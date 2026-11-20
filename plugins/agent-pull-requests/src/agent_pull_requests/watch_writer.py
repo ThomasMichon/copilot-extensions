@@ -309,7 +309,7 @@ class WatchWriter:
         self, *, timeout: float, installation: WatchInstallation | None = None,
     ) -> dict[str, Any]:
         """Seal/recover an already drained preparation; never adopt either registry."""
-        from .watch_sealing import _exchange_backend, seal
+        from .watch_sealing import require_backend, seal
 
         with self._operation(timeout) as deadline:
             def validate() -> None:
@@ -324,7 +324,7 @@ class WatchWriter:
                     raise RuntimeError("watch sealing cannot discard queued legacy callbacks")
 
             validate()
-            _exchange_backend()
+            require_backend()
             binding: dict[str, Any] = {"kind": "legacy", "stateRoot": str(self.root)}
             if installation is not None:
                 binding.update(kind="installation", installation=installation.evidence())

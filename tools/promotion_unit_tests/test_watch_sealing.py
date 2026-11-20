@@ -20,6 +20,7 @@ BOOT = "linux:2ad542a5-ab10-4ffa-9f4f-9f34955e03b0"
 
 @pytest.fixture
 def sealing(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setattr(sys, "platform", "linux")
     package = ModuleType("promotion_watch_sealing")
     package.__path__ = [str(SOURCE)]
     monkeypatch.setitem(sys.modules, package.__name__, package)
@@ -183,6 +184,338 @@ def test_interrupted_sealing_recovers_actual_topology_without_reexchange(
         module.watch_state_paths(root).historical_lock
         if boundary in ("staging", "exchange") else module.watch_state_paths(root).retained_lock
     )
+
+
+@pytest.fixture
+def windows_sealing(sealing: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    linux, state, root, binding, lease = sealing
+    package = linux.__package__
+    private = sys.modules[f"{package}.watch_private"]
+    setattr(private, "_windows_private", lambda *_a, **_kw: None)
+    setattr(private, "windows_move_no_replace", lambda *_a: pytest.fail("unselected native move"))
+    spec = importlib.util.spec_from_file_location(
+        f"{package}.watch_windows_sealing", SOURCE / "watch_windows_sealing.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(sys, "platform", "win32")
+    paths = module.watch_state_paths(root)
+    original, barrier, writer = (2, 3), (2, 4), (2, 5)
+    state.update(moves=[], releases=0, new_leases=0)
+
+    def identity(
+        path: Path, *, directory: bool = False, installed: bool = False,
+    ) -> tuple[int, int]:
+        inode, is_directory = state["paths"][path]
+        if directory != is_directory:
+            raise PermissionError("controlled wrong Windows path kind")
+        return inode[0], inode[1]
+
+    def mkdir(path: Path, *, mode: int) -> None:
+        assert path == paths.staged_barrier and mode == 0o700
+        assert path not in state["paths"]
+        state["paths"][path] = (barrier, True)
+
+    def move(source: Path, destination: Path) -> None:
+        assert not lease.held
+        if destination in state["paths"]:
+            raise FileExistsError("controlled raced Windows path")
+        state["paths"][destination] = state["paths"].pop(source)
+        state["moves"].append((source, destination))
+
+    def release() -> None:
+        lease.held = False
+        state["releases"] += 1
+
+    def acquire_barrier(_root: Path, document: Any, selected: Any) -> None:
+        assert identity(paths.historical_lock, directory=True) == barrier
+        assert identity(paths.retained_lock) == original
+        if selected.held:
+            assert selected.lock_path == paths.writer_lock
+            return
+        state["paths"][paths.writer_lock] = (writer, False)
+        selected.lock_path, selected.held = paths.writer_lock, True
+        state["acquisitions"].append(paths.writer_lock)
+        state["new_leases"] += 1
+
+    def held_identity() -> tuple[int, int]:
+        if not lease.held:
+            raise PermissionError("controlled missing Windows lease")
+        return identity(lease.lock_path)
+
+    for name in (
+        "require_private", "_regular_bytes", "_pin_identity", "_read_subscriptions_state",
+        "confirm_private", "write_private", "read_preparation",
+    ):
+        monkeypatch.setattr(module, name, getattr(linux, name))
+    monkeypatch.setattr(module, "_identity", identity)
+    state["native_acquire_barrier"] = module._acquire_barrier_lease
+    monkeypatch.setattr(module, "_acquire_barrier_lease", acquire_barrier)
+    monkeypatch.setattr(module, "windows_move_no_replace", move)
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+    lease.release, lease.held_file_identity = release, held_identity
+    return module, state, root, binding, lease
+
+
+def test_windows_sealing_releases_before_move_and_only_then_acquires_new_lease(windows_sealing: Any) -> None:
+    module, state, root, binding, lease = windows_sealing
+    record = _seal(windows_sealing)
+    paths = module.watch_state_paths(root)
+    assert record["phase"] == "sealed-legacy" and record["seal"]["boot"] is None
+    assert module.read_sealing(root, binding) == (record, "sealed")
+    assert state["releases"] == 1 and state["new_leases"] == 1
+    assert state["moves"] == [
+        (paths.historical_lock, paths.retained_lock),
+        (paths.staged_barrier, paths.historical_lock),
+    ]
+    assert lease.lock_path == paths.writer_lock
+    assert paths.isolated_subscriptions.parent not in state["paths"]
+    assert _seal(windows_sealing) == record
+    assert len(state["moves"]) == 2 and state["new_leases"] == 1
+
+
+@pytest.mark.parametrize("boundary", ["staging", "release", "move", "barrier", "sealed"])
+def test_windows_interruption_recovers_without_opening_retained_inode(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    module, state, root, _binding, lease = windows_sealing
+    publish, move, release = module.write_private, module.windows_move_no_replace, lease.release
+    paths = module.watch_state_paths(root)
+
+    def interrupted_write(path: Path, document: Any, **kwargs: Any) -> None:
+        publish(path, document, **kwargs)
+        if (document["phase"] == "prepared") == (boundary == "staging"):
+            raise OSError("controlled Windows publication interruption")
+
+    def interrupted_move(source: Path, destination: Path) -> None:
+        move(source, destination)
+        if destination == (paths.retained_lock if boundary == "move" else paths.historical_lock):
+            raise OSError("controlled Windows move interruption")
+
+    def interrupted_release() -> None:
+        release()
+        raise OSError("controlled Windows release interruption")
+
+    with monkeypatch.context() as interrupted:
+        if boundary in ("staging", "sealed"):
+            interrupted.setattr(module, "write_private", interrupted_write)
+        elif boundary == "release":
+            interrupted.setattr(lease, "release", interrupted_release)
+        else:
+            interrupted.setattr(module, "windows_move_no_replace", interrupted_move)
+        with pytest.raises(OSError, match="controlled Windows"):
+            _seal(windows_sealing)
+    lease.held, lease.lock_path = False, paths.historical_lock
+    assert _seal(windows_sealing)["phase"] == "sealed-legacy"
+    assert len(state["moves"]) == 2
+    assert paths.retained_lock not in state["acquisitions"]
+
+
+def test_windows_raced_cold_creation_blocks_without_retained_recovery_lease(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, state, root, _binding, lease = windows_sealing
+    paths = module.watch_state_paths(root)
+    move = module.windows_move_no_replace
+
+    def raced(source: Path, destination: Path) -> None:
+        move(source, destination)
+        if destination == paths.retained_lock:
+            state["paths"][paths.historical_lock] = ((2, 8), False)
+
+    monkeypatch.setattr(module, "windows_move_no_replace", raced)
+    with pytest.raises(PermissionError, match="raced historical"):
+        _seal(windows_sealing)
+    assert not lease.held and state["new_leases"] == 0
+    assert state["paths"][paths.historical_lock] == ((2, 8), False)
+    lease.lock_path = paths.historical_lock
+    with pytest.raises(PermissionError, match="raced historical"):
+        _seal(windows_sealing)
+    assert state["acquisitions"] == [] and len(state["moves"]) == 1
+
+
+def test_windows_open_original_handle_refuses_move_without_installing_barrier(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, state, root, _binding, lease = windows_sealing
+
+    def sharing_violation(*_args: Any) -> None:
+        raise PermissionError("controlled Windows sharing violation")
+
+    monkeypatch.setattr(module, "windows_move_no_replace", sharing_violation)
+    with pytest.raises(PermissionError, match="sharing violation"):
+        _seal(windows_sealing)
+    paths = module.watch_state_paths(root)
+    assert not lease.held and state["new_leases"] == 0
+    assert state["paths"][paths.historical_lock] == ((2, 3), False)
+    assert paths.retained_lock not in state["paths"]
+    assert state["document"]["phase"] == "prepared"
+
+
+@pytest.mark.parametrize("boundary", ["move", "barrier", "publication"])
+def test_windows_rechecks_scope_before_moves_and_final_publication(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    module, state, root, _binding, lease = windows_sealing
+    paths = module.watch_state_paths(root)
+    release, move, publish = lease.release, module.windows_move_no_replace, module.write_private
+    invalid = False
+
+    def validate() -> None:
+        if invalid:
+            raise PermissionError("controlled Windows scope change")
+
+    def changed_release() -> None:
+        nonlocal invalid
+        release()
+        if boundary == "move":
+            invalid = True
+
+    def changed_move(source: Path, destination: Path) -> None:
+        nonlocal invalid
+        move(source, destination)
+        if boundary == "barrier" and destination == paths.retained_lock:
+            invalid = True
+
+    def changed_publish(path: Path, document: Any, **kwargs: Any) -> None:
+        nonlocal invalid
+        if boundary == "publication" and document["phase"] == "sealed-legacy":
+            invalid = True
+        publish(path, document, **kwargs)
+
+    monkeypatch.setattr(lease, "release", changed_release)
+    monkeypatch.setattr(module, "windows_move_no_replace", changed_move)
+    monkeypatch.setattr(module, "write_private", changed_publish)
+    with pytest.raises(PermissionError, match="scope change"):
+        _seal(windows_sealing, validate=validate)
+    assert state["document"]["phase"] == "prepared"
+    assert len(state["moves"]) == {"move": 0, "barrier": 1, "publication": 2}[boundary]
+
+
+@pytest.mark.parametrize("change", ["binding", "pin", "barrier", "phase", "boot", "extra", "isolated"])
+def test_windows_recovery_refuses_foreign_or_conflicting_evidence_before_acquiring(
+    windows_sealing: Any, change: str,
+) -> None:
+    module, state, root, _binding, lease = windows_sealing
+    _seal(windows_sealing)
+    lease.held = False
+    acquired = list(state["acquisitions"])
+    if change == "binding":
+        state["document"]["binding"]["stateRoot"] = "foreign"
+    elif change == "pin":
+        state["pin"] = (2, 7)
+    elif change == "barrier":
+        state["document"]["seal"]["barrier"]["inode"] = 7
+    elif change == "phase":
+        state["document"]["phase"] = "active"
+    elif change == "boot":
+        state["document"]["seal"]["boot"] = BOOT
+    elif change == "extra":
+        state["document"]["seal"]["paths"] = "foreign"
+    else:
+        state["paths"][module.watch_state_paths(root).isolated_subscriptions.parent] = ((2, 8), True)
+    with pytest.raises(PermissionError):
+        _seal(windows_sealing)
+    assert state["acquisitions"] == acquired and len(state["moves"]) == 2
+
+
+def test_windows_uncertain_staging_refuses_release_until_durability_is_confirmed(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, state, _root, _binding, lease = windows_sealing
+    publish = module.write_private
+
+    def unacknowledged(path: Path, document: Any, **kwargs: Any) -> None:
+        publish(path, document, **kwargs)
+        raise OSError("controlled uncertain Windows staging")
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(module, "write_private", unacknowledged)
+        with pytest.raises(OSError, match="uncertain Windows staging"):
+            _seal(windows_sealing)
+
+    def still_uncertain(_path: Path) -> None:
+        raise OSError("controlled Windows journal still uncertain")
+
+    with monkeypatch.context() as uncertain:
+        uncertain.setattr(module, "confirm_private", still_uncertain)
+        with pytest.raises(OSError, match="still uncertain"):
+            _seal(windows_sealing)
+    assert lease.held and state["releases"] == 0 and state["moves"] == []
+    assert _seal(windows_sealing)["phase"] == "sealed-legacy"
+
+
+@pytest.mark.parametrize("failure", ["legacy-source", "deadline"])
+def test_windows_final_publication_rechecks_source_and_deadline(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    module, state, _root, _binding, _lease = windows_sealing
+    publish = module.write_private
+    invalid = False
+
+    def read_source(*_args: Any, **_kwargs: Any) -> list[Any]:
+        if invalid and failure == "legacy-source":
+            raise PermissionError("controlled Windows legacy corruption")
+        return []
+
+    def deadline() -> None:
+        if invalid and failure == "deadline":
+            raise TimeoutError("controlled Windows expired deadline")
+
+    def changed(path: Path, document: Any, **kwargs: Any) -> None:
+        nonlocal invalid
+        if document["phase"] == "sealed-legacy":
+            invalid = True
+        publish(path, document, **kwargs)
+
+    monkeypatch.setattr(module, "_read_subscriptions_state", read_source)
+    monkeypatch.setattr(module, "write_private", changed)
+    with pytest.raises((PermissionError, TimeoutError), match="controlled Windows"):
+        _seal(windows_sealing, check_deadline=deadline)
+    assert state["document"]["phase"] == "prepared"
+    assert state["new_leases"] == 1 and len(state["moves"]) == 2
+
+
+@pytest.mark.parametrize("error_code", [0, 32, 183])
+def test_windows_native_move_preserves_sharing_and_no_replace_semantics(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch, error_code: int,
+) -> None:
+    module, _state, root, _binding, _lease = windows_sealing
+    calls: list[tuple[Any, ...]] = []
+
+    class Move:
+        def __call__(self, *args: Any) -> int:
+            calls.append(args)
+            return int(error_code == 0)
+
+    native = ModuleType("ctypes")
+    for name in ("c_wchar_p", "c_ulong", "c_int"):
+        setattr(native, name, object())
+    setattr(native, "WinDLL", lambda *_a, **_kw: SimpleNamespace(MoveFileExW=Move()))
+    setattr(native, "get_last_error", lambda: error_code)
+    setattr(native, "WinError", lambda code: OSError(code, "controlled native sharing error"))
+    persistence = ModuleType("zdd.routing_persistence")
+    setattr(persistence, "windows_replace", lambda *_a: pytest.fail("replacement not permitted"))
+    monkeypatch.setitem(sys.modules, "ctypes", native)
+    monkeypatch.setitem(sys.modules, persistence.__name__, persistence)
+    spec = importlib.util.spec_from_file_location(
+        f"{module.__package__}.native_private", SOURCE / "watch_private.py",
+    )
+    assert spec and spec.loader
+    private = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(private)
+    if error_code == 183:
+        with pytest.raises(FileExistsError):
+            private.windows_move_no_replace(root / "source", root / "destination")
+    elif error_code:
+        with pytest.raises(OSError) as error:
+            private.windows_move_no_replace(root / "source", root / "destination")
+        assert error.value.errno == error_code
+    else:
+        private.windows_move_no_replace(root / "source", root / "destination")
+    assert calls == [(str(root / "source"), str(root / "destination"), 0x8)]
 
 
 @pytest.mark.parametrize("change", ["binding", "pin", "barrier", "phase", "boot", "extra", "isolated"])
