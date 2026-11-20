@@ -1,0 +1,9 @@
+{
+  "comment": "Join explicit in-process point workers across cancellation and shutdown; report truthful bounded drains without enabling ordinary v2 scheduling",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
