@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
@@ -42,15 +43,15 @@ def launch(command: list[str]) -> int:
     if selected is None:
         if os.name != "nt":
             os.execvp(command[0], command)
-        # headless-guard: allow an interactive backend to inherit its caller's pane
-        if _interactive_console():
-            process = subprocess.Popen(command)
-        else:
+        options: dict[str, Any] = {}
+        if not _interactive_console():
             # A hidden console would otherwise replace redirected stdio (e.g. --acp --stdio pipes).
-            process = subprocess.Popen(
-                command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+            options = {
+                "stdin": sys.stdin, "stdout": sys.stdout, "stderr": sys.stderr,
                 **no_window_kwargs(),
-            )
+            }
+        # headless-guard: allow an interactive backend to inherit its caller's pane
+        process = subprocess.Popen(command, **options)
         while True:
             try:
                 return process.wait()
