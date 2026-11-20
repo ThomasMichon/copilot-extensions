@@ -200,6 +200,75 @@ def test_point_model_binding_save_rechecks_retained_ownership_before_effects(
         selected.save(retained)
 
 
+def test_point_vector_effect_requires_current_model_binding_and_nested_owned_writer(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("numpy", "pyarrow"):
+        monkeypatch.setitem(sys.modules, name, ModuleType(name))
+    name = "_promotion_point_domain.store.vector_table"
+    spec = importlib.util.spec_from_file_location(name, SOURCE / "store/vector_table.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    owner = module.VectorTable.__new__(module.VectorTable)
+    events: list[object] = []
+    binding: dict[str, Any] = {
+        "content_table": "chunks", "models": {"first": {"table_name": "vectors_first", "dim": 2}},
+    }
+
+    @contextmanager
+    def writer(db: object, *, point_scope: object) -> Iterator[None]:
+        assert db is owner._db and point_scope == api.claim.scope
+        events.append("enter")
+        try:
+            yield
+        finally:
+            events.append("exit")
+
+    domain = SimpleNamespace(
+        writing=True, receipt=lambda: {"point_models": binding}, _write=writer,
+    )
+    owner._db = object()
+    owner._source_domain = domain
+    owner._model_id = "first"
+    owner._content_table = "chunks"
+    owner._table_name = "vectors_first"
+    owner._dim = 2
+    canonical, table = {"one": {"source": api.claim.canonical_family}}, object()
+
+    def preflight(*_args: Any, **_kwargs: Any) -> Any:
+        events.append("input")
+        return canonical, table
+
+    def effect(*_args: Any, **kwargs: Any) -> int:
+        assert kwargs["canonical"] is canonical and kwargs["table"] is table
+        events.append("effect")
+        return 1
+
+    monkeypatch.setattr(owner, "_point_upsert_input", preflight)
+    monkeypatch.setattr(owner, "_write_vectors", effect)
+    for writing, scope in ((False, api.claim.scope), (True, None)):
+        domain.writing = writing
+        with pytest.raises(api.layout.SourceLayoutError, match="owning source writer"):
+            owner.upsert_point(["one"], object(), point_scope=scope)
+        assert events == []
+    domain.writing = True
+    binding["models"]["first"]["table_name"] = "vectors_other"
+    with pytest.raises(api.layout.SourceLayoutError, match="model binding"):
+        owner.upsert_point(["one"], object(), point_scope=api.claim.scope)
+    assert events == ["enter", "exit"]
+    events.clear()
+    binding["models"]["first"]["table_name"] = "vectors_first"
+    assert owner.upsert_point(["one"], object(), point_scope=api.claim.scope) == 1
+    assert events == ["enter", "input", "effect", "exit"]
+    events.clear()
+    binding["models"].clear()
+    with pytest.raises(api.layout.SourceLayoutError, match="model binding"):
+        owner.upsert_point([], object(), point_scope=api.claim.scope)
+    assert events == ["enter", "exit"]
+
+
 def test_nested_default_reads_recheck_receipt_before_returning_legacy_results(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
