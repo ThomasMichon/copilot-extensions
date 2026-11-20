@@ -40,15 +40,56 @@ def workspace_epoch(document: Document, scope: Document) -> int | None:
     record = ConversationJournal(document["conversations"])._find(
         conversation_key(scope, document["namespace"]),
     )
-    if record is None or record["epoch"] != 1 or record["previous_terminal"] is not None:
+    if _recorded_epoch(record) is None:
         return None
-    observed = Observation.restore(record["current"])
-    if not observed.complete or observed.state != "open" or not any(
-        row["scope"] == scope and row["epoch"] == record["epoch"]
+    if not any(
+        row["scope"] == scope and row["epoch"] == 1
         for row in document["terminal_retention"]["generations"]
     ):
         return None
     return 1
+
+
+def _recorded_epoch(record: Document | None) -> int | None:
+    if (
+        record is None or record["epoch"] != 1 or record["previous_terminal"] is not None
+        or Observation.restore(record["current"]).terminal
+    ):
+        return None
+    return 1
+
+
+def readable_bindings(
+    document: Document, checkpoint: Callable[[], None],
+) -> set[tuple[bytes, str]]:
+    """Index the validated envelope once during completed-adoption inspection."""
+    records: dict[PRKey, Document] = {}
+    for record in ConversationJournal(document["conversations"]).records:
+        checkpoint()
+        records[PRKey(**record["current"]["key"])] = record
+    state = document["terminal_retention"]
+    admissions: dict[bytes, int] = {}
+    for row in state["admissions"]:
+        checkpoint()
+        admissions[encoded(row["scope"])] = row["cursor"]["epoch"]
+    retired: set[tuple[bytes, int]] = set()
+    for row in state["records"]:
+        checkpoint()
+        retired.add((encoded(row["scope"]), row["cursor"]["epoch"]))
+    epochs: dict[bytes, int | None] = {}
+    result: set[tuple[bytes, str]] = set()
+    for row in state["generations"]:
+        checkpoint()
+        scope = row["scope"]
+        key = encoded(scope)
+        if key not in epochs:
+            epochs[key] = admissions.get(key) if key in admissions else (
+                _recorded_epoch(records.get(conversation_key(scope, document["namespace"])))
+                if document.get(MARKER) == 1 else None
+            )
+        if row["epoch"] == epochs[key] and (key, row["epoch"]) not in retired:
+            result.add((key, row["generation_id"]))
+    return result
 
 
 def stage(

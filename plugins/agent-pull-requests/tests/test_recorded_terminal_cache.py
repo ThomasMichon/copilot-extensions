@@ -9,10 +9,11 @@ from typing import Any
 import pytest
 
 from test_generation_associations import fresh, generation, publish, state
-from test_retained_live_cache import targets
+from test_retained_live_cache import selected, targets
 from test_review_workspace import evidence as evidence
 
 from agent_pull_requests import watch_replay_store
+from agent_pull_requests import conversation_journal
 from agent_pull_requests.conversation_store import ConversationStore
 from agent_pull_requests.terminal_cache_retirement import TerminalCacheRetirementStore
 from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
@@ -164,3 +165,54 @@ def test_original_native_wait_or_closed_history_retains_its_original_reader(
         )
     assert original.path.read_bytes() == before
     assert cache.lookup(value["scope"])["generation"] == value
+
+
+def test_completed_retry_indexes_full_cache_and_journal_once(
+    tmp_path: Path, evidence: Document, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    count = 128
+    original, cache = fresh(tmp_path, count=count)
+    initial = generation(evidence)
+    publish(original, cache, initial)
+    document = state(original)
+    association = document["generation_associations"]["records"][0]
+    ids = [initial["id"]]
+    previous = initial["id"]
+    for index in range(count - 1):
+        value = selected(evidence, offset=f"{200000 + index:06d}")
+        assert cache.publish(value, expected_current=previous)["status"] == "published"
+        row = {**copy.deepcopy(association), "generation_id": value["id"]}
+        document["generation_associations"]["records"].append(row)
+        ids.append(value["id"])
+        previous = value["id"]
+    record = document["conversations"]["records"][0]
+    for index in range(count - 1):
+        other = copy.deepcopy(record)
+        other["current"]["key"]["number"] = index + 1000
+        document["conversations"]["records"].append(other)
+    watch_replay_store._atomic_write_json(original.path, document)
+    owner = terminal(tmp_path)
+    TerminalRetentionStore(owner).adopt(
+        retained_cache=cache, retained_targets=targets(initial),
+        lifecycle_checkpoint=lambda: None, expires_at=100,
+    )
+    TerminalRecoveryStore(owner).adopt(lifecycle_checkpoint=lambda: None, expires_at=100)
+    TerminalCacheRetirementStore(owner).adopt(lifecycle_checkpoint=lambda: None, expires_at=100)
+    before = owner.path.read_bytes()
+    restore = conversation_journal.Observation.restore
+    calls = 0
+
+    def bounded(value: Document) -> Any:
+        nonlocal calls
+        calls += 1
+        assert calls <= 8192, "completed retry repeated whole-journal validation per generation"
+        return restore(value)
+
+    monkeypatch.setattr(conversation_journal.Observation, "restore", staticmethod(bounded))
+    TerminalRetentionStore(owner).adopt(
+        retained_cache=cache, retained_targets=targets(initial),
+        lifecycle_checkpoint=lambda: None, expires_at=100,
+    )
+    assert calls <= 8192
+    assert owner.path.read_bytes() == before
+    assert len(state(owner)["terminal_retention"]["generations"]) == len(ids) == cache.max_generations

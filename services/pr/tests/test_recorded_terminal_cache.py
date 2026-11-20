@@ -183,6 +183,41 @@ def test_combined_selection_refuses_writer_only_core_and_fresh_provision(
     assert not Path(value["root"]).exists()
 
 
+def test_partial_refresh_keeps_recorded_bodies_and_sync_reacquisition(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _, _, values = recorded(configuration, monkeypatch)
+    assert command(path).returncode == 0
+    config = load_config(path)
+    partial = generation(2, complete=False, padding=12000)
+    selected: Document = partial
+    monkeypatch.setattr(NativeReadHandler, "read", lambda *_args, **_kwargs: {
+        "generation": copy.deepcopy(selected), "acquisition": {"source": "synthetic-owner"},
+    })
+    operations = reader(config)
+    options = {"number": values[0]["scope"]["number"], "expected_current": values[-1]["id"],
+               "budget_seconds": 30}
+    expires = int(time.time()) + 60
+    assert operations.execute(
+        "load", options, expires_at=expires, checkpoint=lambda: None,
+    )["result"]["publication"]["status"] == "not_published"
+    assert json.loads(config.store().path.read_bytes())["terminal_retention"]["admissions"] == []
+    for value in values:
+        assert materialized(reader(load_config(path)), value)[0]["id"] == value["id"]
+    assert command(path).returncode == 0
+    request = {**options, "previous_id": values[0]["id"]}
+    assert operations.execute(
+        "sync", request, expires_at=expires, checkpoint=lambda: None,
+    )["result"]["publication"]["status"] == "not_published"
+    selected = generation(3, padding=12000)
+    result = operations.execute(
+        "sync", request, expires_at=expires, checkpoint=lambda: None,
+    )["result"]
+    assert result["publication"]["status"] == "published"
+    assert result["conversation"]["cursor"]["epoch"] == 1
+    assert result["comparison"]["generation_id"] == selected["id"]
+
+
 @pytest.mark.parametrize("uncertain", [False, True])
 @pytest.mark.parametrize("boundary", ["retention", "recovery", "cache"])
 def test_actual_adoption_boundaries_reconcile_original_recorded_bindings(

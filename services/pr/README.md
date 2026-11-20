@@ -397,7 +397,9 @@ The versioned `recorded_terminal_cache_version: 1` marker selects workspace-only
 generation/epoch bindings in the existing terminal ledger. It does not create
 native target admissions, replay observations, journal events or cache writes.
 Current/noncurrent lookup, chunks and sync comparisons retain the original
-bytes and cursors. Fresh validated acquisition establishes the actual native
+bytes and cursors. Partial same-epoch refreshes do not withdraw those recorded
+body bindings; authoritative terminal/reopen evidence still fences them.
+Fresh validated acquisition establishes the actual native
 target through the existing terminal publication path, not the baseline
 association writer. Delayed native samples captured before that binding
 remain fenced. Retry of a complete adoption validates current terminal-owned

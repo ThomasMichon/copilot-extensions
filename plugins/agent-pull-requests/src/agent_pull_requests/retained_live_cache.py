@@ -74,11 +74,15 @@ def validate(
     from .recorded_terminal_cache import complete, stage
     if recorded_generations and complete(document):
         from .generation_associations import selected
-        from .terminal_retention import require_live
+        from .recorded_terminal_cache import readable_bindings
+        from .review_intent import encoded
         selected(document, cache)
+        readable = readable_bindings(document, checkpoint)
+
         def existing(value: Document) -> None:
             visit_pointer(value)
-            require_live(document, value["scope"], generation_id=value["id"], recorded_body=True)
+            if (encoded(value["scope"]), value["id"]) not in readable:
+                raise CacheInvalid("retained generation is not bound to a live workspace epoch")
 
         cache.inspect_retained(existing, visit_pointer)
         checkpoint()
