@@ -21,6 +21,8 @@ from .watch_daemon import Fetch, NativeFetch, Notify, WatchDaemon
 from .watch_notification import default_notify, positive_seconds
 
 if TYPE_CHECKING:
+    from zdd.cutover_lock import CutoverLock
+
     from .watch_installation import WatchInstallation
 
 
@@ -305,11 +307,94 @@ class WatchWriter:
                     raise error from drain_error
                 raise
 
+    def recover_prepared_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+        guard: CutoverLock | None = None,
+    ) -> dict[str, Any]:
+        """Receive a prepared journal under fresh admission, without restoring effects."""
+        return self._recover_state_transition(
+            timeout=timeout, installation=installation, guard=guard, sealed=False,
+        )
+
+    def recover_sealed_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+        guard: CutoverLock | None = None,
+    ) -> dict[str, Any]:
+        """Receive a qualified Windows sealed journal, without importing either registry."""
+        return self._recover_state_transition(
+            timeout=timeout, installation=installation, guard=guard, sealed=True,
+        )
+
+    def seal_recovered_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+        guard: CutoverLock | None = None,
+    ) -> dict[str, Any]:
+        """Progress only an admitted v2 transition through the existing Windows sealer."""
+        return self._recover_state_transition(
+            timeout=timeout, installation=installation, guard=guard, sealed=True, sealing=True,
+        )
+
+    def _recover_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None,
+        guard: CutoverLock | None, sealed: bool, sealing: bool = False,
+    ) -> dict[str, Any]:
+        from zdd.cutover_lock import lock_path
+
+        from .watch_transition_recovery import (
+            _controller_environment, recover_prepared, recover_sealed, seal_recovered,
+        )
+
+        with self._operation(timeout) as deadline:
+            def validate() -> None:
+                self._validate(
+                    "seal-recovered-state-transition" if sealing else
+                    "recover-sealed-state-transition" if sealed else "recover-prepared-state-transition",
+                    deadline,
+                )
+                if installation is not None:
+                    if guard is None:
+                        raise PermissionError("watch transition recovery requires an installation transaction")
+                    guard.require_owned()
+                    if guard.path != lock_path(installation.run_root):
+                        raise PermissionError("watch transition recovery requires its own installation transaction")
+                    installation.require_current(environment=_controller_environment())
+                    if installation.state_root != self.root:
+                        raise PermissionError("watch transition recovery installation state root differs")
+                elif guard is not None:
+                    raise PermissionError("watch legacy transition recovery has no installation transaction")
+                if not self.daemon.quiescent or self.daemon.effects_enabled:
+                    raise PermissionError("watch transition recovery requires completed quiescence")
+                if self.daemon.has_legacy_pending():
+                    raise RuntimeError("watch transition recovery cannot discard queued legacy callbacks")
+
+            def refuse_persistence() -> None:
+                raise PermissionError("watch transition recovery does not authorize legacy writes")
+
+            def check_deadline() -> None:
+                self._remaining(deadline)
+
+            validate()
+            self.daemon.set_persistence_guard(
+                refuse_persistence, timeout=self._remaining(deadline),
+            )
+            self._preparation_guard = refuse_persistence
+            self._strict_custody = True
+            self._read_ready = False
+            try:
+                recover = seal_recovered if sealing else recover_sealed if sealed else recover_prepared
+                return recover(
+                    self.root, self._lease, installation=installation, guard=guard,
+                    validate=validate, check_deadline=check_deadline,
+                )
+            except BaseException:
+                self._reject_preparation()
+                raise
+
     def seal_state_transition(
         self, *, timeout: float, installation: WatchInstallation | None = None,
     ) -> dict[str, Any]:
         """Seal/recover an already drained preparation; never adopt either registry."""
-        from .watch_sealing import _exchange_backend, seal
+        from .watch_sealing import require_backend, seal
 
         with self._operation(timeout) as deadline:
             def validate() -> None:
@@ -324,7 +409,7 @@ class WatchWriter:
                     raise RuntimeError("watch sealing cannot discard queued legacy callbacks")
 
             validate()
-            _exchange_backend()
+            require_backend()
             binding: dict[str, Any] = {"kind": "legacy", "stateRoot": str(self.root)}
             if installation is not None:
                 binding.update(kind="installation", installation=installation.evidence())

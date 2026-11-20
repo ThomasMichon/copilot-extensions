@@ -12,8 +12,8 @@ and ordinary finalization gates.
 - **Repo:** copilot-extensions
 - **Branch(es):** serial plan, source and acceptance PRs
 - **Created:** 2026-11-20
-- **Status:** Active
-- **Vision:** [Worktrees claims and obligations](../../../visions/plugins/agent-worktrees/README.md#claims-leases-and-obligations), [Handoff cancellation](../../../visions/plugins/context-handoff/README.md#extension-independent-recovery)
+- **Status:** Done
+- **Vision:** [Worktrees claims and obligations](../../../../visions/plugins/agent-worktrees/README.md#claims-leases-and-obligations), [Handoff cancellation](../../../../visions/plugins/context-handoff/README.md#extension-independent-recovery)
 - **Umbrella issue:** #4619, finite OS3-OS4/OSV2 only
 
 ## Guiding Intent
@@ -80,54 +80,60 @@ PR publication only. The public reservation is
 No live task abort, claim settlement, finalization, provider/resource operation,
 process/service repair, installation, cleanup or rollout is authorized.
 The reviewed plan does not grant those effects.
+After the causal adapter witness, the operator selected
+`recorded-creator-binding`: record the exact creator binding in existing
+handoff metadata; older tasks without sufficient proof remain protected until
+an explicitly owner-qualified retry. The unique-current-owner-discovery
+alternative is not selected. This selects the finite source/legacy contract,
+not authority for live task or runtime changes.
 
 ## Plan
 
 ### P1 - Establish the actual cancellation outcome
 
-- [ ] Exercise the real save/trigger and manual-only unconsumed abort
+- [x] Exercise the real save/trigger and manual-only unconsumed abort
   consumer against disposable task and Worktrees owners. Observe the exact
   originating creator claim and ordinary finalization, not merely mocked
   release argv. Credit the existing asynchronous and creation-race paths.
-- [ ] Qualify same and different project contexts, including a coincidentally
+- [x] Qualify same and different project contexts, including a coincidentally
   matching worktree ID. Establish any causal counterexample before production
   correction; do not infer an owner from the caller/coordinator cwd alone.
 
 ### P2 - Complete exact closeout without weakening custody
 
-- [ ] If a counterexample remains, correct only its owning cancellation/
+- [x] If a counterexample remains, correct only its owning cancellation/
   settlement seam using existing owner-qualified operations. Require actual
   task-owner terminal confirmation and preserve exact claim identity,
   candidate and record-mutation/handoff/producer fences. Do not change
   BOTH-store abort/arm ordering or general task-responsibility admission.
-- [ ] Make partial cancellation/settlement outcomes explicit and a safe
+- [x] Make partial cancellation/settlement outcomes explicit and a safe
   targeted retry idempotent. Unknown, mismatched, claimed/running,
   contradictory or replaced state retains the obligation; no blind replay,
   forced release or new source of authority.
-- [ ] Clear focused real-consumer regressions, affected suites, whole-file
+- [x] Clear focused real-consumer regressions, affected suites, whole-file
   strict checking where Python changes, contract/documentation guards,
   exact-source qualification and normal review/required CI before merge.
-- [ ] Read the complete current parent and discussion before accepting only
+- [x] Read the complete current parent and discussion before accepting only
   proved OS3-OS4/OSV2 clauses at their actual evidence tier. Complete only
   the original finite reservation; preserve all other rows/custodians.
 
 ## Validation Plan
 
-- [ ] V1: Save/trigger -> eligible unconsumed manual-only abort -> actual
+- [x] V1: Save/trigger -> eligible unconsumed manual-only abort -> actual
   owner-confirmed terminal state -> exact originating creator claim settled
   -> ordinary finalization succeeds in a disposable fixture, with no successor.
   Preserve completed-PR checks and separately genuine unsettled obligations.
-- [ ] V2: Same/different project and wrong-owner/ref controls preserve every
+- [x] V2: Same/different project and wrong-owner/ref controls preserve every
   unrelated record. Include matching leaf IDs, target mismatch, absent or
   uninspectable owner and changed candidate/claim generation at the boundary.
-- [ ] V3: Failed/unknown abandon, claimed/running/contradictory state,
+- [x] V3: Failed/unknown abandon, claimed/running/contradictory state,
   partial settlement failure and supported retry retain truthful separate
   outcomes. Retry must not re-abandon or settle another resource.
-- [ ] V4: Keep existing async release, creation-race reconciliation,
+- [x] V4: Keep existing async release, creation-race reconciliation,
   file-backed/manual/off behavior, exact candidate checks and ordinary task
   responsibility semantics intact. Retain all applicable no-live-effect and
   unchanged-state controls.
-- [ ] V5: Focused fail-first proof for any correction, affected source suites,
+- [x] V5: Focused fail-first proof for any correction, affected source suites,
   lint and complete-file strict analysis where applicable; qualify the actual
   published source on supported disposable platforms, then genuine current-head
   review and required CI. Distinguish source evidence from productive
@@ -141,23 +147,15 @@ Archive publication is a closeout action, not a pre-Done checkbox.
 
 This closes the existing Worktrees creator-obligation and extension-independent
 handoff cancellation intent, not a new lifecycle architecture. The
-[patterns](../../../docs/patterns/README.md) require independent plugin operation,
+[patterns](../../../../docs/patterns/README.md) require independent plugin operation,
 shared owner authority, truthful uncertainty, economical evidence and parity.
 Use the smallest demonstrated correction after P1. A callback retry is not
 proof of settlement; a new receipt protocol, registry, polling worker or
 general terminal-task release policy is not assumed necessary.
+The [creator-routing decision](creator-routing-decision.md) records the
+measured cross-project gap, available evidence and the legacy compatibility
+choice before a production correction.
 
 ## Journal
 
-### 2026-11-20 - Finite source proposal
-
-Read the complete current #4619 receiver and all comments, #10372 and #6751
-with their full discussions, and the relevant existing handoff-root custody.
-The receiver's OA acceptance is preserved. Scoped current PR queries find no
-overlapping OS3 implementation; this is not a whole-PR census. The original
-publisher reserves only OS3-OS4/OSV2; complete four-comment race readback
-confirms that reservation and unchanged incumbent custody.
-
-Read the actual abort, creation-race, asynchronous release and exact settlement
-owners. No new test, source correction, native task or resource operation has
-run. This proposal clears normal review before P1 begins.
+- [2026-11-20 - Source proposal, creator-binding decision, qualification and finite acceptance](journal/2026/11.20-source-qualification.md)

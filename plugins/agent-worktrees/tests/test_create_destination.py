@@ -5,23 +5,38 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import subprocess
+import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from machine_transport.registry import MachineEntry, SSHEnvironment
 
 from agent_worktrees import allocation_creation_result, allocation_link_demand, config as cfg
-from agent_worktrees import create_destination as destination, finalize, output, tracking
+from agent_worktrees import create_destination as destination, execution_spaces, finalize, output
 from agent_worktrees import owned_worktree as allocation, owned_worktree_remote as remote
-from agent_worktrees import worktree_allocation_cli, worktree_ops_cli
+from agent_worktrees import project_state, status_monitor_runtime, tracking, tracking_write
+from agent_worktrees import worktree_allocation_cli, worktree_identity, worktree_ops_cli, worktrees_client
+from agent_worktrees.tracking_claims import ResourceClaim, format_anchor_ref
 from test_owned_worktree_transactions import IDENTITY, call
 from test_resource_producer import owner as owner
 from test_worktree_allocation_receiver import cohort_attempt
 
+Transport = Callable[[str, dict[str, Any]], dict[str, Any]]
+Coordinator = tuple[Path, list[str], dict[str, Any], Transport]
+Owner = tuple[Path, cfg.Config]
 
-def args(**values) -> argparse.Namespace:
+
+def producer(claim: ResourceClaim | None) -> dict[str, Any]:
+    assert claim is not None and isinstance(claim.producer, dict)
+    return claim.producer
+
+
+def args(**values: object) -> argparse.Namespace:
     return argparse.Namespace(**{
         "creation_key": "caller opaque key / includes spaces", "no_owner": False,
         "system": False, "no_pair": True, "seed": None, "bound_agent": None,
@@ -31,22 +46,22 @@ def args(**values) -> argparse.Namespace:
 
 
 @pytest.fixture
-def coordinator(owner, monkeypatch):
+def coordinator(owner: Owner, monkeypatch: pytest.MonkeyPatch) -> Coordinator:
     path, _ = owner
-    operations = []
-    effects = {}
+    operations: list[str] = []
+    effects: dict[str, Any] = {}
     monkeypatch.setattr(destination, "_creator", lambda ref: ("m/p/owner", path))
     monkeypatch.setattr(allocation_link_demand, "require_capability", lambda ref: None)
     monkeypatch.setattr(allocation_link_demand, "request", lambda ref: None)
     monkeypatch.setattr(remote, "capabilities", lambda *a: worktree_allocation_cli.capabilities(receiver=True))
 
-    def transport(operation: str, metadata: dict) -> dict:
+    def transport(operation: str, metadata: dict[str, Any]) -> dict[str, Any]:
         operations.append(operation)
         claim = next(
             item for item in tracking.load_record(path).resources
             if isinstance(item.producer, dict) and item.producer.get("lifetime") == allocation.LIFETIME
         )
-        assert claim.producer["token"] == metadata["token"]
+        assert producer(claim)["token"] == metadata["token"]
         assert claim.is_unsettled
         proof = {
             "schema": allocation.SCHEMA, "version": allocation.VERSION,
@@ -77,13 +92,13 @@ def coordinator(owner, monkeypatch):
     return path, operations, effects, transport
 
 
-def create_remote(selected: argparse.Namespace) -> dict:
+def create_remote(selected: argparse.Namespace) -> dict[str, Any]:
     return destination._remote_create(
         selected, "m/p/owner#session", {"machine": "remote", "project": "target"}, None,
     )
 
 
-def test_durable_pending_precedes_receiving_effect_and_does_not_wait_for_linkage(coordinator):
+def test_durable_pending_precedes_receiving_effect_and_does_not_wait_for_linkage(coordinator: Coordinator) -> None:
     path, operations, effects, _ = coordinator
     result = create_remote(args())
     assert operations == ["create", "result"] and len(effects) == 1
@@ -94,13 +109,15 @@ def test_durable_pending_precedes_receiving_effect_and_does_not_wait_for_linkage
     assert result["worktree"]["path"] == IDENTITY["path"] and "launch" not in result
     record = tracking.load_record(path)
     assert not finalize._assert_obligations_settled(record, "owner", abandon=False)
-    assert record.resources[0].producer["phase"] == "pending"
+    assert producer(record.resources[0])["phase"] == "pending"
 
 
-def test_lost_receiving_response_returns_same_retry_identity_and_never_recarves(coordinator, monkeypatch):
+def test_lost_receiving_response_returns_same_retry_identity_and_never_recarves(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, operations, effects, transport = coordinator
 
-    def lose_response(operation, metadata):
+    def lose_response(operation: str, metadata: dict[str, Any]) -> dict[str, Any]:
         response = transport(operation, metadata)
         if operation == "create":
             raise RuntimeError("receiving response lost")
@@ -109,7 +126,7 @@ def test_lost_receiving_response_returns_same_retry_identity_and_never_recarves(
     monkeypatch.setattr(remote, "request", lose_response)
     with pytest.raises(destination.DestinationCreationFailure) as caught:
         create_remote(args())
-    retained = tracking.load_record(path).resources[0].producer
+    retained = producer(tracking.load_record(path).resources[0])
     failure = caught.value.payload()
     assert failure["creation"]["repeat_new"] is False
     assert failure["allocation"]["creation_key"] == args().creation_key
@@ -121,10 +138,12 @@ def test_lost_receiving_response_returns_same_retry_identity_and_never_recarves(
     assert operations == ["create", "create", "result"]
 
 
-def test_generated_retry_key_survives_unknown_outcome(coordinator, monkeypatch):
+def test_generated_retry_key_survives_unknown_outcome(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, _, _, transport = coordinator
 
-    def unavailable(operation, metadata):
+    def unavailable(operation: str, metadata: dict[str, Any]) -> dict[str, Any]:
         transport(operation, metadata)
         raise RuntimeError("unknown outcome")
 
@@ -139,10 +158,12 @@ def test_generated_retry_key_survives_unknown_outcome(coordinator, monkeypatch):
     assert result["allocation"]["request_id"] == recovery["request_id"]
 
 
-def test_generated_operation_recovers_by_retained_request_id_after_no_output(coordinator, monkeypatch):
+def test_generated_operation_recovers_by_retained_request_id_after_no_output(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, _, effects, transport = coordinator
 
-    def interrupted(operation, metadata):
+    def interrupted(operation: str, metadata: dict[str, Any]) -> dict[str, Any]:
         response = transport(operation, metadata)
         if operation == "create":
             raise SystemExit("caller disappeared before output")
@@ -151,7 +172,7 @@ def test_generated_operation_recovers_by_retained_request_id_after_no_output(coo
     monkeypatch.setattr(remote, "request", interrupted)
     with pytest.raises(SystemExit):
         create_remote(args(creation_key=None))
-    retained = tracking.load_record(path).resources[0].producer
+    retained = producer(tracking.load_record(path).resources[0])
     monkeypatch.setattr(remote, "request", transport)
     result = create_remote(args(creation_key=None, creation_request_id=retained["request_id"]))
     assert result["allocation"]["request_id"] == retained["request_id"]
@@ -159,7 +180,7 @@ def test_generated_operation_recovers_by_retained_request_id_after_no_output(coo
     assert len(effects) == 1 and len(tracking.load_record(path).resources) == 1
 
 
-def test_request_id_recovery_never_reserves_a_missing_or_changed_operation(coordinator):
+def test_request_id_recovery_never_reserves_a_missing_or_changed_operation(coordinator: Coordinator) -> None:
     path, operations, effects, _ = coordinator
     with pytest.raises(destination.DestinationCreationFailure, match="missing"):
         create_remote(args(creation_key=None, creation_request_id="unrecorded"))
@@ -175,10 +196,10 @@ def test_request_id_recovery_never_reserves_a_missing_or_changed_operation(coord
     assert path.read_bytes() == before and not operations
 
 
-def test_existing_bound_identity_only_reads_original_result(coordinator):
+def test_existing_bound_identity_only_reads_original_result(coordinator: Coordinator) -> None:
     path, operations, _, _ = coordinator
     first = create_remote(args())
-    token = tracking.load_record(path).resources[0].producer["token"]
+    token = producer(tracking.load_record(path).resources[0])["token"]
     assert call(path, "bind", {"token": token})["phase"] == "bound"
     operations.clear()
     replay = create_remote(args())
@@ -191,7 +212,9 @@ def test_existing_bound_identity_only_reads_original_result(coordinator):
     {"receiving_receipt": False}, {"operations": ["create", "inspect"]},
     {"creation_result": {"schema": allocation_creation_result.SCHEMA, "version": True}},
 ])
-def test_mixed_version_receiver_refuses_before_pending_or_receiving_effects(coordinator, monkeypatch, change):
+def test_mixed_version_receiver_refuses_before_pending_or_receiving_effects(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch, change: dict[str, object],
+) -> None:
     path, operations, effects, _ = coordinator
     capabilities = {**worktree_allocation_cli.capabilities(receiver=True), **change}
     monkeypatch.setattr(remote, "capabilities", lambda *a: capabilities)
@@ -201,7 +224,9 @@ def test_mixed_version_receiver_refuses_before_pending_or_receiving_effects(coor
 
 
 @pytest.mark.parametrize("change", [{"seed": "prompt"}, {"no_owner": True}, {"system": True}])
-def test_unsupported_remote_policy_refuses_before_negotiation_or_effects(coordinator, monkeypatch, change):
+def test_unsupported_remote_policy_refuses_before_negotiation_or_effects(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch, change: dict[str, object],
+) -> None:
     path, operations, _, _ = coordinator
     monkeypatch.setattr(remote, "capabilities", lambda *a: pytest.fail("unsupported option reached peer"))
     with pytest.raises(ValueError):
@@ -209,7 +234,7 @@ def test_unsupported_remote_policy_refuses_before_negotiation_or_effects(coordin
     assert not tracking.load_record(path).resources and not operations
 
 
-def test_changed_target_facts_conflict_with_same_original_key(coordinator):
+def test_changed_target_facts_conflict_with_same_original_key(coordinator: Coordinator) -> None:
     path, operations, _, _ = coordinator
     create_remote(args())
     before = path.read_bytes()
@@ -221,10 +246,12 @@ def test_changed_target_facts_conflict_with_same_original_key(coordinator):
     assert path.read_bytes() == before and not operations
 
 
-def test_unfinished_result_remains_pending_without_usable_worktree(coordinator, monkeypatch):
+def test_unfinished_result_remains_pending_without_usable_worktree(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, _, _, transport = coordinator
 
-    def pending(operation, metadata):
+    def pending(operation: str, metadata: dict[str, Any]) -> dict[str, Any]:
         response = transport(operation, metadata)
         if operation == "result":
             response["allocation"].update(status="pending", allocation_finished=False)
@@ -239,10 +266,12 @@ def test_unfinished_result_remains_pending_without_usable_worktree(coordinator, 
     assert result["allocation"]["receiving_status"] == "pending" and "worktree" not in result
 
 
-def test_current_linkage_read_failure_does_not_hide_durable_receiving_result(coordinator, monkeypatch, caplog):
+def test_current_linkage_read_failure_does_not_hide_durable_receiving_result(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
     original = destination._origin_operation
 
-    def transaction(creator, path, operation, payload):
+    def transaction(creator: str, path: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         if operation == "inspect":
             raise ValueError("origin inspection unavailable")
         return original(creator, path, operation, payload)
@@ -253,9 +282,11 @@ def test_current_linkage_read_failure_does_not_hide_durable_receiving_result(coo
     assert "current origin linkage is unknown" in caplog.text
 
 
-def test_missing_current_writer_refuses_before_reservation_or_receiving(coordinator, monkeypatch):
+def test_missing_current_writer_refuses_before_reservation_or_receiving(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, operations, _, _ = coordinator
-    monkeypatch.setattr(destination.tracking_write, "registered_verbs", lambda: frozenset())
+    monkeypatch.setattr(tracking_write, "registered_verbs", lambda: frozenset())
     with pytest.raises(ValueError, match="origin writer"):
         create_remote(args())
     assert not tracking.load_record(path).resources and not operations
@@ -263,16 +294,16 @@ def test_missing_current_writer_refuses_before_reservation_or_receiving(coordina
 
 @pytest.mark.parametrize("outcome", ["complete", "unknown", "changed"])
 def test_run_reuses_original_responsibility_instead_of_competing_plain_child_claim(
-    coordinator, monkeypatch, outcome,
-):
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     path, _, _, transport = coordinator
-    original_run = worktree_ops_cli.subprocess.run
+    original_run = subprocess.run
 
-    def inner(command, **kwargs):
+    def inner(command: Any, **kwargs: Any) -> Any:
         if not isinstance(command, str) or not kwargs.get("shell"):
             return original_run(command, **kwargs)
         if outcome == "unknown":
-            def lost(operation, metadata):
+            def lost(operation: str, metadata: dict[str, Any]) -> dict[str, Any]:
                 transport(operation, metadata)
                 raise RuntimeError("original receiving response lost")
             monkeypatch.setattr(remote, "request", lost)
@@ -285,14 +316,14 @@ def test_run_reuses_original_responsibility_instead_of_competing_plain_child_cla
             response["allocation"]["request_id"] = "different-operation"
         return SimpleNamespace(stdout=json.dumps(response), returncode=code)
 
-    monkeypatch.setattr(worktree_ops_cli.subprocess, "run", inner)
+    monkeypatch.setattr(subprocess, "run", inner)
     code = worktree_ops_cli.cmd_run(argparse.Namespace(
         inner_command=["owned-command create --machine remote --repo target --json"],
         owner_ref="m/p/owner#session",
     ))
     record = tracking.load_record(path)
     protected = [item for item in record.resources if item.has_producer]
-    assert len(protected) == 1 and protected[0].producer["phase"] == "pending"
+    assert len(protected) == 1 and producer(protected[0])["phase"] == "pending"
     assert not any(item.ref == IDENTITY["ref"] for item in record.resources)
     pending_wrappers = [item for item in record.resources if item.ref.startswith("pending-run:")]
     assert len(pending_wrappers) == (1 if outcome == "changed" else 0)
@@ -300,15 +331,15 @@ def test_run_reuses_original_responsibility_instead_of_competing_plain_child_cla
     assert not finalize._assert_obligations_settled(record, "owner", abandon=False)
 
 
-def test_journal_helper_observes_original_protected_claim_without_adding_plain_ref(coordinator):
+def test_journal_helper_observes_original_protected_claim_without_adding_plain_ref(coordinator: Coordinator) -> None:
     path, _, _, _ = coordinator
     response = create_remote(args())
     protected = worktree_ops_cli._journal_run_claim("m/p/owner", json.dumps(response))
-    assert protected.producer["request_id"] == response["allocation"]["request_id"]
+    assert producer(protected)["request_id"] == response["allocation"]["request_id"]
     assert len(tracking.load_record(path).resources) == 1
 
 
-def test_origin_capability_owner_probe_reads_actual_ledger_without_reservation(owner):
+def test_origin_capability_owner_probe_reads_actual_ledger_without_reservation(owner: Owner) -> None:
     path, _ = owner
     before = path.read_bytes()
     with output.capture_json_output() as captured:
@@ -321,13 +352,18 @@ def test_origin_capability_owner_probe_reads_actual_ledger_without_reservation(o
     assert path.read_bytes() == before
 
 
-def test_origin_uses_original_cwd_repository_before_explicit_destination(owner, monkeypatch):
+def test_origin_uses_original_cwd_repository_before_explicit_destination(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, config = owner
     monkeypatch.setattr(destination, "_cwd_project", lambda cwd: "p")
-    seen = []
-    monkeypatch.setattr(destination.worktree_identity, "tracked_invocation_record", lambda cwd, **k: (
-        seen.append((cwd, k)) or tracking.load_record(path)
-    ))
+    seen: list[tuple[Path, dict[str, object]]] = []
+
+    def tracked_invocation_record(cwd: Path, **k: object) -> Any:
+        seen.append((cwd, k))
+        return tracking.load_record(path)
+
+    monkeypatch.setattr(worktree_identity, "tracked_invocation_record", tracked_invocation_record)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "current-session")
     project, selected, owner_ref = destination._origin(
         Path("/original/cwd"), None, standalone=False,
@@ -336,11 +372,18 @@ def test_origin_uses_original_cwd_repository_before_explicit_destination(owner, 
     assert seen == [(Path("/original/cwd"), {"project": "p", "anchor": Path(config.default_repo.anchor)})]
 
 
-def test_explicit_owner_controls_authority_but_not_default_destination_repository(owner, monkeypatch):
+def test_explicit_owner_controls_authority_but_not_default_destination_repository(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, config = owner
-    selected = []
+    selected: list[str | None] = []
+
+    def load_project_config(p: str | None) -> cfg.Config:
+        selected.append(p)
+        return config
+
     monkeypatch.setattr(destination, "_cwd_project", lambda cwd: "cwd-project")
-    monkeypatch.setattr(cfg, "load_project_config", lambda p: selected.append(p) or config)
+    monkeypatch.setattr(cfg, "load_project_config", load_project_config)
     project, _, owner_ref = destination._origin(
         Path("/original/cwd"), "m/p/owner#session", standalone=False,
     )
@@ -350,13 +393,13 @@ def test_explicit_owner_controls_authority_but_not_default_destination_repositor
 @pytest.mark.parametrize("project", ["p", None])
 @pytest.mark.parametrize("machine", [None, "remote"])
 def test_untracked_linked_origin_is_refused_before_child_unless_explicit_standalone(
-    owner, monkeypatch, project, machine,
-):
+    owner: Owner, monkeypatch: pytest.MonkeyPatch, project: str | None, machine: str | None,
+) -> None:
     _, config = owner
     monkeypatch.setattr(destination, "_cwd_project", lambda cwd: project)
     monkeypatch.setattr(cfg, "project_name", lambda: "p")
-    monkeypatch.setattr(destination.worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
-    monkeypatch.setattr(destination.worktree_identity, "_worktree_id_from_git", lambda *a, **k: "external")
+    monkeypatch.setattr(worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda *a, **k: "external")
     with pytest.raises(ValueError, match="linked worktree owner is untracked"):
         destination.create(
             args(machine=machine, repo="p"), owner_ref=None, dispatch_attempt=None,
@@ -369,9 +412,11 @@ def test_untracked_linked_origin_is_refused_before_child_unless_explicit_standal
 
 
 @pytest.mark.parametrize("local", [False, True])
-def test_legacy_label_cannot_discard_requested_windows_environment(owner, monkeypatch, local):
+def test_legacy_label_cannot_discard_requested_windows_environment(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch, local: bool,
+) -> None:
     _, config = owner
-    monkeypatch.setattr(destination.execution_spaces, "current_execution_context", lambda c: SimpleNamespace(
+    monkeypatch.setattr(execution_spaces, "current_execution_context", lambda c: SimpleNamespace(
         execution_machine="box" if local else "m", environment="linux",
     ))
     entry = MachineEntry(
@@ -383,9 +428,11 @@ def test_legacy_label_cannot_discard_requested_windows_environment(owner, monkey
         destination._target(config, "box (Windows)", "target")
 
 
-def test_exact_execution_key_precedes_suffix_spelling_and_requires_matching_route(owner, monkeypatch):
+def test_exact_execution_key_precedes_suffix_spelling_and_requires_matching_route(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, config = owner
-    monkeypatch.setattr(destination.execution_spaces, "current_execution_context", lambda c: SimpleNamespace(
+    monkeypatch.setattr(execution_spaces, "current_execution_context", lambda c: SimpleNamespace(
         execution_machine="m", environment="linux",
     ))
     entry = MachineEntry(
@@ -401,7 +448,7 @@ def test_exact_execution_key_precedes_suffix_spelling_and_requires_matching_rout
         destination._target(config, "box-win", "target")
 
 
-def test_destination_parser_keeps_unknown_argument_refusal():
+def test_destination_parser_keeps_unknown_argument_refusal() -> None:
     parser = argparse.ArgumentParser()
     worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
     selected = parser.parse_args(["create", "--machine=remote", "--repo=target", "--json"])
@@ -419,7 +466,9 @@ def test_destination_parser_keeps_unknown_argument_refusal():
 
 
 @pytest.mark.parametrize("support", [None, {"schema": "dispatch-assignment-cohort", "version": True}])
-def test_cohort_receiver_skew_refuses_before_origin_or_receiving_effects(coordinator, monkeypatch, support):
+def test_cohort_receiver_skew_refuses_before_origin_or_receiving_effects(
+    coordinator: Coordinator, monkeypatch: pytest.MonkeyPatch, support: dict[str, object] | None,
+) -> None:
     path, operations, effects, _ = coordinator
     advertised = worktree_allocation_cli.capabilities(receiver=True)
     advertised["dispatch_cohort"] = support
@@ -433,7 +482,7 @@ def test_cohort_receiver_skew_refuses_before_origin_or_receiving_effects(coordin
     assert create_remote(args())["worktree"]["id"] == "child"
 
 
-def test_cohort_cli_parser_and_pre_effect_validation(monkeypatch):
+def test_cohort_cli_parser_and_pre_effect_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import dispatch_cohort
 
     parser = argparse.ArgumentParser()
@@ -443,10 +492,15 @@ def test_cohort_cli_parser_and_pre_effect_validation(monkeypatch):
     for key, value in fields.items():
         argv.extend(["--dispatch-" + key.replace("_", "-"), str(value)])
     selected = parser.parse_args(argv)
-    seen = []
-    monkeypatch.setattr(worktree_ops_cli.project_state, "namespaced", lambda: False)
+    seen: list[dict[str, Any]] = []
+
+    def create_core(*a: object, **k: Any) -> dict[str, Any]:
+        seen.append(k)
+        return {"worktree": {}}
+
+    monkeypatch.setattr(project_state, "namespaced", lambda: False)
     monkeypatch.setattr(cfg, "load_config", lambda: object())
-    monkeypatch.setattr(worktree_ops_cli, "_create_worktree_core", lambda *a, **k: seen.append(k) or {"worktree": {}})
+    monkeypatch.setattr(worktree_ops_cli, "_create_worktree_core", create_core)
     with output.capture_json_output():
         assert worktree_ops_cli.cmd_create(selected) == 0
     assert seen[0]["dispatch_attempt"] == cohort_attempt()
@@ -461,7 +515,7 @@ def test_cohort_cli_parser_and_pre_effect_validation(monkeypatch):
 
 
 @pytest.mark.parametrize("with_cohort", [False, True])
-def test_oversized_cli_attempt_refuses_before_allocation(monkeypatch, with_cohort):
+def test_oversized_cli_attempt_refuses_before_allocation(monkeypatch: pytest.MonkeyPatch, with_cohort: bool) -> None:
     parser = argparse.ArgumentParser()
     worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
     fields = cohort_attempt()
@@ -481,16 +535,18 @@ def test_oversized_cli_attempt_refuses_before_allocation(monkeypatch, with_cohor
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_local_different_project_uses_original_owner_and_restores_project(owner, monkeypatch, failure):
+def test_local_different_project_uses_original_owner_and_restores_project(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch, failure: bool,
+) -> None:
     _, config = owner
     original = cfg.active_project()
     cfg.set_active_project("origin")
     monkeypatch.setattr(destination, "_origin", lambda *a, **k: ("p", config, "m/p/owner#session"))
     monkeypatch.setattr(destination, "_target", lambda *a: {"machine": "m", "project": "target"})
-    monkeypatch.setattr(destination.execution_spaces, "current_execution_context", lambda c: SimpleNamespace(execution_machine="m"))
-    seen = []
+    monkeypatch.setattr(execution_spaces, "current_execution_context", lambda c: SimpleNamespace(execution_machine="m"))
+    seen: list[dict[str, Any]] = []
 
-    def local(selected, **options):
+    def local(selected: argparse.Namespace, **options: Any) -> dict[str, Any]:
         assert cfg.active_project() == "target"
         seen.append(options)
         if failure:
@@ -518,17 +574,24 @@ def test_local_different_project_uses_original_owner_and_restores_project(owner,
         cfg.set_active_project(original)
 
 
-def test_actual_origin_ledger_normalizes_session_alias_without_inventing_anchor(owner):
+def test_actual_origin_ledger_normalizes_session_alias_without_inventing_anchor(owner: Owner) -> None:
     path, _ = owner
     assert destination._creator("m/p/owner#session") == ("m/p/owner", path)
     with pytest.raises(ValueError, match="anchors"):
-        destination._creator(tracking.format_anchor_ref("m", "p", "session"))
+        destination._creator(format_anchor_ref("m", "p", "session"))
 
 
-def test_selected_cli_json_remains_on_stdout_outside_creation_redirect(owner, monkeypatch):
+def test_selected_cli_json_remains_on_stdout_outside_creation_redirect(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     value = {"worktree": {"id": "actual", "path": "/actual", "branch": "worktree/actual"}}
-    seen = []
-    monkeypatch.setattr(destination, "create", lambda *a, **k: seen.append(k) or value)
+    seen: list[dict[str, Any]] = []
+
+    def create(*a: object, **k: Any) -> dict[str, Any]:
+        seen.append(k)
+        return value
+
+    monkeypatch.setattr(destination, "create", create)
     import agent_worktrees.__main__ as main
 
     monkeypatch.setattr(main, "_INVOCATION_CWD", Path("/original/cwd"))
@@ -548,23 +611,71 @@ def test_selected_cli_json_remains_on_stdout_outside_creation_redirect(owner, mo
     {"status": "ready", "published": True, "capabilities": ["worktree-allocation-linker-v1"],
      "allocationLinker": {"admitting": False}},
 ])
-def test_actual_resident_must_advertise_live_admission_before_new_effects(monkeypatch, health):
-    monkeypatch.setattr(allocation_link_demand.status_monitor_runtime, "_status_monitor_enabled", lambda: True)
-    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_current", lambda r: {})
-    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_health", lambda: health)
+def test_actual_resident_must_advertise_live_admission_before_new_effects(
+    monkeypatch: pytest.MonkeyPatch, health: object,
+) -> None:
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(worktrees_client, "read_current", lambda r, **k: {})
+    monkeypatch.setattr(worktrees_client, "read_health", lambda: health)
     with pytest.raises(ValueError, match="actual resident"):
         allocation_link_demand.require_capability("m/p/owner")
 
 
-def test_live_linker_negotiation_uses_authenticated_health_not_advisory_version(monkeypatch):
-    seen = []
-    monkeypatch.setattr(allocation_link_demand.status_monitor_runtime, "_status_monitor_enabled", lambda: True)
-    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_current", lambda r: (
-        seen.append(r) or {"availability": {"status": "advisory"}}
-    ))
-    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_health", lambda: {
+def test_live_linker_negotiation_uses_authenticated_health_not_advisory_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def read_current(request: dict[str, Any], **k: Any) -> dict[str, Any]:
+        seen.append(request)
+        return {"availability": {"status": "advisory"}}
+
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(worktrees_client, "read_current", read_current)
+    monkeypatch.setattr(worktrees_client, "read_health", lambda: {
         "status": "ready", "published": True, "capabilities": ["worktree-allocation-linker-v1"],
         "allocationLinker": {"admitting": True},
     })
     allocation_link_demand.require_capability("m/p/owner")
     assert seen == [{"contract_version": 1, "project": "p", "worktree_id": "owner", "include_missing": True}]
+
+
+def test_capability_check_waits_for_a_starting_resident(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[dict[str, Any]] = []
+    wakes: list[int] = []
+
+    def wake() -> bool:
+        wakes.append(1)
+        return True
+
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", wake)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    def read_current(request: dict[str, Any], **k: Any) -> dict[str, Any]:
+        attempts.append(request)
+        if len(attempts) < 3:
+            raise ConnectionError("endpoint owner exited or was replaced")
+        return {}
+
+    monkeypatch.setattr(worktrees_client, "read_current", read_current)
+    monkeypatch.setattr(worktrees_client, "read_health", lambda: {
+        "status": "ready", "published": True, "capabilities": ["worktree-allocation-linker-v1"],
+        "allocationLinker": {"admitting": True},
+    })
+    allocation_link_demand.require_capability("m/p/owner")
+    assert len(attempts) == 3
+    assert wakes
+
+
+def test_capability_check_reports_a_resident_that_never_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(status_monitor_runtime, "_ensure_status_monitor", lambda: False)
+    monkeypatch.setattr(allocation_link_demand, "CAPABILITY_WAIT", 0.0)
+
+    def read_current(request: dict[str, Any], **k: Any) -> dict[str, Any]:
+        raise ConnectionError("no usable advisory roster")
+
+    monkeypatch.setattr(worktrees_client, "read_current", read_current)
+    with pytest.raises(ConnectionError, match="no usable advisory roster"):
+        allocation_link_demand.require_capability("m/p/owner")

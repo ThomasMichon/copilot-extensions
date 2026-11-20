@@ -73,7 +73,21 @@ for content-free performance events; do not enqueue raw logs or payloads through
 the lifecycle/performance telemetry seam. The separately owned application
 adapter below admits only its explicitly shaped local logging fields.
 
+## Optional bound command telemetry
+
+The optional `command` extra supplies the shared
+[`consumer-telemetry-command` v1 route](../../docs/patterns/consumer-telemetry-command.md).
+Bridge is its first real adapter; see its
+[admission, receiver and validation reference](../../plugins/agent-bridge/docs/consumer-telemetry-command.md).
+`SinkSlot.configure_commands()` retains a separate explicitly bound path beside
+the unchanged synchronous legacy sink. A binding never falls back to that sink.
+`BufferedSink.offer()` adds explicit admission accounting; `drain()` is a
+separate off-path, at-most-250-ms seal/wait. `close()` remains nonflushing.
+The command route reuses that one writer and the native process owner.
+It does not enroll other record families or import a receiver package.
+
 ## Optional retained application diagnostics
+
 
 `process_telemetry.diagnostic_logs` is an optional stdlib-only implementation of
 the existing Dispatch JSONL handler, now shared by the actual Bridge and Dispatch

@@ -33,6 +33,7 @@ def _activity(
     if facts["reviews_complete"] is not True:
         return unknown, None, None
     reviews = []
+    dismissed: set[int] = set()
     for row in facts["reviews"]:
         state = row["state"]
         if state in ("PENDING", "REQUEST_REVIEW"):
@@ -41,12 +42,25 @@ def _activity(
             return unknown, None, None
         if row["user"].casefold() != reviewer.casefold():
             continue
+        if row["dismissed"] is True:
+            # Native dismissal may replace the original state. Validate only;
+            # this copy's synthetic verdict/signature never becomes evidence.
+            metadata = {
+                **row, "dismissed": False, "state": "APPROVED" if state == "DISMISSED" else state,
+            }
+            if review_evidence(metadata, observed_at) is None:
+                return unknown, None, None
+            dismissed.add(row["id"])
+            continue
         evidence = review_evidence(row, observed_at)
         if evidence is None:
-            reason = "review-dismissed" if row["dismissed"] is True else None
-            return unknown, None, reason
+            return unknown, None, None
         reviews.append((evidence.submitted_at, evidence.review_id, row, evidence.signature))
+    if any(item[1] in dismissed for item in reviews):
+        return unknown, None, None
     if not reviews:
+        if dismissed:
+            return unknown, None, "review-dismissed"
         return attention.ReviewActivity(reviewer, "initial"), None, None
     matching = [item for item in reviews if item[2]["commit_id"] == facts["head_sha"]]
     if matching:

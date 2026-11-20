@@ -56,6 +56,34 @@ def test_recorded_transition_never_selects_either_subscription_authority(
         storage.write_subscriptions_state([], root)
 
 
+def test_prepared_version_two_is_observation_not_authority(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = {
+        "schema": "agent-pull-requests.watch-state-transition", "version": 2, "phase": "prepared",
+    }
+    monkeypatch.setattr(storage, "_regular_bytes", lambda _path: json.dumps(document).encode())
+    monkeypatch.setattr(
+        storage, "_read_subscriptions_state",
+        lambda *_args, **_kwargs: pytest.fail("must not read subscription authority"),
+    )
+    monkeypatch.setattr(
+        storage, "_atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("must not begin a subscription write"),
+    )
+    root = Path("fixture-state")
+    for phase in ("prepared", "sealed-legacy"):
+        document["phase"] = phase
+        assert storage.read_transition_phase(root) == phase
+        with pytest.raises(ValueError, match="watch state transition"):
+            storage.read_subscriptions_state(root)
+        with pytest.raises(storage.StateWriteRefused, match="watch state transition"):
+            storage.write_subscriptions_state([], root)
+    document["phase"] = "import-ready"
+    with pytest.raises(ValueError, match="invalid watch state transition"):
+        storage.read_transition_phase(root)
+
+
 def test_transition_is_rechecked_at_the_final_storage_boundary(
     storage: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

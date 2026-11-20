@@ -34,14 +34,16 @@ also supports settling explicitly TO ``released``).
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any
 
-from . import activity, claim_history, obligations, tracking, tracking_write
+from . import activity, claim_history, claims_binding, obligations, tracking, tracking_claims, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
 
-def _authority_rejection(record: tracking.WorktreeRecord) -> dict | None:
+def _authority_rejection(record: tracking.WorktreeRecord) -> dict[str, Any] | None:
     try:
         require_project_record_mutation(record)
     except ExecutionSpaceError as exc:
@@ -52,7 +54,7 @@ def _authority_rejection(record: tracking.WorktreeRecord) -> dict | None:
     return None
 
 
-def _enter_claim_record(stack: ExitStack, path: Path) -> dict | None:
+def _enter_claim_record(stack: ExitStack, path: Path) -> dict[str, Any] | None:
     try:
         stack.enter_context(tracking._RecordLock(path, require_sidecar=True))
     except TimeoutError:
@@ -63,7 +65,7 @@ def _enter_claim_record(stack: ExitStack, path: Path) -> dict | None:
     return None
 
 
-def apply_claim_add(args: dict) -> dict:
+def apply_claim_add(args: dict[str, Any]) -> dict[str, Any]:
     """Registered as the ``claim_add`` verb. Mirrors the former
     ``claims_cli._claims_add`` transaction (the RecordLock body only -- the
     owner-ref cross-machine resolution/deferral and coordination-readiness
@@ -96,7 +98,7 @@ def apply_claim_add(args: dict) -> dict:
                 ),
             }
         was_finalized = record.status == "finalized"
-        claim = tracking.ResourceClaim(
+        claim = tracking_claims.ResourceClaim(
             kind=kind,
             ref=ref,
             created_at=tracking._now_iso(),
@@ -104,7 +106,7 @@ def apply_claim_add(args: dict) -> dict:
             note=note,
         )
         try:
-            tracking.add_resource_claim(record, claim, save=False)
+            claim = tracking_claims.add_resource_claim(record, claim, save=False)
         except ValueError as exc:
             # Covers every other rejection `add_resource_claim` itself
             # enforces (e.g. a completed system/bridge record, or a ref
@@ -112,6 +114,8 @@ def apply_claim_add(args: dict) -> dict:
             # rather than duplicating that predicate here, so this verb can
             # never drift from the one place the invariant is enforced.
             return {"error": "rejected", "message": str(exc)}
+        if kind == "task" and not record.creation_nonce:
+            record.creation_nonce = secrets.token_hex(8)
         reopened = was_finalized and record.status == "active"
         # worktree-finality-and-obligations Phase 2: on reopen, surface what
         # the earlier finalize's `release_all_resources` cascade let go --
@@ -141,10 +145,11 @@ def apply_claim_add(args: dict) -> dict:
         "released_by_finalize": [
             {"kind": c.kind, "ref": c.ref, "note": c.note} for c in released_by_finalize
         ],
+        **({"claim_binding": binding} if (binding := claims_binding.for_claim(record, claim)) else {}),
     }
 
 
-def apply_claim_release(args: dict) -> dict:
+def apply_claim_release(args: dict[str, Any]) -> dict[str, Any]:
     """Registered as the ``claim_release`` verb."""
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
@@ -167,7 +172,7 @@ def apply_claim_release(args: dict) -> dict:
             paired_claims.require_clearable(record, ref)
         except ValueError as exc:
             return {"error": "rejected", "message": str(exc)}
-        reservation = tracking.claim_handoff_reservation(record, match)
+        reservation = tracking_claims.claim_handoff_reservation(record, match)
         if reservation:
             return {
                 "error": "reserved",
@@ -178,6 +183,8 @@ def apply_claim_release(args: dict) -> dict:
             }
         kind = match.kind
         if remove:
+            from .resource_producer import task_claim_removal
+            stack.enter_context(task_claim_removal(record, ref, yaml_path))
             record.resources = [c for c in record.resources if c.ref != ref]
             action = "removed"
         else:
@@ -198,7 +205,7 @@ def apply_claim_release(args: dict) -> dict:
     return {"ok": True, "action": action}
 
 
-def apply_claim_settle(args: dict) -> dict:
+def apply_claim_settle(args: dict[str, Any]) -> dict[str, Any]:
     """Registered as the ``claim_settle`` verb.
 
     ``skip_if_released`` (default ``False``, preserving the public ``claims
@@ -244,12 +251,28 @@ def apply_claim_settle(args: dict) -> dict:
         if rejection := _authority_rejection(record):
             return rejection
         match = next((c for c in record.resources if c.ref == ref), None)
+        pins = tuple(args.get(key) for key in (
+            "expected_record_nonce", "expected_claim_nonce", "expected_kind",
+        ))
+        if any(pin is not None for pin in pins):
+            if (
+                not all(isinstance(pin, str) and pin for pin in pins)
+                or record.creation_nonce != pins[0]
+                or match is None or match.claim_nonce != pins[1] or match.kind != pins[2]
+                or match.metadata_opaque
+            ):
+                return {"error": "rejected", "message": "creator claim binding no longer matches"}
+            if pins[2] == "task" and any(
+                handoff.token == ref and handoff.state == "pending" and handoff.candidate is not None
+                for handoff in record.handoffs
+            ):
+                return {"error": "rejected", "message": "creator handoff has an associated successor candidate"}
         if match is not None and match.has_producer:
             return {"error": "rejected", "message": "producer claims require verified close or accepted handoff"}
         if skip_if_released and match is not None and match.state == "released":
             return {"ok": True, "skipped": "released"}
         reservation = (
-            tracking.claim_handoff_reservation(record, match) if match is not None else ""
+            tracking_claims.claim_handoff_reservation(record, match) if match is not None else ""
         )
         if reservation:
             return {
@@ -260,7 +283,7 @@ def apply_claim_settle(args: dict) -> dict:
                 ),
             }
         try:
-            settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
+            settled = tracking_claims.settle_resource_claim(record, ref, disposition, save=False)
         except ValueError as exc:
             return {"error": "rejected", "message": str(exc)}
         if settled is None:
@@ -282,6 +305,32 @@ def apply_claim_settle(args: dict) -> dict:
     return {"ok": True, "kind": settled.kind, "disposition": disposition}
 
 
-tracking_write.register_verb("claim_add", apply_claim_add, version=4)
-tracking_write.register_verb("claim_release", apply_claim_release, version=4)
-tracking_write.register_verb("claim_settle", apply_claim_settle, version=4)
+def apply_claim_bind(args: dict[str, Any]) -> dict[str, Any]:
+    """Explicitly qualify one existing task claim without reactivating it."""
+    path = Path(args["yaml_path"])
+    with ExitStack() as stack:
+        if rejection := _enter_claim_record(stack, path):
+            return rejection
+        record = tracking.load_record(path)
+        if rejection := _authority_rejection(record):
+            return rejection
+        claim = next((claim for claim in record.resources if claim.ref == args["ref"]), None)
+        if (
+            claim is None or claim.kind != "task" or claim.has_producer or claim.metadata_opaque
+            or tracking_claims.claim_handoff_reservation(record, claim)
+            or record.status in {"finalizing", "orphaned"}
+        ):
+            return {"error": "rejected", "message": "creator task claim cannot be qualified"}
+        record.creation_nonce = record.creation_nonce or secrets.token_hex(8)
+        claim.claim_nonce = claim.claim_nonce or secrets.token_hex(16)
+        try:
+            tracking.save_record(record, path)
+        except ValueError as exc:
+            return {"error": "rejected", "message": str(exc)}
+        return {"ok": True, "claim_binding": claims_binding.for_claim(record, claim)}
+
+
+tracking_write.register_verb("claim_bind", apply_claim_bind)
+tracking_write.register_verb("claim_add", apply_claim_add, version=5)
+tracking_write.register_verb("claim_release", apply_claim_release, version=5)
+tracking_write.register_verb("claim_settle", apply_claim_settle, version=5)

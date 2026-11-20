@@ -4,7 +4,9 @@ The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
 owner. It proves WMI daemon survival after strict caller-Job closure, bounded
 child termination and exact fixture cleanup; ordinary local containment is
-not relaxed to obtain that evidence.
+not relaxed to obtain that evidence. The same proof includes expired inherited
+Job names alongside live caller Jobs; its retained-membership negative must
+still refuse admission after an absent name.
 
 The manual foundation portfolio separates contained functional checks from
 Windows production caller-Job loss. After the ordinary runner prepares its
@@ -7642,6 +7644,282 @@ native owners while executing cleanup composition, including a saturated later
 model and vector-before-canonical effects. Neither packet qualifies provider
 ordering, complete point application, a live directory or native Windows.
 
+`plugins/agent-index/tests/test_point_embedding.py` separately composes selected
+pair writes against the real cold two-model store and nonempty component ledger.
+It covers routed/unclaimed pairs, fresh facades and poisoned caches, reopen
+reuse, changed-profile backfill, prepared-vector counts, current canonical
+input and exact writer/scope/family/model/index refusal before inference.
+Native coverage publication checks prepared actual vectors before SQLite
+receipts; wrong/missing vectors and stale input refuse. Caught post-write
+preparation failure latches the outer writer dirty instead of publishing
+coverage. `test_embedding_pair_reuse.py` retains the default pair/batch controls.
+Caught stale input in a later batch and failed selection of a later model also
+latch earlier effects; the entire invocation shares the nested writer boundary.
+The actor-free controls in
+`tools/promotion_unit_tests/test_point_embedding_contract.py` substitute native
+and SQLite boundaries while executing scope forwarding, no-op selection,
+write/preparation/receipt order and actual-vector-before-receipt composition.
+They do not qualify provider ordering, whole-claim/checkpoint completion,
+ordinary point application, a live directory or native Windows.
+
+For individual native performance samples, run the existing routing/reopen case:
+`PYTEST_ADDOPTS=-s python tools/run-plugin-tests.py agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
+It prints receipt-cold first-write and covered fresh-facade reopen wall/process
+CPU time, table opens, fragment/index-segment counts and work counters for two
+models, three chunks and batch size two. Timed work includes the open observer
+and pair composition, not fixture setup or outer writer entry/exit. OS cache is
+uncontrolled and inference is a fixture; two samples are insufficient for tail,
+large-corpus, real-model, writer-contention or native Windows qualification.
+
+`plugins/agent-index/tests/test_point_component_application.py` composes the
+complete explicit typed-claim application against real native content/model/
+ledger owners, retained acquisition and prepared vectors. It covers replacement
+cleanup, tombstones, covered reopen, concurrent application refusal, unchanged
+parent/polling state and pinned/trailing queue separation. Sealed ordering,
+checkpoint and final-clean interruptions reopen without engines or native data
+replay; changed claim/acquisition/native/coverage/checkpoint owners refuse.
+Real native segment fixtures cover full-ledger and near-capacity multi-point
+canonical/vector refusals, per-stream-batch demand, clean retry after no-effect
+refusal, and dirty retention after unexpected preflight or publication effects.
+Run it separately from `test_component_application.py` and
+`test_point_prepared_application.py` so each native packet retains a bounded
+execution window. Use `PYTEST_ADDOPTS='-vv --durations=10'` for named progress
+and phase timings; a killed quiet run's dots do not identify reusable results.
+The existing positive `-k complete_point_application` case with `-s` prints
+separate preparation/publication wall/process-CPU samples and work counts for
+unapplied and covered reopen. Fixture inference and uncontrolled OS caches are
+not production latency, contention, large-corpus or native Windows proof.
+The actor-free exact-scope/physical-seal case in
+`tools/promotion_unit_tests/test_point_source_domain_contract.py` substitutes
+receipt/physical boundaries but executes the source writer. Whole-claim
+retirement through ordinary workers, v2 execution, ordinary application and
+rollout remain unqualified.
+
+The separate explicit `tests/test_point_completion.py` packet qualifies the
+current whole queue pin, every retained target and native/checkpoint outcome,
+then exercises queue success before exact pending retirement. It covers covered
+reopen without engines, trailing claims, cancellation, stale/partial refusal,
+lost-return retries across separate WAL commits, mixed checkpoint/native restores
+and abrupt-exit rollback of transactional schema/data transitions. Run this
+bounded native packet separately from application/preparation packets. Its
+actor-free `tools/promotion_unit_tests/test_point_completion_contract.py` controls
+check complete typed-target coverage and qualification/commit/retirement order
+in required unit CI; they substitute SQLite/native boundaries, not qualification
+of real restores or native Windows. See
+[explicit completion](plugins/agent-index/docs/component-ledger.md#explicit-whole-claim-completion)
+for retry and budget limits.
+
+The explicit `tests/test_point_worker.py` packet composes fully retained targets
+through the source writer, preparation, native application, whole-claim completion
+and named-component reads. It covers interrupted embedding/cache reuse,
+cancellation before publication, incomplete/foreign input refusal, retained
+uncertain effects without automatic repair, source-writer contention, trailing
+claims, requalifying completed retries and legacy-worker exclusion. Run it as a
+separate bounded packet with `--test-file tests/test_point_worker.py
+--allow-explicit-tiers`. Two additional actor-free controls in
+`test_point_completion_contract.py` qualify publication-before-completion and
+failure propagation with native/SQLite/lock effects substituted. Neither packet
+enables ordinary v2 execution or qualifies native Windows or live provider
+eligibility. See the [retained worker](plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
+for the caller and budget boundaries.
+
+The explicit `tests/test_azure_devops_point_worker.py` packet composes synthetic
+HTTP responses through the actual named-version reader, retained acquisition,
+native content/model/ledger application, completion and named reads. It covers
+new and partially acquired claims, retained-body reuse with fresh principal/
+query checks, eligibility loss during embedding and after publication,
+cancellation, trailing claims, completed retry without provider access,
+writer/owner exclusion, pre-acquisition native-scope refusal, target limits and
+the shared retry cap. Fresh entirely older claims, including an applied comment
+tombstone and multiple versions/correlations, complete after two fixture
+eligibility requests with zero body reads, embeddings, prepared rows, native
+table-version changes or polling changes. Completed reopen retries requalify
+locally and refuse a mixed checkpoint restore. Principal/query/checkpoint/
+coverage/policy drift refuses; equal versions still acquire both bodies and
+reject conflicting canonical content, and mixed older/equal claims still need
+whole-claim acquisition. Select it with
+`--test-file tests/test_azure_devops_point_worker.py --allow-explicit-tiers`;
+run it separately from the other native packets to retain the bounded deadline.
+The existing completion-contract units also cover higher-only selection,
+qualified acknowledgement/retry and the distinct strict outcome encoding,
+without adding unit nodes or native effects. Four actor-free cases in
+`test_point_completion_contract.py` cover the
+optional qualifier's three phase boundaries and completed-retry bypass. These
+are synthetic-provider/local-native evidence, not live API, native Windows,
+ordinary v2 runner, full event delivery or consumer-scale qualification.
+
+`tests/test_azure_devops_point_runtime.py` exercises explicit configuration through
+the same native/HTTP fixture. It covers unpinned whole-snapshot selection,
+completed local retries, retained-acquisition recovery across fresh composition,
+changed queue snapshots, scope/model/connector/client refusal and separate
+legacy/point directories including symlink aliases. Missing configuration is
+not implicitly initialized. Select this bounded integration packet with
+`--test-file tests/test_azure_devops_point_runtime.py --allow-explicit-tiers`.
+It does not enlarge required unit CI or qualify ordinary v2 worker admission,
+native Windows, live APIs or runtime activation.
+
+The same runtime packet composes `PointQueueConsumer` with actual retained
+acquisition, native application and durable completion. It covers exact-scope
+FIFO selection, bounded batches and untouched trailing/other-account work,
+failure pause, explicit retained retry after reconstruction, and joined
+cancellation/drain/stop. A blocked queue-read control proves paused/stopped
+admission is rechecked before native dispatch. Lightweight selection and
+failure-latch controls remain in `tests/test_point_hints.py`; these additions
+do not themselves enlarge required CI admission. Neither packet qualifies
+ordinary/default v2 activation, cross-consumer coordination or restore repair.
+
+The same opt-in native runtime packet now hosts the actual ASGI application
+with an explicit `PointService` factory and the existing `TaskRunner` loop.
+It covers passive promotion, inert/reconstructed admission, exact-scope HTTP
+queue routing, ordinary capability refusal, wake-driven named acquisition and
+native completion, and retained failure/retry across notification and drain
+rollback. Blocked selection and embedding controls prove synchronous stop
+admission, truthful drain results and repeatedly cancelled shutdown retain the
+executor's actual HTTP client until the runner settles. Invalid explicit
+legacy/point overlap refuses before opening clients rather than falling back.
+These cases do not start a detached child, enlarge required unit CI, qualify a
+live-provider/cross-generation cutover, or enable ordinary v2 advertisement.
+
+The service fixture uses the production configured Azure DevOps executor context.
+It checks readiness only for actual missing embeddings, one ensure per model per
+execution, and stopping only the engine this context started. Inert opening/closing
+cancellation controls use actual off-loop resource factories and joined cleanup,
+including loop-wide Task cancellation and preserved context variables. A
+two-execution control expires both fixture engines between distinct missing
+targets, requires readiness again, and stops each context-owned engine once.
+The existing higher-covered service controls require eligibility-only requests,
+no readiness, and an entirely local completed retry through a fresh owned
+executor as well as the explicit caller-owned API. Seven actor-free cases in
+`tools/promotion_unit_tests/test_point_executor_context.py` substitute asynchronous
+dispatch and native/provider actors, retaining inert entry, exact-task refusal,
+partial-construction cleanup, borrowed-client preservation and readiness-failure
+cleanup in required unit CI; they do not claim native cancellation evidence.
+
+The service fixture now selects the production paired executor/qualified-reader
+context. Its named read follows actual admitted execution; paused fresh reopen
+also qualifies content and an ordered deletion without provider requests, model
+readiness, path schema initialization or any file-byte change. A second read
+must refuse unknown paths, revoked checkpoints, changed receipts or a different
+retained point binding rather than reuse an earlier qualification. The new
+read-only path-owner control refuses missing state without creating its parent
+and refuses SQLite writes without changing files.
+Blocked native reads prove truthful drain timeout and repeatedly cancelled
+caller/loop-wide shutdown retain clients until qualification settles. Four
+additional controls block an executor-only caller-owned asynchronous exit during
+ordinary stop or startup rollback and repeatedly cancel the caller or every
+loop Task. Cleanup must finish before the caller receives cancellation or a
+subsequent stop can return. Pre-entry cancellation and concurrent stopped callers
+remain covered by the blocked native-reader controls. All remain in the existing
+opt-in lane.
+Ten additional actor-free nodes in the executor-context and
+`tools/promotion_unit_tests/test_point_service_binding.py` modules cover shared
+binding, mutually exclusive contexts, missing/mismatched/partial selections,
+executor-only refusal and read-before-close ordering using substituted futures
+and consumers. Required unit CI gains no native, thread, event-loop or provider
+actors. Ordinary read routes and activation are unchanged.
+
+Four focused additions in `test_point_service_binding.py` qualify the optional
+running point-service declaration: installed qualified composition rather than
+callable/factory metadata, complete receipt-scope fingerprint encoding,
+paused/active/failure/drain/rollback/stop admission, and missing, malformed,
+incompatible or changed-scope requirements. The actual health route body is
+executed with inert application/identity owners and JSON round-tripped, preserving
+legacy intake/execution meaning and refusing support after peer replacement.
+This unit fixture does not run ASGI, threads, stores or an event loop; the
+existing opt-in ASGI service packet additionally verifies the real HTTP
+serialization, production configured pair and effect-side read refusal.
+The pure validator is not wired into an existing client or effectful caller.
+
+The blocked-selection governance control changes the runner's policy to
+backoff while selection is off-loop. The final admission callback leaves the
+entire task unchanged without provider or executor work; returning to ready
+uses the existing runner wakeup rather than resetting point failure state.
+
+`tests/test_azure_devops_point_service_recovery.py` is an explicit T3
+filesystem/service packet using the same actual ASGI/runner and synthetic
+provider/native fixture. Select it with `--test-file
+tests/test_azure_devops_point_service_recovery.py --allow-explicit-tiers`.
+The sealed-checkpoint case reconstructs native owners and a fresh client/service,
+proves paused startup and dirty-state refusal, explicitly invokes the existing
+sealed publication owner, then completes the retained claim without fetching
+bodies, embedding or replaying content/vector writes. Repair itself does not
+acknowledge the claim or advance polling. The contrasting unsealed-native fault
+remains dirty, parked and unchanged after both service and repair refusal.
+The superseded-claim cases send multiple older versions/correlations through
+actual HTTP intake while service admission is paused. After explicit activation,
+the existing runner completes the exact claim with a higher-covered outcome,
+two fixture eligibility requests, no body/embedding work, no prepared rows and
+unchanged native table versions/polling bytes, including an applied comment
+tombstone. The previous completed task remains unchanged. Joined shutdown closes
+the actual client; a fresh configured completed retry then needs no client or
+provider query and preserves the same projection. Ordinary v2 execution remains
+unadvertised.
+This adds no production repair path, required-unit admission, process-kill/
+cross-generation cutover, native Windows/macOS or live-provider qualification.
+
+`tests/test_native_azure_devops_point_matrix.py` is an explicit Linux T3
+filesystem packet, selected with `--test-file
+tests/test_native_azure_devops_point_matrix.py --allow-explicit-tiers`.
+It composes the actual finite queue consumer, configured acquisition caller,
+worker, native point store and named reader with two injected models.
+Outside measurement, the existing scoped mutation/index owners prepare
+100/10,000/100,000 unrelated content rows, corresponding vectors and path
+checkpoints, plus the same number of unrelated canonical ordering records.
+The latter are synthetic tombstone history for absent paths, bulk-seeded only
+in fixture setup through the existing writer, evidence serializer, scalar
+preparation and ledger binding; this is not a production batch application API.
+First application, equal-version duplicate, superseded claim and
+completed retry must have identical logical counts and measured native query
+counts/rows/read I/Os across those sizes, for live content and a comment
+tombstone. Whole-checkpoint enumeration is trapped. Native versions remain
+unchanged on duplicate/superseded/retry; full native row counts and sampled raw
+content/vector/checkpoint bytes preserve the unrelated corpus.
+Sampled raw ordering records also stay byte-identical, and the final ledger
+contains exactly the unrelated rows plus both selected components.
+
+The packet emits `POINT_NATIVE_WORK` records with Linux process I/O, elapsed
+wall/process-CPU time and separately reported setup time. Process bytes include
+query-plan diagnostic replay and metadata/queue traffic. Completed retries also
+run after reopening owners without replay, with replay and checkpoint enumeration
+trapped, identical logical/query counts, no HTTP/embedding and unchanged native
+versions. Their `ordinary_completed_retry` records include inclusive per-owner
+I/O around fully consumed `to_arrow` queries and scalar-index inspection, plus
+per-call read bytes. Representative diagnostic plans retain indexed-query
+metrics with fixture paths redacted. These are separate observations: subtracting
+replay bytes does not recover ordinary cost because replay can warm caches.
+Native row bounds do not certify flat byte cost; the no-replay control still
+shows index/query and metadata read growth. OS/process caches are uncontrolled,
+and inclusive process counters include instrumentation overhead, not exclusively
+physical disk reads or whole-CPU/memory acceptance. Stage counters retain their
+existing instrumentation scope; the point checkpoint owner's writes are not
+inferred from a zero shared-engine counter. This packet does not exercise
+HTTP service intake, replace the
+service/recovery packet above, enable ordinary v2 execution, or qualify broader
+provider/consumer rollout.
+
+`tests/test_native_azure_devops_point_service_matrix.py` separately qualifies
+the existing higher-covered HTTP/service path beside the same three native
+content/vector/checkpoint/ordering-ledger cardinalities. Select this Linux T3
+filesystem/service packet with `--test-file
+tests/test_native_azure_devops_point_service_matrix.py --allow-explicit-tiers`;
+run it separately from the native consumer matrix to retain the existing caps.
+Initial application and corpus setup are outside operation measurement.
+Actual HTTP intake stays parked until explicit service activation, completes
+through the governed runner, and closes the joined client. Reopened completed
+retry then uses no client or provider request. Content and applied-comment
+tombstone cases preserve exact hints, the old completed task, native versions,
+polling bytes, full native row counts and sampled unrelated raw records.
+Whole-checkpoint enumeration is trapped during the measured operation.
+
+The six `POINT_SERVICE_NATIVE_WORK` records measure the combined service
+lifetime and local retry, including diagnostic native plan replay; they are
+not exclusive per-phase costs. Logical counts and native queries/scanned rows/
+read I/Os must match across cardinalities. Linux process I/O, wall/process-CPU
+time and separate setup time are observations, not flat-byte, physical-disk
+or whole-resource acceptance. Ordinary v2 execution remains unadvertised.
+No new required-unit node, production repair, provider activation or rollout
+is introduced; the small service/recovery controls remain separate.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
@@ -8205,6 +8483,16 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The watch-transition controls exercise the actual prepared and Windows sealed
+receivers with inert storage and lease owners: complete version-1 origin
+preservation, current writer admission, physical-topology refusal,
+final-publication races, uncertain acknowledgement and unchanged version-2
+retry. Phase-progressed sealed inputs retain their actual prepared origin,
+including an existing staged seal, without an invented v1 sealed receipt;
+origin/current-field conflicts refuse before custody. POSIX sealed records
+refuse without retroactive domain evidence.
+Native inode, installation and durability qualification remains in the plugin
+packet; `tests/test_watch_sealed_recovery.py` covers the Windows receiver.
 Ten namespace capability controls use the actual Bridge namespace decoder
 and shared declarations with substituted provider bytes. They preserve true,
 false, null and legacy omission and reject numeric/string/container values
@@ -8543,6 +8831,21 @@ proof. A fresh PR child gets only the declared noncredential environment plus
 fixed Python isolation settings; GitHub event IDs, credentials and unrelated
 ambient variables are not unit inputs. Toolchain binding is bounded, and the
 read-only provider search has an eight-second total budget.
+
+An attempted lookup emits one `pr_unit_lookup` JSON diagnostic with total and
+per-operation elapsed milliseconds, flushed before any fresh-runner handoff.
+Fixed phase names distinguish run/artifact/job
+inventory, producer qualification, archive download and packet verification;
+exceptional operations retain an `error` outcome. A phase's `success` means that
+operation returned, not that reuse was admitted. The diagnostic contains no
+provider paths, credentials, response bodies or exception text. It adds no
+provider request or child process and does not change the lookup deadline,
+required Actions outputs or packet format. The three actor-free controls in
+`tools/promotion_unit_tests/test_ci_pr_unit_lookup_timings.py` exercise real
+packet verification, provider failure and the unchanged expired-budget fresh
+fallback, including visibility through a buffered output stream before that
+fallback begins. Historical budget exhaustion without this diagnostic remains
+unattributed; synthetic timing is not a live-provider performance claim.
 
 An eligible prior run must have a successful exact-attempt unit job and fresh
 upload, the matching context-derived artifact identity, immutable archive

@@ -272,3 +272,34 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
   No Manager, entry, measurement, collector or native reservation is transferred.
 - Runtime support, receiver readback, native/compatibility qualification and
   release/installed adoption remain later acceptance, not U0 evidence.
+
+### 2026-11-19 - U1 source implementation
+
+- Claimed only U1 on #13545. The contract requires agreement for actually
+  reserved overlapping hunks, not a blanket approval from historical campaign
+  roles. Related EventLog refresh and native Job reservations received narrow
+  coordination requests; their changed hunks remain untouched.
+- Added one shared declaration parser, structural projection and command route
+  on the existing `SinkSlot`/`BufferedSink` owner. Bridge admits exact roots from
+  trusted caller-to-harness service configuration, independently of the target
+  agent and cwd.
+- The expanded Windows development packet passes 179 controls, including private
+  restoration and remote-session compatibility. Its real configured,
+  authenticated HTTP stop operations reached one independent receiver, whose
+  file readback contained four session/conversation transitions. Literal argv,
+  cwd after `chdir`, environment isolation, unlisted-caller suppression,
+  non-reading-child failure and finite owned cleanup are explicit controls.
+- Added a finite, contained Windows/Linux native CI packet with immutable
+  candidate selection and receiver-readback properties. Current-head CI/review
+  and merge remain required; source tests do not establish release or rollout.
+- U2 Dispatch adoption, wider coverage/skew qualification and U4 release remain
+  open. No receiver installation, live runtime update or deployment is included.
+- Review regressions cover writable-database ownership transfer, nonblocking
+  concurrent sequence ordering, late remote/merge-recovery session admission,
+  immutable reused-session binding and candidate cleanup after success,
+  construction failure or cancellation. The existing reserved producer hunks
+  remain unchanged.
+- Additional review controls suppress inherited command admission in elevated
+  sub-daemons without changing unbound legacy mode, and retain Linux lifetime
+  custody through the bounded stdin-EOF flush grace before forced retirement.
+  Their native regression persists and reads back the receiver's final batch.

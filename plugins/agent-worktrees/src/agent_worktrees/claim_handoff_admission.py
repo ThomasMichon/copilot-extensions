@@ -11,6 +11,67 @@ if TYPE_CHECKING:
     from .tracking_claims import ClaimRef, ResourceClaim
 
 
+def parse_bundle(raw: object) -> ClaimBundle:
+    """Retain claim-generation evidence through the existing bundle format."""
+    from . import claim_handoffs as owner
+
+    if not isinstance(raw, dict):
+        raise owner.ClaimHandoffError("claim-handoff registry contains a non-mapping bundle")
+    if raw.get("version") != owner.BUNDLE_VERSION:
+        raise owner.ClaimHandoffError(
+            f"unsupported claim-bundle version: {raw.get('version')!r}",
+        )
+    fields: dict[str, str] = {}
+    for key in ("id", "state", "source", "consumer", "offered_at", "updated_at"):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value:
+            raise owner.ClaimHandoffError("claim-handoff registry contains an incomplete bundle")
+        fields[key] = value
+    if fields["state"] not in owner.STATES:
+        raise owner.ClaimHandoffError(f"invalid claim-bundle state: {fields['state']!r}")
+    source = owner._qualified_ref(fields["source"], "bundle source")
+    owner._qualified_ref(fields["consumer"], "bundle consumer")
+    claims_raw = raw.get("claims")
+    if not isinstance(claims_raw, list) or not claims_raw:
+        raise owner.ClaimHandoffError("claim bundle must contain at least one claim")
+    claims: list[dict[str, Any]] = []
+    refs: set[str] = set()
+    for item in claims_raw:
+        if not isinstance(item, dict):
+            raise owner.ClaimHandoffError("claim bundle contains a non-mapping claim")
+        kind, ref = item.get("kind"), item.get("ref")
+        if not isinstance(kind, str) or not kind or not isinstance(ref, str) or not ref:
+            raise owner.ClaimHandoffError("claim bundle contains an incomplete claim")
+        if ref in refs:
+            raise owner.ClaimHandoffError(f"claim bundle contains duplicate ref: {ref}")
+        values = {key: item.get(key, "active" if key == "state" else "")
+                  for key in ("created_at", "state", "note")}
+        if not all(isinstance(value, str) for value in values.values()):
+            raise owner.ClaimHandoffError(f"claim bundle contains invalid metadata: {ref}")
+        refs.add(ref)
+        snapshot: dict[str, Any] = {"kind": kind, "ref": ref, **values}
+        if "claim_nonce" in item:
+            nonce = item["claim_nonce"]
+            if not isinstance(nonce, str) or not nonce:
+                raise owner.ClaimHandoffError(f"claim bundle contains an invalid claim nonce: {ref}")
+            snapshot["claim_nonce"] = nonce
+        if "producer" in item:
+            snapshot["producer"] = copy.deepcopy(item["producer"])
+        claims.append(snapshot)
+    reason = raw.get("reason", "")
+    if not isinstance(reason, str):
+        raise owner.ClaimHandoffError("claim bundle reason must be a string")
+    return owner.ClaimBundle(
+        bundle_id=fields["id"], state=fields["state"], source=fields["source"],
+        consumer=fields["consumer"], claims=tuple(claims), offered_at=fields["offered_at"],
+        updated_at=fields["updated_at"], reason=reason,
+        source_owner_refs=parse_source_owner_refs(
+            raw.get("source_owner_refs", {}), claims, source,
+            error_type=owner.ClaimHandoffError,
+        ),
+    )
+
+
 def bundle_state(bundle: ClaimBundle, state: str, *, reason: str | None = None) -> ClaimBundle:
     from .tracking import _now_iso
 

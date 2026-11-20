@@ -1,4 +1,4 @@
-"""Internal Linux physical sealing; legacy state remains the sole authority."""
+"""Internal physical sealing; legacy state remains the sole authority."""
 
 from __future__ import annotations
 
@@ -25,6 +25,11 @@ from .watch_transition import (
 
 Document = dict[str, Any]
 _BACKEND = "linux-renameat2-exchange"
+
+
+def require_backend() -> None:
+    if sys.platform != "win32":
+        _exchange_backend()
 
 
 def _exchange_backend() -> Callable[[Path, Path], None]:
@@ -152,6 +157,12 @@ def seal(
     validate: Callable[[], None], check_deadline: Callable[[], None],
 ) -> Document:
     """Seal/recover under drained custody; never import, qualify boot or activate."""
+    if sys.platform == "win32":
+        from .watch_windows_sealing import seal as seal_windows
+
+        return seal_windows(
+            root, binding, lease, validate=validate, check_deadline=check_deadline,
+        )
     exchange = _exchange_backend()
     document, exchanged = read_sealing(root, binding)
     retain_original_lease(root, document, exchanged, lease)

@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, TypeVar, cast
 
 from . import tracking
 from . import output
@@ -17,34 +20,36 @@ from . import config as cfg
 from . import status_updater_cli
 from . import worktree_identity
 
+F = TypeVar("F", bound=Callable[..., object])
 
-def _core():
+
+def _core() -> ModuleType:
     """Lazily resolve ``agent_worktrees.__main__`` -- see ``pr_cli._core``."""
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: F) -> F:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(F, candidate)
     return local
 
 
 
 
-def _activate_project_for_path(*args, **kwargs):
-    return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
+def _activate_project_for_path(path: str | None, **kwargs: Any) -> None:
+    _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(path, **kwargs)
 
 
-def _activate_project_for_worktree_id(*args, **kwargs):
+def _activate_project_for_worktree_id(worktree_id: str | None) -> str | None:
     return _core_helper(
         "_activate_project_for_worktree_id", status_updater_cli._activate_project_for_worktree_id
-    )(*args, **kwargs)
+    )(worktree_id)
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``cancel-handoff`` subcommand."""
     sp = sub.add_parser(
         "cancel-handoff",
@@ -66,6 +71,8 @@ def add_parsers(sub) -> None:
     sp.add_argument(
         "--worktree-id", default=None, help="Worktree ID (alternative to --worktree-dir)"
     )
+    sp.add_argument("--owner-ref", help="exact machine/project/worktree owner (requires record nonce)")
+    sp.add_argument("--expected-record-nonce", help="pin the qualified owner's record incarnation")
     sp.add_argument(
         "--dry-run",
         action="store_true",
@@ -93,8 +100,26 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
     task in between, or a file write hit an I/O error (PR #4570 review
     round 18)."""
     wt_id = getattr(args, "worktree_id", None)
+    owner_ref = getattr(args, "owner_ref", None)
+    expected_nonce = getattr(args, "expected_record_nonce", None)
+    qualified_path = None
+    if owner_ref is not None or expected_nonce is not None:
+        if not owner_ref or not expected_nonce or wt_id or getattr(args, "worktree_dir", None):
+            output._json_output({
+                "cancelled": False, "reason": "qualified cancellation requires owner-ref and record nonce only",
+            })
+            return 1
+        from .execution_spaces import resolve_owner_record_path
+        qualified_path, wt_id, error = resolve_owner_record_path(owner_ref, cfg.load_config())
+        if error or qualified_path is None:
+            output._json_output({
+                "cancelled": False, "reason": error or "handoff ledger belongs to another machine",
+            })
+            return 1
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
-    if wt_id:
+    if qualified_path is not None:
+        pass
+    elif wt_id:
         # Always (re)activate the OWNING project for an explicit ID -- never
         # only when no project is active. If a DIFFERENT project already
         # happens to be active (e.g. abort running from inside a different
@@ -128,9 +153,15 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-        with tracking._RecordLock(yaml_path):
+        yaml_path = qualified_path or cfg.tracking_dir() / f"{wt_id}.yaml"
+        with tracking._RecordLock(yaml_path, require_sidecar=qualified_path is not None):
             record = tracking.load_record(yaml_path)
+            if qualified_path is not None:
+                from .execution_spaces import require_project_record_mutation
+                if record.creation_nonce != expected_nonce:
+                    raise ValueError("creator record incarnation no longer matches")
+                if not getattr(args, "dry_run", False):
+                    require_project_record_mutation(record)
             handoff = next((h for h in record.handoffs if h.token == token), None)
             if getattr(args, "dry_run", False):
                 # Read-only: never call cancel_handoff or save_record. Mirror

@@ -43,12 +43,18 @@ class PathIndex:
     Thread-safe: each method opens a fresh connection.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, read_only: bool = False) -> None:
         self._db_path = str(db_path)
-        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self._read_only = read_only
+        if read_only:
+            if not Path(self._db_path).is_file():
+                raise sqlite3.OperationalError("Read-only path index requires existing state")
+        else:
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._init_schema()
 
     def _connect(self, *, read_only: bool = False) -> sqlite3.Connection:
+        read_only = read_only or self._read_only
         target = self._db_path
         if read_only:
             path = Path(self._db_path).resolve()

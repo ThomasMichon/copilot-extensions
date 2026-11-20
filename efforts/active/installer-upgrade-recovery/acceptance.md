@@ -44,6 +44,20 @@ These are candidate families, not assertions that each needs a new defect or
 issue. Each implementation unit must identify a
 specific failing boundary, supported contract and unconflicted owner.
 
+## Finite source-only capture subcase
+
+U6-13667 is an optional capture/validation subcase of the existing
+source/platform coordination, NOT a selected whole-update recovery case.
+Its complete finite acceptance is P13667-1/P13667-2/V13667/G13667 at the
+owning retained-capture boundary. It does not require the latest public
+update entry, an installed consumer or whole-update recovery to pass first.
+Those broader controls remain unchanged for the parent and its existing
+selected cases, and cannot be claimed from this finite source result.
+
+| Source-only subcase | Reported before-state | Required finite evidence | Existing coordination |
+|---|---|---|---|
+| U6-13667 - Retained-capture Windows spelling | Optional Dispatch retained capture compares a forward-slash manifest `venv` with a native backslash slot spelling. | Resolve [P13667/V13667/G13667](retained-capture-path-identity.md): same admitted completed directory, positive capture AND validation, different/indirect/incomplete negatives and every existing identity check. | Existing capture/restoration, installer, source, fixture/native and resource owners under #10377; no live-manifest rewrite, supervisor stop, incoming veto or master-cycle completion claim. |
+
 ## L5820 - Whole installer and resident-companion lifecycle
 
 Source: #5820, including its original version-slot/whole-lifecycle intent,
@@ -73,6 +87,11 @@ No updater, live companion operation, resource release or custody transfer
 is authorized by this documentary intake.
 
 ## Required controls for a selected case
+
+These controls remain unchanged for the parent and its other selected cases.
+The explicitly source-only U6-13667 subcase above retains its own finite
+capture/validation acceptance; it neither inherits these whole-update
+prerequisites nor supplies their missing parent evidence.
 
 | Control | Observable postcondition |
 |---|---|

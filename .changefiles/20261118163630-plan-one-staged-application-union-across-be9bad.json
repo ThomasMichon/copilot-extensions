@@ -1,0 +1,9 @@
+{
+  "comment": "Plan one staged application union across all registered harnesses at the default suite revision.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

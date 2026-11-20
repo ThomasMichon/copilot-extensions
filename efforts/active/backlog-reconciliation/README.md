@@ -410,6 +410,81 @@ the non-public approval conversation.
 
 ## Plan
 
+The [complete orphan-task adoption planning unit](journal/2026/11.20-orphan-task-adoption-planning.md)
+proposes one distinct Draft for #3443's four stages and BOTH headless ACP
+and bare scripted tasks. Nine technical rows remain unchecked; the existing
+#7237 relationship owner and all task/workspace/provider/credential custodians
+remain. It records #13709's actual reviewed inference-identity delivery and
+#3296's separately retained bounded claim. The complete 09:27 PT census is
+885 open, 156 above fixed 729, with no arrivals, departures or new disposition.
+
+The [independent inference-identity and custody unit](journal/2026/11.20-independent-inference-identity-and-custody.md)
+proposes complete #3296 receiving in existing Account-Aware Operations
+Phase 6, with nine unchecked technical rows and no new effort or credential
+owner. Nine complete current source/discussion unions retain the distinct
+custodian, architecture, repair-reservation and final-open incident gates.
+The complete 08:18 PT census remains 883 open, 154 above fixed 729, with no
+new arrivals, departures or campaign disposition in this unit.
+
+The [full-user WinGet venue receiving unit](journal/2026/11.20-winget-venue-and-retained-contracts.md)
+records #13701's actual reviewed receiving and the historical 884-open census.
+The explicit conjunction was then clarified through reviewed #13703: install the
+seed plugin through the external marketplace AND establish its runtime through
+the declared installation owner. Complete current receiving/original/custody
+readback and a separate judgment preceded #1475's acknowledged NOT_PLANNED
+tracking retirement. All six Portfolio technical rows remain unchecked;
+the clarification and retirement change no native/resource custodian or
+original outcome. #688's independent gates, #2612's actual mapping condition
+and the distinct canonicals remain. The new unit above records this follow-through,
+not a repeated disposition or claim of technical completion.
+
+The [local transport and complete rendezvous planning unit](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+records #13690's actual reviewed delivery, #12042's separately audited tracking
+retirement and a complete unchanged 884-open census. One canonical Draft plan
+under existing #54 directly retains the native-first ladder, unresolved #4040
+Bridge-policy choice and #5904's complete independently tracked parser/cleanup
+lane. All fourteen technical rows remain unchecked; #54 and #5904 remain OPEN.
+Changed ownership-observation, cancellation-closeout and fleet-growth source
+references are credited only at their actual finite scope, not whole-parent
+fulfillment or permission to repeat unchanged code/native audits.
+
+The [shared-context and registry-default unit](journal/2026/11.20-shared-context-and-registry-default-receiving.md)
+records #13680's actual reviewed delivery, two separately audited tracking
+retirements and the complete 884-open census. It proposes one canonical
+configuration-reader plan under OPEN #12920, retaining the complete #12042
+registry-default residual and existing native-default/cache/write authorities.
+Every new technical row stays unchecked; #13075's historical timeout and
+#13598's selected separate tracking remain OPEN.
+
+The [Windows attribution and retained-transition unit](journal/2026/11.20-path-attribution-and-retained-transitions.md)
+records #13663's actual reviewed receiving and four separate audited
+tracking retirements, while proposing three distinct finite contracts in
+their existing Portfolio, upgrade-recovery and PR-watch homes. Ten new
+technical rows remain unchecked; #13598's selected separate tracking and
+every actual source, implementation, native and resource owner remain.
+
+The historical [fixture-authority and cleanup receiving proposal](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+mapped four complete source contracts to the existing Portfolio and intake,
+with twenty unchecked technical rows and nine independent retained outcomes.
+Its then-pending reviewed delivery and source judgments are now recorded
+above as #13663's actual acceptance and four audited tracking retirements.
+Every technical row and actual owner remains; no repair or resource release
+is inferred from that administrative completion.
+
+The [registration and selected peer-launch unit](journal/2026/11.20-registration-and-peer-launch-completions.md)
+records two independently acknowledged finite source completions and nine
+distinct retained contracts, with a complete 888-open census. Existing owner,
+source/copy, native and rollout gates and all parent check states remain.
+
+The [native crypto and existing-owner receiving unit](journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+records acknowledged whole #12119 fulfillment through #12122 and proposes
+complete #11995 portfolio receiving plus #12111's same-parent TargetLock
+lane under final-OPEN #2709. All eleven new technical rows remain unchecked.
+Thirteen current source identities preserve the other delivery, claimant,
+scope and source/copy gaps. It also records actual #13590 follow-through
+and the complete 901-open census; no new disposition follows automatically
+from either receiving proposal or the numerical observation.
+
 The [source-claim and credential-generation unit](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
 proposes one complete #11816 Vault P2 receiving contract, with six unchecked
 technical rows, and an acknowledged #11783 source completion after the actual
@@ -1306,6 +1381,57 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [constructor-retention completion record](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
+records #13648's actual reviewed merge and parent return, acknowledged whole
+#10799 source fulfillment through #10810, and seven distinct retained
+continuations. The real constructor consumer and immutable-bundle controls
+remain separate from synthetic owner data, historical notification failures,
+foreground intent and installed acceptance. No incumbent check state, actual
+source/copy restriction or custody changes. The complete 890-open census is
+161 above fixed 729; the campaign remains Active.
+
+The [changed-delivery and finite-defect unit](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
+records #13643's actual reviewed delivery/parent return and acknowledged
+whole #13491/#13585 fulfillment through existing merged/current source.
+Eleven whole originals, seven delivery descriptions and a bounded reference
+delta retain nine unfinished contracts plus #10873's metadata-only continuation.
+Local author-reported Windows evidence, exact-head hosted qualification and
+source correspondence remain distinct from campaign execution or rollout.
+All incumbent check states and owners remain; the complete 891-open census
+is 162 above fixed 729.
+
+The [three-request source-compatibility unit](journal/2026/11.20-source-compatibility-fulfillment.md)
+records actual #13632 delivery/parent return and acknowledged whole #12819,
+#12852 and #12773 fulfillment through their original contributors' merged
+source. Exact current implementation/regression correspondence, the existing
+real constructor result and actual retained-prefix process controls remain
+distinct from fresh native execution, broader writer capabilities or installed
+adoption. All incumbent campaign/Portfolio check states and retained owners
+remain unchanged. The complete 893-open census is 164 above fixed 729;
+unrelated #13626 completion receives no campaign credit.
+
+The [source-fulfillment and retained-owner unit](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+records actual #13622 delivery/current whole receiving and four separately
+audited tracking retirements, plus acknowledged whole #12542 fulfillment
+through #12533. All twenty-three Portfolio technical rows remain unchecked.
+Fourteen complete current original unions, one withheld original and eleven
+linked delivery observations retain the distinct source/claim/native gaps,
+including OPEN #12875 and new mixed-review-history inflow. The complete
+897-open census remains 168 above fixed 729; no implementation, rollout,
+resource release or automatic remaining-source disposition follows.
+
+The [Windows fixture and native-profile unit](journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+records #13611's actual reviewed delivery and parent return, complete current
+receiving readback and two separately audited redundant-tracking retirements
+of #11995/#12111. All eleven earlier technical rows and the OPEN keepers remain.
+Four complete finite fixture/profile families are proposed directly in the
+existing Portfolio Phase 4/5 waves through Phase 7; all twenty-three new
+technical rows remain unchecked. Ten other complete outcomes preserve actual
+claimants, combined keepers, source/copy gaps and live-consumer boundaries.
+No implementation, native/hosted test, changed policy or resource effect is
+claimed. The complete 05:47:50 UTC census is 901 whole open, 172 above fixed
+729; two arrivals offset the two retirements and every parent gate remains.
 
 The [native-readiness and Vault boundary audit](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
 records #13456's reviewed delivery and parent return, the whole finite #13020
@@ -4971,6 +5097,25 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-compatibility completion record](journal/2026/11.20-source-compatibility-fulfillment.md)
+maps three whole original contracts to actual merged/current source and
+regressions, with separate acknowledged `COMPLETED` effects and independent
+provider readbacks. Prior native/semantic results remain attributed rather
+than new campaign runs; account identity is not human-review evidence.
+Auxiliary document drift was distinguished from unchanged core source without
+repeating the standing final check. No technical row, source/copy or resource
+gate is waived. Two equal complete observations establish 893 whole open,
+not prospective subtraction or parent completion.
+
+The [source-fulfillment and retained-owner record](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+separates four accepted planned-receiving retirements from one acknowledged
+whole source completion. All incumbent campaign/Portfolio checks and the
+twenty-three technical obligations remain unchanged. Actual merge/current
+source, full-roster and public-effect readbacks do not qualify unexecuted
+native/installed work or transfer resource custody. Fourteen current whole
+originals and one held original retain actual owners and exact acceptance;
+the full 897-open census, not arithmetic subtraction, remains authoritative.
 
 The [source-claim and generation proposal](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
 preserves every incumbent check state and all six new Vault technical rows

@@ -153,17 +153,19 @@ async def test_probe_remains_responsive_while_the_real_front_send_lock_is_backpr
     host = SessionHost(cast(ChildProcess, child))
     port = await host.serve(port=0)
     front = await SessionHostClient.connect(port=port)
+    flow = None
     try:
         await front.attach()
-        reader_transport = getattr(front._reader, "_transport")
-        reader_transport.pause_reading()
-        for _ in range(8):
-            child.feed_frame(b"x" * (1024 * 1024))
         active_front = host._front
         assert active_front is not None
+        # Drive the transport's flow-control callback, not a platform-specific
+        # socket-buffer threshold. The real FRAME write must block in drain().
+        flow = cast(asyncio.StreamReaderProtocol, active_front.writer.transport.get_protocol())
+        flow.pause_writing()
+        child.feed_frame(b"fixture")
 
         async def backpressured() -> None:
-            while not active_front.writer.transport.get_write_buffer_size():
+            while not active_front.send_lock.locked():
                 await asyncio.sleep(.01)
         await asyncio.wait_for(backpressured(), 2)
         assert active_front.send_lock.locked()
@@ -174,7 +176,8 @@ async def test_probe_remains_responsive_while_the_real_front_send_lock_is_backpr
         assert result["snapshot"]["buffer_depth"] >= 1
         assert _custody(host, child) == before
     finally:
-        reader_transport.resume_reading()
+        if flow is not None:
+            flow.resume_writing()
         await front.close()
         await host.close()
 

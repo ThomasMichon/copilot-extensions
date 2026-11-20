@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify promoted historical PR-watch payload bundles against native Windows sealing and startup barriers.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
