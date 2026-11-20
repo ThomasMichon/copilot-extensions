@@ -78,6 +78,7 @@ class EventLog:
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._observation_revision = 0
+        self.source_unavailable = False
         self._tool_statistics: ToolStartCounter | None
         self._reset_tool_statistics()
         #: Set when this log was merged into another: (target log, old id -> new id).
@@ -159,20 +160,58 @@ class EventLog:
             log._next_id = max_id + 1
         return log
 
-    def refresh_subscribed_history(self, hydrated: EventLog) -> None:
+    def _refresh_position(self) -> tuple[str | None, int, int]:
+        return self._telemetry.log_epoch, self._next_id, self._observation_revision
+
+    def refresh_position(self) -> tuple[str | None, int, int]:
+        with self._lock:
+            return self._refresh_position()
+
+    def retire_missing_source(self, expected: tuple[str | None, int, int]) -> bool:
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if expected != self._refresh_position():
+                return False
+            self.source_unavailable = True
+            self._observation_revision += 1
+            waiters = list(self._waiters)
+        finally:
+            self._lock.release()
+        for loop, waiter in waiters:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(waiter.set)
+        return True
+
+    def refresh_subscribed_history(
+        self, hydrated: EventLog, *, expected: tuple[str | None, int, int] | None = None,
+    ) -> bool:
         """Consume a private hydrated log; keep this reader's waiters and lock.
 
         The caller excludes writers and discards the temporary log after transfer.
         """
         if self._db is None or self._db is not hydrated._db or not self._session_id or self._session_id != hydrated._session_id:
             raise ValueError("Cannot refresh a different session's event history")
-        with self._lock:
+        # A local rebuild can already hold the log lock while waiting for SQLite.
+        # Do not wait for it inside a publication transaction.
+        if not self._lock.acquire(blocking=expected is None):
+            return False
+        try:
+            if expected is not None and expected != self._refresh_position():
+                return False
             self._events, hydrated._events = hydrated._events, self._events
             self._next_id, hydrated._next_id = hydrated._next_id, self._next_id
             self._open_tool_calls, hydrated._open_tool_calls = hydrated._open_tool_calls, self._open_tool_calls
             self._tool_statistics, hydrated._tool_statistics = hydrated._tool_statistics, self._tool_statistics
             self._telemetry, hydrated._telemetry = hydrated._telemetry, self._telemetry
-        self.wake_observers()
+            self._observation_revision += 1
+            waiters = list(self._waiters)
+        finally:
+            self._lock.release()
+        for loop, waiter in waiters:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(waiter.set)
+        return True
 
     def append(
         self, event_type: str, data: dict[str, Any], *, timestamp: float | None = None,
@@ -590,6 +629,8 @@ class EventLog:
         waiter = asyncio.Event()
         registration = (loop, waiter)
         with self._lock:
+            if self.source_unavailable:
+                return []
             events = [event for event in self._events if event.id > after]
             if events:
                 return events
