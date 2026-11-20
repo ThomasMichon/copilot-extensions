@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, cast
@@ -245,8 +246,11 @@ def test_current_authority_and_invocation_budget_cannot_be_substituted(
             return proof
 
         monkeypatch.setattr(AdoReviewContext, "reconcile", reconcile)
-    if control in ("authority", "expiry"):
-        with pytest.raises(PermissionError if control == "authority" else ReplayCallerExpired):
+    if control in ("authority", "expiry", "budget"):
+        expected = PermissionError if control == "authority" else (
+            ReplayCallerExpired if control == "expiry" else TimeoutError
+        )
+        with pytest.raises(expected):
             recover(prepared, context_factory=factory, **kwargs)
     else:
         result = recover(prepared, context_factory=factory, **kwargs)
@@ -282,3 +286,53 @@ def test_receipt_replace_readback_reuses_original_attempt(
     assert [row["state"] for row in result["actions"]] == ["confirmed", "unattempted"]
     assert result["actions"][0]["attempt_id"] == original["actions"][0]["attempt_id"]
     assert json.loads(owner.path.read_bytes())["reviews"][0]["intent"] == intent
+
+
+@pytest.mark.parametrize("stage", ["initial", "final"])
+def test_original_deadline_bounds_both_actual_inspection_lock_waits(
+    workspace: Fixture, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    prepared = prepare(workspace, attempt=stage == "final")
+    owner: ReplayStore = prepared[0].store
+    before = owner.path.read_bytes()
+    errors: list[Exception] = []
+    results: list[Document] = []
+    final_ready, proceed = threading.Event(), threading.Event()
+    inspect = owner.inspect_retained_review
+    calls = 0
+
+    def inspect_original(*args: Any, **kwargs: Any) -> Document:
+        nonlocal calls
+        calls += 1
+        if stage == "final" and calls == 2:
+            final_ready.set()
+            assert proceed.wait(3), "final lock fixture was not admitted"
+        return inspect(*args, **kwargs)
+
+    def run() -> None:
+        try:
+            results.append(recover(prepared, budget_seconds=0.25))
+        except Exception as error:
+            errors.append(error)
+
+    monkeypatch.setattr(owner, "inspect_retained_review", inspect_original)
+    worker = threading.Thread(target=run)
+    try:
+        if stage == "initial":
+            with owner._lock():
+                worker.start()
+                worker.join(3)
+                assert not worker.is_alive(), "initial inspection outlived its original budget"
+        else:
+            worker.start()
+            assert final_ready.wait(3), "recovery did not reach final readback"
+            with owner._lock():
+                proceed.set()
+                worker.join(3)
+                assert not worker.is_alive(), "final inspection outlived its original budget"
+    finally:
+        proceed.set()
+        worker.join(3)
+    assert not results and len(errors) == 1
+    assert isinstance(errors[0], TimeoutError) and "budget exhausted" in str(errors[0])
+    assert owner.path.read_bytes() == before

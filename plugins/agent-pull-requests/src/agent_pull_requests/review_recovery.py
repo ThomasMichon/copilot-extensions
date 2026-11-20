@@ -39,9 +39,6 @@ def reconcile_review(
     if type(budget_seconds) not in (int, float) or not math.isfinite(budget_seconds) or budget_seconds <= 0:
         raise ValueError("finite protected recovery budget required")
     deadline = clock() + budget_seconds
-    original = store.inspect_retained_review(
-        operation_id, scope, expires_at=expires_at, checkpoint=checkpoint,
-    )
 
     def remaining() -> float:
         store.check_current(expires_at, checkpoint)
@@ -50,6 +47,13 @@ def reconcile_review(
             raise TimeoutError("original recovery invocation budget exhausted")
         return value
 
+    def bounded() -> None:
+        remaining()
+
+    original = store.inspect_retained_review(
+        operation_id, scope, expires_at=expires_at, checkpoint=bounded,
+    )
+    bounded()
     result: Document = {
         "protocol": PROTOCOL, "operation_id": operation_id,
         "scope": copy.deepcopy(original["intent"]["scope"]),
@@ -84,8 +88,9 @@ def reconcile_review(
     except (ReviewContextUnavailable, TimeoutError, OSError, ValueError):
         result["errors"] = ["original_protected_recovery_unavailable"]
     retained = store.inspect_retained_review(
-        operation_id, scope, expires_at=expires_at, checkpoint=checkpoint,
+        operation_id, scope, expires_at=expires_at, checkpoint=bounded,
     )
+    bounded()
     return {
         **result,
         "status": "unknown" if any(action["state"] == "unknown" for action in retained["actions"]) else "retained",
