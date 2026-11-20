@@ -1592,47 +1592,6 @@ def apply_uninstall_plan(
 # Machine gate (control-harness manifest -> per-plugin deploy_machines)
 # --------------------------------------------------------------------------
 
-def _ingest_gate_entries(entries: Any, gate: dict[str, set[str]]) -> None:
-    """Merge a list of ``{name, deploy_machines}`` service entries into ``gate``.
-
-    Best-effort: malformed entries (non-dict, missing name, non-list machines)
-    are skipped so a partially-bad manifest degrades to a smaller gate rather
-    than raising.
-    """
-    if not isinstance(entries, list):
-        return
-    for svc in entries:
-        if not isinstance(svc, dict):
-            continue
-        nm = svc.get("name")
-        dm = svc.get("deploy_machines")
-        if nm and isinstance(dm, list):
-            gate.setdefault(str(nm), set()).update(str(m) for m in dm)
-
-
-def _parse_gate_manifest(raw: Any, gate: dict[str, set[str]]) -> None:
-    """Populate ``gate`` from one parsed manifest, accepting either schema.
-
-    * **Native** (``services.yaml``): a top-level ``plugins:`` list of
-      ``{name, deploy_machines}`` -- the coherently-named shape.
-    * **Legacy** (``external-repos.yaml``): ``repos.<group>.services[]`` --
-      whose top-level ``repos``/``<group>`` keys are a free-form bucket the
-      reconciler flattens (grouped by concern, not by source repo).
-
-    A top-level ``services:`` key is deliberately NOT read as a gate list: it is
-    reserved for a future non-plugin (dotfiles-service) section so the two
-    concerns never collide.
-    """
-    if not isinstance(raw, dict):
-        return
-    _ingest_gate_entries(raw.get("plugins"), gate)  # native services.yaml shape
-    repos_block = raw.get("repos")
-    if isinstance(repos_block, dict):
-        for _repo, rdata in repos_block.items():
-            if isinstance(rdata, dict):
-                _ingest_gate_entries(rdata.get("services"), gate)
-
-
 def _gate_candidate_paths(repo_dir: Path) -> list[Path]:
     """Ordered gate-manifest candidate paths: the current repo first, then the
     configured anchor repo (resolved via the repos registry), each tried for
@@ -1687,6 +1646,8 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
     manifest that yields a non-empty gate wins (so a migrated ``services.yaml``
     shadows a lingering legacy file during transition).
     """
+    from repository_policy.runtime_gate import parse_gate_manifest
+
     candidates = _gate_candidate_paths(repo_dir)
 
     gate: dict[str, set[str]] = {}
@@ -1698,7 +1659,7 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
                 raw = yaml.safe_load(f) or {}
         except Exception:
             continue
-        _parse_gate_manifest(raw, gate)
+        parse_gate_manifest(raw, gate)
         if gate:
             break
     return gate

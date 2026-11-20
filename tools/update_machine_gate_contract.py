@@ -265,6 +265,11 @@ def _check_machine_gate(source: Path) -> None:
     with patch.dict(sys.modules, modules), tempfile.TemporaryDirectory(
         prefix="update-machine-gate-contract-"
     ) as temporary:
+        policy_root = Path(__file__).resolve().parents[1] / "libs/repository-policy/src/repository_policy"
+        policy_package = ModuleType("repository_policy")
+        policy_package.__path__ = [str(policy_root)]
+        sys.modules["repository_policy"] = policy_package
+        _module(policy_root / "runtime_gate.py", "repository_policy.runtime_gate")
         root = Path(temporary)
         payload = root / "payload"
         scripts = payload / "scripts"
