@@ -1007,3 +1007,29 @@ required CI, hosted-Windows quiescence, original failure history and
 applicable bounds remain; no run, implementation appointment, budget
 increase or resource release follows. The [campaign record](../backlog-reconciliation/journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
 retains the evidence and independent proposal/disposition boundaries.
+
+## Proposed Windows fixture and native-profile receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #12156 Windows Vault cleanup/native-cache fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Vault wave, P12156/V12156/G12156 through Phase 7 | Four stamp/unlock and four actual native-profile consumers; capability-based test skip OR non-DPAPI test cipher; no production fallback or different-test substitute |
+| #12193 public-toolchain workflow assertions | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 tools/workflow wave, P12193/V12193/G12193 through Phase 7 | All five reported failure groups; meaningful identified path/dependency/platform/coverage replacements; no broad disabling or unit/deadline-pass proxy |
+| #12194 Windows SSH installer fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 SSH/installer wave, P12194/V12194/G12194 through Phase 7 | All seven actual snapshot/transaction cases; supported Windows pass OR justified lane scope, preserved identity/closure/corruption assertions and separate prior repair |
+| #12235 Windows-native no-skip admission | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 5 profile/runner wave, P12235/V12235/G12235 through Phase 7 | Platform-appropriate positive roster OR explicit unsupported boundary before execution; all three named POSIX controls; unchanged exact inventory/no-skip and Linux required CI |
+
+This same planning unit delivers complete direct domain Plan, local and
+actual global Validation, continuing Coordination and dated Journal for
+ordinary review. Ledger publication alone is not domain acceptance.
+The four existing sources remain OPEN during proposal, and OPEN #1303,
+all incumbent states, source/fixture/cache/DPAPI/installer/workflow/runner/
+platform/native/release and resource custodians remain unchanged.
+All twenty-three technical rows are unchecked. Actual complete reviewed
+receiving, current permitted whole receiving/source/custody readback and
+four separate source judgments remain necessary; no generic ACK or
+unrelated whole-portfolio prerequisite is added.
+
+No implementation, native/hosted test, import, installer/profile/CI change,
+production fallback, larger budget, lease transfer or resource release
+follows. Required CI stays unit-only and hosted-Windows execution remains
+quiesced. The [fourteen-source record](../backlog-reconciliation/journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+retains original evidence, alternatives and independent obligations.
