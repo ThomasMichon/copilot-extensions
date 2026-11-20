@@ -169,10 +169,10 @@ def test_concurrent_offer_is_nonblocking_and_preserves_wire_sequence(
             assert release.wait(2)
         return offered_fields(event)
 
-    monkeypatch.setattr(command, "offered_fields", filter_event)
     monkeypatch.setattr(command.CommandRoutes, "_write", lambda self, row: records.append(row))
     declare(tmp_path, active=True)
     owner = SinkSlot().configure_commands()
+    monkeypatch.setattr(owner, "_offered_fields", filter_event)
     binding = owner.admit(str(tmp_path))
     event = {"kind": "event", "name": "session_health", "event": "context_warning"}
     producer = threading.Thread(target=binding.offer, args=(event,))

@@ -166,7 +166,7 @@ def select(root: str | os.PathLike[str], *, environment: dict[str, str] | None =
         return Selection("invalid_config")
 
 
-def supports(path: Path) -> bool:
+def supports(path: Path, *, source_schema: str = "bridge.lifecycle.v1") -> bool:
     """Inspect only the selected runtime's exact metadata path."""
     try:
         value = read_object(path / "consumer-telemetry-contract.json", 4096)
@@ -182,7 +182,9 @@ def supports(path: Path) -> bool:
             if (
                 type(choices) is not list
                 or any(type(choice) is not element_type for choice in choices)
-                or any(required not in choices for required in CAPABILITY[key])
+                or any(required not in choices for required in (
+                    [source_schema] if key == "source_schemas" else CAPABILITY[key]
+                ))
             ):
                 return False
         return True

@@ -12,7 +12,6 @@ import time
 import uuid
 from typing import Any, TYPE_CHECKING
 
-from .bridge_projection import offered_fields, project
 from .buffer import BufferedSink, _Counter
 from .command_config import Selection, select
 
@@ -40,7 +39,19 @@ class Binding:
 class CommandRoutes:
     """One source lifetime, one existing writer, at most four receiver generations."""
 
-    def __init__(self, slot: SinkSlot) -> None:
+    def __init__(self, slot: SinkSlot, *, source: str = "agent-bridge") -> None:
+        if source == "agent-bridge":
+            from .bridge_projection import offered_fields, project
+            schema = "bridge.lifecycle.v1"
+        elif source == "agent-dispatch":
+            from .dispatch_projection import offered_fields, project
+            schema = "dispatch.lifecycle.v1"
+        else:
+            raise ValueError("unregistered telemetry source")
+        self.source = source
+        self.source_schema = schema
+        self._offered_fields = offered_fields
+        self._project = project
         self.slot = slot
         self.source_instance = str(uuid.uuid4())
         self._sequence = count(1)
@@ -95,7 +106,7 @@ class CommandRoutes:
             next(self._counts["dropped_route"])
             return
         try:
-            filtered = offered_fields(event)
+            filtered = self._offered_fields(event)
         except (ValueError, RuntimeError):
             next(self._counts["dropped_invalid"])
             return
@@ -115,14 +126,14 @@ class CommandRoutes:
             next(self._counts["dropped_route"])
             return
         try:
-            event = project(record["event"])
+            event = self._project(record["event"])
         except ValueError:
             next(self._counts["dropped_invalid"])
             return
         try:
             envelope = {
                 "contract": "consumer-telemetry-command", "version": 1,
-                "source": "agent-bridge", "source_schema": "bridge.lifecycle.v1",
+                "source": self.source, "source_schema": self.source_schema,
                 "source_instance": self.source_instance,
                 "route_generation": binding.generation, "sequence": record["sequence"],
                 "observed_at": datetime.fromtimestamp(

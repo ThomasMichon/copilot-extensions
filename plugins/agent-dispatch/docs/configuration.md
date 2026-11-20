@@ -10,6 +10,11 @@ Do not maintain a second independently evolving registrar schema.
 
 ## Coordinator environment (not portable authority)
 
+Optional command telemetry uses the exact local `consumer-telemetry.json`
+[admission policy](consumer-telemetry-command.md), not a new environment command
+override. Each approved root supplies the shared `.agent-telemetry` declaration.
+Its absence preserves the existing `telemetry.json` factory/spool configuration.
+
 | Variables (`AGENT_DISPATCH_` prefix) | Type / default |
 |---|---|
 | `HOST`, `PORT` | String/integer; `127.0.0.1` / 9847 |

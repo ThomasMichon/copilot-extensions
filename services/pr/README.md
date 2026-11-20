@@ -338,6 +338,44 @@ unauthenticated HTTP listener. Its supervisor owns restart and escalation.
 CLI failures name the operation and exception class without echoing external
 references, provider error details or credential material.
 
+### Optional fresh-baseline generation associations
+
+An unextended native workspace may explicitly set
+`workspaces.generation_associations` to `true` before fresh provisioning.
+The selected executing core must declare
+`agent-pull-requests.workspace-generation-associations/v1`; an absent or
+incompatible declaration refuses this selection before provisioning.
+Omitting the field retains the existing workspace behavior and wire contract.
+This profile cannot compose with terminal reads, preparation or comment
+mappings.
+
+The existing cache owner rejects definite CAS conflicts and full-cache outcomes
+before recording an observation or reservation. After that guarded admission,
+the service writer and ReplayStore reserve body-free original
+generation/scope/observation/cursor identities before cache writes.
+Only confirmed publication marks an association confirmed. Distinct immutable
+generations retain separate identities even when their rounded observations
+share a journal cursor. Cache objects, digest inputs and pointer formats do
+not change. Metadata is bounded by the original cache generation limit and
+an envelope reservation of 1 KiB plus 4 KiB per configured generation, within
+the existing owner byte ceiling. Exhaustion refuses publication, not eviction
+or an automatic capacity increase.
+
+Interrupted publication retains its original pending association. The trusted
+owner can reconcile that generation and its original cache CAS without another
+provider acquisition or journal event; a different CAS or epoch refuses.
+Missing or newer cache state is not permission to promote an old pointer.
+Pending and confirmed associations both survive process restart; neither is
+a terminal live admission or evidence of a fresh provider read.
+
+`serve` validates the selected existing storage, never adopts it. Adding this
+selection to a previously provisioned baseline refuses instead of backfilling
+associations. Removing it or selecting a strict older reader also refuses the
+expanded envelope without rewriting it. Retained terminal adoption remains
+unsupported for these populated volumes until the separate positive-transition
+slice is qualified. This profile authorizes no installed migration, native
+watch reassignment, unknown-effect recovery, provider access or service stop.
+
 ## Optional preparation-only hosting
 
 An existing workspace binding may additionally select this trusted

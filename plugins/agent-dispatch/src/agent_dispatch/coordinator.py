@@ -15,9 +15,10 @@ import logging
 import math
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -25,6 +26,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from . import __version__
+from .consumer_telemetry import LEGACY, attach, owning_lifespan
 from . import coordinator_loops as _coordinator_loops
 from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .coordinator_auth import _make_auth, install_scope_boundary
@@ -95,7 +97,7 @@ __all__ = [
 ]
 
 
-async def _gc_loop(*args, **kwargs):
+async def _gc_loop(*args: Any, **kwargs: Any) -> None:
     return await _loops_gc_loop(
         *args,
         **kwargs,
@@ -104,7 +106,7 @@ async def _gc_loop(*args, **kwargs):
     )
 
 
-async def _orphan_reap_loop(*args, **kwargs):
+async def _orphan_reap_loop(*args: Any, **kwargs: Any) -> None:
     return await _loops_orphan_reap_loop(
         *args,
         **kwargs,
@@ -113,7 +115,7 @@ async def _orphan_reap_loop(*args, **kwargs):
     )
 
 
-async def _handoff_fallback_loop(*args, **kwargs):
+async def _handoff_fallback_loop(*args: Any, **kwargs: Any) -> None:
     return await _loops_handoff_fallback_loop(
         *args,
         **kwargs,
@@ -122,7 +124,7 @@ async def _handoff_fallback_loop(*args, **kwargs):
     )
 
 
-async def _worktree_status_relay_loop(*args, **kwargs):
+async def _worktree_status_relay_loop(*args: Any, **kwargs: Any) -> None:
     return await _loops_worktree_status_relay_loop(
         *args,
         **kwargs,
@@ -131,7 +133,7 @@ async def _worktree_status_relay_loop(*args, **kwargs):
     )
 
 
-async def _governance_backoff(*args, **kwargs):
+async def _governance_backoff(*args: Any, **kwargs: Any) -> bool:
     return await _coordinator_loops._governance_backoff(
         *args,
         **kwargs,
@@ -155,10 +157,11 @@ def create_app(
     wake_is_active: Callable[[], bool] | None = None,
     wake_max_attempts: int = 8,
     wake_retry_base: float = 1.0,
-    replay_consumer_factory=None,
+    replay_consumer_factory: Callable[..., Any] | None = None,
     cohort_sources: RegistrarSources | None = None,
     pool_publication_enabled: bool = False,
     periodic_relevance_interval: float = 0.0,
+    consumer_telemetry: Any = LEGACY,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -213,6 +216,7 @@ def create_app(
 
     validate_server_authority()
     bus = EventBus()
+    consumer = attach(bus, consumer_telemetry, authenticated=bool(token))
     directory = FleetDirectory(fencing_floor=queue.advance_fencing_epoch)
     # FleetDirectory.discover_coordinator() already matches the shape the
     # Rendezvous Protocol expects, so this in-process fencing guard needs no
@@ -250,8 +254,10 @@ def create_app(
             mcp_app = None
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI):
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         loop = asyncio.get_running_loop()
+        def notify(signal: Callable[[], None]) -> None:
+            loop.call_soon_threadsafe(signal)
         bus.bind_loop(loop)
         from . import hibernation_claims
         from .verification_drain import drain_verification_requests
@@ -269,7 +275,7 @@ def create_app(
         verification_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         run_waiter_prepare_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
-        waiter_maintenance = WaiterMaintenance(
+        waiter_maintenance = cast(Any, WaiterMaintenance)(
             queue, lambda: _recover_run_waiters_pass(), run_waiter_prepare_signal,
             gate=_app.state.drain_gate, is_active=wake_is_active,
             replay_factory=replay_consumer_factory,
@@ -281,32 +287,28 @@ def create_app(
                     wake_signal.put_nowait(None)
 
             if wake_interval > 0:
-                queue.set_wake_notifier(
-                    lambda: loop.call_soon_threadsafe(_signal_wake)
-                )
+                queue.set_wake_notifier(lambda: notify(_signal_wake))
             def _signal_verification() -> None:
                 if verification_signal.empty():
                     verification_signal.put_nowait(None)
 
             if verification_interval > 0:
-                queue.set_verification_notifier(
-                    lambda: loop.call_soon_threadsafe(_signal_verification)
-                )
+                queue.set_verification_notifier(lambda: notify(_signal_verification))
         def _signal_run_waiter_prepare() -> None:
             if run_waiter_prepare_signal.empty():
                 run_waiter_prepare_signal.put_nowait(None)
 
         queue.set_run_waiter_prepare_notifier(
-            lambda: loop.call_soon_threadsafe(_signal_run_waiter_prepare)
+            lambda: notify(_signal_run_waiter_prepare)
         )
         def _signal_worktree_status() -> None:
             if worktree_status_signal.empty():
                 worktree_status_signal.put_nowait(None)
 
         queue.set_owned_transition_notifier(
-            lambda: loop.call_soon_threadsafe(_signal_worktree_status)
+            lambda: notify(_signal_worktree_status)
         )
-        wake_options = {
+        wake_options: dict[str, Any] = {
             "interval": wake_interval,
             "max_attempts": wake_max_attempts,
             "retry_base": wake_retry_base,
@@ -907,9 +909,10 @@ def create_app(
         title="agent-dispatch",
         version=__version__,
         dependencies=[Depends(_make_auth(token, control_token))],
-        lifespan=lifespan,
+        lifespan=owning_lifespan(consumer, lifespan),
     )
     app.state.bus = bus
+    app.state.consumer_telemetry = consumer
     app.state.directory = directory
     app.state.task_fencing_guard = fencing_guard
     app.state.queue = queue
@@ -929,10 +932,10 @@ def create_app(
     )
     app.state.pool_cohort_source = cohort_source
 
-    install_scope_boundary(app, wake_is_active)
+    cast(Callable[..., None], install_scope_boundary)(app, wake_is_active)
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error(request: Request, exc: RequestValidationError):
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         errors = exc.errors()
         result_errors = [
             error
