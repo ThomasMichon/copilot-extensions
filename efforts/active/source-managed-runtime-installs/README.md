@@ -937,6 +937,9 @@ adoption. Other completed source slices remain credited in the
   the target role alone must request Fleet. Upgrade and reverse selection
   from a previously selected Fleet extra must preserve enrollment identity
   and existing state without implicitly installing or removing Fleet.
+  At each transition verify reconnection with the original fixture key when
+  the provider is available. With it absent, verify no new key, enrollment,
+  state rewrite or fallback connection.
 
 The [legacy first-use foreground controls](legacy-first-use-foreground.md#validation-plan-agent-recommended)
 specialize P4bD and L1-L6 with finite caller custody, truthful interruption,
