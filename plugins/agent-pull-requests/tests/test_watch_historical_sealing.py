@@ -155,8 +155,9 @@ def _wait_for_open(child: subprocess.Popen[str], root: Path) -> None:
 
 
 @pytest.mark.parametrize("revision", _REVISIONS)
+@pytest.mark.parametrize("adapted", [False, True], ids=["v1", "v2"])
 def test_complete_historical_source_cannot_cross_windows_sealing(
-    tmp_path: Path, revision: str,
+    tmp_path: Path, revision: str, adapted: bool,
 ) -> None:
     snapshot, roots = _snapshot(tmp_path, revision)
     root = tmp_path / "state"
@@ -172,6 +173,9 @@ def test_complete_historical_source_cannot_cross_windows_sealing(
     try:
         owner.adopt(timeout=3)
         prepared = owner.prepare_state_transition(timeout=3)
+        if adapted:
+            owner.recover_prepared_state_transition(timeout=3)
+        seal = owner.seal_recovered_state_transition if adapted else owner.seal_state_transition
         with subprocess.Popen(
             _command(snapshot, root, "delayed", roots),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -180,7 +184,7 @@ def test_complete_historical_source_cannot_cross_windows_sealing(
             try:
                 _wait_for_open(child, root)
                 with pytest.raises(PermissionError) as error:
-                    owner.seal_state_transition(timeout=3)
+                    seal(timeout=3)
                 assert getattr(error.value, "winerror", None) == 32
                 assert paths.historical_lock.is_file() and not paths.retained_lock.exists()
                 assert paths.legacy_subscriptions.read_bytes() == legacy
@@ -192,8 +196,11 @@ def test_complete_historical_source_cannot_cross_windows_sealing(
                 if child.poll() is None:
                     child.kill()
                     child.communicate(timeout=5)
-        sealed = owner.seal_state_transition(timeout=3)
+        sealed = seal(timeout=3)
         assert sealed["lease"] == prepared["lease"] and sealed["phase"] == "sealed-legacy"
+        assert sealed["version"] == (2 if adapted else 1)
+        if adapted:
+            assert sealed["origin"] == prepared
         result = subprocess.run(
             _command(snapshot, root, "cold", roots),
             capture_output=True, text=True, timeout=10, **no_window_kwargs(),
@@ -213,8 +220,9 @@ def test_complete_historical_source_cannot_cross_windows_sealing(
 
 
 @pytest.mark.parametrize("revision", _REVISIONS)
+@pytest.mark.parametrize("adapted", [False, True], ids=["v1", "v2"])
 def test_complete_historical_cold_creation_blocks_sealing_and_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, adapted: bool,
 ) -> None:
     from agent_pull_requests import watch_private, watch_windows_sealing
 
@@ -241,9 +249,12 @@ def test_complete_historical_cold_creation_blocks_sealing_and_recovery(
     try:
         owner.adopt(timeout=3)
         prepared = owner.prepare_state_transition(timeout=3)
+        if adapted:
+            owner.recover_prepared_state_transition(timeout=3)
+        seal = owner.seal_recovered_state_transition if adapted else owner.seal_state_transition
         monkeypatch.setattr(watch_windows_sealing, "windows_move_no_replace", raced)
         with pytest.raises(PermissionError, match="raced historical"):
-            owner.seal_state_transition(timeout=8)
+            seal(timeout=8)
         assert child is not None
         retained, recreated = paths.retained_lock.read_bytes(), paths.historical_lock.read_bytes()
         original = paths.retained_lock.stat()
@@ -258,7 +269,7 @@ def test_complete_historical_cold_creation_blocks_sealing_and_recovery(
 
         monkeypatch.setattr(SingleInstance, "acquire", forbidden)
         with pytest.raises(PermissionError, match="raced historical"):
-            owner.seal_state_transition(timeout=3)
+            seal(timeout=3)
         output, errors = child.communicate(input="continue\n", timeout=8)
         assert child.returncode == 0, output + errors
         receipt: dict[str, Any] = json.loads(output)
@@ -266,7 +277,11 @@ def test_complete_historical_cold_creation_blocks_sealing_and_recovery(
         if revision in _RELEASES:
             assert receipt["version"] == _RELEASES[revision]
         with pytest.raises(PermissionError, match="raced historical"):
-            owner.seal_state_transition(timeout=3)
+            seal(timeout=3)
+        interrupted = json.loads(paths.journal.read_bytes())
+        assert interrupted["version"] == (2 if adapted else 1)
+        if adapted:
+            assert interrupted["origin"] == prepared
         assert not owner.writer_held and not paths.writer_lock.exists()
         assert paths.retained_lock.read_bytes() == retained
         assert paths.historical_lock.read_bytes() == recreated

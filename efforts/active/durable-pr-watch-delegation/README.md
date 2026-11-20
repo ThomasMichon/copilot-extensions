@@ -874,9 +874,17 @@ entry. The [prepared-origin phase-progression receiver](subscriber-state-transit
 merged in #13668: an actual prepared origin stays unchanged while its v2
 envelope records the qualified sealed phase. Native current-controller
 publication and cold retry pass without the historical executable.
-Version-2 sealing writers, POSIX epoch/recovery, native domain/boot
-qualification and every remaining gate still follow under the existing
-source-only authority.
+The [Windows v2 sealing writer](subscriber-state-transition.md#windows-version-2-sealing-writer)
+merged in #13674, sharing the existing physical owner and preserving origin
+through staging, both moves and final publication. Metadata preflight, actual
+native interruption recovery and later-controller recovery pass without the
+old executable. POSIX v2 sealing/epoch recovery, native domain/boot
+qualification, final import/authority selection, ordinary entry and every
+remaining gate still follow under the existing source-only authority.
+The follow-on contained Windows historical-source and abrupt-controller-exit
+packet exercises both journal versions: 42 cases pass with one Linux-specific
+skip, preserving original evidence and legacy sole authority. This is not
+complete released-install qualification or native domain/boot proof.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1934,6 +1942,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Windows version-2 sealing](journal/2026/11.20%20Windows%20version-2%20sealing.md)
 - [2026-11-20 - Prepared-origin phase progression](journal/2026/11.20%20Prepared-origin%20phase%20progression.md)
 - [2026-11-20 - Windows sealed receiver](journal/2026/11.20%20Windows%20sealed%20receiver.md)
 - [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
