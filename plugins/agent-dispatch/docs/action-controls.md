@@ -247,6 +247,9 @@ native observation is not proof of a pool-issued resume. Holds never tell a
 running worker to shut down; progress, receipt observation and cleanup remain
 available. A work-bearing idle-confirm prompt or cleanup requiring a new
 pool-issued process resume waits; observing or settling existing work does not.
+A cleanup nudge deferred by policy consumes no retry attempt or backoff.
+Clearing the hold allows its next normally due retry; a real failed nudge
+still uses the existing retry budget.
 
 Use the updated `agent-dispatch` **on the installation making the decision**.
 These commands reread/write local state without contacting a coordinator or

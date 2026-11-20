@@ -2108,15 +2108,15 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 failure["acp_session_id"] = session
             return failure
 
-    def _nudge_terminal_conclusion(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
-        """Reawaken the exact local body once to finish its worktree lifecycle."""
+    def _nudge_terminal_conclusion(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool | None:
+        """Reawaken the exact local body; None means policy deferred the attempt."""
         session_id = _parse_local_body_handle(reservation.get("session_handle"))
         worktree = reservation.get("worktree")
         if session_id is None or not isinstance(worktree, str) or not worktree:
             return False
         from .admission_holds import supervisor_resume_inhibited
         if supervisor_resume_inhibited(self, task, reservation):
-            return False
+            return None
         prompt = (
             f"Task {task.get('id')} is already terminal, but managed worktree "
             f"{worktree} is not FINAL. Conclude this same worktree now: finalize "
@@ -2745,7 +2745,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                                 if exclusive:
                                     continue
                                 preconcluded = checkpoint
-                            elif not self._nudge_terminal_conclusion(res, task):
+                            elif (nudged := self._nudge_terminal_conclusion(res, task)) is None:
+                                continue
+                            elif not nudged:
                                 attempts = prior_attempts + 1
                                 conclusion_payload = {
                                     **preconcluded,
@@ -2849,17 +2851,17 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 conclusion_payload = dict(outcome)
                 if conclusion_state == _CONCLUSION_PENDING:
                     attempts = prior_attempts + 1
-                    conclusion_payload["attempts"] = attempts
-                    conclusion_payload["next_attempt_at"] = now + min(
-                        300,
-                        _CONCLUSION_RETRY_BASE_SECONDS * (2 ** (attempts - 1)),
-                    )
+                    next_attempt_at = now + min(300, _CONCLUSION_RETRY_BASE_SECONDS * (2 ** (attempts - 1)))
                     if attempts == 1 and "same_owner_nudge" not in conclusion_payload:
-                        conclusion_payload["same_owner_nudge"] = (
-                            "delivered"
-                            if self._nudge_terminal_conclusion(res, task)
-                            else "unavailable"
-                        )
+                        nudged = self._nudge_terminal_conclusion(res, task)
+                        if nudged is None:
+                            # Publish pending with the acquired token to finish this
+                            # claim, without charging the unattempted resume.
+                            attempts, next_attempt_at = self._conclusion_retry_meta(res)
+                            conclusion_payload["same_owner_nudge"] = "policy-deferred"
+                        else:
+                            conclusion_payload["same_owner_nudge"] = "delivered" if nudged else "unavailable"
+                    conclusion_payload.update(attempts=attempts, next_attempt_at=next_attempt_at)
                     if attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         conclusion_state = _CONCLUSION_HELD
                 try:
