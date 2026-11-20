@@ -64,6 +64,8 @@ native scan. Insufficient remaining time refuses new native work. A partial
 scan can publish only while the original authority and captured interest remain
 current; it never becomes complete coverage. Delayed cleanup keeps its existing
 owner until settlement, even when the observation can no longer publish.
+The native allowance is finalized after the last potentially blocking interest
+checkpoint, before capture admission advances the query cursor.
 
 Each consumer has independent membership and entry/change/departure/coverage
 events and its own last-projected fact snapshots, including when a new subscriber

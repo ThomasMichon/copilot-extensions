@@ -89,15 +89,21 @@ def population(
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(expression.canonical.encode("utf-8"))
         start_checkpoint()
-        seconds = _seconds(budget, qualified=True)
-        result = _invoke([
+        argv = [
             *(binding.prefix or (binding.command,)), "pr-watch", "population", identity.repo,
             "--config", cast(str, binding.inventory_config),
             "--credential-command", json.dumps(binding.credential_command),
             "--filter-file", filename,
             "--query-offset", str(query_offset),
-            "--max-pages", "4", "--max-pulls", "200", "--seconds", str(seconds), "--json",
-        ], timeout=60, checkpoint=checkpoint, qualified=True, budget=budget, on_admitted=on_capture)
+            "--max-pages", "4", "--max-pulls", "200",
+        ]
+        def capture() -> None:
+            argv.extend(["--seconds", str(_seconds(budget, qualified=True)), "--json"])
+            if on_capture is not None:
+                on_capture()
+        result = _invoke(
+            argv, timeout=60, checkpoint=checkpoint, qualified=True, budget=budget, on_admitted=capture,
+        )
     except OwnedCleanupError:
         retained = True
         raise

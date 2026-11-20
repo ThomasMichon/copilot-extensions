@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from subprocess import CompletedProcess
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -173,6 +174,57 @@ def test_population_timeout_settles_before_enclosing_deadline(
     assert len(calls) == 1
     assert ("--contract" in calls[0]) is (phase == "qualification_delay")
     assert captured == ([True] if phase == "population_delay" else [])
+    assert not list(tmp_path.glob(".population-*.json"))
+
+
+@pytest.mark.parametrize("delay, seconds", [(2, 3), (5, None)])
+def test_capture_allowance_is_revalidated_after_blocking_interest_checkpoint(
+    native: Native, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    delay: int, seconds: int | None,
+) -> None:
+    from agent_pull_requests import filtered_native, repository_native
+
+    binding, _log, _control = native
+    identity = cast(RepositoryIdentity, binding.repository_identity)
+    selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": [binding.repo]}})
+    elapsed = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: elapsed[0])
+    monkeypatch.setattr(filtered_native, "time", clock)
+    monkeypatch.setattr(repository_native, "time", clock)
+    monkeypatch.setattr(filtered_native, "qualify", lambda *_a, **_kw: SUPPORT)
+    checks: list[bool] = []
+    captures: list[bool] = []
+    allowances: list[int] = []
+
+    def interested() -> None:
+        if not checks:
+            elapsed[0] += delay
+        checks.append(True)
+
+    def run(argv: list[str], **_kwargs: object) -> CompletedProcess[str]:
+        allowances.append(int(argv[argv.index("--seconds") + 1]))
+        value = {
+            "schema": "agent-worktrees.pr-population", "version": 1,
+            "provider": identity.provider, "api_base": identity.endpoint, "repo": identity.repo,
+            "filter_revision": selected.revision, "outcome": "partial", "pages": 1,
+            "max_pages": 4, "max_pulls": 200, "error": "deadline_exhausted", "pulls": [],
+        }
+        return CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(repository_native, "run_command", run)
+    if seconds is None:
+        with pytest.raises(RepositoryNativeUnavailable):
+            population(binding, selected, root=tmp_path, checkpoint=interested,
+                       start_checkpoint=lambda: None, deadline=110,
+                       on_capture=lambda: captures.append(True))
+        assert not allowances and not captures
+    else:
+        result = population(binding, selected, root=tmp_path, checkpoint=interested,
+                            start_checkpoint=lambda: None, deadline=110,
+                            on_capture=lambda: captures.append(True))
+        assert result["outcome"] == "partial"
+        assert allowances == [seconds] and captures == [True]
+    assert checks
     assert not list(tmp_path.glob(".population-*.json"))
 
 
