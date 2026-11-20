@@ -342,7 +342,12 @@ The [native-corpus journal](journal/2026/11.20%20point-native-scale.md)
 records actual queue/caller/worker/reader operation-count qualification beside
 100/10,000/100,000 unrelated content/vector/checkpoint rows, and separately
 observed process-byte growth. Ordering-ledger scale and broader acceptance
-remain open.
+remain open. Merged #13678 supplies this bounded qualification, not constant
+total-cost or consumer acceptance.
+The same journal now records a separate no-replay completed-retry control and
+per-query/index-inspection attribution. Representative B-tree plans preserve
+bounded canonical rows while process bytes grow; no production cache, currentness
+shortcut or ordinary activation is justified by these observations.
 
 ### 2026-11-20 - Point-worker dispatch and lifetime
 

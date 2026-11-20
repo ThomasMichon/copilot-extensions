@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
+from importlib import import_module
 import json
 from pathlib import Path
+import re
 import sys
 from time import perf_counter, process_time
 from typing import Any, cast
@@ -15,7 +19,7 @@ import pytest
 
 import test_azure_devops_point_runtime as runtime
 import test_azure_devops_point_worker as worker
-from test_native_delta_matrix import measure_round
+from test_native_delta_matrix import io_counts, measure_round
 
 from agent_index.chunking.base import Chunk
 from agent_index.indexing.component_read import read_component
@@ -86,6 +90,7 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
     application: worker.Fixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     deleted: bool, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    query_builder = import_module("lancedb.query").LanceEmptyQueryBuilder
     template = application
     if deleted:
         template.provider.comment = {"id": 5, "version": 2, "isDeleted": True}
@@ -118,6 +123,23 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
                 task = completed
             before = worker._projection(f)
             results: list[dict[str, Any]] = []
+            diagnostic_io = {key: 0 for key in io_counts()}
+            diagnostic_plans: dict[str, str] = {}
+            analyze_plan = query_builder.analyze_plan
+
+            def observed_plan(query: Any, *args: Any, **kwargs: Any) -> Any:
+                before_io = io_counts()
+                try:
+                    plan = analyze_plan(query, *args, **kwargs)
+                    diagnostic_plans.setdefault(
+                        f"{query._table.name}:{str(query._where).split(' ', 1)[0]}",
+                        re.sub(r"uri=[^,\n]+", "uri=<fixture>", plan),
+                    )
+                    return plan
+                finally:
+                    after_io = io_counts()
+                    for key in diagnostic_io:
+                        diagnostic_io[key] += after_io[key] - before_io[key]
 
             @measure_reindex
             def execute(selected: TaskRecord) -> dict[str, object]:
@@ -150,6 +172,7 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
                 return results[0]
 
             with monkeypatch.context() as patch:
+                patch.setattr(query_builder, "analyze_plan", observed_plan)
                 for method in ("get_all_entries", "get_paths_by_family", "get_content_hashes"):
                     patch.setattr(PathIndex, method, lambda *_a, **_k: pytest.fail(
                         "named consumer enumerated corpus checkpoints",
@@ -158,6 +181,9 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
                 measurement = measure_round(consume, patch)
                 measurement["wall_seconds"] = perf_counter() - wall
                 measurement["process_cpu_seconds"] = process_time() - cpu
+                measurement["diagnostic_io"] = diagnostic_io
+                if name == "completed-retry":
+                    measurement["diagnostic_plans"] = diagnostic_plans
             completed = cast(TaskRecord, results[0]["task"])
             assert completed.id == task.id and completed.change_hints == task.change_hints
             if name == "completed-retry":
@@ -186,6 +212,74 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
             native = measurement["native"]
             assert native["queries"] > 0
             assert native["rows_scanned"] <= 32 * native["queries"], (size, name, measurement)
+            if name == "completed-retry":
+                f.reopen()
+                owner_io: dict[str, Any] = {}
+
+                def observed_owner(
+                    label: str, operation: Callable[..., Any], *args: Any, **kwargs: Any,
+                ) -> Any:
+                    prior = io_counts()
+                    try:
+                        return operation(*args, **kwargs)
+                    finally:
+                        after = io_counts()
+                        entry = owner_io.setdefault(label, {
+                            "calls": 0, "io": {key: 0 for key in prior}, "call_rchar": [],
+                        })
+                        entry["calls"] += 1
+                        entry["call_rchar"].append(after["rchar"] - prior["rchar"])
+                        for key in prior:
+                            entry["io"][key] += after[key] - prior[key]
+
+                to_arrow = query_builder.to_arrow
+
+                def observed_query(query: Any, *args: Any, **kwargs: Any) -> Any:
+                    return observed_owner(
+                        f"query:{query._table.name}:{str(query._where).split(' ', 1)[0]}",
+                        to_arrow, query, *args, **kwargs,
+                    )
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(query_builder, "to_arrow", observed_query)
+                    patch.setattr(query_builder, "analyze_plan", lambda *_a, **_k: pytest.fail(
+                        "ordinary retry replayed a diagnostic query",
+                    ))
+                    for method in ("get_all_entries", "get_paths_by_family", "get_content_hashes"):
+                        patch.setattr(PathIndex, method, lambda *_a, **_k: pytest.fail(
+                            "ordinary retry enumerated corpus checkpoints",
+                        ))
+                    for module in (
+                        "scalar_index", "source_bucket_index", "ingestion_index",
+                        "component_ledger", "chunk_id_index", "file_projection",
+                        "point_content", "point_reconciliation",
+                    ):
+                        owner = import_module(f"agent_index.store.{module}")
+                        patch.setattr(
+                            owner, "inspect_index",
+                            partial(observed_owner, f"inspect:{module}", owner.inspect_index),
+                        )
+                    before_ordinary = io_counts()
+                    wall, cpu = perf_counter(), process_time()
+                    ordinary = execute(task)
+                    elapsed, cpu_elapsed = perf_counter() - wall, process_time() - cpu
+                    after_ordinary = io_counts()
+                ordinary_counts = cast(dict[str, Any], ordinary["work_counts"])
+                ordinary_counts.pop("source_mutations")
+                assert ordinary["task"] == task and ordinary_counts == counts
+                assert sum(
+                    entry["calls"] for label, entry in owner_io.items()
+                    if label.startswith("query:")
+                ) == native["queries"]
+                assert not f.provider.requests and not f.calls
+                assert worker._projection(f) == before
+                measurement["ordinary_completed_retry"] = {
+                    "counts": ordinary_counts, "wall_seconds": elapsed,
+                    "process_cpu_seconds": cpu_elapsed,
+                    "io": {key: after_ordinary[key] - before_ordinary[key] for key in before_ordinary},
+                    "native_plan_replay": False,
+                    "inclusive_owner_io": owner_io,
+                }
             with capsys.disabled():
                 print("POINT_NATIVE_WORK " + json.dumps({
                     "size": size, "deleted": deleted, "round": name,
