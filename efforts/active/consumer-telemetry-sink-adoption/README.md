@@ -118,6 +118,12 @@ and count it as delivery.
 
 ### U0 - Contract and owner agreement
 
+Contract source:
+[Consumer telemetry command v1](../../../docs/patterns/consumer-telemetry-command.md).
+This is the reviewed-before-implementation specification, not shipped command
+support. Its inventory and source reservation preserve #7935/#5900 ownership;
+any overlapping implementation hunk still needs its owner's explicit agreement.
+
 - [ ] Inventory actual producer schemas and consumers; distinguish existing
   hooks from proposed catalog entries or missing instrumentation.
 - [ ] Reconcile API/file overlap with the performance and producer owners.
@@ -254,3 +260,15 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
 - Preserved performance, producer, collector, update, and rollout ownership.
 - Proposed the contract -> real Bridge route -> Dispatch/coverage -> native
   qualification -> release sequence. No runtime work has started.
+
+### 2026-11-19 - U0 contract contribution
+
+- Claimed only U0 on #13545 after checking current comments and open telemetry
+  pull requests; the parent tracker and U1–U4 remain open.
+- Specified one shared parser/runner home, root-bound selection, local override,
+  structural Bridge projection, JSONL framing, finite process/queue/deadline
+  bounds and selected-runtime support discovery.
+- Inventoried actual lifecycle, diagnostics, hourly and performance consumers.
+  No Manager, entry, measurement, collector or native reservation is transferred.
+- Runtime support, receiver readback, native/compatibility qualification and
+  release/installed adoption remain later acceptance, not U0 evidence.

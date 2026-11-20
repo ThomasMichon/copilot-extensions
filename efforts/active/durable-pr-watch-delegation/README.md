@@ -822,7 +822,7 @@ historical-install proof.
 The receiver slice merged in #13508 observes fixed transition paths and the
 phase header through shared storage, preserving absent-transition legacy behavior and
 refusing every present or orphaned transition before legacy reads/writes.
-The current internal preparation candidate validates binding and original
+The internal preparation slice, merged in #13520, validates binding and original
 descriptor custody, drains without releasing the writer and records only
 `prepared`, with a retained original-inode pin, same-inode recovery and
 final-publication guards. Preparation rejection closes admission, permanently
@@ -831,10 +831,12 @@ unsafe repair requires strict readoption. Readoption moves the retained queue,
 history, fence and concurrency limits only after old workers settle. Only
 authorized activation/resumption unfences it; preparation refuses publication
 until retained legacy work has drained. Startup refusal and guard removal
-share the final admission boundary. It is not
-connected to ordinary CLI/control entry. Physical sealing, post-seal recovery
-and authority selection remain unimplemented; no map/cwd capability or
-isolated subscription publisher is activated.
+share the final admission boundary. It is not connected to ordinary CLI/control
+entry. The next internal Linux source slice adds journaled atomic-exchange
+sealing and topology-based recovery under that same custody, without importing
+or activating state. Native Linux exchange/interruption qualification, Windows
+sealing, boot-boundary qualification and authority selection remain open; no
+map/cwd capability or isolated subscription publisher is activated.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
