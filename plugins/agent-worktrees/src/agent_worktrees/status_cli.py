@@ -6,8 +6,7 @@ import argparse
 from typing import Any, cast
 
 from . import config as cfg
-from . import output
-from . import git_ops, profile_assignment, sessions, tracking
+from . import git_ops, output, profile_assignment, sessions, tracking
 
 
 def _core() -> Any:

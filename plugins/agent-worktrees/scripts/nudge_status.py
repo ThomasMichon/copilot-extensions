@@ -192,7 +192,7 @@ def _byte_lock(path: Path, deadline: float | None = None) -> Iterator[bool]:
                 else:
                     import fcntl
 
-                    fcntl.lockf(stream, fcntl.LOCK_EX | fcntl.LOCK_NB, 1)
+                    fcntl.lockf(stream, fcntl.LOCK_EX | fcntl.LOCK_NB, 1)  # type: ignore[attr-defined, unused-ignore]
                 acquired = True
                 break
             except OSError:
@@ -211,7 +211,7 @@ def _byte_lock(path: Path, deadline: float | None = None) -> Iterator[bool]:
                     if os.name == "nt":
                         msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined, unused-ignore]
                     else:
-                        fcntl.lockf(stream, fcntl.LOCK_UN, 1)
+                        fcntl.lockf(stream, fcntl.LOCK_UN, 1)  # type: ignore[attr-defined, unused-ignore]
             finally:
                 stream.close()
 
