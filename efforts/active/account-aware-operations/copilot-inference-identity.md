@@ -29,6 +29,11 @@ malformed repository-preference source. The latter produces an actionable,
 non-secret unresolved result, not selection of a different configured machine
 account or automatic correction. Resolve this through the existing preference
 owner; do not treat a lookup failure as evidence that no repo override exists.
+When default resolution is actually needed, apply the same rule to every
+applicable machine/default source: an unreadable or malformed higher-priority
+source is unresolved, not empty and not permission to choose a different
+lower-priority account. Validate account-selection values against their owning
+schema rather than coercing malformed input into an identity decision.
 
 With no inference preference, preserve ambient behavior only in a mode that
 already permits it, visibly unpinned rather than verified. Strict host-Copilot
@@ -44,6 +49,12 @@ comparison, mismatch warning or correction. Explicit read-only diagnostics
 may still report their requested resolution result; strict container credential
 admission remains independent.
 
+Failed switch-policy reads and non-boolean policy values never opt in.
+Only the owning schema's explicit valid enabled value enables automatic
+enforcement; strings such as `"false"` cannot become enabled through truthiness.
+Invalid/unavailable policy keeps enforcement off with an explicit diagnostic
+available, without an automatic account comparison or switch.
+
 After opt-in, compare intended versus actually effective inference identity
 through a supported source, keeping unknown, unavailable and verified results
 distinct. An unresolved preference source cannot authorize automatic correction.
@@ -54,6 +65,16 @@ state is not idleness proof. Otherwise warn clearly without blocking launch or
 changing another session, unless the operator explicitly accepts that shared-
 session risk. Do not silently enable switching on update or adoption.
 This nonblocking correction warning does not relax strict credential admission.
+
+Protect pending launches as well as visible Copilot processes. The existing
+launch/identity owners must coordinate the eligibility check, any shared-store
+correction and the dependent startup so two different-account launches cannot
+both observe apparent idleness and start with each other's selection.
+Retain the protected selection through the point where startup has established
+its effective identity. If safe coordination cannot be established, take the
+existing nonblocking warning path rather than switching optimistically.
+This is a concurrency outcome and validation obligation, not a new daemon,
+broker, account-store format or source/resource owner.
 
 ## Launch and policy owners
 
@@ -112,11 +133,21 @@ account and no automatic correction. With automatic enforcement disabled,
 prove no comparison/warning/correction even with a preference. Preserve
 explicit diagnostic results and independent strict admission.
 
+Include failed higher-priority machine/default reads when defaults are needed,
+with a distinct lower-priority account; neither parse/read failure nor an
+invalid account value may select that alternate account. Include failed policy
+reads and non-boolean values, particularly the string `"false"`, alongside
+valid false/true controls: automatic enforcement stays off for invalid input.
+
 Exercise opted-in mismatch, unknown/unavailable identity, opted-in idle,
 concurrent/unknown-session warning and explicit risk-acceptance paths.
 Ordinary launch remains nonblocking when only unsafe shared-store correction
 is refused; independent strict admission remains enforced. Unchanged Git/gh
 identity and other sessions are controls.
+Exercise two different-account launches interleaved before either Copilot
+process becomes visible, through shared-store selection and effective startup.
+Prove no cross-account switch/launch race; inability to protect the pending
+selection takes the nonblocking warning path, not an unsafe correction.
 
 ## Consumer validation
 
