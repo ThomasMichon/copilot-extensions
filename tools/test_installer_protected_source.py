@@ -13,7 +13,7 @@ import stat
 import struct
 import subprocess
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs/installer-engine"))
@@ -754,6 +754,67 @@ def test_protected_dispatch_reaches_actual_application_adapter_without_replay(
         assert fixture.versions == [fixture.old.name]
         assert fixture.candidate_options[0]["uv"] == selected.uv
     assert (fixture.old / "preserved").read_bytes() == b"incumbent bytes"
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_protected_package_guard_preserves_closed_source_development_files(
+    policy: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    closed: bool,
+) -> None:
+    from installer_dependency_policy import DependencyPolicyError
+    from installer_engine_health import application_uv_selection
+    from installer_source_build import _package_roots
+
+    selected = _admit(policy)
+    payload = selected.snapshot / "payload"
+    payload.mkdir()
+    metadata = (
+        '[project]\nname="demo-app"\nversion="1.0"\n'
+        '[tool.uv.sources]\nlegacy={path="legacy.whl"}\n'
+    ).encode()
+    (payload / "pyproject.toml").write_bytes(metadata)
+    (payload / "legacy.whl").write_bytes(b"development-only wheel")
+    app = selected.snapshot / "application"
+    app.mkdir()
+    (app / "install.sh").write_bytes(
+        b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
+    )
+    (app / "application.json").write_text('{"name":"demo-app"}')
+    source = ModuleType("install_source")
+    calls: list[dict[str, Any]] = []
+
+    def install(*_args: Any, **options: Any) -> dict[str, str]:
+        calls.append(options)
+        return {"state": "installed"}
+
+    vars(source).update(
+        select_project=lambda *_: SimpleNamespace(
+            payload=payload,
+            project={"application": "application"},
+            closed_wheel_source=closed,
+        ),
+        engine=SimpleNamespace(
+            _package_roots=_package_roots,
+            application_uv_selection=application_uv_selection,
+        ),
+        _member=lambda root, name: root / name,
+        _read=lambda path: json.loads(path.read_bytes()),
+        install_application=install,
+    )
+    monkeypatch.setitem(sys.modules, "install_source", source)
+    monkeypatch.setattr(sys, "path", sys.path[:])
+    if closed:
+        assert (
+            protected.install(selected, code=policy[0].parent)["state"] == "installed"
+        )
+        assert len(calls) == 1
+    else:
+        with pytest.raises(DependencyPolicyError, match="release age"):
+            protected.install(selected, code=policy[0].parent)
+        assert calls == []
+    assert (payload / "pyproject.toml").read_bytes() == metadata
+    assert (payload / "legacy.whl").read_bytes() == b"development-only wheel"
 
 
 @pytest.mark.skipif(
