@@ -1,9 +1,0 @@
-{
-  "comment": "Acquire all Azure DevOps work-item comment pages without partial success",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

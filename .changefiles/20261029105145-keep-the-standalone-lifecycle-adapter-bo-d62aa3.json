@@ -1,9 +1,0 @@
-{
-  "comment": "Keep the standalone lifecycle adapter bound to the complete shared caller-owned source archive.",
-  "changes": [
-    {
-      "plugin": "wsl-setup",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add independent default-off runtime source policy and owned exact source acquisition diagnostics",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

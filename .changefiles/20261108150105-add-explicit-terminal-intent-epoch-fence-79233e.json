@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit terminal intent, epoch-fenced workspace admission and owner drain without physical compaction or host activation",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

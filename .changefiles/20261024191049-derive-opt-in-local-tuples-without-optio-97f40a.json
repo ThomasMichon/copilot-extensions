@@ -1,9 +1,0 @@
-{
-  "comment": "Derive opt-in local tuples without optional machine-map enrollment",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

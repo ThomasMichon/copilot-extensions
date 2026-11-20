@@ -1,9 +1,0 @@
-{
-  "comment": "Route legacy session bootstrap through the canonical caller-independent installation driver",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

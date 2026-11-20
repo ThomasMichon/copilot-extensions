@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve bounded scalar index preparation on older LanceDB APIs without changing modern creation or ownership budgets.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

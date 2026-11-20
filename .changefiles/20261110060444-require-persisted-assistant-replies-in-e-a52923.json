@@ -1,9 +1,0 @@
-{
-  "comment": "Require persisted assistant replies in every installed lifecycle turn and resumed history",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

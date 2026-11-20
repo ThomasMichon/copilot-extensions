@@ -1,9 +1,0 @@
-{
-  "comment": "Add caller-contained actual PSMux Companion client qualification to the manual native portfolio",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

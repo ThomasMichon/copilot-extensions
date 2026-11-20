@@ -1,9 +1,0 @@
-{
-  "comment": "Adapt retained writer records to compatible current Worktrees serializers without rewriting original ownership or replaying unknown operations",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

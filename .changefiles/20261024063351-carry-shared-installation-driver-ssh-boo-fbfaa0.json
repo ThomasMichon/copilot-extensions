@@ -1,9 +1,0 @@
-{
-  "comment": "Carry shared installation-driver SSH bootstrap qualification and adopter boundary documentation",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

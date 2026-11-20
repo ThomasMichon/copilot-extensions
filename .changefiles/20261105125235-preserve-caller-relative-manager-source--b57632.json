@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve caller-relative Manager source resolution across bootstrap request execution.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

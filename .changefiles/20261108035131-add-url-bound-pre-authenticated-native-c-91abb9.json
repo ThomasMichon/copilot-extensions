@@ -1,9 +1,0 @@
-{
-  "comment": "Add URL-bound pre-authenticated native curl with opt-in credential bindings and secret-free caller output",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

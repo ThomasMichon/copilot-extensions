@@ -1,9 +1,0 @@
-{
-  "comment": "Add supported, state-preserving external Manager uninstall with owned artifact inventories and existing service/runtime custody.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep retained editable-build egg-info private without rewriting live source configuration.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

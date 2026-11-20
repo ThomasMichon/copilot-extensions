@@ -1,9 +1,0 @@
-{
-  "comment": "Stream session transcripts with bounded memory in session-fetch, collate and ramp-up",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

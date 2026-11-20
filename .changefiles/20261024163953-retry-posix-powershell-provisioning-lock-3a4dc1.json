@@ -1,9 +1,0 @@
-{
-  "comment": "Retry POSIX PowerShell provisioning-lock contention while preserving unrelated I/O failures",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

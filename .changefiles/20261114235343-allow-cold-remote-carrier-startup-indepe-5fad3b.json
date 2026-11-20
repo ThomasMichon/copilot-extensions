@@ -1,9 +1,0 @@
-{
-  "comment": "Allow cold remote carrier startup independently of operation deadlines, cover startup in HTTP observation budgets, and preserve unknown writer-generation evidence when slot inspection fails.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

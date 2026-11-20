@@ -1,9 +1,0 @@
-{
-  "comment": "Bound service shutdown's server.wait_closed() so a stalled asyncio connection count cannot block cleanup and lease release",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

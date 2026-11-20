@@ -1,9 +1,0 @@
-{
-  "comment": "Select standalone terminal read hosting with fresh-only storage adoption",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

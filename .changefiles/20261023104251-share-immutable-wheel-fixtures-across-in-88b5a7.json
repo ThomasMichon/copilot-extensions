@@ -1,9 +1,0 @@
-{
-  "comment": "Share immutable wheel fixtures across independent installed consumers and include the required credential-reference module in pinned Gateway inputs.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

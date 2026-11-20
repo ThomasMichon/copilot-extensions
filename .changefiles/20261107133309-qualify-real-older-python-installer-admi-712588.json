@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify real older-Python installer admission on disposable Windows",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Conditionally forward sealed original cohort evidence in CLI-native session acquisition",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

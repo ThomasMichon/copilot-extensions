@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit same-window Summary observer navigation with verified CLI pane identity and installed runtime invocation",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

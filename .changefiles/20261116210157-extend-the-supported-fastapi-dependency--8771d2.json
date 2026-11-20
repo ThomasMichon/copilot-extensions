@@ -1,9 +1,0 @@
-{
-  "comment": "Extend the supported FastAPI dependency range.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

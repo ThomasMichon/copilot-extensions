@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicitly prepared bucket and model scoped item reads without corpus scans",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

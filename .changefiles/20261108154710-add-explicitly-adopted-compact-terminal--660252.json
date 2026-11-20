@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicitly adopted compact terminal operation recovery with protected body-free readback.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

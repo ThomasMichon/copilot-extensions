@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit managed agenda initialization and complete consistent export.",
-  "changes": [
-    {
-      "plugin": "efforts",
-      "type": "patch"
-    }
-  ]
-}

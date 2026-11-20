@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize leased Python daemon launches during Bridge cutover",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

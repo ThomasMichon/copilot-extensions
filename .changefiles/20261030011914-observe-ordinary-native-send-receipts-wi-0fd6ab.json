@@ -1,9 +1,0 @@
-{
-  "comment": "Observe ordinary native send receipts without admission or resume",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

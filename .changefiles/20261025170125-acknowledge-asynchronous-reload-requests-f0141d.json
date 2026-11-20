@@ -1,9 +1,0 @@
-{
-  "comment": "Acknowledge asynchronous reload requests truthfully and preserve immediate setup failure diagnostics.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

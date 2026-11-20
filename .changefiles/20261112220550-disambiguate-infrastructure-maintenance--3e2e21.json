@@ -1,9 +1,0 @@
-{
-  "comment": "Disambiguate infrastructure maintenance from agent progress monitoring; rename skill to maintain-agent-infrastructure",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

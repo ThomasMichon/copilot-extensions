@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize nested wheel-application environments when selecting the Vault runtime generation.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Expose the canonical native mux prerequisite setup as a standalone composable owner",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

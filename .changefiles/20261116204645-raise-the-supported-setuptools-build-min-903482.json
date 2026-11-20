@@ -1,9 +1,0 @@
-{
-  "comment": "Raise the supported setuptools build minimum.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

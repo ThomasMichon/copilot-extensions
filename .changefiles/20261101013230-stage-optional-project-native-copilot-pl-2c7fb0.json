@@ -1,9 +1,0 @@
-{
-  "comment": "Stage optional project-native Copilot plugin settings with separate tool receipts and scoped retirement",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

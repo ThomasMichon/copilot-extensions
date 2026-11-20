@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the complete per-project source admission and build toolkit.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

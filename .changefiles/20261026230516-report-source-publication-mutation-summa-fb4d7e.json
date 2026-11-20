@@ -1,9 +1,0 @@
-{
-  "comment": "Report source-publication mutation summaries from successful participating writer commits without extending store ownership",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

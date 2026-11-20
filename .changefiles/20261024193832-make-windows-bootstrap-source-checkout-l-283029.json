@@ -1,9 +1,0 @@
-{
-  "comment": "Make Windows bootstrap source checkout long-path safe and refuse incomplete tracked source before runtime construction",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

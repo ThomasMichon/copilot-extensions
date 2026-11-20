@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify an unused repository-only stock Windows held-file signer primitive without switching bootstrap callers.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

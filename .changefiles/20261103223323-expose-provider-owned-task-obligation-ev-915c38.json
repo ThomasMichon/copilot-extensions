@@ -1,9 +1,0 @@
-{
-  "comment": "Expose provider-owned task obligation evidence without migrating assignment or cleanup callers.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

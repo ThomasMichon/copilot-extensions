@@ -1,9 +1,0 @@
-{
-  "comment": "Ship selected canonical receiving policy with the Bridge Session Host and retain explicit no-wake versus launch activation.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

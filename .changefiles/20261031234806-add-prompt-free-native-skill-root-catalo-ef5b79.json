@@ -1,9 +1,0 @@
-{
-  "comment": "Add prompt-free native skill-root catalog observation with explicit scope and no-dispatch safeguards.",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

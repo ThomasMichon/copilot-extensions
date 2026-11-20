@@ -1,9 +1,0 @@
-{
-  "comment": "Expose bounded external service credential references while preserving typed worker renewal.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

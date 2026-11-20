@@ -1,9 +1,0 @@
-{
-  "comment": "Add raw-byte retrieval through shared polite HTTP and per-purpose accounting",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

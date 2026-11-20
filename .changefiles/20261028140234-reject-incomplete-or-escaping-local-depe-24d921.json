@@ -1,9 +1,0 @@
-{
-  "comment": "Reject incomplete or escaping local dependency closures after release materialization",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

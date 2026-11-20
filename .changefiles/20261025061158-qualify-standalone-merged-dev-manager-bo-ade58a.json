@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify standalone merged-Dev Manager bootstrap through the existing owned acquisition and immutable installer while preserving independent service-source repair guards.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

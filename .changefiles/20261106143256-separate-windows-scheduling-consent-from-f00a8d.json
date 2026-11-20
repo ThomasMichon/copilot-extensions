@@ -1,9 +1,0 @@
-{
-  "comment": "Separate Windows scheduling consent from Connection Owner capability and preserve task holds",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

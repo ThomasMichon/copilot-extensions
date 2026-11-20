@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve optional scalar and list JSON claim shape constraints for user bearer callers",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

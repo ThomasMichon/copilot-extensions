@@ -1,9 +1,0 @@
-{
-  "comment": "Accept an explicit paired originating-owner handoff for session-custody bridge and forward commands",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Trim the awareness instruction template back within the 4096-byte projection budget",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "patch"
-    }
-  ]
-}

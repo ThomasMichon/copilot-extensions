@@ -1,9 +1,0 @@
-{
-  "comment": "Type source provenance and bootstrap selection test boundaries",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

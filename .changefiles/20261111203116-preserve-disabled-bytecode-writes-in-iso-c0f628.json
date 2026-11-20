@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve disabled bytecode writes in isolated repository-setup callbacks",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

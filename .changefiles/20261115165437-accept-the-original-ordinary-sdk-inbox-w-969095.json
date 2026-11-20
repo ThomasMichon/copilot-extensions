@@ -1,9 +1,0 @@
-{
-  "comment": "Accept the original ordinary SDK inbox wire form when installation governance is unconfigured, preserving configured and portable admission.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

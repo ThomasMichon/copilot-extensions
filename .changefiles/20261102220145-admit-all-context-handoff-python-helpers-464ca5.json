@@ -1,9 +1,0 @@
-{
-  "comment": "Admit all Context Handoff Python helpers and tests to strict checking while preserving continuity and native controls",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Admit compatible current retained writers without replacing original standing provenance",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the updated qualified configuration transport dependency for nested runtime owners.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

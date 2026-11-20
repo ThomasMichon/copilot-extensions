@@ -1,9 +1,0 @@
-{
-  "comment": "Add an offline non-root Chat image recipe with explicit retained storage, disposable endpoints and authenticated application health.",
-  "changes": [
-    {
-      "plugin": "agent-chat-service",
-      "type": "patch"
-    }
-  ]
-}

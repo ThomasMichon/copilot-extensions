@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify real Manager mux-backed fresh, resume and reuse callers with isolated native receipts",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

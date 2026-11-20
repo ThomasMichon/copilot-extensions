@@ -1,9 +1,0 @@
-{
-  "comment": "Repair isolated native caller startup, preflight its receiving namespace, and allow launcher-root registration outside an adopted checkout.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

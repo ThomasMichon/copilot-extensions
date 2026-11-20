@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve native helper publication from extended Windows source paths",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
