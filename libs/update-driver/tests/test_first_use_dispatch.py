@@ -18,6 +18,7 @@ import zipfile
 import pytest
 from _pytest.capture import CaptureManager
 from _pytest.faulthandler import fault_handler_stderr_fd_key
+from _pytest.terminal import TerminalReporter
 from packaging.version import Version
 
 from agent_procutil import no_window_kwargs
@@ -138,6 +139,51 @@ def test_dispatch_faulthandler_preserves_registered_option_semantics(
         config._ensure_unconfigure()
 
 
+def _render_dispatch_failed_call(item: pytest.Item, report: pytest.TestReport) -> None:
+    try:
+        terminal = cast(TerminalReporter | None, item.config.pluginmanager.getplugin("terminalreporter"))
+        if terminal is None:
+            return
+        terminal.write_line("[dispatch-recipe-report] original failed call")
+        report.toterminal(terminal._tw)
+        terminal.flush()
+    except BaseException:
+        # Only the optional diagnostic copy is best-effort, never ordinary hook dispatch.
+        return
+
+
+@pytest.mark.parametrize(("stage", "base_failure"), [
+    ("missing", False), ("header", False), ("render", False), ("flush", False), ("render", True),
+])
+def test_dispatch_failure_trace_report_errors_are_best_effort(
+    stage: str, base_failure: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    events: list[str] = []
+
+    class DiagnosticFailure(BaseException):
+        pass
+
+    def step(name: str) -> None:
+        events.append(name)
+        if name == stage:
+            if base_failure:
+                raise DiagnosticFailure()
+            raise RuntimeError("controlled diagnostic failure")
+
+    terminal = SimpleNamespace(
+        _tw=object(), write_line=lambda _line: step("header"), flush=lambda: step("flush"),
+    )
+    item = cast(pytest.Item, SimpleNamespace(config=SimpleNamespace(pluginmanager=SimpleNamespace(
+        getplugin=lambda _name: None if stage == "missing" else terminal,
+    ))))
+    report = cast(pytest.TestReport, SimpleNamespace(toterminal=lambda _writer: step("render")))
+    _render_dispatch_failed_call(item, report)
+    stages = ["header", "render", "flush"]
+    assert events == ([] if stage == "missing" else stages[:stages.index(stage) + 1])
+
+
 class _DispatchColdFailureTrace:
     def __init__(self, item: pytest.Item, timeout: float, stderr: int) -> None:
         self.item, self.timeout, self.stderr = item, timeout, stderr
@@ -149,6 +195,7 @@ class _DispatchColdFailureTrace:
         outcome = yield
         if node is self.item and report.when == "call" and report.failed:
             faulthandler.dump_traceback_later(self.timeout, file=self.stderr, exit=False)
+            _render_dispatch_failed_call(self.item, report)
         return outcome
 
 
@@ -174,9 +221,16 @@ def test_dispatch_failure_trace_wraps_normal_hooks_without_masking_outcomes(
     from types import SimpleNamespace
 
     calls: list[tuple[float, int, bool]] = []
+    events: list[str] = []
+
+    def arm(timeout: float, *, file: int, exit: bool) -> None:
+        calls.append((timeout, file, exit))
+        events.append("arm")
+
+    monkeypatch.setattr(faulthandler, "dump_traceback_later", arm)
     monkeypatch.setattr(
-        faulthandler, "dump_traceback_later",
-        lambda timeout, *, file, exit: calls.append((timeout, file, exit)),
+        sys.modules[__name__], "_render_dispatch_failed_call",
+        lambda _item, _report: events.append("report"),
     )
     item = cast(pytest.Item, object())
     plugin = _DispatchColdFailureTrace(item, 60, 7)
@@ -187,17 +241,20 @@ def test_dispatch_failure_trace_wraps_normal_hooks_without_masking_outcomes(
         ("call", True, False, []),
     ):
         calls.clear()
+        events.clear()
         report = cast(pytest.TestReport, SimpleNamespace(when=when, failed=failed))
         interaction = plugin.pytest_exception_interact(
             item if same_item else cast(pytest.Item, object()), report,
         )
         next(interaction)
-        assert calls == []
+        assert calls == [] and events == []
         with pytest.raises(StopIteration) as finished:
             interaction.send("ordinary hook result")
         assert finished.value.value == "ordinary hook result"
         assert calls == expected
+        assert events == (["arm", "report"] if expected else [])
     calls.clear()
+    events.clear()
     interaction = plugin.pytest_exception_interact(
         item, cast(pytest.TestReport, SimpleNamespace(when="call", failed=True)),
     )
@@ -206,7 +263,7 @@ def test_dispatch_failure_trace_wraps_normal_hooks_without_masking_outcomes(
     with pytest.raises(RuntimeError, match="controlled hook failure") as raised:
         interaction.throw(failure)
     assert raised.value is failure
-    assert calls == []
+    assert calls == [] and events == []
 
 
 @pytest.mark.parametrize("debugger", [None, "usepdb", "trace"])
@@ -442,18 +499,46 @@ def test_dispatch_faulthandler_preserves_failed_body_through_finite_finalizer(
         "        return original_arm(*args, **kwargs)\n"
         "    monkeypatch.setattr(faulthandler, 'cancel_dump_traceback_later', cancel)\n"
         "    monkeypatch.setattr(faulthandler, 'dump_traceback_later', arm)\n"
+        "    if request.node.name == 'test_failed_body':\n"
+        "        terminal = request.config.pluginmanager.getplugin('terminalreporter')\n"
+        "        original_flush = terminal.flush\n"
+        "        def visible_flush():\n"
+        "            result = original_flush()\n"
+        "            visible = Path(__file__).with_suffix('.stdout').read_text(errors='replace')\n"
+        "            if ('[dispatch-recipe-report] original failed call' in visible\n"
+        "                    and 'controlled-call-failure' in visible):\n"
+        "                events.append('report-flushed')\n"
+        "            return result\n"
+        "        monkeypatch.setattr(terminal, 'flush', visible_flush)\n"
+        "    else:\n"
+        "        def broken_report(*args, **kwargs):\n"
+        "            events.append('render-error')\n"
+        "            raise RuntimeError('controlled diagnostic renderer failure')\n"
+        "        monkeypatch.setattr(pytest.TestReport, 'toterminal', broken_report)\n"
         "    _register_dispatch_failure_trace(request, active=True)\n"
         "    yield\n"
         "    assert events[:2] == ['cancel', 'arm']\n"
         "    assert request.config.getoption('capture') == 'fd'\n"
         "    print('controlled failure finalizer remains captured')\n"
-        "    time.sleep(61)\n"
-        "    Path(__file__).with_suffix('.completed').write_text('completed')\n"
+        "    if request.node.name == 'test_failed_body':\n"
+        "        assert events[:3] == ['cancel', 'arm', 'report-flushed']\n"
+        "        visible = Path(__file__).with_suffix('.stdout').read_text(errors='replace')\n"
+        "        assert '[dispatch-recipe-report] original failed call' in visible\n"
+        "        assert 'controlled-call-failure' in visible\n"
+        "        assert 'controlled failure finalizer remains captured' not in visible\n"
+        "        Path(__file__).with_suffix('.visible').write_text('visible-before-wait')\n"
+        "        time.sleep(61)\n"
+        "        Path(__file__).with_suffix('.completed').write_text('completed')\n"
+        "    else:\n"
+        "        assert events[:3] == ['cancel', 'arm', 'render-error']\n"
+        "        Path(__file__).with_suffix('.render-error-completed').write_text('completed')\n"
         "def test_failed_body(request, controlled_failure_finalizer):\n"
         "    assert float(request.config.getini('faulthandler_timeout')) == 60.0\n"
         "    assert _dispatch_faulthandler_is_nonexiting(request.config)\n"
         "    assert request.config.getoption('capture') == 'fd'\n"
-        "    pytest.fail('controlled-call-failure', pytrace=False)\n",
+        "    pytest.fail('controlled-call-failure', pytrace=False)\n"
+        "def test_failed_body_with_render_error(controlled_failure_finalizer):\n"
+        "    pytest.fail('controlled-render-failure-body', pytrace=False)\n",
         encoding="utf-8",
     )
     environment = {
@@ -462,20 +547,26 @@ def test_dispatch_faulthandler_preserves_failed_body_through_finite_finalizer(
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
     }
     try:
-        result = subprocess.run(
-            [sys.executable, "-B", "-m", "pytest", "-q", "--color=no",
-             "-p", "no:cacheprovider", "-o", "addopts=", "--confcutdir", str(suite), str(target)],
-            env=environment, cwd=suite, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=90, **no_window_kwargs(),
-        )
+        with target.with_suffix(".stdout").open("wb") as output:
+            result = subprocess.run(
+                [sys.executable, "-B", "-m", "pytest", "-q", "--color=no",
+                 "-p", "no:cacheprovider", "-o", "addopts=", "--confcutdir", str(suite), str(target)],
+                env=environment, cwd=suite, stdin=subprocess.DEVNULL, stdout=output,
+                stderr=subprocess.PIPE, text=True, timeout=90, **no_window_kwargs(),
+            )
     except subprocess.TimeoutExpired:
         pytest.fail("controlled failed-body finalizer did not finish")
-    if result.returncode != 1 or "controlled-call-failure" not in result.stdout:
+    output_text = target.with_suffix(".stdout").read_text(errors="replace")
+    if result.returncode != 1 or "controlled-call-failure" not in output_text:
         pytest.fail("controlled pytest did not preserve its original failed-body result")
     if "controlled_failure_finalizer" not in result.stderr or "pytest_runtest_teardown" not in result.stderr:
         pytest.fail("failure-unwind traceback did not observe the controlled fixture finalizer")
     assert target.with_suffix(".completed").read_text() == "completed"
-    assert "1 failed" in result.stdout
+    assert target.with_suffix(".visible").read_text() == "visible-before-wait"
+    assert target.with_suffix(".render-error-completed").read_text() == "completed"
+    assert "controlled-render-failure-body" in output_text
+    assert "controlled diagnostic renderer failure" not in output_text + result.stderr
+    assert "2 failed" in output_text
     assert "controlled failure finalizer remains captured" not in result.stderr
 
 

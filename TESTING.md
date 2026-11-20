@@ -5658,10 +5658,20 @@ Other cells receive no additional pytest options and all portfolio bounds remain
 An owner-scoped wrapper re-arms that same non-exiting timer only after ordinary
 exception-interaction hooks return for an unexpected call failure. Passing calls,
 debugger modes and hook exceptions leave existing pytest behavior untouched.
+After re-arming, the scoped hook makes an early copy of the already-configured
+pytest failure report through its existing terminal renderer and flushes it
+before teardown. Only that optional copy is best-effort; rendering/flush errors
+cannot replace the original call result or skip cleanup. No additional capture
+pause, locals, environment dump, descriptor or native stream change is added.
 Pytest's whole-protocol finalizer still owns cancellation after teardown; fixture
 unregistration does not cancel early. Separate pure passing-body and failed-body
 controls retain ordinary capture and a finite 61-second finalizer wait, each with
 its own 120-second item marker covering the 90-second child bound.
+The failed-body control checks its fixture-owned stdout file from inside the
+finalizer: the original failure and a real terminal flush must be visible before
+the finite wait starts. A renderer-error case must still finish cleanup and retain
+its original failed result. This checks live visibility, not output released only
+when the child exits.
 The pytest 8.0 owner has no exit-on-timeout ini option and schedules the stdlib timer
 without an exit argument. The diagnostic adapter treats only that exact missing
 registration as the proven legacy non-exiting contract; registered exiting or
