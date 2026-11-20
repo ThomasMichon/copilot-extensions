@@ -16,8 +16,16 @@ from types import SimpleNamespace
 import pytest
 
 from test_install_engine_adoption import (
-    PLUGIN, construction_bundle, environment, function,
+    PLUGIN, construction_bundle as base_construction_bundle, environment, function,
 )
+
+
+def construction_bundle(scripts: Path) -> None:
+    base_construction_bundle(scripts)
+    shutil.copy2(
+        PLUGIN.parents[1] / "libs" / "versioned-runtime" / "versioned_runtime_identity.py",
+        scripts / "versioned_runtime_identity.py",
+    )
 
 
 def _files(root: Path) -> dict[str, str]:
@@ -63,13 +71,61 @@ def test_cold_runtime_helper_cli_does_not_write_into_its_payload(tmp_path: Path)
     before = _files(scripts)
     for _ in range(2):
         result = _run(
-            [sys.executable, "-I", str(scripts / "versioned_runtime.py"),
+            [sys.executable, "-I", "-B", str(scripts / "versioned_runtime.py"),
              "--root", str(tmp_path / "runtime"), "construction-shell", "--shell", "ps1"],
             cwd=tmp_path, env=environment(tmp_path),
         )
         assert result.returncode == 0, result.stderr
         assert "Start-RuntimeConstruction" in result.stdout
         assert _files(scripts) == before
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "bash"])
+def test_active_slot_metadata_probe_preserves_cold_payload(tmp_path: Path, host: str) -> None:
+    if host == "bash" and os.name == "nt":
+        pytest.skip("Native POSIX installer probe required")
+    shell = shutil.which(host)
+    if not shell:
+        pytest.skip("Native installer shell unavailable")
+    extension = "ps1" if host == "powershell.exe" else "sh"
+    scripts = tmp_path / "payload" / "scripts"
+    construction_bundle(scripts)
+    root = tmp_path / "runtime"
+    env = environment(tmp_path)
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    env.pop("PYTHONPYCACHEPREFIX", None)
+    digest = hashlib.sha256(json.dumps(_files(scripts), sort_keys=True).encode()).hexdigest()
+    completed = _run(
+        [sys.executable, "-I", "-B", str(scripts / "versioned_runtime.py"),
+         "--root", str(root), "construction-session", "1.0.0", "--payload-hash", digest],
+        cwd=tmp_path, env=env,
+        input=json.dumps({"command": "complete", "payload_hash": digest}) + "\n"
+        + '{"command":"settled"}\n',
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    line = next(
+        line.strip() for line in (PLUGIN / "scripts" / f"install.{extension}").read_text(
+            encoding="utf-8",
+        ).splitlines() if "is-complete" in line and "active" in line
+    )
+    if extension == "ps1":
+        body = (
+            f"$activePython='{sys.executable}'; $PSScriptRoot='{scripts}'; "
+            f"$InstallDir='{root}'; $activeVersion='1.0.0'; "
+            + line + "; exit $LASTEXITCODE"
+        )
+        command = [shell, "-NoProfile", "-NonInteractive", "-Command", body]
+    else:
+        body = (
+            f"active_python={shlex.quote(sys.executable)}; SCRIPT_DIR={shlex.quote(str(scripts))}; "
+            f"INSTALL_DIR={shlex.quote(str(root))}; active_version=1.0.0; "
+            + line.removeprefix('&& ').removesuffix(' \\')
+        )
+        command = [shell, "-c", body]
+    before = _files(scripts)
+    result = _run(command, cwd=tmp_path, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _files(scripts) == before
 
 
 @pytest.mark.parametrize("entrypoint", ("session-writer", "pwsh", "powershell.exe", "bash"))
@@ -160,7 +216,7 @@ def test_cold_bash_role_probe_preserves_payload_for_real_completion(tmp_path: Pa
     assert _files(scripts) == before
     digest = hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest()
     complete = _run(
-        [sys.executable, "-I", str(scripts / "versioned_runtime.py"),
+        [sys.executable, "-I", "-B", str(scripts / "versioned_runtime.py"),
          "--root", str(tmp_path / "runtime"), "construction-session", "1.0.0",
          "--payload-hash", digest],
         cwd=tmp_path, env=env,
@@ -203,7 +259,7 @@ def test_cold_installer_hash_survives_real_construction_and_role_resolution(
         f"$python='{getattr(sys, '_base_executable')}'; $root='{root}'\n"
         f"$helper='{scripts / 'versioned_runtime.py'}'\n"
         "$before=Get-PayloadHash\n"
-        "$adapter=(& $python -I $helper --root $root construction-shell --shell ps1 | Out-String)\n"
+        "$adapter=(& $python -I -B $helper --root $root construction-shell --shell ps1 | Out-String)\n"
         "if($LASTEXITCODE -ne 0){throw 'adapter failed'}\n"
         "Invoke-Expression $adapter\n"
         "try {\n"
@@ -215,7 +271,7 @@ def test_cold_installer_hash_survives_real_construction_and_role_resolution(
         "  Complete-RuntimeConstruction -PayloadHash $after\n"
         "} catch { [Console]::Error.WriteLine($_.ToString()); throw }\n"
         "finally { Stop-RuntimeConstruction }\n"
-        "& $python -I $helper --root $root is-complete 1.0.0\n"
+        "& $python -I -B $helper --root $root is-complete 1.0.0\n"
         "if($LASTEXITCODE -ne 0){throw 'completion did not publish'}\n",
         encoding="utf-8",
     )

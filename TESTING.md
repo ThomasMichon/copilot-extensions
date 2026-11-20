@@ -4,7 +4,9 @@ The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
 owner. It proves WMI daemon survival after strict caller-Job closure, bounded
 child termination and exact fixture cleanup; ordinary local containment is
-not relaxed to obtain that evidence.
+not relaxed to obtain that evidence. The same proof includes expired inherited
+Job names alongside live caller Jobs; its retained-membership negative must
+still refuse admission after an absent name.
 
 The manual foundation portfolio separates contained functional checks from
 Windows production caller-Job loss. After the ordinary runner prepares its
@@ -7642,6 +7644,33 @@ native owners while executing cleanup composition, including a saturated later
 model and vector-before-canonical effects. Neither packet qualifies provider
 ordering, complete point application, a live directory or native Windows.
 
+`plugins/agent-index/tests/test_point_embedding.py` separately composes selected
+pair writes against the real cold two-model store and nonempty component ledger.
+It covers routed/unclaimed pairs, fresh facades and poisoned caches, reopen
+reuse, changed-profile backfill, prepared-vector counts, current canonical
+input and exact writer/scope/family/model/index refusal before inference.
+Native coverage publication checks prepared actual vectors before SQLite
+receipts; wrong/missing vectors and stale input refuse. Caught post-write
+preparation failure latches the outer writer dirty instead of publishing
+coverage. `test_embedding_pair_reuse.py` retains the default pair/batch controls.
+Caught stale input in a later batch and failed selection of a later model also
+latch earlier effects; the entire invocation shares the nested writer boundary.
+The actor-free controls in
+`tools/promotion_unit_tests/test_point_embedding_contract.py` substitute native
+and SQLite boundaries while executing scope forwarding, no-op selection,
+write/preparation/receipt order and actual-vector-before-receipt composition.
+They do not qualify provider ordering, whole-claim/checkpoint completion,
+ordinary point application, a live directory or native Windows.
+
+For individual native performance samples, run the existing routing/reopen case:
+`PYTEST_ADDOPTS=-s python tools/run-plugin-tests.py agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
+It prints receipt-cold first-write and covered fresh-facade reopen wall/process
+CPU time, table opens, fragment/index-segment counts and work counters for two
+models, three chunks and batch size two. Timed work includes the open observer
+and pair composition, not fixture setup or outer writer entry/exit. OS cache is
+uncontrolled and inference is a fixture; two samples are insufficient for tail,
+large-corpus, real-model, writer-contention or native Windows qualification.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
@@ -8543,6 +8572,21 @@ proof. A fresh PR child gets only the declared noncredential environment plus
 fixed Python isolation settings; GitHub event IDs, credentials and unrelated
 ambient variables are not unit inputs. Toolchain binding is bounded, and the
 read-only provider search has an eight-second total budget.
+
+An attempted lookup emits one `pr_unit_lookup` JSON diagnostic with total and
+per-operation elapsed milliseconds, flushed before any fresh-runner handoff.
+Fixed phase names distinguish run/artifact/job
+inventory, producer qualification, archive download and packet verification;
+exceptional operations retain an `error` outcome. A phase's `success` means that
+operation returned, not that reuse was admitted. The diagnostic contains no
+provider paths, credentials, response bodies or exception text. It adds no
+provider request or child process and does not change the lookup deadline,
+required Actions outputs or packet format. The three actor-free controls in
+`tools/promotion_unit_tests/test_ci_pr_unit_lookup_timings.py` exercise real
+packet verification, provider failure and the unchanged expired-budget fresh
+fallback, including visibility through a buffered output stream before that
+fallback begins. Historical budget exhaustion without this diagnostic remains
+unattributed; synthetic timing is not a live-provider performance claim.
 
 An eligible prior run must have a successful exact-attempt unit job and fresh
 upload, the matching context-derived artifact identity, immutable archive

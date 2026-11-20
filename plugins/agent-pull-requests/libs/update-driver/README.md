@@ -164,6 +164,22 @@ creation, not an implicit permission migration or a read-only status side effect
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
   Missing state is empty; status does not mkdir, initialize, repair, or recover
   a database. Unknown schema and malformed records fail explicitly.
+- `resolve_failed_unstarted(request_id, *, reason, authorized=False, root=None)`
+  resolves only an exact pending request with a recorded worker-launch failure
+  and no execution, boot or outcome timestamps. Explicit operator repair
+  authorization and the native installation lock are required. The row,
+  invocation and original error remain; the appended reason explains its
+  terminal `completed`, exit **125** disposition. This is non-success, not an
+  installation result or descendant-cleanup attestation. Other requests,
+  daemon records and permanent lock files remain unchanged. An identical
+  repeated disposition returns the same result; active or execution-bearing
+  requests refuse.
+  The finite owner command is
+  `python -m update_driver resolve-failed-unstarted --request-id <id>
+  --reason <reason> --authorized-repair [--root <absolute-root>]`.
+  Its help advertises `update-driver.failed-unstarted-disposition/v1`;
+  older commands reject the new action. CLI exit zero means the disposition
+  succeeded, while its JSON retains the request's nonzero exit code.
 - `ensure_worker(worker_argv, *, root=None, cwd=None, env=None, startup_timeout=15,
   python_bootstrap_root=None)` invokes
   `agent_procutil.spawn_daemon(console_children=True, breakaway=True,

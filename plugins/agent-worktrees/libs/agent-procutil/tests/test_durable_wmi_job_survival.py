@@ -126,8 +126,29 @@ def test_cleanup_never_terminates_a_process_with_a_different_identity() -> None:
         bystander.wait(timeout=10)
 
 
+def test_destroyed_native_scope_does_not_block_admission() -> None:
+    from agent_procutil import _job_scopes
+
+    kernel = pu._kernel32()
+    pu._configure_job_api(kernel)
+    name = _job_scopes.new_name()
+    job = kernel.CreateJobObjectW(None, name)
+    assert job
+    assert kernel.CloseHandle(job)
+    process = kernel.OpenProcess(0x1000, False, os.getpid())
+    assert process
+    environment = {_job_scopes.ENVIRONMENT_KEY: name}
+    try:
+        with _job_scopes.query_scopes(environment) as verify:
+            verify(process)
+        assert environment == {_job_scopes.ENVIRONMENT_KEY: name}
+    finally:
+        assert kernel.CloseHandle(process)
+
+
+@pytest.mark.parametrize("expired_scope", [False, True])
 def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expired_scope: bool,
 ) -> None:
     from agent_procutil._daemon_instance_identity import birth_identity
 
@@ -143,6 +164,10 @@ def test_durable_daemon_survives_closing_a_strict_kill_on_close_caller_job(
     spec = {"root": str(root), "result": str(result_path), "python": python}
     env = os.environ.copy()
     env.pop("__PYVENV_LAUNCHER__", None)
+    if expired_scope:
+        from agent_procutil import _job_scopes
+
+        env = _job_scopes.child_environment(env, append=_job_scopes.new_name())
     src = str(Path(pu.__file__).resolve().parents[1])
     env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
 
@@ -223,7 +248,9 @@ def test_tracked_cleanup_scope_refuses_a_child_outside_the_immediate_caller_job(
                 cwd=str(tmp_path), env=dict(os.environ),
                 creationflags=pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB,
                 log_path=str(tmp_path / "refused.log"), stderr_log_path=None,
-                scope_environment={_job_scopes.ENVIRONMENT_KEY: name},
+                scope_environment={
+                    _job_scopes.ENVIRONMENT_KEY: ";".join((_job_scopes.new_name(), name)),
+                },
             )
         assert caught.value.admission_sent is False
         assert caught.value.cleanup_confirmed is True

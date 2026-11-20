@@ -1206,7 +1206,7 @@ function Invoke-VersionedSlotClean {
     $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        $helpers = (& $py -I -B $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
@@ -1717,7 +1717,7 @@ function Install-Runtime {
         $activePython = Join-Path $activeDir 'Scripts\python.exe'
         $activeReady = $false
         if (Test-Path -LiteralPath $activePython -PathType Leaf) {
-            & $activePython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $activeVersion *> $null
+            & $activePython -B (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $activeVersion *> $null
             if ($LASTEXITCODE -eq 0) {
                 $activeReady = Test-RuntimeOrigin `
                     -Python $activePython `
@@ -2022,7 +2022,7 @@ function Install-Engine {
     if (-not $py) { throw 'Engine construction requires a bootstrap Python interpreter' }
     if ((Test-Path (Join-Path $EngineHome 'current-version')) -or
         (Test-Path (Join-Path $EngineHome 'last-known-good'))) {
-        $selected = & $py -I $vr --root $EngineHome resolve-python
+        $selected = & $py -I -B $vr --root $EngineHome resolve-python
         if ($LASTEXITCODE -eq 0 -and $selected -and -not $Upgrade) {
             $script:EngineVenvPython = "$selected".Trim()
             $script:EngineVenv = Split-Path (Split-Path $script:EngineVenvPython)
@@ -2039,7 +2039,7 @@ function Install-Engine {
     $buildMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
     try {
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $EngineHome construction-shell --shell ps1 | Out-String)
+        $helpers = (& $py -I -B $vr --root $EngineHome construction-shell --shell ps1 | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'Canonical engine construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
@@ -2157,7 +2157,7 @@ function Install-Engine {
         Publish-FileAtomically -Path (Join-Path $EngineHome $name) `
             -Content ([IO.File]::ReadAllText((Join-Path $PSScriptRoot $name)))
     }
-    & $py -I $vr --root $EngineHome --link-name '.venv' activate $engineVersion --no-link | Out-Host
+    & $py -I -B $vr --root $EngineHome --link-name '.venv' activate $engineVersion --no-link | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Completed engine runtime activation failed' }
     Write-Ok "Engine runtime $(if ($Upgrade) { 'updated' } else { 'provisioned' }) (durable venv): $EngineVenv"
     return $true
@@ -3083,7 +3083,7 @@ if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
      (Test-Path (Join-Path $EngineHome 'last-known-good')))) {
     $bootstrap = Get-BootstrapPython
     if (-not $bootstrap) { throw 'Engine selection requires a bootstrap interpreter' }
-    $selected = & $bootstrap -I (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $EngineHome resolve-python
+    $selected = & $bootstrap -I -B (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $EngineHome resolve-python
     if ($LASTEXITCODE -ne 0 -or -not $selected) { throw 'No completed engine runtime is selectable' }
     $EngineVenvPython = "$selected".Trim()
     $EngineVenv = Split-Path (Split-Path $EngineVenvPython)
