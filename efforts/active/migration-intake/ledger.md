@@ -1214,3 +1214,25 @@ also record #13703's actual correction delivery and #1475's separately audited
 NOT_PLANNED disposition after complete accepted receiving. Earlier intake
 rows stay unchanged history; all six WinGet technical rows and independent
 #688/#1192/#2612 conditions remain.
+
+## Proposed complete orphan-task adoption intake - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #3443 existing headless ACP AND bare-scripted orphan adoption | routed (proposed; effective after complete reviewed domain-plan acceptance) | [Orphan Task Adoption](../orphan-task-adoption/README.md), OA3443-P1..5/V1..3 and actual global OA3443-G | All four stages: existing resource/host/venue/status resolution, appropriate controlling worktree creation OR reuse, explicit authorized stewardship charter, ordinary interactive inspection/steering for BOTH shapes; results, unknowns, real holders and independent task/workspace/provider/credential/service custody |
+
+The existing Remote ACP Host Ownership effort explicitly preserves this
+separate orphan UX. Its host retains #7237's relationship, writer/lifecycle
+and transfer boundaries; a retained conversation is not ownership of a peer
+process or workspace. The new Draft composes existing owners, not another
+connector, registry or allocator. Previously reported Session Host recovery,
+interactive embodiment and task/session adoption are finite partial credit,
+not the complete four-stage/two-shape outcome.
+
+All nine technical rows remain unchecked. #3443 stays OPEN during proposal
+review; actual complete receiving readback and any separate permitted
+tracking judgment follow review/merge. A missing controller, age or reachable
+handle authorizes neither takeover nor a replacement remote body. No
+implementation claim, remote inspection, worktree/controller launch,
+credential operation, provider acquisition, resource transfer or rollout
+occurs. See the [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md).
