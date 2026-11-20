@@ -1,0 +1,9 @@
+{
+  "comment": "Retain provider-root admission helper in installed runtime bootstrap",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
