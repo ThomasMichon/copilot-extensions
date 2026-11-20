@@ -417,11 +417,13 @@ their existing Portfolio, upgrade-recovery and PR-watch homes. Ten new
 technical rows remain unchecked; #13598's selected separate tracking and
 every actual source, implementation, native and resource owner remain.
 
-The [fixture-authority and cleanup receiving proposal](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
-maps four complete source contracts to the existing Portfolio and intake,
-with twenty new unchecked technical rows and nine independent retained
-outcomes. Normal reviewed complete delivery and separate source judgments
-remain; no prospective retirement or technical/resource credit is recorded.
+The historical [fixture-authority and cleanup receiving proposal](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+mapped four complete source contracts to the existing Portfolio and intake,
+with twenty unchecked technical rows and nine independent retained outcomes.
+Its then-pending reviewed delivery and source judgments are now recorded
+above as #13663's actual acceptance and four audited tracking retirements.
+Every technical row and actual owner remains; no repair or resource release
+is inferred from that administrative completion.
 
 The [registration and selected peer-launch unit](journal/2026/11.20-registration-and-peer-launch-completions.md)
 records two independently acknowledged finite source completions and nine
