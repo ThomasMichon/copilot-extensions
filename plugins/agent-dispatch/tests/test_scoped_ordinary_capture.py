@@ -117,10 +117,14 @@ def test_exact_winner_is_prospective_across_reconfiguration(
         assert not other.task_relationship_required
 
 
-@pytest.mark.parametrize("retry_stage", ["initial", "empty", "prepared", "prepared-before-start"])
+@pytest.mark.parametrize("retry_stage, disposition", [
+    ("initial", "source"), ("empty", "source"), ("prepared", "source"),
+    ("prepared-before-start", "source"), ("empty", "complete"), ("prepared", "complete"),
+    ("empty", "decline"), ("prepared", "decline"),
+])
 @pytest.mark.parametrize("ordinary", ["scoped"], indirect=True)
-def test_scoped_original_receipt_and_source_closeout_survive_drain(
-    local: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, retry_stage: str
+def test_scoped_original_receipt_and_disposition_survive_drain(
+    local: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, retry_stage: str, disposition: str
 ) -> None:
     from agent_dispatch import submission_readiness_observation
     from agent_dispatch.ordinary_capture import configured_capture
@@ -190,12 +194,6 @@ def test_scoped_original_receipt_and_source_closeout_survive_drain(
     original = queue.task_relationship(task.id)
     assert original["state"] == "bound"
     worker = "host-a/worktree-a"
-    if retry_stage != "prepared-before-start":
-        local.client.start_pool_task(
-            task.id, worker, owner_session_id="native-a", expected_generation=task.generation
-        )
-    report(queue, task.id, scope=RelevanceScope(task.repo, task.source, task.origin_ref))
-
     def ready(request: dict[str, Any], allocation: dict[str, Any], ref: str) -> dict[str, bool]:
         assert request["owner_session_id"] == "native-a"
         assert (allocation["reservation_key"], allocation["attempt"]) == (first.key, first.attempt)
@@ -203,6 +201,22 @@ def test_scoped_original_receipt_and_source_closeout_survive_drain(
         return {"ready": True}
 
     monkeypatch.setattr(submission_readiness_observation, "observe", ready)
+    if disposition == "decline":
+        binding = dict(worker_id=worker, native_id="native-a", generation=task.generation,
+                       startup_revision=reservation.startup_revision, reservation_key=key)
+        queue.prepare_pool_decline(task.id, **binding, exclusions=["pool:worker"], note="missing tool")
+        closed = queue.close_pool_decline(task.id, **binding)
+        assert closed.applied and closed.receipt["binding"] == binding
+        assert closed.relationship == {"state": "closed", "event_id": original["request"]["event_id"]}
+        return
+    if retry_stage != "prepared-before-start":
+        local.client.start_pool_task(task.id, worker, owner_session_id="native-a", expected_generation=task.generation)
+    if disposition == "complete":
+        queue.complete(task.id, worker, result={"outcome": "done"})
+        assert queue.get(task.id).status == "submitted"
+        assert queue.task_relationship(task.id)["state"] == "bound"
+        return
+    report(queue, task.id, scope=RelevanceScope(task.repo, task.source, task.origin_ref))
     result = queue.prepare_relevance_closeout(
         task.id,
         request_id="closed-source",

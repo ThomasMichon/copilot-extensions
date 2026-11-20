@@ -101,7 +101,10 @@ closed and its native is retired. A pending claim or retirement still blocks it.
 **Roll back prospectively.** With authority still `local`, change admission to
 `local-ordinary-drain`. This starts no new captures; it keeps the native writer
 available for existing obligations through closeout. Health reports that scope.
-Drain and reconcile before removing both settings or downgrading the owner.
+Before removing both settings or **downgrading**, finish tasks that still need
+reassignment or completion after a governed decline on the capable coordinator. Closing the old claim is not sufficient:
+older coordinators reinstall stricter execution and submission guards. They do
+not support unselected replacements for those tasks, even after retirement.
 The selective and drain values are distinct from `local-ordinary`: versions
 that only understand the all-pool opt-in reject them instead of broadening the
 rollout. Do not substitute `local-ordinary` to make an older version start.

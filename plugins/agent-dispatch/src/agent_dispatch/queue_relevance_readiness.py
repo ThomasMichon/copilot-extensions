@@ -8,6 +8,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
+from .managed_assignment_proof import creation_stamp, managed_allocation
 from .queue_records import SpawnState, Status, TaskError
 from .queue_relevance_delivery import closeout_owner_matches
 from .queue_task_relationships import _encoded, _matches_receipt
@@ -102,33 +103,7 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
     )
     if row["owner_session_id"] in retired:
         raise TaskError("relevance closeout native is retired; custody retained")
-    original_key = reservation["allocation_reservation_key"] or reservation["key"]
-    allocation = conn.execute(
-        "SELECT * FROM spawn_reservations WHERE key=?", (original_key,),
-    ).fetchone()
-    if original_key != request["reservation_key"]:
-        if reservation["driver"] != "ordinary-bridge":
-            raise TaskError("relevance closeout original allocation changed; custody retained")
-        from .ordinary_capture_proof import original_evidence
-        allocation = original_evidence(conn, request)
-    if (
-        allocation is None or allocation["task_id"] != task_id
-        or allocation["key"] != original_key
-        or allocation["worktree_ownership"] != "created"
-        or allocation["driver"] not in {"cli", "ordinary-bridge"}
-        or not allocation["reserved_by"]
-        or any(allocation[column] != request["workspace"][key] for column, key in (
-            ("execution_machine", "machine"), ("allocation_project", "project"),
-            ("worktree", "worktree"), ("worktree_path", "path"),
-            ("creation_nonce", "creation_nonce"),
-        ))
-        or any(reservation[column] != request["workspace"][key] for column, key in (
-            ("execution_machine", "machine"), ("allocation_project", "project"),
-            ("worktree", "worktree"), ("worktree_path", "path"),
-            ("creation_nonce", "creation_nonce"),
-        ))
-    ):
-        raise TaskError("relevance closeout original allocation changed; custody retained")
+    allocation = managed_allocation(conn, task_id, reservation, relationship)
     return {
         "arguments": arguments, "binding": binding, "relationship": relationship,
         "assignment_worker": event["worker"],
@@ -160,10 +135,7 @@ def prepare(
         observation = observe(
             {"workspace": request["workspace"], "task_id": task_id,
              "owner_session_id": arguments["native_id"]},
-            {"task_id": task_id, "reservation_key": allocation["key"],
-             "attempt": allocation["attempt"], "driver": allocation["driver"],
-             "supervisor": allocation["reserved_by"],
-             "creator_machine": allocation["execution_machine"], "ownership": "created"},
+            creation_stamp(allocation),
             original["relationship"]["receipt"]["ref"],
         )
         receipt = {

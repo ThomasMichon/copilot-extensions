@@ -11,12 +11,13 @@ import threading
 from typing import Any
 import weakref
 
+from .managed_assignment_proof import creation_stamp, managed_allocation
 from .queue_pool_decline import PoolDeclineCloseout, _QueueOwner, current_pool_decline
 from .queue_records import SpawnState, Status, TaskError
 from .task_obligations import _worktree_requirement
 
 
-def _state(owner: _QueueOwner, conn: sqlite3.Connection, task_id: str, binding: dict) -> dict:
+def _state(owner: _QueueOwner, conn: sqlite3.Connection, task_id: str, binding: dict[str, Any]) -> dict[str, Any]:
     task = owner._fetch(conn, task_id)
     decline = current_pool_decline(conn, task_id)
     row = conn.execute(
@@ -52,15 +53,16 @@ def _state(owner: _QueueOwner, conn: sqlite3.Connection, task_id: str, binding: 
         "task": row_task,
         "reservation": dict(row), "assignment": dict(assignment), "decline": asdict(decline),
         "relationship": relationship,
+        "allocation": managed_allocation(conn, task_id, row, relationship) if relationship else None,
     }
 
 
-def _relationship(conn: sqlite3.Connection, task_id: str, reservation: dict) -> dict | None:
+def _relationship(conn: sqlite3.Connection, task_id: str, reservation: dict[str, Any]) -> dict[str, Any] | None:
     """Select this allocation's retained task claim; unresolved claims retain custody."""
     from .queue_task_relationships import latest_relationship
     row = latest_relationship(conn, task_id)
-    value = json.loads(row["task_relationship"]) if row is not None else None
-    if value is not None and value["request"].get("reservation_key") == reservation["key"]:
+    value: dict[str, Any] | None = json.loads(row["task_relationship"]) if row is not None else None
+    if value is not None and row is not None and row["id"] == reservation["task_relationship_event_id"]:
         if value["state"] != "bound":
             raise TaskError("worker decline task relationship is unresolved; custody retained")
         return value
@@ -71,13 +73,13 @@ def _relationship(conn: sqlite3.Connection, task_id: str, reservation: dict) -> 
     return None
 
 
-_settle_locks: weakref.WeakValueDictionary[tuple[str, str], threading.Lock] = (
+_settle_locks: weakref.WeakValueDictionary[tuple[str, int], threading.Lock] = (
     weakref.WeakValueDictionary()
 )
 _settle_locks_guard = threading.Lock()
 
 
-def _settle_lock(task_id: str, event_id: str) -> threading.Lock:
+def _settle_lock(task_id: str, event_id: int) -> threading.Lock:
     with _settle_locks_guard:
         lock = _settle_locks.get((task_id, event_id))
         if lock is None:
@@ -86,15 +88,15 @@ def _settle_lock(task_id: str, event_id: str) -> threading.Lock:
         return lock
 
 
-def _closed(owner: _QueueOwner, task_id: str, event_id: str) -> bool:
+def _closed(owner: _QueueOwner, task_id: str, event_id: int) -> bool:
     current = owner.task_relationship(task_id, event_id=event_id)
     return current is not None and current["state"] == "closed"
 
 
 def _settle(
-    owner: _QueueOwner, task_id: str, receipt: dict, *,
+    owner: _QueueOwner, task_id: str, receipt: dict[str, Any], *,
     authority_guard: Callable[[], None] | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Settle only the exact claim this confirmed disposition retired, through its owner.
 
     The supervisor's closeout and the worker's settlement request race for the same
@@ -133,14 +135,14 @@ def _settle(
     return {"event_id": event_id, "state": settled["state"]}
 
 
-def _replay(conn: sqlite3.Connection, task_id: str, binding: dict) -> dict | None:
+def _replay(conn: sqlite3.Connection, task_id: str, binding: dict[str, Any]) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT receipt FROM pool_worker_decline_closeouts WHERE reservation_key=?",
         (binding["reservation_key"],),
     ).fetchone()
     if row is None:
         return None
-    receipt = json.loads(row["receipt"])
+    receipt: dict[str, Any] = json.loads(row["receipt"])
     if receipt["task_id"] != task_id or receipt["binding"] != binding:
         raise TaskError("worker decline closeout cannot replace its original receipt")
     return receipt
@@ -172,11 +174,18 @@ def close(
         original = _state(owner, conn, task_id, binding) if replay is None else None
     if replay is not None:
         return PoolDeclineCloseout(replay, False, _settle(owner, task_id, replay))
+    assert original is not None
     from .pool_decline_observation import observe
     relationship = original["relationship"]
-    observation = observe(
-        original["task"], original["reservation"], original["decline"], relationship,
-    )
+    if relationship is None:
+        observation = observe(original["task"], original["reservation"], original["decline"])
+    else:
+        from .submission_readiness_observation import observe as observe_ready
+        observation = observe_ready(
+            {"workspace": relationship["request"]["workspace"], "task_id": task_id,
+             "owner_session_id": binding["native_id"]},
+            creation_stamp(original["allocation"]), relationship["receipt"]["ref"],
+        )
     with owner._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         replay = _replay(conn, task_id, binding)
