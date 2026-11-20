@@ -344,11 +344,15 @@ class TaskRecoveryMixin:
                 raise TaskError("; ".join(reasons))
             task = self._fetch(conn, task_id)
             ts = self._now(now)
+            completion_origin = None
             if operation == "detach_agent":
                 if not task.owner and not task.owner_session_id and not any(
                     row["detached_at"] is None for row in captured["attachments"]
                 ):
                     raise TaskError("task has no agent assignment")
+                if task.status == Status.COMPLETED:
+                    from .completion_origins import capture_terminal_detachment
+                    completion_origin = capture_terminal_detachment(conn, task_id)
                 destination = Status.QUEUED if task.status in Status.OWNED else task.status
                 fields: dict[str, Any] = {
                     "owner": None, "owner_session_id": None, "lease_expires_at": None,
@@ -382,6 +386,8 @@ class TaskRecoveryMixin:
                 "operation": operation, "request_id": request_id, "replayed": False,
                 "task": {name: getattr(updated, name) for name in TASK_FIELDS},
             }
+            if completion_origin is not None:
+                result["completion_origin_v1"] = completion_origin
             conn.execute(
                 "INSERT INTO task_recovery_receipts VALUES (?,?,?,?)",
                 (task_id, request_id, request, _encoded(result)),
