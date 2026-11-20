@@ -5994,7 +5994,7 @@
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_source_domain_contract.py": "fc228626d6a7d08f1938ecd9c22d013d5486211c1dbef000dfae9be3625ca474",
-        "plugins/agent-index/src/agent_index/store/source_layout.py": "d631754268c430a9c262585eafbcf41758478cff52ea487314403995afcc2ae7",
+        "plugins/agent-index/src/agent_index/store/source_layout.py": "fdcf05c52d27e8cde9337c8de6ff93dc94908df94eaf041719430ae7d307443e",
         "tools/promotion_unit_tests/test_component_manifest_contract.py": "81edd6f0bba4a9810a1126380c9bbc71754de9fb6ecf7dff41fd57505eef17a8",
         "plugins/agent-index/src/agent_index/indexing/component_manifest.py": "15185181f200ec824d25f091cbe133e23446f6741f5ac85646706ac5d8f11830",
         "tools/promotion_unit_tests/test_point_hint_contract.py": "730bf4cbea18d6f75d0b13c49df91848e5afe2ca6c4301f622f3989b4ffb0de6",
