@@ -66,8 +66,11 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
 ) -> None:
     entered, observe, failed = threading.Event(), threading.Event(), threading.Event()
     publishing, publish_allowed = threading.Event(), threading.Event()
+    published = threading.Event()
     callback_entries: list[dict[str, Any]] = []
+    callback_publication: list[bool] = []
     enqueued: list[dict[str, Any]] = []
+    enqueue_publication: list[bool] = []
     committed: list[list[dict[str, Any]]] = []
     forbidden_rewrites: list[list[dict[str, Any]]] = []
     delivered: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -92,6 +95,7 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
             if not publish_allowed.wait(2):
                 raise AssertionError("expiry publication fixture was not released")
             original_write(entries)
+            published.set()
             committed.append(copy.deepcopy(entries))
             if failure == "uncertain":
                 failed.set()
@@ -103,6 +107,7 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
         original_write(entries)
 
     def notify(event: FiredEvent) -> int:
+        callback_publication.append(published.is_set())
         payload = event_payload(event)
         callback_entries.append(payload)
         delivered.append((payload, read_subscriptions_state()))
@@ -116,6 +121,9 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
     try:
         daemon.compute("register", registration)
         assert entered.wait(2)
+        with daemon._pollers_lock:
+            pollers = tuple(daemon._native_pollers)
+        assert len(pollers) == 1
         paths = watch_state_paths(tmp_path)
         original = paths.legacy_subscriptions.read_bytes()
         subscriber = daemon._registry.subscriber(WatchKey("example/project", 1), "one")
@@ -123,6 +131,7 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
         legacy = daemon._deliveries.legacy
 
         def enqueue(event: FiredEvent) -> None:
+            enqueue_publication.append(published.is_set())
             enqueued.append(event_payload(event))
             legacy(event)
 
@@ -141,8 +150,12 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
         publish_allowed.set()
         wait(lambda: len(delivered) == 1 and not daemon.status()["subscribers"])
         wait(lambda: not daemon._pollers and not daemon.status()["in_flight"])
+        wait(lambda: all(not thread.is_alive() for thread in pollers))
         payload, durable_at_delivery = delivered[0]
         assert callback_entries == [payload] and forbidden_rewrites == []
+        assert callback_publication == [True]
+        assert enqueue_publication == ([] if acknowledged else [True])
+        assert not daemon._shutdown_event.is_set()
         assert len(committed) == 1
         assert payload["timed_out"] is True and payload["transitions"] == []
         assert "pr_state" not in payload
