@@ -1316,6 +1316,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [changed-delivery and finite-defect unit](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
+records #13643's actual reviewed delivery/parent return and acknowledged
+whole #13491/#13585 fulfillment through existing merged/current source.
+Eleven whole originals, seven delivery descriptions and a bounded reference
+delta retain nine unfinished contracts plus #10873's metadata-only continuation.
+Local author-reported Windows evidence, exact-head hosted qualification and
+source correspondence remain distinct from campaign execution or rollout.
+All incumbent check states and owners remain; the complete 891-open census
+is 162 above fixed 729.
+
 The [three-request source-compatibility unit](journal/2026/11.20-source-compatibility-fulfillment.md)
 records actual #13632 delivery/parent return and acknowledged whole #12819,
 #12852 and #12773 fulfillment through their original contributors' merged

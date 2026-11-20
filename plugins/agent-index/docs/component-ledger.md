@@ -456,6 +456,28 @@ dequeue, worker-generation selection and execution advertisement are unchanged.
 No new CLI syntax, serialized configuration, service selector, producer or
 automatic v2 scheduling is enabled.
 
+### Explicit async lifetime owner
+
+`indexing.point_worker_host.PointWorkerHost` adapts the explicit dispatch above
+to one event loop. Enter its single-use async context inside the caller-owned
+connector/client lifetime, then `await host.run(task_id)`. It offloads the
+complete synchronous dispatch, including durable verification, and joins it
+before propagating cancellation. Context exit and `stop()` close admission and
+join the same operation even if repeatedly cancelled; they do not terminate a
+thread or synthesize cancelled queue status.
+
+Only one explicit dispatch is admitted at a time. `drain(timeout=...)` pauses
+admission and waits without cancelling the worker; it returns false on timeout.
+Cancelling the drain observer also leaves the active operation owned.
+`resume()` reopens paused admission, but never a stopped host. Clients must
+remain alive until context exit or stop settles, not merely until drain times
+out. There is no bounded thread-termination guarantee.
+
+This Python-only owner is not yet attached to the service or `TaskRunner`.
+Their detached-worker stop/drain semantics remain unchanged and do not qualify
+in-process cutover. No automatic task selection, shared-queue coordination,
+ordinary v2 capability, process adoption or runtime activation is added.
+
 ### Sealed native publication suffix
 
 After qualifying all selected native content, routed vectors, cleanup and
