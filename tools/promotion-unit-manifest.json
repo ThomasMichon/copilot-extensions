@@ -6253,9 +6253,9 @@
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
-        "tools/promotion_unit_tests/test_point_completion_contract.py": "707b487e91d6ee7840526d8ce9380182e439fe75b5eae42c83a7d7de87710861",
+        "tools/promotion_unit_tests/test_point_completion_contract.py": "a6ccb6cf2fc76b2a83c8a6e35b1f370be4c619f413b18b873479eacc29a03a17",
         "plugins/agent-index/src/agent_index/indexing/point_worker.py": "ff8f10891dc4217112b5c45e27419c8ce48722bb193f08ef8b2809910b62e9e4",
-        "plugins/agent-index/src/agent_index/indexing/point_completion.py": "89f43fbac46cd52c53543da8e901bd98c45a47b81962de5aa7bf63ef92126e91",
+        "plugins/agent-index/src/agent_index/indexing/point_completion.py": "c15c00e5747f467ca409c01641602153e6c3a55aef1ecf12d83e6af0cde0754d",
         "plugins/agent-index/src/agent_index/indexing/point_claim.py": "02cbe2ac90f35fbe6edaec731f8995bab47c73d79ac36c23bc7433c62262c90c",
         "plugins/agent-index/src/agent_index/store/file_projection.py": "8ad033d3e78f58cb701f9e7befd572683475c025e434e82e9c27ad16185c6d50",
         "tools/promotion_unit_tests/test_point_reconciliation_contract.py": "52028a2bc8ade72938fbb48f9fdeffa32ef0efc199be7ff764075487122fb233",

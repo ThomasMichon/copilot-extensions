@@ -7730,10 +7730,20 @@ new and partially acquired claims, retained-body reuse with fresh principal/
 query checks, eligibility loss during embedding and after publication,
 cancellation, trailing claims, completed retry without provider access,
 writer/owner exclusion, pre-acquisition native-scope refusal, target limits and
-the shared retry cap. Select it with
+the shared retry cap. Fresh entirely older claims, including an applied comment
+tombstone and multiple versions/correlations, complete after two fixture
+eligibility requests with zero body reads, embeddings, prepared rows, native
+table-version changes or polling changes. Completed reopen retries requalify
+locally and refuse a mixed checkpoint restore. Principal/query/checkpoint/
+coverage/policy drift refuses; equal versions still acquire both bodies and
+reject conflicting canonical content, and mixed older/equal claims still need
+whole-claim acquisition. Select it with
 `--test-file tests/test_azure_devops_point_worker.py --allow-explicit-tiers`;
-it can share one bounded runner with the existing named-reader and retained-worker
-packets. Four actor-free cases in `test_point_completion_contract.py` cover the
+run it separately from the other native packets to retain the bounded deadline.
+The existing completion-contract units also cover higher-only selection,
+qualified acknowledgement/retry and the distinct strict outcome encoding,
+without adding unit nodes or native effects. Four actor-free cases in
+`test_point_completion_contract.py` cover the
 optional qualifier's three phase boundaries and completed-retry bypass. These
 are synthetic-provider/local-native evidence, not live API, native Windows,
 ordinary v2 runner, full event delivery or consumer-scale qualification.

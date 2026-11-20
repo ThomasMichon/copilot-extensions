@@ -286,7 +286,30 @@ pending retirement. The databases use separate WALs; this is deliberately not
 described as a crash-atomic cross-database commit. The outcome retains claim and
 parent digests/incarnation, scope, policy, native domain and per-component
 version/fingerprint/deletion summaries, not copies of acquired bodies.
-Completed v2 outcomes reject later updates, including from older status writers.
+Completed point-claim outcomes reject later updates, including from older status writers.
+
+The additive `complete_higher_point_claim(claim, components=..., scope=...,
+paths=..., tasks=..., ledger=..., max_rows=...)` selects **only an entirely
+superseded claim with no pending acquisition**. The caller supplies the adapter's
+exact typed component mapping after fresh eligibility checks, under its source
+writer. Every applied component must be strictly newer than the greatest
+claimed version of that logical identity, with matching scope and rendering
+semantics, and pass the same native/checkpoint/routed-coverage qualification.
+Missing, equal or newer requested versions return `None` for ordinary
+acquisition; inconsistent or uncertain evidence refuses. It neither creates
+nor retires pending/prepared work and never advances polling.
+
+This no-acquisition path retains `point_completion` outcome version 2 with
+`mode: higher-covered`. Its components describe the **actual applied higher
+versions and their fingerprints**, not invented fingerprints for unread older
+bodies. Claim, scope, policy and native domain remain bound; pending digest and
+incarnation fields are absent because no acquisition occurred. The existing
+`complete_point_claim` requalifies this summary on completed retries, including
+exact canonical equality with the recorded higher version or still-higher
+coverage. Version-1 acquired outcomes retain their encoding and behavior.
+Older completion readers reject the new outcome rather than reinterpret it;
+rollback cannot requalify that completed retry until a compatible reader is
+selected. This adds no execution capability or independently deployed wire form.
 
 Only the owning transaction temporarily removes its exact legacy status or
 pending-delete fence, performs the qualified transition, then reinstalls the
@@ -372,6 +395,14 @@ and acknowledgement, fresh principal/query-union/definition checks must still
 match the entire claim binding. Query exit, changed principal/context,
 ambiguous responses, unsupported identities/versions and cancellation refuse,
 without inferring deletion or invoking broad/legacy acquisition.
+
+For a fresh claim with no pending parent, the caller first tries the all-target
+higher-covered completion above using the same physical/semantic mapping as the
+named reader. A qualifying superseded claim needs only the initial per-item
+eligibility checks and local native qualification: no body acquisition,
+chunking, embedding or native application. Equal versions still acquire and
+compare canonical content; mixed older/equal/missing claims retain whole-claim
+acquisition. Existing pending work always takes its retained recovery path.
 
 For U distinct items and M missing targets the upper bound is 132U + 67M logical
 provider requests, each under the existing maximum of five attempts. This uses
