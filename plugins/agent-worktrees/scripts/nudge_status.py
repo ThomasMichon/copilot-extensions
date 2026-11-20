@@ -66,9 +66,11 @@ import re
 import sys
 import time
 import uuid
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 _DEFAULT_CALLS = 25
 _DEFAULT_MINUTES = 20
@@ -85,7 +87,7 @@ def _truthy_off(val: str | None) -> bool:
     return (val or "").strip().lower() in _OFF_VALUES
 
 
-def _int_env(env, name: str, default: int) -> int:
+def _int_env(env: Mapping[str, Any], name: str, default: int) -> int:
     try:
         v = int(str(env.get(name, "")).strip())
         return v if v > 0 else default
@@ -134,7 +136,7 @@ def _read_record_fields(yaml_path: Path) -> tuple[str | None, str | None]:
     except OSError:
         return None, None
 
-    def _clean(m):
+    def _clean(m: re.Match[str] | None) -> str | None:
         if not m:
             return None
         v = m.group(1).strip().strip("'\"")
@@ -146,7 +148,7 @@ def _read_record_fields(yaml_path: Path) -> tuple[str | None, str | None]:
     return note, (state.lower() if state else None)
 
 
-def _note_identity(value):
+def _note_identity(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     try:
@@ -159,14 +161,16 @@ def _note_identity(value):
 
 
 @contextmanager
-def _counter_lock(aw: Path, worktree_id: str, deadline=None):
+def _counter_lock(
+    aw: Path, worktree_id: str, deadline: float | None = None,
+) -> Iterator[bool]:
     """Share one bounded byte-range transaction with the shell read consumer."""
     with _byte_lock(aw / "nudge-state" / f"{worktree_id}.lock", deadline) as acquired:
         yield acquired
 
 
 @contextmanager
-def _byte_lock(path: Path, deadline=None):
+def _byte_lock(path: Path, deadline: float | None = None) -> Iterator[bool]:
     if deadline is not None and time.time() >= deadline:
         yield False
         return
@@ -184,11 +188,11 @@ def _byte_lock(path: Path, deadline=None):
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined, unused-ignore]
                 else:
                     import fcntl
 
-                    fcntl.lockf(stream, fcntl.LOCK_EX | fcntl.LOCK_NB, 1)
+                    fcntl.lockf(stream, fcntl.LOCK_EX | fcntl.LOCK_NB, 1)  # type: ignore[attr-defined, unused-ignore]
                 acquired = True
                 break
             except OSError:
@@ -205,9 +209,9 @@ def _byte_lock(path: Path, deadline=None):
                 if acquired:
                     stream.seek(0)
                     if os.name == "nt":
-                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined, unused-ignore]
                     else:
-                        fcntl.lockf(stream, fcntl.LOCK_UN, 1)
+                        fcntl.lockf(stream, fcntl.LOCK_UN, 1)  # type: ignore[attr-defined, unused-ignore]
             finally:
                 stream.close()
 
@@ -217,12 +221,15 @@ def _nudge_text(calls: int, minutes: int) -> str:
         f"[agent-worktrees] It's been {calls} tool call(s) / ~{minutes} min since "
         "this worktree's Picker disposition was last written, and the focus or "
         "state may have moved. If so, refresh it: `agent-worktrees status "
-        "--activity \"<current sub-task>\"` most often (pass this whenever the "
-        "immediate focus shifts); add `--summary \"<updated recap>\"` only "
-        "occasionally, to fold newly completed work into the existing summary; "
-        "add `--title \"<short headline>\"` only rarely, when the worktree's "
-        "main theme genuinely changed. Keep `--follow-up`/`--resolved` "
-        "accurate. If nothing consequential changed, ignore this."
+        "--activity \"<current focus>\"` most often (whenever the immediate "
+        "focus shifts, or you block or start waiting); add `--summary "
+        "\"<updated recap>\"` occasionally, to fold newly completed work into "
+        "the recap. `--title \"<goal or role>\"` names the worktree's "
+        "persistent goal or standing role, not the current task: set it as "
+        "soon as that is clear (replacing an auto-derived first-message "
+        "title) and revise it only when the charter, root goal or role "
+        "changes. Keep `--follow-up`/`--resolved` accurate. If nothing "
+        "consequential changed, ignore this."
     )
 
 
@@ -282,7 +289,9 @@ NUDGE_ENV_KEYS = (
 )
 
 
-def forwarded_env(payload: dict, base=None) -> dict | None:
+def forwarded_env(
+    payload: dict[str, Any], base: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
     """Return the session's forwarded nudge switches over ``base``, else None."""
     metadata = payload.get("_agentWorktrees")
     forwarded = metadata.get("environment") if isinstance(metadata, dict) else None
@@ -315,7 +324,7 @@ def read_agenda_policy(aw: Path, worktree_id: str) -> str | None:
     return policy if isinstance(policy, str) else None
 
 
-def _agenda_nudge(aw, yaml_path, worktree_id) -> str | None:
+def _agenda_nudge(aw: Path, yaml_path: Path, worktree_id: str) -> str | None:
     if _read_record_fields(yaml_path)[1] in _TERMINAL_STATES:
         return None
     if read_agenda_policy(aw, worktree_id) != _AGENDA_EXPECTED:
@@ -340,7 +349,7 @@ def _worker_definitely_gone(owner: object) -> bool:
             import ctypes
             from ctypes import wintypes
 
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined, unused-ignore]
             kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             kernel.OpenProcess.restype = wintypes.HANDLE
             kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
@@ -349,9 +358,9 @@ def _worker_definitely_gone(owner: object) -> bool:
             kernel.CloseHandle.restype = wintypes.BOOL
             handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE, no mutation rights
             if not handle:
-                return ctypes.get_last_error() == 87  # absent PID, not access denial
+                return bool(ctypes.get_last_error() == 87)  # type: ignore[attr-defined, unused-ignore]  # absent PID, not access denial
             try:
-                return kernel.WaitForSingleObject(handle, 0) == 0
+                return bool(kernel.WaitForSingleObject(handle, 0) == 0)
             finally:
                 kernel.CloseHandle(handle)
         os.kill(pid, 0)
@@ -409,7 +418,7 @@ def _consume_late_watch(path: Path, snapshot: bytes) -> bool:
             return False
 
 
-def _late_guidance_notice(payload: dict, home: Path) -> str | None:
+def _late_guidance_notice(payload: dict[str, Any], home: Path) -> str | None:
     session_id = payload.get("sessionId")
     if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
         return None
@@ -491,8 +500,10 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
 
 
 def decide(
-    payload: dict, *, env=None, home=None, now: float | None = None,
-    tracking_record=_UNSET, deadline: float | None = None, tracking_lookup=None,
+    payload: dict[str, Any], *, env: Mapping[str, str] | None = None,
+    home: str | Path | None = None, now: float | None = None,
+    tracking_record: Any = _UNSET, deadline: float | None = None,
+    tracking_lookup: Callable[[str, Path], tuple[str, Path] | None] | None = None,
 ) -> str | None:
     """Return the ``additionalContext`` reminder string, or None for a no-op.
 
@@ -539,7 +550,10 @@ def decide(
     return text
 
 
-def _agenda_tick(aw, worktree_id, env, now, deadline) -> bool:
+def _agenda_tick(
+    aw: Path, worktree_id: str, env: Mapping[str, str], now: float,
+    deadline: float | None,
+) -> bool:
     """Advance the agenda window; True when a policy/lane check is due."""
     if _truthy_off(env.get("AGENT_WORKTREES_AGENDA_NUDGE")):
         return False
@@ -572,7 +586,10 @@ def _agenda_tick(aw, worktree_id, env, now, deadline) -> bool:
     return due
 
 
-def _update_counter(aw, worktree_id, yaml_path, env, now, deadline):
+def _update_counter(
+    aw: Path, worktree_id: str, yaml_path: Path, env: Mapping[str, str],
+    now: float, deadline: float | None,
+) -> str | None:
     note_at, state = _read_record_fields(yaml_path)
     note_at = _note_identity(note_at)
     if state in _TERMINAL_STATES:
@@ -590,7 +607,7 @@ def _update_counter(aw, worktree_id, yaml_path, env, now, deadline):
 
     state_dir = aw / "nudge-state"
     sidecar = state_dir / f"{worktree_id}.json"
-    data: dict = {}
+    data: dict[str, Any] = {}
     try:
         if sidecar.is_file():
             data = json.loads(sidecar.read_text("utf-8")) or {}
