@@ -164,6 +164,23 @@ before replacement and retain store-before-checkpoint recovery. Raw indexed
 reads and native effects are selected-ID bounded; table/fragment metadata
 inspection is not constant work or proof of the large-corpus acceptance gate.
 
+`store.file_projection.require_file_projection_capacity` accepts an optional
+exact point scope only under its already-owned source writer. It qualifies the
+receipt-bound canonical/model inventory and optional ordering ledger through
+the same native owner, without trusting or changing caller caches. Replacements
+must all belong to the selected family; their nonnegative row counts replace
+that family's existing occupancy at each path. Other families at that path
+remain in the final count. A deletion contributes zero replacement rows.
+The prepared zero-tail `file_path` index is required even for an empty replacement
+set. Selected paths bound current candidates across all families before
+calculating final occupancy, including for deletions.
+Each queried path and its projected final count must fit the
+positive integer row budget. This read-only preflight requires no reserved
+mutation segment and performs no preparation, row mutation or ledger write.
+The default legacy path is unchanged. The composing selected application must
+run this preflight inside its writer before effects; this helper does not
+enable that application or establish provider ordering.
+
 `store.point_reconciliation.reconcile_point_file` separately provides bounded
 stale-ID cleanup under an already-owned exact point writer. It reuses the native
 table qualification and raw file projection above through task-local owners;

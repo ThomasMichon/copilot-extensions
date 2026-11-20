@@ -1,0 +1,9 @@
+{
+  "comment": "Preflight selected final-path capacity through qualified canonical owners without enabling application",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
