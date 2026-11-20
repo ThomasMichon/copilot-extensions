@@ -164,6 +164,32 @@ before replacement and retain store-before-checkpoint recovery. Raw indexed
 reads and native effects are selected-ID bounded; table/fragment metadata
 inspection is not constant work or proof of the large-corpus acceptance gate.
 
+`store.point_reconciliation.reconcile_point_file` separately provides bounded
+stale-ID cleanup under an already-owned exact point writer. It reuses the native
+table qualification and raw file projection above through task-local owners;
+caller caches are neither trusted nor changed. Its positive integer row budget
+caps both same-path candidates across families and the union of current and
+explicitly retained IDs. Kept and retained IDs are unique tuples within that
+budget. Known vector-only remnants can be removed, but unknown orphans are not
+discovered. A retained ID belonging to another canonical point or incompatible
+vector provenance refuses the operation.
+
+All bound models, raw points and prepared zero-tail indices are checked before
+effects. Every affected index needs a reserved segment; an unchanged table
+does not. Only observed stale rows are deleted, from each bound vector table
+before canonical content, through the existing bucket mutation owner. The
+return value counts distinct IDs that had rows removed, not rows across models.
+Empty or fully kept points perform no native mutation. Unselected paths,
+families and models and the ordering ledger remain unchanged. A caught native
+failure latches the outer writer dirty and uncertain, even after an earlier
+model deletion succeeded.
+
+This cleanup does not compare provider versions or publish applied versions,
+embedding coverage, indices/FTS, path checkpoints or claim completion. Its caller
+must establish provider ordering before **any** replacement or deletion, and
+retain store-before-checkpoint recovery. Ordinary reconciliation remains
+unsupported on a point domain.
+
 Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live

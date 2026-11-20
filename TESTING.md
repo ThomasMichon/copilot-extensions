@@ -7620,6 +7620,17 @@ checks indexed file/content/vector plans select only the one requested point.
 It is not part of required actor-free unit admission and does not qualify an
 ordered receiver, durable tombstones, backup recovery or native Windows execution.
 
+`plugins/agent-index/tests/test_point_reconciliation.py` separately exercises
+selected stale-ID cleanup against real cold canonical/two-model stores and a
+nonempty component ledger. It checks indexed bounded raw points, poisoned
+caller caches, known vector-only remnants, preserved neighboring paths/families,
+byte-stable empty/kept calls, all-model preflight and caught native failure
+uncertainty. The required actor-free control in
+`tools/promotion_unit_tests/test_point_reconciliation_contract.py` substitutes
+native owners while executing cleanup composition, including a saturated later
+model and vector-before-canonical effects. Neither packet qualifies provider
+ordering, complete point application, a live directory or native Windows.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
