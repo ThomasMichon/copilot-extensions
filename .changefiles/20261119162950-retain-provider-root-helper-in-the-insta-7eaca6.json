@@ -1,0 +1,9 @@
+{
+  "comment": "Retain provider-root helper in the installed Worktrees settlement bootstrap",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
