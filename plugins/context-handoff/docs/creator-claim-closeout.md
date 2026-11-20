@@ -17,6 +17,10 @@ nonce; replacing its kind or reactivating a released claim does not.
 Ordinary full-record saves retain a newer task-claim incarnation and its
 disposition, including when a stale snapshot omits it. Explicit native removal
 and reserved claim handoff retain their existing locked transactions.
+Terminal nonce-bearing entries are retained until explicit native removal;
+previously read snapshots cannot recreate a removed entry. Fresh kind changes
+or reactivation retain a new incarnation even when the replacement is no
+longer a task. Changing the kind never clears its existing generation evidence.
 
 Context-handoff records that binding once in the existing Dispatch task row's
 `handoff_claim` metadata, including when completion raced ahead of journaling.

@@ -279,7 +279,7 @@ class ResourceClaim:
     claim_nonce: str = ""
 
     def __post_init__(self) -> None:
-        self._observed_incarnation = (self.kind, self.claim_nonce, self.state)
+        self._observed_incarnation: tuple[str, str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Full wire shape, with producer metadata absent for legacy claims."""
@@ -557,8 +557,8 @@ def add_resource_claim(
             raise ValueError(
                 f"claim {claim.ref} is reserved by handoff bundle {reservation}"
             )
-        if claim.kind == "task":
-            if existing.kind != "task" or existing.state != "active" or not existing.claim_nonce:
+        if claim.kind == "task" or existing.claim_nonce:
+            if existing.kind != claim.kind or existing.state != "active" or not existing.claim_nonce:
                 existing.claim_nonce = secrets.token_hex(16)
         else:
             existing.claim_nonce = ""

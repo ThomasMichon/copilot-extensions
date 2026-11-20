@@ -6,6 +6,7 @@ import base64
 import copy
 import json
 import re
+import secrets
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -278,10 +279,13 @@ def task_claim_removal(record: WorktreeRecord, ref: str, path: Path) -> Iterator
 def _preserve_task_incarnations(
     record: WorktreeRecord, current: WorktreeRecord | None, path: Path,
 ) -> None:
-    authoritative = {
+    current_by_ref = {
         claim.ref: claim for claim in current.resources
-        if claim.claim_nonce and not claim.has_producer and not claim.handoff_bundle
     } if current is not None else {}
+    authoritative = {
+        ref: claim for ref, claim in current_by_ref.items()
+        if claim.claim_nonce and not claim.has_producer and not claim.handoff_bundle
+    }
     merged = []
     for claim in record.resources:
         prior = authoritative.pop(claim.ref, None)
@@ -293,12 +297,22 @@ def _preserve_task_incarnations(
                 retained = copy.deepcopy(prior)
                 retained.note = claim.note
                 claim = retained
+            if prior.kind != claim.kind or (prior.state != "active" and claim.state == "active"):
+                if not claim.claim_nonce or claim.claim_nonce == prior.claim_nonce:
+                    claim.claim_nonce = secrets.token_hex(16)
+            elif not claim.claim_nonce:
+                claim.claim_nonce = prior.claim_nonce
+        elif (
+            current is not None and claim.claim_nonce
+            and claim._observed_incarnation is not None and claim.ref not in current_by_ref
+        ):
+            continue
         merged.append(claim)
     for prior in authoritative.values():
         expected = (
             str(path.resolve()), prior.ref, (prior.kind, prior.claim_nonce, prior.state),
         )
-        if prior.is_live and expected not in _task_removals.get():
+        if expected not in _task_removals.get():
             merged.append(copy.deepcopy(prior))
     for claim in merged:
         claim._observed_incarnation = (claim.kind, claim.claim_nonce, claim.state)

@@ -189,6 +189,74 @@ def test_stale_record_cannot_restore_an_obsolete_task_claim(
     assert _record(owners, "creator").resources == []
 
 
+@pytest.mark.parametrize("explicit_removal", [False, True])
+def test_terminal_task_claim_cannot_be_resurrected_by_two_stale_saves(
+    owners: dict[str, Any], explicit_removal: bool,
+) -> None:
+    binding = _journal_binding(owners)
+    stale = _record(owners, "creator")
+    omitted = _record(owners, "creator")
+    omitted.resources = []
+    assert _settle_binding(owners, binding)[0] == 0
+    if explicit_removal:
+        assert _claims("release", binding["ref"], "--worktree", "shared-id", "--remove")[0] == 0
+    else:
+        tracking.save_record(omitted)
+    tracking.save_record(stale)
+    current = _record(owners, "creator")
+    if explicit_removal:
+        assert current.resources == []
+        replacement = _journal_binding(owners)
+        assert replacement["claim_nonce"] != binding["claim_nonce"]
+        assert _settle_binding(owners, replacement)[0] == 0
+    else:
+        assert len(current.resources) == 1
+        assert current.resources[0].claim_nonce == binding["claim_nonce"]
+        assert current.resources[0].state == "released"
+    assert _assert_obligations_settled(_record(owners, "creator"), "shared-id", abandon=False)
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_stale_task_binding_cannot_replace_a_workdir_claim(
+    owners: dict[str, Any], native: bool,
+) -> None:
+    binding = _journal_binding(owners)
+    stale = _record(owners, "creator")
+    if native:
+        assert _claims("add", "workdir", binding["ref"], "--worktree", "shared-id")[0] == 0
+    else:
+        fresh = _record(owners, "creator")
+        fresh.resources[0].kind = "workdir"
+        fresh.resources[0].claim_nonce = ""
+        tracking.save_record(fresh)
+    replacement = _record(owners, "creator").resources[0]
+    tracking.save_record(stale)
+    current = _record(owners, "creator")
+    assert current.resources[0].kind == "workdir"
+    assert current.resources[0].claim_nonce == replacement.claim_nonce
+    assert replacement.claim_nonce and replacement.claim_nonce != binding["claim_nonce"]
+    path = current.yaml_path
+    assert path is not None
+    before = path.read_bytes()
+    assert _settle_binding(owners, binding)[0] != 0
+    assert path.read_bytes() == before
+    assert not _assert_obligations_settled(current, "shared-id", abandon=False)
+
+
+def test_fresh_full_record_reactivation_rotates_the_task_incarnation(
+    owners: dict[str, Any],
+) -> None:
+    binding = _journal_binding(owners)
+    assert _settle_binding(owners, binding)[0] == 0
+    fresh = _record(owners, "creator")
+    fresh.resources[0].state = "active"
+    tracking.save_record(fresh)
+    current = _record(owners, "creator")
+    assert current.resources[0].state == "active"
+    assert current.resources[0].claim_nonce != binding["claim_nonce"]
+    assert _settle_binding(owners, binding)[0] != 0
+
+
 @pytest.mark.parametrize("replacement", ["record", "claim", "kind"])
 def test_bound_settlement_refuses_replaced_identity(
     owners: dict[str, Any], replacement: str,
