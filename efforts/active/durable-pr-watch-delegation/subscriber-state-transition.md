@@ -17,9 +17,11 @@ control-plane entry. The internal Linux source path, merged in #13594, adds phys
 sealing/recovery under the same writer. It still adds no authority selection,
 ordinary entry integration or qualification of an actual boot crossing. The follow-on
 Windows source slice merged in #13608 implements no-delete-sharing sealing/
-recovery below. Contained native Windows tests now cover abrupt current-controller
+recovery below. Contained native Windows tests, merged in #13612, cover abrupt current-controller
 exit at six transition boundaries and cold recovery without import or effects.
-Complete historical-runtime qualification remains open.
+The selected historical source-closure packet below qualifies three legacy-home
+families on Windows. Released installations, governed entry and complete
+supported-window qualification remain open.
 Native Linux exchange/interruption qualification remains open.
 
 **Scope:** Historical-root admission, one recoverable state authority and
@@ -61,6 +63,38 @@ the barrier lease afterward, with no retained-inode acquisition, fetch,
 notification, isolated state or activation. This proves those current-owner
 process-exit boundaries, not complete historical startup-family coverage,
 host power-loss durability or the POSIX boot boundary.
+
+The explicit historical packet, merged in #13615, archives complete source closures from
+`24b79724ac81d65f80a50507f6a7bef5b5dc1a33`,
+`a936d3b39f4d069b4e77ed11cf8e0e59bebbcd2b` and
+`3c62c9442c5944640d2c13385d7ff00db614c1aa`, including their declared
+standard-library-only local dependencies. Isolated children disable site and
+environment import paths and verify loaded package locations; they do not
+substitute current unrelated modules. For each family, a delayed actual
+historical lease open blocks the first move until normal release, and actual
+legacy-home `serve` and `restart` refuse the installed directory at the exact
+historical lock pathname. A cold historical lease that creates a file in the
+move gap blocks sealing and recovery; both files remain intact after its normal
+release, without acquiring either historical inode during recovery.
+Subprocess and socket effects are prohibited inside those historical children.
+Missing local source commits explicitly skip rather than fetching or falling
+back to current code. This qualifies those pinned legacy-home source entries,
+not released installers, governed installation/adoption, every supported
+historical release or POSIX native behavior.
+
+A follow-on packet also selects the actual promoted payloads
+`9d11a84f794506956dbaeb8341578a0b0f13b899` (`0.3.1-dev1`),
+`c2ee1877fb55f965c141f400a31bc5e95dbebe6b` (`0.3.2-dev1`) and
+`5ee1468f15967fd6e76a0be08ee3dc69da2551bb` (`0.3.16-dev1`).
+These archive the libraries actually bundled under each promoted plugin,
+not the repository-root development libraries. The children verify the
+observed package version as well as loaded source locations. Both scenarios
+pass for all six snapshots: twelve historical cases under unchanged runner
+limits. The first two promotions differ from their development anchors only
+in the package version stamp; the third contains substantive source changes
+and is qualified independently. These versions identify fixture inputs, not
+a support floor or version-equality negotiation rule. Installer, governed
+adoption, complete-window and POSIX qualifications remain separate.
 
 POSIX rename does not revoke a descriptor for the original inode. A delayed
 historical acquisition can consequently succeed after the incumbent releases

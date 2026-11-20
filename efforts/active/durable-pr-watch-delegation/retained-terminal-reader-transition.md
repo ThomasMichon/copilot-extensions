@@ -123,8 +123,8 @@ probe followed by a legacy provisioning fallback.
 
 ## Serial delivery and acceptance
 
-- [ ] Review and then implement the [populated live-cache refinement](#populated-live-cache-refinement)
-  before relaxing the bootstrap refusal. This does not admit operation recovery.
+- [ ] Complete the [populated live-cache refinement](#populated-live-cache-refinement)
+  with durable generation association; the metadata-only leaf does not close it.
 - [x] Review this contract before implementing the command or changing retained
   host adoption (#13488; current-head Copilot approval and required green CI).
 - [x] Implement the local existing-owner transition without changing baseline
@@ -148,11 +148,17 @@ probe followed by a legacy provisioning fallback.
 
 ## Populated live-cache refinement
 
-This is the next **agent-recommended, review-first** source leaf under #13487,
-not implemented behavior or permission to migrate a running owner. The bootstrap
-implementation merged in #13495. Its positive populated-volume successor first
-preserves ordinary retained cache reads; active/compact-operation recovery and
-richer watch predicates remain separate T3 work.
+The reviewed intent under #13487/#13560 remains open. The bootstrap
+implementation merged in #13495. Implementation review proved that the baseline
+journal cannot durably associate a legacy generation with an observation:
+distinct same-second acquisitions can share its rounded normalized projection.
+Positive generation migration therefore remains unimplemented; do not infer
+bindings or restore the unsafe projection-equality path.
+
+The finite source leaf is narrowed to retained journal metadata and cache
+misses, not generation content. This preserves useful original state without
+claiming the positive populated-volume outcome. Active/compact-operation
+recovery and richer predicates remain separate T3 work.
 
 ### Compatibility boundary
 
@@ -165,42 +171,51 @@ checks or label an old generation freshly acquired to make transition succeed.
 Extend the existing local `adopt-terminal` operation, not startup, provisioning,
 a remote mutation or a second migration command. Reuse its writer lease,
 original finite operation budget and ReplayStore/cache owners. The selected
-executing core must explicitly declare support for retained live-cache
-binding (`agent-pull-requests.retained-live-cache-adoption/v1`); an older core
-keeps the existing populated-cache refusal. Wire
+executing core must explicitly declare the metadata-only
+`agent-pull-requests.retained-cache-metadata-adoption/v1` profile; it is not
+generation-binding support. An older core keeps bootstrap-only refusal. Wire
 workspace protocols, terminal-reader selection, baseline defaults and strict
 old-file-reader refusal remain unchanged.
 
 Initially admit only the standalone version-three baseline owner with no
 active/compact review operations and no populated terminal-extension state.
-Every retained conversation must have an existing open, nonterminal first epoch
-and no previous terminal summary. Every cached generation must be complete,
-nonterminal, reachable through the selected full workspace scope and associated
-with that original conversation. Refuse absent/ambiguous conversation evidence,
+Every retained conversation must have an existing complete, open, nonterminal first epoch
+and no previous terminal summary. Every legacy generation remains with its
+original reader. Future positive adoption requires a durable association between
+the exact generation ID and its original observation/epoch, with normal contract
+review before that storage or writer change. Neither timestamp bounds nor exact
+normalized projection equality supplies that missing association.
+Likewise, retained conversation metadata does not record its original native
+watch association. If active legacy native waits coexist with that metadata,
+refuse unchanged instead of assigning the current configuration's mapping:
+cross-account/repository remapping can otherwise let a delayed read escape
+close/reopen fencing. Keep the active watch with its original usable reader.
+Completed frozen delivery and empty-journal bootstrap remain supported.
+Refuse absent/ambiguous conversation evidence,
 closed/reopened histories, incomplete or terminal generations, unsupported
 extensions and unknown scopes before adoption, without changing original reads.
 An empty-cache bootstrap remains supported.
 
-Preflight validates all committed immutable generations, including noncurrent
-objects, and all current pointers through the actual cache owner: plain paths,
-identities, full scopes, references and original configured byte/count limits.
-No new capacity, eviction, rebuild or orphan cleanup is inferred. Preserve
-valid noncurrent objects; malformed, dangling, staged or otherwise unsupported
-cache entries refuse unchanged. A valid existing null rebuild pointer retains
+Preflight uses the actual cache owner for plain paths, identities, scopes,
+references and original byte/count limits. Generation objects refuse before
+adoption, retaining their current/noncurrent original reads. No new capacity,
+eviction, rebuild or orphan cleanup is inferred. Configured growth beyond the
+terminal binding limit also refuses, rather than silently reducing capacity.
+Malformed, dangling, staged or unsupported cache entries refuse unchanged.
+A valid existing null rebuild pointer retains
 its cache-miss meaning rather than being converted to a generation.
 Enumeration, bounded reads, validation and final adoption share the original
 deadline and held-lease checks; do not repeatedly decode all generations or
 perform an unbounded inventory before checking the budget.
 
-Under the existing exclusive owner and lock ordering, initialize terminal live
-admissions and generation bindings from the original journal's scope and
-epoch/cursor. Preserve its events, sequences, observation intervals and prior
-metadata exactly. This is compatibility metadata, not a new conversation
-observation, watch success, authoritative terminal fact or fresh acquisition.
+Under the existing exclusive owner and lock ordering, preserve original events,
+sequences, intervals and metadata exactly while adopting empty terminal-reader
+extensions. Create no live admission, generation binding, observation or watch
+success. Later fresh acquisition retains its actual terminal-aware owner.
 Keep every cache object and pointer byte-for-byte unchanged, including IDs,
 revisions and retained freshness. Reserve complete metadata capacity before
 committing adoption; do not publish a selected-reader-ready result until all
-required live bindings are present.
+required reader extensions are present.
 The initial-baseline eligibility rules do not reject this invocation's own
 partially adopted compatible metadata on explicit retry; validate that metadata
 against the same original journal and immutable objects instead.
@@ -215,20 +230,30 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 ### Finite acceptance
 
-- [ ] Land this refinement through normal plan review before changing runtime
-  eligibility or binding behavior.
-- [ ] Transition a populated baseline through the actual CLI, then serve current
+- [x] Land this refinement through normal plan review before changing runtime
+  eligibility or binding behavior (#13560; current-head approval and required CI).
+- [ ] Transition a durably associated populated baseline through the actual CLI, then serve current
   and explicit noncurrent `lookup`/all `chunk` reads after a fresh-reader restart.
   Compare original descriptors, reconstructed bytes, pointers, journal/events,
   replay identities/deadlines/delivery positions and cache freshness.
 - [ ] Exercise the actual selected workspace `sync` comparison against a retained
   generation, with new synthetic acquisition and existing CAS/epoch fences.
   Transition itself performs no acquisition, write, ACK or cache retirement.
-- [ ] Qualify missing/skewed core declarations, absent/closed/reopened conversations,
+- [ ] Qualify active legacy native-watch migration with its original
+  workspace/epoch association; the metadata-only leaf refuses that unqualified
+  combination rather than inventing a mapping or canceling original work.
+- [x] Qualify the narrower metadata-only transition through the actual CLI and
+  fresh reader process, preserving original events, frozen replay and null
+  misses. Fresh load/sync creates only newly acquired generation bindings.
+- [x] Refuse every legacy generation while preserving original current/noncurrent
+  reads, including failed initial journal write and same-second reopen ambiguity.
+- [x] Qualify missing/skewed core declarations, absent/closed/reopened conversations,
   unsupported operations/extensions, corrupt/dangling/staged objects, scopes,
-  null pointers, capacity and deadline refusal. Original readers and bytes remain
+  null pointers, capacity and deadline refusal. A selected null rebuild pointer
+  without generation content needs no journal or invented admission.
+  Original readers and bytes remain
   usable on refusal; no predicate is silently dropped.
-- [ ] Interrupt before and after each durable boundary, lose a replace result and
+- [x] Interrupt before and after each durable boundary, lose a replace result and
   explicitly retry under the same lease/budget contract. Prove complete recoverable
   envelopes, no duplicate events, exact binding continuity, competing-owner
   exclusion and old/new-reader rollback refusal.

@@ -182,8 +182,9 @@ After the reviewed proposal, the operator admitted execution:
   frontdoors and direct native content/vector/cluster/package-export readers
   have bounded refusal qualification; broader consumer composition remains
   open. Exact-scope cold content/model schema and component-ledger bootstrap,
-  plus explicitly budgeted point-index preparation, are available; point-domain
-  application, v2 execution, automatic partial-effect/restore reconciliation
+  plus explicitly budgeted point-index preparation, typed-claim application
+  and its exact sealed publication suffix, are available. V2 execution,
+  automatic partial-effect/restore reconciliation
   and whole-claim completion remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.

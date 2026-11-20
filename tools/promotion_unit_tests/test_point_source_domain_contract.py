@@ -147,6 +147,61 @@ def test_point_selection_and_receipt_save_never_admit_legacy_operations(
     assert guards.count("enter") == guards.count("exit") == 4
 
 
+def test_selected_reconciliation_requires_exact_scope_and_existing_physical_seal(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout, claim = api.layout, api.claim
+    selected = layout.SourceDomain(Path("unused-point-domain"), point_scope=claim.scope)
+    receipt = {
+        **api.receipt, "state": "dirty", "uncertain_effect": True,
+        "reconciliation": {"owner": "publication", "token": "retained", "physical": {}},
+    }
+    saved: list[dict[str, Any]] = []
+    monkeypatch.setattr(selected, "receipt", lambda: dict(receipt))
+    monkeypatch.setattr(layout, "_versions", lambda _db: {})
+
+    @contextmanager
+    def exclusion() -> Iterator[None]:
+        yield
+
+    def save(value: dict[str, Any]) -> None:
+        saved.append(dict(value))
+        receipt.clear()
+        receipt.update(value)
+
+    monkeypatch.setattr(selected, "exclusion", exclusion)
+    monkeypatch.setattr(selected, "save", save)
+    for suffix, fields in (
+        ("logical_projection", {
+            "physical_tables": lambda *args: {},
+            "commit_projection": lambda *args, **kwargs: {},
+        }),
+        ("mutation_result", {"record_write": lambda *args: None}),
+    ):
+        name = f"{layout.__package__}.{suffix}"
+        stub = ModuleType(name)
+        for key, value in fields.items():
+            setattr(stub, key, value)
+        monkeypatch.setitem(sys.modules, name, stub)
+    for scope, owner, token in (
+        (None, "publication", "retained"),
+        (("foreign", *claim.scope[1:]), "publication", "retained"),
+        (claim.scope, "other-owner", "retained"),
+        (claim.scope, "publication", "other-token"),
+    ):
+        with pytest.raises(layout.SourceLayoutError), selected.reconcile(
+            object(), owner=owner, token=token, point_scope=scope,
+        ):
+            pytest.fail("unqualified reconciliation entered")
+        assert not saved
+    with selected.reconcile(
+        object(), owner="publication", token="retained", point_scope=claim.scope,
+    ):
+        assert selected.writing
+    assert not selected.writing and receipt["state"] == "clean"
+    assert "reconciliation" not in receipt and "uncertain_effect" not in receipt
+
+
 def test_point_model_binding_shape_refuses_ambiguous_table_ownership(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
