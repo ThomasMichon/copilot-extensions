@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [finite Vault copy-transaction unit](journal/2026/11.20-vault-copy-and-existing-keepers.md)
+proposes complete #13077/#13083/#13085 receiving in existing Vault Service P2:
+relocation/fencing, selected-peer copy support and uncertain overwrite
+recovery retain eighteen unchecked technical rows and their actual
+custodians. The three sources remain OPEN during proposal. The same record
+follows through reviewed #13590/#13723 and separate #11816/#13617
+NOT_PLANNED tracking retirements without checking technical acceptance.
+The complete 11:59 PT whole census remains 883 open, 154 above fixed 729;
+there are no arrivals, departures or new campaign dispositions in this unit.
+
 The [retained-supervisor and existing-canonical unit](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
 proposes complete #13617 receiving in existing Installer Upgrade Recovery:
 seven unchecked technical rows retain the native legacy/current transition,
