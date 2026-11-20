@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +17,7 @@ from test_review_workspace import evidence as evidence
 
 from agent_pull_requests import generation_cache, review_workspace, watch_replay_store, workspace_conversation
 from agent_pull_requests.conversation_store import ConversationStore
-from agent_pull_requests.generation_cache import CacheFull, GenerationCache, POINTER_SCHEMA
+from agent_pull_requests.generation_cache import CacheFull, CacheInvalid, GenerationCache, POINTER_SCHEMA
 from agent_pull_requests.review_workspace import _digest, build_generation
 from agent_pull_requests.terminal_retention import MAX_RECORDS, TerminalRetentionStore
 from agent_pull_requests.watch_replay_store import ReplayCallerExpired, ReplayServiceIdentity, ReplayStore
@@ -314,3 +317,40 @@ def test_metadata_adoption_preserves_the_original_cache_checkpoint(
     with pytest.raises(ValueError, match="cache owner withdrew"):
         adopt(owner, cache, targets(values[0]))
     assert owner.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("directory", ["root", "generations", "targets"])
+def test_cache_inspection_streams_and_refuses_before_collecting_later_entries(
+    owner: ReplayStore, monkeypatch: pytest.MonkeyPatch, directory: str,
+) -> None:
+    cache = cache_for(owner)
+    location: Path = cache.root if directory == "root" else getattr(cache, directory)
+    bad = location / "uncommitted.tmp"
+    bad.write_text("synthetic uncommitted content")
+    scandir = os.scandir
+    with scandir(location) as entries:
+        rejected = next(entry for entry in entries if entry.name == bad.name)
+    iterdir = Path.iterdir
+
+    @contextmanager
+    def scan(path: Any) -> Iterator[Any]:
+        if Path(path) != location:
+            with scandir(path) as entries:
+                yield entries
+            return
+
+        def bounded() -> Iterator[Any]:
+            yield rejected
+            raise AssertionError("collected entries beyond the first invalid object")
+
+        yield bounded()
+
+    def eager(path: Path) -> Iterator[Path]:
+        if path in (cache.root, cache.generations, cache.targets):
+            raise AssertionError("eager directory enumeration bypassed streaming checks")
+        return iterdir(path)
+
+    monkeypatch.setattr(os, "scandir", scan)
+    monkeypatch.setattr(Path, "iterdir", eager)
+    with pytest.raises(CacheInvalid):
+        cache.inspect_retained(lambda value: None, lambda pointer: None)

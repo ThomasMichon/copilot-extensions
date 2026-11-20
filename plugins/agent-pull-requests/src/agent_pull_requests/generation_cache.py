@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from collections.abc import Callable, Iterator
 import copy
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -136,10 +137,13 @@ class GenerationCache:
                 _plain(path, directory=True)
             except FileNotFoundError:
                 raise CacheInvalid("cache directory is missing") from None
-        for path in self.root.iterdir():
-            self._check()
-            if path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
-                raise CacheInvalid("unexpected cache root entry")
+        self._check()
+        with os.scandir(self.root) as entries:
+            for entry in entries:
+                self._check()
+                if entry.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
+                    raise CacheInvalid("unexpected cache root entry")
+        self._check()
         if self.lock_path.exists() or self.lock_path.is_symlink():
             _plain(self.lock_path)
 
@@ -175,28 +179,37 @@ class GenerationCache:
             _atomic_write_json(self.descriptor, self.expected_descriptor)
 
     def _inventory(self, *, include_staging: bool = False) -> tuple[list[Path], list[Path], int, list[Path]]:
-        for path in self.root.iterdir():
-            if path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
-                raise CacheInvalid("unexpected cache root entry")
-            _plain(path, directory=path.name in {"generations", "targets"})
+        self._check()
+        with os.scandir(self.root) as entries:
+            for entry in entries:
+                self._check()
+                path = Path(entry.path)
+                if path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
+                    raise CacheInvalid("unexpected cache root entry")
+                _plain(path, directory=path.name in {"generations", "targets"})
         generations: list[Path] = []
         pointers: list[Path] = []
         staging: list[Path] = []
         total = self.descriptor.stat().st_size
         for directory, output in ((self.generations, generations), (self.targets, pointers)):
-            for path in directory.iterdir():
-                _plain(path)
-                if include_staging and re.fullmatch(r"\.[0-9a-f]{64}\.json\.[a-z0-9_]{8}\.tmp", path.name):
-                    staging.append(path)
-                    continue
-                if path.suffix != ".json":
-                    raise CacheInvalid("unexpected cache object name")
-                try:
-                    _identifier(path.stem)
-                except ValueError:
-                    raise CacheInvalid("unexpected cache object name") from None
-                output.append(path)
-                total += path.stat().st_size
+            self._check()
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    self._check()
+                    path = Path(entry.path)
+                    _plain(path)
+                    if include_staging and re.fullmatch(r"\.[0-9a-f]{64}\.json\.[a-z0-9_]{8}\.tmp", path.name):
+                        staging.append(path)
+                        continue
+                    if path.suffix != ".json":
+                        raise CacheInvalid("unexpected cache object name")
+                    try:
+                        _identifier(path.stem)
+                    except ValueError:
+                        raise CacheInvalid("unexpected cache object name") from None
+                    output.append(path)
+                    total += path.stat().st_size
+            self._check()
         return generations, pointers, total, staging
 
     def _load_generation(self, identifier: str, scope: Document) -> Document:
@@ -257,52 +270,60 @@ class GenerationCache:
     ) -> None:
         """Validate committed cache objects once under the original finite owner."""
         with self._transaction() as lock:
+            self._check(lock)
             total = self.descriptor.stat().st_size
             scopes: dict[str, Document] = {}
             if total > self.max_bytes:
                 raise CacheFull("retained cache exceeds its configured capacity")
-            for path in self.generations.iterdir():
-                self._check(lock)
-                _plain(path)
-                if path.suffix != ".json":
-                    raise CacheInvalid("unexpected cache object name")
-                identity = _identifier(path.stem)
-                if len(scopes) >= self.max_generations:
-                    raise CacheFull("retained cache exceeds its generation capacity")
-                total += path.stat().st_size
-                if total > self.max_bytes:
-                    raise CacheFull("retained cache exceeds its configured capacity")
-                generation = self._read(path, MAX_GENERATION_BYTES)
-                scope = _scope(generation.get("scope"))
-                _generation(generation, scope)
-                if generation["id"] != identity:
-                    raise CacheInvalid("cached generation filename does not match its content")
-                scopes[identity] = scope
-                visit(generation)
-                self._check(lock)
-            for path in self.targets.iterdir():
-                self._check(lock)
-                _plain(path)
-                if path.suffix != ".json":
-                    raise CacheInvalid("unexpected cache object name")
-                _identifier(path.stem)
-                total += path.stat().st_size
-                if total > self.max_bytes:
-                    raise CacheFull("retained cache exceeds its configured capacity")
-                pointer = self._read(path, MAX_POINTER_BYTES)
-                scope = _scope(pointer.get("scope"))
-                if (
-                    set(pointer) != {"schema", "version", "scope", "generation_id"}
-                    or pointer["schema"] != POINTER_SCHEMA or type(pointer["version"]) is not int
-                    or pointer["version"] != 1 or scope != pointer["scope"]
-                    or path.stem != _digest(scope)
-                ):
-                    raise CacheInvalid("cache pointer does not match its scope")
-                selected = pointer["generation_id"]
-                if selected is not None and scopes.get(_identifier(selected)) != scope:
-                    raise CacheInvalid("cache pointer references an unavailable generation")
-                visit_pointer(pointer)
-                self._check(lock)
+            with os.scandir(self.generations) as entries:
+                for entry in entries:
+                    self._check(lock)
+                    path = Path(entry.path)
+                    _plain(path)
+                    if path.suffix != ".json":
+                        raise CacheInvalid("unexpected cache object name")
+                    identity = _identifier(path.stem)
+                    if len(scopes) >= self.max_generations:
+                        raise CacheFull("retained cache exceeds its generation capacity")
+                    total += path.stat().st_size
+                    if total > self.max_bytes:
+                        raise CacheFull("retained cache exceeds its configured capacity")
+                    generation = self._read(path, MAX_GENERATION_BYTES)
+                    scope = _scope(generation.get("scope"))
+                    _generation(generation, scope)
+                    if generation["id"] != identity:
+                        raise CacheInvalid("cached generation filename does not match its content")
+                    self._check(lock)
+                    scopes[identity] = scope
+                    visit(generation)
+                    self._check(lock)
+            self._check(lock)
+            with os.scandir(self.targets) as entries:
+                for entry in entries:
+                    self._check(lock)
+                    path = Path(entry.path)
+                    _plain(path)
+                    if path.suffix != ".json":
+                        raise CacheInvalid("unexpected cache object name")
+                    _identifier(path.stem)
+                    total += path.stat().st_size
+                    if total > self.max_bytes:
+                        raise CacheFull("retained cache exceeds its configured capacity")
+                    pointer = self._read(path, MAX_POINTER_BYTES)
+                    scope = _scope(pointer.get("scope"))
+                    if (
+                        set(pointer) != {"schema", "version", "scope", "generation_id"}
+                        or pointer["schema"] != POINTER_SCHEMA or type(pointer["version"]) is not int
+                        or pointer["version"] != 1 or scope != pointer["scope"]
+                        or path.stem != _digest(scope)
+                    ):
+                        raise CacheInvalid("cache pointer does not match its scope")
+                    selected = pointer["generation_id"]
+                    if selected is not None and scopes.get(_identifier(selected)) != scope:
+                        raise CacheInvalid("cache pointer references an unavailable generation")
+                    self._check(lock)
+                    visit_pointer(pointer)
+                    self._check(lock)
             self._check(lock)
 
     def _retire_scope(
