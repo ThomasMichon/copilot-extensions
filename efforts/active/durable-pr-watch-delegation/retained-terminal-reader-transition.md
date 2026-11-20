@@ -560,9 +560,10 @@ class before selecting that broader transition.
 - [x] Review this refinement before changing operation eligibility, serving
   selection or recovery behavior (#13757; current-head approval and all
   required checks green).
-- [ ] Expand and qualify the actual scoped active-operation inspection and
+- [x] Expand and qualify the actual scoped active-operation inspection and
   original-attempt readback owners, including unsupported native attribution,
-  current authority withdrawal, expiry, partial/unknown results and zero sends.
+  current authority withdrawal, expiry, partial/unknown results and zero sends
+  (#13760; finite library source controls, not host selection or adoption).
 - [ ] Only then select the compatible retained transition and actual negotiated
   receiver/client path. Qualify original inspection before/after actual CLI
   adoption and fresh-reader restart, same-operation retry after every uncertain

@@ -52,6 +52,7 @@ def validate(
     document: Document, cache: GenerationCache, targets: list[Document],
     checkpoint: Callable[[], None],
     *, recorded_generations: bool = False, recorded_native_targets: bool = False,
+    retained_active_reviews: bool = False,
 ) -> None:
     """Run inside the existing replay adoption and exclusive service lifecycle."""
     checkpoint()
@@ -59,6 +60,8 @@ def validate(
         raise ValueError("explicit retained generation adoption selection required")
     if type(recorded_native_targets) is not bool or recorded_native_targets and not recorded_generations:
         raise ValueError("native adoption requires the recorded generation reader")
+    if type(retained_active_reviews) is not bool or retained_active_reviews and not recorded_generations:
+        raise ValueError("retained review adoption requires the recorded generation reader")
     targets = _targets(targets)
     keys = {
         conversation_key({**target["scope"], "number": 1}, document["namespace"])
@@ -71,6 +74,9 @@ def validate(
         if conversation_key(scope, document["namespace"]) not in keys:
             raise ValueError("retained pointer is outside the selected workspace scope")
 
+    if retained_active_reviews:
+        from .retained_review_adoption import stage as stage_reviews
+        stage_reviews(document, keys, checkpoint)
     if cache.max_generations > MAX_RECORDS:
         raise ValueError("configured cache growth exceeds terminal generation binding capacity")
     from .recorded_terminal_cache import complete, stage
@@ -93,7 +99,7 @@ def validate(
         checkpoint()
         return
     if (
-        document["version"] != 3 or document["reviews"]
+        document["version"] != 3 or (document["reviews"] and not retained_active_reviews)
         or document.get("terminal_recovery", {}).get("operations")
         or document.get("terminal_cache_retirement", {}).get("records")
     ):

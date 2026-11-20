@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import re
+from typing import Any, cast
 
 from .review_workspace import _digest, _scope
 
@@ -13,25 +14,26 @@ SCHEMA = "agent-pull-requests.review-intent"
 MAX_ACTIONS = 16
 MAX_OPERATIONS = 1024
 MAX_INTENT_BYTES = 256 * 1024
+Document = dict[str, Any]
 
 
-def encoded(value) -> bytes:
+def encoded(value: object) -> bytes:
     return json.dumps(value, allow_nan=False).encode("utf-8")
 
 
-def text(value, limit=256):
+def text(value: object, limit: int = 256) -> str:
     if not isinstance(value, str) or not value or len(value) > limit or any(ord(c) < 32 for c in value):
         raise ValueError("invalid review identity")
     return value
 
 
-def identifier(value):
+def identifier(value: object) -> str:
     if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
         raise ValueError("review requires a full content identity")
     return value
 
 
-def revision(value):
+def revision(value: object) -> Document:
     if not isinstance(value, dict) or set(value) != {"head_sha", "common_sha", "iteration"}:
         raise ValueError("invalid review revision")
     for name in ("head_sha", "common_sha"):
@@ -42,7 +44,7 @@ def revision(value):
     return copy.deepcopy(value)
 
 
-def intent(value, *, persisted=False, versions=(1,)):
+def intent(value: object, *, persisted: bool = False, versions: tuple[int, ...] = (1,)) -> Document:
     """Validate selected data, not authority or evidence that it was reviewed."""
     if not isinstance(value, dict) or set(value) != {
         "schema", "version", "operation_id", "scope", "generation_id", "source_id", "revision", "actions",
@@ -110,7 +112,7 @@ def intent(value, *, persisted=False, versions=(1,)):
     return result
 
 
-def receipt(value, *, operation, action, limit):
+def receipt(value: object, *, operation: Document, action: Document, limit: int) -> Document:
     if not isinstance(value, dict) or set(value) != {"origin", "platform_ids", "proof"}:
         raise ValueError("invalid action receipt")
     if value["origin"] not in ("response", "attributable_readback", "no_send"):
@@ -141,7 +143,7 @@ def receipt(value, *, operation, action, limit):
     return copy.deepcopy(value)
 
 
-def confirms(value, selected, scope):
+def confirms(value: Document, selected: Document, scope: Document) -> bool:
     """Native target consistency, not authentication of the effect owner."""
     if value["origin"] == "no_send":
         return False
@@ -150,12 +152,14 @@ def confirms(value, selected, scope):
         if not all(type(ids.get(name)) is int and ids[name] > 0 for name in ("thread_id", "comment_id")):
             return False
         return all(ids[name] == selected[name] for name in ("thread_id", "comment_id") if name in selected)
-    return selected["verdict"] != "COMMENTED" and ids.get("reviewer_id") == scope["principal_id"]
+    return cast(bool, selected["verdict"] != "COMMENTED" and ids.get("reviewer_id") == scope["principal_id"])
 
 
-def new_operation(selected: dict, *, created_at: float, receipt_bytes: int, mappings: bool = False) -> dict:
+def new_operation(
+    selected: Document, *, created_at: float, receipt_bytes: int, mappings: bool = False,
+) -> Document:
     """Reserve one final intent and its eventual attempt/receipt growth."""
-    operation = {
+    operation: Document = {
         "intent": copy.deepcopy(selected), "intent_id": _digest(selected), "created_at": created_at,
         "actions": [{"id": action["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
                     for action in selected["actions"]],
@@ -169,13 +173,20 @@ def new_operation(selected: dict, *, created_at: float, receipt_bytes: int, mapp
     return operation
 
 
-def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,), selections=False, mappings=False):
+def validate_operations(
+    operations: object, *, receipt_bytes: int, review_bytes: int, versions: tuple[int, ...] = (1,),
+    selections: bool = False, mappings: bool = False, retained_active: bool = False,
+) -> None:
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:
         raise ValueError("invalid persisted review operations")
     identities = set()
     write_ids = set()
     for operation in operations:
         names = {"intent", "intent_id", "reserved_bytes", "created_at", "actions"}
+        if isinstance(operation, dict) and "recovery_only" in operation:
+            if not retained_active or operation["recovery_only"] is not True:
+                raise ValueError("unsupported retained active review operation")
+            names.add("recovery_only")
         if mappings and isinstance(operation, dict) and "comment_observations" in operation:
             names.add("comment_observations")
         selection = operation.get("selection") if isinstance(operation, dict) else None
@@ -189,6 +200,11 @@ def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,
         if not isinstance(operation, dict) or set(operation) != names:
             raise ValueError("invalid persisted review operation")
         selected = intent(operation["intent"], persisted=True, versions=versions)
+        if "recovery_only" in operation and (
+            selected["version"] != 1 or selection is not None
+            or "comment_observations" in operation
+        ):
+            raise ValueError("retained active recovery requires the original version-one operation")
         if selection is not None and selected["version"] != 2:
             raise ValueError("retained selection requires prepared intent")
         identity = selected["operation_id"]
@@ -225,6 +241,7 @@ def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,
                     state["receipt"] is None or not confirms(state["receipt"], chosen, selected["scope"])
                 ):
                     raise ValueError("confirmed review action lacks a native receipt")
+        # Recovery-only metadata uses the original fixed overhead, not a new receipt reservation.
         reserved = {"intent": selected, "intent_id": _digest(selected), "created_at": operation["created_at"],
                     "actions": [{"id": a["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
                                 for a in selected["actions"]]}

@@ -284,11 +284,42 @@ unknown. It never admits an operation, allocates an attempt or enters a sender.
 An uncertain receipt replacement is read through the same owner, not resent.
 No new recovery deadline is attached to an active operation.
 
-This provider-first library expansion does not select retained-volume adoption,
-add a workspace CLI/HTTP recovery command, configure a protected factory or
-substitute observation credentials. Existing `inspect` and submission defaults
-remain unchanged. Negotiated receiver/client selection and actual retained
-transition remain separate acceptance.
+The library does not itself select retained-volume adoption, configure a
+protected factory or substitute observation credentials. Existing `inspect`
+and submission defaults remain unchanged.
+
+### Original active-operation inspection
+
+An explicitly selected recorded terminal host can adopt original active v1
+operations using the [existing local transition](../../../services/pr/README.md#original-active-operation-inspection).
+Its capabilities retain the exact terminal body-reading operation list and
+add a separate `retained_active_review_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.retained-active-review-inspection/v1",
+  "operations": ["inspect"],
+  "representation": "original_active_v1",
+  "storage_extension": "retained_active_review_version:1",
+  "effects": "none",
+  "reconciliation": false
+}
+```
+
+Native and Gateway clients negotiate this declaration before sending the
+existing scoped `inspect` request, selecting that protocol in
+`workspace_contract`. `WorkspaceTools` exposes `pr_workspace_inspect` only when
+that optional contract is supported. A prior body-only client keeps its
+original reads; a missing or incompatible declaration never falls back to
+submission, acquisition or a less restrictive inspection path.
+
+Inspection returns the original intent and action/attempt/receipt state,
+including its permanent `recovery_only` marker, without live execution
+admission. It remains usable after closure/reopen and does not change owner
+bytes. Wrong scope, unimported operations and prepared/compact representations
+refuse. This optional contract configures no protected context and exposes no
+reconcile or receipt-confirmation operation; library readback still requires
+the original actual protected owner.
 
 ## Optional local comment preparation
 

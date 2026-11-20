@@ -40,6 +40,7 @@ from .workspace_comment_mapping import (
     available as mapping_available, contract as mapping_contract, supports as supports_mapping,
 )
 from . import workspace_terminal_mapping as terminal_mapping
+from . import workspace_retained_review as retained_review
 
 PROTOCOL = "agent-pull-requests.workspace/v1"
 Document = dict[str, Any]
@@ -105,6 +106,7 @@ class WorkspaceOperations:
                  retention_target_deadline: bool = False,
                  terminal_reads: bool = False,
                  terminal_mapping_reads: bool = False,
+                 retained_active_reviews: bool = False,
                  generation_native_target: tuple[str, str] | None = None,
                  write_context_factory: Callable[..., Callable[..., Any]] | None = None) -> None:
         writers = (write_context, write_context_factory)
@@ -124,6 +126,8 @@ class WorkspaceOperations:
             or type(comment_mappings) is not bool
             or type(terminal_reads) is not bool
             or type(terminal_mapping_reads) is not bool
+            or type(retained_active_reviews) is not bool
+            or retained_active_reviews and (not terminal_reads or not store.retained_active_reviews)
             or store.native_generation_associations != (generation_native_target is not None)
             or generation_native_target is not None and (
                 not isinstance(generation_native_target, tuple)
@@ -193,6 +197,7 @@ class WorkspaceOperations:
         self.retention_target_deadline = retention_target_deadline
         self.terminal_reads = terminal_reads
         self.terminal_mapping_reads = terminal_mapping_reads
+        self.retained_active_reviews = retained_active_reviews
         self.generation_native_target = generation_native_target
         from .workspace_retention import WorkspaceRetention
         self.retention = WorkspaceRetention(self)
@@ -263,6 +268,10 @@ class WorkspaceOperations:
             from .workspace_terminal_read import OPERATIONS as READ_OPERATIONS
             if operation not in READ_OPERATIONS and not (
                 operation == "retained-comment" and terminal_mapping.available(
+                    self, expires_at=expires_at, checkpoint=checkpoint,
+                )
+            ) and not (
+                operation == "inspect" and retained_review.available(
                     self, expires_at=expires_at, checkpoint=checkpoint,
                 )
             ):
@@ -509,13 +518,18 @@ class WorkspaceOperations:
                 result.update(offset=offset, data=base64.b64encode(data[offset:offset + CHUNK_BYTES]).decode("ascii"))
         elif operation == "inspect":
             from .review_selection_store import ReviewSelectionStore
-            owner = (
-                ReviewSelectionStore(self.store).inspect
-                if self.prepared_reviews and ReviewSelectionStore(self.store).supported(
-                    expires_at=expires_at, checkpoint=check,
-                ) else self.store.inspect_review
-            )
-            result = owner(payload["operation_id"], scope, expires_at=expires_at, checkpoint=check)
+            if self.terminal_reads:
+                result = retained_review.read(
+                    self, payload, scope, expires_at=expires_at, checkpoint=check,
+                )
+            else:
+                owner = (
+                    ReviewSelectionStore(self.store).inspect
+                    if self.prepared_reviews and ReviewSelectionStore(self.store).supported(
+                        expires_at=expires_at, checkpoint=check,
+                    ) else self.store.inspect_review
+                )
+                result = owner(payload["operation_id"], scope, expires_at=expires_at, checkpoint=check)
         elif operation == "receipt":
             if self.prepared_reviews is not True:
                 raise WorkspaceUnavailable("prepared review receiver unavailable")
@@ -677,6 +691,7 @@ class NativeWorkspaceClient:
         self._mapping_contract: object = None
         self._terminal_contract: object = None
         self._terminal_mapping_contract: object = None
+        self._retained_review_contract: object = None
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
@@ -704,9 +719,13 @@ class NativeWorkspaceClient:
                 self._mapping_contract = None
                 self._terminal_contract = None
                 self._terminal_mapping_contract = None
+                self._retained_review_contract = None
         with self._prepared_lock:
             compact_mapping = operation == "retained-comment" and terminal_mapping.supports(
                 self._terminal_mapping_contract,
+            )
+            retained_inspect = operation == "inspect" and retained_review.supports(
+                self._retained_review_contract,
             )
         if operation == "retained-comment":
             current()
@@ -743,7 +762,10 @@ class NativeWorkspaceClient:
         result = serve(
             self.operations, operation, payload, expires_at=self.expires_at(),
             checkpoint=current if checkpoint is not None else self.checkpoint,
-            selection=terminal_mapping.SELECTION if compact_mapping else terminal_contract,
+            selection=(
+                retained_review.SELECTION if retained_inspect else
+                terminal_mapping.SELECTION if compact_mapping else terminal_contract
+            ),
         )
         if operation == "capabilities":
             if result.get("protocol") not in (PROTOCOL, TERMINAL_PROTOCOL):
@@ -762,6 +784,10 @@ class NativeWorkspaceClient:
                     copy.deepcopy(result[terminal_mapping.FIELD])
                     if terminal_mapping.selected(result) else None
                 )
+                self._retained_review_contract = (
+                    copy.deepcopy(result[retained_review.FIELD])
+                    if retained_review.selected(result) else None
+                )
                 self._selection_contract = copy.deepcopy(result.get("selection_contract"))
                 self._owned_edit_contract = copy.deepcopy(result.get("owned_edit_selection_contract"))
                 self._observation_contract = (
@@ -774,6 +800,8 @@ class NativeWorkspaceClient:
                 )
         if compact_mapping and not terminal_mapping.valid_result(result, payload):
             raise WorkspaceUnavailable("invalid terminal comment mapping response")
+        if retained_inspect and not retained_review.valid_result(result, payload):
+            raise WorkspaceUnavailable("invalid retained active review response")
         return result
 
     def materialize(
