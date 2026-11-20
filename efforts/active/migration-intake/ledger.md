@@ -1191,7 +1191,7 @@ provisioning, resource transfer or changed #688/#1192/downstream F3-E gate follo
 
 | Source | Disposition | Primary canonical owner | Retained gates |
 |---|---|---|---|
-| #3296 independent repo/machine Copilot inference identity | routed (proposed; effective after complete reviewed domain-plan acceptance) | Existing [Account-Aware Operations Phase 6](../account-aware-operations/README.md#phase-6---independent-copilot-inference-identity-from-3296), CI3296-P1..5/V1..3 and actual global CI3296-G | Exact repo override then machine default, unpinned ambient compatibility, default-off/shared-session warning safety, effective versus unknown identity, supported launch/machine-restore consumers, explicit strict/legacy modes and unchanged Git/gh identity |
+| #3296 independent repo/machine Copilot inference identity | routed (proposed; effective after complete reviewed domain-plan acceptance) | Existing [Account-Aware Operations Phase 6](../account-aware-operations/README.md#phase-6---independent-copilot-inference-identity-from-3296), CI3296-P1..5/V1..3 and actual global CI3296-G | Exact repo override then machine default, unpinned ambient compatibility only in permitting modes, strict unset-account refusal, default-off/shared-session warning safety, effective versus unknown identity, supported launch/machine-restore consumers and unchanged Git/gh identity |
 
 This is one separate inference lane in the existing account-aware family,
 not another gh resolver, credential store or new effort. Credit the reported
