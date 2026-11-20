@@ -19,7 +19,7 @@ from tests.test_assignment_relationships import GroundOwner
 from tests.test_pool_placement import current_task, place, pool, publish, q as q, task
 
 
-def replace_after_decline(queue: TaskQueue, task_id: str, now: float) -> SpawnReservation:
+def replace_after_decline(queue: TaskQueue, task_id: str, now: float, *, governed: bool = False) -> SpawnReservation:
     scope = queue.pool_catalog_snapshot().scopes[0]
     queue.publish_pool_catalog_scope(
         scope.machine,
@@ -40,7 +40,7 @@ def replace_after_decline(queue: TaskQueue, task_id: str, now: float) -> SpawnRe
         now=now,
         pool_catalog_revision=queue.pool_catalog_snapshot().revision,
     )
-    assert created and not replacement.task_relationship_required
+    assert created and replacement.task_relationship_required is governed
     return replacement
 
 
@@ -62,6 +62,7 @@ def replace_after_decline(queue: TaskQueue, task_id: str, now: float) -> SpawnRe
         "proposal-submitted-detached",
         "proposal-governed-successor",
         "proposal-governed-foreign",
+        "proposal-next-governed",
     ],
 )
 def test_direct_unassignment_before_decline_survives_removal_of_capture(
@@ -76,7 +77,7 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
     t = q.create(
         "work",
         repo="example",
-        require_verification=history == "proposal-submitted-detached"
+        require_verification=history in {"proposal-submitted-detached", "proposal-next-governed"}
         or history.startswith("proposal-governed"),
     )
     assert isinstance(t, Task)
@@ -162,6 +163,28 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
             append_proposal(conn, foreign=True)
         with pytest.raises(TaskError, match="cannot drop a governed assignment"):
             replace_after_decline(reopened, t.id, due)
+        return
+    if history == "proposal-next-governed":
+        reopened._relationship_writer, reopened._relationship_authority = owner, "local"
+        owner.queue = reopened
+        replacement = replace_after_decline(reopened, t.id, due, governed=True)
+        reopened.record_spawn_worktree(
+            replacement.key, "replacement", ownership="created", execution_machine="host-a",
+            creating_host="host-a", driver="cli", allocation_project="example",
+            worktree_path=str(tmp_path / "replacement"), creation_nonce="replacement-nonce",
+        )
+        reopened.record_spawn(replacement.key, worktree="replacement", session_handle="next-native",
+                              startup_complete=True, startup_revision=1)
+        reopened.start(t.id, "host-a/replacement", owner_session_id="next-native",
+                       expected_generation=current_task(reopened, t.id).generation, now=due + 1)
+        assert reopened.complete(t.id, "host-a/replacement", result={"next": True}).status == "submitted"
+        with reopened._connect() as conn:
+            prior, new = conn.execute(
+                "SELECT submission_preparation FROM task_events WHERE task_id=? "
+                "AND submission_preparation IS NOT NULL ORDER BY id", (t.id,)
+            ).fetchall()
+        assert proposal is not None and json.loads(prior[0]) == proposal
+        assert json.loads(new[0])["request"]["assignment_event_id"] != proposal["request"]["assignment_event_id"]
         return
     replacement = replace_after_decline(reopened, t.id, due)
     if "detached" not in history and not history.startswith("proposal-governed"):
