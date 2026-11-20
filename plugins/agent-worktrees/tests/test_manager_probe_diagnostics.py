@@ -13,6 +13,7 @@ from typing import NoReturn
 import pytest
 
 from agent_worktrees import __main__ as core
+from agent_worktrees import config as cfg
 from agent_worktrees import manager_launch_cli as launch
 from agent_worktrees.control_plane_providers import _ControlPlaneProviderManifest
 
@@ -35,7 +36,7 @@ def test_engine_callback_preserves_source_without_unsealed_cache(
         "print(json.dumps({'args':sys.argv[1:],'value':value,'no_write':sys.dont_write_bytecode}))\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(launch.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
     previous_environment = os.environ.get("PYTHONPYCACHEPREFIX")
     previous_prefix = sys.pycache_prefix
 
@@ -103,7 +104,7 @@ def test_real_probe_failure_reaches_bare_front_door_as_failure(
     monkeypatch.setattr(core, "_is_noninteractive_invocation", lambda: False)
     monkeypatch.setattr(core, "_is_headless_project", lambda: False)
     monkeypatch.setattr(core, "_bundled_picker_available", lambda: False)
-    monkeypatch.setattr(core.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(cfg, "active_project", lambda: "demo")
     monkeypatch.setattr(
         core, "_exec_worktree_manager", lambda *_a, **_kw: pytest.fail("failed provider launched"),
     )
@@ -219,6 +220,7 @@ def test_timeout_stdout_fallback_is_redacted_and_keeps_last_useful_evidence(
     def failed(argv: list[str], **kwargs: object) -> NoReturn:
         calls.append(kwargs)
         timeout = kwargs["timeout"]
+        assert isinstance(timeout, (int, float))
         assert timeout == 20.0
         partial = (
             b"\x1b[31mresolver at https://packages.example/simple?token=fixture-secret\x1b[0m"
@@ -366,7 +368,7 @@ def test_real_bundled_fallback_keeps_its_exit_status(
     monkeypatch.setattr(core, "_is_noninteractive_invocation", lambda: False)
     monkeypatch.setattr(core, "_is_headless_project", lambda: False)
     monkeypatch.setattr(core, "_bundled_picker_available", lambda: True)
-    monkeypatch.setattr(core.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(cfg, "active_project", lambda: "demo")
     monkeypatch.setattr(core, "cmd_launch", lambda _args: 7)
     assert launch.dispatch_bare_invocation(True) == 7
 

@@ -172,49 +172,71 @@ def _probe_worktree_manager_version(
     command: list[str],
     *,
     attempts: int = 2,
-    timeout: float = 20.0,
+    timeout: float | None = 20.0,
 ) -> tuple[tuple[int, int, int, int] | None, subprocess.CompletedProcess[str] | None]:
-    """Run a fast ``--version`` probe and parse a comparable version tuple.
+    """Keep recovery probes finite; foreground entry explicitly opts out."""
+    from agent_procutil.owned_process import OwnedCleanupError
 
-    Retries on a bare timeout only -- never on a genuine spawn failure (a
-    missing/non-executable binstub, which another attempt cannot fix). A cold
-    ``uv run`` resync (e.g. right after a self-update, or under heavy
-    concurrent load from other worktree/session activity on the same
-    machine) has been observed to take several seconds on its own, well
-    within an installed Manager's legitimate startup budget -- treating one
-    slow probe as conclusively "unusable" was too quick to call a real,
-    working install uninstalled/broken (the loud reinstall-from-scratch
-    guidance) when it was really just transient load.
-    """
-    probe_attempts = max(1, attempts)
+    if timeout is None:
+        from agent_procutil.owned_process import require_caller_owned_support
+
+        try:
+            require_caller_owned_support()
+        except (OSError, RuntimeError) as error:
+            _report_manager_probe_failure(
+                "Control-plane --version probe requires unavailable caller-owned process support.",
+                str(error),
+            )
+            return None, None
+    probe_attempts = 1 if timeout is None else max(1, attempts)
     timeout_detail: str | bytes = ""
     for _attempt in range(probe_attempts):
         try:
-            proc = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=_launch_probe_env(),
+            environment = _launch_probe_env()
+            probe_command = list(command)
+            if os.name == "nt" and probe_command[0].lower().endswith((".cmd", ".bat")):
+                probe_command = _terminal_launch._batch_probe_command(probe_command, environment)
+            if timeout is None:
+                from agent_procutil.owned_process import run_caller_owned
+
+                proc = run_caller_owned(
+                    probe_command, env=environment, timeout=None,
+                    max_stdout_bytes=4096, max_stderr_bytes=4096,
+                )
+            else:
+                proc = subprocess.run(
+                    probe_command, capture_output=True, text=True, timeout=timeout,
+                    env=environment,
+                )
+        except OwnedCleanupError:
+            raise
+        except UnicodeError as error:
+            detail = error.object if isinstance(error, UnicodeDecodeError) else str(error)
+            _report_manager_probe_failure(
+                "Control-plane --version probe output could not be decoded.", detail,
             )
+            return None, None
         except subprocess.TimeoutExpired as error:
             timeout_detail = (
                 _safe_probe_diagnostic(error.stderr or "")
                 or _safe_probe_diagnostic(error.stdout or "")
                 or timeout_detail
             )
+            if timeout is None:
+                _report_manager_probe_failure(
+                    "Control-plane --version command reported a timeout.", timeout_detail,
+                )
+                return None, None
             continue
-        except (OSError, subprocess.SubprocessError) as error:
+        except (OSError, subprocess.SubprocessError, _terminal_launch._UnsafeBatchArguments) as error:
             _report_manager_probe_failure(
-                "Control-plane --version probe could not start.", str(error),
+                "Control-plane --version probe could not start or complete.", str(error),
             )
             return None, None
         if proc.returncode != 0:
             return None, proc
-        version = _parse_comparable_version(proc.stdout or "")
-        if version is None:
-            return None, proc
-        return version, proc
+        return _parse_comparable_version(proc.stdout or ""), proc
+    assert timeout is not None
     _report_manager_probe_failure(
         f"Control-plane --version probe timed out after {probe_attempts} attempts "
         f"({timeout:g}s each).",
@@ -230,18 +252,20 @@ class _ManagerHealth:
     diagnostic: str = ""
 
 
-def _worktree_manager_health() -> _ManagerHealth:
+def _worktree_manager_health(*, foreground: bool = False) -> _ManagerHealth:
     """Distinguish first-run absence from a selected provider's failed probe."""
     manifest, selection_error = _control_plane_provider_selection()
     if selection_error:
         return _ManagerHealth("failed", diagnostic=selection_error)
     if manifest is None:
         return _ManagerHealth("absent")
-    version, proc = _core_helper(
+    probe = _core_helper(
         "_probe_worktree_manager_version", _probe_worktree_manager_version
-    )([*manifest.command, "--version"])
+    )
+    command = [*manifest.command, "--version"]
+    version, proc = probe(command, timeout=None) if foreground else probe(command)
     if proc is None:
-        reason = "its --version health check could not complete (could not start or timed out)"
+        reason = "its --version health check could not complete"
     elif proc.returncode != 0:
         reason = f"its --version health check failed (exit {proc.returncode})"
     elif version is None:
@@ -689,7 +713,7 @@ def _exec_worktree_manager(
         from agent_procutil import spawn_sync_in_kill_on_close_job
 
         prefix = [mgr] if isinstance(mgr, str) else list(mgr)
-        selected, env = select_receiver(prefix, env)
+        selected, env = select_receiver(prefix, env, timeout=10 if subcommand else None)
         argv = [*selected, *argv[len(prefix):]]
         proc, job_handle = spawn_sync_in_kill_on_close_job(argv, env=env)
         try:
@@ -847,7 +871,10 @@ def dispatch_bare_invocation(has_project: bool) -> int:
     if has_project:
         if is_headless():
             return headless_bare()
-    health = manager_health()
+    health = (
+        manager_health(foreground=True)
+        if manager_health is _worktree_manager_health else manager_health()
+    )
     project = cfg.active_project() if has_project else None
     if health.command:
         return exec_worktree_manager(health.command, project)

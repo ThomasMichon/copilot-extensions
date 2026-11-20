@@ -14,6 +14,29 @@ QUERY_ENVIRONMENT = "CE_TERMINAL_CAPABILITY_QUERY"
 _channel = os.environ.pop(ENVIRONMENT, None)
 
 
+class _UnsafeBatchArguments(ValueError):
+    pass
+
+
+def _batch_probe_command(arguments: list[str], environment: dict[str, str]) -> list[str]:
+    from plugin_resolve.execution import windows_batch_command
+
+    # Native argv quoting is not cmd syntax escaping or batch-parameter
+    # quoting (which also splits comma/semicolon/equals). Spaced trailing
+    # backslashes are doubled by native quoting, which cmd does not undo.
+    if any(
+        any(character in '&|<>^()%!",;=' or ord(character) < 32 or ord(character) == 127
+            for character in argument)
+        or (" " in argument and argument.endswith("\\"))
+        for argument in arguments[1:]
+    ):
+        raise _UnsafeBatchArguments(
+            "Selected Manager batch prefix cannot be passed literally; "
+            "use a non-batch provider command. No launch was admitted."
+        )
+    return windows_batch_command(arguments, environment)
+
+
 def available() -> bool:
     return bool(_channel)
 
@@ -34,7 +57,7 @@ def exit_for_query(arguments: list[str] | None = None) -> None:
 
 
 def select_receiver(
-    command: list[str], environment: dict[str, str],
+    command: list[str], environment: dict[str, str], *, timeout: float | None = 10,
 ) -> tuple[list[str], dict[str, str]]:
     environment = dict(environment)
     environment.pop(ENVIRONMENT, None)
@@ -43,17 +66,33 @@ def select_receiver(
     validate_or_exit()
     selector = command[-1:] if command[-1:] == ["--resident-picker"] else []
     query_command = command[:-1] if selector else command
-    from agent_procutil.owned_process import run_caller_owned
+    from agent_procutil.owned_process import require_caller_owned_support, run_caller_owned
 
     query_environment = {
         **environment, QUERY_ENVIRONMENT: "1",
         "UV_NO_SYNC": "1", "UV_OFFLINE": "1", "WORKTREE_NO_UPDATE": "1",
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
     }
-    result = run_caller_owned(
-        [*query_command, "--version"], env=query_environment, timeout=10,
-        max_stdout_bytes=4096, max_stderr_bytes=4096,
-    )
+    query_arguments = [*query_command, "--version"]
+    if query_arguments[0].lower().endswith((".cmd", ".bat")):
+        query_arguments = _batch_probe_command(query_arguments, query_environment)
+    try:
+        require_caller_owned_support()
+    except (OSError, RuntimeError):
+        raise RuntimeError(
+            "Selected Manager terminal capability query requires unavailable caller-owned "
+            "process support; no launch was admitted"
+        ) from None
+    try:
+        result = run_caller_owned(
+            query_arguments, env=query_environment, timeout=timeout,
+            max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+    except UnicodeError:
+        raise RuntimeError(
+            "Selected Manager terminal capability query returned non-UTF-8 output; "
+            "no launch was admitted"
+        ) from None
     if result.returncode != 0 or result.stderr:
         raise RuntimeError("Selected Manager terminal capability query failed; no launch was admitted")
     text = result.stdout.strip()

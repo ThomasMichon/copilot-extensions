@@ -3,7 +3,10 @@
 import json
 import os
 import sys
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
+from typing import TypedDict
 
 import pytest
 
@@ -11,15 +14,26 @@ from agent_worktrees import terminal_launch
 from agent_procutil import owned_process
 
 
+class RuntimeBinding(TypedDict):
+    command: list[str]
+    root: str | None
+
+
+class CapabilityResponse(TypedDict, total=False):
+    package: str
+    capability: str
+    runtime: RuntimeBinding
+
+
 @pytest.fixture
-def channel(monkeypatch, tmp_path):
+def channel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
     request = tmp_path / "request.json"
     request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
     monkeypatch.setattr(terminal_launch, "_channel", str(request))
     return str(request)
 
 
-def test_actual_query_entry_exits_before_roster_and_cli_imports():
+def test_actual_query_entry_exits_before_roster_and_cli_imports() -> None:
     code = (
         "import builtins,runpy,sys\n"
         "original=builtins.__import__\n"
@@ -45,7 +59,9 @@ def test_actual_query_entry_exits_before_roster_and_cli_imports():
 
 @pytest.mark.parametrize("response", ["current", "legacy", "malformed", "foreign", "failed"])
 @pytest.mark.parametrize("resident", [False, True])
-def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypatch, response, resident, tmp_path, channel):
+def test_foreground_channel_only_reaches_a_supported_selected_receiver(
+    monkeypatch: pytest.MonkeyPatch, response: str, resident: bool, tmp_path: Path, channel: str,
+) -> None:
     monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
     command = ["selected-manager", "fixed-prefix"]
     selector = ["--resident-picker"] if resident else []
@@ -64,17 +80,19 @@ def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypat
         "failed": "",
     }
 
-    def query(argv, **options):
+    def query(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         assert argv == [*command, "--version"]
-        assert "CE_TERMINAL_LAUNCH" not in options["env"]
-        assert options["env"]["UV_NO_SYNC"] == "1"
-        assert options["timeout"] == 10
+        environment = options["env"]
+        assert isinstance(environment, dict)
+        assert "CE_TERMINAL_LAUNCH" not in environment
+        assert environment["UV_NO_SYNC"] == "1"
+        assert options["timeout"] is None
         assert options["max_stdout_bytes"] == options["max_stderr_bytes"] == 4096
-        return SimpleNamespace(returncode=int(response == "failed"), stderr="", stdout=outputs[response])
+        return subprocess.CompletedProcess(argv, int(response == "failed"), outputs[response], "")
 
     monkeypatch.setattr(owned_process, "run_caller_owned", query)
     if response in {"current", "legacy"}:
-        selected, result = terminal_launch.select_receiver(invocation, environment)
+        selected, result = terminal_launch.select_receiver(invocation, environment, timeout=None)
         assert selected == ([*pinned, *selector] if response == "current" else invocation)
         assert result.get("CE_TERMINAL_LAUNCH") == (
             channel if response == "current" else None
@@ -84,10 +102,12 @@ def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypat
         assert result.get("WORKTREE_MANAGER_ROOT") == (root if response == "current" else None)
     else:
         with pytest.raises(RuntimeError):
-            terminal_launch.select_receiver(invocation, environment)
+            terminal_launch.select_receiver(invocation, environment, timeout=None)
 
 
-def test_no_foreground_offer_does_not_probe_or_reuse_an_inherited_channel(monkeypatch):
+def test_no_foreground_offer_does_not_probe_or_reuse_an_inherited_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(terminal_launch, "_channel", None)
     monkeypatch.setattr(
         owned_process, "run_caller_owned",
@@ -97,10 +117,12 @@ def test_no_foreground_offer_does_not_probe_or_reuse_an_inherited_channel(monkey
 
 
 @pytest.mark.parametrize("damage", ["no-binding", "shell", "extra-argument", "missing-python", "retired-slot", "root"])
-def test_unavailable_or_unbound_runtime_cannot_receive_an_offer(monkeypatch, tmp_path, damage, channel):
+def test_unavailable_or_unbound_runtime_cannot_receive_an_offer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, damage: str, channel: str,
+) -> None:
     monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
     command = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "worktree_manager"]
-    response = {
+    response: CapabilityResponse = {
         "package": "worktree_manager", "capability": terminal_launch.CAPABILITY,
         "runtime": {"command": command, "root": None},
     }
@@ -128,7 +150,9 @@ def test_unavailable_or_unbound_runtime_cannot_receive_an_offer(monkeypatch, tmp
 
 
 @pytest.mark.parametrize("damage", ["missing", "malformed", "consumed"])
-def test_invalid_offer_never_queries_a_legacy_receiver_or_reaches_launch(channel, monkeypatch, damage):
+def test_invalid_offer_never_queries_a_legacy_receiver_or_reaches_launch(
+    channel: str, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     from pathlib import Path
     from agent_worktrees import __main__ as main
 
