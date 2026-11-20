@@ -29,12 +29,12 @@ _REVISIONS = [
     "a936d3b39f4d069b4e77ed11cf8e0e59bebbcd2b",
     "3c62c9442c5944640d2c13385d7ff00db614c1aa",
 ]
-_SOURCE_ROOTS = [
-    "plugins/agent-pull-requests/src",
-    "libs/agent-procutil/src",
-    "libs/single-instance-lease/src",
-    "libs/work-coalescing-singleton/src",
-]
+_RELEASES = {
+    "9d11a84f794506956dbaeb8341578a0b0f13b899": "0.3.1-dev1",
+    "c2ee1877fb55f965c141f400a31bc5e95dbebe6b": "0.3.2-dev1",
+    "5ee1468f15967fd6e76a0be08ee3dc69da2551bb": "0.3.16-dev1",
+}
+_REVISIONS.extend(_RELEASES)
 _HISTORICAL = r"""
 import json, os, sys
 from pathlib import Path
@@ -75,7 +75,8 @@ if mode in ("delayed", "racer"):
         if mode == "racer":
             (root / "historical-opened").write_text("held", encoding="ascii")
             assert sys.stdin.readline() == "continue\n"
-        print(json.dumps(dict(mode=mode, held=owner.held, loaded=closure())), flush=True)
+        print(json.dumps(dict(mode=mode, held=owner.held, loaded=closure(),
+                              version=cli.__version__)), flush=True)
     finally:
         owner.release()
 else:
@@ -89,7 +90,8 @@ else:
             refused.append(operation)
         else:
             raise AssertionError("historical startup admitted after sealing")
-    print(json.dumps(dict(mode=mode, refused=refused, loaded=closure())), flush=True)
+    print(json.dumps(dict(mode=mode, refused=refused, loaded=closure(),
+                          version=cli.__version__)), flush=True)
 """
 
 
@@ -104,9 +106,14 @@ def _snapshot(tmp_path: Path, revision: str) -> tuple[Path, list[str]]:
     )
     if available.returncode != 0:
         pytest.skip(f"historical qualification needs local source commit {revision}")
-    roots = list(_SOURCE_ROOTS)
-    if revision == _REVISIONS[-1]:
-        roots.append("libs/zdd/src")
+    plugin = "plugins/agent-pull-requests"
+    dependencies = plugin + "/libs" if revision in _RELEASES else "libs"
+    roots = [plugin + "/src", *[
+        f"{dependencies}/{name}/src"
+        for name in ("agent-procutil", "single-instance-lease", "work-coalescing-singleton")
+    ]]
+    if revision in (_REVISIONS[2], "5ee1468f15967fd6e76a0be08ee3dc69da2551bb"):
+        roots.append(dependencies + "/zdd/src")
     archive = subprocess.run(
         [git, "-C", str(repository), "archive", "--format=tar", revision, "--", *roots],
         capture_output=True, timeout=10, **no_window_kwargs(),
@@ -194,6 +201,8 @@ def test_complete_historical_source_cannot_cross_windows_sealing(
         assert result.returncode == 0, result.stdout + result.stderr
         cold: dict[str, Any] = json.loads(result.stdout)
         assert cold["refused"] == ["serve", "restart"]
+        if revision in _RELEASES:
+            assert delayed["version"] == cold["version"] == _RELEASES[revision]
         assert "agent_pull_requests.__main__" in cold["loaded"]
         assert "agent_pull_requests.watch_daemon" in cold["loaded"]
         assert paths.legacy_subscriptions.read_bytes() == legacy
@@ -254,6 +263,8 @@ def test_complete_historical_cold_creation_blocks_sealing_and_recovery(
         assert child.returncode == 0, output + errors
         receipt: dict[str, Any] = json.loads(output)
         assert receipt["mode"] == "racer" and receipt["held"]
+        if revision in _RELEASES:
+            assert receipt["version"] == _RELEASES[revision]
         with pytest.raises(PermissionError, match="raced historical"):
             owner.seal_state_transition(timeout=3)
         assert not owner.writer_held and not paths.writer_lock.exists()
