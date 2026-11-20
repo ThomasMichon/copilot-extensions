@@ -22,6 +22,7 @@ from agent_dispatch.queue_pool_recovery import prepare_recovery_wake
 from agent_dispatch.queue_records import SpawnReservation, WorkerAdmissionInhibited
 from agent_dispatch.supervisor import Supervisor
 from tests import test_native_owner_wake as native
+from tests import test_ordinary_invocation as ordinary
 from tests import test_pool_placement_client as controls
 from tests.test_pool_placement import pool, publish, task
 from tests.test_pool_suspended_recovery import suspended
@@ -30,6 +31,32 @@ from tests.test_scoped_worker_holds import command
 q = controls.q
 api = controls.api
 hosted = native.hosted
+intent = ordinary.intent
+
+
+def test_carried_ordinary_retry_matches_frozen_agent(
+    intent: tuple[TaskQueue, Task, SpawnReservation, dict[str, Any], str, dict[str, Any]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original, row, first, info, _, invocation = intent
+    named = invocation["selection"]["agent"]
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "policy"))
+    ordinary_bridge.record_created_agent(original, first.key, task_generation=row.generation,
+                                         agent_info=info, startup_invocation=invocation)
+    original.defer_spawn(first.key)
+    queue = TaskQueue(original.db_path, worker_admission=require_worker_admission)
+    prior = queue.get_reservation(first.key)
+    before = queue.get(row.id)
+    command("hold", "--agent", "another-worker", "--reason", "unrelated")
+    command("hold", "--agent", named, "--reason", "pause carried worker")
+    with pytest.raises(WorkerAdmissionInhibited):
+        queue.reserve_spawn(row.id, driver="ordinary-bridge")
+    assert queue.get(row.id) == before and list(queue.list_reservations(task_id=row.id)) == [prior]
+    command("resume", "--agent", named)
+    retry, admitted = queue.reserve_spawn(row.id, driver="ordinary-bridge")
+    assert admitted and prior and retry.key != first.key and retry.agent_info == prior.agent_info
+    assert (retry.creation_key, retry.session_handle, retry.worktree) == (prior.creation_key, prior.session_handle, prior.worktree)
+    assert queue.get_reservation(first.key) == prior
 
 
 def test_fresh_placement_checks_allocator_as_well_as_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

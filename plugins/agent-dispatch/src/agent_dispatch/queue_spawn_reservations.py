@@ -565,7 +565,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             effective_driver = (driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge"
                                 else driver or carried_driver)
             if self._spawn_admission is not None:
-                self._spawn_admission(task, reserved_by, selected_pool.identity if selected_pool else None, effective_driver)
+                self._spawn_admission(task, reserved_by, selected_pool.identity if selected_pool else None, effective_driver,
+                                      {"agent_info": json.loads(agent_info)} if agent_info is not None else None)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
