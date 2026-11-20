@@ -17,7 +17,7 @@ _RECOVERY_INTERVAL = 5.0
 _RESIDENT_STARTING = (ConnectionError, FileNotFoundError, TimeoutError, ProjectionUnavailable)
 
 
-def _resident_health(request: dict) -> object:
+def _resident_health(request: dict[str, object]) -> object:
     deadline = time.monotonic() + CAPABILITY_WAIT
     next_recovery = 0.0
     delay = 0.1
