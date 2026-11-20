@@ -323,6 +323,16 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-20 - Point-worker dispatch and lifetime
+
+The [worker-lifetime journal](journal/2026/11.20%20point-worker-lifetime.md)
+records merged #13646, original-selection verification, current-head review,
+executed/reused CI evidence and guarded source reconciliation. Both parent
+completion gates remain open; hosted lifetime and ordinary scheduling remain
+separate implementation work.
+The same entry now records the explicit async host's joined cancellation and
+truthful drain tests; service/queue admission and cutover wiring remain open.
+
 Append-only entries are preserved in dated files, newest first.
 
 - [2026-11-19 retained point model/table ownership](journal/2026/11.19%20point-model-binding.md)

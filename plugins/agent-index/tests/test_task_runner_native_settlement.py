@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, suppress
 import importlib.util
 import os
+from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import threading
+from types import ModuleType
+from typing import Any
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -19,47 +23,47 @@ from agent_procutil.daemon_instances import (
 
 from agent_index.indexing import runner as runner_module
 from agent_index.indexing.runner import TaskRunner, _machine_id
-from agent_index.indexing.task_store import TaskStore
+from agent_index.indexing.task_store import TaskRecord, TaskStore
 
 
 class _ObservedStore(TaskStore):
-    def __init__(self, path):
+    def __init__(self, path: Path) -> None:
         self.statement = ""
         self.entered = threading.Event()
         self.dequeued = threading.Event()
         self.reaped = threading.Event()
         super().__init__(path)
 
-    def _connect(self):
+    def _connect(self) -> sqlite3.Connection:
         conn = super()._connect()
 
-        def trace(sql):
+        def trace(sql: str) -> None:
             if self.statement and self.statement in " ".join(sql.split()):
                 self.entered.set()
 
         conn.set_trace_callback(trace)
         return conn
 
-    def dequeue_next(self):
+    def dequeue_next(self, *, accept_change_hints: bool = False) -> TaskRecord | None:
         try:
-            return super().dequeue_next()
+            return super().dequeue_next(accept_change_hints=accept_change_hints)
         finally:
             self.dequeued.set()
 
-    def reap_orphaned(self, *args):
+    def reap_orphaned(self, host: str, is_alive: Callable[[int], bool]) -> int:
         try:
-            return super().reap_orphaned(*args)
+            return super().reap_orphaned(host, is_alive)
         finally:
             self.reaped.set()
 
 
 class _EventBus:
-    def publish(self, _event, _payload):
+    def publish(self, _event: str, _payload: dict[str, Any]) -> None:
         return None
 
 
 @pytest.fixture
-def server():
+def server() -> ModuleType:
     if importlib.util.find_spec("fastapi") is None:
         pytest.skip("real ASGI service requires unavailable offline FastAPI dependencies")
     from agent_index import server
@@ -68,7 +72,7 @@ def server():
 
 
 @asynccontextmanager
-async def _runner_host(runner):
+async def _runner_host(runner: TaskRunner) -> AsyncIterator[None]:
     with admit_daemon_instance(
         "agent-index", source=runner_module.__file__, purpose="production",
     ):
@@ -80,7 +84,7 @@ async def _runner_host(runner):
 
 
 @pytest.fixture
-def registry(tmp_path, monkeypatch):
+def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     root = tmp_path / "registry"
     with daemon_test_lifecycle(owner="index-native-settlement", registry_root=root) as env:
         for name, value in env.items():
@@ -89,7 +93,7 @@ def registry(tmp_path, monkeypatch):
         yield root
 
 
-def _state(registry):
+def _state(registry: Path) -> str:
     records = [
         record for record in inspect_instances(registry)
         if record["service"] == "agent-index"
@@ -98,13 +102,14 @@ def _state(registry):
     return records[0]["state"]
 
 
-async def _until(predicate):
-    async with asyncio.timeout(8):
+async def _until(predicate: Callable[[], bool]) -> None:
+    async def wait() -> None:
         while not predicate():
             await asyncio.sleep(0.01)
+    await asyncio.wait_for(wait(), timeout=8)
 
 
-async def _cancel_twice(task):
+async def _cancel_twice(task: asyncio.Future[Any]) -> None:
     task.cancel()
     await asyncio.sleep(0.03)
     task.cancel()
@@ -112,7 +117,7 @@ async def _cancel_twice(task):
     assert not task.done()
 
 
-async def _finish(task, cancelled):
+async def _finish(task: asyncio.Future[Any], cancelled: bool) -> None:
     if cancelled:
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -122,9 +127,9 @@ async def _finish(task, cancelled):
 
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_service_guard_retains_blocked_dequeue_and_returns_claim(
-    tmp_path, registry, server, cancelled,
-):
-    async def exercise():
+    tmp_path: Path, registry: Path, server: ModuleType, cancelled: bool,
+) -> None:
+    async def exercise() -> None:
         store = _ObservedStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="native-proof")
         runner = TaskRunner(store, server._EventBus())
@@ -147,13 +152,15 @@ def test_service_guard_retains_blocked_dequeue_and_returns_claim(
                 await _cancel_twice(stopping)
             assert not stopping.done()
             assert _state(registry) == "running"
-            assert store.get_task(queued.id).status == "queued"
+            assert (record := store.get_task(queued.id)) is not None
+            assert record.status == "queued"
             writer.rollback()
             writer.close()
             writer = None
             await _finish(stopping, cancelled)
             assert store.dequeued.is_set()
             record = store.get_task(queued.id)
+            assert record is not None
             assert record.status == "queued"
             assert record.worker_pid is None
             assert not runner._monitors
@@ -175,20 +182,22 @@ def test_service_guard_retains_blocked_dequeue_and_returns_claim(
 
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_startup_recovery_settles_before_cancellation_or_failure_unwinds(
-    tmp_path, registry, server, monkeypatch, cancelled,
-):
-    class RecoveryBus(server._EventBus):
-        def publish(self, event, payload):
+    tmp_path: Path, registry: Path, server: ModuleType,
+    monkeypatch: pytest.MonkeyPatch, cancelled: bool,
+) -> None:
+    class RecoveryBus(_EventBus):
+        def publish(self, event: str, payload: dict[str, Any]) -> None:
             if not cancelled and event == "queue_update":
                 raise RuntimeError("recovery publication refused")
 
-    async def exercise():
+    async def exercise() -> None:
         store = _ObservedStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="orphan")
         store.dequeue_next()
         runner = TaskRunner(store, RecoveryBus())
         monkeypatch.setattr(server, "_create_task_runner", lambda: (store, runner))
-        writer = sqlite3.connect(store._db_path)
+        writer: sqlite3.Connection | None = sqlite3.connect(store._db_path)
+        assert writer is not None
         writer.execute("BEGIN IMMEDIATE")
         store.statement = "SET status = 'interrupted'"
         app = server.build_app()
@@ -206,7 +215,9 @@ def test_startup_recovery_settles_before_cancellation_or_failure_unwinds(
             writer = None
             await _finish(starting, cancelled)
             assert store.reaped.is_set()
-            assert store.get_task(queued.id).status == "interrupted"
+            assert (record := store.get_task(queued.id)) is not None
+            assert record.status == "interrupted"
+            assert runner._stop_task is not None
             assert runner._stop_task.done()
             assert not runner._monitors
             assert runner._task is None or runner._task.done()
@@ -228,16 +239,17 @@ def test_startup_recovery_settles_before_cancellation_or_failure_unwinds(
 @pytest.mark.parametrize("cancelled", [False, True])
 @pytest.mark.parametrize("refused", [False, True])
 def test_launch_registration_or_refusal_write_settles_before_guard_exit(
-    tmp_path, registry, monkeypatch, cancelled, refused,
-):
-    async def exercise():
+    tmp_path: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+    cancelled: bool, refused: bool,
+) -> None:
+    async def exercise() -> None:
         store = _ObservedStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="native-registration")
         runner = TaskRunner(store, _EventBus())
-        writers = []
-        children = []
+        writers: list[sqlite3.Connection] = []
+        children: list[subprocess.Popen[bytes]] = []
 
-        def spawn(_task_id):
+        def spawn(_task_id: str) -> subprocess.Popen[bytes]:
             writer = sqlite3.connect(store._db_path, check_same_thread=False)
             writer.execute("BEGIN IMMEDIATE")
             writers.append(writer)
@@ -270,6 +282,7 @@ def test_launch_registration_or_refusal_write_settles_before_guard_exit(
             writers.clear()
             await _finish(stopping, cancelled)
             record = store.get_task(queued.id)
+            assert record is not None
             if refused:
                 assert record.status == "failed"
                 assert record.worker_pid is None
@@ -286,7 +299,8 @@ def test_launch_registration_or_refusal_write_settles_before_guard_exit(
                 finally:
                     await successor.stop()
                 assert child.poll() is None
-                assert store.get_task(queued.id).worker_pid == child.pid
+                assert (record := store.get_task(queued.id)) is not None
+                assert record.worker_pid == child.pid
             assert not runner._monitors
             assert _state(registry) == "finished"
         finally:
@@ -308,15 +322,17 @@ def test_launch_registration_or_refusal_write_settles_before_guard_exit(
 
 
 @pytest.mark.parametrize("failed", [False, True])
-def test_stop_withdraws_unlaunched_source_lock_claim(tmp_path, registry, failed):
-    async def exercise():
+def test_stop_withdraws_unlaunched_source_lock_claim(
+    tmp_path: Path, registry: Path, failed: bool,
+) -> None:
+    async def exercise() -> None:
         store = TaskStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="locked")
         runner = TaskRunner(store, _EventBus())
         lock = asyncio.Lock()
         await lock.acquire()
 
-        async def acquire(_source):
+        async def acquire(_source: str) -> asyncio.Lock:
             if failed:
                 raise RuntimeError("source lock refused")
             await lock.acquire()
@@ -326,14 +342,15 @@ def test_stop_withdraws_unlaunched_source_lock_claim(tmp_path, registry, failed)
         try:
             await runner.start()
             if failed:
-                await _until(runner._task.done)
+                await _until(lambda: runner._task is not None and runner._task.done())
                 with pytest.raises(RuntimeError, match="source lock refused"):
                     await runner.stop()
             else:
                 await _until(lambda: runner._source_lock_task is not None)
                 await runner.stop()
-            assert store.get_task(queued.id).status == "queued"
-            assert store.get_task(queued.id).worker_pid is None
+            assert (record := store.get_task(queued.id)) is not None
+            assert record.status == "queued"
+            assert record.worker_pid is None
             assert lock.locked()
         finally:
             with suppress(RuntimeError):
@@ -344,14 +361,14 @@ def test_stop_withdraws_unlaunched_source_lock_claim(tmp_path, registry, failed)
 
 
 def test_startup_failure_settles_adopted_monitor_without_changing_worker_custody(
-    tmp_path, registry,
-):
+    tmp_path: Path, registry: Path,
+) -> None:
     class FailingStore(_ObservedStore):
-        def get_pending_count(self):
+        def get_pending_count(self) -> int:
             super().get_pending_count()
             raise RuntimeError("startup queue read refused")
 
-    async def exercise():
+    async def exercise() -> None:
         store = FailingStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="adopted")
         store.dequeue_next()
@@ -360,10 +377,11 @@ def test_startup_failure_settles_adopted_monitor_without_changing_worker_custody
         lifespan = _runner_host(runner)
         with pytest.raises(RuntimeError, match="startup queue read refused"):
             await lifespan.__aenter__()
-        assert runner._stop_task.done()
+        assert runner._stop_task is not None and runner._stop_task.done()
         assert not runner._monitors
         assert not runner._active_workers
         record = store.get_task(queued.id)
+        assert record is not None
         assert record.status == "processing"
         assert record.worker_pid == os.getpid()
         assert _state(registry) == "finished"
@@ -372,9 +390,9 @@ def test_startup_failure_settles_adopted_monitor_without_changing_worker_custody
 
 
 def test_monitor_native_write_settles_before_guard_and_lock_release(
-    tmp_path, registry,
-):
-    async def exercise():
+    tmp_path: Path, registry: Path,
+) -> None:
+    async def exercise() -> None:
         store = _ObservedStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="post-index")
         store.dequeue_next()
@@ -382,7 +400,7 @@ def test_monitor_native_write_settles_before_guard_and_lock_release(
         runner = TaskRunner(store, _EventBus())
         native_finished = threading.Event()
 
-        def post_index():
+        def post_index() -> None:
             try:
                 store.update_status(queued.id, "complete")
             finally:
@@ -414,7 +432,8 @@ def test_monitor_native_write_settles_before_guard_and_lock_release(
             await _finish(stopping, True)
             assert native_finished.is_set()
             assert not lock.locked()
-            assert store.get_task(queued.id).status == "complete"
+            assert (record := store.get_task(queued.id)) is not None
+            assert record.status == "complete"
             assert _state(registry) == "finished"
         finally:
             if writer is not None:
@@ -432,17 +451,17 @@ def test_monitor_native_write_settles_before_guard_and_lock_release(
 
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_runner_admission_retains_native_claim_until_existing_release(
-    tmp_path, registry, cancelled,
-):
+    tmp_path: Path, registry: Path, cancelled: bool,
+) -> None:
     """Dependency-light native proof, independent of an ASGI host's dependencies."""
-    async def exercise():
+    async def exercise() -> None:
         store = _ObservedStore(tmp_path / "tasks.db")
         queued = store.enqueue(source="runner-native")
         runner = TaskRunner(store, _EventBus())
         writer = None
         stopping = None
 
-        async def host():
+        async def host() -> None:
             with admit_daemon_instance(
                 "agent-index", source=runner_module.__file__, purpose="production",
             ):
@@ -474,6 +493,7 @@ def test_runner_admission_retains_native_claim_until_existing_release(
                 await stopping
             assert store.dequeued.is_set()
             record = store.get_task(queued.id)
+            assert record is not None
             assert record.status == "queued"
             assert record.worker_pid is None
             assert _state(registry) == "finished"

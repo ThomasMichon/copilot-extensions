@@ -480,6 +480,54 @@ controller-exit qualification, native Linux exchange/interruption qualification,
 final-source import, actual boot-crossing
 qualification and map/cwd activation remain open.
 
+### Prepared-only version-2 receiver
+
+The internal `WatchWriter.recover_prepared_state_transition()` operation is
+limited to completed quiescence with no queued legacy callbacks. It admits the
+current controller through existing authorization, process and lifecycle checks;
+governed recovery also holds the exact current installation transaction and
+uses the installation owner's complete historical-scope validation. It reads
+origin only from the private journal, never a caller-provided old binding.
+
+The version-2 prepared record retains the entire version-1 record as `origin`
+and its unchanged `binding` and `lease` at the top level, with a separate
+`controller` binding. The latter is historical evidence on the next attempt,
+not authority. Recovery accepts a later compatible current installation while
+retaining both original generations and payload provenance, without accessing
+an older executable. Version-1 validators remain unchanged and refuse the new
+record. Shared ordinary entry recognizes the prepared header but refuses every
+present transition.
+
+Before native acquisition and at final atomic publication, the adapter checks
+the exact canonical root, original lease/pin, absent physical-transition
+artifacts, unchanged journal bytes, strict legacy source, native custody,
+current admission and deadline. Acquisition never creates another historical
+inode or opens a pin/retained file. An already-current version-2 retry confirms
+durability without rewriting it. Unknown acknowledgement retains the published
+origin, native custody and legacy sole authority. Both sealed inputs and
+conflicting records refuse before acquiring a lease.
+
+Contained tests exercise actual receipt/activation replacement through a third
+generation, absent older payloads, serialized version-1/version-2 recovery and
+rollback refusal, scope/topology/source conflicts, transaction custody,
+pre/post-publication failures and uncertain acknowledgement. The focused
+preparation/storage/sealing packet passes 155 tests with three platform-specific
+skips on Windows; strict typing checks both Linux and Windows targets.
+The final exact-transaction precondition correction passes seven targeted
+negative/positive cases. Precondition refusals leave existing readiness and
+effects unchanged. Admission is revalidated after the initial source read,
+before acquisition; final source/admission work precedes the journal/topology
+check. Candidate serialization is bounded before acquisition/publication so a
+valid origin cannot produce an unreadable oversized record. Fresh current-cell
+checks omit only `COPILOT_PLUGIN_ROOT`, preserving WSL distribution identity
+and other observed environment evidence. Four focused propagation/identity
+controls pass after this final correction; guest resolution uses the canonical
+owner with fixture-only observations, not native WSL qualification.
+This is neither native Linux qualification nor actual domain/boot evidence.
+Sealed reconciliation, final import, ordinary command integration and the
+complete historical installed window remain open. No installation, migration,
+service operation or rollout is performed.
+
 ### Internal Linux sealing and recovery
 
 `WatchWriter.seal_state_transition` requires a separately completed, authorized

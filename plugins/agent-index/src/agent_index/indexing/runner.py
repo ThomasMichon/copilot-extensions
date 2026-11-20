@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agent_procutil import (
     detached_kwargs,
@@ -37,7 +37,10 @@ from agent_index.runtime_version import current_runtime_version
 
 if TYPE_CHECKING:
     from agent_index.indexing.task_store import TaskRecord, TaskStore
-    from agent_index.server.event_bus import EventBus
+
+
+class EventBus(Protocol):
+    def publish(self, event: str, payload: dict[str, Any]) -> None: ...
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +57,7 @@ _TERMINAL_VALUES = {s.value for s in TERMINAL}
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
-async def _settle(task: asyncio.Task[Any]) -> Any:
+async def _settle(task: asyncio.Future[Any]) -> Any:
     """Defer caller cancellation until this runner-owned operation settles."""
     cancelled = False
     while not task.done():
@@ -138,7 +141,7 @@ def _terminate_pid(pid: int) -> None:
         log.debug("terminate pid %s failed", pid, exc_info=True)
 
 
-def _load_governance_module():
+def _load_governance_module() -> dict[str, Any] | None:
     context_path = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "").strip()
     plugin_root_value = os.environ.get("AGENT_INDEX_HOME", "").strip()
@@ -336,7 +339,9 @@ class TaskRunner:
         self._worker_locks: dict[str, Any] = {}
         self._cancel_requested: set[str] = set()
         self._hint_worker_refusal: tuple[str, str] | None = None
-        self._governance_helper = _load_governance_module()
+        self._governance_helper: Callable[[str], dict[str, Any]] | dict[str, Any] | None = (
+            _load_governance_module()
+        )
         self._governance_baseline: dict[str, Any] | None = None
         self._governance_state: dict[str, Any] | None = None
         # Observable state
@@ -511,6 +516,7 @@ class TaskRunner:
         if helper is None:
             self._governance_state = None
             return None
+        result: dict[str, Any]
         if callable(helper):
             result = helper(checkpoint)
             if "checkpoint" not in result:

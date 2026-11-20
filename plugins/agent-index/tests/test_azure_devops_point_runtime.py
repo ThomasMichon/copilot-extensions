@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+import threading
 from typing import Any, cast
 
 import pytest
@@ -12,6 +15,7 @@ import test_azure_devops_point_worker as worker
 
 from agent_index.engine.client import EngineClient
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
+from agent_index.indexing.point_worker_host import PointWorkerHost
 from agent_index.indexing.task_store import TaskRecord, TaskStatus
 from agent_index.indexing.worker import run_worker
 from agent_index.sources.azure_devops_point_runtime import run_configured_azure_devops_points
@@ -172,6 +176,168 @@ def test_executor_mutation_cannot_redirect_completion_to_another_task(
     assert run_worker(original.id, config=f.config, point_executor=redirect) == 2
     assert f.tasks.get_task(original.id) == original
     assert f.tasks.get_task(completed.id) == completed
+
+
+@pytest.mark.parametrize("cancelled_owner", ["run", "stop", "context", "loop"])
+def test_host_joins_real_point_effects_before_cancelled_owner_can_exit(
+    application: worker.Fixture, cancelled_owner: str,
+) -> None:
+    f = application
+    task = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+    entered, release = threading.Event(), threading.Event()
+    clients_closed = False
+
+    def block_embedding() -> None:
+        entered.set()
+        assert release.wait(8), "Test did not release its native worker"
+        assert not clients_closed
+
+    f.hook = block_embedding
+
+    async def exercise() -> None:
+        nonlocal clients_closed
+        host = PointWorkerHost(config=f.config, point_executor=lambda selected: run(f, selected))
+        active: asyncio.Task[int] | None = None
+
+        async def hosting() -> None:
+            nonlocal active, clients_closed
+            try:
+                async with host:
+                    if cancelled_owner == "run":
+                        await host.run(task.id)
+                    else:
+                        active = asyncio.create_task(host.run(task.id))
+                        assert await asyncio.to_thread(entered.wait, 5)
+                        if cancelled_owner == "stop":
+                            await host.stop()
+            finally:
+                clients_closed = True
+
+        owner = asyncio.create_task(hosting())
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            for _ in range(2):
+                if cancelled_owner == "loop":
+                    for running in asyncio.all_tasks() - {asyncio.current_task()}:
+                        running.cancel()
+                else:
+                    owner.cancel()
+                await asyncio.sleep(0)
+            assert not owner.done() and not clients_closed
+            assert not await host.drain(timeout=0)
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await owner
+            if active is not None:
+                if cancelled_owner == "loop":
+                    with pytest.raises(asyncio.CancelledError):
+                        await active
+                else:
+                    assert await active == 0
+            assert clients_closed and await host.drain(timeout=0)
+            completed = f.tasks.get_task(task.id)
+            assert completed is not None and completed.status == TaskStatus.COMPLETE
+            assert completed.worker_pid is None and f.provider.body_reads == 2 and f.calls
+            with pytest.raises(RuntimeError, match="not accepting"):
+                await host.run(task.id)
+        finally:
+            release.set()
+            with suppress(asyncio.CancelledError):
+                await owner
+            if active is not None:
+                with suppress(asyncio.CancelledError):
+                    await active
+            await host.stop()
+
+    asyncio.run(exercise())
+
+
+def test_host_drain_timeout_and_cancel_keep_dispatch_owned_until_local_retry(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    task = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+    entered, release = threading.Event(), threading.Event()
+
+    def block_embedding() -> None:
+        entered.set()
+        assert release.wait(8), "Test did not release its native worker"
+
+    f.hook = block_embedding
+
+    async def exercise() -> None:
+        async with PointWorkerHost(
+            config=f.config, point_executor=lambda selected: run(f, selected),
+        ) as host:
+            active = asyncio.create_task(host.run(task.id))
+            draining: asyncio.Task[bool] | None = None
+            try:
+                assert await asyncio.to_thread(entered.wait, 5)
+                with pytest.raises(RuntimeError, match="active operation"):
+                    await host.run(task.id)
+                assert not await host.drain(timeout=0)
+                with pytest.raises(RuntimeError, match="not accepting"):
+                    await host.run(task.id)
+                draining = asyncio.create_task(host.drain(timeout=10))
+                await asyncio.sleep(0)
+                draining.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await draining
+                assert not active.done()
+                await host.resume()
+                with pytest.raises(RuntimeError, match="active operation"):
+                    await host.run(task.id)
+                release.set()
+                assert await active == 0
+                assert await host.drain(timeout=0)
+                await host.resume()
+                f.reopen()
+                f.provider.user = "changed"
+                assert await host.run(task.id) == 0
+                assert not f.provider.requests and not f.calls
+            finally:
+                release.set()
+                if draining is not None:
+                    with suppress(asyncio.CancelledError):
+                        await draining
+                await active
+
+    asyncio.run(exercise())
+
+
+def test_host_returns_dispatch_refusal_and_retains_failed_pin_for_explicit_retry(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    task = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+
+    def interrupt() -> None:
+        raise RuntimeError("fixture interrupted hosted embedding")
+
+    async def exercise() -> None:
+        with pytest.raises(ValueError, match="explicit point executor"):
+            PointWorkerHost(config=f.config, point_executor=cast(Any, None))
+        host = PointWorkerHost(config=f.config, point_executor=lambda selected: run(f, selected))
+        with pytest.raises(RuntimeError, match="not accepting"):
+            await host.run(task.id)
+        async with host:
+            assert await host.run("missing-task") == 2
+            assert f.tasks.get_task(task.id) == task and not f.provider.requests
+            f.hook = interrupt
+            assert await host.run(task.id) == 1
+            pinned = f.tasks.get_task(task.id)
+            assert pinned is not None and pinned.status == TaskStatus.QUEUED_HINTS_V2
+            assert pinned.point_claim_id is not None and f.retained_count() == 2
+            f.reopen()
+            f.hook = None
+            assert await host.run(task.id) == 0
+            assert f.provider.body_reads == 0 and f.calls
+        with pytest.raises(RuntimeError, match="entered again"):
+            await host.__aenter__()
+        with pytest.raises(RuntimeError, match="not accepting"):
+            await host.resume()
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("overlap", ["same", "ancestor", "descendant", "symlink"])

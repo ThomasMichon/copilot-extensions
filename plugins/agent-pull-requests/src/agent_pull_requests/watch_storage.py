@@ -22,6 +22,7 @@ WATCH_ENGINE_GENERATION = 1
 TransitionPhase = Literal["absent", "prepared", "sealed-legacy", "import-ready", "active"]
 _TRANSITION_PHASES = {"prepared", "sealed-legacy", "import-ready", "active"}
 _REPARSE_POINT = 0x400
+_MAX_METADATA_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -76,7 +77,7 @@ def subscriptions_path(root: Path | None = None) -> Path:
     return watch_state_paths(root).legacy_subscriptions
 
 
-def _regular_bytes(path: Path, *, max_bytes: int | None = 1_048_576) -> bytes | None:
+def _regular_bytes(path: Path, *, max_bytes: int | None = _MAX_METADATA_BYTES) -> bytes | None:
     """Read stable plain bytes; None preserves legacy subscription size policy."""
     try:
         info = path.lstat()
@@ -132,9 +133,10 @@ def read_transition_phase(
             if (
                 not isinstance(data, dict)
                 or data.get("schema") != "agent-pull-requests.watch-state-transition"
-                or type(data.get("version")) is not int or data["version"] != 1
+                or type(data.get("version")) is not int or data["version"] not in {1, 2}
                 or not isinstance(data.get("phase"), str)
                 or data["phase"] not in _TRANSITION_PHASES
+                or (data["version"] == 2 and data["phase"] != "prepared")
             ):
                 raise ValueError("unsupported marker")
         except (ValueError, UnicodeError):
