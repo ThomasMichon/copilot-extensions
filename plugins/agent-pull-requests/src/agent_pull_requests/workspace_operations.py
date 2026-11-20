@@ -105,6 +105,7 @@ class WorkspaceOperations:
                  retention_target_deadline: bool = False,
                  terminal_reads: bool = False,
                  terminal_mapping_reads: bool = False,
+                 generation_native_target: tuple[str, str] | None = None,
                  write_context_factory: Callable[..., Callable[..., Any]] | None = None) -> None:
         writers = (write_context, write_context_factory)
         write_available = sum(value is not None for value in writers) == 1
@@ -123,6 +124,13 @@ class WorkspaceOperations:
             or type(comment_mappings) is not bool
             or type(terminal_reads) is not bool
             or type(terminal_mapping_reads) is not bool
+            or store.native_generation_associations != (generation_native_target is not None)
+            or generation_native_target is not None and (
+                not isinstance(generation_native_target, tuple)
+                or len(generation_native_target) != 2
+                or not isinstance(read_owner, NativeReadHandler)
+                or read_owner.repo != generation_native_target[1]
+            )
             or store.workspace_generation_associations and (
                 not conversations or terminal_reads and not store.recorded_terminal_cache
                 or prepared_reviews or comment_mappings
@@ -185,6 +193,7 @@ class WorkspaceOperations:
         self.retention_target_deadline = retention_target_deadline
         self.terminal_reads = terminal_reads
         self.terminal_mapping_reads = terminal_mapping_reads
+        self.generation_native_target = generation_native_target
         from .workspace_retention import WorkspaceRetention
         self.retention = WorkspaceRetention(self)
         self._materializations: OrderedDict[
@@ -409,6 +418,14 @@ class WorkspaceOperations:
                     ) if self.retention_target_deadline else self.retention_target(copy.deepcopy(scope))
                 )
                 check()
+            native_capture = None
+            if self.generation_native_target is not None:
+                from .generation_native_targets import capture
+                native_capture = capture(
+                    self.store, scope, self.generation_native_target,
+                    expires_at=expires_at, checkpoint=check,
+                )
+                check()
             observed = self.read_owner.read({
                 "schema": REQUEST_SCHEMA, "version": 1, "binding_ref": self.binding_ref,
                 "number": number, "budget_seconds": deadline - time.monotonic(),
@@ -423,6 +440,7 @@ class WorkspaceOperations:
                 publication, retention_observation = publish(
                     self.store, cache, generation, expected_current=payload["expected_current"],
                     expires_at=expires_at, checkpoint=check,
+                    native_capture=native_capture,
                 )
             elif retention_epoch is not None:
                 if terminal_target is None:

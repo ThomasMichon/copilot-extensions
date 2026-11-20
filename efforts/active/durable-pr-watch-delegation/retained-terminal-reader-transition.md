@@ -462,8 +462,9 @@ replays an operation, adds an effect receiver or declares full T3 complete.
 
 **Source acceptance, in delivery order:**
 
-- [ ] Review this native-target contract before changing writer/storage or
-  admitting active native waits.
+- [x] Review this native-target contract before changing writer/storage or
+  admitting active native waits (#13748; current-head approval and required
+  green CI). Fresh-writer qualification does not admit its later adoption reader.
 - [ ] Qualify the selected fresh writer through actual load/sync and fresh
   process reconstruction, proving capture precedes native discovery/IO.
   Include original absence, close/reopen during acquisition, scope/target

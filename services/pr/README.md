@@ -374,9 +374,35 @@ associations. Removing it or selecting a strict older reader also refuses the
 expanded envelope without rewriting it. This profile authorizes no installed migration, native
 watch reassignment, unknown-effect recovery, provider access or service stop.
 
+#### Original native-target capture
+
+A fresh baseline may additionally select
+`workspaces.native_generation_associations: true`. It requires
+`generation_associations: true` and the executing-core declaration
+`agent-pull-requests.workspace-native-generation-associations/v1`.
+The original v1 selection and default publication remain unchanged.
+
+The host captures its admitted native account/repository/PR, full workspace
+scope, service binding and journal epoch/absence before native discovery or
+acquisition. This request-local capture creates no observation or storage write.
+Publication rejects an intervening closure, reopen, newly created conversation
+or mismatched capture before recording a new observation or touching the cache.
+The existing guarded publication then reserves original target/epoch metadata
+in generation-association storage version 2, confirming it only after cache
+publication. Original pending CAS and uncertain-result reconciliation remain
+with the same owner.
+
+Only fresh provisioning selects this version; adding the flag to a v1 volume
+does not migrate it. Removing the flag or choosing an older strict reader
+refuses expanded storage unchanged. Native-target selection does not compose
+with `terminal_reads`: active-native retained adoption and unknown-effect
+recovery are not yet qualified. It does not backfill targets, change watch
+receipts or deadlines, or create terminal admissions. Existing count/byte
+limits and pending/confirmed metadata custody remain intact.
+
 #### Recorded-generation terminal transition
 
-For an existing volume provisioned with the association writer, retaining
+For an existing volume provisioned with the v1 association writer, retaining
 `generation_associations: true` and selecting `terminal_reads: true` enables
 the recorded-cache variant of the existing `adopt-terminal` command. The
 executing core must separately declare

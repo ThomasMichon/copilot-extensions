@@ -6725,6 +6725,15 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+`plugins/agent-pull-requests/tests/test_generation_native_targets.py` qualifies
+original target capture before the actual synthetic native exporter capability
+and read calls, publication interruption/readback, scope/epoch refusal and
+original CAS/capacity preservation. The standalone
+`services/pr/tests/test_generation_associations.py` covers v1/v2 provisioning,
+load/sync, fresh-process body reconstruction and explicit old-core/reader
+refusal. These are fresh-writer controls, not active-native adoption or installed
+migration acceptance.
+
 `services/pr/tests/test_recorded_terminal_cache.py` belongs to this existing
 explicit process lane. It provisions the selected baseline through the actual
 CLI, transitions current/noncurrent recorded generations, reconstructs all
