@@ -435,7 +435,8 @@ Dispatch holds the configured source writer from snapshot recheck through the
 callable's return and durable queue verification. The configured runtime still
 qualifies and pins the whole snapshot before effects. The dispatcher ignores
 the callable's return value: success requires the existing queue owner to
-confirm completion of the same exact hints and immutable pin. Exceptions leave
+confirm completion against the original task ID, exact immutable hints and pin,
+captured before the callback can mutate its `TaskRecord`. Exceptions leave
 the claim and recovery material as the execution owners retained them; dispatch
 does not write generic failed, cancelled or successful status. Return codes are
 0 for verified completion, 1 for an execution exception and 2 for an unsupported

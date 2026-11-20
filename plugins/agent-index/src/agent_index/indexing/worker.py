@@ -282,24 +282,24 @@ def _run_point_executor(
         print("[FAIL] worker: point executor requires a parked or completed point claim",
               file=sys.stderr)
         return 2
+    task_id, hints, original_pin = task.id, task.change_hints, task.point_claim_id
     try:
         with source_writer(config.data_dir):
-            if store.get_task(task.id) != task:
+            if store.get_task(task_id) != task:
                 raise ValueError("Selected point queue snapshot changed")
             executor(task)
-            completed = store.get_task(task.id)
+            completed = store.get_task(task_id)
             if (
                 completed is None or completed.status != TaskStatus.COMPLETE
                 or completed.point_claim_id is None
-                or (task.point_claim_id is not None
-                    and completed.point_claim_id != task.point_claim_id)
+                or (original_pin is not None and completed.point_claim_id != original_pin)
             ):
                 print("[FAIL] worker: point executor did not durably complete its claim",
                       file=sys.stderr)
                 return 2
             with closing(store._connect()) as conn:
                 store._require_point_claim(conn, PendingPointClaim(
-                    task.id, completed.point_claim_id, task.change_hints,
+                    task_id, completed.point_claim_id, hints,
                 ))
         return 0
     except Exception as exc:

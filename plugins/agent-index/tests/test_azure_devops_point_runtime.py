@@ -155,6 +155,25 @@ def test_selected_point_dispatch_owns_synchronous_lifetime_without_process_setup
     assert not f.provider.requests and not f.calls
 
 
+def test_executor_mutation_cannot_redirect_completion_to_another_task(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    selected = f.tasks.get_task(f.claim.task_id)
+    assert selected is not None
+    completed = run(f, selected)
+    assert completed.status == TaskStatus.COMPLETE
+    original = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+    assert original.id != completed.id and original.point_claim_id is None
+
+    def redirect(task: TaskRecord) -> None:
+        task.__dict__.update(completed.__dict__)
+
+    assert run_worker(original.id, config=f.config, point_executor=redirect) == 2
+    assert f.tasks.get_task(original.id) == original
+    assert f.tasks.get_task(completed.id) == completed
+
+
 @pytest.mark.parametrize("overlap", ["same", "ancestor", "descendant", "symlink"])
 def test_legacy_overlap_refuses_before_pin_or_provider(
     application: worker.Fixture, overlap: str, tmp_path: Path,
