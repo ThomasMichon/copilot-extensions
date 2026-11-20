@@ -2126,15 +2126,18 @@ export function runAgentDispatchConsume(cwd, taskId, deferComplete) {
 // regardless of which process or cwd resolves the handoff.
 export function addHandoffClaim(cwd, taskId, worktree, execute = runCli) {
   try {
-    execute(
+    const result = JSON.parse(execute(
       "agent-worktrees",
       [
         "claims", "add", "task", taskId, "--note", "context handoff",
         "--worktree", worktree, "--json",
       ],
       { cwd, timeout: 15000 },
-    );
+    ));
+    return result?.claim_binding?.contract === "context-handoff-creator-claim/v1"
+      ? result.claim_binding : null;
   } catch { /* best-effort -- defense in depth, not a precondition */ }
+  return null;
 }
 
 // PR #3248 review (comment 9): `dispatchHandoff` publishes the task (making
@@ -2157,11 +2160,7 @@ export function releaseHandoffClaimIfTerminal(cwd, taskId, worktree, execute = r
   try {
     const fresh = cliJson("agent-dispatch", ["show", taskId], cwd, 15000, execute);
     if (!fresh || !HANDOFF_TERMINAL_STATUSES.has(fresh.status)) return;
-    execute(
-      "agent-worktrees",
-      ["claims", "release", taskId, "--worktree", worktree, "--json"],
-      { cwd, timeout: 15000 },
-    );
+    return reconcileHandoffCreatorClaim(cwd, taskId, fresh, execute);
   } catch { /* best-effort -- the async server-side hook already tried and
                lost this exact race; an operator can still release by hand */ }
 }
@@ -2189,7 +2188,10 @@ export function dispatchHandoff(
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
+  const claimTmp = join(dir, `${metadata.id}-claim-${process.pid}.json`);
   try {
+    const peer = cliJson("agent-dispatch", ["health"], cwd, 15000, execute);
+    if (peer?.handoff_claim_contract !== "context-handoff-creator-claim/v1") return null;
     mkdirSync(dir, { recursive: true });
     writeFileSync(tmp, encodeHandoffPayload(promptText, metadata), "utf-8");
     const machine = get("machine", cwd, sid);
@@ -2207,7 +2209,19 @@ export function dispatchHandoff(
     if (machine) argv.push("--target-machine", machine);
     const task = JSON.parse(execute("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
     if (task?.id) {
-      addHandoffClaim(cwd, task.id, worktree, execute);
+      let binding = task.handoff_claim || addHandoffClaim(cwd, task.id, worktree, execute);
+      if (binding && !task.handoff_claim) {
+        try {
+          writeFileSync(claimTmp, JSON.stringify(binding), "utf-8");
+          const recorded = cliJson(
+            "agent-dispatch", ["handoff-claim", task.id, "--binding-file", claimTmp],
+            cwd, 45000, execute,
+          );
+          binding = recorded?.claimBinding || null;
+        } catch { binding = null; }
+      }
+      metadata.creatorClaim = binding;
+      metadata.creatorClaimPending = !binding;
       // #3248 review comment 9: the task was already publicly claimable
       // above, before this claim existed -- close that race's window right
       // here rather than trusting only the async server-side hook, which
@@ -2224,12 +2238,15 @@ export function dispatchHandoff(
       id: task.id,
       metadata: {
         ...(retained || { ...metadata, authorIdentity: null }), taskId: task.id,
+        creatorClaim: task.handoff_claim || metadata.creatorClaim || null,
+        creatorClaimPending: !(task.handoff_claim || metadata.creatorClaim),
       },
     };
   } catch {
     return null;
   } finally {
     try { unlinkSync(tmp); } catch { /* already gone */ }
+    try { unlinkSync(claimTmp); } catch { /* already gone */ }
   }
 }
 
@@ -2294,6 +2311,7 @@ export function writeSessionStateHandoff(
     worktreeDir: stored.metadata?.worktreeDir || null,
     stateDir: stored.metadata?.stateDir || null,
     authorIdentity: stored.metadata?.authorIdentity || null,
+    creatorClaim: stored.metadata?.creatorClaim || null,
     title: stored.metadata?.title || "",
     seed,
     promptText,
@@ -3767,6 +3785,35 @@ export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = 
 // process's own stale read.
 const ABORT_ELIGIBLE_TASK_STATUSES = new Set(["proposed", "queued"]);
 
+function taskHasNoExecution(task) {
+  return task?.attempts === 0
+    && !task.owner && !task.owner_session_id && task.started_at == null && task.claimed_at == null;
+}
+
+function unconsumedAbandonedTask(task, taskId) {
+  return task?.id === taskId && task.status === "abandoned" && taskHasNoExecution(task);
+}
+
+function reconcileHandoffCreatorClaim(cwd, taskId, task, execute = runCli) {
+  if (task?.handoff_claim_contract !== "context-handoff-creator-claim/v1") {
+    return { claimSettled: false, claimNote: "The task owner does not support exact creator-claim reconciliation." };
+  }
+  try {
+    const result = cliJson(
+      "agent-dispatch", ["handoff-claim", taskId], cwd, 45000, execute,
+    );
+    if (result?.id !== taskId || result.claimSettled !== true || result.taskTerminal !== true) {
+      return {
+        claimSettled: false,
+        claimNote: result?.claimNote || "The task owner did not confirm exact creator settlement.",
+      };
+    }
+    return { claimSettled: true };
+  } catch (error) {
+    return { claimSettled: false, claimNote: describeCliError(error) || "Creator settlement is pending." };
+  }
+}
+
 export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   let task;
   try {
@@ -3781,6 +3828,9 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   }
   const labels = Array.isArray(task?.labels) ? task.labels : [];
   const isHandoffTask = labels.includes("handoff") || task?.source === "context-handoff";
+  if (task?.id !== taskId) {
+    return { ok: false, id: taskId, kind: "task", error: "Task owner returned a different task identity." };
+  }
   if (!isHandoffTask) {
     return {
       ok: false,
@@ -3790,7 +3840,8 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
         `source is "${task?.source || "unknown"}", not "context-handoff") -- refusing to abandon it.`,
     };
   }
-  if (!ABORT_ELIGIBLE_TASK_STATUSES.has(task?.status)) {
+  const retry = unconsumedAbandonedTask(task, taskId);
+  if ((!ABORT_ELIGIBLE_TASK_STATUSES.has(task?.status) || !taskHasNoExecution(task)) && !retry) {
     return {
       ok: false,
       id: taskId,
@@ -3822,7 +3873,16 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   // itself succeeds below, so a failed abandon (e.g. a race consumer
   // claimed the task in between) never leaves the ledger showing
   // "cancelled" over a task that's still alive (PR #4570 review round 18).
-  const peek = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute, { dryRun: true });
+  const creatorClaim = task?.handoff_claim || null;
+  if (creatorClaim && (
+    (task.target_worktree || task.affinity?.worktree) !== creatorClaim.worktree_id
+    || task.target_machine && task.target_machine.toLowerCase() !== creatorClaim.machine?.toLowerCase()
+  )) {
+    return { ok: false, id: taskId, kind: "task", error: "Creator binding contradicts the handoff target." };
+  }
+  const peek = cancelHandoffInRecord(
+    cwd, predecessorSessionId, taskId, execute, { dryRun: true, creatorClaim },
+  );
   if (!peek.checked) {
     // Fail CLOSED, not open: a peek failure (worktree id didn't resolve,
     // the CLI call errored, its output didn't parse) is NOT the same as a
@@ -3848,7 +3908,7 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
     };
   }
   try {
-    execute(
+    if (!retry) execute(
       "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
       [
         "abandon", taskId, "--permit", "--reason", reason || "aborted via context-handoff abort",
@@ -3856,6 +3916,13 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
       ],
       { cwd, timeout: 15000 },
     );
+    const confirmed = cliJson("agent-dispatch", ["show", taskId], cwd, 15000, execute);
+    if (!unconsumedAbandonedTask(confirmed, taskId)) {
+      return {
+        ok: false, id: taskId, kind: "task", taskCancelled: false, claimSettled: false,
+        error: "The task owner did not confirm an unconsumed abandonment; creator protection is retained.",
+      };
+    }
     // Best-effort: mark the predecessor's own session-state handoff-request
     // marker aborted too, so a later `readSessionStateHandoff` lookup (or a
     // stale-claimant check) doesn't keep reporting `consumed: false` for a
@@ -3875,11 +3942,18 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
     // https://github.com/ThomasMichon/copilot-extensions/issues/4619, and
     // this commit call will itself decline to cancel (reporting
     // `cancelled: false`) rather than silently succeeding over it.
-    const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
+    const ledger = cancelHandoffInRecord(
+      cwd, predecessorSessionId, taskId, execute, { creatorClaim },
+    );
+    const creator = ledger.checked && !ledger.raw?.candidate
+      ? reconcileHandoffCreatorClaim(cwd, taskId, confirmed, execute)
+      : { claimSettled: false, claimNote: "Pending-handoff retirement could not be verified; retry this exact abort." };
     return {
       ok: true,
       id: taskId,
       kind: "task",
+      taskCancelled: true,
+      ...creator,
       ledgerCancelled: ledger.cancelled,
       ...(ledger.cancelled ? {} : { ledgerNote: ledgerFailureNote(ledger.reason) }),
     };
@@ -3888,6 +3962,8 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
       ok: false,
       id: taskId,
       kind: "task",
+      taskCancelled: null,
+      claimSettled: false,
       error: describeCliError(error) || "agent-dispatch abandon failed",
     };
   }
@@ -3924,8 +4000,18 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
 // non-dry-run cancellation after the destructive action already succeeded)
 // deliberately stays best-effort/fail-open -- there is nothing left to
 // protect by then.
-export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli, { dryRun = false } = {}) {
-  const worktreeId = agentWorktreesGet("worktree-id", cwd, sessionId, execute);
+export function cancelHandoffInRecord(
+  cwd, sessionId, token, execute = runCli, { dryRun = false, creatorClaim = null } = {},
+) {
+  const qualified = creatorClaim?.contract === "context-handoff-creator-claim/v1"
+    && creatorClaim.ref === token && creatorClaim.kind === "task"
+    && ["machine", "project", "worktree_id", "creation_nonce", "claim_nonce"]
+      .every(key => typeof creatorClaim[key] === "string" && /^[A-Za-z0-9_.:@-]{1,256}$/.test(creatorClaim[key]));
+  if (creatorClaim && !qualified) {
+    return { cancelled: false, checked: false, reason: "creator claim binding is invalid", raw: null };
+  }
+  const worktreeId = qualified
+    ? creatorClaim.worktree_id : agentWorktreesGet("worktree-id", cwd, sessionId, execute);
   if (!worktreeId) {
     return {
       cancelled: false,
@@ -3939,7 +4025,12 @@ export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli, {
       execute(
         "agent-worktrees", // marketplace-isolation: allow agent-worktrees-management
         [
-          "cancel-handoff", "--worktree-id", worktreeId, "--token", token,
+          "cancel-handoff",
+          ...(qualified ? [
+            "--owner-ref", `${creatorClaim.machine}/${creatorClaim.project}/${creatorClaim.worktree_id}`,
+            "--expected-record-nonce", creatorClaim.creation_nonce,
+          ] : ["--worktree-id", worktreeId]),
+          "--token", token,
           ...(dryRun ? ["--dry-run"] : []),
         ],
         { cwd, timeout: 5000 },

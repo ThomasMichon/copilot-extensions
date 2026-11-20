@@ -25,23 +25,25 @@ importable (otherwise the REST API still serves).
 import json
 import secrets
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable, cast
 
 from pydantic import PlainValidator, StrictInt, WithJsonSchema
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
 
 from . import telemetry
 from .events import EventBus
 from .identity import canonicalize_remote
-from .queue import (
+from .queue import TaskQueue
+from .queue_common import (
     CompletionOutcome,
-    ProducerFenceError,
-    ProducerScopeValidationError,
     StructuredResult,
     Task,
-    TaskError,
-    TaskQueue,
     worker_id_for,
 )
+from .queue_producer_fences import ProducerFenceError, ProducerScopeValidationError
+from .queue_records import TaskError
 
 MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
@@ -84,13 +86,13 @@ def _headers_of(ctx: Any) -> dict[str, str]:
     return dict(req.headers) if req is not None else {}
 
 
-def _bulk_task_dict(task: Task) -> dict:
+def _bulk_task_dict(task: Task) -> dict[str, Any]:
     result = asdict(task)
     result.pop("result")
     return result
 
 
-def _event_task_dict(task: dict) -> dict:
+def _event_task_dict(task: dict[str, Any]) -> dict[str, Any]:
     result = dict(task)
     result["has_result"] = result.pop("result", None) is not None or bool(
         result.get("has_result")
@@ -120,18 +122,18 @@ def build_coordinator_mcp(
     # streamable_http_app() (see coordinator.create_app).
     mcp = MCPServer("agent-dispatch-coordinator")
 
-    def _emit(event_type: str, task: dict) -> None:
+    def _emit(event_type: str, task: dict[str, Any]) -> None:
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
         # Generic telemetry seam (no-op unless a consumer registered a sink).
         # Skip it for periodic, non-state-transition event types (e.g. a
         # heartbeat lease extension) -- see `_NO_TELEMETRY_EVENT_TYPES`.
         if event_type not in _NO_TELEMETRY_EVENT_TYPES:
-            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+            telemetry.emit_for(bus, telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
-        telemetry.emit(telemetry.producer_fence_event(event_type, detail))
+        telemetry.emit_for(bus, telemetry.producer_fence_event(event_type, detail))
 
     def _control_error(ctx: Context) -> dict[str, object] | None:
         if control_token is None:
@@ -157,7 +159,7 @@ def build_coordinator_mcp(
             }
         return None
 
-    def _mutate(op, event_type: str | None) -> dict:
+    def _mutate(op: Callable[[], Task | CompletionOutcome], event_type: str | None) -> dict[str, Any]:
         """Run a queue mutation; map TaskError to an error dict; emit on success."""
         try:
             mutation = op()
@@ -175,7 +177,9 @@ def build_coordinator_mcp(
             # matching one for MCP callers.
             from . import handoff_claim_release
 
-            handoff_claim_release.release_if_handoff(result, cancel_pending=event_type == "task.abandoned")
+            handoff_claim_release.release_if_handoff(
+                result, cancel_pending=event_type == "task.abandoned", queue=queue,
+            )
         if event_type is not None:
             _emit(event_type, result)
         return result
@@ -230,7 +234,7 @@ def build_coordinator_mcp(
         done_criteria: str | None = None,
         not_before: float = 0.0,
         proposed: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Enqueue a task (``proposed=True`` for an unclaimable draft).
 
         ``repo`` is the **lane** (a remote URL, or the ``X-Agent-Repo`` header);
@@ -301,7 +305,7 @@ def build_coordinator_mcp(
     @mcp.tool(name="dispatch_producer_scope_status")
     def producer_scope_status(
         ctx: Context, source: str, repo: str | None = None
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Inspect one exact repo+source creation fence."""
         lane = _repo(ctx, repo)
         if not lane:
@@ -327,7 +331,7 @@ def build_coordinator_mcp(
         expected_generation: StrictInt,
         repo: str | None = None,
         required_label: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Retire N and activate N+1 for one selected producer."""
         control_error = _control_error(ctx)
         if control_error is not None:
@@ -373,7 +377,7 @@ def build_coordinator_mcp(
             )
             return {"error": exc.detail(operation="transition")}
         state = transition.state
-        detail: dict[str, object] = {
+        transition_detail: dict[str, object] = {
             "repo": state.scope["repo"],
             "source": state.scope["source"],
             "from_generation": expected_generation,
@@ -382,12 +386,12 @@ def build_coordinator_mcp(
             "replayed": transition.replayed,
         }
         if state.required_label is not None:
-            detail["required_label"] = state.required_label
-        _emit_producer_event("producer_scope.transitioned", detail)
+            transition_detail["required_label"] = state.required_label
+        _emit_producer_event("producer_scope.transitioned", transition_detail)
         return transition.as_dict()
 
     @mcp.tool(name="dispatch_approve")
-    def approve(task_id: str) -> dict:
+    def approve(task_id: str) -> dict[str, Any]:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
         return _mutate(lambda: queue.approve(task_id), "task.approved")
 
@@ -395,26 +399,26 @@ def build_coordinator_mcp(
 
     @mcp.tool(name="dispatch_find")
     def find(ctx: Context, query: str, limit: int = 50, repo: str | None = None,
-             category: str | None = None) -> list[dict]:
+             category: str | None = None) -> list[dict[str, Any]]:
         """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
         return [
             _bulk_task_dict(t)
-            for t in queue.find(query, repo=_repo(ctx, repo), limit=limit, category=category)
+            for t in cast(list[Task], queue.find(query, repo=_repo(ctx, repo), limit=limit, category=category))
         ]
 
     @mcp.tool(name="dispatch_sweep")
     def sweep(ctx: Context, limit: int = 500, repo: str | None = None,
-              category: str | None = None) -> list[dict]:
+              category: str | None = None) -> list[dict[str, Any]]:
         """The dedup corpus for the lane: every non-abandoned task, newest first."""
         return [
             _bulk_task_dict(t)
-            for t in queue.sweep(repo=_repo(ctx, repo), limit=limit, category=category)
+            for t in cast(list[Task], queue.sweep(repo=_repo(ctx, repo), limit=limit, category=category))
         ]
 
     # -- recipes -------------------------------------------------------------
 
     @mcp.tool(name="dispatch_recipe_list")
-    def recipe_list() -> list[dict]:
+    def recipe_list() -> list[dict[str, Any]]:
         """List the built-in loop recipes (reviewer / conflict-resolution /
         goal-driven) with their parameters, suspend-on events, and resolution."""
         from .recipes import list_recipes
@@ -439,7 +443,7 @@ def build_coordinator_mcp(
         ]
 
     @mcp.tool(name="dispatch_recipe_render")
-    def recipe_render(name: str, params: dict[str, str] | None = None) -> dict:
+    def recipe_render(name: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         """Render a recipe with parameters into the fields of a task (creates
         nothing) -- inspect what ``dispatch_recipe_kick`` would enqueue."""
         from .recipes import RecipeError, render_recipe
@@ -461,7 +465,7 @@ def build_coordinator_mcp(
         target_worktree: str | None = None,
         target_repo: str | None = None,
         proposed: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Carve an ad-hoc task from a recipe (the no-wrapper-service path).
 
         Renders the recipe and enqueues it, deriving a reserved-work
@@ -481,6 +485,7 @@ def build_coordinator_mcp(
             return {"error": "no repo (lane): send X-Agent-Repo or pass repo=<remote URL>"}
         merged_labels = list(dict.fromkeys([*rendered.labels, *(labels or [])]))
         make = queue.propose if proposed else queue.create
+        verification: dict[str, Any] = verification_options(rendered)
         task = make(
             rendered.title,
             repo=lane,
@@ -489,7 +494,7 @@ def build_coordinator_mcp(
             labels=merged_labels,
             dedup_key=dedup_key or dedup_key_for(rendered),
             exclusive_key=exclusive_key_for(rendered),
-            **verification_options(rendered),
+            **verification,
             goal=rendered.goal,
             done_criteria=rendered.done_criteria,
             source="recipe",
@@ -503,7 +508,7 @@ def build_coordinator_mcp(
         return result
 
     @mcp.tool(name="dispatch_emitter_side_load")
-    def emitter_side_load(registration_id: str, change_ref: str) -> dict:
+    def emitter_side_load(registration_id: str, change_ref: str) -> dict[str, Any]:
         """Run one registered emitter's on-demand path on the coordinator host."""
         from .producers.emitter import EmitterError, run_side_load
         from . import remote_dispatch
@@ -511,10 +516,11 @@ def build_coordinator_mcp(
         registration = queue.get_registration(registration_id)
         if registration is None:
             return {"error": f"no such registration {registration_id!r}"}
-        if remote_dispatch.is_peer_machine(registration.machine):
+        remote_machine = registration.machine
+        if remote_machine is not None and remote_dispatch.is_peer_machine(remote_machine):
             try:
                 completed = remote_dispatch.browse_remote(
-                    registration.machine,
+                    remote_machine,
                     [
                         "agent-dispatch",
                         "emitter",
@@ -531,18 +537,18 @@ def build_coordinator_mcp(
             if completed.returncode != 0:
                 return {
                     "error": remote_dispatch.diagnose_remote_failure(
-                        registration.machine,
+                        remote_machine,
                         completed.returncode,
                         completed.stderr,
                     )
                 }
             try:
-                return json.loads(completed.stdout)
+                return cast(dict[str, Any], json.loads(completed.stdout))
             except ValueError as exc:
                 return {"error": f"remote side-load returned invalid JSON: {exc}"}
 
         class _QueueClient:
-            def create(self, title: str, **fields: Any) -> dict:
+            def create(self, title: str, **fields: Any) -> dict[str, Any]:
                 proposed = bool(fields.pop("proposed", False))
                 task = (
                     queue.propose(title, **fields)
@@ -574,7 +580,7 @@ def build_coordinator_mcp(
         limit: int = 200,
         repo: str | None = None,
         category: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         return [
             _bulk_task_dict(t)
@@ -590,23 +596,23 @@ def build_coordinator_mcp(
         ]
 
     @mcp.tool(name="dispatch_show")
-    def show(task_id: str) -> dict:
+    def show(task_id: str) -> dict[str, Any]:
         """Return one task's full record."""
         task = queue.get(task_id)
         return asdict(task) if task else {"error": f"no such task {task_id!r}"}
 
     @mcp.tool(name="dispatch_events")
-    def events(task_id: str) -> list[dict]:
+    def events(task_id: str) -> list[dict[str, Any]]:
         """Return a task's append-only audit trail."""
         return queue.events(task_id)
 
     @mcp.tool(name="dispatch_wakes")
-    def wakes(task_id: str) -> list[dict]:
+    def wakes(task_id: str) -> list[dict[str, Any]]:
         """Return a task's durable wake outbox operations."""
         return [asdict(wake) for wake in queue.list_wakes(task_id)]
 
     @mcp.tool(name="dispatch_payload")
-    def payload(task_id: str) -> dict:
+    def payload(task_id: str) -> dict[str, Any]:
         """Return a task's resolved payload (inline text or blob content)."""
         task = queue.get(task_id)
         if task is None:
@@ -619,7 +625,7 @@ def build_coordinator_mcp(
         }
 
     @mcp.tool(name="dispatch_result")
-    def result(task_id: str) -> dict:
+    def result(task_id: str) -> dict[str, Any]:
         """Return a task's structured completion result."""
         task = queue.get(task_id)
         if task is None:
@@ -638,7 +644,7 @@ def build_coordinator_mcp(
         machine: str | None = None,
         worktree: str | None = None,
         repo: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """This worktree's inbox: tasks targeted at + owned by its identity.
 
         Identity comes from ``X-Agent-Machine``/``X-Agent-Worktree`` headers and
@@ -666,8 +672,8 @@ def build_coordinator_mcp(
         worktree: str | None = None,
         repo: str | None = None,
         all_repos: bool = False,
-        assignment_workspace: dict | None = None,
-    ) -> dict | None:
+        assignment_workspace: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """Atomically lease one eligible task (identity + lane via header or args).
 
         The claim honors the repo lane and targeting: only tasks in this repo's
@@ -719,7 +725,7 @@ def build_coordinator_mcp(
     # -- lifecycle -----------------------------------------------------------
 
     @mcp.tool(name="dispatch_start")
-    def start(task_id: str, worker_id: str) -> dict:
+    def start(task_id: str, worker_id: str) -> dict[str, Any]:
         """Mark a claimed task ``started``."""
         from .coordinator import _resolve_owner_session_id
 
@@ -730,12 +736,12 @@ def build_coordinator_mcp(
         )
 
     @mcp.tool(name="dispatch_yield")
-    def yield_task(task_id: str, worker_id: str, note: str | None = None) -> dict:
+    def yield_task(task_id: str, worker_id: str, note: str | None = None) -> dict[str, Any]:
         """Return a held task to ``queued`` with a note (recoverable snag)."""
         return _mutate(lambda: queue.yield_task(task_id, worker_id, note=note), "task.yielded")
 
     @mcp.tool(name="dispatch_suspend")
-    def suspend(task_id: str, worker_id: str, reason: str) -> dict:
+    def suspend(task_id: str, worker_id: str, reason: str) -> dict[str, Any]:
         """Park a started task as owner-preserving, dormant ``suspended`` work."""
         return _mutate(
             lambda: queue.suspend(task_id, worker_id, reason=reason),
@@ -748,7 +754,7 @@ def build_coordinator_mcp(
         worker_id: str,
         wake: bool = True,
         message: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Resume a suspended task under the same owner and optionally wake it."""
         wake_message = message or (
             f"Task {task_id} has been resumed. Continue toward its goal "
@@ -776,7 +782,7 @@ def build_coordinator_mcp(
         task_id: str,
         worker_id: str,
         reason: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Release a suspended task to ``queued`` for replacement embodiment."""
         return _mutate(
             lambda: queue.release_suspended(
@@ -791,7 +797,7 @@ def build_coordinator_mcp(
         worker_id: str,
         result_ref: str | None = None,
         result: McpStructuredResult = None,  # type: ignore[assignment]
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Complete a task.
 
         Omit ``result`` for no structured result; explicit JSON null is invalid.
@@ -808,7 +814,7 @@ def build_coordinator_mcp(
     @mcp.tool(name="dispatch_abandon")
     def abandon(
         task_id: str, worker_id: str | None = None, permit: bool = False, reason: str | None = None
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Terminally abandon a task -- requires ``permit=True`` (permission-gated)."""
         return _mutate(
             lambda: queue.abandon_with_outcome(
@@ -818,17 +824,17 @@ def build_coordinator_mcp(
         )
 
     @mcp.tool(name="dispatch_heartbeat")
-    def heartbeat(task_id: str, worker_id: str) -> dict:
+    def heartbeat(task_id: str, worker_id: str) -> dict[str, Any]:
         """Extend the lease on a held task during long work."""
         return _mutate(lambda: queue.heartbeat(task_id, worker_id), "task.heartbeat")
 
     @mcp.tool(name="dispatch_detach")
-    def detach(task_id: str) -> dict:
+    def detach(task_id: str) -> dict[str, Any]:
         """Demote a hard worktree pin to a soft affinity (portability)."""
         return _mutate(lambda: queue.detach(task_id), "task.detached")
 
     @mcp.tool(name="dispatch_recover")
-    def recover() -> dict:
+    def recover() -> dict[str, Any]:
         """Force a liveness GC pass (requeue tasks whose owner is confirmed gone)."""
         counts = queue.reconcile_liveness()
         # Matches the HTTP /recover route's own event: this call bypasses
@@ -844,7 +850,7 @@ def build_coordinator_mcp(
         permit: bool = False,
         reason: str | None = None,
         min_failures: int = 3,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Atomically rearm a queued task's dead-lettered spawn history."""
         try:
             result = queue.rearm_spawn(
@@ -871,13 +877,12 @@ def build_coordinator_mcp(
 
 def bearer_guard_middleware(
     token: str | None, control_token: str | None = None
-):
+) -> type[BaseHTTPMiddleware]:
     """A middleware factory that accepts ordinary or control bearer auth."""
-    from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse
 
     class _Guard(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
+        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
             credential = _bearer_credential(
                 request.headers.get("authorization", "")
             )

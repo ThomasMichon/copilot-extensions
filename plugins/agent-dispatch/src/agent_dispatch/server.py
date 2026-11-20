@@ -12,6 +12,10 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+from fastapi import FastAPI
 
 from . import __version__, telemetry
 from .action_controls import require_worker_admission
@@ -86,7 +90,9 @@ def check_bind_safety(cfg: Config) -> None:
         )
 
 
-def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
+def build_app(
+    cfg: Config | None = None, *, replay_consumer_factory: Callable[..., Any] | None = None,
+) -> FastAPI:
     """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     from .assignment_admission import configured_writer
@@ -103,8 +109,13 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     # unless a consumer wired a sink). Prefer a convention-located config file
     # (env-free); fall back to the environment so env-wired deploys don't
     # regress. Fail-open either way.
-    if not telemetry.load_sink_from_config():
-        telemetry.load_sink_from_env()
+    from .consumer_telemetry import load_policy
+    from process_telemetry.emission import LEGACY
+
+    telemetry_policy = load_policy()
+    if telemetry_policy is LEGACY:
+        if not telemetry.load_sink_from_config():
+            telemetry.load_sink_from_env()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(
         Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
@@ -132,6 +143,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         cohort_sources=RegistrarSources(),
         pool_publication_enabled=cfg.pool_publication_enabled,
         periodic_relevance_interval=60.0 if cfg.control_token else 0.0,
+        consumer_telemetry=telemetry_policy,
     )
     from .source_start import behavior_identity, config_identity
 
@@ -217,7 +229,7 @@ def _owns_active_route() -> bool:
         return _wake_route_owned
 
 
-def advertise_endpoint(cfg: Config):
+def advertise_endpoint(cfg: Config) -> Path | None:
     """Write the rendezvous file advertising the coordinator's bound endpoint.
 
     Discovery: clients resolve the coordinator here (env override -> file ->
@@ -318,6 +330,16 @@ def _clear_routing() -> None:
         routing.clear_if_owner(routing_dir(), os.getpid())
     except Exception:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
+
+
+class _Serve(Protocol):
+    def __call__(
+        self, cfg: Config | None = None, *, passive: bool = False, force: bool = False,
+    ) -> None: ...
+
+
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(Callable[..., Callable[[_Serve], _Serve]], daemon_entrypoint)
 
 
 @daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
@@ -532,7 +554,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                     sock.close()
 
 
-def _settle_federation(runner, *, interrupted=None) -> None:
+def _settle_federation(runner: Any, *, interrupted: BaseException | None = None) -> None:
     """Keep the hosting admission until bounded local retirement confirms success."""
     retry = False
     while True:
@@ -552,7 +574,7 @@ def _settle_federation(runner, *, interrupted=None) -> None:
         raise interrupted
 
 
-def _maybe_start_federation(*, drain_gate=None):
+def _maybe_start_federation(*, drain_gate: Any = None) -> Any:
     """Start the federation runner alongside the coordinator when a federation
     role is configured (``AGENT_DISPATCH_FEDERATION_ROLE``); return it (so
     :func:`serve` can stop it) or ``None``.

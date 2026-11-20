@@ -25,6 +25,25 @@ switch or leaking one operation's credentials into another.
 
 ## Coordination
 
+- **Finite #3296 inference-identity intake (reviewed planning accepted):** Phase 6 is the
+  separate Copilot inference-identity lane; it does not change Phases 1-4's
+  repository-operation authentication contract or conflate the two identities.
+  Worktrees retains repo-keyed resolution and launcher integration;
+  agent-machines retains machine-default policy and restoration. The existing
+  trusted-container claimant keeps that bounded launch/isolation slice and
+  its explicit exclusions. Other launcher, credential, source and native
+  owners remain unchanged. Preserve Draft status and the temporary-token
+  implementation restriction: this amendment appoints no executor, transfers
+  no claim and starts no authentication or live inference operation.
+  #13709 merged the complete planning contract after current-head review and
+  required CI. Complete current original/discussion, ROOT/detail/global
+  validation, intake and custody readback accepted that planned receiving.
+  The separate source judgment retains #3296 OPEN because its bounded
+  claimant, exclusions and independent launcher/machine-policy/native/
+  credential custody remain. Ordinary document review is not claim release.
+  The [dated follow-through](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md#previous-reviewed-delivery-and-distinct-source-keeper)
+  records this accepted planning gate without claiming implementation.
+
 The proposed #4756 fork-consent lane below is distinct from #5791 credential
 dispatch. It directly receives the WHOLE durable target/account/remote,
 existence-before-creation and confirmation outcome, not only its residual
@@ -123,6 +142,15 @@ venue-specific credential transport and launch authentication remain with
 Define and adopt a general-purpose account-aware execution contract for
 repository operations, including concurrent use, diagnostics, and safe
 degradation without global identity mutation.
+
+The finite Phase 6 intake preserves #3296's independently stated request:
+"Per-repo/per-machine enforcement of Copilot CLI's own inference identity
+(distinct from gh account_map)". Its requested repo override and machine
+default, supported launch enforcement OR actionable warning, independent
+Git identity and prerequisite question are retained below. Private deployment
+examples are deliberately not reproduced. This is a source-contract intake,
+not an operator amendment or a grant to use the original speculative
+credential-extraction mechanism.
 
 ## Plan
 
@@ -381,7 +409,43 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#545** agent-worktrees: <project> --version mis-routes to the bare Picker seam instead of the CLI
   - `<project> --version` mis-routing is exactly this effort's `project-addressed-not-cwd-bound` scope.
 
+### Phase 6 - Independent Copilot inference identity from #3296
+
+**Agent-recommended tracking amendment.** This is the complete independent
+repo/machine inference-identity program, not another gh account wrapper.
+The [complete phase contract](copilot-inference-identity.md) retains the
+source crosswalk, mechanisms left open, existing owners and evidence tiers.
+
+- [ ] **CI3296-P1:** Implement [repo/default selection and mode-qualified
+  ambient compatibility](copilot-inference-identity.md#repo-selection).
+- [ ] **CI3296-P2:** Preserve [disabled enforcement's no-op, opted-in
+  shared-session safety and mismatch guidance](copilot-inference-identity.md#safe-correction).
+- [ ] **CI3296-P3:** Reconcile [supported launch consumers and machine-policy
+  restoration](copilot-inference-identity.md#launch-and-policy-owners).
+- [ ] **CI3296-P4:** Resolve [supported account-selection mechanisms and
+  strict/legacy failures](copilot-inference-identity.md#supported-authentication).
+- [ ] **CI3296-P5:** Retain [bounded claim, isolation, source credit and
+  qualification tiers](copilot-inference-identity.md#claim-and-delivery-boundaries).
+
+#### Local Validation - #3296
+
+- [ ] **CI3296-V1:** Qualify [selection, mode and shared-session
+  controls](copilot-inference-identity.md#selection-and-safety-validation).
+- [ ] **CI3296-V2:** Qualify [actual supported launch and machine-policy
+  consumers](copilot-inference-identity.md#consumer-validation).
+- [ ] **CI3296-V3:** Qualify [authentication, isolation and evidence-tier
+  controls](copilot-inference-identity.md#authentication-validation).
+
 ## Validation Plan
+
+The existing machine-global-account invariants below continue to govern
+Git/gh repository operations. Phase 6 separately qualifies the inference
+store's already-explicit opt-in/idle-machine OR accepted-risk correction
+and nonblocking-warning alternative; it does not relax operation scoping.
+
+- [ ] **CI3296-G:** Resolve EVERY CI3296-P1..5/V1..3 clause through the
+  [complete acceptance gate](copilot-inference-identity.md#complete-acceptance);
+  documentary receiving alone is not technical completion or claim release.
 
 - [ ] **FC4756-G:** Complete EVERY FC4756-P1..3/LV1..3 clause at its original
   source/consumer tier: durable private target/account/remote consent and reuse,
@@ -450,6 +514,29 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-20 - Reviewed inference-identity planning accepted, source claim retained
+
+#13709 delivered the complete Phase 6/detail/global contract after current-head
+review and required CI. Complete current original, all three discussions,
+receiving and custody readback accepted the whole planned mapping; a separate
+judgment keeps #3296 OPEN for its actual bounded claimant and independent
+custodians. All nine technical rows remain unchecked. Draft status,
+temporary-token implementation restriction and every existing owner remain.
+See the [dated campaign follow-through](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md#previous-reviewed-delivery-and-distinct-source-keeper).
+
+### 2026-11-20 - Complete independent inference-identity receiving proposed
+
+Added five unchecked Phase 6 Plan, three local Validation and one actual
+global Validation rows for #3296, through the existing Phase 5 intake.
+The complete repo/default/ambient policy, machine restoration, actual launcher
+matrix, safe shared-store warning behavior and strict/legacy source contract
+remain independent of Git/gh operation identity. Existing source milestones
+retain their reported scope; the trusted-container claim and its exclusions
+remain with their owner. Draft, temporary coordination, original intent,
+every incumbent check state and all source/resource/native duties remain.
+No implementation, credential operation, inference trial or issue disposition
+is performed by this planning amendment.
 
 ### 2026-11-17 - Whole durable fork-consent receiving proposed
 

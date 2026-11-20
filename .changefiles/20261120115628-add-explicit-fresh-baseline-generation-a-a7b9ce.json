@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit fresh-baseline generation association hosting with strict prior-reader refusal",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

@@ -338,6 +338,44 @@ unauthenticated HTTP listener. Its supervisor owns restart and escalation.
 CLI failures name the operation and exception class without echoing external
 references, provider error details or credential material.
 
+### Optional fresh-baseline generation associations
+
+An unextended native workspace may explicitly set
+`workspaces.generation_associations` to `true` before fresh provisioning.
+The selected executing core must declare
+`agent-pull-requests.workspace-generation-associations/v1`; an absent or
+incompatible declaration refuses this selection before provisioning.
+Omitting the field retains the existing workspace behavior and wire contract.
+This profile cannot compose with terminal reads, preparation or comment
+mappings.
+
+The existing cache owner rejects definite CAS conflicts and full-cache outcomes
+before recording an observation or reservation. After that guarded admission,
+the service writer and ReplayStore reserve body-free original
+generation/scope/observation/cursor identities before cache writes.
+Only confirmed publication marks an association confirmed. Distinct immutable
+generations retain separate identities even when their rounded observations
+share a journal cursor. Cache objects, digest inputs and pointer formats do
+not change. Metadata is bounded by the original cache generation limit and
+an envelope reservation of 1 KiB plus 4 KiB per configured generation, within
+the existing owner byte ceiling. Exhaustion refuses publication, not eviction
+or an automatic capacity increase.
+
+Interrupted publication retains its original pending association. The trusted
+owner can reconcile that generation and its original cache CAS without another
+provider acquisition or journal event; a different CAS or epoch refuses.
+Missing or newer cache state is not permission to promote an old pointer.
+Pending and confirmed associations both survive process restart; neither is
+a terminal live admission or evidence of a fresh provider read.
+
+`serve` validates the selected existing storage, never adopts it. Adding this
+selection to a previously provisioned baseline refuses instead of backfilling
+associations. Removing it or selecting a strict older reader also refuses the
+expanded envelope without rewriting it. Retained terminal adoption remains
+unsupported for these populated volumes until the separate positive-transition
+slice is qualified. This profile authorizes no installed migration, native
+watch reassignment, unknown-effect recovery, provider access or service stop.
+
 ## Optional preparation-only hosting
 
 An existing workspace binding may additionally select this trusted
@@ -476,7 +514,7 @@ The selected core must also declare
 retains the native watch observer rather than synthesizing a reduced
 notification from workspace evidence.
 
-Only explicit **fresh** provisioning, under the existing host-local writer
+Explicit **fresh** provisioning, under the existing host-local writer
 lease and operation deadline, adopts the core's terminal retention, recovery
 and cache-retirement extensions in the owner-store v3 envelope. It uses the
 core's bounded 8 MiB terminal reservation. Partial provisioning retains its
@@ -489,11 +527,32 @@ refuses without stripping extensions or rewriting the volume.
 An explicitly stopped standalone workspace owner can instead run
 `agent-pull-requests-service adopt-terminal --config /run/config/pr-service.json`
 against an eligible existing version-three conversation volume and empty workspace cache.
-This bootstrap path refuses cached generations/current pointers, active or
-compact review operations, conversation records and populated terminal-extension state: preserving
-their files alone would not preserve the original usable reader/recovery paths.
-Keep those volumes with their original owner pending a separately qualified
-transition. Selected workspace scopes and account/repository targets must form
+With the executing core's optional
+`agent-pull-requests.retained-cache-metadata-adoption/v1` declaration, that same
+command also preserves an existing complete open first-epoch conversation
+journal and valid null rebuild pointers when no generation objects remain.
+Populated journal metadata with active legacy native waits refuses unchanged:
+the old envelope cannot prove its original watch-to-workspace association,
+and current account/repository remapping must not defeat reopen fencing.
+Completed frozen delivery remains eligible; empty-journal bootstrap is unchanged.
+It creates no observation, live admission or generation binding. Original
+metadata/events, replay positions and cache misses survive reader restart;
+later fresh acquisition uses the ordinary terminal-aware load/sync owner.
+A selected null pointer needs no journal and remains a cache miss.
+Legacy generation objects still refuse unchanged: their original observation
+association cannot be recovered from rounded journal timestamps or normalized
+projection equality, including same-second close/reopen cases. Their original
+readers remain usable. Positive generation migration needs a separately
+reviewed durable association contract.
+Missing/incompatible optional core
+support retains bootstrap-only eligibility and its first-entry empty-cache
+check; baseline hosting is unaffected.
+
+Active/compact review operations, closed/reopened or incomplete conversation histories,
+all legacy generations, unknown scopes, unsupported extension state
+and corrupt/dangling/staged cache objects refuse before adoption. Keep those
+volumes with their original usable owner pending a compatible transition.
+Selected workspace scopes and account/repository targets must form
 a one-to-one mapping in both directions. Every retained replay scope must remain
 reachable through the selected consumer/account/repository bindings, including
 frozen pending events and completed receipts. Every retained watch receipt requires
@@ -510,8 +569,10 @@ It preserves the original service/namespace binding, eligible replay/delivery
 positions and cache scaffold, and performs no acquisition, compaction
 or cache retirement. It neither provisions missing state nor repairs it.
 Native callback state, unsafe linked lease files and incompatible cache
-descriptors also refuse before adoption. Cache eligibility uses bounded
-first-entry checks, not a scan or repeated decoding of retained generations.
+descriptors also refuse before adoption. Configured cache growth must fit the
+core's terminal binding capacity. Request-local cache validation checks both the
+original cache checkpoint and owner expiry during enumeration, without mutating
+a shared checkpoint. It does not repair or remove unsupported objects.
 The exact monotonic operation deadline remains enforced; integer storage
 expiry is rounded up so a short budget is not lost at a wall-clock boundary.
 The host-local lease does not fence another host or unsupported direct volume

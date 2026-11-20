@@ -512,9 +512,11 @@ class SourceDomain:
     def write(self, db: Any) -> AbstractContextManager[None]:
         return self._write(db)
 
-    def reconcile(self, db: Any, *, owner: str, token: str) -> AbstractContextManager[None]:
+    def reconcile(
+        self, db: Any, *, owner: str, token: str, point_scope: PointScope | None = None,
+    ) -> AbstractContextManager[None]:
         """Resume only an exact sealed phase; arbitrary dirty stores still refuse."""
-        return self._write(db, reconciliation=(owner, token))
+        return self._write(db, reconciliation=(owner, token), point_scope=point_scope)
 
     @contextmanager
     def _write(

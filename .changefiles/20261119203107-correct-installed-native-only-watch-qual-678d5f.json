@@ -1,0 +1,9 @@
+{
+  "comment": "Correct installed native-only watch qualification with independent terminal evidence and unchanged deadlines",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

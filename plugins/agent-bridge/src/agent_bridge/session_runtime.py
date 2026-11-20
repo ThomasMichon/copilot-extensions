@@ -2,23 +2,27 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .db import Database
 from .models import ServiceConfig
 
 if TYPE_CHECKING:
+    from .consumer_telemetry import ConsumerTelemetry
     from .session_manager import SessionManager
     from .session_snapshot import SessionSnapshot
 
 
 class _SessionRuntimePolicyMixin:
+    _consumer_telemetry: ConsumerTelemetry
+
     def effective_runtime_settings(self) -> dict[str, Any]:
         """Copy the manager's current policy, not a reloaded config's defaults.
 
         Called synchronously on the owning event loop by private capture.
         Session/host ownership, draining and running tasks are not policy.
         """
+        self = cast("SessionManager", self)
         return {
             "context_thresholds": self._thresholds.model_dump(mode="json"),
             "auto_handoff": self._auto_handoff.model_dump(mode="json"),
@@ -57,32 +61,44 @@ def session_manager_from_config(
     """
     from .session_manager import SessionManager
 
-    manager = SessionManager(
-        db,
-        session_host_state_dir=session_host_state_dir,
-        drain_auto_release_s=drain_auto_release_s,
-        drain_warn_interval_s=drain_warn_interval_s,
-        read_only_rehydrate=read_only_rehydrate,
-        captured_sessions=captured_sessions,
-        context_thresholds=cfg.context_thresholds,
-        auto_handoff=cfg.auto_handoff,
-        timeouts=cfg.timeouts,
-        retention=cfg.retention,
-        remote_acp_targets=cfg.remote_acp,
-        session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
-        graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
-        cancel_turns_on_redeploy=cfg.cancel_turns_on_redeploy,
-        idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
-        live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
-        session_host_unexpected_reap_seconds=cfg.session_host_unexpected_reap_seconds,
-        session_host_active_reap_seconds=cfg.session_host_active_reap_seconds,
-    )
-    from .remote_acp_catalog import RemoteAcpCatalog
-    from .remote_acp_auth import RemoteCredentialPolicy
+    from .consumer_telemetry import ConsumerTelemetry
 
-    manager._remote_credential_policy = RemoteCredentialPolicy(cfg.remote_acp_auth_sources)
-    manager._remote_acp_catalog = RemoteAcpCatalog(
-        manager._remote_acp_targets, bindings=cfg.remote_acp_bindings,
-        check_auth=manager._remote_credential_policy.bind,
-    )
-    return manager
+    consumer = ConsumerTelemetry(cfg.consumer_telemetry_harnesses)
+    if getattr(cfg, "_consumer_telemetry_invalid", False):
+        consumer.refusal = "invalid_config"
+    with consumer.admission(db):
+        manager = SessionManager(
+            db,
+            session_host_state_dir=session_host_state_dir,
+            drain_auto_release_s=drain_auto_release_s,
+            drain_warn_interval_s=drain_warn_interval_s,
+            read_only_rehydrate=read_only_rehydrate,
+            captured_sessions=captured_sessions,
+            context_thresholds=cfg.context_thresholds,
+            auto_handoff=cfg.auto_handoff,
+            timeouts=cfg.timeouts,
+            retention=cfg.retention,
+            remote_acp_targets=cfg.remote_acp,
+            session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
+            graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
+            cancel_turns_on_redeploy=cfg.cancel_turns_on_redeploy,
+            idle_reap_ttl_seconds=cfg.idle_reap_ttl_seconds,
+            live_stall_interrupt_after_s=cfg.live_stall_interrupt_after_s,
+            session_host_unexpected_reap_seconds=cfg.session_host_unexpected_reap_seconds,
+            session_host_active_reap_seconds=cfg.session_host_active_reap_seconds,
+        )
+        from .remote_acp_catalog import RemoteAcpCatalog
+        from .remote_acp_auth import RemoteCredentialPolicy
+
+        credential_policy = RemoteCredentialPolicy(cfg.remote_acp_auth_sources)
+        setattr(manager, "_remote_credential_policy", credential_policy)
+        catalog = RemoteAcpCatalog(
+            manager._remote_acp_targets, bindings=cfg.remote_acp_bindings,
+            check_auth=credential_policy.bind,
+        )
+        setattr(manager, "_remote_acp_catalog", catalog)
+        manager._consumer_telemetry = consumer
+        consumer.attach_manager(manager)
+        for session in manager.list_sessions():
+            consumer.bind(session)
+        return manager

@@ -64,6 +64,15 @@ existing composed-description retry control also requires no additional writes.
 Do not rewrite that already-idempotent provider or infer that the observed
 changed evidence body was an unchanged-body write.
 
+The [November 20 attribution slice](journal/2026/11.20-unit-lookup-attribution.md)
+adds bounded phase diagnostics to the existing reuse helper, not a workflow
+change or claimed execution saving. Run/artifact/job inventory, producer
+qualification, archive download and packet verification retain the same
+eight-second aggregate and request sequence. The historical exhausted stage
+remains unknown; real diagnostic delivery and subsequent comparable evidence
+remain separate from synthetic controls. The edited/retarget ownership seam
+and its existing acceptance requirement are unchanged.
+
 ## October 23 repeated PR qualification: exact-input reuse boundary
 
 Query the already captured October 22-23 population, not another rolling

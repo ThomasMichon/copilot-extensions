@@ -1,0 +1,9 @@
+{
+  "comment": "Ship complete artifact-first Source preparation and its retained canonical input owners.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

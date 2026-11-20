@@ -102,7 +102,7 @@ def application(
         binding=PointBinding("https://example.test", "project", "eligible-query/v1"),
         targets=targets,
     )
-    tasks = TaskStore(tmp_path / "tasks.db")
+    tasks = TaskStore(tmp_path / "owned" / "tasks.db")
     task = tasks.enqueue(hints.source, change_hints=hints)
     claim = PendingPointClaim.from_task(tasks.pin_point_claim(task.id, expected_hints=hints))
     config = IndexConfig(
@@ -114,7 +114,7 @@ def application(
     )
     store = initialize_source_store(config, point_scope=claim.hints.scope)
     prepare_ingestion_indices(store, max_rows=0, point_scope=claim.hints.scope)
-    paths = PathIndex(config.data_dir / "paths.db")
+    paths = PathIndex(config.data_dir / "path_index.db")
     observations = []
     for target in targets:
         comment = isinstance(target, CommentVersionTarget)

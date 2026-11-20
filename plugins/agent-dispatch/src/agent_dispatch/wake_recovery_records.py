@@ -35,7 +35,7 @@ class WakeRecoveryRecords:
         db.execute("PRAGMA synchronous=FULL")
         return db
 
-    def retain(self, conn: sqlite3.Connection, task: Task, wake_id: str, admission: str) -> None:
+    def retain(self, conn: sqlite3.Connection, task: Task, wake_id: str, admission: str, *, no_resume: bool = False) -> None:
         """Failure rolls back queue admission before transport. No unrelated history scan."""
         task_id = task.id
         row = conn.execute("SELECT * FROM wake_outbox WHERE task_id=? AND id=?", (task_id, wake_id)).fetchone()
@@ -60,6 +60,7 @@ class WakeRecoveryRecords:
             "admission": admission, "target": target,
             "prompt": steering_prompt(task_id, wake["message"]),
             "steer_acceptances": [json.loads(row[0]) for row in steer],
+            **({"no_resume": True} if no_resume else {}),
         }
         with closing(self._open("rw")) as db:
             encoded = json.dumps(evidence, allow_nan=False, sort_keys=True)
@@ -110,7 +111,10 @@ class WakeRecoveryRecords:
         if list(expected_target) != evidence["target"]:
             raise TaskError("original wake target differs")
         bridge, native, machine = expected_target
-        receipt = native_prompt_receipt(bridge, native, evidence["prompt"], idempotency_key=wake_id, machine=machine)
+        receipt = native_prompt_receipt(
+            bridge, native, evidence["prompt"], idempotency_key=wake_id, machine=machine,
+            **({"no_resume": True} if evidence.get("no_resume") is True else {}),
+        )
         with closing(self._open("rw")) as db:
             db.execute("BEGIN IMMEDIATE")
             current, _, prior = self._row(db, task_id, wake_id)

@@ -5,29 +5,33 @@ import json
 import sys
 import threading
 import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agent_dispatch import handoff_claim_release, remote_dispatch
+from agent_dispatch.events import EventBus
 from agent_dispatch.effort_driver_loops import run_tick as run_effort_driver_tick
 from agent_dispatch.github_provider_adapter import PRObservation
 from agent_dispatch.pr_observation_store import PRObservationStore
 from agent_dispatch.provider_state_machine import ApprovalStatus, Mergeability, Revision
-from agent_dispatch.queue import Status, TaskError
+from agent_dispatch.queue_records import Status, TaskError
 from agent_dispatch.verification import evaluate_submitted_task
 from agent_dispatch.verification_drain import (
     _scheduled_wait_interval,
     drain_verification_requests,
 )
-from tests._helpers import TEST_REPO
+from tests._helpers import TEST_REPO, required
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
-class _Bus:
+class _Bus(EventBus):
     def __init__(self) -> None:
-        self.events: list[dict] = []
+        super().__init__()
+        self.events: list[dict[str, Any]] = []
 
-    def publish(self, event: dict) -> None:
+    def publish(self, event: dict[str, Any]) -> None:
         self.events.append(event)
 
 
@@ -66,7 +70,7 @@ def _register_script(
     repo: str = TEST_REPO,
     env: str = "default",
     evaluator_ref: str = "review-loop",
-    reviewer_loop: dict | None = None,
+    reviewer_loop: dict[str, Any] | None = None,
 ) -> None:
     spec = {
         "repo": repo,
@@ -85,7 +89,7 @@ def _register_script(
     )
 
 
-def test_evaluate_submitted_applies_confirm_abandon_and_noop(tmp_path):
+def test_evaluate_submitted_applies_confirm_abandon_and_noop(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -129,16 +133,16 @@ def test_evaluate_submitted_applies_confirm_abandon_and_noop(tmp_path):
     assert merged["applied"][0]["decision"] == "complete"
     assert closed["applied"][0]["decision"] == "abandon"
     assert waiting["applied"][0]["decision"] == "noop"
-    assert queue.get(merged_id).status == Status.COMPLETED
-    assert queue.get(closed_id).status == Status.ABANDONED
-    assert queue.get(waiting_id).status == Status.SUBMITTED
+    assert required(queue.get(merged_id)).status == Status.COMPLETED
+    assert required(queue.get(closed_id)).status == Status.ABANDONED
+    assert required(queue.get(waiting_id)).status == Status.SUBMITTED
     assert [event["type"] for event in bus.events] == [
         "task.completed",
         "task.abandoned",
     ]
 
 
-def test_evaluate_submitted_respects_repo_scope_and_environment_fallback(tmp_path, monkeypatch):
+def test_evaluate_submitted_respects_repo_scope_and_environment_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -173,12 +177,12 @@ def test_evaluate_submitted_respects_repo_scope_and_environment_fallback(tmp_pat
     )
 
     assert matched["eligible"] is True
-    assert queue.get(task_id).status == Status.COMPLETED
+    assert required(queue.get(task_id)).status == Status.COMPLETED
     assert skipped["eligible"] is False
-    assert queue.get(untouched.id).status == Status.SUBMITTED
+    assert required(queue.get(untouched.id)).status == Status.SUBMITTED
 
 
-def test_evaluate_submitted_rejects_emit_decisions(tmp_path):
+def test_evaluate_submitted_rejects_emit_decisions(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -198,10 +202,10 @@ def test_evaluate_submitted_rejects_emit_decisions(tmp_path):
 
     assert report["eligible"] is True
     assert "complete/abandon/noop" in report["reason"]
-    assert queue.get(task_id).status == Status.SUBMITTED
+    assert required(queue.get(task_id)).status == Status.SUBMITTED
 
 
-def test_reviewer_loop_stale_after_days_is_per_declaration(tmp_path, monkeypatch):
+def test_reviewer_loop_stale_after_days_is_per_declaration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -257,9 +261,9 @@ def test_reviewer_loop_stale_after_days_is_per_declaration(tmp_path, monkeypatch
     thirty_day = evaluate_submitted_task(queue, thirty_day_id, trigger="submitted")
 
     assert seven_day["applied"][0]["decision"] == "abandon"
-    assert queue.get(seven_day_id).status == Status.ABANDONED
+    assert required(queue.get(seven_day_id)).status == Status.ABANDONED
     assert thirty_day["applied"][0]["decision"] == "noop"
-    assert queue.get(thirty_day_id).status == Status.SUBMITTED
+    assert required(queue.get(thirty_day_id)).status == Status.SUBMITTED
 
     monkeypatch.setattr(
         "agent_dispatch.reviewer_loops.time.time",
@@ -268,10 +272,10 @@ def test_reviewer_loop_stale_after_days_is_per_declaration(tmp_path, monkeypatch
     thirty_day_late = evaluate_submitted_task(queue, thirty_day_id, trigger="backfill")
 
     assert thirty_day_late["applied"][0]["decision"] == "abandon"
-    assert queue.get(thirty_day_id).status == Status.ABANDONED
+    assert required(queue.get(thirty_day_id)).status == Status.ABANDONED
 
 
-def test_reviewer_loop_without_stale_after_days_never_stales(tmp_path, monkeypatch):
+def test_reviewer_loop_without_stale_after_days_never_stales(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -302,12 +306,12 @@ def test_reviewer_loop_without_stale_after_days_never_stales(tmp_path, monkeypat
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "noop"
-    assert queue.get(task_id).status == Status.SUBMITTED
+    assert required(queue.get(task_id)).status == Status.SUBMITTED
 
 
 def test_reviewer_loop_stale_deadline_requeues_and_fires_without_manual_evaluate(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     current_time = {"value": 1_000_000.0}
     monkeypatch.setattr(
@@ -353,11 +357,11 @@ def test_reviewer_loop_stale_deadline_requeues_and_fires_without_manual_evaluate
     )
     signal: asyncio.Queue[None] = asyncio.Queue()
 
-    class _DrainBus:
-        def publish(self, event: dict) -> None:
+    class _DrainBus(EventBus):
+        def publish(self, event: dict[str, Any]) -> None:
             return None
 
-    async def scenario():
+    async def scenario() -> None:
         loop = asyncio.create_task(
             drain_verification_requests(
                 queue,
@@ -394,7 +398,7 @@ def test_reviewer_loop_stale_deadline_requeues_and_fires_without_manual_evaluate
             )
             assert delayed.trigger == "reviewer-loop-stale-deadline"
             assert delayed.not_before == current_time["value"] + (7 * 86400.0)
-            assert queue.get(task_id).status == Status.SUBMITTED
+            assert required(queue.get(task_id)).status == Status.SUBMITTED
 
             current_time["value"] += 8 * 86400.0
             store.put(
@@ -412,7 +416,7 @@ def test_reviewer_loop_stale_deadline_requeues_and_fires_without_manual_evaluate
             )
             signal.put_nowait(None)
             for _ in range(200):
-                if queue.get(task_id).status == Status.ABANDONED:
+                if required(queue.get(task_id)).status == Status.ABANDONED:
                     break
                 await asyncio.sleep(0.01)
             else:
@@ -423,12 +427,12 @@ def test_reviewer_loop_stale_deadline_requeues_and_fires_without_manual_evaluate
                 await loop
 
     asyncio.run(scenario())
-    assert queue.get(task_id).status == Status.ABANDONED
+    assert required(queue.get(task_id)).status == Status.ABANDONED
 
 
 def test_reviewer_loop_can_derive_last_commit_at_from_provider_observation_store(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     install_root = tmp_path / "install-root"
     install_root.mkdir()
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(install_root))
@@ -477,12 +481,12 @@ def test_reviewer_loop_can_derive_last_commit_at_from_provider_observation_store
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "abandon"
-    assert queue.get(task_id).status == Status.ABANDONED
+    assert required(queue.get(task_id)).status == Status.ABANDONED
 
 
 def test_reviewer_loop_can_derive_last_commit_at_from_azure_devops_provider_observation_store(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     install_root = tmp_path / "install-root"
     install_root.mkdir()
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(install_root))
@@ -531,12 +535,12 @@ def test_reviewer_loop_can_derive_last_commit_at_from_azure_devops_provider_obse
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "abandon"
-    assert queue.get(task_id).status == Status.ABANDONED
+    assert required(queue.get(task_id)).status == Status.ABANDONED
 
 
 def test_reviewer_loop_stale_after_days_works_with_blob_spilled_payload(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     queue = TaskQueue(tmp_path / "tasks.db", blob_threshold=16)
     script = tmp_path / "eval.py"
     script.write_text(
@@ -578,12 +582,12 @@ def test_reviewer_loop_stale_after_days_works_with_blob_spilled_payload(
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "abandon"
-    assert queue.get(task_id).status == Status.ABANDONED
+    assert required(queue.get(task_id)).status == Status.ABANDONED
 
 
 def test_reviewer_loop_stale_after_days_applies_even_when_evaluator_raises(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -622,12 +626,12 @@ def test_reviewer_loop_stale_after_days_applies_even_when_evaluator_raises(
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "abandon"
-    assert queue.get(task_id).status == Status.ABANDONED
+    assert required(queue.get(task_id)).status == Status.ABANDONED
 
 
 def test_reviewer_loop_stale_after_days_requires_fresh_provider_observation(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     install_root = tmp_path / "install-root"
     install_root.mkdir()
     observation_db = install_root / "custom" / "tasks.db"
@@ -679,12 +683,12 @@ def test_reviewer_loop_stale_after_days_requires_fresh_provider_observation(
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "noop"
-    assert queue.get(task_id).status == Status.SUBMITTED
+    assert required(queue.get(task_id)).status == Status.SUBMITTED
 
 
 def test_reviewer_loop_stale_after_days_uses_relocated_observation_store_path(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     relocated = tmp_path / "relocated"
     relocated.mkdir()
     queue_db = relocated / "nested" / "tasks.db"
@@ -735,12 +739,12 @@ def test_reviewer_loop_stale_after_days_uses_relocated_observation_store_path(
     report = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert report["applied"][0]["decision"] == "abandon"
-    assert queue.get(task_id).status == Status.ABANDONED
+    assert required(queue.get(task_id)).status == Status.ABANDONED
 
 
 def test_backlog_triager_verification_checks_repo_specific_label_schema_and_effort_marker(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -815,16 +819,16 @@ def test_backlog_triager_verification_checks_repo_specific_label_schema_and_effo
     duplicate = evaluate_submitted_task(queue, duplicate_id, trigger="submitted")
 
     assert good["applied"][0]["decision"] == "complete"
-    assert queue.get(good_id).status == Status.COMPLETED
+    assert required(queue.get(good_id)).status == Status.COMPLETED
     assert incomplete["applied"][0]["decision"] == "noop"
-    assert queue.get(incomplete_id).status == Status.SUBMITTED
+    assert required(queue.get(incomplete_id)).status == Status.SUBMITTED
     assert duplicate["applied"][0]["decision"] == "complete"
-    assert queue.get(duplicate_id).status == Status.COMPLETED
+    assert required(queue.get(duplicate_id)).status == Status.COMPLETED
 
 
 def test_repository_issue_loop_issue_reproducer_requires_evidence_and_outcome_markers(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -915,16 +919,16 @@ def test_repository_issue_loop_issue_reproducer_requires_evidence_and_outcome_ma
     incomplete = evaluate_submitted_task(queue, incomplete_id, trigger="submitted")
 
     assert reproducible["applied"][0]["decision"] == "complete"
-    assert queue.get(reproducible_id).status == Status.COMPLETED
+    assert required(queue.get(reproducible_id)).status == Status.COMPLETED
     assert not_reproducible["applied"][0]["decision"] == "complete"
-    assert queue.get(not_reproducible_id).status == Status.COMPLETED
+    assert required(queue.get(not_reproducible_id)).status == Status.COMPLETED
     assert incomplete["applied"][0]["decision"] == "noop"
-    assert queue.get(incomplete_id).status == Status.SUBMITTED
+    assert required(queue.get(incomplete_id)).status == Status.SUBMITTED
 
 
 def test_repository_issue_loop_effort_builder_requires_shared_effort_assignment_and_review_gate(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -1016,16 +1020,16 @@ def test_repository_issue_loop_effort_builder_requires_shared_effort_assignment_
     missing_gate = evaluate_submitted_task(queue, missing_gate_id, trigger="submitted")
 
     assert good["applied"][0]["decision"] == "complete"
-    assert queue.get(good_id).status == Status.COMPLETED
+    assert required(queue.get(good_id)).status == Status.COMPLETED
     assert unassigned["applied"][0]["decision"] == "noop"
-    assert queue.get(unassigned_id).status == Status.SUBMITTED
+    assert required(queue.get(unassigned_id)).status == Status.SUBMITTED
     assert missing_gate["applied"][0]["decision"] == "noop"
-    assert queue.get(missing_gate_id).status == Status.SUBMITTED
+    assert required(queue.get(missing_gate_id)).status == Status.SUBMITTED
 
 
 def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evidence(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     state_root = tmp_path / "state-root"
     archived = state_root / "efforts" / "2026" / "10" / "04 recipe-library" / "README.md"
     archived.parent.mkdir(parents=True, exist_ok=True)
@@ -1140,16 +1144,16 @@ def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evi
     )
 
     assert good["applied"][0]["decision"] == "complete"
-    assert queue.get(good_id).status == Status.COMPLETED
+    assert required(queue.get(good_id)).status == Status.COMPLETED
     assert active_result["applied"][0]["decision"] == "noop"
-    assert queue.get(active_id).status == Status.SUBMITTED
+    assert required(queue.get(active_id)).status == Status.SUBMITTED
     assert weak_evidence_result["applied"][0]["decision"] == "noop"
-    assert queue.get(weak_evidence_id).status == Status.SUBMITTED
+    assert required(queue.get(weak_evidence_id)).status == Status.SUBMITTED
 
 
 def test_effort_driver_lifecycle_discovers_active_effort_then_confirms_archive_transition(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     state_root = tmp_path / "state-root"
     active_readme = (
         state_root / "efforts" / "active" / "recipe-library" / "README.md"
@@ -1163,13 +1167,13 @@ def test_effort_driver_lifecycle_discovers_active_effort_then_confirms_archive_t
     )
 
     class _CreateClient:
-        def __init__(self):
-            self.created = []
+        def __init__(self) -> None:
+            self.created: list[dict[str, Any]] = []
 
-        def list(self, **_kwargs):
+        def list(self, **_kwargs: Any) -> list[dict[str, Any]]:
             return []
 
-        def create(self, title, **fields):
+        def create(self, title: str, **fields: Any) -> dict[str, Any]:
             task = {"id": "task-1", "title": title, **fields}
             self.created.append(task)
             return task
@@ -1256,10 +1260,10 @@ def test_effort_driver_lifecycle_discovers_active_effort_then_confirms_archive_t
     result = evaluate_submitted_task(queue, task_id, trigger="submitted")
 
     assert result["applied"][0]["decision"] == "complete"
-    assert queue.get(task_id).status == Status.COMPLETED
+    assert required(queue.get(task_id)).status == Status.COMPLETED
 
 
-def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path):
+def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create(
         "retry later",
@@ -1294,7 +1298,7 @@ def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp
         ("target closed", Status.ABANDONED),
     ],
 )
-def test_evaluate_submitted_releases_handoff_claims(tmp_path, monkeypatch, title, expected_status):
+def test_evaluate_submitted_releases_handoff_claims(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, title: str, expected_status: str) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     script = tmp_path / "eval.py"
     script.write_text(
@@ -1321,7 +1325,7 @@ def test_evaluate_submitted_releases_handoff_claims(tmp_path, monkeypatch, title
     monkeypatch.setattr(
         handoff_claim_release,
         "release_if_handoff",
-        lambda payload, task_id=None: released.append(
+        lambda payload, task_id=None, queue=None: released.append(
             (
                 payload.get("id"),
                 payload.get("target_worktree"),
@@ -1332,11 +1336,11 @@ def test_evaluate_submitted_releases_handoff_claims(tmp_path, monkeypatch, title
 
     evaluate_submitted_task(queue, task.id, trigger="submitted")
 
-    assert queue.get(task.id).status == expected_status
+    assert required(queue.get(task.id)).status == expected_status
     assert released == [(task.id, "wt-9", expected_status)]
 
 
-def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
+def test_verification_drain_retries_retryable_task_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     task_id = _submitted_task(
         queue,
@@ -1345,13 +1349,13 @@ def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
         evaluator_ref="review-loop",
     )
 
-    class _DrainBus:
-        def publish(self, event: dict) -> None:
+    class _DrainBus(EventBus):
+        def publish(self, event: dict[str, Any]) -> None:
             pass
 
     calls = 0
 
-    def fake_evaluate(queue_arg, task_id_arg, *, bus=None, trigger, **_kwargs):
+    def fake_evaluate(queue_arg: TaskQueue, task_id_arg: str, *, bus: Any=None, trigger: str, **_kwargs: Any) -> dict[str, Any]:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -1373,7 +1377,7 @@ def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
     from agent_dispatch import verification_drain as verification_drain_module
     monkeypatch.setattr(verification_drain_module, "evaluate_submitted_task", fake_evaluate)
 
-    async def scenario():
+    async def scenario() -> None:
         loop = asyncio.create_task(
             drain_verification_requests(
                 queue,
@@ -1388,7 +1392,7 @@ def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
                 status = queue.list_verification_requests(task_id)[0].status
                 if (
                     status in {"stale", "delivered", "failed"}
-                    and queue.get(task_id).status == Status.COMPLETED
+                    and required(queue.get(task_id)).status == Status.COMPLETED
                 ):
                     break
                 await asyncio.sleep(0.01)
@@ -1404,10 +1408,12 @@ def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
     assert calls == 2
     assert request.status == "stale"
     assert request.attempts == 2
-    assert queue.get(task_id).status == Status.COMPLETED
+    assert required(queue.get(task_id)).status == Status.COMPLETED
 
 
-def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(tmp_path):
+def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Characterizes a real async-cancellation race: ``Task.cancel()`` on a
     loop blocked inside ``asyncio.to_thread`` returns as soon as the
     cancellation propagates through asyncio -- it does NOT wait for the
@@ -1421,15 +1427,15 @@ def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(tmp_p
     thread_finished = threading.Event()
     original_recover = queue.recover_inflight_verification_requests
 
-    def slow_recover(*args, **kwargs):
+    def slow_recover(*args: Any, **kwargs: Any) -> int:
         time.sleep(0.2)
         result = original_recover(*args, **kwargs)
         thread_finished.set()
         return result
 
-    queue.recover_inflight_verification_requests = slow_recover
+    monkeypatch.setattr(queue, "recover_inflight_verification_requests", slow_recover)
 
-    async def scenario():
+    async def scenario() -> None:
         task = asyncio.create_task(
             drain_verification_requests(queue, _Bus(), interval=0.01)
         )
@@ -1451,7 +1457,9 @@ def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(tmp_p
     asyncio.run(scenario())
 
 
-def test_verification_drain_stop_event_waits_for_in_flight_thread_work(tmp_path):
+def test_verification_drain_stop_event_waits_for_in_flight_thread_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Regression test: a cooperative ``stop_event``
     must let the drain loop's current ``asyncio.to_thread`` call actually
     finish before the awaited task returns, unlike ``task.cancel()`` (see
@@ -1463,15 +1471,15 @@ def test_verification_drain_stop_event_waits_for_in_flight_thread_work(tmp_path)
     thread_finished = threading.Event()
     original_recover = queue.recover_inflight_verification_requests
 
-    def slow_recover(*args, **kwargs):
+    def slow_recover(*args: Any, **kwargs: Any) -> int:
         time.sleep(0.2)
         result = original_recover(*args, **kwargs)
         thread_finished.set()
         return result
 
-    queue.recover_inflight_verification_requests = slow_recover
+    monkeypatch.setattr(queue, "recover_inflight_verification_requests", slow_recover)
 
-    async def scenario():
+    async def scenario() -> None:
         stop_event = asyncio.Event()
         task = asyncio.create_task(
             drain_verification_requests(

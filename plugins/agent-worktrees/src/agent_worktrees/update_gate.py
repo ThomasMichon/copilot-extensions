@@ -26,19 +26,14 @@ def runtime_allowed(
     enabling the plugin permits its local runtime; an omitted entry in a
     present manifest still refuses.
     """
-    if scope == "universal":
-        return True
-    if scope == "machine-gated":
-        allowed = gate.get(name)
-        if allowed is not None:
-            physical_machine = machine
-            if repo_dir is not None:
-                from .machine_identity import runtime_policy_physical_machine
+    from repository_policy.runtime_gate import allows_runtime
 
-                physical_machine = runtime_policy_physical_machine(machine, repo_dir, config=config)
-            return machine in allowed or physical_machine in allowed
-        return not gate_present
-    return False
+    identities = [machine]
+    if scope == "machine-gated" and name in gate and repo_dir is not None:
+        from .machine_identity import runtime_policy_physical_machine
+
+        identities.append(runtime_policy_physical_machine(machine, repo_dir, config=config))
+    return allows_runtime(scope, name, identities, gate, present=gate_present)
 
 
 def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:

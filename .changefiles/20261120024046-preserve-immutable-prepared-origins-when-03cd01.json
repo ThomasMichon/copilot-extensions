@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve immutable prepared origins when receiving phase-progressed sealed watch journals.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

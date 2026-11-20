@@ -1,0 +1,13 @@
+{
+  "comment": "Use the original no-resume native receipt through the recorded Dispatch to Bridge command path.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

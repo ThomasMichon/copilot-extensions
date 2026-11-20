@@ -14,11 +14,14 @@ from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
 from . import claim_history, config as cfg, legacy_wsl_record_locality, tracking
-from .claim_handoff_admission import snapshot_claim as _claim_snapshot, parse_source_owner_refs
+from . import tracking_claims
+from .tracking_claims import ClaimRef, ResourceClaim
+from .claim_handoff_admission import snapshot_claim as _claim_snapshot, parse_bundle
 from .claim_handoff_admission import bundle_state as _bundle_state
 from .claim_handoff_accept_support import (
     acquire_bundle_fence,
@@ -39,7 +42,7 @@ from .claim_handoff_accept_support import (
 )
 from .lease_config import load_lease_settings
 from . import paired_claims
-from .lease_store import GitLeaseStore, LeaseLost
+from .lease_store import GitLeaseStore, LeaseLost, LeaseSnapshot
 
 REGISTRY_VERSION = 1
 BUNDLE_VERSION = 1
@@ -66,7 +69,7 @@ class ClaimBundle:
     state: str
     source: str
     consumer: str
-    claims: tuple[dict, ...]
+    claims: tuple[dict[str, Any], ...]
     offered_at: str
     updated_at: str
     reason: str = ""
@@ -96,8 +99,8 @@ def registry_path() -> Path:
     return cfg.install_dir() / "claim-handoffs.yaml"
 
 
-def _qualified_ref(ref: str, field: str) -> tracking.ClaimRef:
-    parsed = tracking.parse_claim_ref(ref)
+def _qualified_ref(ref: str, field: str) -> ClaimRef:
+    parsed = tracking_claims.parse_claim_ref(ref)
     if parsed is None or not parsed.is_qualified or parsed.session:
         raise ClaimHandoffError(
             f"{field} must be machine/project/worktree_id (got {ref!r})"
@@ -105,90 +108,23 @@ def _qualified_ref(ref: str, field: str) -> tracking.ClaimRef:
     return parsed
 
 
-def _canonical_ref(parsed: tracking.ClaimRef) -> str:
-    return tracking.format_claim_ref(
+def _canonical_ref(parsed: ClaimRef) -> str:
+    return tracking_claims.format_claim_ref(
         parsed.machine, parsed.project, parsed.worktree_id
     )
 
 
 def _bundle_from_dict(raw: object) -> ClaimBundle:
-    if not isinstance(raw, dict):
-        raise ClaimHandoffError("claim-handoff registry contains a non-mapping bundle")
-    if raw.get("version") != BUNDLE_VERSION:
-        raise ClaimHandoffError(
-            f"unsupported claim-bundle version: {raw.get('version')!r}"
-        )
-    bundle_id = raw.get("id")
-    state = raw.get("state")
-    source = raw.get("source")
-    consumer = raw.get("consumer")
-    offered_at = raw.get("offered_at")
-    updated_at = raw.get("updated_at")
-    claims_raw = raw.get("claims")
-    if not all(isinstance(value, str) and value for value in (
-        bundle_id, state, source, consumer, offered_at, updated_at
-    )):
-        raise ClaimHandoffError("claim-handoff registry contains an incomplete bundle")
-    if state not in STATES:
-        raise ClaimHandoffError(f"invalid claim-bundle state: {state!r}")
-    _qualified_ref(source, "bundle source")
-    _qualified_ref(consumer, "bundle consumer")
-    if not isinstance(claims_raw, list) or not claims_raw:
-        raise ClaimHandoffError("claim bundle must contain at least one claim")
-    claims: list[dict] = []
-    refs: set[str] = set()
-    for item in claims_raw:
-        if not isinstance(item, dict):
-            raise ClaimHandoffError("claim bundle contains a non-mapping claim")
-        kind = item.get("kind")
-        ref = item.get("ref")
-        created_at = item.get("created_at", "")
-        claim_state = item.get("state", "active")
-        note = item.get("note", "")
-        if not isinstance(kind, str) or not kind or not isinstance(ref, str) or not ref:
-            raise ClaimHandoffError("claim bundle contains an incomplete claim")
-        if ref in refs:
-            raise ClaimHandoffError(f"claim bundle contains duplicate ref: {ref}")
-        if not all(isinstance(value, str) for value in (
-            created_at, claim_state, note
-        )):
-            raise ClaimHandoffError(f"claim bundle contains invalid metadata: {ref}")
-        refs.add(ref)
-        claims.append({
-            "kind": kind,
-            "ref": ref,
-            "created_at": created_at,
-            "state": claim_state,
-            "note": note,
-        })
-        if "producer" in item:
-            claims[-1]["producer"] = copy.deepcopy(item["producer"])
-    reason = raw.get("reason", "")
-    if not isinstance(reason, str):
-        raise ClaimHandoffError("claim bundle reason must be a string")
-    return ClaimBundle(
-        bundle_id=bundle_id,
-        state=state,
-        source=source,
-        consumer=consumer,
-        claims=tuple(claims),
-        offered_at=offered_at,
-        updated_at=updated_at,
-        reason=reason,
-        source_owner_refs=parse_source_owner_refs(
-            raw.get("source_owner_refs", {}), claims, _qualified_ref(source, "bundle source"),
-            error_type=ClaimHandoffError,
-        ),
-    )
+    return parse_bundle(raw)
 
 
 def _load_registry_strict(path: Path, *, maximum_bytes: int | None = None) -> list[ClaimBundle]:
     from .claim_handoff_snapshot import load
 
-    return load(
+    return cast(list[ClaimBundle], load(
         path, maximum_bytes=maximum_bytes, version=REGISTRY_VERSION,
         parse_bundle=_bundle_from_dict, error_type=ClaimHandoffError,
-    )
+    ))
 
 
 def _save_registry(path: Path, bundles: list[ClaimBundle]) -> None:
@@ -207,12 +143,12 @@ def _save_registry(path: Path, bundles: list[ClaimBundle]) -> None:
         ) from exc
 
 
-def _record_path(ref: tracking.ClaimRef) -> Path:
+def _record_path(ref: ClaimRef) -> Path:
     return cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
 
 
 def _load_actor_record(
-    ref: tracking.ClaimRef, *, role: str, machine: str
+    ref: ClaimRef, *, role: str, machine: str
 ) -> tuple[Path, tracking.WorktreeRecord]:
     if not local_record_ref(ref, machine=machine):
         raise ClaimHandoffError(
@@ -256,8 +192,8 @@ def _note_with_provenance(note: str, source: str) -> str:
 
 def _transferred_claim(
     snapshot: dict[str, str], *, source: str
-) -> tracking.ResourceClaim:
-    return tracking.ResourceClaim(
+) -> ResourceClaim:
+    return ResourceClaim(
         kind=snapshot["kind"],
         ref=snapshot["ref"],
         created_at=snapshot.get("created_at", ""),
@@ -267,7 +203,7 @@ def _transferred_claim(
 
 
 def _claim_matches(
-    claim: tracking.ResourceClaim, snapshot: dict[str, str], *, source: str
+    claim: ResourceClaim, snapshot: dict[str, str], *, source: str
 ) -> bool:
     return (
         claim.kind == snapshot["kind"]
@@ -280,13 +216,15 @@ def _claim_matches(
 
 
 def _accept_child_path(
-    snapshot: dict[str, str], *, bundle_consumer: tracking.ClaimRef, bundle: ClaimBundle | None = None,
+    snapshot: dict[str, str], *, bundle_consumer: ClaimRef, bundle: ClaimBundle | None = None,
 ) -> Path:
     return accept_child_path(snapshot, consumer=bundle_consumer, error_type=ClaimHandoffError, bundle=bundle)
 
 
-def _validate_supported_claims(bundle: ClaimBundle) -> None:
+def _validate_supported_claims(bundle: object) -> None:
     from .claim_handoff_admission import validate_supported_claims
+    if not isinstance(bundle, ClaimBundle):
+        raise ClaimHandoffError("invalid claim bundle")
     validate_supported_claims(
         bundle, supported_kinds=_SUPPORTED_ACCEPT_KINDS,
         qualified_ref=_qualified_ref, error_type=ClaimHandoffError,
@@ -297,6 +235,9 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
     """Settle the source-side half of an acceptance on the source machine."""
     if not bundle_id:
         raise ClaimHandoffError("missing claim-bundle id")
+    bundles: list[ClaimBundle]
+    index: int
+    bundle: ClaimBundle
     path = registry_path()
     try:
         with tracking._RecordLock(path, require_sidecar=True):
@@ -310,7 +251,7 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
                 return bundle
             if any("producer" in claim for claim in bundle.claims):
                 from .producer_handoff import accept_producers
-                return accept_producers(bundle_id, actor=actor)
+                return cast(ClaimBundle, accept_producers(bundle_id, actor=actor))
             source_ref = _qualified_ref(bundle.source, "bundle source")
             source_path = _record_path(source_ref)
             if not source_path.exists():
@@ -460,7 +401,7 @@ def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimB
             for snapshot in bundle.claims:
                 if snapshot["ref"] not in consumer_by_ref:
                     transferred = _transferred_claim(snapshot, source=bundle.source)
-                    tracking.add_resource_claim(consumer_record, transferred, save=False)
+                    tracking_claims.add_resource_claim(consumer_record, transferred, save=False)
                     consumer_by_ref[transferred.ref] = transferred
                     new_refs.append(snapshot["ref"])
                 if snapshot["kind"] == "worktree":
@@ -572,6 +513,7 @@ def offer(
                         + ", ".join(sorted(inactive))
                     )
                 if identical is not None:
+                    assert identical_index is not None
                     snapshots = tuple(
                         _claim_snapshot(by_ref[ref]) for ref in sorted(refs)
                     )
@@ -682,6 +624,7 @@ def accept(
     """Accept a bundle as its consumer and atomically transfer ownership."""
     if not bundle_id:
         raise ClaimHandoffError("missing claim-bundle id")
+    bundle: ClaimBundle
     path = registry_path()
     try:
         with tracking._RecordLock(path, require_sidecar=True):
@@ -696,7 +639,7 @@ def accept(
         require_handoff_consumer(bundle, machine, ClaimHandoffError)
         if any("producer" in claim for claim in bundle.claims):
             from .producer_handoff import accept_producers
-            return accept_producers(bundle_id, actor=actor, machine=machine)
+            return cast(ClaimBundle, accept_producers(bundle_id, actor=actor, machine=machine))
         if bundle.state == "accepted":
             return _finish_accept_consumer_side(bundle, machine=machine)
         if same_local_records(source_ref, consumer_ref, machine=machine):
@@ -720,6 +663,7 @@ def accept(
                 if local_record_ref(source_ref, machine=machine):
                     bundle = accept_source(bundle_id, actor=actor)
                 else:
+                    assert source_ref.machine is not None and source_ref.project is not None
                     bundle = remote_accept_source(
                         source_machine=source_ref.machine, source_project=source_ref.project,
                         bundle_id=bundle.bundle_id, actor=actor,
@@ -830,6 +774,8 @@ def transition(
                 raise ClaimHandoffError(
                     f"claim bundle {bundle_id} is already {bundle.state}"
                 )
+        store: GitLeaseStore | None
+        fence: LeaseSnapshot | None
         if (
             _qualified_ref(bundle.source, "bundle source").machine
             != _qualified_ref(bundle.consumer, "bundle consumer").machine

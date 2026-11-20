@@ -15,13 +15,18 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .change_hints import ChangeHints
 from .point_hints import AcquisitionHints, PointChangeHints, read_change_hints, union_change_hints
 from .task_hints_schema import install_hints_schema
+
+if TYPE_CHECKING:
+    from ..store.source_layout import PointScope
+    from .point_claim import PendingPointClaim
 
 if sys.version_info >= (3, 11):
     from enum import StrEnum as _TaskStatusBase
@@ -548,6 +553,40 @@ class TaskStore:
 
     # ── Status updates ───────────────────────────────────────
 
+    def _require_point_claim(
+        self, conn: sqlite3.Connection, claim: PendingPointClaim,
+    ) -> TaskRecord:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (claim.task_id,)).fetchone()
+        if row is None:
+            raise ValueError("Current point claim is missing")
+        task = _row_to_record(row)
+        if (
+            task.status not in (TaskStatus.QUEUED_HINTS_V2, TaskStatus.COMPLETE)
+            or task.point_claim_id != claim.point_claim_id or task.change_hints != claim.hints
+            or any(value is not None for value in (task.worker_pid, task.worker_host, task.worker_version))
+        ):
+            raise ValueError("Current point claim is no longer eligible for completion")
+        return task
+
+    def _complete_point_claim(
+        self, conn: sqlite3.Connection, claim: PendingPointClaim, stats: dict[str, Any],
+    ) -> TaskRecord:
+        from .point_claim import _point_completion_transition
+
+        task = self._require_point_claim(conn, claim)
+        if task.status != TaskStatus.QUEUED_HINTS_V2:
+            raise ValueError("Point completion requires the current parked claim")
+        now = time.time()
+        with _point_completion_transition(conn, "tasks_point_execution_unsupported_update"):
+            conn.execute(
+                "UPDATE tasks SET status = 'complete', result_stats = ?, error = NULL, "
+                "progress_stage = 'complete', progress_pct = 100.0, "
+                "progress_msg = 'Whole point claim completed', finished_at = ?, updated_at = ? "
+                "WHERE id = ?",
+                (json.dumps(stats, sort_keys=True, allow_nan=False), now, now, claim.task_id),
+            )
+        return self._require_point_claim(conn, claim)
+
     def update_status(
         self,
         task_id: str,
@@ -610,17 +649,38 @@ class TaskStore:
     # ── Cancel ───────────────────────────────────────────────
 
     def cancel(self, task_id: str) -> bool:
-        """Cancel a queued task. Running tasks are cancelled via the runner."""
+        """Cancel queued work, refusing point cancellation during native execution.
+
+        Point workers retain a parked row while owning the source writer. Do
+        not revoke that row until its application and completion have settled.
+        Legacy running tasks are still cancelled through their detached runner.
+        """
+        from .source_ownership import SourcePipelineBusy, source_writer
+
         now = time.time()
         conn = self._connect()
         try:
-            affected = conn.execute(
-                """UPDATE tasks
-                   SET status = 'cancelled', finished_at = ?, updated_at = ?
-                   WHERE id = ? AND status IN ('queued', 'queued_hints', 'queued_hints_v2')""",
-                (now, now, task_id),
-            ).rowcount
-            conn.commit()
+            row = conn.execute(
+                "SELECT change_hints_version FROM tasks WHERE id = ?", (task_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            ownership = (
+                source_writer(self.data_dir, allow_reentry=False)
+                if row["change_hints_version"] != 1 else nullcontext()
+            )
+            try:
+                with ownership:
+                    affected = conn.execute(
+                        """UPDATE tasks
+                           SET status = 'cancelled', finished_at = ?, updated_at = ?
+                           WHERE id = ? AND status IN
+                               ('queued', 'queued_hints', 'queued_hints_v2')""",
+                        (now, now, task_id),
+                    ).rowcount
+                    conn.commit()
+            except SourcePipelineBusy:
+                return False
             if affected:
                 log.info("Task %s cancelled (was queued)", task_id)
             return affected > 0
@@ -684,6 +744,31 @@ class TaskStore:
                    ORDER BY created_at""",
             ).fetchall()
             return [_row_to_record(r) for r in rows]
+        finally:
+            conn.close()
+
+    def next_point_task(self, *, point_scope: PointScope) -> TaskRecord | None:
+        """Read the oldest parked whole-scope point task without claiming it.
+
+        Selection grants no execution authority. The explicit worker must
+        recheck the selected snapshot and pin it through the existing owners.
+        """
+        from ..store.source_layout import _point_scope_json
+
+        if _point_scope_json(point_scope) is None:
+            raise ValueError("Point queue selection requires an exact point scope")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE status = 'queued_hints_v2' "
+                "AND change_hints_version = 2 AND source = ? ORDER BY created_at, id",
+                (point_scope[0],),
+            )
+            for row in rows:
+                task = _row_to_record(row)
+                if type(task.change_hints) is PointChangeHints and task.change_hints.scope == point_scope:
+                    return task
+            return None
         finally:
             conn.close()
 

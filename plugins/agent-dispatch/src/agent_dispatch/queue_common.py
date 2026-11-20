@@ -200,7 +200,7 @@ class Task:
     evaluator_ref: str | None = None
     exclusive_key: str | None = None
     dedup_key: str | None = None
-    producer_fence: dict | None = None
+    producer_fence: dict[str, Any] | None = None
     owner: str | None = None
     attempts: int = 0
     not_before: float = 0.0
@@ -224,9 +224,9 @@ class Task:
     last_liveness: str | None = None
     activity: str | None = None
     activity_updated_at: float | None = None
-    card: dict | None = None
+    card: dict[str, Any] | None = None
     awaiting_steer: bool = False
-    card_draft: dict | None = None
+    card_draft: dict[str, Any] | None = None
     resume_requested: bool = False
     hold_reason: str | None = None
     hold_actor: str | None = None
@@ -238,9 +238,10 @@ class Task:
     monitor_not_before: float | None = None
     category: str = "work"
     kind: str = "finite"
-    standing_charter: dict | None = None
+    standing_charter: dict[str, Any] | None = None
     standing_revision: int = 0
     standing_parent_id: str | None = None
+    handoff_claim: dict[str, Any] | None = None
 
     @property
     def card_draft_revision(self) -> str:
@@ -293,6 +294,10 @@ class Task:
             labels=json.loads(row["labels"] or "[]"),
             payload_ref=row["payload_ref"],
             payload_inline=row["payload_inline"],
+            handoff_claim=(
+                json.loads(row["handoff_claim"])
+                if "handoff_claim" in columns and row["handoff_claim"] else None
+            ),
             target_machine=row["target_machine"],
             target_worktree=row["target_worktree"],
             target_repo=row["target_repo"],
@@ -507,6 +512,7 @@ _COLUMNS: dict[str, str] = {
     "labels": "TEXT NOT NULL DEFAULT '[]'",
     "payload_ref": "TEXT",
     "payload_inline": "TEXT",
+    "handoff_claim": "TEXT",
     "target_machine": "TEXT",
     "target_worktree": "TEXT",
     "target_repo": "TEXT",

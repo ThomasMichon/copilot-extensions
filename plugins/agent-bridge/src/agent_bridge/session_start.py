@@ -9,19 +9,19 @@ import time
 import uuid
 from dataclasses import replace
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from repository_policy import AgentHostingError
 
 from .caller_session import normalize_caller_session_id
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .events import EventLog
-from .models import SessionStatus
+from .session_status import SessionStatus
+from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 from .owned_workspace import acquire_start, prepare_session
 from .session_manager import (
     _ACTIVE_STATES,
     _AcpLaunchTiming,
-    _REQUEST_OVERRIDES_KEY,
     _append_plugin_dirs,
     _container_claim_key,
     _container_remote_child_argv,
@@ -39,15 +39,22 @@ from .session_manager import (
     log,
 )
 from .transport import AgentProcess, SpawnTarget
-from .session_preferences import client_preferences
+from agent_remote_driver.session_preferences import client_preferences
 from .venue_launch_policy import LaunchRefusedError
 from .privileged_plugins import relay_agent, start_client
 
 if TYPE_CHECKING:
+    from .session_manager import SessionManager
     from .acp_client import AcpClient
     from .local_launch_owner import LocalLaunchOwner
+    from .local_launch_preparation import PreparedLocalLaunch
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
+
+
+class _StartHostOptions(TypedDict, total=False):
+    prepared_local_launch: PreparedLocalLaunch
+    acquisition_launch: LocalLaunchOwner
 
 
 def _core() -> Any:
@@ -59,12 +66,13 @@ def _core() -> Any:
 class _SessionStartMixin:
     """Session start and failed-start parity cleanup helpers."""
 
-    def _find_active_session(self, ws_key: tuple) -> Session | None:
+    def _find_active_session(self, ws_key: tuple[str, ...]) -> Session | None:
         """Return an existing session that occupies the given workspace key.
 
         A session occupies a workspace when its status is in _ACTIVE_STATES.
         Used by the concurrency guard to enforce one session per CodeSpace.
         """
+        self = cast("SessionManager", self)
         for s in self._sessions.values():
             if s.status not in _ACTIVE_STATES:
                 continue
@@ -91,7 +99,7 @@ class _SessionStartMixin:
         creation_session_id: str | None = None,
         creation_before_launch: Callable[[], Awaitable[None]] | None = None,
         acquisition_launch: LocalLaunchOwner | None = None,
-        dispatch_origin: dict | None = None,
+        dispatch_origin: dict[str, Any] | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -119,6 +127,7 @@ class _SessionStartMixin:
             env_overrides: Request-owned environment overrides already merged
                 into ``target.env`` by the route.
         """
+        self = cast("SessionManager", self)
         if self._draining:
             raise DaemonDrainingError("session")
         from .dispatch_origin import capture
@@ -216,7 +225,7 @@ class _SessionStartMixin:
             if creation_before_launch is not None and (not creation_session_id or not target.explicit_cwd):
                 raise ValueError("creation preflight requires a keyed exact local target")
             if target.local_plugin_preparation or creation_before_launch is not None:
-                target = with_controller_origin(
+                target = cast(Callable[..., SpawnTarget], with_controller_origin)(
                     target, controller_origin,
                     caller_session_id=normalize_caller_session_id(caller_session_id),
                 )
@@ -298,6 +307,9 @@ class _SessionStartMixin:
             session_id=session_id,
             worktree_id=target.worktree_id,
         )
+        from .consumer_telemetry import bind as bind_consumer_telemetry
+
+        bind_consumer_telemetry(self, session)
 
         # Wire ACP events into the session's event log
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
@@ -363,6 +375,7 @@ class _SessionStartMixin:
                 with contextlib.suppress(Exception):
                     await agent_proc.kill()
             session.client = None
+            assert session.event_log is not None
             session.event_log.append("failed_launch_cleanup", {
                 "pid": pid,
                 "reaped": not agent_proc.alive,
@@ -397,7 +410,7 @@ class _SessionStartMixin:
                 or (target.type == "ssh" and target.static_plugin_args is not None) or privileged_relay
             ):
                 from .venue_plugins import with_controller_origin
-                target = with_controller_origin(
+                target = cast(Callable[..., SpawnTarget], with_controller_origin)(
                     target, controller_origin, caller_session_id=session.caller_session_id,
                 )
                 session.target = target
@@ -412,6 +425,11 @@ class _SessionStartMixin:
                 # Session-Host mode: the child lives in a survivable host that
                 # outlives this frontend (goal 1/3). resolve->launch host->
                 # reattach over loopback->drive ACP.
+                host_options: _StartHostOptions = {}
+                if prepared_local_launch is not None:
+                    host_options["prepared_local_launch"] = prepared_local_launch
+                if acquisition_launch is not None:
+                    host_options["acquisition_launch"] = acquisition_launch
                 client, acp_sid = await self._connect_via_session_host(
                     target,
                     tracker=tracker,
@@ -421,8 +439,7 @@ class _SessionStartMixin:
                     mcp_servers=mcp_servers,
                     model=model,
                     effort=effort,
-                    **({"prepared_local_launch": prepared_local_launch} if prepared_local_launch is not None else {}),
-                    **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
+                    **host_options,
                 )
             elif container_target is not None:
                 from .venue_plugins import prepare_venue_plugins, resolve_controller_cwd
@@ -510,9 +527,9 @@ class _SessionStartMixin:
                         or None
                     )
                     if not parity_fault:
-                        async def prepare_container_child(argv):
+                        async def prepare_container_child(argv: list[str]) -> list[str]:
                             plugin_dirs = await prepare_venue_plugins(
-                                container_target, container_spawner.transport, remote_cwd,
+                                container_target, container_spawner.transport, cast(str, remote_cwd),
                                 remote_env=prepared.get("remote_env"), controller_cwd=controller_cwd,
                             )
                             return _container_remote_child_argv(
@@ -614,6 +631,7 @@ class _SessionStartMixin:
                 from .session_host.codespace_transport import codespace_launch_ownership, codespace_provider_call
                 claim_owner = getattr(target, "caller_worktree", None) or caller_id or controller_cwd
                 core = _core()
+                assert target.venue is not None
                 async with codespace_launch_ownership(
                     self, session_id, cs_target, claim_owner or "", core,
                     holder_ref=getattr(target, "caller_owner_ref", None),
@@ -645,7 +663,10 @@ class _SessionStartMixin:
                     acp_command = cs_target["acp_command"]
                     if not parity_fault:
                         from .session_host.codespace_transport import codespace_child_preparer
-                        cs_spawner.prepare_child = codespace_child_preparer(
+                        cs_spawner.prepare_child = cast(
+                            Callable[..., Callable[[list[str]], Awaitable[list[str]]]],
+                            codespace_child_preparer,
+                        )(
                             cs_target, cs_spawner.transport, prelude=relay_prelude,
                             controller_cwd=controller_cwd, prepare_plugins=prepare_venue_plugins,
                             append_plugin_dirs=_append_plugin_dirs,
@@ -795,7 +816,7 @@ class _SessionStartMixin:
                     acp_session_id=acp_sid,
                     worktree_id=target.worktree_id,
                 )
-            self._db.update_session_acp_id(session_id, acp_sid)
+            self._db.update_session_acp_id(session_id, cast(str, acp_sid))
             # Persist target with resolved values (worktree_id, cwd from plan)
             self._db.update_session_target(
                 session_id, target.to_json(), target.cwd

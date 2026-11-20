@@ -4,6 +4,17 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`command_pipe.CommandPipe` adds a continuous binary stdin owner for the optional
+consumer-telemetry command route. It reuses atomic Windows caller-owned Job
+creation or the Linux private-session guardian and parent-lifetime pipe.
+Its producer-facing owner is an existing telemetry buffer, not a per-record
+process or a pipe-writer thread. Nonblocking writes have one aggregate record
+deadline; close retains exact custody until whole-tree settlement is confirmed.
+Unsupported pipe/custody primitives refuse optional export before writing data.
+Windows callers can omit child scope-name environment publication while keeping
+the native Job and inherited-handle restrictions. Existing launches retain their
+default publication and behavior.
+
 `spawn_sync_in_kill_on_close_job(..., require_job=True, allow_breakaway=False,
 on_suspended=callback)` optionally calls an in-process creation owner with the
 original Windows `Popen`, after required Job assignment and before resume.
@@ -677,6 +688,12 @@ it does not infer abort custody from a nonzero process exit. See Windows'
 
 ### Daemon and finite-process entrypoints
 
+Python daemon admission ignores only `ERROR_FILE_NOT_FOUND` when opening a
+tracked cleanup Job: a destroyed Job cannot retain a child. It still pins and
+checks every existing Job before resume. Malformed scope metadata, access
+denial, other native query failures and retained membership remain errors.
+This does not clear the caller's scope environment or authorize a launch retry.
+
 The packaged `native_daemon.ps1` retains compiled process creation/control
 while its compiler-free replacement remains open. `native_owned.ps1` uses the
 existing shared Python atomic Job owner. Both require setup-provided Python
@@ -723,6 +740,18 @@ acknowledgement; only an explicit refusal or observed cleanup clears that
 uncertainty. `RetainedChild` preserves native custody after unconfirmed cleanup
 for an explicit bounded `Stop()` retry followed by `Dispose()`. Callers must
 consult their durable operation state rather than retrying installation.
+Failed native launches also retain their instance receipt. Only the original,
+authenticated launcher can cancel a positively refused creation or settle a
+child whose exact retained handle proves exit. `ReservationSettled` reports
+that tracking result separately from `CleanupConfirmed`; neither authorizes
+replay. After retiring a retained child, call
+`Complete-NativeDaemonFailedLaunch -Failure <exception>` before disposing its
+handle. A retained child's own receipt also supports `-Child <retained-child>`.
+An independent pinned `-ObservedProcess` is accepted only when its PID and
+birth match the original child. Generic reconciliation still holds a
+reservation with no PID; it never infers refused creation from missing data.
+The native type and helper advertise version-one failed-launch support before
+reservation, so a newer caller refuses an older helper before creating state.
 With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
 windowless child and deliberately retains the caller's Job.
 

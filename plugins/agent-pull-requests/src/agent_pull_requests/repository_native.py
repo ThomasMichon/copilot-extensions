@@ -1,12 +1,22 @@
 """Configured inventory through the selected Worktrees native process boundary."""
 
+from __future__ import annotations
+
 import json
 import subprocess
+import time
+from typing import TYPE_CHECKING, cast
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError
 
 from .native_command import NativeCommandUnavailable, run_observation_command as run_command
+from .filtered_state import Checkpoint, Document
+from .repository_contract import RepositoryIdentity
 from .watch_replay_store import ReplayCallerExpired, json_object
+
+if TYPE_CHECKING:
+    from .watch_observer import NativeObservationBinding
 
 
 class RepositoryNativeUnsupported(ValueError):
@@ -16,15 +26,24 @@ class RepositoryNativeUnsupported(ValueError):
 class RepositoryNativeUnavailable(ValueError):
     """Settled read loss retains whether executing bounds were qualified."""
 
-    def __init__(self, *, qualified):
+    def __init__(self, *, qualified: bool) -> None:
         self.qualified = qualified
         super().__init__("native repository read unavailable")
 
 
-def _invoke(argv, *, timeout, checkpoint, qualified=False):
+def _invoke(
+    argv: list[str], *, timeout: float, checkpoint: Checkpoint, qualified: bool = False,
+    budget: OwnedExecutionBudget | None = None, on_admitted: Checkpoint | None = None,
+) -> subprocess.CompletedProcess[str]:
     checkpoint()
+    if budget is not None:
+        timeout = min(timeout, budget.execution_deadline - time.monotonic())
+        if timeout <= 0:
+            raise RepositoryNativeUnavailable(qualified=qualified)
+    if on_admitted is not None:
+        on_admitted()
     try:
-        result = run_command(argv, timeout=timeout)
+        result = run_command(argv, timeout=timeout, budget=budget)
     except (OwnedCleanupError, ReplayCallerExpired):
         raise
     except (OSError, subprocess.SubprocessError, NativeCommandUnavailable):
@@ -34,7 +53,7 @@ def _invoke(argv, *, timeout, checkpoint, qualified=False):
     return result
 
 
-def qualify(binding, *, checkpoint):
+def qualify(binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None:
     """Confirm executing read bounds without provider or credential acquisition."""
     checkpoint()
     identity = binding.repository_identity
@@ -63,15 +82,17 @@ def qualify(binding, *, checkpoint):
     checkpoint()
 
 
-def inventory(binding, *, checkpoint, _qualified=False):
+def inventory(
+    binding: NativeObservationBinding, *, checkpoint: Checkpoint, _qualified: bool = False,
+) -> Document:
     """Perform selected bounded inventory after its current-cycle qualification."""
     if not _qualified:
         qualify(binding, checkpoint=checkpoint)
-    identity = binding.repository_identity
+    identity = cast(RepositoryIdentity, binding.repository_identity)
     prefix = list(binding.prefix or (binding.command,))
     result = _invoke([
         *prefix, "pr-watch", "inventory", identity.repo,
-        "--config", binding.inventory_config,
+        "--config", cast(str, binding.inventory_config),
         "--credential-command", json.dumps(binding.credential_command),
         "--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json",
     ], timeout=60, checkpoint=checkpoint, qualified=True)

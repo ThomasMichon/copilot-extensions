@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import os
 import stat
+import argparse
+import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from . import config as cfg
 
@@ -24,12 +28,23 @@ def refuse_recovery(error: ResidentRecoveryHeld, *, json_output: bool) -> int:
     return 1
 
 
-def dispatch_lazy(command: str, args_list: list[str], **options: object) -> int:
+def dispatch_lazy(
+    command: str, args_list: list[str], *,
+    dispatch_table: Mapping[str, tuple[str, str]], package: str, prog: str,
+    ensure_cluster_loaded: Callable[[], None],
+    cluster_free_modules: frozenset[str] = frozenset(),
+    command_map: Mapping[str, Callable[[argparse.Namespace], int]] | None = None,
+    register_cli_modules: frozenset[str] = frozenset(),
+) -> int:
     """Keep maintenance refusals at the normal parsed-command CLI boundary."""
     from lazy_cli_dispatch import dispatch_lazy as dispatch
 
     try:
-        return dispatch(command, args_list, **options)
+        return dispatch(
+            command, args_list, dispatch_table=dispatch_table, package=package, prog=prog,
+            ensure_cluster_loaded=ensure_cluster_loaded, cluster_free_modules=cluster_free_modules,
+            command_map=command_map, register_cli_modules=register_cli_modules,
+        )
     except ResidentRecoveryHeld as error:
         return refuse_recovery(error, json_output=(
             "--json" in args_list
@@ -40,7 +55,7 @@ def dispatch_lazy(command: str, args_list: list[str], **options: object) -> int:
         ))
 
 
-def dispatch_claim(verb: str, verb_args: dict) -> dict:
+def dispatch_claim(verb: str, verb_args: dict[str, Any]) -> dict[str, Any]:
     """Use the existing versioned normal claim writer and resident ensure policy."""
     from . import locks, status_monitor_runtime as monitor, tracking_write
 
@@ -48,13 +63,13 @@ def dispatch_claim(verb: str, verb_args: dict) -> dict:
         verb, verb_args,
         read_lock_data=lambda: locks.read_lock(monitor._monitor_lock_path()),
         ensure_monitor=monitor._ensure_status_monitor if monitor._status_monitor_enabled() else None,
-        min_version=4,
+        min_version={"claim_add": 5, "claim_release": 5, "claim_settle": 5, "claim_bind": 1}.get(verb, 4),
     )
 
 
 def _user_profile() -> Path:
     try:
-        if os.name == "nt":
+        if sys.platform == "win32":
             value = os.environ.get("USERPROFILE", "")
         else:
             import pwd

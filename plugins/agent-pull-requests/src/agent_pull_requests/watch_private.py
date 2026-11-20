@@ -6,17 +6,23 @@ import ctypes
 import json
 import os
 import stat
+import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from zdd.routing_persistence import windows_replace
 
 from .watch_storage import StateCommitUncertain
 
 _DACL = "D:P(A;;FA;;;OW)(A;;FA;;;SY)"
+_REPARSE_POINT = 0x400
 
 
 def _windows_private(path: Path, *, protect: bool) -> None:
+    if sys.platform != "win32":
+        raise NotImplementedError("Windows capability security requires Windows")
     from ctypes import wintypes as w
 
     security = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -85,11 +91,11 @@ def _windows_private(path: Path, *, protect: bool) -> None:
         raise PermissionError("watch private file security descriptor is unavailable")
     if ctypes.get_last_error() != 122 or not size.value:
         raise ctypes.WinError(ctypes.get_last_error())
-    descriptor = ctypes.create_string_buffer(size.value)
-    checked(security.GetFileSecurityW(str(path), 5, descriptor, size, ctypes.byref(size)))
+    descriptor_buffer = ctypes.create_string_buffer(size.value)
+    checked(security.GetFileSecurityW(str(path), 5, descriptor_buffer, size, ctypes.byref(size)))
     rendered = w.LPWSTR()
     checked(security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-        descriptor, 1, 4, ctypes.byref(rendered), None,
+        descriptor_buffer, 1, 4, ctypes.byref(rendered), None,
     ))
     try:
         if rendered.value != _DACL:
@@ -98,7 +104,7 @@ def _windows_private(path: Path, *, protect: bool) -> None:
         kernel.LocalFree(rendered)
     owner, defaulted = w.LPVOID(), w.BOOL()
     checked(security.GetSecurityDescriptorOwner(
-        descriptor, ctypes.byref(owner), ctypes.byref(defaulted),
+        descriptor_buffer, ctypes.byref(owner), ctypes.byref(defaulted),
     ))
     if not security.EqualSid(owner, sid):
         raise PermissionError("watch capability file belongs to another OS account")
@@ -108,16 +114,16 @@ def require_private(path: Path) -> None:
     parent = path.parent.stat(follow_symlinks=False)
     if (
         not stat.S_ISDIR(parent.st_mode)
-        or getattr(parent, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(parent, "st_file_attributes", 0) & _REPARSE_POINT
     ):
         raise PermissionError("watch capability directory must not be a link")
     info = path.stat(follow_symlinks=False)
     if (
         not stat.S_ISREG(info.st_mode)
-        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
     ):
         raise PermissionError("watch capability must be a regular non-link file")
-    if os.name == "nt":
+    if sys.platform == "win32":
         _windows_private(path, protect=False)
     elif info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
         raise PermissionError("watch capability file is not owner-private")
@@ -158,13 +164,33 @@ def confirm_private(path: Path) -> None:
         raise PermissionError("watch capability changed during durability confirmation")
 
 
-def write_private(path: Path, document: dict, *, replace: bool = True) -> None:
+def windows_move_no_replace(source: Path, destination: Path) -> None:
+    """Use the native sharing check and write-through without replacing custody."""
+    if sys.platform != "win32":
+        raise NotImplementedError("Windows capability publication requires Windows")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    move = kernel.MoveFileExW
+    move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_ulong]
+    move.restype = ctypes.c_int
+    if not move(str(source), str(destination), 0x8):
+        error = ctypes.get_last_error()
+        if error in (80, 183):
+            raise FileExistsError("watch capability custody already exists")
+        raise ctypes.WinError(error)
+
+
+def write_private(
+    path: Path, document: dict[str, Any], *, replace: bool = True,
+    before_publish: Callable[[], None] | None = None,
+    create_parent: bool = True,
+) -> None:
     """Protect before writing secrets, then publish without a partial visible file."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if create_parent:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     parent = path.parent.stat(follow_symlinks=False)
     if (
         not stat.S_ISDIR(parent.st_mode)
-        or getattr(parent, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(parent, "st_file_attributes", 0) & _REPARSE_POINT
     ):
         raise PermissionError("watch capability directory must not be a link")
     if os.path.lexists(path):
@@ -181,6 +207,8 @@ def write_private(path: Path, document: dict, *, replace: bool = True) -> None:
             json.dump(document, handle, allow_nan=False)
             handle.flush()
             os.fsync(handle.fileno())
+        if before_publish is not None:
+            before_publish()
         if replace:
             if os.name == "nt":
                 windows_replace(temporary, path)
@@ -188,16 +216,7 @@ def write_private(path: Path, document: dict, *, replace: bool = True) -> None:
                 os.replace(temporary, path)
         else:
             if os.name == "nt":
-                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-                move = kernel.MoveFileExW
-                move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_ulong]
-                move.restype = ctypes.c_int
-                # WRITE_THROUGH without REPLACE_EXISTING preserves prior custody.
-                if not move(str(temporary), str(path), 0x8):
-                    error = ctypes.get_last_error()
-                    if error in (80, 183):
-                        raise FileExistsError("watch capability custody already exists")
-                    raise ctypes.WinError(error)
+                windows_move_no_replace(temporary, path)
             else:
                 os.link(temporary, path)
         _sync_directory(path.parent)

@@ -196,11 +196,16 @@ def compose(
     source_descriptor: dict[str, Any] | None = None,
     projects: tuple[str, ...] | None = None,
     observer: Callable[[int, int, float], None] | None = None,
+    closed_wheel_source: bool = False,
 ) -> dict[str, Any]:
     """Materialize one Git object; only finalized Main selection needs ancestry."""
     started = time.monotonic()
     deadline = started + 600 if deadline is None else deadline
     preparation._remaining(deadline)
+    if type(closed_wheel_source) is not bool or closed_wheel_source and (
+        projects is None or finalized_main or main_head is not None
+    ):
+        raise ValueError("closed-wheel source requires explicit projects from one uncomposed Git source")
     if observer is not None and not callable(observer):
         raise ValueError("source phase observer must be callable")
     repository = repository.resolve(strict=True)
@@ -254,9 +259,17 @@ def compose(
                    if composition is not None and composition.export_paths is not None else {}),
         )
     _verify_project_declaration(repository, commit, source, deadline)
+    if closed_wheel_source:
+        from versioned_runtime_source import SOURCE_FILE
+
+        for relative in project_paths or ():
+            for name in (SOURCE_FILE, "snapshot-provenance.json"):
+                metadata = source / relative / name
+                if metadata.exists() or metadata.is_symlink():
+                    raise ValueError("Source payload already contains reserved deployment metadata")
     archive.unlink()
     source_tree = preparation._git(repository, "rev-parse", f"{commit}^{{tree}}", deadline=deadline)
-    if not finalized_main and composition is None:
+    if not finalized_main and composition is None and not closed_wheel_source:
         with _source_phase(observer, 3, started):
             if project_paths is None:
                 log = materialization.materialize(

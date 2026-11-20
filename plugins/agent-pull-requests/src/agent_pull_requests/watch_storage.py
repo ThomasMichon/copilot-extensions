@@ -22,6 +22,7 @@ WATCH_ENGINE_GENERATION = 1
 TransitionPhase = Literal["absent", "prepared", "sealed-legacy", "import-ready", "active"]
 _TRANSITION_PHASES = {"prepared", "sealed-legacy", "import-ready", "active"}
 _REPARSE_POINT = 0x400
+_MAX_METADATA_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class WatchStatePaths:
     historical_lock: Path
     retained_lock: Path
     staged_barrier: Path
+    preparation_pin: Path
     journal: Path
     isolated_subscriptions: Path
     writer_lock: Path
@@ -43,6 +45,7 @@ def watch_state_paths(root: Path | None = None) -> WatchStatePaths:
         historical_lock=historical_lock,
         retained_lock=base / "watch-state-transition.legacy.lock",
         staged_barrier=base / "watch-state-transition.barrier",
+        preparation_pin=base / "watch-state-transition.pin",
         journal=base / "watch-state-transition.json",
         isolated_subscriptions=base / "watch-state" / "subscriptions.json",
         writer_lock=historical_lock / "writer.lock",
@@ -74,9 +77,10 @@ def subscriptions_path(root: Path | None = None) -> Path:
     return watch_state_paths(root).legacy_subscriptions
 
 
-def _regular_bytes(path: Path) -> bytes | None:
+def _regular_bytes(path: Path, *, max_bytes: int | None = _MAX_METADATA_BYTES) -> bytes | None:
+    """Read stable plain bytes; None preserves legacy subscription size policy."""
     try:
-        info = path.stat(follow_symlinks=False)
+        info = path.lstat()
     except FileNotFoundError:
         return None
     if (
@@ -84,13 +88,16 @@ def _regular_bytes(path: Path) -> bytes | None:
         or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
     ):
         raise PermissionError("watch journal metadata must be a regular non-link file")
-    if info.st_size > 1_048_576:
+    if max_bytes is not None and info.st_size > max_bytes:
         raise ValueError("watch journal metadata exceeds its bounded size")
-    with path.open("rb") as handle:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as handle:
         opened = os.fstat(handle.fileno())
-        content = handle.read(1_048_577)
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
+            raise PermissionError("watch journal metadata changed before its regular-file read")
+        content = handle.read() if max_bytes is None else handle.read(max_bytes + 1)
         finished = os.fstat(handle.fileno())
-    current = path.stat(follow_symlinks=False)
+    current = path.lstat()
     identities = [
         (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
         for item in (info, opened, finished, current)
@@ -101,7 +108,8 @@ def _regular_bytes(path: Path) -> bytes | None:
         for before, after in ((info, current), (opened, finished))
     )
     if (
-        len(content) > 1_048_576 or any(item != identities[0] for item in identities[1:])
+        (max_bytes is not None and len(content) > max_bytes)
+        or any(item != identities[0] for item in identities[1:])
         or not metadata_stable
         or not stat.S_ISREG(current.st_mode)
         or getattr(current, "st_file_attributes", 0) & _REPARSE_POINT
@@ -110,7 +118,9 @@ def _regular_bytes(path: Path) -> bytes | None:
     return content
 
 
-def read_transition_phase(root: Path | None = None) -> TransitionPhase:
+def read_transition_phase(
+    root: Path | None = None, *, allow_preparation_pin: bool = False,
+) -> TransitionPhase:
     """Observe a marker, never establish physical sealing, custody or authority."""
     paths = watch_state_paths(root)
     try:
@@ -123,9 +133,10 @@ def read_transition_phase(root: Path | None = None) -> TransitionPhase:
             if (
                 not isinstance(data, dict)
                 or data.get("schema") != "agent-pull-requests.watch-state-transition"
-                or type(data.get("version")) is not int or data["version"] != 1
+                or type(data.get("version")) is not int or data["version"] not in {1, 2}
                 or not isinstance(data.get("phase"), str)
                 or data["phase"] not in _TRANSITION_PHASES
+                or (data["version"] == 2 and data["phase"] not in {"prepared", "sealed-legacy"})
             ):
                 raise ValueError("unsupported marker")
         except (ValueError, UnicodeError):
@@ -133,14 +144,17 @@ def read_transition_phase(root: Path | None = None) -> TransitionPhase:
         return cast(TransitionPhase, data["phase"])
     for path in (
         paths.historical_lock, paths.retained_lock, paths.staged_barrier,
-        paths.isolated_subscriptions.parent,
+        paths.isolated_subscriptions.parent, paths.preparation_pin,
     ):
         try:
             info = path.stat(follow_symlinks=False)
         except FileNotFoundError:
             continue
         if (
-            path != paths.historical_lock or not stat.S_ISREG(info.st_mode)
+            (path != paths.historical_lock and not (
+                allow_preparation_pin and path == paths.preparation_pin
+            ))
+            or not stat.S_ISREG(info.st_mode)
             or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
         ):
             raise ValueError("watch state transition evidence has no journal")
@@ -155,8 +169,10 @@ def _require_legacy_state(root: Path | None) -> None:
 
 def _atomic_write_json(
     path: Path, data: object, *, before_replace: Callable[[], None] | None = None,
+    create_parent: bool = True,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if create_parent:
+        path.parent.mkdir(parents=True, exist_ok=True)
     handle = tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.",
         suffix=".tmp", delete=False,
@@ -207,11 +223,19 @@ def _round_trip_float(raw: str) -> float:
     return value
 
 
-def _read_subscriptions_document(path: Path) -> tuple[str | None, Any]:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None, []
+def _read_subscriptions_document(
+    path: Path, *, require_plain: bool = False,
+) -> tuple[str | None, Any]:
+    if require_plain:
+        content = _regular_bytes(path, max_bytes=None)
+        if content is None:
+            return None, []
+        raw = content.decode("utf-8")
+    else:
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None, []
     try:
         data = json.loads(
             raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant,
@@ -254,26 +278,33 @@ def _subscription_entries(data: Any) -> list[dict[str, Any]]:
     return data
 
 
-def _read_subscriptions_state(path: Path) -> list[dict[str, Any]]:
-    return _subscription_entries(_read_subscriptions_document(path)[1])
+def _read_subscriptions_state(
+    path: Path, *, require_plain: bool = False,
+) -> list[dict[str, Any]]:
+    return _subscription_entries(_read_subscriptions_document(path, require_plain=require_plain)[1])
 
 
-def read_subscriptions_state(root: Path | None = None) -> list[dict[str, Any]]:
+def read_subscriptions_state(
+    root: Path | None = None, *, require_plain: bool = False,
+) -> list[dict[str, Any]]:
     with _ATOMIC_REPLACE_LOCK:
         _require_legacy_state(root)
-        return _read_subscriptions_state(subscriptions_path(root))
+        return _read_subscriptions_state(subscriptions_path(root), require_plain=require_plain)
 
 
 def write_subscriptions_state(
     entries: list[dict[str, Any]], root: Path | None = None, *,
     validate: Callable[[list[dict[str, Any]]], None] | None = None,
+    before_replace: Callable[[], None] | None = None,
+    create_parent: bool = True,
+    require_plain: bool = False,
 ) -> None:
     path = subscriptions_path(root)
 
     def checked_document() -> tuple[str | None, Any]:
         try:
             _require_legacy_state(root)
-            raw, document = _read_subscriptions_document(path)
+            raw, document = _read_subscriptions_document(path, require_plain=require_plain)
             selected = _subscription_entries(document)
             if isinstance(selected, VersionedSubscriptions):
                 if validate is None:
@@ -301,8 +332,15 @@ def write_subscriptions_state(
             current, _ = checked_document()
             if current != original:
                 raise StateWriteRefused("persisted watch subscriptions changed before replacement")
+            if before_replace is not None:
+                before_replace()
 
-        _atomic_write_json(path, document, before_replace=check_existing_contract)
+        if create_parent:
+            _atomic_write_json(path, document, before_replace=check_existing_contract)
+        else:
+            _atomic_write_json(
+                path, document, before_replace=check_existing_contract, create_parent=False,
+            )
 
 
 def read_lock_data() -> dict[str, Any] | None:

@@ -192,6 +192,13 @@ creator, generic state, phase, callback ref, handoff marker and producer metadat
 receipts when present). Pending and allocating responsibility remains visible.
 Accepted transfers must form one connected, creator-rooted chain with matching
 immutable metadata; closed receipts are history, not current ownership.
+Historical transfer actors that differ from current reporter names additionally
+match the existing handoff registry's accepted bundle, exact source/consumer and
+original producer snapshot. The scan reads that evidence once only when needed
+and includes it in its input-change checks. This preserves verified historical
+renames without treating any machine spelling with the same project/worktree ID
+as an alias. Missing, invalid, nonaccepted or mismatched evidence leaves the
+transfer unresolved; the scan does not repair it or change receipt actors.
 
 Filters apply **after** checking all observed records and transfer chains.
 An identity filter compares the entire canonical JSON object, together with any

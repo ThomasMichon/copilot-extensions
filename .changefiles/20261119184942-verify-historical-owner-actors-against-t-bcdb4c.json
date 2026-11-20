@@ -1,0 +1,9 @@
+{
+  "comment": "Verify historical owner actors against the existing accepted handoff transaction",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

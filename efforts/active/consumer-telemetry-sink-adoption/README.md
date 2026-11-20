@@ -118,6 +118,12 @@ and count it as delivery.
 
 ### U0 - Contract and owner agreement
 
+Contract source:
+[Consumer telemetry command v1](../../../docs/patterns/consumer-telemetry-command.md).
+This is the reviewed-before-implementation specification, not shipped command
+support. Its inventory and source reservation preserve #7935/#5900 ownership;
+any overlapping implementation hunk still needs its owner's explicit agreement.
+
 - [ ] Inventory actual producer schemas and consumers; distinguish existing
   hooks from proposed catalog entries or missing instrumentation.
 - [ ] Reconcile API/file overlap with the performance and producer owners.
@@ -254,3 +260,68 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
 - Preserved performance, producer, collector, update, and rollout ownership.
 - Proposed the contract -> real Bridge route -> Dispatch/coverage -> native
   qualification -> release sequence. No runtime work has started.
+
+### 2026-11-19 - U0 contract contribution
+
+- Claimed only U0 on #13545 after checking current comments and open telemetry
+  pull requests; the parent tracker and U1–U4 remain open.
+- Specified one shared parser/runner home, root-bound selection, local override,
+  structural Bridge projection, JSONL framing, finite process/queue/deadline
+  bounds and selected-runtime support discovery.
+- Inventoried actual lifecycle, diagnostics, hourly and performance consumers.
+  No Manager, entry, measurement, collector or native reservation is transferred.
+- Runtime support, receiver readback, native/compatibility qualification and
+  release/installed adoption remain later acceptance, not U0 evidence.
+
+### 2026-11-19 - U1 source implementation
+
+- Claimed only U1 on #13545. The contract requires agreement for actually
+  reserved overlapping hunks, not a blanket approval from historical campaign
+  roles. Related EventLog refresh and native Job reservations received narrow
+  coordination requests; their changed hunks remain untouched.
+- Added one shared declaration parser, structural projection and command route
+  on the existing `SinkSlot`/`BufferedSink` owner. Bridge admits exact roots from
+  trusted caller-to-harness service configuration, independently of the target
+  agent and cwd.
+- The expanded Windows development packet passes 179 controls, including private
+  restoration and remote-session compatibility. Its real configured,
+  authenticated HTTP stop operations reached one independent receiver, whose
+  file readback contained four session/conversation transitions. Literal argv,
+  cwd after `chdir`, environment isolation, unlisted-caller suppression,
+  non-reading-child failure and finite owned cleanup are explicit controls.
+- Added a finite, contained Windows/Linux native CI packet with immutable
+  candidate selection and receiver-readback properties. Current-head CI/review
+  and merge remain required; source tests do not establish release or rollout.
+- U2 Dispatch adoption, wider coverage/skew qualification and U4 release remain
+  open. No receiver installation, live runtime update or deployment is included.
+- Review regressions cover writable-database ownership transfer, nonblocking
+  concurrent sequence ordering, late remote/merge-recovery session admission,
+  immutable reused-session binding and candidate cleanup after success,
+  construction failure or cancellation. The existing reserved producer hunks
+  remain unchanged.
+- Additional review controls suppress inherited command admission in elevated
+  sub-daemons without changing unbound legacy mode, and retain Linux lifetime
+  custody through the bounded stdin-EOF flush grace before forced retirement.
+  Their native regression persists and reads back the receiver's final batch.
+
+### 2026-11-20 - U2 Dispatch source adoption
+
+- Claimed only U2 on #13545 in managed source worktree codename
+  `clanking-compass`. U1 retains no shared-command source reservation.
+  Current Dispatch work on assignment capture and placement retains its own
+  expression; this slice does not change those integration hunks.
+- Added the independent closed `dispatch.lifecycle.v1` projection and explicit
+  coordinator-owned admission through the existing shared parser, bounded
+  writer and native process owner. Bridge remains the default shared API and
+  advertises only its own schema.
+- Real ordinary configured HTTP mutations exercise interleaved stored-task
+  origins and an explicit service-owned fence route, with independent
+  receiver-file readback. Disabled/invalid/local opt-out, legacy compatibility,
+  failure, nonreading receiver and new-source restart are finite controls.
+- Reconciled actual shared-library imports in the command contract inventory:
+  participating lifecycle owners, deliberately separate diagnostic/reporting
+  readers and validation-only consumers, and explicitly unknown/unobserved
+  instrumentation or installed generations.
+- Current-head review, required CI, native evidence, merge and finalization
+  remain publication obligations for this slice. U3/U4 and the umbrella stay
+  open; no installed runtime, receiver, daemon or release was changed.

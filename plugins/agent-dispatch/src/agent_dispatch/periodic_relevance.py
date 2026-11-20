@@ -18,7 +18,8 @@ from .loop_governance import LoopGovernance
 from .producers.evaluator import (
     MAX_SCRIPT_EVALUATOR_TIMEOUT, load_registration_evaluator,
 )
-from .queue import TaskError, TaskQueue
+from .queue import TaskQueue
+from .queue_records import TaskError
 from .queue_common import Task
 from .queue_relevance_registration import RelevanceRegistration
 from .relevance_evaluation import PeriodicRelevancePolicy, RelevanceJudgment
@@ -59,23 +60,23 @@ class PeriodicRelevanceMaintenance:
             await self.task
 
 
-def _publish(bus: EventBus, outcome: Any) -> None:
+def _publish(bus: EventBus, outcome: Any, queue: TaskQueue) -> None:
     from .coordinator_task_views import _event_task_dict
     from . import telemetry
     from .handoff_claim_release import release_if_handoff
 
     task = asdict(outcome.task)
-    release_if_handoff(task, cancel_pending=True)
+    release_if_handoff(task, cancel_pending=True, queue=queue)
     event_task = _event_task_dict(task)
     bus.publish({"type": outcome.event_type, "task": event_task})
-    telemetry.emit(telemetry.task_lifecycle_event(outcome.event_type, event_task))
+    telemetry.emit_for(bus, telemetry.task_lifecycle_event(outcome.event_type, event_task))
 
 
 def reconsider_unbound_tasks(
     queue: TaskQueue, source: RelevanceSource, *, bus: EventBus | None = None,
     runner: Callable[..., Any] = subprocess.run,
     can_continue: Callable[[], bool] = lambda: True,
-) -> dict:
+) -> dict[str, Any]:
     """One bounded registrar pass; source checks never hold the queue write lock."""
     admission = source.prepare()
     with local_policy() as (machine, env, _disabled):
@@ -94,7 +95,7 @@ def reconsider_unbound_tasks(
                     policies[rid] = policy
             except ValueError:
                 log.warning("invalid periodic evaluator %s", rid, exc_info=True)
-    result: dict[str, list] = {"accepted": [], "errors": []}
+    result: dict[str, list[Any]] = {"accepted": [], "errors": []}
     for rid in queue.rotate_relevance_evaluators(list(policies)):
         if not can_continue():
             break
@@ -164,7 +165,7 @@ def reconsider_unbound_tasks(
                     ),
                     reporter=f"registration:{rid}", disabled_ids=disabled,
                     registration_admission=report_admission, evaluation_token=entry["token"],
-                    on_transition=(lambda outcome: _publish(bus, outcome)) if bus is not None else None,
+                    on_transition=(lambda outcome: _publish(bus, outcome, queue)) if bus is not None else None,
                 )
             result["accepted"].append(accepted)
             queue.finish_relevance_evaluation(
@@ -183,7 +184,7 @@ def reconsider_unbound_tasks(
                 if receipt is not None:
                     result["accepted"].append(receipt["acceptance"])
                 queue.finish_relevance_evaluation(
-                    entry, policy, verdict=report["verdict"] if receipt else None,
+                    entry, policy, verdict=report["verdict"] if receipt and report is not None else None,
                     error=str(exc), preserve_report=False,
                 )
             except Exception:

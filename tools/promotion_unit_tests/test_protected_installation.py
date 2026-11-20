@@ -19,9 +19,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "libs/versioned-runtime"))
 sys.path.insert(0, str(ROOT / "libs/installer-engine"))
-import installer_native_executable as executable
-import installer_protected_source as protected
-import installer_engine_health as health
+import installer_native_executable as executable  # noqa: E402
+import installer_protected_source as protected  # noqa: E402
+import installer_engine_health as health  # noqa: E402
 
 
 @dataclass
@@ -201,7 +201,15 @@ def test_policy_admission_preserves_closed_native_roles(
 
 
 @pytest.mark.parametrize(
-    "case", ["installed", "old-launcher", "manager-context", "script-uv"]
+    "case",
+    [
+        "installed",
+        "closed-wheels",
+        "closed-escape",
+        "old-launcher",
+        "manager-context",
+        "script-uv",
+    ],
 )
 def test_protected_dispatch_uses_admitted_selection_without_fallback(
     memory: Memory,
@@ -229,13 +237,27 @@ def test_protected_dispatch_uses_admitted_selection_without_fallback(
     monkeypatch.setattr(health, "_open", lambda path: path.open("rb"))
     source = ModuleType("install_source")
     payload = MemoryPath(record["snapshot"]) / "payload"
+    closed = case in {"closed-wheels", "closed-escape"}
+
+    def package_roots(_payload: Any, **options: Any) -> tuple[MemoryPath, ...]:
+        if closed and not options.get("closed_wheels"):
+            raise ValueError("development wheel lacks release-age proof")
+        if not closed:
+            assert options == {}, "ordinary source defaults changed"
+        return (
+            MemoryPath("/unit-protected/foreign")
+            if case == "closed-escape"
+            else payload,
+        )
+
     vars(source).update(
         select_project=lambda *_: SimpleNamespace(
             payload=payload,
             project={"application": "application"},
+            closed_wheel_source=closed,
         ),
         engine=SimpleNamespace(
-            _package_roots=lambda *_: (payload,),
+            _package_roots=package_roots,
             application_uv_selection=health.application_uv_selection,
         ),
         _member=lambda root, name: root / name,
@@ -259,7 +281,7 @@ def test_protected_dispatch_uses_admitted_selection_without_fallback(
 
     vars(source)["install_application"] = install
     monkeypatch.setitem(sys.modules, "install_source", source)
-    if case != "installed":
+    if case not in {"installed", "closed-wheels"}:
         with pytest.raises(ValueError):
             protected.install(selected, code=cast(Path, code))
         assert calls == []

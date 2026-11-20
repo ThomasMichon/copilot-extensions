@@ -22,7 +22,7 @@ from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
 from agent_pull_requests.watch_contract import PRSnapshot
 from agent_pull_requests.watch_replay import ObservationTarget
 from agent_pull_requests.watch_replay_store import MAX_OWNER_BYTES, ReplayStore, ReplayStoreInvalid
-from agent_pull_requests_service import terminal_transition
+from agent_pull_requests_service import terminal, terminal_transition
 from agent_pull_requests_service.__main__ import main
 from agent_pull_requests_service.config import HostConfig, load_config
 
@@ -369,8 +369,9 @@ def test_native_state_coexistence_refuses_before_adoption(configuration: Configu
 
 @pytest.mark.parametrize("contents", ["generation", "pointer"])
 def test_populated_cache_refuses_without_excluding_original_workspace_reads(
-    configuration: Configuration, contents: str,
+    configuration: Configuration, contents: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(terminal, "retained_cache_supported", lambda: False)
     path, value, _ = retained(configuration)
     selected = generation()
     value["workspaces"]["terminal_reads"] = False
@@ -407,6 +408,7 @@ def test_populated_cache_refuses_without_excluding_original_workspace_reads(
 def test_deadline_expires_during_cache_scan_without_visiting_later_entries(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(terminal, "retained_cache_supported", lambda: False)
     _, _, config = retained(configuration)
     assert config.workspaces is not None
     cache = config.workspaces.cache(config.store())

@@ -18,7 +18,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from agent_procutil import no_window_kwargs
 from agent_procutil.daemon_instances import admit_daemon_instance
@@ -32,6 +32,12 @@ from ..repository_resources import (
 
 class EmitterError(ValueError):
     """A malformed command-emitter spec."""
+
+
+class TaskAuthor(Protocol):
+    """Task creation shared by HTTP clients and the coordinator's local adapter."""
+
+    def create(self, title: str, **fields: Any) -> dict[str, Any]: ...
 
 
 class _SnapshotOptions(TypedDict, total=False):
@@ -231,7 +237,7 @@ def _task_specs(stdout: str) -> list[dict[str, Any]]:
 
 
 def _author_tasks(
-    client: DispatchClient,
+    client: TaskAuthor,
     spec: dict[str, Any],
     stdout: str,
     *,
@@ -474,7 +480,7 @@ RECEIPTS_PATH_ENV = "AGENT_DISPATCH_EMITTER_RECEIPTS_PATH"
 
 
 def run_side_load(
-    client: DispatchClient,
+    client: TaskAuthor,
     registration: dict[str, Any],
     change_ref: str,
     *,
