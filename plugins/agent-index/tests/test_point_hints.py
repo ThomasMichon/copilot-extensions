@@ -273,6 +273,25 @@ def test_pin_freezes_whole_claim_and_retains_trailing_union_after_reopen(tmp_pat
     assert sql(path, "SELECT * FROM tasks ORDER BY id") == before
 
 
+def test_point_cancellation_cannot_reenter_an_active_source_writer(tmp_path: Path) -> None:
+    from agent_index.indexing.source_ownership import source_writer
+
+    store = TaskStore(tmp_path / "tasks.db")
+    task = enqueue(store)
+    pinned = store.pin_point_claim(task.id, expected_hints=hints())
+    legacy = store.enqueue("git:plain")
+    with source_writer(tmp_path):
+        assert not store.cancel(task.id)
+        assert record(store, task.id) == pinned
+        assert store.cancel(legacy.id)
+        with source_writer(tmp_path):
+            assert record(store, task.id) == pinned
+    assert store.cancel(task.id)
+    retried = store.retry(task.id)
+    assert retried is not None and retried.point_claim_id == pinned.point_claim_id
+    assert retried.change_hints == pinned.change_hints
+
+
 def test_pin_refuses_stale_or_partial_snapshot_without_losing_arrivals(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
