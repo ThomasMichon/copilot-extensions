@@ -286,9 +286,9 @@ No v1 form, legacy source or stored content is retired by this proposal.
 ### Configured executor ownership before caller migration
 
 The explicit service binding and native service count controls compose the
-owners, but their executor/client closure is still supplied by the embedding
-application. The next provider-first step is a reusable configured executor
-context, not a serialized selector or a blanket v2 execution declaration.
+owners. The reusable configured executor context now supplies production
+connector/model ownership; the embedding application still selects it
+explicitly. This is not a serialized selector or a blanket v2 execution declaration.
 This is an **agent-recommended implementation refinement** of the composition
 gate below, not new source activation or rollout authority.
 
@@ -325,6 +325,67 @@ binding and explicit reader, declare point/v2/paged semantics truthfully, and
 exercise missing support and provider rollback before enabling a new wire
 caller. Neither an owned executor nor callable metadata alone establishes
 that a running service's selected binding and reader satisfy those semantics.
+
+### Selected executor and qualified-reader composition
+
+The next **agent-recommended refinement** stays inside the existing
+`build_app(point_service_factory=...)` / `PointService` Python binding. Compose
+the configured executor above with the existing
+`indexing.component_read.read_component` owner as one explicit selection, not
+two independently supplied callables whose metadata happens to agree. This
+proposal does not implement that selection or change health, intake receipts,
+queue eligibility, HTTP routes or any other wire contract.
+
+The configured selection binds one `IndexConfig`, exact `PointScope`,
+application/recovery scope and finite qualification row budget. Its resource
+context supplies both the actual executor and a named-path reader closed over
+that same binding. `PointService` must validate agreement with its own configured
+domain and scope before installing the pair; reject missing, conflicting or
+partially constructed selections before dispatch or reader exposure. Keep the
+existing executor-only constructor and caller-owned context behavior unchanged,
+but do not treat that alternative as qualified reader support. Select either
+the existing executor-only context or the paired context, never silently prefer
+one when both are supplied. No package-version check, callable attribute or
+separate capability registry substitutes for composing these owners.
+
+The reader takes only a named component path within that selected binding; it
+cannot override the domain, source, application scope or budget per call.
+Delegate every result to `read_component` under its existing domain operation:
+canonical typed identity, current ordering/native content, path checkpoint and
+routed-model evidence must agree. Return its component-specific `ComponentRead`,
+including applied version, deletion and `named-target-only` coverage, unchanged.
+Unknown paths, changed receipts/scopes and incomplete or conflicting evidence
+remain explicit refusals, never an empty legacy-shaped success. Do not retain
+an earlier qualification as permission for a later read.
+
+Open only existing native state needed by this operation through its current
+owners; do not prepare schemas/indexes, register models, repair coverage,
+enumerate a discussion or invoke acquisition/embedding readiness for a read.
+Keep thread-affine native handles within their owning operation and close them
+on success or refusal. Paused intake/recovery is not application evidence:
+starting or reading must neither activate retained work nor acknowledge it.
+Reads may qualify already-applied state while execution is paused, but refuse
+once shutdown closes admission. Join any admitted reads as well as workers
+before closing the selected context's resources, including cancellation paths.
+
+Qualify this composition through the existing native service fixture rather
+than a test-only executor/reader pair. Cover one admitted exact execution
+followed by the selected qualified read, an ordered deletion, a fresh paused
+reopen, stale/missing application evidence and wrong binding/receipt refusals.
+Prove no provider requests, model readiness or preparation from reader entry;
+retain existing legacy-domain and unselected-route refusal controls. Add focused
+pure controls for mutually exclusive contexts, binding mismatch, partial setup
+and joined reader shutdown. Reuse the bounded opt-in native lane, without
+repeating the unrelated-corpus-size matrix or adding native effects to unit CI.
+
+This pair is only an in-process composition prerequisite. Execution remains
+explicitly activated, every other read surface remains unsupported, and
+ordinary health/intake declarations remain legacy-only. Before any new wire
+caller or support advertisement, separately review the actual running-service
+declaration and missing-support/provider-rollback contract against the selected
+pair and the read-path inventory above. Missing paired support must preserve
+retained v2 state and unrelated legacy operations; it must never trigger legacy
+acquisition of a point claim or reinterpret component data as combined content.
 
 ## Implementation and validation gate
 
