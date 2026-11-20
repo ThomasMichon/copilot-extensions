@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source-claim and credential-generation unit](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+proposes one complete #11816 Vault P2 receiving contract, with six unchecked
+technical rows, and an acknowledged #11783 source completion after the actual
+historical Stage-5 keeper reason became satisfied by current owner acceptance.
+Thirteen complete current unions retain eleven further claim, receiving or
+whole-scope gaps; #11805 remains an actual source-author metadata-only hold.
+The same record captures actual #13580 delivery, two separately verified
+tracking retirements and the complete 902-open census. Neither proposed
+judgment follows automatically from this publication.
+
 The [provider-observation and terminal-load unit](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
 proposes complete direct #11726 Driver observation-design and #11711 PR-service
 original-result contracts in their existing owners' Plan, local/global
@@ -4961,6 +4971,16 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-claim and generation proposal](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+preserves every incumbent check state and all six new Vault technical rows
+unchecked. Complete direct domain Plan, local/global Validation, Coordination
+and Journal receiving still needs ordinary review/current readback before
+separate #11816 tracking judgment. #11783 needs its own final whole-fulfillment,
+current original/roster/delivery verification and acknowledged `COMPLETED`
+judgment, retaining the actual satisfied-versus-waived keeper distinction.
+No new per-source receipt PR, generic ACK, broader-parent completion barrier,
+native/credential operation or resource release follows.
 
 The [two-source receiving proposal](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
 directly retains both complete finite unions in their actual existing owners'

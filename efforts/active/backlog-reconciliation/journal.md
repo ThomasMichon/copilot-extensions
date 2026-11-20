@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Fulfilled source-claim and credential-generation receiving](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+
 - [2026-11-20 - Provider observation and original terminal-load receiving](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
 
 - [2026-11-20 - Source attribution, visual and retirement-fixture receiving](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)

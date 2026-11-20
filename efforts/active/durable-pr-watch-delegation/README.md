@@ -1892,6 +1892,20 @@ callback an implicit credential store.
 
 ## Journal
 
+- **2026-11-20 - Proposed finite M1 source-claim acknowledgment.** The
+  [current campaign reconciliation](../backlog-reconciliation/journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+  maps #11783's complete four-stage source/synthetic request to
+  #11790/#11838/#11866/#11897 and this owner's current accepted GitHub AND
+  Gitea Stage-5 records. The historical source-exit journal correctly kept
+  #11783 OPEN while Stage 5 was unqualified; the current M1 contract now
+  checks every acceptance row and explicitly accepts the combined milestone.
+  That actual changed evidence supports a proposed acknowledged `COMPLETED`
+  source-claim judgment after normal publication and final source checks,
+  not a waiver of a still-unmet owner condition or a duplicate fold.
+  #6007 and every broader outcome, operational hold and resource custodian
+  remain; #12159's filter scope and #13574's separately claimed observer
+  correction are not absorbed. No native run, service stop, credential,
+  deployment or source-resource transfer is authorized by this capture.
 - **2026-11-20 - Proposed finite original-load reliability receiving.** The
   complete qualified #11711 original is retained directly with the existing
   PR-service process/workspace owner, local/global Validation and continuing
