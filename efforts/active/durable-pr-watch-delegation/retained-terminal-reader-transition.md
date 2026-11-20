@@ -16,11 +16,11 @@ generation-bearing or active-native-watch transition, as the unchecked
 refinement below records. Full T3, providers and installed/whole-parent
 acceptance remain separate.
 
-Only after normally reviewed complete domain/intake delivery and current
-applicable source/receiver/custody readback may a separate judgment retire
-redundant #13487 tracking. Preserve any genuine intervening source-OPEN
-condition and the actual driver/reader/writer/cache/ReplayStore/resource
-owners; this creates no handoff, claim expiry, generic ACK, migration,
+The administrative consolidation of #13487 under #13680 did not complete
+this transition or transfer its driver. P13487/V13487/G13487 remain the
+canonical work and acceptance entries. Preserve any genuine intervening
+source-OPEN condition and the actual driver/reader/writer/cache/ReplayStore/resource
+owners; administrative closure creates no handoff, claim expiry, generic ACK, migration,
 service-stop, forge request, protected send or execution grant.
 
 ## Gap and existing owners
@@ -250,6 +250,8 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 - [x] Land this refinement through normal plan review before changing runtime
   eligibility or binding behavior (#13560; current-head approval and required CI).
+- [ ] Review the [durable generation association](#durable-generation-association)
+  refinement before changing baseline writers, storage or populated transition.
 - [ ] Transition a durably associated populated baseline through the actual CLI, then serve current
   and explicit noncurrent `lookup`/all `chunk` reads after a fresh-reader restart.
   Compare original descriptors, reconstructed bytes, pointers, journal/events,
@@ -279,6 +281,90 @@ pre-transition executable still refuses expanded state without rewriting it.
   does not qualify active/compact unknown-effect recovery, prepared selections,
   specialized attention owners, historical terminal volumes, installed migration,
   provider conformance or whole-system retention.
+
+### Durable generation association
+
+This is the next proposed source slice, not implemented support. The current
+baseline `WorkspaceOperations` path publishes through `GenerationCache` before
+calling `ConversationStore.observe_workspace`. Its feedback-only
+`_generation_positions` map is process-local. `project_generation` rounds native
+observation intervals to integer seconds, and `ConversationJournal.observe`
+can reuse a cursor for unchanged meaning. Neither that cursor alone, the
+current journal projection nor process memory identifies the original immutable
+generation after restart. The terminal-aware publication path already uses the
+existing ReplayStore transaction and cache owner; extend those owners rather
+than introducing a second journal or inferring historical associations.
+
+**Expand the writer first.** Propose the optional executing-core profile
+`agent-pull-requests.workspace-generation-associations/v1`, separately from
+metadata-only adoption and terminal-reader support. An explicit baseline
+workspace configuration selection enables it on fresh provisioning. Ordinary
+`serve` validates the selected persisted contract and never adopts it.
+Absent selection preserves baseline provisioning, publication and wire behavior;
+missing support refuses the selected optional feature before durable changes.
+Use the existing selected-core declaration, `HostConfig`, ReplayStore complete
+envelope and cache descriptor owners, with a versioned extension that strict
+older readers refuse unchanged. Do not select support from package versions,
+an installed-but-not-executing core or a new prerequisite RPC.
+
+The trusted acquisition/publication owner records the full workspace scope,
+immutable generation ID and original observation cursor together with enough
+original observation identity to distinguish acquisitions whose normalized
+projections share a cursor. Record only bounded identity metadata, not another
+copy of discussion, diff or message bodies. This association is not a terminal
+live admission, a current-epoch label or evidence that a provider was observed
+again. Callers cannot supply or repair it through HTTP. Preserve generation
+bytes, digest inputs, cache pointers and journal event/cursor meanings.
+
+Association must be durable before a generation is reported as successfully
+published under this profile. Reuse the existing ReplayStore-before-cache lock
+order, staged complete-envelope transaction and finite publication checkpoint;
+do not hold the cache lock while acquiring the replay lock. Validate and reserve
+bounded association capacity before cache IO. Failed, stale or conflicting
+observations and failed cache CAS must not create usable associations. An
+uncertain write remains uncertain until readback through those same owners;
+retry reconciles its original generation and observation rather than appending
+an event, fabricating success or guessing which replacement occurred. An
+association without its confirmed cache object cannot make a missing generation
+readable. Preserve unresolved publication custody without deleting its bytes.
+
+Bound metadata by the selected cache's original generation/count limits and the
+existing envelope byte limit. Exhaustion refuses the affected publication before
+effects instead of growing capacity, evicting retained work or dropping an
+association needed by a retained generation. Repeated observation of the same
+immutable ID may reuse only a compatible original association; conflicting
+epoch or scope evidence must remain explicitly ineligible, never overwrite the
+original binding. This is especially important across close/reopen histories.
+
+**Migrate only recorded generations.** After writer support is reviewed and
+qualified, extend the existing `adopt-terminal` preflight for this profile.
+Validate every retained generation, including noncurrent objects, against its
+durable original association and the existing complete open first-epoch journal
+requirements. Create terminal generation bindings from that recorded evidence
+under the original exclusive lease and adoption transaction, not from today's
+configuration or journal high water. Refuse missing, conflicting, stale,
+closed/reopened or unsupported evidence before adoption. Unassociated legacy
+objects remain readable through their original compatible baseline reader;
+this proposal supplies no backfill, re-acquisition or timestamp/projection
+matching shortcut. Empty-cache and metadata-only transitions remain supported.
+Active native waits and unknown-effect operations keep their separate current
+refusals and acceptance obligations.
+
+**Validation before claiming positive compatibility:** exercise the actual
+baseline CLI with the selected profile, multiple current/noncurrent generations
+and a fresh writer restart, then the actual transition CLI and fresh terminal
+reader `lookup`, every `chunk` and `sync` comparison. Include distinct native
+intervals with identical rounded projections, unchanged cursors, repeated IDs,
+scope/epoch conflicts and close/reopen. Interrupt each durable publication and
+adoption boundary, lose a replace result, fail cache CAS and exhaust original
+capacities/deadlines; reconcile retry without duplicate observations, false
+bindings or changed original cache/replay bytes. Cover competing writers,
+old/new selected cores, absent/malformed declarations and rollback refusal
+through real parser/process fixtures. Run focused unit contracts in required
+CI and the existing explicit process lane for restart/interruption controls.
+No provider request, protected send, ACK, cache retirement, service stop or
+installed migration is part of this source qualification. Keep P13487/V13487/
+G13487 and both parents open until their own remaining gates are satisfied.
 
 ## See Also
 
