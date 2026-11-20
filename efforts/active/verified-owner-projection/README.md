@@ -12,7 +12,7 @@ uncertainty for unverified or unrelated actors.
 - **Repo:** copilot-extensions
 - **Branch(es):** serial plan, source and acceptance PRs
 - **Created:** 2026-11-20
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Agent Fabric](../../../visions/agent-fabric/README.md), shared identity authority
 - **Umbrella issue:** #4619, finite OA lane only
 
@@ -67,15 +67,19 @@ Source diagnosis, bounded corrections, contained validation and normal PR
 publication only. No live ledger scan, transfer, provider probe, claim
 settlement, cleanup, process/service change, installation or rollout.
 Plan review does not grant those effects.
+After the causal fixture and rename results, the operator selected
+`accepted-handoff-evidence` from the linked decision: use the existing accepted
+transaction for historical transfer actors; missing or contradictory proof
+yields an incomplete snapshot. No new registry or resource effect is authorized.
 
 ## Plan
 
 ### P1 - Establish the exact source contract
 
-- [ ] Reuse the supported historical/qualified-consumer acceptance fixture
+- [x] Reuse the supported historical/qualified-consumer acceptance fixture
   through the real strict ownership scanner, preserving the original actor.
   Distinguish already-delivered positive behavior from a current defect.
-- [ ] Characterize unverified/unrelated actor negatives against current
+- [x] Characterize unverified/unrelated actor negatives against current
   record-qualified acceptance and projection, including an unverified or
   explicitly foreign machine with the SAME receiving project/worktree ID.
   A different project/ID alone does not test the alias fallback.
@@ -85,12 +89,15 @@ Plan review does not grant those effects.
 
 ### P2 - Complete the finite observation lane
 
-- [ ] If a counterexample remains, correct only its owning observation seam,
+- [x] If a counterexample remains, correct only its owning observation seam,
   reusing current shared identity/receiving evidence without suffix stripping,
   a competing registry or cached-record/mutation/provider/subprocess work in
   the strict scan. If no correction is needed, retain explicit positive and
   negative regressions and credit the existing implementation.
-- [ ] Preserve globally incomplete snapshots for genuine uncertainty, exact
+- [x] Qualify historical transfer actors with the existing accepted handoff's
+  exact bundle/actors and producer snapshot. Preserve actual rename continuity;
+  missing, malformed, contradictory or changing evidence remains uncertainty.
+- [x] Preserve globally incomplete snapshots for genuine uncertainty, exact
   creator-rooted chains, unrelated owner conclusions when complete, and
   historical receipt bytes. Document any affected existing guarantee.
 - [ ] Clear focused consumer tests, whole-file strict checks and ordinary
@@ -99,15 +106,17 @@ Plan review does not grant those effects.
 
 ## Validation Plan
 
-- [ ] V1: Real offer/accept -> strict scan for both historical and qualified
+- [x] V1: Real offer/accept -> strict scan for both historical and qualified
   consumers; correct current owner, complete snapshot, unaffected independent
   owner and unchanged actor/ledger bytes during observation.
-- [ ] V2: An unverified or explicitly foreign machine with the same receiving
+- [x] V2: An unverified or explicitly foreign machine with the same receiving
   project/worktree ID remains unresolved/incomplete and suppresses fabricated
   current ownership; separately cover receiving-record mismatch.
   Preserve existing single/multiple rename, chain and uncertainty controls.
-- [ ] V3: No cached tracking load, write, provider callback, subprocess or live
+- [x] V3: No cached tracking load, write, provider callback, subprocess or live
   resource operation during scanning; preserve actual no-effect controls.
+  Cover missing/malformed/mismatched accepted evidence, nonaccepted bundles
+  and evidence replacement during the strict read.
 - [ ] V4: Focused fail-first proof for any new correction, full affected suites,
   touched-file F/E9 lint and whole-file strict Linux/Windows analysis; normal
   contract guards and exact-source review/CI before merge.
@@ -127,6 +136,9 @@ architecture. Existing [patterns](../../../docs/patterns/README.md) require
 shared authority, explicit uncertainty, economical evidence and independent
 plugin operation. Choose the smallest demonstrated correction only after P1;
 do not infer a new global native/owner-ACK gate from this source qualification.
+The [historical alias evidence decision](alias-evidence.md) records the measured
+same-ID gap, passing rename contract, existing transaction-evidence alternative
+and the bounded evidence-contract choice before any production correction.
 
 ## Journal
 
@@ -138,3 +150,33 @@ implementation claim or open PR was found in the scoped source queries.
 Reserved only OA1-OA3/OAV1-OAV3 in the original parent discussion. Source
 qualification and implementation have not begun; this plan clears normal
 review first.
+
+### 2026-11-20 - Reviewed plan and causal qualification
+
+Plan #13569 actually merged at `91a55c3839` after current-head approval
+`5986261695`, both useful review threads resolved and required checks green.
+The source workspace was pulled forward through the native completion owner.
+The new fixture packet reports four causal same-ID foreign/unverified failures
+and six passes; the four existing historical-rename controls separately pass.
+The positive original symptom is already corrected by #12485. No production
+file has changed; the linked decision records the remaining evidence boundary.
+
+### 2026-11-20 - Selected evidence and contained source packet
+
+The operator selected existing accepted-handoff evidence. The strict scanner
+now qualifies only historical transfer resolution against the accepted bundle,
+exact actors/ref and immutable producer snapshot, using the existing parser.
+The evidence is read once and stamp-checked with other inputs. Literal current
+chains have no added registry dependency; creator history and receipt actors
+remain unchanged. No current-topology re-enrollment or new store is introduced.
+
+The complete affected ownership, original handoff-recovery and delivery packet
+passes 156 cases; three existing symlink controls report unavailable Windows
+symlink privilege, not passes. All 24 new cases pass, including the four causal
+fail-first negatives, missing/corrupt/nonaccepted/mismatched evidence,
+duplicate IDs, changed evidence, literal-chain independence and unchanged-byte/
+no-cache/no-write/no-provider/no-full-Config/no-subprocess controls.
+The four original rename controls pass separately. Touched Python F/E9 lint,
+the 13-plugin install contract and 25-plugin documentation consistency pass.
+Exact complete-file strict analysis and published-source qualification remain
+open; an unavailable local checker environment is not a typing pass.
