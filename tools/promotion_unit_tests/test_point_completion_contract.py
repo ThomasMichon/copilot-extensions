@@ -47,8 +47,9 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     events: list[str] = []
     binding = hints.PointBinding("https://example.test", "project", "query")
     requested = hints.PointChangeHints(
-        "selected", "components", "account", binding,
-        (hints.WorkItemRevisionTarget("one", 1, ("old",)),
+        source="selected", canonical_family="components", account_id="account",
+        binding=binding,
+        targets=(hints.WorkItemRevisionTarget("one", 1, ("old",)),
          hints.WorkItemRevisionTarget("one", 2, ("event-a",)),
          hints.WorkItemRevisionTarget("one", 2, ("event-b",)),
          hints.CommentVersionTarget("one", "two", 3, ("comment",))),

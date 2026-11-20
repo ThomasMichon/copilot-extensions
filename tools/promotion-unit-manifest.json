@@ -6152,7 +6152,7 @@
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
-        "tools/promotion_unit_tests/test_point_completion_contract.py": "6419f00ae8819414b2f6d125f3d7fb9bbe19d1c8283f0f7bf486c02436396f77",
+        "tools/promotion_unit_tests/test_point_completion_contract.py": "e2196e0f0452818d9113a87ca5f0bff8a21111e0f60cb93e935f91377dde4b92",
         "plugins/agent-index/src/agent_index/indexing/point_completion.py": "89f43fbac46cd52c53543da8e901bd98c45a47b81962de5aa7bf63ef92126e91",
         "plugins/agent-index/src/agent_index/indexing/point_claim.py": "02cbe2ac90f35fbe6edaec731f8995bab47c73d79ac36c23bc7433c62262c90c",
         "plugins/agent-index/src/agent_index/store/file_projection.py": "8ad033d3e78f58cb701f9e7befd572683475c025e434e82e9c27ad16185c6d50",
