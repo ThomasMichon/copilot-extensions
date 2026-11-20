@@ -51,6 +51,11 @@ class PointQueueConsumer:
         """Whether dispatch requires explicit resume."""
         return self._paused
 
+    @property
+    def tasks(self) -> TaskStore:
+        """The isolated queue used by both configured intake and selection."""
+        return self._tasks
+
     async def __aenter__(self) -> PointQueueConsumer:
         await self._host.__aenter__()
         self._entered = True
@@ -66,7 +71,9 @@ class PointQueueConsumer:
         if not self._entered or self._stopped:
             raise RuntimeError("Point queue consumer is not accepting work")
 
-    async def run_pending(self, *, max_tasks: int = 1) -> int:
+    async def run_pending(
+        self, *, max_tasks: int = 1, admit: Callable[[], bool] | None = None,
+    ) -> int:
         """Complete at most max_tasks claims; raise and pause on any failure."""
         self._require_open()
         if type(max_tasks) is not int or max_tasks < 1:
@@ -84,6 +91,8 @@ class PointQueueConsumer:
                 )
                 if task is None or self._paused or self._stopped:
                     break
+                if admit is not None and not admit():
+                    break
                 result = await self._host.run(task.id)
                 if result != 0:
                     raise RuntimeError(f"Point queue dispatch {task.id} exited with code {result}")
@@ -95,9 +104,13 @@ class PointQueueConsumer:
         finally:
             self._running = False
 
+    def pause(self) -> None:
+        """Close admission synchronously, including during off-loop selection."""
+        self._paused = True
+
     async def drain(self, *, timeout: float = 300.0) -> bool:
         """Pause this consumer and observe its joined worker without cancelling it."""
-        self._paused = True
+        self.pause()
         return await self._host.drain(timeout=timeout)
 
     async def resume(self) -> None:
