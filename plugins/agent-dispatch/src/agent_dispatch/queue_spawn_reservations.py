@@ -42,7 +42,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from .queue_allocation_revisions import revision_disposed
+from .queue_allocation_revisions import next_revision
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_spawn_completion import SpawnCompletionMixin
@@ -264,22 +264,18 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 (creation_prefix + "%",),
             ).fetchall()
             latest_allocation = allocation_rows[0] if allocation_rows else (rows[-1] if rows else None)
-            previous_revision = latest_allocation["allocation_revision"] if latest_allocation else 1
-            revision = previous_revision if allocation_revision is None else allocation_revision
-            if revision < previous_revision or (latest_allocation is None and revision != 1):
-                raise TaskError("allocation revision must retain the current revision or advance it explicitly")
-            new_allocation = revision != previous_revision
+            revision, new_allocation = next_revision(
+                conn, latest_allocation, allocation_rows or rows, requested=allocation_revision,
+                successor=task_id, ordinary_pool=(pool_catalog_revision is not None and driver == "ordinary-bridge"
+                    and (self._ordinary_relationship_writer is not None or self._relationship_writer is None)),
+                creation_prefix=creation_prefix,
+            )
             if (
                 latest_allocation is not None and latest_allocation["creation_key"] is None
                 and latest_allocation["worktree"] is None
                 and latest_allocation["state"] not in SpawnState.ACTIVE and not new_allocation
             ):
                 raise TaskError("legacy allocation intent is unknown; preserve it for reconciliation")
-            if new_allocation and not revision_disposed([
-                row for row in (allocation_rows or rows)
-                if row["allocation_revision"] == previous_revision
-            ]):
-                raise TaskError("new allocation revision requires proven disposal of the previous workspace")
             creation_key = creation_prefix + str(revision)
             if task.exclusive_key is not None:
                 active = conn.execute(

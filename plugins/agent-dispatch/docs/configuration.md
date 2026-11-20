@@ -96,12 +96,19 @@ Retrying an allocation keeps its original decision, even in all-pool mode;
 re-emitting work against an old ungoverned workspace does not retrofit it.
 A captured allocation cannot switch startup drivers. After a confirmed worker
 decline, a *new* unselected allocation may proceed only once the old claim is
-closed and its native is retired. A pending claim or retirement still blocks it.
+closed and its native is retired. This remains true when the admission settings
+are removed. Earlier direct assignments need their own closed receipt and
+matching unassignment; a pending claim or retirement still blocks replacement.
+A different task re-emitted under the same deduplication key can receive a new
+allocation revision if every attempt in the captured predecessor revision was
+retired before workspace preparation. A missing workspace receipt after project
+binding is not proof of absence. Unresolved sends or wakes still block placement.
 
 **Roll back prospectively.** With authority still `local`, change admission to
 `local-ordinary-drain`. This starts no new captures; it keeps the native writer
 available for existing obligations through closeout. Health reports that scope.
-Before removing both settings or **downgrading**, finish tasks that still need
+Before removing both settings, reconcile governed work through its original owner.
+Before **downgrading**, finish tasks that still need
 reassignment or completion after a governed decline on the capable coordinator. Closing the old claim is not sufficient:
 older coordinators reinstall stricter execution and submission guards. They do
 not support unselected replacements for those tasks, even after retirement.

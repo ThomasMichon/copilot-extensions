@@ -1,0 +1,213 @@
+"""A new generation can depend on exact discharges, never on a missing receipt."""
+
+from pathlib import Path
+import sqlite3
+from typing import Any
+
+import pytest
+from agent_dispatch import submission_readiness_observation
+from agent_dispatch.assignment_local_ordinary import LocalOrdinaryRelationshipWriter
+from agent_dispatch.assignment_workspace import AssignmentWorkspace
+from agent_dispatch.ordinary_capture import OrdinaryCapture
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_records import SpawnReservation, TaskError
+from agent_dispatch.queue_task_relationships import require_relationship
+from tests._ordinary_relationship_controls import claim
+from tests.test_assignment_relationships import GroundOwner
+from tests.test_pool_placement import current_task, place, pool, publish, q as q, task
+
+
+def replace_after_decline(queue: TaskQueue, task_id: str, now: float) -> SpawnReservation:
+    scope = queue.pool_catalog_snapshot().scopes[0]
+    queue.publish_pool_catalog_scope(
+        scope.machine,
+        scope.env,
+        scope.publisher_id,
+        generation=scope.generation,
+        expected_revision=scope.revision,
+        registration_revision=queue.pool_registration_revision(),
+        expected_cohort_revision=1,
+        input_revision="second-pool",
+        definitions=(pool(), pool("other")),
+        now=now,
+    )
+    replacement, created = queue.reserve_spawn(
+        task_id,
+        reserved_by="allocator",
+        driver="cli",
+        now=now,
+        pool_catalog_revision=queue.pool_catalog_snapshot().revision,
+    )
+    assert created and not replacement.task_relationship_required
+    return replacement
+
+
+@pytest.mark.parametrize("foreign_proof", [False, True])
+def test_direct_unassignment_before_decline_survives_removal_of_capture(
+    q: TaskQueue,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    foreign_proof: bool,
+) -> None:
+    owner = GroundOwner()
+    owner.queue = q
+    q._relationship_writer, q._relationship_authority = owner, "local"
+    t = task(q)
+    first = AssignmentWorkspace("host-a", "example", "manual", str(tmp_path / "manual"), "first")
+    claim(q, first, t)
+    q.yield_task(t.id, first.worker_id)
+    direct = q.reconcile_task_relationship(t.id)
+    assert direct["state"] == "closed"
+    publish(q, pool())
+    held, _ = place(q, t)
+    q.record_spawn_worktree(
+        held.key,
+        "pool-tree",
+        driver="cli",
+        ownership="created",
+        creating_host="host-a",
+        execution_machine="host-a",
+        allocation_project="example",
+        worktree_path=str(tmp_path / "pool"),
+        creation_nonce="second",
+    )
+    q.record_spawn(
+        held.key,
+        worktree="pool-tree",
+        session_handle="first-native",
+        startup_complete=True,
+        startup_revision=1,
+    )
+    binding: dict[str, Any] = dict(
+        worker_id="host-a/pool-tree",
+        native_id="first-native",
+        generation=current_task(q, t.id).generation,
+        startup_revision=1,
+        reservation_key=held.key,
+    )
+    q.prepare_pool_decline(t.id, **binding, exclusions=["pool:worker"], note="need another tool")
+    monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
+    closed = q.close_pool_decline(t.id, **binding)
+    assert closed.relationship and closed.relationship["state"] == "closed"
+    q.retire_spawn(held.key, exact_absence=True, conclusion_state="skipped")
+    reopened = TaskQueue(q.db_path)
+    due = closed.receipt["not_before"]
+    replacement = replace_after_decline(reopened, t.id, due)
+    queued = reopened.exhaust_pool_startup(
+        replacement.key,
+        generation=current_task(reopened, t.id).generation,
+        startup_revision=replacement.startup_revision,
+        now=due + 600,
+    )
+    reopened.request_spawn_release(replacement.key, finished_startup_revision=1, now=due + 601)
+    reopened.retire_spawn(
+        replacement.key, exact_absence=True, conclusion_state="skipped", now=due + 602
+    )
+    due = queued.not_before
+    retry = replace_after_decline(reopened, t.id, due)
+    assert retry.key != replacement.key and retry.allocation_reservation_key == replacement.key
+    replacement = retry
+    reopened.record_spawn_worktree(
+        replacement.key,
+        "replacement",
+        ownership="created",
+        execution_machine="host-a",
+        creating_host="host-a",
+        driver="cli",
+        allocation_project="example",
+        worktree_path=str(tmp_path / "replacement"),
+    )
+    reopened.record_spawn(
+        replacement.key,
+        worktree="replacement",
+        session_handle="other-native",
+        startup_complete=True,
+        startup_revision=1,
+    )
+    if foreign_proof:
+        # In a disposable DB, make a once-qualified direct receipt name another subject.
+        with reopened._connect() as conn:
+            conn.execute(
+                "UPDATE task_events SET task_relationship=json_set(task_relationship,"
+                " '$.receipt.producer.closeout.relationship_verification.subject','foreign') WHERE id=?",
+                (direct["request"]["event_id"],),
+            )
+            with pytest.raises(TaskError, match="unconfirmed"):
+                require_relationship(conn, t.id)
+            with pytest.raises(sqlite3.IntegrityError, match="unconfirmed"):
+                conn.execute(
+                    "UPDATE tasks SET status='started',owner='host-a/replacement' WHERE id=?",
+                    (t.id,),
+                )
+        return
+    reopened.start(
+        t.id,
+        "host-a/replacement",
+        expected_generation=current_task(reopened, t.id).generation,
+        owner_session_id="other-native",
+        now=due + 1,
+    )
+    reopened.complete(t.id, "host-a/replacement", result={"ok": True})
+    assert current_task(reopened, t.id).status == "completed"
+
+
+@pytest.mark.parametrize("predecessor", ["empty", "bound-project", "unknown-send"])
+def test_only_fenced_preallocation_reemission_gets_a_new_revision(
+    q: TaskQueue, predecessor: str
+) -> None:
+    winner = pool()
+    revision = publish(q, winner)
+    q._ordinary_capture = OrdinaryCapture("local-ordinary-instance", winner.identity)
+    q._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(q)
+    first = task(q, dedup_key="recurring")
+    held, _ = q.reserve_spawn(
+        first.id, reserved_by="allocator", driver="ordinary-bridge", pool_catalog_revision=revision
+    )
+    assert held.task_relationship_required
+    if predecessor == "bound-project":
+        q.record_spawn_allocation(held.key, "example")
+    q.request_spawn_release(held.key, finished_startup_revision=1)
+    old = q.retire_spawn(held.key, exact_absence=True, conclusion_state="skipped")
+    q.abandon(first.id, permitted=True, reason="prior source closed")
+    second = task(q, dedup_key="recurring")
+    if predecessor == "unknown-send":
+        with q._connect() as conn:
+            conn.execute(
+                "INSERT INTO execution_send_custody VALUES "
+                "('scope','send','example','fixture',1,?,?,1,'launch','{}','unknown','outcome unconfirmed',100,100)",
+                (first.id, held.key),
+            )
+    if predecessor != "empty":
+        with pytest.raises(
+            TaskError,
+            match=(
+                "unresolved execution send"
+                if predecessor == "unknown-send"
+                else "original task and driver"
+            ),
+        ):
+            q.reserve_spawn(
+                second.id,
+                reserved_by="allocator",
+                driver="ordinary-bridge",
+                pool_catalog_revision=revision,
+            )
+        assert not q.list_reservations(task_id=second.id)
+    else:
+        q._ordinary_capture = OrdinaryCapture("local-ordinary-drain")
+        new, created = q.reserve_spawn(
+            second.id,
+            reserved_by="allocator",
+            driver="ordinary-bridge",
+            pool_catalog_revision=revision,
+        )
+        assert (
+            created
+            and not new.task_relationship_required
+            and new.allocation_reservation_key == new.key
+        )
+        assert (
+            new.creation_key != held.creation_key
+            and new.allocation_revision == held.allocation_revision + 1
+        )
+    assert q.get_reservation(held.key) == old

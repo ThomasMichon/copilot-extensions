@@ -172,7 +172,7 @@ class QueueTaskRelationshipsMixin:
     ) -> None:
         governed = latest_relationship(conn, task.id) is not None
         writer, authority = self._spawn_relationship_selection(driver)
-        if self._relationship_queue._ordinary_relationship_writer is not None:
+        if self._relationship_queue._ordinary_relationship_writer is not None or writer is None:
             if allocation_key != key:
                 prior = conn.execute(
                     "SELECT task_id, driver, task_relationship_required FROM spawn_reservations WHERE key=?",
@@ -180,10 +180,11 @@ class QueueTaskRelationshipsMixin:
                 ).fetchone()
                 if prior is None:
                     raise TaskError("ordinary capture cannot confirm the original allocation")
-                if prior["driver"] == "ordinary-bridge" and prior["task_relationship_required"] and (
-                    driver != "ordinary-bridge" or prior["task_id"] != task.id
-                ):
-                    raise TaskError("captured ordinary allocation requires its original task and driver")
+                if prior["driver"] == "ordinary-bridge" and prior["task_relationship_required"]:
+                    if driver != "ordinary-bridge" or prior["task_id"] != task.id:
+                        raise TaskError("captured ordinary allocation requires its original task and driver")
+                    if writer is None:
+                        raise TaskError("captured ordinary allocation requires its original relationship writer")
                 required = bool(prior["task_relationship_required"])
             else:
                 required = self._ordinary_capture.selects(winner)
@@ -192,8 +193,6 @@ class QueueTaskRelationshipsMixin:
                     from .relationship_decline_history import admit_ungoverned_replacement
                     admit_ungoverned_replacement(conn, task.id, key, task.generation + 1)
                 return
-        if governed and writer is None:
-            raise TaskError("governed allocator assignment requires its original relationship writer")
         if governed:
             from .queue_relationship_continuation import continue_pool_startup
 

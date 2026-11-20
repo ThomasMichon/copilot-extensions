@@ -208,6 +208,11 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         closed = queue.close_pool_decline(task.id, **binding)
         assert closed.applied and closed.receipt["binding"] == binding
         assert closed.relationship == {"state": "closed", "event_id": original["request"]["event_id"]}
+        queue.retire_spawn(key, exact_absence=True, conclusion_state="skipped")
+        from tests.test_relationship_discharge import replace_after_decline
+        reopened = TaskQueue(queue.db_path)
+        replacement = replace_after_decline(reopened, task.id, closed.receipt["not_before"])
+        assert not replacement.task_relationship_required
         return
     if retry_stage != "prepared-before-start":
         local.client.start_pool_task(task.id, worker, owner_session_id="native-a", expected_generation=task.generation)
