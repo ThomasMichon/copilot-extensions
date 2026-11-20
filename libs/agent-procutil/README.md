@@ -571,6 +571,12 @@ or trying another interpreter.
 Before qualification, the shell retains the original `Process` instance and
 pins its creation handle. Pre-offer cancellation terminates and observes that
 original process rather than depending on stdin EOF or rediscovering a PID.
+Windows venv candidates are launched through their declared `pyvenv.cfg` base,
+with `__PYVENV_LAUNCHER__` preserving the selected venv identity. The pinned
+creation process is therefore the interpreter, not a separately surviving
+redirector; `selectedExecutable` retains selection while `StartInfo.FileName`
+records the actual image. Unusable venv metadata refuses selection rather than
+substituting another interpreter.
 Unconfirmed cleanup retains the original state in the exception's
 `Data['DaemonInstanceState']`; this is live cleanup custody, not a serializable
 diagnostic or permission to replay selection.
@@ -581,6 +587,10 @@ separate cumulative 65536-character cap. Protocol and process-exit waits drain
 diagnostics concurrently; exceeding either capture cap fails through the same
 owned cleanup path without echoing captured content. These transport limits
 are separate from the target query's byte budgets.
+The original helper's observed exit starts one three-second post-exit pipe
+grace, even for no-deadline requests. A still-open inherited pipe refuses the
+outcome without replay and retains unconfirmed capture custody for explicit
+settlement; it does not authorize signaling an unadmitted descendant by PID.
 The caller still owns applicability and capability interpretation. This
 operation does not authorize installation or target effects.
 

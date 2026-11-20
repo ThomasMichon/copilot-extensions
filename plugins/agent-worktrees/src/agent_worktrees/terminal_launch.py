@@ -76,10 +76,16 @@ def select_receiver(
     query_arguments = [*query_command, "--version"]
     if query_arguments[0].lower().endswith((".cmd", ".bat")):
         query_arguments = _batch_probe_command(query_arguments, query_environment)
-    result = run_caller_owned(
-        query_arguments, env=query_environment, timeout=timeout,
-        max_stdout_bytes=4096, max_stderr_bytes=4096,
-    )
+    try:
+        result = run_caller_owned(
+            query_arguments, env=query_environment, timeout=timeout,
+            max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+    except UnicodeError:
+        raise RuntimeError(
+            "Selected Manager terminal capability query returned non-UTF-8 output; "
+            "no launch was admitted"
+        ) from None
     if result.returncode != 0 or result.stderr:
         raise RuntimeError("Selected Manager terminal capability query failed; no launch was admitted")
     text = result.stdout.strip()

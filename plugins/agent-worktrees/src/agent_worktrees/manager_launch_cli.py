@@ -199,6 +199,12 @@ def _probe_worktree_manager_version(
                 )
         except OwnedCleanupError:
             raise
+        except UnicodeError as error:
+            detail = error.object if isinstance(error, UnicodeDecodeError) else str(error)
+            _report_manager_probe_failure(
+                "Control-plane --version probe output could not be decoded.", detail,
+            )
+            return None, None
         except subprocess.TimeoutExpired as error:
             timeout_detail = (
                 _safe_probe_diagnostic(error.stderr or "")

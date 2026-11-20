@@ -248,6 +248,7 @@ def _communicate_unreaped(
     offset = 0
     root_exited = False
     drain_deadline: float | None = None
+    observe_root = timeout is None and (on_root_exit is not None or handoff_on_root_exit)
 
     def remaining() -> float:
         if root_exited:
@@ -279,11 +280,7 @@ def _communicate_unreaped(
                 process.stdin.close()
         while selector.get_map():
             remaining()
-            if (
-                timeout is None and not root_exited
-                and (on_root_exit is not None or handoff_on_root_exit)
-                and _observe_unreaped(process) is not None
-            ):
+            if observe_root and not root_exited and _observe_unreaped(process) is not None:
                 root_exited = True
                 drain_deadline = (
                     cleanup_deadline if cleanup_deadline is not None else time.monotonic() + 2.0
@@ -297,9 +294,10 @@ def _communicate_unreaped(
             # An inherited group belongs to the enclosing supervisor, which must
             # publish its completion before retiring that group. Drain available
             # bytes, but never wait for descendants to close inherited pipe ends.
-            events = selector.select(
-                0 if root_exited else min(.05, remaining())
-            )
+            wait = remaining() if deadline is not None or root_exited else None
+            if observe_root:
+                wait = 0 if root_exited else min(.05, wait or .05)
+            events = selector.select(wait)
             if root_exited and not events:
                 break
             for key, _mask in events:
@@ -478,8 +476,7 @@ def _communicate_windows_bounded(
                     return
                 output[index].extend(chunk)
         except (OSError, ValueError) as error:
-            if not retiring.is_set():
-                fail(error)
+            fail(error)
         except BaseException as error:
             fail(error)
 

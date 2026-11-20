@@ -377,3 +377,88 @@ def test_confirmed_root_exit_reuses_its_two_scan_group_witness(
     assert result.returncode == 7 and result.stdout == "root\n"
     assert scans == [True, True] and signals == [True] and process.waits == 1
     assert notifications == [True]
+
+
+@pytest.mark.parametrize(
+    ("timeout", "deadline", "observe", "expected_wait"),
+    [(4.0, 5.0, False, 4.1), (None, 5.0, False, 4.1),
+     (None, None, False, None), (None, 5.0, True, .05), (None, None, True, .05)],
+)
+def test_posix_selector_polls_only_when_root_observation_is_enabled(
+    monkeypatch: pytest.MonkeyPatch, timeout: float | None, deadline: float | None,
+    observe: bool, expected_wait: float | None,
+) -> None:
+    clock = _Clock()
+    waits: list[float | None] = []
+    observations: list[bool] = []
+
+    class Selector(_Selector):
+        def select(self, timeout: float | None = None) -> list[tuple[selectors.SelectorKey, int]]:
+            waits.append(timeout)
+            return [(key, selectors.EVENT_READ) for key in self.mapping.values()]
+
+    selector = Selector(clock, 0)
+    process = SimpleNamespace(pid=123, returncode=None, stdin=None, stdout=_Pipe(), stderr=None)
+
+    def exited(root: UnreapedChild) -> object | None:
+        observations.append(True)
+        return None if observe and len(observations) == 1 else object()
+
+    monkeypatch.setattr(owned_process, "time", clock)
+    monkeypatch.setattr(owned_process, "os", SimpleNamespace(
+        read=lambda fd, size: b"", set_blocking=lambda fd, value: None,
+    ))
+    monkeypatch.setattr(owned_process, "_observe_unreaped", exited)
+    monkeypatch.setattr(owned_process, "selectors", SimpleNamespace(
+        DefaultSelector=lambda: selector,
+        EVENT_READ=selectors.EVENT_READ, EVENT_WRITE=selectors.EVENT_WRITE,
+    ))
+    assert owned_process._communicate_unreaped(
+        process, input_text=None, deadline=deadline, timeout=timeout, argv=["fixture"],
+        capture_limits=(64, 64), handoff_on_root_exit=observe,
+    ) == ("", None)
+    assert len(waits) == 1
+    assert waits[0] == (pytest.approx(expected_wait) if expected_wait is not None else None)
+    assert len(observations) == (2 if observe else 1)
+
+
+@pytest.mark.parametrize("failure_type", [OSError, ValueError])
+def test_windows_post_root_read_errors_cannot_become_truncated_success(
+    failure_type: type[OSError] | type[ValueError],
+) -> None:
+    ready, retired = threading.Event(), threading.Event()
+    failure = failure_type("post-exit capture failed")
+
+    class Stream(io.BytesIO):
+        emitted = False
+
+        def read(self, size: int | None = -1) -> bytes:
+            if not self.emitted:
+                self.emitted = True
+                ready.set()
+                return b"prefix"
+            assert retired.wait(2)
+            raise failure
+
+    class Process(_WindowsProcess):
+        def poll(self) -> int:
+            assert ready.wait(2)
+            return self.returncode
+
+        def retire_job(self, job: object, timeout: float) -> None:
+            self.retired.append(timeout)
+            retired.set()
+
+    process = Process(_Clock(), 0, stdout=Stream())
+    try:
+        with pytest.raises(failure_type) as caught:
+            owned_process._communicate_windows_bounded(
+                process, object(), input_text=None, deadline=None, timeout=None,
+                argv=["fixture"], capture_limits=(64, 64),
+            )
+        assert caught.value is failure
+        assert len(process.retired) == 1
+    finally:
+        retired.set()
+        process.stdout.close()
+        process.stderr.close()

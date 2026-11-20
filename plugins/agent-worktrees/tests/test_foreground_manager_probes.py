@@ -182,6 +182,86 @@ def test_nonbatch_probe_prefix_remains_literal_argv(
     assert calls == [[*command, "--version"], [*command, "--version"]]
 
 
+def _invalid_utf8_provider_script(tmp_path: Path, stream: str) -> tuple[str, Path]:
+    attempts = tmp_path / "attempts"
+    descriptor = {"stdout": 1, "stderr": 2}[stream]
+    script = (
+        "import os\nfrom pathlib import Path\n"
+        f"with Path({str(attempts)!r}).open('ab') as record:\n"
+        " record.write(b'probe\\n')\n"
+        "os.write(1, b'worktree-manager 1.2.3\\n')\n"
+        f"os.write({descriptor}, b'fixture decoding diagnostic "
+        "https://example.invalid/path?token=fixture-secret \\xff')\n"
+    )
+    return script, attempts
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("fallback", ["bundled", "install-trigger"])
+def test_real_invalid_utf8_probe_rejects_version_and_uses_normal_fallback_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    stream: str, fallback: str,
+) -> None:
+    script, attempts = _invalid_utf8_provider_script(tmp_path, stream)
+    command = [sys.executable, "-I", "-S", "-B", "-c", script]
+    registry = tmp_path / "providers"
+    registry.mkdir()
+    (registry / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager", "command": command,
+        "minimum_version": "0.1.0-dev21",
+    }), encoding="utf-8")
+    monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registry))
+    monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDER_ENV, "worktree-manager")
+    monkeypatch.setattr(core, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(core, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(core, "_bundled_picker_available", lambda: fallback == "bundled")
+    monkeypatch.setattr(cfg, "active_project", lambda: "sample")
+    monkeypatch.setattr(
+        core, "_exec_worktree_manager",
+        lambda *_args: pytest.fail("invalid output must not admit a Manager version"),
+    )
+    fallbacks: list[str] = []
+
+    def bundled(_arguments: list[str]) -> int:
+        fallbacks.append("bundled")
+        return 17
+
+    def install(_project: str | None) -> int:
+        fallbacks.append("install-trigger")
+        return 0
+
+    monkeypatch.setattr(core, "cmd_launch", bundled)
+    monkeypatch.setattr(core, "cmd_manager_install_trigger", install)
+    assert launch.dispatch_bare_invocation(True) == (17 if fallback == "bundled" else 1)
+    assert fallbacks == [fallback]
+    assert attempts.read_bytes() == b"probe\n"
+    captured = capsys.readouterr()
+    assert "output could not be decoded" in captured.err
+    assert "fixture-secret" not in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+    if os.name == "nt":
+        assert "fixture decoding diagnostic" in captured.err
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_real_invalid_utf8_terminal_query_never_admits_or_replays_the_receiver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: str,
+) -> None:
+    script, attempts = _invalid_utf8_provider_script(tmp_path, stream)
+    command = [sys.executable, "-I", "-S", "-B", "-c", script, "--resident-picker"]
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
+    monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
+    environment = {**os.environ, "FIXTURE_KEPT": "original"}
+    original = dict(environment)
+    with pytest.raises(RuntimeError, match="non-UTF-8 output; no launch was admitted"):
+        terminal_launch.select_receiver(command, environment, timeout=None)
+    assert attempts.read_bytes() == b"probe\n"
+    assert environment == original
+    assert not (tmp_path / "result.json").exists()
+
+
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_foreground_real_capture_overflow_is_failure_not_a_version(
     stream: str, capsys: pytest.CaptureFixture[str],
@@ -261,6 +341,7 @@ def test_foreground_unconfirmed_cleanup_preserves_owner_custody(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     failure = owned_process.OwnedCleanupError(None)
+    failure.operation_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
     def unconfirmed(command: list[str], **options: object) -> NoReturn:
         raise failure
@@ -318,7 +399,7 @@ def test_mux_launcher_resolution_retains_finite_recovery_and_fallback(
     assert all(command[:5] == ["uv", "run", "--quiet", "--project", str(slot)] for command in calls)
 
 
-@pytest.mark.parametrize("error", ["overflow", "cancel"])
+@pytest.mark.parametrize("error", ["overflow", "cancel", "cleanup"])
 def test_terminal_identity_query_keeps_custody_and_stream_limits(
     error: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
@@ -331,10 +412,18 @@ def test_terminal_identity_query_keeps_custody_and_stream_limits(
         assert options["max_stdout_bytes"] == options["max_stderr_bytes"] == 4096
         if error == "cancel":
             raise KeyboardInterrupt
+        if error == "cleanup":
+            failure = owned_process.OwnedCleanupError(None)
+            failure.operation_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+            raise failure
         raise owned_process.OutputLimitExceeded("stdout", 4096)
 
     monkeypatch.setattr(owned_process, "run_caller_owned", rejected)
-    expected_error = KeyboardInterrupt if error == "cancel" else owned_process.OutputLimitExceeded
+    expected_error = (
+        KeyboardInterrupt if error == "cancel"
+        else owned_process.OwnedCleanupError if error == "cleanup"
+        else owned_process.OutputLimitExceeded
+    )
     with pytest.raises(expected_error):
         terminal_launch.select_receiver(["manager", "--resident-picker"], {}, timeout=None)
 

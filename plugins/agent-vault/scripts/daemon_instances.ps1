@@ -12,6 +12,47 @@ function Get-DaemonInstanceProcessBirth {
     )
 }
 
+function Resolve-DaemonInstancePython {
+    param([string]$Selected)
+    $executable = $Selected
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    while ($true) {
+        if ($seen.Count -ge 8) { throw 'Selected Python has excessive virtual-environment indirection.' }
+        if (-not $seen.Add($executable)) { throw 'Selected Python has a virtual-environment home cycle.' }
+        $directory = [IO.Path]::GetDirectoryName($executable)
+        if ([IO.Path]::GetFileName($directory) -ine 'Scripts') { break }
+        $config = Join-Path ([IO.Path]::GetDirectoryName($directory)) 'pyvenv.cfg'
+        if (-not [IO.File]::Exists($config)) { break }
+        if ([IO.Path]::GetFileName($executable) -inotmatch '^pythonw?\.exe$') {
+            throw 'Cannot preserve selected Python: its virtual-environment entrypoint is unrecognized.'
+        }
+        if ([IO.FileInfo]::new($config).Length -gt 65536) {
+            throw 'Selected Python virtual-environment configuration exceeds its size bound.'
+        }
+        $venvHome = $null
+        foreach ($line in [IO.File]::ReadAllLines($config)) {
+            $separator = $line.IndexOf('=')
+            if ($separator -ge 0 -and $line.Substring(0, $separator).Trim() -ceq 'home') {
+                $venvHome = $line.Substring($separator + 1).Trim()
+            }
+        }
+        $root = if ($venvHome) { [IO.Path]::GetPathRoot($venvHome) } else { $null }
+        if (-not $venvHome -or -not [IO.Path]::IsPathRooted($venvHome) -or -not $root -or
+            $root -in @('\', '/') -or $root -match '^[A-Za-z]:$') {
+            throw 'Cannot preserve selected Python: its virtual-environment home is unavailable.'
+        }
+        $executable = Join-Path $venvHome 'python.exe'
+        if (-not [IO.File]::Exists($executable) -or $executable -match '[\\/]WindowsApps[\\/]') {
+            throw 'Cannot preserve selected Python: its base interpreter is unavailable.'
+        }
+        $executable = [IO.Path]::GetFullPath($executable)
+    }
+    return [pscustomobject]@{
+        Executable=$executable
+        Launcher=$(if ($executable -ine $Selected) { $Selected } else { $null })
+    }
+}
+
 function New-DaemonInstanceReader {
     param([IO.StreamReader]$Source, [string]$Stream, [int]$Limit)
     $reader = [pscustomobject]@{
@@ -117,6 +158,12 @@ function Wait-DaemonInstanceTask {
     while ($true) {
         if ($null -ne $diagnostics) { [void]$diagnostics.Wait(0) }
         if ($Task.Wait(100)) { break }
+        if ($null -ne $State -and $null -ne $State['process'] -and $State.process.WaitForExit(0)) {
+            if ($null -eq $State['exitClock']) { $State.exitClock = [Diagnostics.Stopwatch]::StartNew() }
+            if ($State.exitClock.Elapsed.TotalSeconds -ge 3.0) {
+                throw 'Original helper exited before its response; pipe settlement is unconfirmed; selection was not retried.'
+            }
+        }
         if ($Clock.Elapsed.TotalSeconds -ge $Seconds) {
             throw 'Daemon instance helper response timed out; the operation outcome is unconfirmed.'
         }
@@ -181,6 +228,20 @@ function Close-DaemonInstanceWorker {
                 $settled = $false
             }
         } catch { $errors.Add('Original helper diagnostic capture failed: ' + $_.Exception.Message) }
+    }
+    if ($settled -and $null -ne $State.output -and
+        $null -ne $State.output.PSObject.Properties['Active'] -and
+        $null -ne $State.output.Active -and -not $State.output.Active.IsCompleted) {
+        try {
+            $remaining = [Math]::Max(0, 3000 - $clock.ElapsedMilliseconds)
+            if (-not $State.output.Active.Wait([int]$remaining)) {
+                $errors.Add('Original helper output capture is unconfirmed.')
+                $settled = $false
+            }
+        } catch {
+            $errors.Add('Original helper output capture failed: ' + $_.Exception.Message)
+            $settled = $false
+        }
     }
     if ($settled) {
         foreach ($resource in @($State.output, $State.error, $State.worker, $State.process)) {
@@ -270,7 +331,12 @@ sys.exit(main(packet))
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $compatible = $false
     for ($index = 0; $index -lt $pythons.Count; $index++) {
-        $start.FileName = $pythons[$index]
+        $State.selectedExecutable = $pythons[$index]
+        $launch = Resolve-DaemonInstancePython $State.selectedExecutable
+        $start.FileName = $launch.Executable
+        $start.EnvironmentVariables.Remove('__PYVENV_LAUNCHER__')
+        if ($launch.Launcher) { $start.EnvironmentVariables['__PYVENV_LAUNCHER__'] = $launch.Launcher }
+        $State.exitClock = $null
         $State.process = New-Object Diagnostics.Process
         $State.process.StartInfo = $start
         $process = $State.process
@@ -421,8 +487,12 @@ function Invoke-DaemonInstanceRequest {
             throw 'Daemon instance helper custody is unavailable. The prior outcome remains unconfirmed; automatic replay is refused.'
         }
         $bootstrapPython = [Environment]::GetEnvironmentVariable('COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON', 'Process')
+        $selectedPython = $state['selectedExecutable']
+        if (-not $selectedPython -and $null -ne $state.process) {
+            $selectedPython = $state.process.StartInfo.FileName
+        }
         if ($bootstrapPython -and ($null -eq $state.process -or
-            $state.process.StartInfo.FileName -ine $bootstrapPython)) {
+            $selectedPython -ine $bootstrapPython)) {
             throw 'The existing daemon instance helper uses another interpreter. Use a fresh PowerShell process for the supplied bootstrap Python; existing custody was not changed.'
         }
         $pendingState = $state
