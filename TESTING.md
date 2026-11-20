@@ -8571,6 +8571,21 @@ fixed Python isolation settings; GitHub event IDs, credentials and unrelated
 ambient variables are not unit inputs. Toolchain binding is bounded, and the
 read-only provider search has an eight-second total budget.
 
+An attempted lookup emits one `pr_unit_lookup` JSON diagnostic with total and
+per-operation elapsed milliseconds, flushed before any fresh-runner handoff.
+Fixed phase names distinguish run/artifact/job
+inventory, producer qualification, archive download and packet verification;
+exceptional operations retain an `error` outcome. A phase's `success` means that
+operation returned, not that reuse was admitted. The diagnostic contains no
+provider paths, credentials, response bodies or exception text. It adds no
+provider request or child process and does not change the lookup deadline,
+required Actions outputs or packet format. The three actor-free controls in
+`tools/promotion_unit_tests/test_ci_pr_unit_lookup_timings.py` exercise real
+packet verification, provider failure and the unchanged expired-budget fresh
+fallback, including visibility through a buffered output stream before that
+fallback begins. Historical budget exhaustion without this diagnostic remains
+unattributed; synthetic timing is not a live-provider performance claim.
+
 An eligible prior run must have a successful exact-attempt unit job and fresh
 upload, the matching context-derived artifact identity, immutable archive
 bytes and the original canonical three-file packet. Every phase, source hash,
