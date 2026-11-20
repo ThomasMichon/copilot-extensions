@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
+from .ordinary_capture import OrdinaryCapture
 from .queue_common import Task
 from .queue_records import Status, TaskError
 
@@ -135,6 +136,8 @@ def _matches_receipt(value: object, request: dict, *, phase: str | None = None) 
 
 
 class QueueTaskRelationshipsMixin:
+    _ordinary_capture = OrdinaryCapture()
+
     def _spawn_relationship_selection(self, driver: str | None) -> tuple[object, str | None]:
         if driver == "ordinary-bridge" and getattr(self, "_ordinary_relationship_writer", None) is not None:
             return self._ordinary_relationship_writer, "local"
@@ -147,15 +150,41 @@ class QueueTaskRelationshipsMixin:
             return self._standing_relationship_writer, "local"
         if reservation_key is not None and getattr(self, "_ordinary_relationship_writer", None) is not None:
             reservation = self.get_reservation(reservation_key)
-            if reservation is not None and reservation.task_id == task.id:
+            if (
+                reservation is not None and reservation.task_id == task.id
+                and reservation.task_relationship_required
+            ):
                 return self._spawn_relationship_selection(reservation.driver)
         return self._relationship_writer, self._relationship_authority
 
     def _retain_pool_relationship_requirement(
         self, conn: sqlite3.Connection, task: Task, key: str, driver: str | None,
+        winner: tuple[str, str, str], allocation_key: str,
     ) -> None:
         governed = latest_relationship(conn, task.id) is not None
         writer, authority = self._spawn_relationship_selection(driver)
+        if (
+            driver == "ordinary-bridge"
+            and self._ordinary_relationship_writer is not None
+            and self._ordinary_capture.scope != "local-ordinary"
+        ):
+            if allocation_key == key:
+                required = self._ordinary_capture.selects(winner)
+            else:
+                # Only the original task can continue its allocation's capture.
+                prior = conn.execute(
+                    "SELECT task_id, task_relationship_required FROM spawn_reservations WHERE key=?",
+                    (allocation_key,),
+                ).fetchone()
+                if prior is None:
+                    raise TaskError("ordinary capture cannot confirm the original allocation")
+                if prior["task_id"] != task.id and self._ordinary_capture.selects(winner):
+                    raise TaskError("ordinary capture cannot adopt another task's allocation")
+                required = prior["task_id"] == task.id and bool(prior["task_relationship_required"])
+            if not required:
+                if governed:
+                    raise TaskError("ordinary capture cannot drop a governed assignment")
+                return
         if governed and writer is None:
             raise TaskError("governed allocator assignment requires its original relationship writer")
         if governed:

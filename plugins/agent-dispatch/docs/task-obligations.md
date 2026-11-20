@@ -13,7 +13,11 @@ and allocator workspace attachment, as described below. That integration
 requires an explicitly assembled, qualified ground-owner writer; default
 finite-task construction leaves it disabled. The opt-in
 [native ordinary assembly](configuration.md#native-local-ordinary-admission)
-qualifies local ordinary participants through their existing owners.
+qualifies local ordinary participants through their existing owners. A scoped
+rollout captures the decision for the selected pool instance at reservation
+time. Receipt and source-obsolescence closeout follow that original assignment,
+not the current selector; an ungoverned reservation cannot gain a relationship
+retroactively.
 Neither this evidence nor an
 assignment claim finalizes a worktree or authorizes physical cleanup.
 Writer-cohort activation, submission readiness and same-worker rejection

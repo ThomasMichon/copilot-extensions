@@ -91,9 +91,9 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     from .assignment_admission import configured_writer
 
-    ordinary_local = cfg.relationship_admission == "local-ordinary"
-    if ordinary_local and cfg.relationship_authority != "local":
-        raise ValueError("local ordinary relationship admission requires local queue authority")
+    from .ordinary_capture import configured_capture
+
+    ordinary_local = configured_capture(cfg.relationship_admission, cfg.relationship_authority)
     relationship_writer = (
         None if ordinary_local else configured_writer(
             cfg.relationship_admission, cfg.relationship_authority,
@@ -114,6 +114,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     if ordinary_local:
         from .assignment_local_ordinary import LocalOrdinaryRelationshipWriter
 
+        queue._ordinary_capture = ordinary_local
         queue._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(queue)
     if ordinary_local or (
         cfg.relationship_admission is None and cfg.relationship_authority is None

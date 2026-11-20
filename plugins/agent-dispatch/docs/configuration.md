@@ -24,7 +24,7 @@ Do not maintain a second independently evolving registrar schema.
 | `URL`, `SHARED_URL` | URL; native local discovery / absent shared |
 | `SHARED_TOKEN`, `SHARED_CONTROL_TOKEN` | Secret string; absent; independent shared authority |
 | `TASK_AUTHORITY` | `central` / `local`; unset retains native routing; no cross-queue fallback for explicit authority |
-| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` queue authority, or native `local-ordinary` with `local`; both absent by default |
+| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` authority, or [native ordinary capture](#native-local-ordinary-admission) with `local`; both absent by default |
 | `PRODUCER_CAPABILITY`, `PRODUCER_CAPABILITY_COMMAND` | Capability/fetch selector; invocation-owned, never portable authority |
 | `NO_AUTOSTART` | Any nonempty value disables lazy start |
 | `RUN_DIR`, `ROUTING_DIR`, `ENDPOINT`, `OVERRIDES` | Owner runtime/discovery paths/selectors; native defaults; not preference tiers |
@@ -75,6 +75,31 @@ claims, CLI-driver pools and the native standing assembly keep their existing
 behavior. Health's version-1 `task_relationships` object reports the additive
 `scope: "local-ordinary"`; `enabled` describes available integration, not the
 readiness of any participant. Alternate global factories report `scope: "all"`.
+
+**Stage one instance.** On the local coordinator set `AGENT_DISPATCH_RELATIONSHIP_AUTHORITY=local`
+and set `AGENT_DISPATCH_RELATIONSHIP_ADMISSION` to this single literal value (shown without shell quoting):
+
+```text
+local-ordinary-instance={"registration_id":"worker","machine":"host-a","env":"linux"}
+```
+
+Placement still selects the global winner. Only an exact, case-sensitive match of
+all three fields on that winner enables capture for a new ordinary allocation.
+This setting does not select a pool, enable allocation, or qualify a writer.
+Duplicate or extra fields, missing values and wildcards are not supported.
+Check `task_relationships.scope` for `local-ordinary-instance` on the intended
+coordinator. A capable coordinator stores `task_relationship_required` in the
+reservation transaction; the unchanged receipt path must then bind the original
+workspace and retain its writer requirement before the first prompt. Changing
+the selector does not reclassify reservations or repair ungoverned history.
+
+**Roll back prospectively.** With authority still `local`, change admission to
+`local-ordinary-drain`. This starts no new captures; it keeps the native writer
+available for existing obligations through closeout. Health reports that scope.
+Drain and reconcile before removing both settings or downgrading the owner.
+The selective and drain values are distinct from `local-ordinary`: versions
+that only understand the all-pool opt-in reject them instead of broadening the
+rollout. Do not substitute `local-ordinary` to make an older version start.
 
 Before each relationship operation the assembly rechecks the exact original
 queue request and reservation, actual execution/creation machine, created

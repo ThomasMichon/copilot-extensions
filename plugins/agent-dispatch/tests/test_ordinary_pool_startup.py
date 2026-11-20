@@ -42,10 +42,23 @@ def ordinary(
         from tests.test_assignment_relationships import GroundOwner
         relationship_owner = GroundOwner()
         relationship_owner.queue = q
-        q._relationship_writer = relationship_owner
+        if governed == "scoped":
+            from agent_dispatch.assignment_local_ordinary import LocalOrdinaryRelationshipWriter
+            from agent_dispatch.ordinary_capture import configured_capture
+
+            q._ordinary_capture = configured_capture(
+                'local-ordinary-instance={"registration_id":"worker","machine":"host-a","env":"linux"}',
+                "local",
+            )
+            q._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(q)
+        else:
+            q._relationship_writer = relationship_owner
         q._relationship_authority = "local"
     revision = publish(q, pool())
-    requested = task(q, **({"require_verification": True} if governed else {}))
+    requested = task(
+        q, **({"require_verification": True} if governed else {}),
+        **({"source": "emitter", "origin_ref": "review-source"} if governed == "scoped" else {}),
+    )
     requests, calls = [], []
     client = controls.connected(api, requests)
     placed = client.place_pool_task(

@@ -129,7 +129,7 @@ def register_status_routes(
                 ),
                 "assignment_request": 2, "authority": queue._relationship_authority,
                 "scope": (
-                    "all" if queue._relationship_writer is not None else "local-ordinary"
+                    "all" if queue._relationship_writer is not None else queue._ordinary_capture.scope
                     if queue._ordinary_relationship_writer is not None else None
                 ),
             },

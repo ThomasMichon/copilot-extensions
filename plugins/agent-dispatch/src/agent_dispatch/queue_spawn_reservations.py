@@ -48,7 +48,7 @@ from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_spawn_completion import SpawnCompletionMixin
 from .queue_spawn_release import SpawnReleaseMixin
 from .queue_spawn_workspace import SpawnWorkspaceMixin
-from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment
+from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment, record_pool_claim
 from .queue_pool_startup import PoolStartupMixin, advance_pool_startup
 from .queue_spawn_cooling import validate_cooling_publication
 from .queue_standing_schema import require_finite_execution_admission
@@ -610,8 +610,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     (key, creation_key, carried_worktree, carried_path, key),
                 )
             if selected_pool is not None:
-                self._retain_pool_relationship_requirement(conn, task, key, driver)
-                from .queue_pool_placement import record_pool_claim
+                self._retain_pool_relationship_requirement(
+                    conn, task, key, driver, selected_pool.identity, allocation_reservation_key)
                 assert pool_catalog_revision is not None and reserved_by is not None
                 record_pool_claim(
                     conn, task, selected_pool, key, pool_catalog_revision, ts=ts,
