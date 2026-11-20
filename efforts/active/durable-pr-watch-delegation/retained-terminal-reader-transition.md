@@ -250,8 +250,9 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 - [x] Land this refinement through normal plan review before changing runtime
   eligibility or binding behavior (#13560; current-head approval and required CI).
-- [ ] Review the [durable generation association](#durable-generation-association)
-  refinement before changing baseline writers, storage or populated transition.
+- [x] Review the [durable generation association](#durable-generation-association)
+  refinement before changing baseline writers, storage or populated transition
+  (#13724; current-head approval and required green CI).
 - [ ] Transition a durably associated populated baseline through the actual CLI, then serve current
   and explicit noncurrent `lookup`/all `chunk` reads after a fresh-reader restart.
   Compare original descriptors, reconstructed bytes, pointers, journal/events,
@@ -284,7 +285,8 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 ### Durable generation association
 
-This is the next proposed source slice, not implemented support. The current
+The optional fresh-baseline writer records original associations; positive
+populated terminal adoption remains unimplemented. The unselected
 baseline `WorkspaceOperations` path publishes through `GenerationCache` before
 calling `ConversationStore.observe_workspace`. Its feedback-only
 `_generation_positions` map is process-local. `project_generation` rounds native
@@ -295,7 +297,7 @@ generation after restart. The terminal-aware publication path already uses the
 existing ReplayStore transaction and cache owner; extend those owners rather
 than introducing a second journal or inferring historical associations.
 
-**Expand the writer first.** Propose the optional executing-core profile
+**Expand the writer first.** The optional executing-core profile is
 `agent-pull-requests.workspace-generation-associations/v1`, separately from
 metadata-only adoption and terminal-reader support. An explicit baseline
 workspace configuration selection enables it on fresh provisioning. Ordinary
