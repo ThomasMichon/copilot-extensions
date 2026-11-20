@@ -77,3 +77,32 @@ def test_upgrade_waits_for_original_claim_and_exact_retirement(
         )
         conn.execute("UPDATE spawn_reservations SET task_relationship_required=1 WHERE key='legacy-retry'")
     assert upgraded.get_reservation("legacy-retry") is None
+
+
+def test_upgrade_reads_each_wake_table_once(q: TaskQueue, tmp_path: Path) -> None:
+    from agent_dispatch.assignment_local_ordinary import LocalOrdinaryRelationshipWriter
+    from agent_dispatch.ordinary_policy_upgrade import install_policy_boundary
+    from tests.test_pool_placement import pool, publish, task
+
+    revision = publish(q, pool())
+    q._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(q)
+    for i in range(8):
+        old = task(q, dedup_key=f"old-{i}")
+        held, _ = q.reserve_spawn(
+            old.id, reserved_by="allocator", driver="ordinary-bridge", pool_catalog_revision=revision
+        )
+        assert held.task_relationship_required
+        q.request_spawn_release(held.key, finished_startup_revision=1)
+        q.retire_spawn(held.key, exact_absence=True, conclusion_state="skipped")
+        q.abandon(old.id, permitted=True, reason="source closed")
+
+    path = tmp_path / "legacy-history.db"
+    legacy_snapshot(q, path, pre_column=True)
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        queries: list[str] = []
+        conn.set_trace_callback(queries.append)
+        install_policy_boundary(conn)
+    for table in ("wake_outbox", "run_waiter_wakes"):
+        scans = [sql for sql in queries if f"FROM {table} " in sql and "execution_send_state" in sql]
+        assert len(scans) == 1

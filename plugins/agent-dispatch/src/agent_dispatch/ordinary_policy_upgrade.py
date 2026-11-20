@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from typing import TYPE_CHECKING
 
 from .queue_records import Status, TaskError
 
+if TYPE_CHECKING:
+    from .queue_execution_custody import ReservationTransportSnapshot
 
-def _settled(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
+
+def _settled(conn: sqlite3.Connection, row: sqlite3.Row, transport: ReservationTransportSnapshot) -> bool:
     from .queue_allocation_revisions import RETIRED_BEFORE_ALLOCATION
-    from .queue_execution_custody import reservation_transport_accountable
     from .queue_task_relationships import _matches_receipt
 
     if (
@@ -21,7 +24,7 @@ def _settled(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
         or not (row["startup_complete"] or row["startup_fenced"])
         or row["cooling_token"] or row["cleanup_claim_token"]
         or row["conclusion_state"] in {"held", "pending"}
-        or reservation_transport_accountable(conn, row)
+        or transport.accountable(row)
     ):
         return False
     if row["task_relationship_event_id"] is None:
@@ -63,12 +66,16 @@ def install_policy_boundary(conn: sqlite3.Connection) -> None:
     try:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(spawn_reservations)")}
         predicate = " AND s.ordinary_admission_policy IS NULL" if "ordinary_admission_policy" in columns else ""
+        transport = None
         for row in conn.execute(
             "SELECT s.*, t.status AS task_status FROM spawn_reservations s LEFT JOIN tasks t ON t.id=s.task_id"
             " WHERE s.driver='ordinary-bridge' AND s.task_relationship_required=1" + predicate
         ):
+            if transport is None:
+                from .queue_execution_custody import ReservationTransportSnapshot
+                transport = ReservationTransportSnapshot(conn)
             try:
-                settled = _settled(conn, row)
+                settled = _settled(conn, row, transport)
             except (KeyError, TypeError, ValueError, TaskError):
                 settled = False
             if not settled:
