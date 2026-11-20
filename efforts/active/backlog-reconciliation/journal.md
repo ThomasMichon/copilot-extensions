@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Windows attribution and retained-transition receiving](journal/2026/11.20-path-attribution-and-retained-transitions.md)
+
 - [2026-11-20 - Finite fixture-authority and cleanup receiving](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
 
 - [2026-11-20 - Config-free registration and selected peer-launch completion](journal/2026/11.20-registration-and-peer-launch-completions.md)

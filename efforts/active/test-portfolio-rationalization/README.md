@@ -55,6 +55,14 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #13598 observed-collection attribution family enters the
+existing Phase 4 tools/shared-observer wave through Phase 7 migration intake.
+Preserve the actual source-admission, observer, fixture, runner, native and
+release owners. Its operator-selected separate tracking from #6237's lookup
+diagnostic remains: #13598 stays OPEN, with no observer waiver or claimed
+Windows pass. The related P13294 family, original inventories, every incumbent
+state/hold, unit-only required CI and hosted-Windows quiescence stay unchanged.
+
 The proposed finite #9348 historical-workflow, #12968 publication-identity
 and #13164 session-command fixture families enter Phase 4's tools/workflow
 and Worktrees waves. The distinct #12973 finished-daemon cleanup
@@ -650,6 +658,14 @@ Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite observed Windows bytecode attribution from #13598
+
+Agent-recommended Phase 4 tools/shared-observer receiving through Phase 7.
+This is a distinct original-profile boundary, not a second implementation owner.
+
+- [ ] **P13598:** Preserve [exact declared-source/bytecode attribution](windows-bytecode-attribution.md#p13598-exact-source-binding), the reported failure and all fail-closed controls.
+- [ ] **V13598:** Qualify [the original observed Windows collection boundary](windows-bytecode-attribution.md#v13598-original-profile-qualification), not a longer profile or an unobserved preload.
 
 #### Finite historical workflow-fixture contracts from #9348
 
@@ -3004,6 +3020,13 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G13598:** Resolve P13598/V13598 and continuing Coordination at the
+  original CPython 3.11.9 observed-collection boundary, including relocated
+  cache-prefix and supported extended spelling, exact declared-source binding
+  and unknown/stale/mismatched/unadmitted refusals. Preserve the separate
+  #6237 diagnostic track, ordinary Linux CI, original limits and actual
+  owners; this intake supplies neither a #13598 retirement nor a native pass.
+
 - [ ] **G9348:** Resolve every P9348/V9348 and continuing Coordination clause:
   the complete historical three-file recipe family, current unit-profile
   declarations and separate adjacent workflow-verifier migration. Preserve all
@@ -3433,6 +3456,8 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### [2026-11-20 UTC - Windows attribution and retained-transition receiving](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
 
 ### [2026-11-20 UTC - Proposed finite fixture-authority and cleanup receiving](../backlog-reconciliation/journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
 
