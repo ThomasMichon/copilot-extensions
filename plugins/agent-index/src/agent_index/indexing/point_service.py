@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 from .point_hints import AcquisitionHints, PointChangeHints
 from .point_queue_consumer import PointQueueConsumer
+from .point_service_contract import point_scope_fingerprint, unavailable_point_service
 from .runner import _settle
 from .task_store import TaskRecord, TaskStore
 
@@ -34,6 +35,10 @@ class PointRuntime:
     point_scope: PointScope
     execute: PointExecutor
     read_component: PointReader
+
+
+class _ConfiguredPointRuntime(PointRuntime):
+    """Owned production composition; custom callable pairs remain unadvertised."""
 
 
 class _CleanupTask(asyncio.Task[None]):
@@ -78,6 +83,7 @@ class PointService:
         self._executor_context = executor_context
         self._runtime_context = runtime_context
         self._reader: PointReader | None = None
+        self._runtime: PointRuntime | None = None
         self._reads: set[asyncio.Future[ComponentRead]] = set()
         self._consumer: PointQueueConsumer | None = None
         self._resources: AsyncExitStack | None = None
@@ -105,10 +111,12 @@ class PointService:
         await asyncio.to_thread(require_point_isolation, self._config, legacy_data_dir)
         resources = AsyncExitStack()
         try:
+            runtime = None
             reader = None
             if self._runtime_context is not None:
                 runtime = await resources.enter_async_context(self._runtime_context())
-                if (type(runtime) is not PointRuntime or runtime.config is not self._config
+                if (type(runtime) not in (PointRuntime, _ConfiguredPointRuntime)
+                        or runtime.config is not self._config
                         or runtime.point_scope != self._scope
                         or not callable(runtime.execute) or not callable(runtime.read_component)):
                     raise ValueError("Point runtime requires its configured executor and reader binding")
@@ -127,6 +135,35 @@ class PointService:
         self._resources = resources
         self._consumer = consumer
         self._reader = reader
+        self._runtime = runtime
+
+    def contract(self, *, draining: bool = False) -> dict[str, object]:
+        """Observe installed owners, never open or qualify their retained state."""
+        if self._stopped:
+            return unavailable_point_service("stopped", stopped=True, failed=self._failed)
+        if self._resources is None:
+            return unavailable_point_service(
+                "startup-incomplete" if self._started else "not-started",
+            )
+        if self._runtime is None:
+            return unavailable_point_service("executor-only")
+        if type(self._runtime) is not _ConfiguredPointRuntime:
+            return unavailable_point_service("unqualified-runtime")
+        closed = self._draining or draining
+        return {
+            "id": "agent-index.point-service", "version": 1, "paired": True,
+            "scope_fingerprint": point_scope_fingerprint(self._scope),
+            "representation": "point-components", "representation_version": 1,
+            "coverage": "named-target-only", "hints_versions": [2],
+            "read_boundary": "in-process-only",
+            "state": (
+                "draining" if closed else "failed" if self._failed
+                else "active" if self._admitted else "paused"
+            ),
+            "failed": self._failed,
+            "execution_admitted": self._admitted and not self._failed and not closed,
+            "read_admitted": self._reader is not None and not closed,
+        }
 
     async def read_component(self, path: str) -> ComponentRead:
         """Qualify one named target, including while execution remains paused."""

@@ -1186,3 +1186,31 @@ technical checkbox. All six technical rows remain unchecked. Keep #1475 OPEN
 until corrected complete current receiving/original/custody readback and a
 separate judgment after reviewed delivery. No native run, implicit loading-time
 provisioning, resource transfer or changed #688/#1192/downstream F3-E gate follows.
+
+## Proposed complete independent inference-identity intake - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #3296 independent repo/machine Copilot inference identity | routed (proposed; effective after complete reviewed domain-plan acceptance) | Existing [Account-Aware Operations Phase 6](../account-aware-operations/README.md#phase-6---independent-copilot-inference-identity-from-3296), CI3296-P1..5/V1..3 and actual global CI3296-G | Exact repo override then machine default; unreadable/malformed lookup stays unresolved, not fallback; disabled enforcement no-op; opted-in shared-session warning safety; mode-qualified ambient compatibility and strict unset-account refusal; supported launch/machine-restore consumers and unchanged Git/gh identity |
+
+This is one separate inference lane in the existing account-aware family,
+not another gh resolver, credential store or new effort. Credit the reported
+#3344/#3498 prototype/policy, #6415 trusted-container isolation and #6725
+preference-editing slices without promoting them to full program acceptance.
+The existing trusted-container claimant keeps its bounded source scope and
+explicit parser/storage/refresh/proxy exclusions; launcher, machine-policy,
+credential, native and source owners remain unchanged.
+
+All nine new technical rows remain unchecked. Preserve the receiver's Draft
+status and temporary-token implementation restriction. #3296 remains OPEN
+during the proposal; actual reviewed complete receiving, current original/
+receiver/custody readback and any separate permitted source judgment are
+distinct. Normal document review is not claim release. No implementation,
+credential lookup, login, account switch, model request, container operation,
+settings change or rollout is authorized.
+
+The [source crosswalk and current census](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md)
+also record #13703's actual correction delivery and #1475's separately audited
+NOT_PLANNED disposition after complete accepted receiving. Earlier intake
+rows stay unchanged history; all six WinGet technical rows and independent
+#688/#1192/#2612 conditions remain.

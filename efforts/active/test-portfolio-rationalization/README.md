@@ -55,9 +55,13 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
-The proposed complete #1475 full-user Windows WinGet bootstrap-venue family
-enters Phase 5's owning-runner/native-workflow lane through existing Phase 7
-migration intake and domain review. Preserve the primary maintainer and actual
+The complete #1475 full-user Windows WinGet bootstrap-venue family was
+accepted through reviewed #13701 and the explicit plugin-AND-runtime
+clarification #13703 in Phase 5's owning-runner/native-workflow lane and
+Phase 7 intake. Complete current receiving/original/custody readback and a
+separate audited judgment preceded #1475's NOT_PLANNED tracking retirement.
+OPEN #1303 now carries this planned work; #1475 is historical provenance.
+Preserve the primary maintainer and actual
 clean-room/provider, bootstrap/installer, repository-resource, credential,
 native, source and cleanup custodians. No VM/provider, machine, implementer,
 resource, access or budget is appointed. OPEN #1303, all incumbent states/holds,
@@ -67,10 +71,10 @@ This is separate from #5921's finite verdict-reducer case and preserves that
 case's independent #1475 contract rather than absorbing it. #688's own cost,
 precondition, native and downstream F3-E ownership gates remain independent;
 its received #1192 remote Windows container path is not a full-user WinGet
-venue. Normal review must deliver every P1475/V1475/G1475 clause, this
-Coordination, Phase 7 route and dated Journal. Keep #1475 OPEN during proposal;
-current whole applicable receiving/original/custody readback and a separate
-source judgment follow actual complete delivery. No new generic ACK,
+venue. Documentary receiving and the separate source disposition are complete;
+all six P1475/V1475/G1475 technical rows remain unchecked until their own
+evidence exists. Do not repeat the proposal/readback/retirement gates or
+infer provider, native or execution completion. No new generic ACK,
 whole-Portfolio prerequisite or execution/resource transfer follows.
 
 The proposed finite #13598 observed-collection attribution family enters the
@@ -1719,14 +1723,16 @@ an assertion that the historical source defect remains current._
 
 ### Phase 7 — Reconcile deferred backlog
 
-The proposed complete P1475/V1475/G1475 family has one primary placement in
+The accepted complete P1475/V1475/G1475 family has one primary placement in
 Phase 5's owning-runner/native-workflow lane. The append-only migration-intake
 route records full-user WinGet provider/bootstrap acceptance, not generic
 Windows transport equivalence, and retains existing custodians. This same
-planning unit supplies complete Plan, local/actual global Validation,
-Coordination and dated Journal for ordinary domain review. Existing #1475
-supplies the tracker during proposal; no new issue, administrative checkbox,
-implementer or execution authority is added.
+planning unit supplied complete Plan, local/actual global Validation,
+Coordination and dated Journal through #13701/#13703. #1475's separately
+audited NOT_PLANNED disposition retires redundant tracking, not technical
+work. Continue under OPEN #1303 and these six unchecked domain rows; do not
+reopen or repeat the completed proposal/receiving gates. No new issue,
+administrative checkbox, implementer or execution authority is added.
 
 The proposed P9348/V9348/G9348, P12968/V12968/G12968 and
 P13164/V13164/G13164 families each have one primary Phase 4 placement;
@@ -3521,6 +3527,8 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### [2026-11-20 UTC - Full-user WinGet receiving and tracking accepted](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md#accepted-portfolio-receiving-follow-through)
 
 ### [2026-11-20 UTC - Proposed complete full-user WinGet bootstrap venue](../backlog-reconciliation/journal/2026/11.20-winget-venue-and-retained-contracts.md)
 
