@@ -229,6 +229,136 @@ full Windows rotation or authorize a production installation.
 
 ## Worker admission
 
+### Worker admission KillSwitches (not E-Stops)
+
+A **KillSwitch** inhibits starting new work units, including a pool initiating
+a resume. Outstanding work continues and can settle. Both scoped holds and
+the system-wide `worker-admission` hold in the selected installation are
+KillSwitches. An **E-Stop** rapidly terminates outstanding work; Dispatch
+does not implement an E-Stop here.
+
+The pool switch governs **who initiates the operation**. It prevents Dispatch
+from reserving, launching or reactivating a worker on behalf of the held pool.
+It is not a switch inside the worker or in agent-bridge. An independently
+authorized direct Bridge resume of the very same conversation remains subject
+to Bridge's normal access, identity and ownership checks. That resume neither
+creates a Dispatch reservation nor starts, adopts or releases a task. A live
+native observation is not proof of a pool-issued resume. Holds never tell a
+running worker to shut down; progress, receipt observation and cleanup remain
+available. A work-bearing idle-confirm prompt or cleanup requiring a new
+pool-issued process resume waits; observing or settling existing work does not.
+A cleanup nudge deferred by policy consumes no retry attempt or backoff.
+Clearing the hold allows its next normally due retry; a real failed nudge
+still uses the existing retry budget.
+
+Use the updated `agent-dispatch` **on the installation making the decision**.
+These commands reread/write local state without contacting a coordinator or
+restarting a supervisor. Examples (the stops may coexist):
+
+```bash
+agent-dispatch actions hold --pool review --reason "Review intake paused"
+agent-dispatch actions hold --instance review host-a linux --reason "Host maintenance"
+agent-dispatch actions hold --label review-request --reason "Quarantine new requests"
+agent-dispatch actions hold --kind finite --reason "Pause finite task launches"
+agent-dispatch actions hold --agent reviewer --reason "Investigating worker startup"
+agent-dispatch actions holds
+agent-dispatch actions holds --agent reviewer
+agent-dispatch actions resume --agent reviewer
+agent-dispatch actions resume --kind finite
+agent-dispatch actions resume --label review-request
+agent-dispatch actions resume --instance review host-a linux
+agent-dispatch actions resume --pool review
+```
+
+`--pool` matches the registration/supervisor ID; `--instance` matches the
+entire **registration ID, machine, environment** tuple, in that order. A bare
+legacy supervisor has an ID but not a managed instance. `--label` matches
+**any** exact stored task label, not just its first routing label. `--kind`
+matches the stored queue kind; the ordinary automatic scheduler selects
+`finite`, not standing charters. A task's prompt, title, payload, repo,
+source and capability requests are not worker-type selectors.
+
+`--agent` matches the selected headless Bridge agent (`--headless-agent`,
+default `task-worker`) or the selected body: `acp`, `cli`, `script`,
+`restricted-bridge`, `ci-repair`, `handoff-fallback`, `fleet-headless`, or `fleet-cli`.
+Fleet headless also matches the configured agent name. A charter overlay is
+not the Bridge agent name. For per-label overrides, the first overridden
+label in the task's stored order selects a **configured** backend; task text
+cannot name an arbitrary agent. CI repair uses its coordinator-selected body
+class, not an agent name supplied by a task.
+
+All selectors are exact and case-sensitive, without globs. **Any** matching
+hold denies a new admission. `resume` removes that exact key; it does not
+clear sibling holds, start a pool, change the positive
+[allocation selector](pool-claim-start.md), or override a global stop.
+A held managed placement is not permission to claim through the legacy API,
+change the global winner, or borrow capacity from another pool.
+An inhibited **cold waiter** keeps its resume request, wake choice and original
+queue position, but neither occupies a slot nor outranks runnable work while
+its coordinator-local hold applies. Clearing the last matching hold restores
+normal priority without preempting an admitted sibling. Running reservations
+and unresolved sends still count. A supervisor-only hold that the coordinator
+cannot see does not change the coordinator's capacity calculation.
+For managed placement, `--pool` matches **either** the requesting allocator
+ID or the selected registration ID; these need not be the same.
+
+A full newest-first page (200 finite queued tasks per watched label, or one
+page for a catch-all lane) triggers **one** supplemental page per cycle. It
+walks at most 200 queued finite tasks within the repository scope in indexed
+task-ID order. The supervisor advances a local cursor, wraps at the end, and
+deduplicates with the normal pages before applying its unchanged lane and
+admission checks. Stable older work can therefore surface behind held tasks
+without loading the entire backlog. Discovery latency grows with backlog
+size, cursor progress resets on supervisor restart, and older coordinators
+without the page endpoint provide only the original bounded head pages.
+
+**Enforcement:** Each supervisor checks just before asking for a reservation,
+including label-routed, fleet, restricted and coordinator-launched CI work.
+It checks before restricted startup retries, unclaimed-body redrive and new
+managed startup retry/nudge attempts. The production coordinator separately
+checks fresh reservations before insertion, using the task row and, for
+managed placement, the actual selected instance even if the request omits
+one. It also checks the bound instance before admitting a new pool retry.
+Retained retries include the original allocator and recorded Bridge agent
+selection when available. Ordinary redrive checks the reservation's durable
+pool binding even if it has no task assignment. Queued retries check the
+driver being recorded, including an inherited workspace driver.
+The coordinator's one-shot handoff fallback checks
+its stored task and actual default worker before consuming its launch attempt.
+The coordinator can check its known body class; it cannot attest an unnamed
+remote supervisor's selected agent. Set named-agent holds on every executing
+supervisor installation; set placement holds on the coordinator as well for
+direct placement clients. There is no distributed policy replication.
+
+**In flight:** A reservation request or retry already admitted at its check
+can finish its original launch/send; a file update and a remote launch are
+not one transaction. No process is killed, attempt reset, task canceled or
+custody cleared. Existing claims, work already underway, observation of
+an already-issued retry, exhaustion, retirement and cleanup keep their normal
+rules. For a pending ordinary Bridge redrive, the updated supervisor can
+request observation of its exact retained revision and invocation during a
+hold. Only an accepted receipt for that same native, caller, key and prompt
+permits completion. A missing or ambiguous receipt leaves the attempt
+pending; it does not send, resume a session or authorize a replacement.
+Older providers that cannot confirm this observation retain custody instead.
+Clear the last applicable hold to allow the next eligible attempt.
+This is not a switch for task enqueue, direct execution claims, standing
+attachments, manual external launchers, or older runtimes. Use the existing
+global admission control when its broader semantics are needed.
+
+`actions holds [selector]` reports explicit stops (not effective eligibility).
+`worker-admission-holds.json` is a sibling of the global action file under
+the selected installation, so even clearing a global action cannot erase its
+scoped stops. The store uses the action reader's 64 KiB limit and the existing
+override writer's lock and atomic replace. Specify a short **nonsecret**
+single-line reason (1–240 printable characters); it is stored and displayed
+as entered, not redacted. A malformed/unreadable file refuses admission and
+ordinary edits; inspect the reported state path and restore the last known
+valid policy before retrying. Do not remove the file as a generic recovery:
+absence means no scoped stops. Other installation controls remain independent.
+
+### Global admission
+
 The production coordinator checks `worker-admission` before execution claims
 and before minting a new spawn reservation or one-shot handoff-fallback attempt.
 An inhibited fallback retains its sole attempt for a later poll.

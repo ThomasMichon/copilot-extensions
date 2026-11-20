@@ -87,6 +87,9 @@ def run_queue_schema_migrations(
             conn.execute("ROLLBACK")
             raise
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+    for name, columns in (("id", "id"), ("repo_id", "repo,id")):
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_queued_finite_{name} ON tasks({columns}) "
+                     "WHERE status='queued' AND kind='finite'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_category_created ON tasks(category, created_at)")
     # Sentinel-backfill rows created before ``repo`` became required so a

@@ -10,11 +10,7 @@ active-state transitions. The conclusion-retry claim/revalidate family
 sibling mixin, :mod:`agent_dispatch.queue_spawn_conclusion` (module size);
 ``_validate_conclusion_claim``/``_newer_worktree_reservation`` stayed here
 since ``_update_reservation`` (below, used by several transitions that
-remain in this module) also needs them. Verified self-contained the same
-way as every prior slice: an AST free-name walk found only module-level
-helpers themselves used exclusively by this cluster (``spawn_key``,
-``_validate_conclusion_claim``, ``_newer_worktree_reservation``), and no
-test monkeypatches any of these methods by name. The three simple
+remain in this module) also needs them. The three simple
 read-only lookups (``get_reservation``, ``latest_reservation``,
 ``list_reservations``) stayed behind in ``queue.py`` itself, both because
 ``list_reservations`` calls ``self._canonical_repo`` (a ``TaskQueue``
@@ -44,6 +40,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
@@ -81,7 +78,7 @@ def _validate_conclusion_claim(
         if supplied_token != stored_token:
             raise TaskError("cleanup claim changed")
         try:
-            claim_expires_at = float(stored_expires_at or 0)
+            claim_expires_at = float(stored_expires_at) if isinstance(stored_expires_at, (str, float, int)) else 0.0
         except (TypeError, ValueError):
             claim_expires_at = 0.0
         if claim_expires_at <= now:
@@ -97,7 +94,7 @@ def _newer_worktree_reservation(
 ) -> sqlite3.Row | None:
     if not row["worktree"]:
         return None
-    return conn.execute(
+    newer: sqlite3.Row | None = conn.execute(
         "SELECT key FROM spawn_reservations "
         "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
         "AND reserved_at >= ? ORDER BY reserved_at DESC LIMIT 1",
@@ -108,6 +105,7 @@ def _newer_worktree_reservation(
             row["reserved_at"],
         ),
     ).fetchone()
+    return newer
 
 
 class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnReleaseMixin, SpawnWorkspaceMixin, PoolStartupMixin):
@@ -194,6 +192,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         owner; every other check (active-reservation dedupe, exclusive-key
         carry-forward) is unchanged.
         """
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         ts = self._now(now)
         from .queue_pool_placement import require_selected_instance, validate_pool_request
         validate_pool_request(
@@ -559,9 +559,14 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 )
                 selected_pool = select_pool(
                     conn, resolved_task, catalog.definitions,
-                    execution_machine=carried_execution_machine,
+                    execution_machine=carried_execution_machine, scoped_admission=self._spawn_admission is not None,
                 )
                 require_selected_instance(expected_instance, selected_pool)
+            effective_driver = (driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge"
+                                else driver or carried_driver)
+            if self._spawn_admission is not None:
+                self._spawn_admission(task, reserved_by, selected_pool.identity if selected_pool else None, effective_driver,
+                                      {"agent_info": json.loads(agent_info)} if agent_info is not None else None)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
@@ -585,7 +590,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     carried_project,
                     carried_path,
                     carried_host,
-                    driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge" else driver or carried_driver,
+                    effective_driver,
                     ts,
                     ts,
                     revision,
@@ -645,9 +650,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         preserve_releasing: bool = False,
         guard: Callable[[sqlite3.Row], None] | None = None,
         require_no_native: bool = False,
-        pool_startup_retry: dict | None = None,
+        pool_startup_retry: dict[str, Any] | None = None,
         in_transaction: Callable[[sqlite3.Connection, sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -678,6 +685,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             elif worktree is not None:
                 from .queue_pool_placement import require_pool_workspace
                 task = self._fetch(conn, row["task_id"])
+                if task is None:
+                    raise TaskError("workspace publication requires the reservation's task")
                 require_pool_workspace(conn, task, worktree, row["execution_machine"], driver=row["driver"], reservation_key=key)
             validate_cooling_publication(row, cooling_token, expected_startup_revision)
             if release_requested or to_state in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.RELEASING}:
@@ -781,6 +790,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if session_handle is not None:
                 from .queue_pool_placement import pool_native_publication
                 task = self._fetch(conn, row["task_id"])
+                if task is None:
+                    raise TaskError("native publication requires the reservation's task")
                 clear_retirement = pool_native_publication(conn, task, row, session_handle, releasing=releasing)
             completion = row["startup_complete"]
             revision = row["startup_revision"]
@@ -847,10 +858,12 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         return SpawnReservation._from_row(row)
 
     def record_spawn_allocation(
-        self, key: str, project: str, *, worktree_writer_requirement: dict | None = None,
+        self, key: str, project: str, *, worktree_writer_requirement: dict[str, Any] | None = None,
         cohort_transport: str | None = None,
     ) -> SpawnReservation:
         """Bind execution routing before the first non-transactional allocation."""
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         if not isinstance(project, str) or not project.strip():
             raise TaskError("allocation project must be non-empty")
         with self._connect() as conn:

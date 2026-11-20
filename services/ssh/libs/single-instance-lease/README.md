@@ -133,6 +133,22 @@ Keying on the optional `port` lets an active and a passive daemon coexist on one
 take different locks), while two starts on the *same* port still collide.
 Cross-platform: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows.
 
+`acquire(expected_file_identity=(device, inode))` is an opt-in existing-file
+operation: it creates neither a directory nor a lock file, rejects non-regular
+or linked/reparse paths, and compares the opened descriptor and current path
+with that identity before locking and again before recording the PID.
+Ordinary `acquire()` retains its create-if-missing behavior. After a fork,
+`release()` on an inherited object closes only the child's descriptor; it
+does not unlock the parent's shared POSIX open-file description.
+
+`held_file_identity()` returns the held descriptor's `(device, inode)` only
+while this process owns the lease and its pathname still names that ordinary,
+non-link file. Missing custody, inherited objects, replacement and reparse/link
+paths refuse. The read neither reopens nor transfers the lease and never uses
+the PID text as ownership proof. Consumers must serialize their lifecycle and
+recheck identity at their own consequential boundaries; this is not a
+filesystem compare-and-swap or proof that prior work settled.
+
 ### `supersession` -- the self-retire decision
 
 `is_superseded(table, my_pid, my_generation)` is the pure, fail-safe decision a

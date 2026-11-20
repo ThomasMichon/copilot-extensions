@@ -49,6 +49,47 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Select the evidence first
 
+The native Windows tool-hook packet is Worktrees'
+`tests/test_native_tool_hook_transport.py`, selected through the canonical runner
+with `--allow-explicit-tiers`. Both PowerShell engines enter the actual registered
+commands with cold native membership and executable lookup trapped. Synthetic
+resident discovery exercises warm refusal/accounting, missing/old/closed peers,
+invalid responses and bounded timeouts. Sentinel compatibility helpers must
+remain unexecuted; no existing session, installed runtime or SDK probe is a fixture.
+The packet records per-entry wall time, not an accepted composed-hook latency
+distribution. Actor-free policy/batch/switch and handler admission controls live
+in `tools/promotion_unit_tests/test_native_tool_policy.py` and `test_hook_demand.py`.
+The original opt-in pre-entry packet retains guard/stop/JSON/cell-prerequisite
+controls without selecting a per-tool Python worker. Setup-only cell stamping
+still uses its original owner outside the measured hook.
+Caller/resident identity-mismatch controls require supersede observations to
+remain unavailable without any `gh` launch; the original process-free guard
+control also covers a close attempt. The existing native workflow separately
+selects the retained batch/live-grant, unmanaged-repository and two-cycle
+protection controls. Their disposable residents use original admission and
+guards, setup stamps membership outside entry, and native entries must not
+start Python or perform executable discovery. Missing-resident behavior remains
+in the separate cold transport controls.
+The existing native lane explicitly selects the complete command-entry transport
+matrix too, rather than only the process-free original-guard control.
+Registered post-tool work-count controls require one original membership
+validation per event on both engines in legacy and selected-cell contexts.
+Direct prepared-read helper calls retain their own admission check.
+The same native selection checks caller/resident session mismatch, explicit
+session preservation and absent caller identity through real managed admission.
+Native transport controls compare the forwarded pre-tool elevation Boolean with
+the invoking process's actual token, without requesting elevation. Actor-free
+controls retain original cross-repository posture filtering with opposite caller
+and resident token states, and stop further guard work at a simulated deadline.
+Caller-directory controls also cover absent, explicit, aliased and null fields.
+The unit packet also exercises a 128-call batch with repeated missing/raising
+guards and a final denial, requiring one recovery message per boundary and a
+response inside 64 KiB without dropping the decision or reason.
+Large valid warnings and oversized non-BMP or HTML-sensitive reasons require
+explicit truncation without losing a confirmed decision. Both native engines
+consume the bounded large response through their original 500 ms transport,
+including Windows PowerShell 5's HTML-sensitive client reserialization.
+
 The focused Worktrees credential-isolation regression is
 `tests/test_git_credential_isolation.py`, selected through the canonical
 runner with `--test-file` and `--allow-explicit-tiers`. It runs actual nested
@@ -68,6 +109,15 @@ child deadline. Use the contained runner with `--allow-explicit-tiers
 --test-timeout 30 --timeout 300 --plugin-timeout 300`.
 These observations do not explain an earlier timeout, waive a failed run or
 replace the complete prepared-membership acceptance portfolio.
+
+Registered-write fixtures also record fixed, content-free RPC phases with
+wall-clock and process-CPU observations in their disposable script copies.
+The phases distinguish endpoint validation, function entry, caller elevation,
+request encoding, connection, send, receive and result encoding. Unknown or
+malformed stderr remains an error. Phase-free comparison controls retain the
+original scripts without these probes. Probe overhead is included in diagnostic
+timings; passing observations are nonreproduction, not an explanation or fix
+for an earlier timeout. Production scripts, retries and deadlines are unchanged.
 
 The same file's `-k registered_policy_timeout_observation` selection invokes
 the unchanged `cross-modes` cell composition on both engines. Only that test
@@ -837,7 +887,7 @@ naming the contained runner's dependency-ready interpreter. Its admitted
 policy fixtures retain the complete managed JSON module but isolate membership;
 `registered_pre_tool_entry` in `tests/test_managed_session.py` separately
 exercises the unchanged registered command and actual prepared membership,
-raw-input forwarding and revocation. The PS7 decoder comparison reports
+complete-invocation forwarding and revocation. The PS7 decoder comparison reports
 cmdlet/native/cmdlet first-use samples after assembly-only admission preparation,
 without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
 production decoder and verifies structured-value and malformed-input parity.
@@ -873,8 +923,8 @@ the same native envelope validator as writes. It checks legacy and selected-cell
 entries, mixed read kinds, batch-over-single precedence, working-directory
 context, 128/129 calls, later protected/unknown/shell/malformed members and
 extra keys that shadow dictionary metadata. Missing/older prepared evidence
-and missing or changed normalizer contracts retain byte-exact policy input.
-Real-worker comparisons cover the read no-op and a later protected-write deny;
+and missing or changed normalizer contracts retain complete policy input through
+the selected resident. Real-policy comparisons cover the read no-op and a later protected-write deny;
 the original child/item/group bounds remain unchanged.
 Native batch cases prove all-call admission with mixed reads/writes, per-call
 arguments, batch-over-single precedence, the 128-call bound and a later
@@ -890,7 +940,7 @@ their own packet, retaining the same child/item/group limits.
 Disjoint patch-positive, protected, fallback and real-policy packets cover
 object/JSON/freeform input, every original Add/Update/Delete/Move header,
 CRLF, all-field/direct/structured union and mixed native batches. They retain
-both move endpoints, byte-exact whole-event fallback and real protected-state
+both move endpoints, complete-invocation fallback and real protected-state
 denials in legacy and selected-cell contexts. Exact 131072/131073-character
 field and 128/129-target boundaries, combined-union overflow, malformed,
 fragmentary, targetless, non-object JSON, foreign/nested/anchor and protected
@@ -924,25 +974,25 @@ Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
 The `real-policy` cases compare the same registered entry and fixture with the
-new contract and an older read-only contract, using the real caller-owned policy
-worker rather than a timing stub; they also require a real protected-state deny.
+new contract and an older read-only contract, using the selected resident and
+original in-process guards rather than a timing stub; they also require a real protected-state deny.
 These are finite source samples, not latency distributions or the 1-2 second
 whole-hook/throughput acceptance. Child/item/group limits stay 10/30/300 seconds.
 The `batch-read-only-attribution` cases retain the unchanged packaged contract
 while comparing phase-free/read-attributed/phase-free calls and an attributed
-later protected write through the real worker. Both Windows shell engines run
+later protected write through the selected resident. Both Windows shell engines run
 in legacy and selected-cell fixtures. Successful output records the executable
 hash and actual child version, registered-command/source hashes, outer elapsed
 time and same-occurrence monotonic command, script, admission and read/source
-proof phases. Only fixture copies are instrumented; the existing fixture runtime
-selector and context-validator substitutes remain, so this is not installed
+proof phases. Only fixture copies are instrumented; fixture-scoped resident
+rendezvous and explicit guard inputs remain, so this is not installed
 runtime qualification. Phase times include their instrumentation, and the
 outside-command startup/exit envelope is not isolated startup. Ordered controls
 do not establish exact subtractive attribution or a latency distribution.
 An after-call loaded-module observation, without importing or listing available
 modules, requires the three native read calls to leave
-`Microsoft.PowerShell.Management` unloaded while the real protected-policy call
-retains its original module work. These cases use Unicode, space and apostrophe
+`Microsoft.PowerShell.Management` unloaded, including the real protected-policy
+call. These cases use Unicode, space and apostrophe
 source-root paths. Module absence is deterministic work-count evidence, not a
 latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
@@ -952,15 +1002,15 @@ The `shell-entry-attribution` cases reuse that complete-entry fixture for a
 read-only `Get-Location` event and the original recognized protected
 `Set-Content` target shape. The hook only inspects the commands: the target
 must remain absent. Both engines and legacy/cell contexts use the actual
-strict policy worker, not the ordinary client's relevance shortcut or a
-policy stub. Fixture-only runtime-selection boundaries include CWD repair
-and selected-context validation; source/worker hashes and actual no-op/deny
+selected resident and original guards, not the ordinary client's relevance
+shortcut or a policy stub. Native boundaries retain CWD repair
+and prepared selected-context admission; source/transport hashes and actual no-op/deny
 outputs accompany ordered phase-free/attributed calls. The existing fixture
-runtime/context substitutes remain, so this is not installed selection
-qualification. Positive original-worker controls omit only the optional literal
+resident/guard-input substitutes remain, so this is not installed selection
+qualification. Positive original-policy controls omit only the optional literal
 proof; the protected leg retains the actual packaged declaration. Original guards
-and policy worker remain in use on this path.
-All shell calls may load their original Management module. Timings retain
+remain in use on this path without a per-event interpreter.
+Timings retain
 instrumentation and outside-command uncertainty under the same 10/30/300
 limits; this does not qualify a shell-only replacement or Git/PR, POSIX,
 lifecycle, composed or productive-throughput acceptance.
@@ -973,7 +1023,7 @@ proof omitted, not historical binaries. Per-sample contract hashes and proof
 presence make that distinction explicit. Eligible attributed calls must leave
 Management unloaded and skip runtime/policy entry while retaining native
 admission/source/output phases. Protected calls still use the real original
-worker; the inspected tool never executes. No source digest is repaired.
+resident; the inspected tool never executes. No source digest is repaired.
 
 The same existing packet covers primary-command precedence, actual JSON key
 casing and collisions, alias metadata, ordinal literal comparison, argument and
@@ -984,7 +1034,7 @@ view path. Canonical-source tests compare every declared head with original
 guard decisions and ordinary argument grammar; the renderer refuses malformed,
 nonliteral, duplicate and oversized declarations inside the existing file bound.
 Other selection-only controls retain their explicit policy stub and are not
-represented as full real-worker decisions.
+represented as full real-resident decisions.
 
 The `literal-shell-carrier` cases extend that same registered fixture to raw
 primary strings and object/raw `tool_input` fallback carriers. Each complete
@@ -1002,7 +1052,7 @@ not isolated hook startup attribution.
 
 The `literal-shell-selection` cases apply original first-nonempty command-key
 selection to the same exact-literal proof. Representative first/final alternate
-keys retain complete real-worker comparisons and same-selected-key protected
+keys retain complete real-resident comparisons and same-selected-key protected
 denials in both engines and legacy/cell scopes. Focused controls retain earlier
 null/nonstring/whitespace/protected values, exact key casing, dictionary-member
 metadata, JSON/batch fallback and absent or invalid optional key declarations.
@@ -1018,11 +1068,11 @@ The `literal-batch-all-shell` and `literal-batch-mixed` cases compose the same
 complete-entry fixture over whole batches in both engines and legacy/cell
 scopes. Comparator legs omit only the optional literal proof; the candidate
 retains the packaged declaration. A later protected shell member must still
-reach the real worker and deny without executing a tool. Fixture-only counters
+reach the real resident and deny without executing a tool. Fixture-only counters
 require one declaration load and one shared source pass, not per-member hashes.
 Counters live only inside that disposable shell process. Focused controls retain
 member/top-level precedence, raw/object selection, 128-member bounds, member
-key shadowing, old/new readers, absent optional key metadata and whole byte-exact
+key shadowing, old/new readers, absent optional key metadata and complete-invocation
 fallback for malformed, unknown, nonliteral, argument-bearing or JSON input.
 Original batch expansion and all four real guards supply separate parity
 evidence. Ordered records retain actual source/build identities and all failures;
@@ -1035,13 +1085,13 @@ The existing path-gated native workflow keeps these two bounded groups apart;
 required unit-only CI does not acquire another subprocess matrix.
 
 The registered PS5.1/PS7 command retains its current read declaration and original
-admission, runtime selector, strict worker and four guards. Original producers
+prepared admission, selected resident and four original guards. Original producers
 publish the prepared map; the original grant writer supplies selected grants
-and revocation. A real stamped cell and disposable no-pip version slot exercise
-selection without substituting a context validator or a permission decision.
-The slot marker is fixture setup, not an installer or installed-runtime pass.
-An independent selected-runtime assertion prevents ambient Python from masking
-a broken selector.
+and revocation. A real stamped cell, prepared membership and scoped resident
+rendezvous exercise selection without substituting a permission decision.
+The original standalone policy routine supplies an in-process oracle outside
+the measured entry. Named runtime/interpreter lookups throw, and each
+non-exempt call must reach exactly the selected resident once.
 
 Controls reach delegation and standalone-anchor decisions after statelessness
 does not deny, compose earlier ask/warn with a later deny, observe changed modes
@@ -1053,9 +1103,9 @@ unavailable guidance, not a fabricated denial or successful evaluation.
 PR-close author/login observations are not exercised by these local-write cases.
 
 `natural_registered_policy` records bind source, registered command, executable
-hash/build and fixture identities to complete-entry observations. Passive worker
+hash/build and fixture identities to complete-entry observations. Passive resident
 markers affect only the disposable copy.
-`natural_policy_progress` retains inclusive fixture/owner/runtime/native-entry
+`natural_policy_progress` retains inclusive fixture/owner/preparation/native-entry
 boundaries even when an aggregate timeout prevents final JUnit publication.
 The inspected tools never execute and their targets remain absent.
 These are natural-policy and explicit failure
@@ -1063,14 +1113,14 @@ controls, not deliberately older-proof read comparators, a latency distribution,
 causal subtraction, shell-only replacement, nativeCLI/ACP/model admission,
 installed composition or productive-throughput acceptance.
 
-The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
-supplied existing Python 3.9 interpreter. Their private fixture publishes real
-project membership and the current original guard map, copies the required
-standalone helpers and observes original request entry rather than assuming a
-legacy descriptor qualifies for transport. Read/no-op cases must not enter that
-request path or attempt IPC/subprocess work, while the edit control reaches the
-original path and retains a real denial. Missing fixture prerequisites remain
-explicit skips, not relevance qualification. All these cases preserve original
+The optional `COPILOT_TEST_HOOK_PRE_PYTHON` entry controls use an explicitly
+supplied dependency-ready interpreter only for fixture setup and cell stamping.
+The actual Windows entries never select it. Prepared native reads and stops
+retain their no-IPC path; uncertain input with no qualified resident reports
+unavailable evaluation, and incomplete cells never start their validator.
+Compatibility helpers carry sentinels, so an interpreter failure cannot be
+mistaken for a successful no-Python path. Missing fixture prerequisites remain
+explicit skips, not relevance qualification. All cases preserve original
 deadlines and containment; neither finite ordered observations nor process
 elimination proves full-roster, installed/composed or throughput acceptance.
 

@@ -12,8 +12,10 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Protocol, cast
 
-Decision = Callable[[str, dict, float], dict]
+Payload = dict[str, Any]
+Decision = Callable[[str, Payload, float], Payload | None]
 _READ_TIMEOUT_S = 1.0
 _RECENT_HOOK_DEMAND_S = 120.0
 READ_DEMAND_CAPABILITY = "read-hook-demand-v1"
@@ -23,8 +25,10 @@ SHELL_MUTATION_CAPABILITY = "shell-hook-mutation-v1"
 WORKTREE_CHANGE_CAPABILITY = "worktree-change-v1"
 WORKTREE_CHANGE_KIND = "worktreeChanged"
 MIXED_BATCH_MUTATION_CAPABILITY = "mixed-hook-batch-mutation-v1"
+NATIVE_TOOL_POLICY_CAPABILITY = "native-tool-policy-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
+    NATIVE_TOOL_POLICY_CAPABILITY,
 ]
 
 
@@ -36,19 +40,28 @@ class HookUnavailable(Exception):
     from an ordinary deadline miss (``None``, unchanged wire shape).
     """
 
-    def __init__(self, reason: str | None = None):
+    def __init__(self, reason: str | None = None) -> None:
         super().__init__(reason or "")
         self.reason = reason
+
+
+class _AdmissionLock(Protocol):
+    def acquire(self, *, timeout: float) -> bool: ...
+
+    def release(self) -> None: ...
 
 
 class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = False
     daemon_threads = True
 
-    def __init__(self, address, handler, *, token: str, decide: Decision):
+    def __init__(
+        self, address: tuple[str, int], handler: type[socketserver.BaseRequestHandler],
+        *, token: str, decide: Decision,
+    ) -> None:
         self.token = token
         self.decide = decide
-        self.owner = None
+        self.owner: HookIpcServer | None = None
         # Set only by HookIpcServer.close_admission() -- see its docstring.
         # Distinct from actually closing the socket: a superseded-but-not-
         # yet-exited daemon keeps listening and accepting connections, but
@@ -58,7 +71,7 @@ class _Server(socketserver.ThreadingTCPServer):
         self.admission_closed_reason: str | None = None
         super().__init__(address, handler)
 
-    def process_request(self, request, client_address) -> None:
+    def process_request(self, request: Any, client_address: Any) -> None:
         owner = self.owner
         if owner is not None:
             owner._on_request_accepted()
@@ -69,7 +82,7 @@ class _Server(socketserver.ThreadingTCPServer):
                 owner._on_request_finished()
             raise
 
-    def process_request_thread(self, request, client_address) -> None:
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
@@ -79,6 +92,8 @@ class _Server(socketserver.ThreadingTCPServer):
 
 
 class _Handler(socketserver.StreamRequestHandler):
+    server: _Server
+
     def handle(self) -> None:
         try:
             self.request.settimeout(_READ_TIMEOUT_S)
@@ -108,19 +123,30 @@ class _Handler(socketserver.StreamRequestHandler):
                 if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
                     owner._on_worktree_changed(request)
                 return
-            payload = request.get("payload")
+            raw_payload = request.get("payload")
             deadline = float(request.get("deadline") or 0)
-            payload_valid = isinstance(payload, dict)
-            if not payload_valid:
-                payload = {}
+            payload_valid = isinstance(raw_payload, dict)
+            payload = cast(Payload, raw_payload) if payload_valid else {}
+            metadata = payload.get("_agentWorktrees")
+            if isinstance(metadata, dict) and "nativePolicy" in metadata:
+                if (
+                    type(metadata["nativePolicy"]) is not int
+                    or metadata["nativePolicy"] != 1
+                    or kind not in {"preToolUse", "postToolUse"}
+                    or self.server.owner is None
+                    or request.get("hook_generation") != self.server.owner.generation
+                    or len(raw) > (2 * 1024 * 1024 if kind == "preToolUse" else 65536)
+                    or not raw.endswith(b"\n")
+                    or not math.isfinite(deadline) or deadline - time.time() > 1.0
+                ):
+                    raise HookUnavailable
             if deadline <= time.time():
                 raise HookUnavailable
             if self.server.admission_closed:
                 raise HookUnavailable(self.server.admission_closed_reason)
-            result = self.server.decide(kind, payload, deadline)
-            result_valid = isinstance(result, dict)
-            if not result_valid:
-                result = {}
+            raw_result = self.server.decide(kind, payload, deadline)
+            result_valid = isinstance(raw_result, dict)
+            result = cast(Payload, raw_result) if result_valid else {}
             if os.environ.get("PYTEST_CURRENT_TEST"):
                 try:
                     delay_s = float(payload.get("__test_delay_s") or 0.0)
@@ -128,9 +154,12 @@ class _Handler(socketserver.StreamRequestHandler):
                     delay_s = 0.0
                 if delay_s > 0:
                     time.sleep(delay_s)
-            response = {
+            owner = self.server.owner
+            if owner is None:
+                return
+            response: Payload = {
                 "version": 1,
-                "capabilities": self.server.owner.capabilities(),
+                "capabilities": owner.capabilities(),
                 "result": result,
             }
             self.wfile.write(
@@ -160,10 +189,10 @@ class HookIpcServer:
 
     def __init__(
         self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None,
-        read_demand_lock=None,
-        native_mutation_decide: Callable[[str, dict, float], dict | None] | None = None,
+        read_demand_lock: _AdmissionLock | None = None,
+        native_mutation_decide: Callable[[str, Payload, float], Payload | None] | None = None,
         worktree_changed: Callable[[str | None], None] | None = None,
-    ):
+    ) -> None:
         self.token = secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
         self.server = _Server(
@@ -182,13 +211,15 @@ class HookIpcServer:
         self._read_demand_admitted = read_demand_admitted
         self._native_mutation_decide = native_mutation_decide
         self._worktree_changed = worktree_changed
-        self._read_demand_lock = read_demand_lock if read_demand_lock is not None else threading.RLock()
+        self._read_demand_lock: _AdmissionLock = (
+            read_demand_lock if read_demand_lock is not None else threading.RLock()
+        )
 
     def start(self) -> None:
         self.thread.start()
 
-    def rendezvous(self) -> dict:
-        host, port = self.server.server_address
+    def rendezvous(self) -> Payload:
+        host, port = cast(tuple[str, int], self.server.server_address)
         return {
             "hook_transport": "tcp",
             "hook_endpoint": f"{host}:{port}",
@@ -239,7 +270,7 @@ class HookIpcServer:
             self.server.admission_closed = False
             self.server.admission_closed_reason = None
 
-    def _on_read_demand(self, request: dict) -> None:
+    def _on_read_demand(self, request: Payload) -> None:
         if (
             set(request) != {"version", "token", "kind", "hook_generation", "deadline"}
             or type(request.get("version")) is not int
@@ -265,7 +296,7 @@ class HookIpcServer:
         finally:
             self._read_demand_lock.release()
 
-    def _on_native_mutation(self, request: dict) -> None:
+    def _on_native_mutation(self, request: Payload) -> None:
         if (
             set(request) != {"version", "token", "kind", "hook_generation", "deadline", "payload"}
             or type(request.get("version")) is not int
@@ -298,7 +329,7 @@ class HookIpcServer:
         finally:
             self._read_demand_lock.release()
 
-    def _on_worktree_changed(self, request: dict) -> None:
+    def _on_worktree_changed(self, request: Payload) -> None:
         if (
             set(request) != {"version", "token", "kind", "hook_generation", "deadline", "payload"}
             or type(request.get("version")) is not int
@@ -365,7 +396,7 @@ class HookIpcServer:
 _DEFAULT_CLIENT_TIMEOUT_S = 1.0
 
 
-def _lock_matches_installation_context(lock: dict) -> bool:
+def _lock_matches_installation_context(lock: Payload) -> bool:
     """Whether ``lock``'s installation-context fields match THIS process's
     own selected cell -- mirrors ``scripts/hook_client.py``'s
     ``_lock_matches_context`` (that script re-derives the context itself
@@ -399,7 +430,7 @@ def _lock_matches_installation_context(lock: dict) -> bool:
 
 def send_best_effort(
     kind: str,
-    payload: dict,
+    payload: Payload,
     *,
     lock_path: Path | None = None,
     timeout: float = _DEFAULT_CLIENT_TIMEOUT_S,

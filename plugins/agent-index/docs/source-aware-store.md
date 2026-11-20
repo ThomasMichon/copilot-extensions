@@ -138,7 +138,11 @@ corresponding native canonical effect under that same already-owned exact
 writer. The current receipt must bind the canonical role and every model table;
 the complete native/retained inventories, schemas and connection paths must
 agree. No cached handle or failed open can select another table or create a
-replacement. Both canonical chunk-ID/file-path indices, any already-present
+replacement. The only permitted auxiliary table is the existing component
+ordering ledger, qualified through its own retained identity/version,
+metadata-bearing schema and prepared zero-tail point index. Canonical effects
+neither change that ledger nor adopt arbitrary auxiliary or model tables.
+Both canonical chunk-ID/file-path indices, any already-present
 source index and every bound vector chunk-ID index must be prepared with zero
 uncovered physical rows. Every table that will change needs a reserved segment.
 Identical raw fields retain the canonical timestamp and table version; identical

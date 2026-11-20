@@ -15,7 +15,7 @@ from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
 
 def prepare_mutation(
-    owner: Any, conn: sqlite3.Connection, row: sqlite3.Row, binding: dict, *,
+    owner: Any, conn: sqlite3.Connection, row: sqlite3.Row, binding: dict[str, Any], *,
     completion: bool | None, ts: float,
 ) -> bool:
     """Validate and record a retry/completion; True is an unchanged exact replay."""
@@ -64,6 +64,10 @@ def prepare_mutation(
     base = {name: binding[name] for name in expected_fields - {"action"}}
     if action == "retry":
         owner.require_worker_admission()
+        if owner._spawn_admission is not None:
+            owner._spawn_admission(task, row["reserved_by"], (
+                assignment["registration_id"], assignment["machine"], assignment["env"],
+            ), row["driver"], retained)
         task, assignment, row = _current(
             owner, conn, row["key"], binding["generation"], binding["startup_revision"], ts,
             binding["task_id"],
@@ -152,7 +156,7 @@ def prepare_mutation(
     return False
 
 
-def record_retry(owner: Any, key: str, binding: dict) -> SpawnReservation:
+def record_retry(owner: Any, key: str, binding: dict[str, Any]) -> SpawnReservation:
     """Use the existing spawn publication owner, with no external effect in its lock."""
     action = binding["action"]
     completion = False if action == "retry" else (

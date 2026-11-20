@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable
+from contextlib import AbstractContextManager, ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Protocol, cast
@@ -17,6 +18,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 Parser = Callable[[bytes], tuple[str, bytes]]
+ResidentFactory = Callable[..., list[dict[str, object]]]
 Observation = tuple[int, str, int]
 BOUNDARIES = (
     "prepared-admission-entry", "prepared-scope-checked", "prepared-identity-checked",
@@ -32,8 +34,9 @@ class Fixture(Protocol):
     NATIVE_WRITE_PHASE_WRITER: str
     instrument_prepared_admission: Callable[[str], str]
     native_write_fixture_stderr: Parser
+    registered_policy_resident: Callable[..., AbstractContextManager[list[dict[str, object]]]]
     test_registered_file_local_write_reuses_original_guard_facts: Callable[
-        [Path, pytest.MonkeyPatch, pytest.CaptureFixture[str], str, str], None
+        [Path, pytest.MonkeyPatch, pytest.CaptureFixture[str], str, str, ResidentFactory], None
     ]
 
 
@@ -241,9 +244,11 @@ def test_registered_patch_membership_tail(
         lambda source: instrument(original_instrument, source),
     )
     monkeypatch.setattr(original, "native_write_fixture_stderr", observe)
-    original.test_registered_file_local_write_reuses_original_guard_facts(
-        tmp_path, monkeypatch, capsys, shell, "patch-input",
-    )
+    with ExitStack() as stack:
+        original.test_registered_file_local_write_reuses_original_guard_facts(
+            tmp_path, monkeypatch, capsys, shell, "patch-input",
+            lambda *args, **kwargs: stack.enter_context(original.registered_policy_resident(*args, **kwargs)),
+        )
     assert [name for _, name, _ in observed] == list(BOUNDARIES), traces
     with capsys.disabled():
         print(json.dumps({"registered_patch_membership_tail": {

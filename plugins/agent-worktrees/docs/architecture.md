@@ -3610,20 +3610,21 @@ the Picker moved to `worktree-manager/`.
 ### Native Windows pre-tool entry
 
 `hooks.json` dispatches through `scripts/pre-tool-hook.ps1` (or its installed
-`bin` copy). A partial installation without that file retains the previous
-standalone Python entry. Existing sessions that cached the old command keep
+`bin` copy). Its Windows command entry and transitive membership/policy path
+never start Python. A partial installation reports unavailable evaluation,
+without invoking a standalone compatibility client. Existing sessions that cached the old command keep
 using `hook_client.py`; a payload refresh is not proof their command changed.
 
 The declared scripts root, native script and admission-helper filesystem paths
 use `IO.Path.Combine` directly. A prepared native read therefore does not
 initialize `Microsoft.PowerShell.Management` merely to join these fixed child
-paths. Source/context/legacy selection and the original runtime, policy and CWD
-compatibility routes remain unchanged.
+paths. Source/context/legacy selection remains installation-scoped; no runtime
+resolver, installer or service ensure runs in a tool callback.
 
-For the default installation, `view`, `rg` and `glob` can return without Python,
+With current prepared membership, `view`, `rg` and `glob` can return without Python,
 IPC, repository discovery or runtime selection. `hook-read-policy.json` binds
 that exemption to the exact normalized sources of all four guards. Missing,
-changed, linked or unrecognized guard/contract files retain Python policy;
+changed, linked or unrecognized guard/contract files require resident policy;
 installation-context admission is never skipped. Regenerate the contract with
 `python tools/render-hook-read-policy.py` after guard changes. The deployment
 contract tests also exercise each real guard's read decision, not just hashes.
@@ -3666,11 +3667,14 @@ There is no new caller syntax or package-version handshake. Regenerate the
 contract after relevance-source changes too. Eligible events return an empty
 no-op response without runtime selection, policy-worker startup or Management
 module initialization; that is not an explicit permission grant. Protected and
-uncertain events retain the original raw payload, guard decisions and owned
-worker cleanup. Nonmatching PowerShell commands with an object-command or
+uncertain events retain the complete invocation and original guard decisions
+through the selected resident. Nonmatching PowerShell commands with an object-command or
 raw-string carrier can additionally read the bounded contract while declining
 the proof; their source hashes are not scanned merely to reject an undeclared
 command.
+The original anchor guard also applies its own fact-independent no-write shell
+predicate before loading the anchor inventory. Write commands retain the same
+inventory, target and live break-glass checks.
 
 Prepared membership also permits complete all-read native batches of
 `view`, `rg`, `glob` and those exact-literal `powershell`/`pwsh` calls.
@@ -3718,7 +3722,7 @@ is retired and no caller or package-version handshake is added.
 The declaration remains bounded to 4096 bytes. Compiled predicates are local to
 one event and reused across members; the same declaration is loaded once and the
 same shared sources are verified once. Original source/input/member bounds,
-current control/context/admission checks and policy-worker cleanup remain
+current control/context/admission checks remain
 unchanged. This is native source-proof optimization, not a new permission table,
 shell evaluator, runtime rollout or installed/composed-throughput qualification.
 
@@ -3765,8 +3769,8 @@ not a replacement patch parser or validator.
 Argument strings containing literal original header lines retain their raw
 interpretation before JSON decoding, so permissive JSON comments cannot hide
 a target that the original strict guards would inspect as freeform input.
-The entry discovers optional facts support from the loaded admission function;
-an older helper keeps its original call and policy path without that proof.
+The native entry uses the prepared admission function directly. Missing,
+incompatible or stale prepared evidence never invokes the Python admission helper.
 
 The single-read contract hashes four bounded guard sources; all-read batches
 add the two existing normalizer/reader sources (at most 128 KiB per file).
@@ -3778,11 +3782,70 @@ partial helper upgrade from reusing a stale exemption. A future lifecycle- or
 daemon-published generation may replace this repeated check after its own
 freshness/admission contract is qualified; no parallel runtime selector is added.
 
-Other input retains the existing selected-runtime resolver in read-only mode
-for default installations, with the old ambient Python compatibility path when
-no slot is available. Explicit installation contexts retain the existing Python
-validator, not a legacy-root substitute. Python receives UTF-8 input explicitly
-without a CLI/binstub or self-provisioning invocation. Unavailable evaluation
+Other Windows input uses the existing authenticated loopback resident transport.
+Both discovery and the reply must advertise `native-tool-policy-v1`; the request
+binds the advertised resident generation. The elected resident performs managed
+membership and current original-guard evaluation in process, including complete
+native batches, and receives only the caller's named guard/nudge switches, never
+caller-selected installation roots. Its original non-native request form remains
+available to older callers. New callers facing an old, missing, closed, stale or
+incompatible resident report unavailable evaluation without an interpreter
+fallback, retry, service start or provider-version guess. Namespaced Windows
+requests additionally require current prepared installation-context admission;
+they never validate a cold cell by starting the Python SDK or substitute the
+legacy root.
+
+When `sessionId` is absent, transport resolves it from the caller's
+`COPILOT_AGENT_SESSION_ID` before resident admission. Explicit payload values,
+including null, are preserved. Missing caller environment becomes an explicit
+null, never a fallback to the resident's session identity.
+The same boundary resolves an absent `cwd` from payload `workingDirectory`,
+then caller `COPILOT_PROJECT_DIR`. Explicit values, including null, are preserved;
+an absent caller directory becomes null rather than the resident's directory.
+Pre-tool transport reads its own Windows token without requesting elevation and
+forwards that Boolean separately from policy switches. Native cross-repository
+evaluation uses this caller value, never the resident's token; missing or invalid
+values retain non-elevated restrictions. Standalone guard calls keep their existing
+process-token behavior.
+
+Native frames do not establish the caller's GitHub account/host authority or a
+caller-owned external-observation scope. The original supersede guard still
+classifies close attempts and honors the forwarded switches, but its identity
+and PR lookups report unavailable instead of using resident credentials or
+starting `gh`. No raw subprocess, timed-out observation descendant or
+compatibility worker is created on this path. Independent denials remain in
+force; unavailable is not permission. Standalone observation ownership is
+unchanged.
+Repeated recovery context is deduplicated per boundary within one request.
+Native result text is limited to 60 KiB of ASCII-escaped standard JSON including
+Windows PowerShell 5's expansion of HTML-sensitive characters, reserving space
+inside the existing response frame and the client reserialization. Confirmed decisions are retained;
+excess context is truncated before a decision reason, with an explicit notice.
+An oversized reason retains its prefix and a truncation notice. Maximum-batch
+controls cover both repeated unavailability and large valid guard responses.
+An expired native request starts no guard work. Evaluation checks the original
+monotonic deadline before each next guard load and decision, including across
+batch members. Exhaustion retains decisions already obtained and marks remaining
+evaluation unavailable. This is cooperative between-guard cancellation, not
+preemption of an in-progress local guard or an extension of the client clock.
+
+The transport has one 500 ms allocation/connect/write/read budget. Pre-tool
+requests retain the existing 2 MiB newline-frame bound; post requests and typed
+responses remain bounded to 64 KiB. Pre-tool requests
+preserve the complete invocation. Post-tool requests discard only `toolResult`
+and `tool_result`, which accounting and target invalidation do not consume.
+An ambiguously delivered post request is not resent and its completion remains
+explicitly unconfirmed. This changes neither the POSIX Python entry nor the
+separately selected SDK pilot below. A source change does not update cached
+commands or prove installed/composed latency.
+
+The prepared post-tool entry validates native membership once for the current
+event and passes that result to its prepared read helper. Direct helper calls
+still perform their own validation by default. This is same-call reuse, not a
+cross-event cache; fact freshness, accounting and demand notification remain
+unchanged.
+
+Unavailable evaluation
 returns bounded recovery `additionalContext` without a fabricated permission
 decision; it is not authorization or proof that policy was satisfied. Confirmed
 protected violations retain their existing deny/ask outcomes.
@@ -3790,28 +3853,19 @@ protected violations retain their existing deny/ask outcomes.
 Native JSON readers reject non-object roots before PowerShell can enumerate
 a singleton array. On PowerShell 6+, the pre-tool reader reuses managed
 admission's same-engine JSON helper instead of initializing the JSON cmdlet
-again. This covers event, stop-state, installation-context and policy-response
-decoding without changing admission or forwarding the decoded event to Python:
-the original raw UTF-8 input still reaches the policy worker. PowerShell 5
-retains its existing plain serializer and metadata behavior. Non-exempt native
-fallback uses the strict entry and checks
-a bounded, typed object response before forwarding diagnostics. Empty,
-malformed and down-level unknown-entry responses report unavailable evaluation
-without a permission decision. Child UTF-8 settings override inherited
-standard-I/O encodings, including during native fallback.
+again. This covers event, stop-state and policy-response decoding without a
+child interpreter. PowerShell 5 retains its existing plain serializer and
+metadata behavior. Empty, malformed and unsupported resident responses report
+unavailable evaluation without a permission decision.
 Strict hot-stop responses explicitly serialize `{}` without loading guards;
 legacy command-hook stop/no-op responses retain their empty-output behavior.
 Stop overrides must be fully qualified drive/UNC paths, and contract identifiers
 must be strings; relative overrides or array-valued identifiers retain policy.
 
-Native fallback uses the same existing caller-owned SDK worker as the resident
-adapter. The event-local wrapper keeps its stdin lifetime channel open, reads
-both outputs asynchronously, and bounds input transfer, process completion and
-output completion within one 28-second deadline. Its optional base64 frame
-preserves raw multiline JSON bytes. Closing the channel on caller death or
-failure cancels the real worker behind a virtual-environment launcher; the SDK
-owns the policy's descendants under its 25-second budget. The shared installer
-native runner is unchanged; no generic installer lifetime behavior is widened.
+### Standalone policy-worker compatibility
+
+The standalone Python entry and opt-in SDK pilot retain their caller-owned
+worker. The native Windows command entries do not select it.
 
 The worker publishes an event-local monotonic settlement deadline 23 seconds
 after receipt, leaving two seconds for response inside its 25-second execution
@@ -3824,7 +3878,7 @@ Cross-repo and supersede observations share the remaining decision clock;
 supersede calls use the public `OwnedExecutionBudget` SDK seam with 64-KiB stdout
 and 4-KiB stderr caps. Each PR observation retains its 15-second individual cap
 but cannot renew the aggregate clock. Confirmed deny takes precedence, and a
-settled late observation timeout preserves an accumulated ask. The native/SDK
+settled late observation timeout preserves an accumulated ask. The standalone/SDK
 28-second adapter and 30-second host limits are unchanged.
 
 SDK acquisition is lazy for supersede observations: an absent SDK cannot
@@ -3841,7 +3895,7 @@ decision with its retained custody and emits only a bounded internal pending
 envelope. The adapter forwards that decision only after the enclosing SDK's
 positive native settlement callback; unknown enclosing cleanup stays pending.
 
-Explicit installation cells are validated through the existing native
+For standalone policy-worker clients, explicit installation cells are validated through the existing native
 installation-context helper before the read-only runtime resolver selects the
 owning slot. A missing/invalid cell or unavailable owning interpreter produces
 nonblocking recovery context, without substituting an ambient Python lacking the
@@ -3860,8 +3914,8 @@ session-liveness assertion or ownership grant. It starts no monitor, scans no
 CLI processes, writes no demand file and does not wake a sweep or add projects
 to refresh. After completed traffic stops, normal empty-sweep retirement resumes.
 Admission closure, accepted-work draining, supersession, governance and explicit
-shutdown keep their existing independent rules. An absent endpoint still uses
-the existing fallback; ordinary missing-endpoint recovery is not supplied by
+shutdown keep their existing independent rules. An absent endpoint retains
+the caller's documented unavailable/fallback behavior; missing-endpoint recovery is not supplied by
 this retention path.
 
 ### Opt-in resident pre-tool pilot

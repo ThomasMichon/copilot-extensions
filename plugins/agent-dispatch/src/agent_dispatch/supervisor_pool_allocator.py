@@ -37,7 +37,16 @@ def instance_allocation_enabled(
     from .registrar_json import unique_json_fields
 
     try:
-        return pool_instance_identity(json.loads(setting, object_pairs_hook=unique_json_fields)) == instance
+        value = json.loads(setting, object_pairs_hook=unique_json_fields)
+        if isinstance(value, dict) and set(value) == {"instances"}:
+            entries = value["instances"]
+            if not isinstance(entries, list) or not 1 <= len(entries) <= 128:
+                return False
+            # Validate the entire policy before matching: a valid prefix does
+            # not authorize allocation if a later entry is malformed.
+            identities = {pool_instance_identity(entry) for entry in entries}
+            return len(identities) == len(entries) and instance in identities
+        return pool_instance_identity(value) == instance
     except (ValueError, RecursionError):
         return False
 

@@ -51,7 +51,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -59,6 +62,16 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from registry_root import resolve_registry_root
 from tool_call_forms import write_targets
+
+_guard_map: ModuleType | None
+_git_invocation: Callable[
+    [str, str, str], tuple[str | None, list[str], list[tuple[str, str]], bool]
+] | None
+_git_subcommand_writes_worktree: Callable[[str], bool] | None
+_anchor_evaluate: Callable[
+    [str, dict[str, Any], str, list[dict[str, str]]], dict[str, str] | None
+] | None
+literal_write_targets: Callable[[str, str], list[str]] | None
 
 try:
     import guarded_anchor_map as _guard_map
@@ -176,7 +189,9 @@ def _git_targets(eff_seg: str, base: str, tool: str) -> list[str]:
         return []
     return [
         path for kind, path in targets
-        if path and (kind != "work-tree" or _git_subcommand_writes_worktree(subcommand))
+        if path and (kind != "work-tree" or cast(
+            Callable[[str], bool], _git_subcommand_writes_worktree,
+        )(subcommand))
     ] + ([] if overridden else [base])
 
 
@@ -197,7 +212,7 @@ def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
 
 
-def _mode(env) -> str:
+def _mode(env: Mapping[str, str]) -> str:
     m = (env.get("CROSS_REPO_GUARD_MODE") or "").strip().lower()
     return m if m in {"deny", "ask", "warn", "off"} else "deny"
 
@@ -228,7 +243,7 @@ def find_repo_root(start: str) -> Path | None:
     return Path(identity["root"]) if identity else None
 
 
-def _as_args(tool_args) -> dict:
+def _as_args(tool_args: Any) -> dict[str, Any]:
     if isinstance(tool_args, str):
         try:
             parsed = json.loads(tool_args)
@@ -238,7 +253,7 @@ def _as_args(tool_args) -> dict:
     return tool_args if isinstance(tool_args, dict) else {}
 
 
-def _pick(args: dict, keys) -> str | None:
+def _pick(args: dict[str, Any], keys: Iterable[str]) -> str | None:
     for k in keys:
         v = args.get(k)
         if isinstance(v, str) and v:
@@ -262,25 +277,25 @@ def active_break_glass(
         data = json.loads(
             ((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
-        return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
+        return bool(g) and float(cast(dict[str, Any], g).get("expires_at_ms", 0)) > time.time() * 1000
     except (OSError, ValueError, TypeError, KeyError):
         return False
 
 
 # --- Delegation nudge ---------------------------------------------------------
 
-def _machine_hint(g: dict) -> str:
+def _machine_hint(g: dict[str, Any]) -> str:
     locus = g.get("locus") or {}
     pref = locus.get("preferred") or ""
     if pref.startswith("machine:"):
-        return pref[len("machine:"):]
+        return cast(str, pref[len("machine:"):])
     machines = locus.get("machines")
     if isinstance(machines, list) and machines:
-        return machines[0]
+        return cast(str, machines[0])
     return "<its host>"
 
 
-def _channel_hint(g: dict) -> str:
+def _channel_hint(g: dict[str, Any]) -> str:
     name = g.get("name", "")
     resolve = f"`agent-worktrees related resolve {name}`"
     delegate = g.get("delegate")
@@ -295,7 +310,7 @@ def _channel_hint(g: dict) -> str:
             f"(run {resolve} for the exact target)")
 
 
-def _deny_reason(g: dict, detail: str) -> str:
+def _deny_reason(g: dict[str, Any], detail: str) -> str:
     name, delegate, path = g.get("name", ""), g.get("delegate", ""), g.get("path", "")
     posture = g.get("posture")
     if posture:
@@ -329,7 +344,7 @@ def _deny_reason(g: dict, detail: str) -> str:
 def load_guarded_roots(
     root: str, home: Path, deadline: float | None = None,
     *, registry_root: Path | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Read prepared facts only; ``deadline`` remains a compatibility argument."""
     if _guard_map is None:
         return []
@@ -348,18 +363,18 @@ def load_guarded_roots(
             "confirmed roots remain usable. Run agent-worktrees refresh-guards to retry.",
             file=sys.stderr,
         )
-    return result.roots + (getattr(result, "postures", None) or [])
+    return cast(list[dict[str, Any]], result.roots + (getattr(result, "postures", None) or []))
 
 
 def _is_elevated() -> bool:
     if os.name == "nt":
         import ctypes
 
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    return os.geteuid() == 0
+        return bool(getattr(ctypes, "windll").shell32.IsUserAnAdmin())
+    return cast(int, getattr(os, "geteuid")()) == 0
 
 
-def _posture_mode(row: dict, env, default: str) -> str:
+def _posture_mode(row: dict[str, Any], env: Mapping[str, str], default: str) -> str:
     if row.get("posture") != "worktree":
         return default
     if _truthy_off(env.get("ANCHOR_WRITE_GUARD")):
@@ -370,8 +385,8 @@ def _posture_mode(row: dict, env, default: str) -> str:
 
 # --- Core evaluation ----------------------------------------------------------
 
-def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell",
-               identity_cache: dict | None = None) -> dict | None:
+def _shell_hit(cmd: str, cwd: str, guarded: list[dict[str, Any]], *, tool: str = "shell",
+               identity_cache: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Return a guarded-repo hit for a shell command that WRITES into a guarded
     repo, or None. Fires only on a real write target (redirect target /
     command-position write verb argument / git mutation via ``-C <repo>`` or the
@@ -393,12 +408,12 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell",
             reason = _deny_reason(g, "(a shell command writes into it).")
             if at_write_cmd or ">" in seg_hay:
                 for target in targets:
-                    if _guard_map.matches(_resolve(target, eff_cwd), g, identity_cache=identity_cache):
+                    if cast(ModuleType, _guard_map).matches(_resolve(target, eff_cwd), g, identity_cache=identity_cache):
                         return {**g, "reason": reason}
         for git_cwd in _git_targets(eff, eff_cwd, tool):
             for g in guarded:
                 gp = g.get("path")
-                if gp and _guard_map.matches(git_cwd, g, identity_cache=identity_cache):
+                if gp and cast(ModuleType, _guard_map).matches(git_cwd, g, identity_cache=identity_cache):
                     return {**g, "reason": _deny_reason(
                         g, "(a shell command writes into it).")}
         # Follow an in-command ``cd`` to a resolvable path for later segments.
@@ -408,8 +423,8 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell",
     return None
 
 
-def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict],
-             *, identity_cache: dict | None = None) -> dict | None:
+def evaluate(tool: str, args: dict[str, Any], cwd: str, guarded: list[dict[str, Any]],
+             *, identity_cache: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Return the guarded repo hit (with a ``reason``), or None to allow."""
     if not guarded or _guard_map is None:
         return None
@@ -438,7 +453,7 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict],
     return None
 
 
-def _hit_to_output(hit: dict, mode: str) -> dict | None:
+def _hit_to_output(hit: dict[str, Any], mode: str) -> dict[str, str] | None:
     if not hit or mode == "off":
         return None
     if mode == "warn":
@@ -450,8 +465,11 @@ def _hit_to_output(hit: dict, mode: str) -> dict | None:
             "permissionDecisionReason": hit["reason"]}
 
 
-def decide(payload: dict, *, env=None, home=None,
-           guarded_roots=None, deadline: float | None = None) -> dict | None:
+def decide(
+    payload: dict[str, Any], *, env: Mapping[str, str] | None = None,
+    home: str | Path | None = None, guarded_roots: list[dict[str, Any]] | None = None,
+    deadline: float | None = None, caller_elevated: bool | None = None,
+) -> dict[str, str] | None:
     """Return a hook-output decision dict, or None to allow. Pure/injectable."""
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()
@@ -489,7 +507,7 @@ def decide(payload: dict, *, env=None, home=None,
     if not guarded:
         return None
     if any(row.get("elevated") for row in guarded):
-        elevated = _is_elevated()
+        elevated = _is_elevated() if caller_elevated is None else caller_elevated
         guarded = [
             {**row, "posture": "elevated"}
             if row.get("elevated") and not elevated and row.get("posture") != "reference"
@@ -498,7 +516,7 @@ def decide(payload: dict, *, env=None, home=None,
             if row.get("delegate") != "none" or row.get("posture")
             or row.get("elevated") and not elevated
         ]
-    identity_cache = {}
+    identity_cache: dict[str, Any] = {}
     for decision_mode in ("deny", "ask", "warn"):
         candidates = [row for row in guarded if _posture_mode(row, env, mode) == decision_mode]
         while candidates:
