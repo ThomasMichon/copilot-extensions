@@ -37,7 +37,6 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Cancelled Handoff Obligations](active/cancelled-handoff-obligations/README.md) | Active; local creator closeout flow qualified; whole-file typing prerequisite, exact-source review/CI and finite acceptance pending | #4619 OS3-OS4/OSV2 from #10372 only; existing task/ledger owners and all other custody lanes retained; no live effects or rollout |
 | [Consumer Telemetry Sink Adoption](active/consumer-telemetry-sink-adoption/README.md) | Draft; command-only configuration, bounded delivery, real producer adoption and release sequence | #13545; preserves #7935/#5900 and producer custody; HTTP and adopter rollout remain separate |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |
@@ -206,6 +205,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Cancelled Handoff Obligations](2026/11/20%20cancelled-handoff-obligations/README.md) | Done for finite source scope; #13644 merged,242 contained controls plus final parser/transfer proof and strict40-file original-profile CI qualify | Only #4619 OS3-OS4/OSV2 accepted across five original/refined rows; original discussion reservation complete, parent Open and all other custodians retained; no rollout |
 | [Verified Owner Projection](2026/11/20%20verified-owner-projection/README.md) | Done; #13586 merged,159 exact-source Windows cases and strict three-file Linux/Windows CI qualify | Only #4619 OA1-OA3/OAV1-OAV3 accepted; original discussion reservation complete, parent Open and all other custodians retained; no rollout |
 | [Registry Local-Only Sync](2026/11/20%20registry-local-only-sync/README.md) | Done; reviewed local-only skip source merged,149 exact-source Windows cases and strict four-file CI qualify | #4173 A5 / historical #4228 only; finite original reservation complete, whole project-context parent Open; no rollout |
 | [Configured Worktree Base Preparation](2026/11/17%20worktree-base-preparation/README.md) | Done for finite source scope; #13033 merged after clean final-head review, required CI and 195-case exact-source qualification | #13013 closed and original claim completed; preserves #4093 fallback, #4303 resume, contributor/workspace custody and #3336 promotion; no rollout |
