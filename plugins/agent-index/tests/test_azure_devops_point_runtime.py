@@ -16,7 +16,7 @@ import test_azure_devops_point_worker as worker
 from agent_index.engine.client import EngineClient
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
 from agent_index.indexing.point_worker_host import PointWorkerHost
-from agent_index.indexing.task_store import TaskRecord, TaskStatus
+from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.worker import run_worker
 from agent_index.sources.azure_devops_point_runtime import run_configured_azure_devops_points
 from agent_index.store.source_layout import SourceLayoutError
@@ -336,6 +336,87 @@ def test_host_returns_dispatch_refusal_and_retains_failed_pin_for_explicit_retry
             await host.__aenter__()
         with pytest.raises(RuntimeError, match="not accepting"):
             await host.resume()
+
+    asyncio.run(exercise())
+
+
+def test_queue_cancellation_cannot_revoke_hosted_native_application(
+    application: worker.Fixture,
+) -> None:
+    from agent_index.indexing.runner import TaskRunner
+
+    f = application
+    task = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+    legacy = f.tasks.enqueue("legacy")
+    entered, release = threading.Event(), threading.Event()
+    events: list[str] = []
+
+    class Events:
+        def publish(self, event: str, payload: dict[str, Any]) -> None:
+            events.append(event)
+
+    competing = TaskStore(f.config.data_dir / "tasks.db")
+    runner = TaskRunner(competing, Events())
+
+    def block_embedding() -> None:
+        # A callback cannot revoke its own reentrant source-writer ownership.
+        assert not competing.cancel(task.id)
+        entered.set()
+        assert release.wait(8), "Test did not release its native worker"
+
+    f.hook = block_embedding
+
+    async def exercise() -> None:
+        async with PointWorkerHost(
+            config=f.config, point_executor=lambda selected: run(f, selected),
+        ) as host:
+            active = asyncio.create_task(host.run(task.id))
+            try:
+                assert await asyncio.to_thread(entered.wait, 5)
+                pinned = f.tasks.get_task(task.id)
+                assert pinned is not None and pinned.point_claim_id is not None
+                assert not await asyncio.to_thread(runner.cancel_task, task.id)
+                assert f.tasks.get_task(task.id) == pinned and not events
+                assert await asyncio.to_thread(runner.cancel_task, legacy.id)
+                assert events == ["task_cancelled"]
+                assert not active.done() and not await host.drain(timeout=0)
+                release.set()
+                assert await active == 0
+                completed = f.tasks.get_task(task.id)
+                assert completed is not None and completed.status == TaskStatus.COMPLETE
+                assert not competing.cancel(task.id)
+            finally:
+                release.set()
+                await active
+
+    asyncio.run(exercise())
+
+
+def test_settled_failed_point_claim_can_be_cancelled_and_retried(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    task = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+
+    def interrupt() -> None:
+        raise RuntimeError("fixture interrupted hosted embedding")
+
+    async def exercise() -> None:
+        async with PointWorkerHost(
+            config=f.config, point_executor=lambda selected: run(f, selected),
+        ) as host:
+            f.hook = interrupt
+            assert await host.run(task.id) == 1
+            pinned = f.tasks.get_task(task.id)
+            assert pinned is not None and pinned.point_claim_id is not None
+            assert f.tasks.cancel(task.id)
+            retried = f.tasks.retry(task.id)
+            assert retried is not None and retried.point_claim_id == pinned.point_claim_id
+            assert retried.change_hints == pinned.change_hints and f.retained_count() == 2
+            f.reopen()
+            f.hook = None
+            assert await host.run(task.id) == 0
+            assert not f.provider.body_reads and f.calls
 
     asyncio.run(exercise())
 

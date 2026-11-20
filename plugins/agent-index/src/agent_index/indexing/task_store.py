@@ -15,6 +15,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -647,17 +648,38 @@ class TaskStore:
     # ── Cancel ───────────────────────────────────────────────
 
     def cancel(self, task_id: str) -> bool:
-        """Cancel a queued task. Running tasks are cancelled via the runner."""
+        """Cancel queued work, refusing point cancellation during native execution.
+
+        Point workers retain a parked row while owning the source writer. Do
+        not revoke that row until its application and completion have settled.
+        Legacy running tasks are still cancelled through their detached runner.
+        """
+        from .source_ownership import SourcePipelineBusy, source_writer
+
         now = time.time()
         conn = self._connect()
         try:
-            affected = conn.execute(
-                """UPDATE tasks
-                   SET status = 'cancelled', finished_at = ?, updated_at = ?
-                   WHERE id = ? AND status IN ('queued', 'queued_hints', 'queued_hints_v2')""",
-                (now, now, task_id),
-            ).rowcount
-            conn.commit()
+            row = conn.execute(
+                "SELECT change_hints_version FROM tasks WHERE id = ?", (task_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            ownership = (
+                source_writer(self.data_dir, allow_reentry=False)
+                if row["change_hints_version"] != 1 else nullcontext()
+            )
+            try:
+                with ownership:
+                    affected = conn.execute(
+                        """UPDATE tasks
+                           SET status = 'cancelled', finished_at = ?, updated_at = ?
+                           WHERE id = ? AND status IN
+                               ('queued', 'queued_hints', 'queued_hints_v2')""",
+                        (now, now, task_id),
+                    ).rowcount
+                    conn.commit()
+            except SourcePipelineBusy:
+                return False
             if affected:
                 log.info("Task %s cancelled (was queued)", task_id)
             return affected > 0

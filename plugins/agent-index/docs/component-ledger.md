@@ -473,6 +473,16 @@ Cancelling the drain observer also leaves the active operation owned.
 remain alive until context exit or stop settles, not merely until drain times
 out. There is no bounded thread-termination guarantee.
 
+The supported `TaskStore.cancel()` API acquires the same data-directory source
+writer before cancelling point work. It returns false without changing the row
+when another thread/process owns that writer, or when called reentrantly by
+the current owner. This matters because a running point claim still has parked
+queue status. After the owner settles, cancellation and explicit retry retain
+the immutable pin and pending recovery material. Legacy queued cancellation
+does not acquire this lock. The lock does not fence raw SQL or older,
+nonparticipating cancellation implementations; it is not a new running state,
+cross-version adoption contract or cooperative interruption of native work.
+
 This Python-only owner is not yet attached to the service or `TaskRunner`.
 Their detached-worker stop/drain semantics remain unchanged and do not qualify
 in-process cutover. No automatic task selection, shared-queue coordination,
