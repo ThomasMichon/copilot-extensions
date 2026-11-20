@@ -29,7 +29,7 @@ from agent_index.sources.azure_devops_point_worker import run_azure_devops_point
 from agent_index.store.component_ledger import ComponentLedger, initialize_component_ledger
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
-from agent_index.store.source_layout import LAYOUT, initialize_source_store
+from agent_index.store.source_layout import LAYOUT, SourceLayoutError, initialize_source_store
 
 subject = named.subject
 SCOPE = "account/endpoint/query"
@@ -94,7 +94,7 @@ class Client:
 @pytest.fixture
 def application(
     subject: tuple[named.Provider, AzureDevOpsConnector, WorkItemEligibility],
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
 ) -> Fixture:
     provider, connector, expected = subject
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
@@ -109,9 +109,12 @@ def application(
     tasks = TaskStore(config.data_dir / "tasks.db")
     task = tasks.enqueue(hints.source, change_hints=hints)
     claim = PendingPointClaim.from_task(tasks.pin_point_claim(task.id, expected_hints=hints))
-    store = initialize_source_store(config, point_scope=hints.scope)
-    prepare_ingestion_indices(store, max_rows=0, point_scope=hints.scope)
-    initialize_component_ledger(config, store, point_scope=hints.scope)
+    store_scope = hints.scope
+    if getattr(request, "param", False):
+        store_scope = replace(hints, binding=replace(hints.binding, query_context="other")).scope
+    store = initialize_source_store(config, point_scope=store_scope)
+    prepare_ingestion_indices(store, max_rows=0, point_scope=store_scope)
+    initialize_component_ledger(config, store, point_scope=store_scope)
     paths = PathIndex(config.data_dir / "path_index.db")
     config.state_file.write_text('{"poll":"unchanged"}')
     return Fixture(config, store, paths, tasks, claim, provider, connector)
@@ -292,5 +295,14 @@ def test_invalid_target_or_retry_budget_refuses_before_provider_io(
     claim = replace(f.claim, hints=replace(f.claim.hints, targets=(target,)))
     with pytest.raises(ValueError):
         f.run(claim=claim)
+    assert not f.provider.requests and not f.calls
+    assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, SCOPE) is None
+
+
+@pytest.mark.parametrize("application", [True], indirect=True)
+def test_incompatible_native_point_selection_refuses_before_acquisition(application: Fixture) -> None:
+    f = application
+    with pytest.raises(SourceLayoutError):
+        f.run()
     assert not f.provider.requests and not f.calls
     assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, SCOPE) is None

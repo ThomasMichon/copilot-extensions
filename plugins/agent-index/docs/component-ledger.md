@@ -359,6 +359,8 @@ claim, scope=..., paths=..., tasks=..., ledger=..., clients=..., max_rows=...,
 progress_cb=...)` composes the named-version adapter with this worker. The caller
 must already select a compatible, bootstrapped point domain and own client
 lifetime. It is not a new selected-callable capability or ordinary runner path.
+The existing domain operation verifies the actual native point selection before
+provider acquisition or pending writes; its exclusion is released before HTTP.
 
 The existing source writer spans fresh qualification of every distinct claimed
 item, exact named-version acquisition, immutable `PreparedPoints` retention and

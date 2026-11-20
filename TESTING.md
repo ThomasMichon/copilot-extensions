@@ -7729,7 +7729,8 @@ native content/model/ledger application, completion and named reads. It covers
 new and partially acquired claims, retained-body reuse with fresh principal/
 query checks, eligibility loss during embedding and after publication,
 cancellation, trailing claims, completed retry without provider access,
-writer/owner exclusion, target limits and the shared retry cap. Select it with
+writer/owner exclusion, pre-acquisition native-scope refusal, target limits and
+the shared retry cap. Select it with
 `--test-file tests/test_azure_devops_point_worker.py --allow-explicit-tiers`;
 it can share one bounded runner with the existing named-reader and retained-worker
 packets. Four actor-free cases in `test_point_completion_contract.py` cover the

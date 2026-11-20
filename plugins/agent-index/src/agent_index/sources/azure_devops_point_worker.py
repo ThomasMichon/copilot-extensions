@@ -87,6 +87,10 @@ def run_azure_devops_point_worker(
         with closing(tasks._connect()) as conn:
             task = tasks._require_point_claim(conn, claim)
         if task.status != TaskStatus.COMPLETE:
+            with ledger._source_domain.operation(
+                ledger._store.content_store.db, point_scope=claim.hints.scope,
+            ):
+                pass
             selections = qualify()
             pending = PendingCrawls(paths)
             payload = pending.read_payload(claim.hints.source, scope)
