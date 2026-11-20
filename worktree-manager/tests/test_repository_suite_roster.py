@@ -101,7 +101,12 @@ def test_linked_overlay_must_resolve(roots: tuple[Path, Path]) -> None:
     target, source = roots
     overlay = target / ".github/copilot/settings.local.json"
     backing = target / "overlay.json"
-    overlay.symlink_to(backing)
+    try:
+        overlay.symlink_to(backing)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows account lacks symlink creation privilege")
+        raise
     with pytest.raises(ValueError, match="dangling link"):
         plan(target, source, gate_paths=(), machines=())
     write(backing, {"enabledPlugins": {"agent-utility@copilot-extensions": False}})
