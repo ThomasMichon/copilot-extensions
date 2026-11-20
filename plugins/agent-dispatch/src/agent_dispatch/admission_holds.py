@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,11 +61,22 @@ def update_hold(path: Path, key: str, reason: str | None) -> None:
     mutate_overrides(path, update, loader=read_holds)
 
 
+def waiter_hold_snapshot(enabled: bool) -> frozenset[str]:
+    """Malformed policy cannot discount demand; the separate admission gate refuses effects."""
+    if enabled:
+        try:
+            return frozenset(read_holds(install_dir() / STATE_NAME))
+        except (OSError, ValueError, RecursionError, TypeError):
+            log.warning("invalid worker admission holds; retaining waiter demand")
+    return frozenset()
+
+
 def inhibited(*, pool: str | None, instance: tuple[str, str, str] | None,
               labels: Iterable[str], kind: str | None, agents: Iterable[str],
-              reservation: Mapping[str, object] | None = None) -> bool:
+              reservation: Mapping[str, object] | None = None, holds: Collection[str] | None = None) -> bool:
     try:
-        holds = read_holds(install_dir() / STATE_NAME)
+        if holds is None:
+            holds = read_holds(install_dir() / STATE_NAME)
         if not holds:
             return False
         candidates: list[tuple[str, tuple[str, ...]]] = []

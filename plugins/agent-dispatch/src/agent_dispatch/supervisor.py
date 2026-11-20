@@ -734,8 +734,14 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 return self.script_body_verdict_fn(pid, start_token) != _tracking().GONE
             except Exception:
                 return True
-        # CLI suspension hands its process to the hibernation layer.
-        return False
+        # A suspended CLI normally releases its process slot. A pending
+        # owner wake for this still-spawned native makes that absence unknown.
+        return bool(
+            reservation.get("state") == SpawnState.SPAWNED and reservation.get("driver") == "cli"
+            and reservation.get("session_handle") and reservation["session_handle"] == task.get("owner_session_id")
+            and task.get("resume_requested") and task.get("wake_operation_id")
+            and task.get("wake_status") in {"pending", "delivering"}
+        )
 
     def cool_dormant_bodies(self) -> int:
         """Cool dormant bodies through the coordinator-held operation guard."""

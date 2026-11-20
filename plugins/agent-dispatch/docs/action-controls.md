@@ -290,6 +290,12 @@ clear sibling holds, start a pool, change the positive
 [allocation selector](pool-claim-start.md), or override a global stop.
 A held managed placement is not permission to claim through the legacy API,
 change the global winner, or borrow capacity from another pool.
+An inhibited **cold waiter** keeps its resume request, wake choice and original
+queue position, but neither occupies a slot nor outranks runnable work while
+its coordinator-local hold applies. Clearing the last matching hold restores
+normal priority without preempting an admitted sibling. Running reservations
+and unresolved sends still count. A supervisor-only hold that the coordinator
+cannot see does not change the coordinator's capacity calculation.
 For managed placement, `--pool` matches **either** the requesting allocator
 ID or the selected registration ID; these need not be the same.
 

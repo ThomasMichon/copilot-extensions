@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .queue import TaskQueue
 
 from .queue_common import Task
+from .admission_holds import waiter_hold_snapshot
 from .queue_pool_startup import (
     COOLDOWN_SECONDS, DECISION_SECONDS, NUDGE_SECONDS, STARTUP_ATTEMPTS, begin_pool_episode,
 )
@@ -199,7 +200,7 @@ def _wait_for_lane(
     # restarts intentionally suspended work outside its pool's authority.
     if pool is not None and pool_lane_load(
         conn, identity, ahead_of=(ts if since is None else since, task.id),
-        cutoff=pool.max_concurrent,
+        cutoff=pool.max_concurrent, waiter_holds=waiter_hold_snapshot(owner._spawn_admission is not None),
     ) < pool.max_concurrent:
         return False
     if since is None:
@@ -372,6 +373,7 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
         load = pool_lane_load(
             probe, identity, cutoff=pool.max_concurrent,
             exclude_key=row["key"], exclude_waiter=row["task_id"],
+            waiter_holds=waiter_hold_snapshot(owner._spawn_admission is not None),
         )
     if load >= pool.max_concurrent:
         raise PoolLaneUnavailable("cold pool body is waiting for a free lane")

@@ -559,7 +559,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 )
                 selected_pool = select_pool(
                     conn, resolved_task, catalog.definitions,
-                    execution_machine=carried_execution_machine,
+                    execution_machine=carried_execution_machine, scoped_admission=self._spawn_admission is not None,
                 )
                 require_selected_instance(expected_instance, selected_pool)
             effective_driver = (driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge"
