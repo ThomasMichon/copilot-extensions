@@ -23,7 +23,7 @@ It adds no migration daemon, second state ledger or remote operation.
 
 Add a local `adopt-terminal --config <absolute-config>` command to the
 standalone service CLI. It requires the already supported explicit terminal
-workspace selection and a populated, valid, service-bound conversation store.
+workspace selection and an existing valid, service-bound conversation store.
 It is not a substitute for fresh provisioning and does not create missing
 replay/cache state, adopt a different namespace/service identity, change a
 credential or reinterpret an unsupported layout.
@@ -43,6 +43,35 @@ prepared intents, acquired mappings, selections or any other adopted extension.
 Unsupported combinations refuse before the first change. Existing terminal
 mapping selection may compose only its already supported prerequisites.
 
+The first finite implementation is a bootstrap-only retained-volume transition.
+Source review showed that retaining generation or unknown-attempt bytes would
+not preserve their original usable reader/recovery interfaces after selection.
+Require the standalone version-three owner, empty generation/pointer directories,
+empty active/compact operation and conversation journals, and empty
+terminal-extension state. Refuse other volumes unchanged
+and retain their original reader; positive populated/recovery-compatible
+transition remains T3 work, not permission to settle or discard accepted work.
+Also require a bijection between full workspace scopes and account/repository
+targets, plus original consumer/account/repository reachability for every
+retained replay record. Every retained watch receipt requires finite original deadlines and
+terminal-compatible `merged`, `closed` or `head_changed` predicates. Other
+predicates refuse without disabling their original native observer; richer
+predicate preservation remains full T3 work. Apply that same policy to new
+registrations on the selected terminal host, without changing strict legacy
+watch capability/receipt shapes. Include acknowledged/cancelled receipts in
+preflight so the original register retry is never stranded by the new reader.
+Advertise the optional terminal admission profile through every watch binding's
+capabilities media profile, not only workspace discovery. The capable consumer
+checks criteria before suspension; settlement still reconciles original receipts.
+It also rechecks existing preparations before emission after a policy change:
+incompatible tasks wake for reinspection, while attempted/unknown requests
+retain original reconciliation custody rather than being discarded or replayed.
+Keep optional old-core refusal and baseline-host compatibility.
+Validate plain lease files
+before PID writes and reject native callback state. Use bounded cache
+eligibility checks and the original monotonic budget, without scanning or
+repeatedly decoding retained generations.
+
 Use the original command's finite operation deadline and PID/held-lease
 checkpoint at every existing adoption boundary. Select the same terminal
 retention, recovery and cache-retirement contracts and bounded capacity used
@@ -55,6 +84,19 @@ The transition enables capable readers; it does not observe a provider,
 create a terminal observation, compact an operation, retire cache content,
 settle a delivery or send a write. In particular, adding terminal storage
 cannot manufacture authoritative terminal evidence for an existing generation.
+Target capture includes already frozen pending events, preserving their
+original IDs/deadlines under the same request budget. Public load/sync output
+projects only bounded workspace retirement metadata; cross-consumer delivery
+and operation custody remains internal even for high fan-out.
+The standalone profile does not synthesize reduced watch notifications from
+workspace retirement. Its selected core declares native-watch preservation;
+the existing native observer continues evaluating fresh predicates, including
+after an unmerged workspace closure, and supplies the complete native snapshot
+and triggering head. Retirement and native application resolve elapsed original
+deadlines before success evidence. No retired workspace bodies are restored.
+Native observation also retains its original pre-IO epoch fence: a delayed read
+spanning workspace close/reopen refuses unchanged, while a freshly captured read
+keeps its complete native payload.
 
 ## Interrupted adoption and skew
 
@@ -81,17 +123,21 @@ probe followed by a legacy provisioning fallback.
 
 ## Serial delivery and acceptance
 
-- [ ] Review this contract before implementing the command or changing retained
-  host adoption.
-- [ ] Implement the local existing-owner transition without changing baseline
+- [x] Review this contract before implementing the command or changing retained
+  host adoption (#13488; current-head Copilot approval and required green CI).
+- [x] Implement the local existing-owner transition without changing baseline
   provisioning, serving, remote workspace contracts or physical retirement.
 - [ ] Qualify a populated baseline volume, preserving original replay/cache and
   unknown-effect identities through transition and fresh-reader restart.
-- [ ] Cover actual competing service/transition lease ownership, failed drain,
+  The finite bootstrap path qualifies an existing empty workspace cache and
+  terminal-compatible finite pending replay. Populated cache/active or compact operation volumes
+  refuse unchanged, with original inspection preserved. Positive populated
+  generation, richer-predicate and recovery compatibility remain with full T3.
+- [x] Cover actual competing service/transition lease ownership, failed drain,
   operation expiry, unsupported core/layout/binding/capacity, partial adoption,
   uncertain replacement and explicit retry. Refusal before adoption must
   preserve bytes; partial progress must remain complete and recoverable.
-- [ ] Exercise the actual CLI and old/new reader directions, optional mapping
+- [x] Exercise the actual CLI and old/new reader directions, optional mapping
   selection and rollback refusal. Confirm no native acquisition, protected
   send, cache deletion or delivery/ACK advancement.
 - [ ] Return to full T3 and both parent acceptance plans. Source controls do not
@@ -100,6 +146,7 @@ probe followed by a legacy provisioning fallback.
 
 ## See Also
 
+- [Focused source qualification and retained boundaries](journal/2026/11.19%20Retained%20terminal%20reader%20transition.md)
 - [Standalone terminal host](../../../services/pr/README.md#optional-terminal-read-hosting)
 - [Coordinated terminal retention](terminal-retention.md)
 - [Canonical effort](README.md)

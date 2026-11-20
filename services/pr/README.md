@@ -471,6 +471,10 @@ It additionally requires the core's separate
 `agent-pull-requests.terminal-target-capture/v1` declaration before selecting
 the budget-aware target callback. The existing remote terminal-read descriptor
 and legacy single-argument callbacks remain unchanged.
+The selected core must also declare
+`agent-pull-requests.terminal-native-watches/v1`: this standalone profile
+retains the native watch observer rather than synthesizing a reduced
+notification from workspace evidence.
 
 Only explicit **fresh** provisioning, under the existing host-local writer
 lease and operation deadline, adopts the core's terminal retention, recovery
@@ -481,6 +485,44 @@ envelope/cache before connector admission, never adopts or repairs either.
 Existing volumes require their own reader/lifecycle transition. Removing the
 selection or rolling back to a reader that cannot understand adopted storage
 refuses without stripping extensions or rewriting the volume.
+
+An explicitly stopped standalone workspace owner can instead run
+`agent-pull-requests-service adopt-terminal --config /run/config/pr-service.json`
+against an eligible existing version-three conversation volume and empty workspace cache.
+This bootstrap path refuses cached generations/current pointers, active or
+compact review operations, conversation records and populated terminal-extension state: preserving
+their files alone would not preserve the original usable reader/recovery paths.
+Keep those volumes with their original owner pending a separately qualified
+transition. Selected workspace scopes and account/repository targets must form
+a one-to-one mapping in both directions. Every retained replay scope must remain
+reachable through the selected consumer/account/repository bindings, including
+frozen pending events and completed receipts. Every retained watch receipt requires
+finite original delivery deadlines and predicates supported by the terminal
+projection (`merged`, `closed`, `head_changed`); the command never invents
+deadlines or reinterprets richer predicates. A refused volume retains its
+original native review/checks watcher and usable pending/ACK reader.
+This includes incompatible acknowledged/cancelled receipts: refuse before
+expansion rather than making an exact original registration retry unusable.
+This separate command
+requires the terminal-reader selection and the same available service writer
+lease; a running or unconfirmed drain refuses without stopping the service.
+It preserves the original service/namespace binding, eligible replay/delivery
+positions and cache scaffold, and performs no acquisition, compaction
+or cache retirement. It neither provisions missing state nor repairs it.
+Native callback state, unsafe linked lease files and incompatible cache
+descriptors also refuse before adoption. Cache eligibility uses bounded
+first-entry checks, not a scan or repeated decoding of retained generations.
+The exact monotonic operation deadline remains enforced; integer storage
+expiry is rounded up so a short budget is not lost at a wall-clock boundary.
+The host-local lease does not fence another host or unsupported direct volume
+users; their exclusion remains with the deployment owner.
+The command returns zero after adoption and one with a sanitized unavailable
+diagnostic on failure. Interrupted adoption may leave complete partial extension
+progress; an explicit retry revalidates that same volume and continues compatible
+steps under its finite invocation budget, without rollback or reprovisioning.
+Old readers or selection rollback refuse expanded storage unchanged.
+Specialized attention/feedback owner layouts are not standalone bootstrap
+volumes and retain their original lifecycle/readers unchanged.
 
 The actual workspace receiver advertises
 [workspace/v2 terminal reads](../../plugins/agent-pull-requests/docs/workspace-tools.md)
@@ -494,9 +536,50 @@ service is installed. Actual physical retirement still belongs to the existing
 explicit lifecycle owner; this selection does not execute it automatically.
 Before native acquisition, the target callback captures matching existing
 watch registrations through the original ReplayStore using that request's
-expiry and budget-aware checkpoint. Accepted terminal notifications therefore
-retain their original delivery identity after reopen; a registration added
-after capture is not retroactively included.
+expiry and budget-aware checkpoint. The retirement record retains original
+delivery custody; a registration added after capture is not retroactively included.
+Capture includes frozen pending registrations, not just subscriptions awaiting
+another provider observation. Their original event IDs and deadlines remain
+in the internal retirement delivery ledger; acquisition does not replace them.
+Workspace retirement sweeps elapsed original watch deadlines under that same
+custody, but does not fire a synthetic watch success. Success still comes from
+the existing native observer, with its complete native notification and head
+SHA. Its actual pre-IO captured retention epoch must still match the current
+workspace epoch; a delayed read spanning close/reopen refuses unchanged.
+Fresh native observations remain usable after an unmerged workspace
+closure, without reopening or restoring retired workspace content. Native
+application also resolves elapsed deadlines before applying success evidence.
+
+The standalone terminal profile applies the same admission policy to **new**
+watch registrations, before any commit. Requests without an original finite
+deadline or with richer predicates receive an explicit invalid-request refusal;
+they never create an incompatible registration or fall back to another owner.
+The optional workspace capability response advertises
+`agent-pull-requests.terminal-watch-admission/v1` and its accepted predicates.
+Every affected watch binding also advertises that policy through the
+[capabilities media profile](../../plugins/agent-pull-requests/docs/watch-gateway.md#optional-terminal-admission-profile),
+including watch-only callers without a workspace route. The current Dispatch
+consumer checks it before durable suspension. An older or incompatible
+optional PR core refuses terminal selection before state creation; baseline
+hosting remains independent of that declaration.
+Each bounded consumer cycle also rechecks already-prepared waiters against a
+changed policy. Incompatible live waiters wake for external-state reinspection
+before another registration attempt. Unattempted requests settle locally;
+attempted or uncertain requests retain their original identity and reconcile
+receipts or cancellation, without retransmitting an incompatible registration.
+Legacy watch/v1-v2 capability and receipt shapes remain unchanged, and finite
+legacy requests using those predicates keep their original semantics. Clients
+needing unbounded or richer watches must retain the baseline host until a
+predicate-preserving transition is qualified; this opt-in profile does not
+silently convert them. Removing terminal selection is not a storage downgrade.
+Deployment must select a capability-aware delegation consumer before enabling
+the restricted profile; source publication does not update or activate one.
+
+Public terminal load/sync results contain only the selected workspace's compact
+retirement cursor, drain status and no-effect marker. Cross-consumer request,
+registration and event IDs, full delivery inventories and operation custody
+remain internal. Thus high-fan-out retirement does not expand the public result
+beyond the existing 32 KiB Gateway response boundary.
 
 The fresh foreground-process fixture qualifies CLI discovery, native export,
 terminal fencing, retained restart, reopen and cursor resynchronization over
@@ -525,6 +608,12 @@ retained volume without its extension does not adopt it or advertise support.
 Interrupted provisioning retains progress and refuses blind reprovisioning.
 Removing the selection or rolling back to a reader that cannot understand the
 adopted extension refuses the volume without rewriting it.
+
+For retained `adopt-terminal`, terminal mapping selection additionally requires
+prepared-review and acquired-comment mapping storage to be already adopted.
+It does not allocate new mapping slots on that path; a missing prerequisite
+refuses before terminal adoption. Fresh provisioning retains its existing
+prerequisite construction.
 
 The selected receiver separately advertises scoped `retained-comment` reads
 for original active and compact records. Terminal-read/v1 and the prior
