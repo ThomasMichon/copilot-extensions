@@ -43,7 +43,12 @@ def _activity(
         if row["user"].casefold() != reviewer.casefold():
             continue
         if row["dismissed"] is True:
-            if review_evidence({**row, "dismissed": False}, observed_at) is None:
+            # Native dismissal may replace the original state. Validate only;
+            # this copy's synthetic verdict/signature never becomes evidence.
+            metadata = {
+                **row, "dismissed": False, "state": "APPROVED" if state == "DISMISSED" else state,
+            }
+            if review_evidence(metadata, observed_at) is None:
                 return unknown, None, None
             dismissed.add(row["id"])
             continue

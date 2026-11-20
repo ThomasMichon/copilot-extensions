@@ -88,11 +88,14 @@ def test_stream_reprojects_freshness_without_a_new_durable_event(tmp_path: Path)
 
 
 @pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("history_state", ["APPROVED", "DISMISSED"])
 def test_mixed_history_stream_preserves_evidence_and_existing_delivery_owner(
-    tmp_path: Path, reverse: bool,
+    tmp_path: Path, reverse: bool, history_state: str,
 ) -> None:
-    selected = setup(tmp_path)
-    reviews = [fixtures.verdict(dismissed=True), fixtures.verdict(id=10)]
+    selected = setup(tmp_path, provider="github" if history_state == "DISMISSED" else "gitea")
+    reviews = [
+        fixtures.verdict(dismissed=True, state=history_state), fixtures.verdict(id=10),
+    ]
     if reverse:
         reviews.reverse()
     observe(selected, head_sha=fixtures.OLD, reviews=reviews)

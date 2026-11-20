@@ -97,6 +97,8 @@ Malformed selected-reviewer metadata remains `review-activity-unavailable`,
 including malformed dismissed history or a review ID reported as both dismissed
 and undismissed. The query preserves cached records and
 signatures and never turns a dismissal into initial-review evidence.
+The known native `DISMISSED` state is accepted for metadata validation only;
+neither its original verdict nor an evidence signature is inferred.
 Consumers must retain unavailable coverage regardless of
 the reason string; reasons are explanatory, not an exhaustive action enum.
 Independent author-owned rebase recommendations and higher-priority missing

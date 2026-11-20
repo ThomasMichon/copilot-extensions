@@ -253,6 +253,7 @@ def test_only_qualified_review_causes_become_actions(
 
 @pytest.mark.parametrize("reviews", [
     [verdict(dismissed=True, commit_id=HEAD)],
+    [verdict(dismissed=True, state="DISMISSED", commit_id=HEAD)],
 ])
 def test_dismissed_review_diagnostic_does_not_invent_a_verdict_or_order(
     tmp_path: Path, reviews: list[dict[str, Any]],
@@ -269,11 +270,12 @@ def test_dismissed_review_diagnostic_does_not_invent_a_verdict_or_order(
 
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("matching_head", [False, True])
+@pytest.mark.parametrize("history_state", ["APPROVED", "DISMISSED"])
 def test_independent_verdict_survives_dismissed_history_refresh_and_restart(
-    tmp_path: Path, reverse: bool, matching_head: bool,
+    tmp_path: Path, reverse: bool, matching_head: bool, history_state: str,
 ) -> None:
-    selected = setup(tmp_path)
-    historical = verdict(dismissed=True)
+    selected = setup(tmp_path, provider="github" if history_state == "DISMISSED" else "gitea")
+    historical = verdict(dismissed=True, state=history_state)
     independent = verdict(id=10, commit_id=HEAD if matching_head else OLD)
     reviews = [historical, independent]
     if reverse:
@@ -316,6 +318,7 @@ def test_independent_verdict_survives_dismissed_history_refresh_and_restart(
 @pytest.mark.parametrize("changes", [
     {"submitted_at": "unknown"}, {"commit_id": ""}, {"state": "unknown"},
     {"id": 0}, {"submitted_at": "1970-01-01T01:00:00Z"},
+    {"state": "DISMISSED", "commit_id": ""},
 ])
 def test_malformed_selected_dismissed_review_still_blocks_independent_verdict(
     tmp_path: Path, reverse: bool, changes: dict[str, Any],
@@ -380,6 +383,8 @@ def test_same_review_identity_cannot_supply_independent_dismissal_evidence(
     ({"reviews": [verdict(dismissed=True, state="PENDING")]}, "initial_verdict", None),
     ({"reviews": [verdict(dismissed=True)], "mergeable": False}, "rebase", None),
     ({"reviews": [verdict(dismissed=True)], "reviews_complete": False},
+     None, "review-activity-unavailable"),
+    ({"reviews": [verdict(dismissed=True, state="DISMISSED")], "reviews_complete": False},
      None, "review-activity-unavailable"),
     ({"reviews": [verdict(dismissed=True)], "author": ""}, None, "author-unavailable"),
 ])
