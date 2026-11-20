@@ -283,6 +283,49 @@ to its original build. Supported rollback preserves those records and refuses
 unsupported point operations without preventing unrelated legacy operations.
 No v1 form, legacy source or stored content is retired by this proposal.
 
+### Configured executor ownership before caller migration
+
+The explicit service binding and native service count controls compose the
+owners, but their executor/client closure is still supplied by the embedding
+application. The next provider-first step is a reusable configured executor
+context, not a serialized selector or a blanket v2 execution declaration.
+This is an **agent-recommended implementation refinement** of the composition
+gate below, not new source activation or rollout authority.
+
+Keep the existing `build_app(point_service_factory=...)` and `PointService`
+boundaries. Supply a production context that binds the existing configured
+Azure DevOps point acquisition caller to its exact `IndexConfig`, `PointScope`,
+query/recovery scope and finite row budget. The embedding application supplies
+the connector selection and embedding policy explicitly; do not discover a
+source, credential, model or engine from a different runtime or ambient default.
+Reuse `EmbeddingRuntime`'s owned-client and deferred-readiness policy rather
+than introducing another lifecycle manager. Acquire fresh connector/model
+resources on context entry, close partial construction on failure, and keep
+them alive until the existing joined worker/service shutdown settles.
+
+Opening this context must not fetch provider data, start an embedding engine,
+activate parked work, repair state or bootstrap a point domain. Reject an
+invalid binding before dispatch. Request model readiness only for actual
+missing embeddings, not for covered targets or completed retries; stop only
+engines this context actually started. Existing explicit callers that already
+own connector/client lifetimes remain supported unchanged.
+
+Qualify the production context through the existing service fixture instead of
+reconstructing its executor in the test. Cover paused startup, exact-scope
+intake, one admitted named-target execution, higher-covered completion with
+eligibility-only requests and no body acquisition or model work, and entirely
+local completed-task retry. Also cover lazy readiness, partial-construction
+cleanup and joined shutdown. Keep small lifecycle contracts in unit CI and
+real native owner execution in the existing opt-in lane; do not repeat the corpus-size
+matrix merely to prove this resource-ownership change.
+
+This step leaves health and intake receipts' execution declarations unchanged.
+A subsequent caller-migration step must separately select the actual point
+binding and explicit reader, declare point/v2/paged semantics truthfully, and
+exercise missing support and provider rollback before enabling a new wire
+caller. Neither an owned executor nor callable metadata alone establishes
+that a running service's selected binding and reader satisfy those semantics.
+
 ## Implementation and validation gate
 
 1. Implement the shared typed-target intake, version-aware queue selection and
