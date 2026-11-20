@@ -8342,7 +8342,10 @@ The watch-transition controls exercise the actual prepared and Windows sealed
 receivers with inert storage and lease owners: complete version-1 origin
 preservation, current writer admission, physical-topology refusal,
 final-publication races, uncertain acknowledgement and unchanged version-2
-retry. POSIX sealed records refuse without retroactive domain evidence.
+retry. Phase-progressed sealed inputs retain their actual prepared origin,
+including an existing staged seal, without an invented v1 sealed receipt;
+origin/current-field conflicts refuse before custody. POSIX sealed records
+refuse without retroactive domain evidence.
 Native inode, installation and durability qualification remains in the plugin
 packet; `tests/test_watch_sealed_recovery.py` covers the Windows receiver.
 Ten namespace capability controls use the actual Bridge namespace decoder

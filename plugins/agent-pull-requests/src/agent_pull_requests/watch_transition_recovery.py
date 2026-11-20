@@ -134,17 +134,28 @@ def _read_sealed(
         origin = document["origin"]
         if any(
             json.dumps(document[field], sort_keys=True) != json.dumps(origin.get(field), sort_keys=True)
-            for field in ("schema", "phase", "binding", "lease", "seal")
+            for field in ("schema", "binding", "lease")
+        ) or (
+            "seal" in origin
+            and json.dumps(document["seal"], sort_keys=True) != json.dumps(origin["seal"], sort_keys=True)
         ):
             raise PermissionError("watch sealed recovery changed immutable origin evidence")
         _validate_scope(root, document["controller"], installation, guard)
     else:
         raise PermissionError("watch sealed recovery journal version is unsupported")
     _validate_scope(root, origin.get("binding"), installation, guard)
+    if "seal" in origin:
+        if _inspect_sealing(root, origin["binding"], origin) != "sealed":
+            raise PermissionError("watch sealed recovery origin no longer names its installed barrier")
+    else:
+        _validate_record(origin, origin["binding"])
+    # Validate current physical facts without rewriting the retained v1 receipt.
+    current = {key: value for key, value in document.items() if key in _FIELDS | {"seal"}}
+    current["version"] = 1
 
     def topology() -> None:
-        if origin.get("phase") != "sealed-legacy" or _inspect_sealing(
-            root, origin["binding"], origin,
+        if current.get("phase") != "sealed-legacy" or _inspect_sealing(
+            root, origin["binding"], current,
         ) != "sealed":
             raise PermissionError("watch sealed recovery requires its installed barrier")
 
@@ -185,7 +196,7 @@ def _recover(
         controller.update(kind="installation", installation=installation.evidence())
     origin = prior if prior["version"] == 1 else prior["origin"]
     document = {
-        **origin, "version": 2, "origin": origin, "controller": controller,
+        **prior, "version": 2, "origin": origin, "controller": controller,
     }
     published_bytes = json.dumps(document, allow_nan=False).encode("utf-8")
     if len(published_bytes) > _MAX_METADATA_BYTES:
@@ -204,7 +215,7 @@ def _recover(
     if sealed:
         from .watch_windows_sealing import _acquire_barrier_lease
 
-        _acquire_barrier_lease(root, origin, lease)
+        _acquire_barrier_lease(root, document, lease)
     elif not lease.held:
         lease.acquire(expected_file_identity=identity)
 
