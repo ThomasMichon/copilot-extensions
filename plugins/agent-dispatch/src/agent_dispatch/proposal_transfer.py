@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 
-from .proposal_recovery import ProposalIntake
+from .proposal_recovery import ProposalIntake, proposal_row
 
 # Cache compatibility is distinct from the version of the independent logical records.
 CACHE_FORMAT = 1
@@ -43,7 +43,7 @@ def receive(records: Path, destination: Path, *, outgoing: Path) -> tuple[Propos
         if row is None or Path(row[2]) != outgoing:
             raise ValueError("outgoing proposal is not the current offer")
         if row[1] == CACHE_FORMAT and (outgoing / "tasks.db").is_file():
-            [(identity, title, payload)] = db.execute("SELECT id,title,payload FROM proposal_v1").fetchall()
+            identity, title, _, payload, _, draft = proposal_row(db)
             destination.mkdir(mode=0o700)
             with closing(sqlite3.connect((outgoing / "tasks.db").as_uri() + "?mode=ro", uri=True)) as old:
                 with closing(sqlite3.connect(destination / "tasks.db")) as new:
@@ -55,6 +55,8 @@ def receive(records: Path, destination: Path, *, outgoing: Path) -> tuple[Propos
             task = incoming.queue.get(identity)
             if task is None or task.title != title or task.status != "proposed" or task.owner is not None:
                 raise ValueError("cache does not match the offered proposal")
+            if draft is not None and task.card_draft != json.loads(draft):
+                raise ValueError("cache does not match the acknowledged draft")
             if task.payload_ref:
                 # The content address precedes the original writer's text-mode newline translation.
                 body = payload.encode("utf-8")

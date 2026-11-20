@@ -7756,7 +7756,24 @@ cancellation/drain/stop. A blocked queue-read control proves paused/stopped
 admission is rechecked before native dispatch. Lightweight selection and
 failure-latch controls remain in `tests/test_point_hints.py`; these additions
 do not themselves enlarge required CI admission. Neither packet qualifies
-automatic service scheduling, cross-consumer coordination or restore repair.
+ordinary/default v2 activation, cross-consumer coordination or restore repair.
+
+The same opt-in native runtime packet now hosts the actual ASGI application
+with an explicit `PointService` factory and the existing `TaskRunner` loop.
+It covers passive promotion, inert/reconstructed admission, exact-scope HTTP
+queue routing, ordinary capability refusal, wake-driven named acquisition and
+native completion, and retained failure/retry across notification and drain
+rollback. Blocked selection and embedding controls prove synchronous stop
+admission, truthful drain results and repeatedly cancelled shutdown retain the
+executor's actual HTTP client until the runner settles. Invalid explicit
+legacy/point overlap refuses before opening clients rather than falling back.
+These cases do not start a detached child, enlarge required unit CI, qualify a
+live-provider/cross-generation cutover, or enable ordinary v2 advertisement.
+
+The blocked-selection governance control changes the runner's policy to
+backoff while selection is off-loop. The final admission callback leaves the
+entire task unchanged without provider or executor work; returning to ready
+uses the existing runner wakeup rather than resetting point failure state.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
