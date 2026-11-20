@@ -882,8 +882,8 @@ old executable. POSIX v2 sealing/epoch recovery, native domain/boot
 qualification, final import/authority selection, ordinary entry and every
 remaining gate still follow under the existing source-only authority.
 The follow-on contained Windows historical-source and abrupt-controller-exit
-packet exercises both journal versions: 42 cases pass with one Linux-specific
-skip, preserving original evidence and legacy sole authority. This is not
+packet merged in #13681 and exercises both journal versions: 42 cases pass with
+one Linux-specific skip, preserving original evidence and legacy sole authority. This is not
 complete released-install qualification or native domain/boot proof.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
@@ -892,6 +892,12 @@ whole-contract acceptance and residual work, not a claim that the repaired
 outage-expiry defect remains unfixed.
 
 #### Direct callback Plan
+
+The [expiry persistence packet](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
+adds pure per-subscriber deadline/terminal controls and actual
+legacy/acknowledged expiry publication failure controls. Its 133-case combined
+packet passes; whole-outcome reconciliation below remains open, including
+sustained outage/recovery with other subscribers and ordinary synchronous waits.
 
 - [ ] **P5947-1:** Preserve expiry independently of successful provider fetch,
   subscriber-specific filters/deadlines, legitimate terminal transitions,
@@ -1942,6 +1948,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Expiry persistence qualification](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
 - [2026-11-20 - Windows version-2 sealing](journal/2026/11.20%20Windows%20version-2%20sealing.md)
 - [2026-11-20 - Prepared-origin phase progression](journal/2026/11.20%20Prepared-origin%20phase%20progression.md)
 - [2026-11-20 - Windows sealed receiver](journal/2026/11.20%20Windows%20sealed%20receiver.md)
