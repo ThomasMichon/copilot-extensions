@@ -186,6 +186,10 @@ class MultiModelStore(_ItemRepresentationMixin):
         """Store chunk content in the global content table."""
         return self._content.upsert(chunks, skip_identical=skip_identical)
 
+    def upsert_point_content(self, chunks: list[Chunk], *, point_scope: PointScope | None) -> int:
+        """Write selected native content; no applied-version or completion certificate."""
+        return self._content.upsert_point(chunks, point_scope=point_scope)
+
     def upsert_vectors(
         self,
         model_id: str,

@@ -136,6 +136,17 @@ native/fleet switch alone does not deliver this service intake model.
 
 ## Coordination
 
+The proposed finite #11711 terminal-mapping result lane below stays with this
+existing PR-service process/workspace, observer/store and terminal-retirement
+owner. It does not duplicate the forge client, move a workspace, take over
+the current M1/callback/consumer priorities or reopen earned source milestones.
+Preserve actual uncertain-effect custody, original standalone bounds and all
+incumbent source/provider/native/resource obligations. Ordinary reviewed
+complete P11711/V11711/G11711 and continuing Journal delivery, followed by
+permitted current source/ROOT/custody readback, precedes a separate tracking
+judgment; keep #11711 OPEN during proposal. No generic ACK, receipt PR,
+whole-M1/provider/native prerequisite, effectful retry or owner transfer is added.
+
 ### MCP startup prerequisite follow-through
 
 The existing integration driver retains concurrent MCP bridge startup diagnosis
@@ -1013,6 +1024,44 @@ _Operator-required scope; agent-recommended implementation and validation._
   account/fleet isolation, observation sharing, disconnection recovery and the
   real client/Gateway/service path before treating fleet deployment as complete.
 
+### Finite original terminal-mapping load result from #11711
+
+Agent-recommended reliability receiving at the existing PR-service owner.
+
+- [ ] **P11711-1:** Retain the intermittent original standalone-process case
+  `services/pr/tests/test_installed_process.py::test_installed_host_process_register_observe_reconnect_restart_and_ack[True-False-False-False-True-True]`:
+  after `workspace-close` registration, synthetic PR abandonment and the next
+  evidence snapshot, terminal `workspace load` returned
+  `workspace_input_or_result_unavailable` / `workspace_unavailable`.
+  Two later unchanged complete runs, including the reported 168-pass run,
+  are intermittent evidence, not deterministic reproduction or a proved cause.
+- [ ] **P11711-2:** Qualify the observer/store-lock versus terminal-retirement
+  interaction and make the fixture's ORIGINAL operation deterministic OR fix
+  the underlying owner if an admitted original load can lose its result.
+  Preserve actual process/TLS boundaries, exact operation/result identity,
+  terminal assertions and uncertain-effect custody; do not hide unavailable
+  results by replaying `load`, `sync` or allocation or by weakening assertions.
+- [ ] **P11711-3:** Use the existing isolated standalone fixture and original
+  bounded preparation/execution path, retaining the reported 180-second
+  runner boundary and truthful unavailable outcomes. Keep this independent
+  of the optional report path, which was not established as causal. Choose
+  the smallest demonstrated fixture OR owner correction without a new
+  lifecycle harness, shared-service experiment or production request.
+
+#### Local Validation for #11711
+
+- [ ] **V11711-1:** Exercise meaningful observer/store-lock/terminal-retirement
+  interleavings through the actual process/TLS fixture and its original single
+  operation. Include an admitted result-loss/unavailable control; verify exact
+  result identity, preserved terminal assertions and custody without effectful
+  retry. A helper-only or unrelated report-path pass is not this qualification.
+- [ ] **V11711-2:** Validate the named terminal-mapping case and relevant
+  standalone packet at an attributable source, preserving original bounds,
+  assertions and exact cleanup. Separate historical unchanged green runs,
+  newly controlled failure/positive evidence and unresolved intermittent
+  behavior; a later merge or repeated green run alone is not a causal repair.
+  Planned receiving runs no fixture or live load/sync/allocation request.
+
 ### PR-service offline image inputs
 
 _Delegation driver source slice; agent-recommended implementation under the
@@ -1396,6 +1445,14 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] **G11711:** Resolve every P11711/V11711 and continuing Coordination
+  clause at its original standalone process/TLS and bounded-operation tier:
+  actual interleaving qualification, deterministic original operation OR
+  cause-preserving owner correction, exact result/terminal assertions and
+  no effectful replay. Preserve historical partial credit and all existing
+  source/workspace/provider/resource owners. Planned consolidation is not a
+  fixed intermittent defect, broader service acceptance or custody release.
 
 - [x] Qualify the finite [filtered-population source controls](filter-subscriptions.md#validation-plan):
   hosted run 44001919435 passes both disposable platforms at its recorded source;
@@ -1824,6 +1881,14 @@ callback an implicit credential store.
 
 ## Journal
 
+- **2026-11-20 - Proposed finite original-load reliability receiving.** The
+  complete qualified #11711 original is retained directly with the existing
+  PR-service process/workspace owner, local/global Validation and continuing
+  Coordination. All six technical rows remain unchecked. The
+  [campaign record](../backlog-reconciliation/journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+  distinguishes intermittent green history from causal qualification and
+  preserves actual uncertain-effect custody. No load/sync/allocation replay,
+  process fixture, provider, runtime or resource operation occurred.
 - [2026-11-19 - Historical physical transition design](journal/2026/11.19%20Historical%20physical%20transition%20design.md)
 - [2026-11-19 - Reviewed retained terminal-reader transition and focused source qualification](journal/2026/11.19%20Retained%20terminal%20reader%20transition.md)
 - [2026-11-18 - Present-only per-version receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)

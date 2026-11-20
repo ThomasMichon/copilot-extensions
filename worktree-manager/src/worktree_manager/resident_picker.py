@@ -7,7 +7,9 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import cast
 
 BOOTSTRAP_ENV = "WORKTREE_MANAGER_RESIDENT_BOOTSTRAP"
 _binding: tuple[str, Path, list[str]] | None = None
@@ -20,7 +22,7 @@ def settle_local(project: str | None = None) -> None:
         _local_settled.set()
 
 
-def wait_for_local(project: str | None, cancelled) -> bool:
+def wait_for_local(project: str | None, cancelled: Callable[[], bool]) -> bool:
     selected = project or (_binding[0] if _binding is not None else "")
     event = _local_settled if selected and root_for(selected) is not None else None
     if event is None:
@@ -44,7 +46,7 @@ def root_for(project: str) -> Path | None:
     return _binding[1]
 
 
-def consume(args: list[str]) -> tuple[str, dict]:
+def consume(args: list[str]) -> tuple[str, dict[str, object]]:
     global _binding, _local_settled
     _binding = None
     _local_settled = None
@@ -80,9 +82,10 @@ def consume(args: list[str]) -> tuple[str, dict]:
             or engine_client.engine_base_command() != command
         ):
             raise ValueError("resident bootstrap does not match the selected engine/project")
+        configuration = cast(dict[str, object], payload.get("project_config") or {})
         payload = {
             **payload,
-            "project_config": {**(payload.get("project_config") or {}), "install_dir": root},
+            "project_config": {**configuration, "install_dir": root},
         }
         _binding = project, Path(root), command
         _local_settled = threading.Event()
@@ -91,7 +94,9 @@ def consume(args: list[str]) -> tuple[str, dict]:
     return project, payload
 
 
-def _run_decision(project: str, payload: dict, decision: dict) -> int:
+def _run_decision(
+    project: str, payload: dict[str, object], decision: Mapping[str, object],
+) -> int:
     from .__main__ import _run_production_picker
     from .production_picker import context, project_config
 
@@ -107,7 +112,6 @@ def _run_decision(project: str, payload: dict, decision: dict) -> int:
 
 
 def main(args: list[str]) -> int:
-    raw = os.environ.get(BOOTSTRAP_ENV, "")
     try:
         project, payload = consume(args)
     except (TypeError, ValueError) as error:
@@ -117,13 +121,9 @@ def main(args: list[str]) -> int:
     from .process_priority import raise_current_process_priority, restore_normal_process_priority
     raise_current_process_priority()
     try:
-        from .warm_picker_client import run as run_warm
+        from .production_picker import runner
 
-        warm, decision = run_warm(json.loads(raw))
-        if not warm:
-            from .production_picker import runner
-
-            decision = runner.run(project, bootstrap_payload=payload)
+        decision = runner.run(project, bootstrap_payload=payload)
     except Exception as error:
         print(f"error: production Picker failed: {error}", file=sys.stderr)
         return 1

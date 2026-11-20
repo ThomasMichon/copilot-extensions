@@ -28,15 +28,17 @@ def _literal(value: Path | str) -> str:
 @pytest.mark.parametrize("compatible", [False, True])
 @pytest.mark.parametrize("interpreter", ["synthetic_version", "real_python39"])
 def test_python_selection_skips_unsupported_and_alias_candidates(
-    tmp_path, host, compatible, interpreter,
-):
+    tmp_path: Path, host: str, compatible: bool, interpreter: str,
+) -> None:
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} unavailable")
-    if Path(sys.executable) == Path(sys._base_executable):
+    base = getattr(sys, "_base_executable", sys.executable)
+    assert isinstance(base, str)
+    if Path(sys.executable) == Path(base):
         pytest.skip("qualification needs the runner's venv and physical base")
     package = Path(__file__).resolve().parents[1] / "src" / "agent_procutil"
-    old_python = Path(sys._base_executable)
+    old_python = Path(base)
     if interpreter == "real_python39":
         supplied = os.environ.get("TEST_PYTHON39")
         if not supplied:
@@ -78,7 +80,7 @@ def test_python_selection_skips_unsupported_and_alias_candidates(
         "$state=@{process=$null;worker=$null;job=$null;input=$null;output=$null;error=$null;"
         "diagnostics=$null;nonce=$null;sequence=0;broken=$true;offerPermitted=$false}; "
         "$selected=$null; $failure=$null; $cleanupError=$null; $ended=$false; "
-        "try { Start-DaemonInstanceWorker $state; $selected=$state.process.StartInfo.FileName } "
+        "try { Start-DaemonInstanceWorker $state; $selected=$state.selectedExecutable } "
         "catch { $failure=$_.Exception.Message; $ended=$state.process.HasExited } "
         "finally { try { Close-DaemonInstanceWorker $state } "
         "catch { $cleanupError=$_.Exception.Message } }; "

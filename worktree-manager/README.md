@@ -57,6 +57,14 @@ does not execute its displayed commands, open links or change readiness.
 Redirected/noninteractive bare invocation still prints installation status;
 explicit verbs, project launch and launcher JSON output keep their contracts.
 
+Foreground project launch opens the app directly, without first acquiring a
+warm UI session from the Manager service daemon. The app can paint its pending
+state while its data and optional services become available. Version and
+terminal-capability checks retain selected-runtime validation and actual error
+reporting, but do not impose an execution timeout: CPU contention alone is not
+evidence of an unusable installation. Cancellation and owned-child cleanup
+remain active. Installer readiness and background service deadlines are unchanged.
+
 ## Prepared application installation
 
 `worktree-manager-install FOOTPRINT` is Manager's finite, noninteractive

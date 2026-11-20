@@ -269,6 +269,85 @@ def test_point_vector_effect_requires_current_model_binding_and_nested_owned_wri
     assert events == ["enter", "exit"]
 
 
+def test_point_content_preflights_every_model_before_native_effects(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    package = "_promotion_point_domain.store"
+    chunk = SimpleNamespace(chunk_id="one", source=api.claim.canonical_family, language="python")
+    row = {"chunk_id": chunk.chunk_id, "source": chunk.source, "language": chunk.language}
+
+    def indexed(owner: Any, _ids: list[str], **_kwargs: Any) -> list[dict[str, Any]]:
+        events.append("read:" + owner._table_name)
+        return [{**row, "language": "markdown"}]
+
+    def projection(*_args: Any, **kwargs: Any) -> None:
+        assert kwargs["tables"] == [first._table, second._table]
+        events.append("projection")
+
+    for suffix, attributes in (
+        ("chunk_id_index", {"indexed_chunk_rows": indexed}),
+        ("content_mutations", {"coalesce_chunks": lambda chunks: chunks, "content_record": lambda _chunk: row}),
+        ("repo_filter", {"_sql_str": lambda value: value}),
+        ("source_projection", {"sync_content_projection": projection}),
+    ):
+        stub = ModuleType(package + "." + suffix)
+        for key, value in attributes.items():
+            setattr(stub, key, value)
+        monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    modules = []
+    for suffix in ("scalar_index", "point_content"):
+        name = package + "." + suffix
+        spec = importlib.util.spec_from_file_location(name, SOURCE / f"store/{suffix}.py")
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, module)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    scalar, module = modules
+    table = SimpleNamespace(
+        delete=lambda _predicate: events.append("delete"),
+        add=lambda _records: events.append("add"),
+    )
+    canonical = SimpleNamespace(_table_name="chunks", _table=table)
+    first = SimpleNamespace(_table_name="first", _table=SimpleNamespace(name="first"))
+    second = SimpleNamespace(_table_name="second", _table=SimpleNamespace(name="second"))
+
+    @contextmanager
+    def writer(_db: object, *, point_scope: object) -> Iterator[None]:
+        assert point_scope == api.claim.scope
+        events.append("writer")
+        yield
+        events.append("exit")
+
+    @contextmanager
+    def mutation(*_args: Any) -> Iterator[None]:
+        events.append("effect")
+        yield
+
+    domain = SimpleNamespace(writing=True, _write=writer, bucket_mutation=mutation)
+    content = SimpleNamespace(_source_domain=domain, db=object(), _table_name="chunks")
+    monkeypatch.setattr(module, "_prepared_tables", lambda *_args, **_kwargs: (canonical, [first, second]))
+    exhausted = True
+
+    def inspect(native: object, *, column: str) -> Any:
+        return scalar.ScalarIndexState(
+            1, True, 0, 32 if exhausted and native is second._table else 1,
+        ), None
+
+    monkeypatch.setattr(module, "inspect_index", inspect)
+    with pytest.raises(scalar.ScalarIndexPreparationRequired, match="reserved"):
+        module.upsert_point_content(content, [chunk], point_scope=api.claim.scope)
+    assert events == ["writer", "read:chunks", "read:first", "read:second"]
+    events.clear()
+    exhausted = False
+    assert module.upsert_point_content(content, [chunk], point_scope=api.claim.scope) == 1
+    assert events == [
+        "writer", "read:chunks", "read:first", "read:second",
+        "effect", "delete", "add", "projection", "exit",
+    ]
+
+
 def test_nested_default_reads_recheck_receipt_before_returning_legacy_results(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

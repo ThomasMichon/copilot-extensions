@@ -133,6 +133,33 @@ perform existing index upkeep before another nonempty selected write. The
 returned row count is not an application certificate. Ordinary vector APIs,
 prepared point publication and all frontdoors remain disabled.
 
+`ContentStore.upsert_point` and `MultiModelStore.upsert_point_content` expose the
+corresponding native canonical effect under that same already-owned exact
+writer. The current receipt must bind the canonical role and every model table;
+the complete native/retained inventories, schemas and connection paths must
+agree. No cached handle or failed open can select another table or create a
+replacement. Both canonical chunk-ID/file-path indices, any already-present
+source index and every bound vector chunk-ID index must be prepared with zero
+uncovered physical rows. Every table that will change needs a reserved segment.
+Identical raw fields retain the canonical timestamp and table version; identical
+duplicate inputs coalesce, while conflicting duplicates or an existing ID with
+another source refuse. Raw comparisons use the existing bounded indexed lookup,
+not decoded metadata or a corpus scan.
+
+Before any effect, selected vector-ID reads also reject duplicate/failed reads
+and qualify all bound models, not just those registered on the calling facade.
+The existing provenance updater then maintains source/language labels through
+those exact prepared vector handles without changing embeddings. A caught
+canonical add or later model-projection failure latches the outer writer dirty
+and uncertain. There is no implicit repair or retry.
+
+Canonical and vector effects still do not compare provider versions, remove
+obsolete IDs, qualify embedding coverage, update indices/FTS, publish path
+checkpoints or complete work. The composing application must order versions
+before replacement and retain store-before-checkpoint recovery. Raw indexed
+reads and native effects are selected-ID bounded; table/fragment metadata
+inspection is not constant work or proof of the large-corpus acceptance gate.
+
 Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live

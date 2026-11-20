@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable
+from typing import Callable, Protocol, TypedDict, cast
 
 from agent_procutil import SyncProcessLaunchError
 from agent_procutil.owned_process import (
@@ -38,6 +38,74 @@ _BOOTSTRAP = (
     "import sys;sys.path.insert(0,sys.argv.pop(1));"
     "from agent_procutil._caller_owned import _main;_main()"
 )
+
+
+class _BudgetFrame(TypedDict):
+    deadline: float
+    cleanup_reserve: float
+
+
+class _RequiredRequest(TypedDict):
+    argv: list[str]
+    timeout: float | None
+    input_text: str | None
+    capture: bool
+    limits: list[int]
+
+
+class _Request(_RequiredRequest, total=False):
+    binary: bool
+    input_bytes: str
+    budget: _BudgetFrame
+
+
+class _NestedBudget(Protocol):
+    def enclosed_budget(self) -> OwnedExecutionBudget: ...
+
+
+class _Poller(Protocol):
+    def register(self, fd: int, eventmask: int) -> None: ...
+    def poll(self, timeout: int) -> list[tuple[int, int]]: ...
+
+
+class _PollModule(Protocol):
+    POLLIN: int
+    POLLERR: int
+    POLLNVAL: int
+
+    def poll(self) -> _Poller: ...
+
+
+class _PosixNative(Protocol):
+    def getpgid(self, pid: int) -> int: ...
+    def killpg(self, pgid: int, sig: int) -> None: ...
+    def set_blocking(self, fd: int, blocking: bool) -> None: ...
+
+
+class _Closeable(Protocol):
+    def close(self) -> None: ...
+
+
+class _CleanupProcess(UnreapedChild, Protocol):
+    @property
+    def stdin(self) -> _Closeable | None: ...
+
+    @property
+    def stdout(self) -> _Closeable | None: ...
+
+    @property
+    def stderr(self) -> _Closeable | None: ...
+
+    def wait(self, *, timeout: float) -> int: ...
+
+
+class _PendingOutput(Protocol):
+    def finish(
+        self, timeout: float, *, deadline: float,
+    ) -> tuple[str | bytes | None, str | bytes | None]: ...
+
+
+_Captured = str | bytes | None
 
 
 def _after_fork_child() -> None:
@@ -84,12 +152,13 @@ def _require_posix_support() -> None:
 
 
 def _pidfd_exited(fd: int) -> bool:
-    observer = select.poll()
-    observer.register(fd, select.POLLIN)
+    native = cast(_PollModule, select)
+    observer = native.poll()
+    observer.register(fd, native.POLLIN)
     events = observer.poll(0)
-    if any(mask & (select.POLLERR | select.POLLNVAL) for _fd, mask in events):
+    if any(mask & (native.POLLERR | native.POLLNVAL) for _fd, mask in events):
         raise RuntimeError("native pidfd exit observation failed")
-    return any(mask & select.POLLIN for _fd, mask in events)
+    return any(mask & native.POLLIN for _fd, mask in events)
 
 
 def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | None = None) -> None:
@@ -127,14 +196,14 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
                     if pid == process.pid:
                         continue
                     try:
-                        if os.getpgid(pid) != process.pid:
+                        if cast(_PosixNative, os).getpgid(pid) != process.pid:
                             continue
                         fd = open_pidfd(pid)
                         try:
                             # A reaped/reused numeric PID is not proof of this group's exit.
                             if _pidfd_pid(fd) != pid:
                                 active = True
-                            elif os.getpgid(pid) == process.pid:
+                            elif cast(_PosixNative, os).getpgid(pid) == process.pid:
                                 active |= not _pidfd_exited(fd)
                         finally:
                             os.close(fd)
@@ -150,7 +219,98 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
         raise OwnedCleanupError(process) from error
 
 
-def _validate(request: object) -> dict:
+def _zombie_only_group(process: UnreapedChild) -> bool:
+    """Confirm the group holds no live member besides its exited, unreaped leader."""
+    if sys.platform != "darwin":
+        return False
+    from agent_procutil._darwin_caller_owned import GroupCensus
+
+    return not GroupCensus().active(process.pid)
+
+
+def _posix_cleanup_error(
+    process: _CleanupProcess, *, confirm_group: bool = False, inherit_process_group: bool = False,
+    output: _PendingOutput | None = None, native_settled: bool = False,
+    on_settled: Callable[[], None] | None = None,
+    group_settled: bool = False,
+) -> OwnedCleanupError:
+    """Retain the exact unreaped leader and remaining stream custody for retry."""
+    def retry(deadline: float) -> None:
+        from agent_procutil.owned_process import _retire_posix_group
+
+        nonlocal native_settled
+
+        def remaining() -> float:
+            seconds = deadline - time.monotonic()
+            if seconds <= 0:
+                raise TimeoutError("owned POSIX cleanup deadline expired")
+            return seconds
+
+        if not native_settled:
+            # Popen retains a completed reap even if interruption prevented this
+            # closure from recording its own stage before the previous unwind.
+            if process.returncode is None:
+                remaining()
+                if not group_settled:
+                    _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                    if confirm_group:
+                        _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
+                process.wait(timeout=remaining())
+            native_settled = True
+        if output is not None:
+            output.finish(remaining(), deadline=deadline)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                remaining()
+                stream.close()
+
+    return OwnedCleanupError(
+        process, cleanup_resources=(("output", output),) if output is not None else (),
+        cleanup_retry=retry, on_settled=on_settled,
+    )
+
+
+def _settle_exited_group(
+    process: _CleanupProcess, *, budget: OwnedExecutionBudget | None,
+    on_settled: Callable[[], None] | None,
+) -> None:
+    from agent_procutil.owned_process import _retire_posix_group
+
+    try:
+        _retire_posix_group(process)
+        _confirm_group(process, budget=budget)
+    except BaseException as error:
+        raise _posix_cleanup_error(
+            process, confirm_group=True, on_settled=on_settled,
+        ) from error
+
+
+def _finish_posix_process(
+    process: _CleanupProcess, *, confirm_group: bool, inherit_process_group: bool,
+    budget: OwnedExecutionBudget | None, group_settled: bool,
+    output: _PendingOutput | None, on_settled: Callable[[], None] | None,
+) -> None:
+    from agent_procutil.owned_process import _retire_posix_group
+
+    try:
+        if not group_settled:
+            _retire_posix_group(process, inherit_process_group=inherit_process_group)
+            if confirm_group:
+                if budget is None:
+                    _confirm_group(process)
+                else:
+                    _confirm_group(process, budget=budget)
+                group_settled = True
+        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
+    except BaseException as error:
+        raise _posix_cleanup_error(
+            process, confirm_group=confirm_group, inherit_process_group=inherit_process_group,
+            output=output, native_settled=process.returncode is not None,
+            on_settled=on_settled, group_settled=group_settled,
+        ) from error
+
+
+def _validate(request: object) -> _Request:
     if not isinstance(request, dict) or set(request) - {"binary", "budget", "input_bytes"} != {
         "argv", "timeout", "input_text", "capture", "limits",
     }:
@@ -161,8 +321,10 @@ def _validate(request: object) -> dict:
     if any("\0" in arg for arg in argv):
         raise ValueError("native child argv must not contain NUL characters")
     timeout = request["timeout"]
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("native child timeout must be finite and positive")
+    if timeout is not None and (
+        type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0
+    ):
+        raise ValueError("native child timeout must be None or finite and positive")
     if request["input_text"] is not None and not isinstance(request["input_text"], str):
         raise ValueError("native child input_text must be text or None")
     if request["input_text"] is not None:
@@ -187,13 +349,17 @@ def _validate(request: object) -> dict:
         type(limit) is not int or limit <= 0 for limit in limits
     ):
         raise ValueError("native child stream limits must be positive integers")
-    return request
+    # Each member and optional frame was checked above; keep the wire contract
+    # explicit rather than propagating JSON's dynamically typed dictionary.
+    return cast(_Request, request)
 
 
-def _decode(reply: object, request: dict, returncode: int) -> subprocess.CompletedProcess:
+def _decode(
+    reply: object, request: _Request, returncode: int,
+) -> subprocess.CompletedProcess[_Captured]:
     if (
         not isinstance(reply, dict) or type(reply.get("version")) is not int
-        or reply["version"] != 1 or returncode != -signal.SIGKILL
+        or reply["version"] != 1 or returncode != -getattr(signal, "SIGKILL")
     ):
         raise RuntimeError("caller-owned completion is unconfirmed")
     kind = reply.get("kind")
@@ -214,12 +380,15 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
         if type(code) is not int or not isinstance(stdout, expected) or not isinstance(stderr, expected):
             raise RuntimeError("caller-owned result is invalid")
         if request.get("binary", False) and request["capture"]:
+            if not isinstance(stdout, str) or not isinstance(stderr, str):
+                raise RuntimeError("caller-owned binary result is invalid")
             try:
-                stdout, stderr = (base64.b64decode(stream, validate=True) for stream in (stdout, stderr))
-                if any(len(stream) > limit for stream, limit in zip((stdout, stderr), request["limits"])):
+                raw_stdout, raw_stderr = (base64.b64decode(stream, validate=True) for stream in (stdout, stderr))
+                if any(len(stream) > limit for stream, limit in zip((raw_stdout, raw_stderr), request["limits"])):
                     raise ValueError("binary completion exceeds capture limits")
             except ValueError:
                 raise RuntimeError("caller-owned binary result is invalid") from None
+            return subprocess.CompletedProcess(request["argv"], code, raw_stdout, raw_stderr)
         return subprocess.CompletedProcess(request["argv"], code, stdout, stderr)
     if kind == "output-limit":
         stream = reply.get("stream")
@@ -230,15 +399,15 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
             raise RuntimeError("caller-owned stream limit is invalid")
         raise OutputLimitExceeded(stream, limit)
     if kind == "timeout":
-        partial = [None, None]
+        partial: list[bytes | None] = [None, None]
         if "output" in reply:
             try:
                 partial = [base64.b64decode(reply[name], validate=True) for name in ("output", "stderr")]
-                if any(len(value) > limit for value, limit in zip(partial, request["limits"])):
+                if any(value is not None and len(value) > limit for value, limit in zip(partial, request["limits"])):
                     raise ValueError("timeout evidence exceeds its byte budget")
             except (TypeError, ValueError):
                 raise RuntimeError("caller-owned timeout evidence is invalid") from None
-        raise subprocess.TimeoutExpired(request["argv"], request["timeout"], *partial)
+        raise subprocess.TimeoutExpired(request["argv"], cast(float, request["timeout"]), *partial)
     if kind == "os-error":
         errno = reply.get("errno")
         if type(errno) is not int:
@@ -250,17 +419,17 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
 
 
 def run(
-    argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
+    argv: list[str], *, timeout: float | None, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
     input_bytes: bytes | None = None,
     on_settled: Callable[[], None] | None = None,
-    cwd: str | os.PathLike | None = None,
+    cwd: str | os.PathLike[str] | None = None,
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
     borrow_parent_scope: bool = False,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[_Captured]:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
     execution_budget = budget
@@ -278,7 +447,7 @@ def run(
         if budget is not None and not isinstance(budget, OwnedExecutionBudget):
             raise TypeError("budget must be an OwnedExecutionBudget")
         if budget is not None and time.monotonic() >= budget.execution_deadline:
-            raise subprocess.TimeoutExpired(argv, timeout)
+            raise subprocess.TimeoutExpired(argv, cast(float, timeout))
         request = _validate({
             "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
             "limits": [max_stdout_bytes, max_stderr_bytes],
@@ -289,9 +458,11 @@ def run(
                if budget is not None else {}),
         })
         if budget is not None and os.name != "nt" and not borrow_parent_scope:
-            target_deadline = min(time.monotonic() + timeout, budget.execution_deadline)
+            target_deadline = budget.execution_deadline
+            if timeout is not None:
+                target_deadline = min(time.monotonic() + timeout, target_deadline)
             capped = OwnedExecutionBudget(target_deadline + budget.cleanup_reserve, budget.cleanup_reserve)
-            enclosed = capped.enclosed_budget()
+            enclosed = cast(_NestedBudget, capped).enclosed_budget()
             execution_budget = OwnedExecutionBudget(capped.deadline, capped.cleanup_reserve / 2)
             request["budget"] = {"deadline": enclosed.deadline, "cleanup_reserve": enclosed.cleanup_reserve}
         frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
@@ -312,14 +483,12 @@ def run(
                 on_settled=on_settled,
                 allow_daemon_breakaway=allow_daemon_breakaway,
                 binary=binary,
-                **({"budget": execution_budget} if execution_budget is not None else {}),
-                **({"cwd": cwd} if cwd is not None else {}),
-                **({"env": env} if env is not None else {}),
+                budget=execution_budget, cwd=cwd, env=env,
             )
         except _PreparationTimeout as error:
             if on_settled is not None:
                 on_settled()
-            raise subprocess.TimeoutExpired(argv, timeout) from error
+            raise subprocess.TimeoutExpired(argv, cast(float, timeout)) from error
     if borrow_parent_scope:
         return _run_owned(
             argv, timeout=timeout, input_text=input_bytes if input_bytes is not None else input_text, capture=capture,
@@ -345,18 +514,17 @@ def run(
                     str(Path(__file__).resolve().parents[1]), str(reader),
                     *([str(os.getpid())] if sys.platform == "darwin" else []),
                 ],
-                timeout=timeout + (budget.cleanup_reserve / 2 if budget else 0),
+                timeout=(timeout + (budget.cleanup_reserve / 2 if budget else 0)
+                         if timeout is not None else None),
                 input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
                 on_settled=lambda: native_settled.append(True),
-                **({"budget": execution_budget} if execution_budget is not None else {}),
-                **({"cwd": cwd} if cwd is not None else {}),
-                **({"env": env} if env is not None else {}),
+                budget=execution_budget, cwd=cwd, env=env,
             )
         except _PreparationTimeout as error:
             preparation_refused = True
-            raise subprocess.TimeoutExpired(argv, timeout) from error
+            raise subprocess.TimeoutExpired(argv, cast(float, timeout)) from error
         except SyncProcessLaunchError:
             preparation_refused = True
             raise
@@ -364,7 +532,7 @@ def run(
             error._retain_on_settled(on_settled)
             raise
         except subprocess.TimeoutExpired as error:
-            raise subprocess.TimeoutExpired(argv, timeout) from error
+            raise subprocess.TimeoutExpired(argv, cast(float, timeout)) from error
         except OutputLimitExceeded as error:
             raise RuntimeError("caller-owned completion frame exceeded its byte budget") from error
     finally:
@@ -401,7 +569,7 @@ def run(
 
 
 def _retire() -> None:
-    os.killpg(os.getpid(), signal.SIGKILL)
+    cast(_PosixNative, os).killpg(os.getpid(), getattr(signal, "SIGKILL"))
 
 
 def _main() -> None:
@@ -417,14 +585,14 @@ def _main() -> None:
     lifetime = int(sys.argv[1])
     if not stat.S_ISFIFO(os.fstat(lifetime).st_mode):
         raise RuntimeError("caller-owned lifetime descriptor is not a pipe")
-    os.set_blocking(lifetime, False)
+    cast(_PosixNative, os).set_blocking(lifetime, False)
     try:
         initial = os.read(lifetime, 1)
     except BlockingIOError:
         initial = None
     if initial is not None:
         _retire()
-    os.set_blocking(lifetime, True)
+    cast(_PosixNative, os).set_blocking(lifetime, True)
 
     def watch() -> None:
         try:
@@ -444,7 +612,7 @@ def _main() -> None:
         threading.Thread(
             target=watch_owner, name="native-caller-exit", daemon=True,
         ).start()
-    response: dict = {"version": 1, "kind": "execution"}
+    response: dict[str, object] = {"version": 1, "kind": "execution"}
     try:
         frame = sys.stdin.buffer.readline(_MAX_REQUEST + 1)
         if len(frame) > _MAX_REQUEST or not frame.endswith(b"\n"):
@@ -456,9 +624,10 @@ def _main() -> None:
                 request["argv"], timeout=request["timeout"],
                 input_text=base64.b64decode(request["input_bytes"], validate=True)
                 if "input_bytes" in request else request["input_text"], capture=request["capture"],
-                inherit_process_group=True, capture_limits=tuple(request["limits"]),
+                inherit_process_group=True, completion_supervisor=True,
+                capture_limits=(request["limits"][0], request["limits"][1]),
                 binary=request.get("binary", False),
-                **({"budget": budget} if budget is not None else {}),
+                budget=budget,
             )
             if request.get("binary", False) and request["capture"]:
                 result.stdout, result.stderr = (

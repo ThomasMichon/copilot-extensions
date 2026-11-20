@@ -4,15 +4,29 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
 
 from worktree_manager import engine_client, process_priority, resident_picker
-from worktree_manager.production_picker import runner
+from worktree_manager.production_picker import engine_group_b, runner
+
+if TYPE_CHECKING:
+    from worktree_manager import picker_app
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+Handoff = dict[str, Any]
+
+
+class SourceFactory(Protocol):
+    def __call__(
+        self, machine: str, env: str, argv: list[str] | None, *, alias: str,
+    ) -> data_ssh.Source: ...
 
 
 @pytest.fixture
-def handoff(tmp_path, monkeypatch):
+def handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Handoff:
     monkeypatch.setattr(resident_picker, "_binding", None)
     monkeypatch.setattr(engine_client, "_INHERITED_ENGINE_COMMAND", None)
     monkeypatch.setattr(engine_client, "_ENGINE_CMD_OVERRIDE", None)
@@ -36,12 +50,20 @@ def handoff(tmp_path, monkeypatch):
     return payload
 
 
-def test_entry_consumes_a_scoped_bootstrap_and_preserves_engine_selection(handoff, tmp_path, monkeypatch):
-    calls = []
+def test_entry_consumes_a_scoped_bootstrap_and_preserves_engine_selection(
+    handoff: Handoff, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import warm_picker_client
+
+    monkeypatch.setattr(
+        warm_picker_client, "run",
+        lambda *_a: pytest.fail("app entry must not wait on the Manager daemon"),
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setenv(resident_picker.BOOTSTRAP_ENV, json.dumps(handoff))
     monkeypatch.setattr(runner, "run", lambda project, **kwargs: calls.append((project, kwargs)))
     monkeypatch.setattr(
-        runner.engine_group_b, "picker_bootstrap",
+        engine_group_b, "picker_bootstrap",
         lambda *_args: pytest.fail("resident entry repeated the bootstrap CLI"),
     )
     assert resident_picker.main(["--project", "sample"]) == 0
@@ -53,7 +75,9 @@ def test_entry_consumes_a_scoped_bootstrap_and_preserves_engine_selection(handof
 
 
 @pytest.mark.parametrize("invalid", ["headless", "project", "root", "payload", "version", "live"])
-def test_invalid_or_foreign_handoff_never_opens_the_ui(handoff, monkeypatch, invalid):
+def test_invalid_or_foreign_handoff_never_opens_the_ui(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
     if invalid == "headless":
         handoff["bootstrap"]["headless"] = True
     elif invalid == "project":
@@ -72,23 +96,29 @@ def test_invalid_or_foreign_handoff_never_opens_the_ui(handoff, monkeypatch, inv
     assert resident_picker.root_for("sample") is None
 
 
-def test_first_decision_is_executed_without_reopening_the_picker(handoff, monkeypatch):
+def test_first_decision_is_executed_without_reopening_the_picker(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import __main__ as cli
 
     monkeypatch.setenv(resident_picker.BOOTSTRAP_ENV, json.dumps(handoff))
     decision = {"action": "new"}
     monkeypatch.setattr(runner, "run", lambda *_args, **_kwargs: decision)
-    calls = []
-    monkeypatch.setattr(
-        cli, "_run_production_picker",
-        lambda project, **kwargs: calls.append((project, kwargs)) or 17,
-    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def run_production(project: str, **kwargs: object) -> int:
+        calls.append((project, kwargs))
+        return 17
+
+    monkeypatch.setattr(cli, "_run_production_picker", run_production)
     assert resident_picker.main(["--project", "sample"]) == 17
     assert calls == [("sample", {"initial_decision": decision})]
 
 
 @pytest.mark.parametrize("switch_to_anchor", [False, True])
-def test_runner_binds_scalars_without_any_bootstrap_or_scalar_cli(handoff, monkeypatch, tmp_path, switch_to_anchor):
+def test_runner_binds_scalars_without_any_bootstrap_or_scalar_cli(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, switch_to_anchor: bool,
+) -> None:
     from worktree_manager.production_picker import project_config
 
     caller = tmp_path / "caller"
@@ -97,11 +127,11 @@ def test_runner_binds_scalars_without_any_bootstrap_or_scalar_cli(handoff, monke
     anchor.mkdir()
     monkeypatch.chdir(caller)
     handoff["bootstrap"].update(should_switch_cwd=switch_to_anchor, cwd=str(anchor))
-    monkeypatch.setattr(runner.engine_client, "engine_available", lambda: pytest.fail("repeated engine resolution"))
-    monkeypatch.setattr(runner.engine_group_b, "picker_bootstrap", lambda *_args: pytest.fail("bootstrap CLI"))
-    monkeypatch.setattr(runner.engine_client, "get_value", lambda *_args: pytest.fail("scalar CLI"))
+    monkeypatch.setattr(engine_client, "engine_available", lambda: pytest.fail("repeated engine resolution"))
+    monkeypatch.setattr(engine_group_b, "picker_bootstrap", lambda *_args: pytest.fail("bootstrap CLI"))
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: pytest.fail("scalar CLI"))
 
-    def run_picker(**kwargs):
+    def run_picker(**kwargs: object) -> None:
         assert os.getcwd() == str(anchor if switch_to_anchor else caller)
         assert kwargs["live"] is True
         assert "prepare" not in kwargs
@@ -117,7 +147,9 @@ def test_runner_binds_scalars_without_any_bootstrap_or_scalar_cli(handoff, monke
 
 
 @pytest.mark.parametrize("action", ["cancel", "new", "attach-failed", "foreign", "replay"])
-def test_retained_result_is_scoped_and_consumed_once_before_actions(handoff, tmp_path, monkeypatch, action):
+def test_retained_result_is_scoped_and_consumed_once_before_actions(
+    handoff: Handoff, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str,
+) -> None:
     from worktree_manager import __main__ as cli
 
     handoff["manager_session"] = {"version": 1, "root": str(tmp_path)}
@@ -129,17 +161,19 @@ def test_retained_result_is_scoped_and_consumed_once_before_actions(handoff, tmp
     (directory / "request.json").write_text(json.dumps(request))
     decision = {"action": "new"} if action in {"new", "replay"} else None
     (directory / "result.json").write_text(json.dumps({"ok": True, "decision": decision}))
-    calls = []
-    monkeypatch.setattr(
-        cli, "_run_production_picker",
-        lambda project, **kwargs: calls.append((project, kwargs)) or 17,
-    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def run_production(project: str, **kwargs: object) -> int:
+        calls.append((project, kwargs))
+        return 17
+
+    monkeypatch.setattr(cli, "_run_production_picker", run_production)
     args = [
         "--project", "sample", "--directory", str(directory),
         "--manager-root", str(tmp_path), "--attach-exit", "130" if action == "attach-failed" else "0",
     ]
 
-    def finish():
+    def finish() -> int:
         monkeypatch.setenv(resident_picker.BOOTSTRAP_ENV, json.dumps(handoff))
         monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(["qualified-engine"]))
         return resident_picker.finish(args)
@@ -153,10 +187,13 @@ def test_retained_result_is_scoped_and_consumed_once_before_actions(handoff, tmp
         assert len(calls) == 1
 
 
-@pytest.mark.parametrize("entry", ["warm", "retained"])
+@pytest.mark.parametrize("entry", ["direct", "retained"])
 @pytest.mark.parametrize("switch_to_anchor", [False, True])
-def test_remote_restore_keeps_bootstrap_project_and_scalars(handoff, tmp_path, monkeypatch, entry, switch_to_anchor):
-    from worktree_manager import __main__ as cli, warm_picker_client
+def test_remote_restore_keeps_bootstrap_project_and_scalars(
+    handoff: Handoff, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    entry: str, switch_to_anchor: bool,
+) -> None:
+    from worktree_manager import __main__ as cli
     from worktree_manager.production_picker import context, project_config
     from worktree_manager.production_picker.picker_tui import data_ssh, maintenance
 
@@ -176,15 +213,18 @@ def test_remote_restore_keeps_bootstrap_project_and_scalars(handoff, tmp_path, m
         "action": "restore", "worktree_id": "fixture-worktree", "is_local": False,
         "machine": "fixture-peer", "env": "Linux",
     }
-    projects, commands, launches = [], [], []
+    projects: list[str] = []
+    commands: list[list[str]] = []
+    launches: list[picker_app.LaunchRequest] = []
+    source_factory = cast(SourceFactory, data_ssh.Source)
 
-    def sources():
+    def sources() -> list[data_ssh.Source]:
         projects.append(data_ssh._project())
         if projects[-1] != "sample":
             return []
-        return [data_ssh.Source("fixture-peer", "Linux", None, alias="fixture-ssh")]
+        return [source_factory("fixture-peer", "Linux", None, alias="fixture-ssh")]
 
-    def remux(argv):
+    def remux(argv: list[str]) -> dict[str, object]:
         assert project_config._machine_name("sample") == "fixture-host"
         assert project_config._repo_dir("sample") == handoff["runtime_root"]
         assert str(project_config.install_dir("sample")) == handoff["runtime_root"]
@@ -194,10 +234,14 @@ def test_remote_restore_keeps_bootstrap_project_and_scalars(handoff, tmp_path, m
 
     monkeypatch.setattr(data_ssh, "_build_sources", sources)
     monkeypatch.setattr(maintenance, "_ssh_json", remux)
-    monkeypatch.setattr(cli, "_run_launch", lambda request: launches.append(request) or 17)
+    def launch(request: picker_app.LaunchRequest) -> int:
+        launches.append(request)
+        return 17
+
+    monkeypatch.setattr(cli, "_run_launch", launch)
     monkeypatch.setattr(runner, "run", lambda *_a, **_k: pytest.fail("completion reopened the UI"))
-    if entry == "warm":
-        monkeypatch.setattr(warm_picker_client, "run", lambda *_a: (True, decision))
+    if entry == "direct":
+        monkeypatch.setattr(runner, "run", lambda *_a, **_k: decision)
         args = ["--project", "sample"]
         invoke = resident_picker.main
     else:
@@ -224,16 +268,18 @@ def test_remote_restore_keeps_bootstrap_project_and_scalars(handoff, tmp_path, m
         project_config.clear_caches(reset_binding=True)
 
 
-def test_optional_startup_waits_only_for_its_own_local_feed_and_honors_cancellation(handoff, monkeypatch):
+def test_optional_startup_waits_only_for_its_own_local_feed_and_honors_cancellation(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import threading
 
     monkeypatch.setenv(resident_picker.BOOTSTRAP_ENV, json.dumps(handoff))
     resident_picker.consume(["--project", "sample"])
     finished = threading.Event()
     cancelled = threading.Event()
-    result = []
+    result: list[bool] = []
 
-    def wait():
+    def wait() -> None:
         result.append(resident_picker.wait_for_local("sample", cancelled.is_set))
         finished.set()
 
@@ -254,7 +300,9 @@ def test_optional_startup_waits_only_for_its_own_local_feed_and_honors_cancellat
     assert not thread.is_alive()
 
 
-def test_optional_startup_has_a_bounded_escape_when_local_feed_never_settles(handoff, monkeypatch):
+def test_optional_startup_has_a_bounded_escape_when_local_feed_never_settles(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
 
     monkeypatch.setenv(resident_picker.BOOTSTRAP_ENV, json.dumps(handoff))
