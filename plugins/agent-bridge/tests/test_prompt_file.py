@@ -101,6 +101,25 @@ def test_create_writes_exact_session_id_before_return(
     assert output.read_text(encoding="utf-8") == "sid-123\n"
 
 
+def test_create_unreadable_prompt_file_fails_before_any_session(
+    tmp_path, monkeypatch, capsys
+):
+    created = []
+    monkeypatch.setattr(m, "_get_client", lambda: pytest.fail("contacted the Bridge"))
+    monkeypatch.setattr(
+        m, "_resolve_target", lambda *_args, **_kwargs: created.append(1) or "sid-1"
+    )
+    missing = tmp_path / "missing-prompt.md"
+    args = _parse(["create", "agent-x", "--prompt-file", str(missing)])
+
+    with pytest.raises(SystemExit) as exc:
+        m._cmd_create(args)
+
+    assert exc.value.code == 2
+    assert "cannot read" in capsys.readouterr().err
+    assert created == []
+
+
 # --- _resolve_prompt behavior -----------------------------------------------
 
 def test_resolve_reads_file(tmp_path):
