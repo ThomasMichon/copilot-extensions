@@ -400,6 +400,7 @@ def test_health_route_serializes_current_selection_without_factory_or_version_in
     assert declaration["representation_version"] == 1
     assert declaration["coverage"] == "named-target-only"
     assert declaration["hints_versions"] == [2]
+    assert declaration["required_admission_versions"] == [1]
     assert declaration["read_boundary"] == "in-process-only"
     assert observed["indexing_contract"] == legacy.intake_contract()
     assert observed["indexing_contract"]["execution_versions"] == [1]

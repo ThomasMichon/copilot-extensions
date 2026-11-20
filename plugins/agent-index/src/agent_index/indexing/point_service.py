@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from contextvars import copy_context
 from dataclasses import dataclass
@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING, cast
 
 from .point_hints import AcquisitionHints, PointChangeHints
 from .point_queue_consumer import PointQueueConsumer
-from .point_service_contract import point_scope_fingerprint, unavailable_point_service
+from .point_service_contract import (
+    point_scope_fingerprint, require_point_service, unavailable_point_service,
+)
 from .runner import _settle
 from .task_store import TaskRecord, TaskStore
 
@@ -25,6 +27,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 PointExecutor = Callable[[TaskRecord], object]
 PointReader = Callable[[str], "ComponentRead"]
+
+
+class PointAdmissionRefused(RuntimeError):
+    """The selected point owner refused before starting a queue effect."""
 
 
 @dataclass(frozen=True)
@@ -85,6 +91,7 @@ class PointService:
         self._reader: PointReader | None = None
         self._runtime: PointRuntime | None = None
         self._reads: set[asyncio.Future[ComponentRead]] = set()
+        self._intakes: set[asyncio.Task[TaskRecord]] = set()
         self._consumer: PointQueueConsumer | None = None
         self._resources: AsyncExitStack | None = None
         self._stop_result: asyncio.Future[None] | None = None
@@ -152,6 +159,7 @@ class PointService:
         closed = self._draining or draining
         return {
             "id": "agent-index.point-service", "version": 1, "paired": True,
+            "required_admission_versions": [1],
             "scope_fingerprint": point_scope_fingerprint(self._scope),
             "representation": "point-components", "representation_version": 1,
             "coverage": "named-target-only", "hints_versions": [2],
@@ -164,6 +172,28 @@ class PointService:
             "execution_admitted": self._admitted and not self._failed and not closed,
             "read_admitted": self._reader is not None and not closed,
         }
+
+    async def enqueue_required(
+        self, hints: AcquisitionHints, enqueue: Callable[[TaskStore], Awaitable[TaskRecord]],
+    ) -> TaskRecord:
+        """Admit and own one exact selected queue effect through settled cleanup."""
+        if not self.matches(hints):
+            raise PointAdmissionRefused("Required point-service scope does not match the selected pair")
+        try:
+            require_point_service(
+                {"point_service_contract": self.contract()}, self._scope, operation="execute",
+            )
+        except RuntimeError as exc:
+            raise PointAdmissionRefused(str(exc)) from None
+        store = self.store
+
+        async def admitted() -> TaskRecord:
+            return await enqueue(store)
+
+        operation = asyncio.create_task(admitted())
+        self._intakes.add(operation)
+        operation.add_done_callback(self._intakes.discard)
+        return cast("TaskRecord", await _settle(operation))
 
     async def read_component(self, path: str) -> ComponentRead:
         """Qualify one named target, including while execution remains paused."""
@@ -214,8 +244,11 @@ class PointService:
         self.pause()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        if self._reads:
-            _, pending = await asyncio.wait(self._reads, timeout=max(0, timeout))
+        admitted: set[asyncio.Future[ComponentRead] | asyncio.Task[TaskRecord]] = {
+            *self._reads, *self._intakes,
+        }
+        if admitted:
+            _, pending = await asyncio.wait(admitted, timeout=max(0, timeout))
             if pending:
                 return False
         if self._consumer is None:
@@ -238,8 +271,11 @@ class PointService:
             return
         async def close() -> None:
             try:
-                if self._reads:
-                    await _settle(asyncio.gather(*self._reads, return_exceptions=True))
+                admitted: set[asyncio.Future[ComponentRead] | asyncio.Task[TaskRecord]] = {
+                    *self._reads, *self._intakes,
+                }
+                if admitted:
+                    await _settle(asyncio.gather(*admitted, return_exceptions=True))
             finally:
                 await resources.aclose()
 

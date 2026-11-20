@@ -221,8 +221,10 @@ After the reviewed proposal, the operator admitted execution:
   now has receiver-only selected-pair/lifecycle advertisement and pure optional
   missing-support/provider-rollback validation. Existing clients remain unchanged;
   the [request-bound required-admission refinement](point-required-admission.md)
-  must be reviewed before implementation and wire-caller migration: a prior
-  provider can retain the old v2 form after health-to-request rollback.
+  was reviewed in #13712. Its opt-in receiver now checks the actual peer,
+  selected scope and admission before an owned queue effect and emits an
+  explicit typed receipt. Existing wire callers remain unchanged; their
+  migration needs separate review.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
