@@ -80,7 +80,28 @@ private schema writer. Explicit scoped reads support the
 through applied-version qualification. Explicit
 [ledger/index preparation](component-ledger.md) now forwards that same exact
 selection through its existing owners and budgets, without admitting ordinary
-data writers. Qualified point application and every v2 executor/producer remain unsupported.
+data writers.
+
+`VectorTable.preflight_point_upsert` and
+`MultiModelStore.preflight_point_vectors` inspect current canonical input only,
+under an already-owned matching source writer and explicit `point_scope`.
+They reject another family/scope, including empty input; both connection URIs
+must resolve to the domain, and distinct prepared content/vector tables must
+match their expected schemas. The vector chunk-ID index needs zero uncovered
+physical rows; nonempty input also reserves room below the existing segment cap.
+Canonical fields are compared once through the prepared chunk-ID index.
+The canonical table handle opened during binding is reused for that lookup;
+an open failure propagates without the generic create-table fallback.
+
+Preflight returns selected raw canonical fields at that read boundary, not a
+durable receipt, model-to-table ownership proof or permission to write.
+It performs no content/vector mutation, index preparation or writer acquisition.
+The existing mutation APIs still refuse point domains. Enabling point writes
+first requires durable cross-facade/reopen model ownership and a post-effect
+failure latch that cannot be cleared by catching a nested exception.
+Selected reads retain their separate explicit prepared-index path.
+
+Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP

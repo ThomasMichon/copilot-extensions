@@ -1,0 +1,9 @@
+{
+  "comment": "Preflight scoped vector input without admitting point mutation",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    }
+  ]
+}

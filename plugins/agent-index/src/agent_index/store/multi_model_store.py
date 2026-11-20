@@ -191,6 +191,15 @@ class MultiModelStore(_ItemRepresentationMixin):
             return vt.upsert(chunks, vectors, bounded_provenance=True)
         return vt.upsert(chunks, vectors)
 
+    def preflight_point_vectors(
+        self, model_id: str, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Inspect selected canonical input; no model-ownership or mutation receipt."""
+        return self.get_vector_table(model_id).preflight_point_upsert(
+            chunks, vectors, point_scope=point_scope,
+        )
+
     @source_write
     def upsert(
         self,
