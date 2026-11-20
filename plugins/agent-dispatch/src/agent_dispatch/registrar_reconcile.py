@@ -19,6 +19,7 @@ lane ``spec`` keys line up with
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from .registrar import ProfileDeclaration
 from .registrations import RegistrationKind
@@ -34,12 +35,12 @@ def declared_registration_id(decl: ProfileDeclaration) -> str:
     return f"{DECLARED_ID_PREFIX}:{owner}:{decl.name}"
 
 
-def declaration_to_spec(decl: ProfileDeclaration) -> dict:
+def declaration_to_spec(decl: ProfileDeclaration) -> dict[str, Any]:
     """Map a declaration to its daemon ``spec``."""
     if decl.kind != RegistrationKind.SUPERVISED_LANE:
         return dict(decl.spec)
 
-    spec: dict = {
+    spec: dict[str, Any] = {
         "labels": list(decl.labels),
         "max_concurrent": decl.concurrency,
         "max_attempts": decl.max_attempts,
@@ -67,6 +68,8 @@ def declaration_to_spec(decl: ProfileDeclaration) -> dict:
             "origin": decl.fleet.origin,
             "headless": decl.fleet.headless,
         }
+        if decl.fleet.placement_provider is not None:
+            spec["fleet"]["placement_provider"] = decl.fleet.placement_provider.to_json()
         # A fleet embody body pins CLI explicitly; a headless fleet emits --headless
         # (from spec["fleet"]) in _lane_flags.
         if decl.body.type == "embody" and not decl.fleet.headless:
@@ -101,7 +104,7 @@ def declaration_to_spec(decl: ProfileDeclaration) -> dict:
 
 def declaration_to_registration(
     decl: ProfileDeclaration, *, machine: str | None, env: str = "default"
-) -> dict:
+) -> dict[str, Any]:
     """Map a declaration to a daemon registration dict scoped to ``(machine, env)``."""
     kind = (
         decl.kind
@@ -109,7 +112,7 @@ def declaration_to_registration(
         else RegistrationKind.EVALUATOR if decl.evaluator
         else RegistrationKind.SUPERVISED_LANE
     )
-    registration = {
+    registration: dict[str, Any] = {
         "id": declared_registration_id(decl),
         "logical_id": decl.name,
         "kind": kind,
@@ -187,7 +190,7 @@ def runs_on_machine(decl: ProfileDeclaration, machine: str | None) -> bool:
 
 def declared_registrations(
     decls: Iterable[ProfileDeclaration], *, machine: str | None, env: str = "default"
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Convert the declarations that run on ``machine`` into daemon registrations.
 
     Standing-charter declarations are durable task records, not processes.

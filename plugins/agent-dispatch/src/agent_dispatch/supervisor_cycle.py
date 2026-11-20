@@ -107,6 +107,10 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         with trace.stage("active_reservations"):
             active = len(self._active_reservations()) if legacy_needed else 0
     spawned: list[str] = []
+    # A spawn fn with per-cycle placement state (a fleet provider) starts fresh.
+    begin_placement = getattr(self.spawn_fn, "begin_placement_cycle", None)
+    if callable(begin_placement):
+        begin_placement()
     for task in eligible:
         task_trace = SpawnDiagnostics(
             supervisor_id=self.supervisor_id, cycle_id=trace.cycle_id,

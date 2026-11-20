@@ -25,6 +25,10 @@ The design (Model C) keeps the strong guarantee where it belongs:
   for this cycle **without a reservation**, so an all-asleep pool never burns
   spawn attempts toward the dead-letter bound. Selection is cached briefly so the
   gate and the subsequent spawn agree on the same host without re-probing.
+- **Optional placement ordering.** A lane may hand the order of a managed subset
+  of its pool to a trusted provider (:mod:`agent_dispatch.fleet_placement`),
+  called at most once per cycle before any reservation. Unmanaged hosts keep
+  their configured positions and never depend on the provider.
 
 Nothing here is consumer-specific: a :class:`FleetSpawner` is keyed only on host
 aliases + task ids.
@@ -43,6 +47,7 @@ from typing import Any
 
 from . import embody
 from .embody_prompts import validate_fleet_route
+from .fleet_placement import PlacementOrdering
 from .procutil import run_ssh_command
 from .queue_common import machine_matches
 
@@ -243,6 +248,7 @@ class FleetSpawner:
         liveness: LivenessFn | None = None,
         spawn_fn: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         now: Callable[[], float] = time.time,
+        placement: PlacementOrdering | None = None,
     ):
         self.pool = [h.strip() for h in pool if h and h.strip()]
         if not self.pool:
@@ -279,12 +285,18 @@ class FleetSpawner:
         )
         self._spawn: Callable[..., subprocess.CompletedProcess[str]] = spawn_fn or default_spawn
         self._now = now
+        self.placement = placement
         #: task_id -> chosen host, so can_spawn() and __call__() agree per cycle.
         self._selection: dict[str, str] = {}
         #: host -> (checked_at, is_live); short-TTL so a cycle probes each host once.
         self._live_cache: dict[str, tuple[float, bool]] = {}
 
     # -- host selection ------------------------------------------------------
+
+    def begin_placement_cycle(self) -> None:
+        """Start a supervisor cycle: drop the previous cycle's provider result."""
+        if self.placement is not None:
+            self.placement.begin_cycle()
 
     def _is_live(self, host: str) -> bool:
         now = self._now()
@@ -326,13 +338,23 @@ class FleetSpawner:
 
     def select(self, task: dict[str, Any]) -> str | None:
         """Pick the first live candidate host for ``task``; cache and return it,
-        or ``None`` when the whole pool is asleep/unreachable this cycle."""
+        or ``None`` when the whole pool is asleep/unreachable this cycle.
+
+        With a placement provider, managed hosts are reordered (or dropped)
+        before liveness, so a hard pin to a managed host starts only when the
+        provider kept it and it is live; it never moves to another host.
+        """
         tid = str(task.get("id"))
-        for host in self._candidates(task):
+        candidates = self._candidates(task)
+        if self.placement is not None:
+            candidates = self.placement.order(candidates)
+        for host in candidates:
             if self._is_live(host):
                 self._selection[tid] = host
                 return host
         self._selection.pop(tid, None)
+        if self.placement is not None:
+            log.info("fleet: no eligible host for task %s this cycle; deferring", tid)
         return None
 
     def can_spawn(self, task: dict[str, Any]) -> bool:
