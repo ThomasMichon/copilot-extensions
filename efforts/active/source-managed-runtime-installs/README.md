@@ -12,6 +12,12 @@
 
 ## Goal
 
+Fleet Manager is an independently selected application, not a dependency of
+`agent-worktrees`. The bound knowledge repository opts a target machine into
+Fleet Manager by its assigned role (for example, controller). Installing
+Worktrees, requesting a Python extra, or running on the planning machine must
+not select Fleet for the target. Selection alone does not start a service.
+
 Recover Bridge's potential agent catalog from independent registered and provider
 sources, distinguishing discovery from verified reachability. Preserve surviving
 mux sessions and session hosts across version changes: reattach only to the
@@ -687,6 +693,13 @@ other protected work.
 
 ## Plan
 
+- [ ] Decouple Worktrees' `fleet-ssh`, `fleet-review`, development dependency
+  and `application-sources` metadata from the Fleet distribution. Preserve
+  explicitly configured SSH and review behavior through the provider's
+  supported interface, without importing Fleet from another app's environment
+  or relaxing review authorization. Select standalone Fleet from the target's
+  knowledge-owned role policy, not from Worktrees or an ambient host role.
+
 **Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
 recorded evidence; the open rows are finite work, not new completion claims.
 The [disposition map](finite-scope.md) identifies replaced gate families and
@@ -900,6 +913,14 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+- [ ] Build and stage Worktrees without a Fleet distribution or source input.
+  Inspect its wheel metadata, including extras. With the same Worktrees build
+  and two target-role assignments, only the opted-in target should request the
+  separately staged Fleet app. A known nonmatching role excludes Fleet;
+  unreadable required policy is unresolved, not a grant. Exercise optional
+  SSH and review callers both without their provider and with an explicitly
+  configured provider. No live setup, role reassignment or service start.
 
 The [legacy first-use foreground controls](legacy-first-use-foreground.md#validation-plan-agent-recommended)
 specialize P4bD and L1-L6 with finite caller custody, truthful interruption,
