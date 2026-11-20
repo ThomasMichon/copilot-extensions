@@ -7163,6 +7163,6 @@
         "libs/update-driver/src/update_driver/boot.py": "ea3957d4a7458566a4cf844c7c94ceb1b6363bec93265f30087d062e32c5037b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_private.py": "9e45fa5807c7ecd0bb7d870450f562bd004528005510f35dc2df0b733f34741b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py": "b1de6e01dea834380b81ea5ff1c0729eebde1fdc811787856cb8bfe7c2d24194",
-        "tools/promotion_unit_tests/test_boot_domain.py": "e086381c3b4fddbce8a4ad29116e0795af6872501504fa7cda64635c634cd65b"
+        "tools/promotion_unit_tests/test_boot_domain.py": "42da2cacbbdb6ff58618fabe1552530f2500bfea5cd6d16edabe18a291610e1d"
     }
 }

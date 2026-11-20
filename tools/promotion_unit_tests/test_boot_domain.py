@@ -1,13 +1,12 @@
 """Actor-free evidence controls; no test reads the host's native identities."""
 
-import ctypes
 import importlib.util
 import json
 import sys
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -31,6 +30,25 @@ class NativeFunction:
 
     def __call__(self, *args: Any) -> Any:
         return self.function(*args)
+
+
+class NativeValue:
+    def __init__(self, value: int = 0) -> None:
+        self.value = value if value >= 0 else (1 << 64) + value
+
+
+class NativeBuffer:
+    def __init__(self) -> None:
+        self.data = b"\0" * 16
+
+    def __bytes__(self) -> bytes:
+        return self.data
+
+
+class NativeByte:
+    def __mul__(self, length: int) -> type[NativeBuffer]:
+        assert length == 16
+        return NativeBuffer
 
 
 @pytest.fixture
@@ -58,7 +76,7 @@ def native(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         assert data is None and size == 0 and overlapped is None
         assert capacity == 16
         calls.append("read")
-        ctypes.memmove(output, counters.pop(0), 16)
+        output.data = counters.pop(0)
         returned._obj.value = behavior["size"]
         return behavior["read"]
 
@@ -83,8 +101,16 @@ def native(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(boot, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(boot, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(boot, "kernel_boot_identity", kernel_boot)
-    monkeypatch.setattr(ctypes, "WinDLL", load, raising=False)
-    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    native_api = ModuleType("ctypes")
+    for name in ("c_uint32", "c_int", "c_void_p"):
+        setattr(native_api, name, NativeValue)
+    setattr(native_api, "c_ubyte", NativeByte())
+    setattr(native_api, "c_wchar_p", object())
+    setattr(native_api, "POINTER", lambda kind: ("pointer", kind))
+    setattr(native_api, "byref", lambda value: SimpleNamespace(_obj=value))
+    setattr(native_api, "WinDLL", load)
+    setattr(native_api, "get_last_error", lambda: 5)
+    monkeypatch.setitem(sys.modules, "ctypes", native_api)
     return SimpleNamespace(
         calls=calls, counters=counters, boots=boots, behavior=behavior, library=library,
     )
@@ -158,7 +184,7 @@ def test_unsupported_venue_does_not_probe_or_fall_back(
     assert native.calls == []
 
 
-@pytest.mark.parametrize("handle", [None, 0, ctypes.c_void_p(-1).value])
+@pytest.mark.parametrize("handle", [None, 0, (1 << 64) - 1])
 def test_unavailable_device_has_no_fallback_or_invalid_handle_close(
     native: SimpleNamespace, handle: Any,
 ) -> None:
