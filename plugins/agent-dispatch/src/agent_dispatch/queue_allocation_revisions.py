@@ -86,7 +86,7 @@ def next_revision(
     *,
     requested: int | None,
     successor: str,
-    ordinary_pool: bool,
+    pool_successor: bool,
     creation_prefix: str,
 ) -> tuple[int, bool]:
     """Keep the original revision unless explicitly disposed or positively never allocated."""
@@ -104,7 +104,7 @@ def next_revision(
         )
     if (
         requested is None
-        and ordinary_pool
+        and pool_successor
         and previous is not None
         and previous["task_id"] != successor
         and previous["task_relationship_required"]

@@ -317,6 +317,71 @@ def test_retry_of_same_allocation_keeps_initial_capture(
     assert retry.task_relationship_required is initially_selected
 
 
+@pytest.mark.parametrize("original, successor, driver, required, refusal", [
+    ("local-ordinary-drain", "policy:factory", "ordinary-bridge", False, None),
+    ("local-ordinary-drain", "policy:factory", "cli", False, None),
+    ("local-ordinary", "policy:factory", "cli", True, "original task and driver"),
+    ("local-ordinary", "policy:factory", "ordinary-bridge", True, "original admission policy"),
+    ("policy:factory", "local-ordinary", "ordinary-bridge", True, "original admission policy"),
+    ("policy:factory", "policy:other", "ordinary-bridge", True, "original admission policy"),
+    ("policy:factory", "central/policy:factory", "ordinary-bridge", True, "original admission policy"),
+    ("anonymous", "policy:factory", "ordinary-bridge", True, "original admission policy"),
+    ("policy:factory", "policy:factory", "ordinary-bridge", True, None),
+])
+def test_ordinary_allocation_decision_survives_factory_cutover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, original: str, successor: str,
+    driver: str, required: bool, refusal: str | None,
+) -> None:
+    from agent_dispatch import assignment_admission
+    from tests.test_assignment_relationships import GroundOwner
+    from tests.test_pool_placement import pool, publish
+    from tests.test_pool_startup_policy import exhaust, renew
+
+    owner = GroundOwner()
+    monkeypatch.setattr(assignment_admission, "configured_writer", lambda *_: owner)
+    monkeypatch.setattr(telemetry, "load_sink_from_config", lambda: True)
+    monkeypatch.setattr(server, "require_worker_admission", lambda: None)
+    monkeypatch.setattr(server, "create_app", lambda queue, **_: SimpleNamespace(state=SimpleNamespace(queue=queue)))
+    cfg = Config(db_path=str(tmp_path / "queue.db"), relationship_authority="local")
+
+    def opened(spec: str) -> TaskQueue:
+        if spec == "anonymous":
+            queue = TaskQueue(cfg.db_path, relationship_writer=owner, relationship_authority="local")
+        else:
+            selected_authority = "central" if spec.startswith("central/") else "local"
+            queue = server.build_app(replace(cfg, relationship_admission=spec.removeprefix("central/"),
+                                             relationship_authority=selected_authority)).state.queue
+        monkeypatch.setattr(queue, "_now", lambda now=None: 100.0 if now is None else now)
+        return queue
+
+    q = opened(original)
+    revision = publish(q, pool())
+    task = new_task(q)
+    first, _ = q.reserve_spawn(task.id, reserved_by="allocator", driver="ordinary-bridge", pool_catalog_revision=revision)
+    assert first.task_relationship_required is required
+    queued = exhaust(q, current_task(q, task.id), first)
+    q.request_spawn_release(first.key, finished_startup_revision=1, now=701)
+    q.retire_spawn(first.key, exact_absence=True, now=702)
+    reopened = opened(successor)
+    renew(reopened, queued.not_before)
+    revision = reopened.pool_catalog_snapshot().revision
+
+    def retry() -> tuple[SpawnReservation, bool]:
+        return reopened.reserve_spawn(task.id, reserved_by="allocator", driver=driver, pool_catalog_revision=revision,
+                                      now=queued.not_before)
+
+    if refusal:
+        before = reopened.list_reservations(task_id=task.id), current_task(reopened, task.id)
+        with pytest.raises(TaskError, match=refusal):
+            retry()
+        assert (reopened.list_reservations(task_id=task.id), current_task(reopened, task.id)) == before
+    else:
+        second, created = retry()
+        assert created and second.allocation_reservation_key == first.key
+        assert second.task_relationship_required is required and second.driver == driver
+    assert not owner.calls
+
+
 def test_reemission_keeps_settled_legacy_workspace_ungoverned(q: TaskQueue) -> None:
     from agent_dispatch.ordinary_capture import OrdinaryCapture
     from tests.test_pool_placement import pool, publish

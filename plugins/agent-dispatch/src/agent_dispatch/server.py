@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_procutil.daemon_instances import daemon_entrypoint
 
+import hashlib
 import logging
 import os
 import socket
@@ -129,6 +130,9 @@ def build_app(
         relationship_writer=relationship_writer,
         relationship_authority=cfg.relationship_authority,
     )
+    if relationship_writer is not None:
+        selection = f"{cfg.relationship_authority}:{cfg.relationship_admission}"
+        queue._ordinary_factory_policy = "factory:" + hashlib.sha256(selection.encode()).hexdigest()
     if ordinary_local:
         from .assignment_local_ordinary import LocalOrdinaryRelationshipWriter
 

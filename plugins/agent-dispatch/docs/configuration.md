@@ -94,16 +94,23 @@ workspace and retain its writer requirement before the first prompt. Changing
 the selector does not reclassify reservations or repair ungoverned history.
 Retrying an allocation keeps its original decision, even in all-pool mode;
 re-emitting work against an old ungoverned workspace does not retrofit it.
-A captured allocation cannot switch startup drivers. After a confirmed worker
-decline, a *new* unselected allocation may proceed only once the old claim is
+A captured allocation cannot switch tasks or startup drivers on retry. For a
+governed ordinary root the queue also retains the admission selection (native
+local, or a fingerprint of the configured factory and its queue authority). Changing between
+native rollout scopes is not a change of writer policy. A different or unknown
+selection, including a historical root without this evidence, cannot authorize
+a new same-allocation attempt. A matching selection does not prove a writer's
+identity: the original workspace, writer and receipt checks still apply.
+
+After a confirmed worker decline, a *new* unselected allocation may proceed only once the old claim is
 closed and its native is retired. This remains true when the admission settings
 are removed. Earlier direct assignments need their own closed receipt and
 matching unassignment. If closed before bind acknowledgement, the canonical
 receipt must instead identify that same assignment in its version-2 recovery
 record. A pending claim or retirement still blocks replacement.
 A different task re-emitted under the same deduplication key can receive a new
-allocation revision if every attempt in the captured predecessor revision was
-retired before workspace preparation. A missing workspace receipt after project
+allocation revision for either the CLI or ordinary-Bridge pool driver if every
+attempt in the captured predecessor revision was retired before workspace preparation. A missing workspace receipt after project
 binding is not proof of absence. Unresolved sends or wakes still block placement.
 
 **Roll back prospectively.** With authority still `local`, change admission to

@@ -81,6 +81,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
                 "creation_nonce": "TEXT",
                 "task_relationship_event_id": "INTEGER",
                 "task_relationship_required": "INTEGER NOT NULL DEFAULT 0",
+                "ordinary_admission_policy": "TEXT",
                 "task_relationship_generation": "INTEGER",
             },
         ),
@@ -127,6 +128,12 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
         " OR (OLD.task_relationship_generation IS NOT NULL"
         " AND NEW.task_relationship_generation IS NOT OLD.task_relationship_generation)"
         " BEGIN SELECT RAISE(ABORT, 'task relationship workspace is immutable'); END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS ordinary_admission_policy_retained"
+        " BEFORE UPDATE OF ordinary_admission_policy ON spawn_reservations"
+        " WHEN OLD.task_relationship_required=1 AND NEW.ordinary_admission_policy IS NOT OLD.ordinary_admission_policy"
+        " BEGIN SELECT RAISE(ABORT, 'captured admission policy is immutable'); END"
     )
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.

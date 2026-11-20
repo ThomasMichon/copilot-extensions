@@ -142,6 +142,7 @@ def _matches_receipt(value: object, request: dict[str, Any], *, phase: str | Non
 
 class QueueTaskRelationshipsMixin:
     _ordinary_capture = OrdinaryCapture()
+    _ordinary_factory_policy: str | None = None
 
     @property
     def _relationship_queue(self) -> TaskQueue:
@@ -172,37 +173,40 @@ class QueueTaskRelationshipsMixin:
     ) -> None:
         governed = latest_relationship(conn, task.id) is not None
         writer, authority = self._spawn_relationship_selection(driver)
-        if self._relationship_queue._ordinary_relationship_writer is not None or writer is None:
-            if allocation_key != key:
-                prior = conn.execute(
-                    "SELECT task_id, driver, task_relationship_required FROM spawn_reservations WHERE key=?",
-                    (allocation_key,),
-                ).fetchone()
-                if prior is None:
-                    raise TaskError("ordinary capture cannot confirm the original allocation")
-                if prior["driver"] == "ordinary-bridge" and prior["task_relationship_required"]:
-                    if driver != "ordinary-bridge" or prior["task_id"] != task.id:
-                        raise TaskError("captured ordinary allocation requires its original task and driver")
-                    if writer is None:
-                        raise TaskError("captured ordinary allocation requires its original relationship writer")
-                required = bool(prior["task_relationship_required"])
-            else:
-                required = self._ordinary_capture.selects(winner)
-            if writer is None or (driver == "ordinary-bridge" and not required):
-                if governed:
-                    from .relationship_decline_history import admit_ungoverned_replacement
-                    admit_ungoverned_replacement(conn, task.id, key, task.generation + 1)
-                return
+        ordinary = driver == "ordinary-bridge"
+        native = ordinary and self._relationship_queue._ordinary_relationship_writer is not None
+        policy = "local-ordinary" if native else self._ordinary_factory_policy if ordinary else None
+
+        if allocation_key == key:
+            required = writer is not None and (not native or self._ordinary_capture.selects(winner))
+        else:
+            prior = conn.execute(
+                "SELECT task_id, driver, task_relationship_required, ordinary_admission_policy"
+                " FROM spawn_reservations WHERE key=?", (allocation_key,),
+            ).fetchone()
+            if prior is None:
+                raise TaskError("ordinary capture cannot confirm the original allocation")
+            required = bool(prior["task_relationship_required"])
+            if required:
+                if prior["task_id"] != task.id or prior["driver"] != driver:
+                    raise TaskError("captured allocation requires its original task and driver")
+                if writer is None:
+                    raise TaskError("captured allocation requires its original relationship writer")
+                if ordinary and (policy is None or prior["ordinary_admission_policy"] != policy):
+                    raise TaskError("captured ordinary allocation requires its original admission policy")
+        if not required:
+            if governed:
+                from .relationship_decline_history import admit_ungoverned_replacement
+                admit_ungoverned_replacement(conn, task.id, key, task.generation + 1)
+            return
         if governed:
             from .queue_relationship_continuation import continue_pool_startup
 
             continue_pool_startup(conn, task, key, authority=authority)
-        if writer is not None or governed:
-            conn.execute(
-                "UPDATE spawn_reservations SET task_relationship_required=1,"
-                " task_relationship_generation=? WHERE key=?",
-                (task.generation + 1, key),
-            )
+        conn.execute(
+            "UPDATE spawn_reservations SET task_relationship_required=1, ordinary_admission_policy=?,"
+            " task_relationship_generation=? WHERE key=?", (policy, task.generation + 1, key),
+        )
 
     def _replay_relationship_claim(
         self,

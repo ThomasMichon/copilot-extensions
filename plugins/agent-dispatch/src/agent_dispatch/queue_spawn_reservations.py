@@ -266,8 +266,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             latest_allocation = allocation_rows[0] if allocation_rows else (rows[-1] if rows else None)
             revision, new_allocation = next_revision(
                 conn, latest_allocation, allocation_rows or rows, requested=allocation_revision,
-                successor=task_id, ordinary_pool=(pool_catalog_revision is not None and driver == "ordinary-bridge"
-                    and (self._ordinary_relationship_writer is not None or self._relationship_writer is None)),
+                successor=task_id, pool_successor=pool_catalog_revision is not None,
                 creation_prefix=creation_prefix,
             )
             if (

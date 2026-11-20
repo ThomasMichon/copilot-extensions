@@ -273,9 +273,10 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
     assert current_task(reopened, t.id).status == "completed"
 
 
+@pytest.mark.parametrize("successor_driver", ["ordinary-bridge", "cli"])
 @pytest.mark.parametrize("predecessor", ["empty", "bound-project", "unknown-send"])
 def test_only_fenced_preallocation_reemission_gets_a_new_revision(
-    q: TaskQueue, predecessor: str
+    q: TaskQueue, predecessor: str, successor_driver: str
 ) -> None:
     winner = pool()
     revision = publish(q, winner)
@@ -311,7 +312,7 @@ def test_only_fenced_preallocation_reemission_gets_a_new_revision(
             q.reserve_spawn(
                 second.id,
                 reserved_by="allocator",
-                driver="ordinary-bridge",
+                driver=successor_driver,
                 pool_catalog_revision=revision,
             )
         assert not q.list_reservations(task_id=second.id)
@@ -320,7 +321,7 @@ def test_only_fenced_preallocation_reemission_gets_a_new_revision(
         new, created = q.reserve_spawn(
             second.id,
             reserved_by="allocator",
-            driver="ordinary-bridge",
+            driver=successor_driver,
             pool_catalog_revision=revision,
         )
         assert (
