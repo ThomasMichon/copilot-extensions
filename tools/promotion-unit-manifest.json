@@ -5708,7 +5708,9 @@
         "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[native64]",
         "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[native32]",
         "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[dynamic-interpreter]",
-        "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[dynamic-section]"
+        "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[dynamic-section]",
+        "tools/promotion_unit_tests/test_point_embedding_contract.py::test_selected_pairs_forward_scope_and_prepare_before_coverage",
+        "tools/promotion_unit_tests/test_point_embedding_contract.py::test_selected_coverage_checks_stored_vectors_before_opening_receipt_writer"
     ],
     "coverage_targets": [
         "plugins/agent-index/src/agent_index/store/file_projection.py",
@@ -6105,7 +6107,9 @@
         "libs/single-instance-lease/src/single_instance_lease/lease.py",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_delivery.py",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_sealing.py",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_writer.py"
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_writer.py",
+        "plugins/agent-index/src/agent_index/indexing/embedding_batch.py",
+        "plugins/agent-index/src/agent_index/indexing/embedding_coverage.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
@@ -7047,6 +7051,9 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_sealing.py": "6cbc7c14be638f18f96aefe93047afaf550c0430b34eb6e3f86c74c4ef754cee",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_writer.py": "b58bec59f0919efbe941ee56ed3989e88d3bb028ba990d7735edd7c916ab4379",
         "tools/promotion_unit_tests/test_watch_sealing.py": "6b6e195f25605d825cf6601c8d016eee27b904dd31e3fa09e7a77f1f2b74543f",
-        "libs/update-driver/src/update_driver/boot.py": "53ee1e189836e7ce586474884bcd3d435a6440c588dcef07440fccb13e47937d"
+        "libs/update-driver/src/update_driver/boot.py": "53ee1e189836e7ce586474884bcd3d435a6440c588dcef07440fccb13e47937d",
+        "tools/promotion_unit_tests/test_point_embedding_contract.py": "274ff71961cd9592c8d93b97958f76984f01c03a83e7b471c6a8387c7fc35a93",
+        "plugins/agent-index/src/agent_index/indexing/embedding_batch.py": "b6906fcdb1bc3040c19ee277a6e6ff970e35e00265bd6b5dc6e069d74e2653c4",
+        "plugins/agent-index/src/agent_index/indexing/embedding_coverage.py": "fd7bf89c185ccad5b3538a59b775d81c9705707d5d8ac5cc26d68c1ba68def53"
     }
 }
