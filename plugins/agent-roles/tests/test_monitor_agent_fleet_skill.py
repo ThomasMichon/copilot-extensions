@@ -561,3 +561,58 @@ def test_goal_establishment_is_standing_but_bounded() -> None:
         "activity-shaped-root-goal-steer",
         "goal-steer-disputed-draft",
     } <= set(cases)
+
+def test_relentless_drive_posture_is_opt_in_and_bounded() -> None:
+    def norm(*parts: str) -> str:
+        return " ".join(_read(SKILL.joinpath(*parts)).split())
+
+    skill = norm("SKILL.md")
+    charter = norm("assets", "CHARTER.md")
+    watchdog = norm("references", "watchdog-checks.md")
+    pending = norm("references", "pending-input.md")
+    repair = norm("references", "repair-escalation.md")
+    dormant = norm("references", "dormant-correction.md")
+    assert "**Drive posture is opt-in.**" in skill
+    assert "Drive posture: <conservative (default) | relentless" in charter
+    assert "Head reactivation: <none (default)" in charter
+    for requirement in (
+        "A hold is kept only with a recorded reason: clear resource contention, "
+        "or lifting it would worsen a known issue or outage.",
+        "Record who lifted which hold, when and the source.",
+        "It never widens authority.",
+        "the monitor never lifts an operator-set hold itself",
+    ):
+        assert requirement in watchdog, requirement
+    for requirement in (
+        "The grant widens which offered option the monitor picks, not whose authority",
+        "re-capture the same form and the same request identifier or cursor",
+        "Never pick an option that deploys, bypasses review or CI, deletes, "
+        "elevates, changes credentials, reboots, changes network or system "
+        "configuration, restarts all agents, or replays an operation with an "
+        "unknown outcome.",
+        "Permission and approval prompts stay operator-only, even under this scope.",
+        "A question whose authority boundary or intent cannot be established stays "
+        "unclear and operator-only",
+    ):
+        assert requirement in pending, requirement
+    assert "## Every blocker has an owner" in repair
+    assert "consuming harness's own issue tracker" in repair
+    for requirement in (
+        "Dormant correction itself never reactivates a target.",
+        "Never start a new session, reseed it or replace the head.",
+        "Launch from an interactive logon on Windows.",
+        "**Verify the pane stays live.**",
+        "**Relay the goal once.**",
+        "report the proposed relay without sending it",
+    ):
+        assert requirement in dormant, requirement
+    assert "Never finalize, abandon, reset, resume, start or message the target" in dormant
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {
+        "conservative-default-posture",
+        "relentless-unjustified-hold",
+        "relentless-goal-advancing-answer",
+        "relentless-excluded-option",
+        "relentless-unowned-blocker",
+        "reactivation-interactive-logon",
+    } <= {case["id"] for case in scenarios["cases"]}

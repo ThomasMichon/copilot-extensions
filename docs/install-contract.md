@@ -6144,6 +6144,19 @@ provides a new service supervisor. Its caller retains independent source
 approval and the application's installation ownership throughout consumption.
 It is a supported composition entry, not a complete packaged installer toolkit.
 
+### Protected native ownership handoff
+
+The optional [Linux installation-owner entry](../libs/installer-engine/protected-installation.md)
+composes that same adapter from an independently installed root-protected
+bootstrap, policy, seed and prepared Source. Its
+`copilot-extensions.protected-installation` version-one `linux-root/v1`
+declaration belongs to the actual selected provider and native entry.
+Missing or unsupported protected semantics refuse without invoking the
+ordinary controller with elevation or trying a legacy installation form.
+Ordinary callers remain unchanged. The provider does not install its own
+trusted seed, grant privilege/deployment authority or establish positive native
+qualification; Windows and macOS are explicitly unsupported by this provider.
+
 ### Bridge and MCP application startup
 
 Bridge starts its selected Source frontend on a fresh endpoint. It keeps the

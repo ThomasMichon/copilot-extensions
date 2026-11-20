@@ -93,13 +93,15 @@ class ProposalIntake:
             return receipt
 
     @classmethod
-    def recover(cls, records: Path, generation: Path) -> ProposalIntake:
+    def recover(cls, records: Path, generation: Path, *, expected_epoch: str | None = None) -> ProposalIntake:
         """Caller supplies owner-private records and an absent offline destination."""
         records, generation = records.absolute(), generation.absolute()
         with closing(sqlite3.connect(records.as_uri() + "?mode=rw", uri=True)) as db:
             db.execute("PRAGMA trusted_schema=OFF")
             db.execute("PRAGMA synchronous=FULL")
             db.execute("BEGIN IMMEDIATE")
+            if expected_epoch is not None and db.execute("SELECT epoch FROM writer").fetchall() != [(expected_epoch,)]:
+                raise ValueError("proposal owner changed; refresh the handoff offer")
             [(identity, title, repo, payload, created)] = db.execute(
                 "SELECT id,title,repo,payload,created FROM proposal_v1"
             ).fetchall()

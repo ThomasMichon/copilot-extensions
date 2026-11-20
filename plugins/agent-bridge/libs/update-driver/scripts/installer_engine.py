@@ -44,6 +44,7 @@ from installer_engine_process import (
     run_owned,
 )
 from installer_wheel_inputs import _check_deadline, _ordinary
+from installer_provider_roots import check_construction
 from installer_wheel_snapshot import (
     WheelInstallInputs, WheelReuseInputs as WheelReuseInputs, _digest as _snapshot_digest,
     _open as _snapshot_open, _unchanged as _snapshot_unchanged)
@@ -53,8 +54,11 @@ from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
+    _construction_hash as _construction_hash,
     _wheel_construction_hash as _wheel_construction_hash)
 from installer_engine_health import (
+    application_staging_environment as _application_staging_environment,
+    application_uv_selection as application_uv_selection,
     HealthRepairRequired as HealthRepairRequired,
     _PREPARE_INSTALLED_CHECK,
     verify_installed_inputs as verify_installed_inputs,
@@ -93,27 +97,6 @@ class ReadyCandidate:
 
 class ContentRepairRequired(RuntimeError):
     """Published bytes differ; a caller must select a distinct generation."""
-
-
-def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
-    local_packages: tuple[str, ...] | None = None,
-    *, on_progress: Callable[[], None] | None = None,
-    file_hashes: dict[Path, str] | None = None) -> str:
-    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
-    source_hash = runtime.fingerprint_source(
-        files, file_hashes=file_hashes,
-        **progress,
-    )
-    if not extras and local_packages is None:
-        return source_hash
-    profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
-    if local_packages is not None:
-        profile["local_packages"] = local_packages
-    # Keep source-only identities compatible; non-base admission also binds selection.
-    return hashlib.sha256(json.dumps({
-        "schema": "installer-engine.dependency-profile", "version": 1,
-        **profile,
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _package_roots(plugin: Path) -> tuple[Path, ...]:
@@ -579,10 +562,7 @@ def _construct(
         if runtime.fingerprint_source(tuple(copied)) != before:
             raise RuntimeError("Application inputs changed while copying the slot project")
         _verify_application_wheels(inputs, slot)
-        environment = {
-            **os.environ, "PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", ""),
-            "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
-        }
+        environment = _application_staging_environment(inputs.application, uv, base_python)
         command = (
             [
                 str(Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0"
@@ -801,6 +781,10 @@ def _candidate(
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
         if not selected_packages <= installed or (included - selected_packages) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
+    check_construction(
+        root, wheel_inputs.receipt() if wheel_inputs is not None else None,
+        core=_package_name(plugin),
+    )
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     with _source_phase("source-selection", child_timeout, {}) as progress:
@@ -860,6 +844,10 @@ def _candidate(
                 _assert_source_pin(plugin, expected_source_identity)
                 if dev_owner is not None:
                     _check_dev_owner(root, dev_owner)
+                check_construction(
+                    root, wheel_inputs.receipt() if wheel_inputs is not None else None,
+                    core=_package_name(plugin),
+                )
                 yield ReadyCandidate(
                     slot, inputs.payload_hash, True, descriptor, inputs.plugin, inputs.extras,
                     inputs.local_packages,
@@ -994,6 +982,10 @@ def _candidate(
             _assert_source_pin(plugin, expected_source_identity)
             if dev_owner is not None:
                 _check_dev_owner(root, dev_owner)
+            check_construction(
+                root, wheel_inputs.receipt() if wheel_inputs is not None else None,
+                core=_package_name(plugin),
+            )
             yield ReadyCandidate(
                 slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,
                 inputs.local_packages,

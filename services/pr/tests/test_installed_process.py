@@ -652,6 +652,8 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     "request_id": "original", "issued_at": time.time(),
                     "number": 1, "until": ["merged"],
                 }
+                if terminal_enabled:
+                    original["deadline_at"] = time.time() + 60
                 receipt = await send("register", original)
                 assert await send("register", original) == receipt
                 for _ in range(100):

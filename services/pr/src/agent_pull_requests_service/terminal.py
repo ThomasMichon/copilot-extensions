@@ -12,9 +12,10 @@ from agent_pull_requests.watch_replay import ObservationTarget
 def core() -> tuple[Any, Any, Any]:
     try:
         from agent_pull_requests.workspace_terminal_read import contract, target_capture_contract
-        from agent_pull_requests.terminal_retention import TerminalRetentionStore
+        from agent_pull_requests.terminal_retention import TerminalRetentionStore, native_watch_contract
         from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
         from agent_pull_requests.terminal_cache_retirement import TerminalCacheRetirementStore
+        from agent_pull_requests.watch_admission import contract as admission_contract
 
         value = contract()
         if value != {
@@ -32,6 +33,17 @@ def core() -> tuple[Any, Any, Any]:
             "phase": "before_acquisition", "budget": "request_checkpoint_and_expiry",
         }:
             raise ValueError("unsupported terminal target capture")
+        if admission_contract() != {
+            "protocol": "agent-pull-requests.terminal-watch-admission/v1",
+            "profile": "urn:agent-pull-requests:terminal-watch-admission:v1",
+            "discovery": "watch_capabilities_content_type",
+        }:
+            raise ValueError("unsupported terminal watch admission discovery")
+        if native_watch_contract() != {
+            "protocol": "agent-pull-requests.terminal-native-watches/v1",
+            "observations": "native_only", "workspace_deadlines": "sweep_before_retirement",
+        }:
+            raise ValueError("unsupported terminal native watch preservation")
         return TerminalRetentionStore, TerminalRecoveryStore, TerminalCacheRetirementStore
     except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
         raise ValueError("selected terminal read core unsupported") from None
@@ -70,11 +82,19 @@ def target(
     expires_at: int, checkpoint: Callable[[], None],
 ) -> ObservationTarget:
     checkpoint()
-    targets = store.observation_targets(expires_at=expires_at, checkpoint=checkpoint)
-    checkpoint()
-    return next(
-        (value for value in targets if (value.account, value.repo, value.number) == (
-            account, repo, number,
-        )),
-        ObservationTarget(account, repo, number, frozenset()),
+
+    def capture(document: dict[str, Any]) -> ObservationTarget:
+        from agent_pull_requests.terminal_retention import replay_epoch
+
+        selected = ObservationTarget(account, repo, number, frozenset(
+            record["registration_id"] for record in document["replay"]["records"]
+            if record["outcome"] == "active" and record["scope"]["account"] == account
+            and record["scope"]["repo"] == repo and record["number"] == number
+        ))
+        return ObservationTarget(
+            account, repo, number, selected.registration_ids, replay_epoch(document, selected),
+        )
+
+    return store._review_transaction(
+        capture, expires_at=expires_at, checkpoint=checkpoint, persist=False,
     )

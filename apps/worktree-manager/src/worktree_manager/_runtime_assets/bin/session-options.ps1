@@ -2,15 +2,15 @@
 #
 # agent-worktrees does NOT own your global ~/.psmux.conf. Instead the launcher
 # dot-sources this file and stamps these options onto each session it
-# creates/joins, scoped to that one session (set-option -t <session>, no -g), so
-# your personal psmux config and any ad-hoc psmux sessions sharing the same
-# server are left untouched. This mirrors the Linux/WSL session-options.sh
-# (tmux) integration.
+# creates/joins, scoped to that one session (set-option -t <session>, no -g).
+# Invoke-AwPsmuxPassthrough separately sources the private worktree server's
+# key/mouse defaults automatically; personal config files are not rewritten.
+# Ordinary tmux uses session-options.sh and a shared server instead.
 #
-# Settings that CANNOT be session-scoped -- the server-global keystroke
-# passthrough root key table and the prefix key -- are NOT applied here. They
-# live in the optional, opt-in apply-mux-keybinds.ps1; run it once per machine
-# (or wire it into a machine-restore flow) if you want them.
+# Prefix/root-table directives are server-global, but each worktree PSMux
+# session has its own server. The optional apply-mux-keybinds.ps1 is a separate
+# deliberate host-wide action: it persists a managed user-config block by
+# default and applies the fragment to every listed live session's server.
 #
 # This file is dot-sourced, not executed. It defines one function.
 

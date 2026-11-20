@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import Any, cast
 
 from .delegated_replay_contract import replay_scope, validate_replay
 from .delegated_waiter_contract import validate_event
 from .queue_records import TaskError
 
 
-def create_replay_consumer(queue, caller, *, route_prefix: str, target: str,
-                           repo: str, caller_scope: str, checkpoint=None,
-                           service_binding: dict | None = None):
+def create_replay_consumer(
+    queue: Any, caller: Any, *, route_prefix: str, target: str,
+    repo: str, caller_scope: str, checkpoint: Callable[[], None] | None = None,
+    service_binding: dict[str, Any] | None = None,
+) -> ReplayConsumer:
     """Explicit optional composition, never imported by ordinary Dispatch startup.
 
     caller_scope is the embedding's stable authenticated principal/namespace
@@ -22,7 +26,7 @@ def create_replay_consumer(queue, caller, *, route_prefix: str, target: str,
 
     binding = {"gateway": caller.gateway, "route_prefix": route_prefix,
                "target": target, "repo": repo, "caller_scope": caller_scope}
-    options = {}
+    options: dict[str, Any] = {}
     if service_binding is not None:
         from agent_pull_requests.watch_replay_binding import SCOPED_PROTOCOL, ReplayBinding
 
@@ -46,8 +50,12 @@ class ReplayConsumer:
     identity. Queue effects commit before ACK, with terminal progress retained.
     """
 
-    def __init__(self, queue, *, binding: dict, client, request_factory,
-                 binding_current=lambda: True, checkpoint=None):
+    def __init__(
+        self, queue: Any, *, binding: dict[str, Any], client: Any,
+        request_factory: Callable[[str, float], Any],
+        binding_current: Callable[[], bool] = lambda: True,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> None:
         validated = validate_replay(
             {"binding": binding, "request_id": "validation", "issued_at": 1,
              "deadline_at": 2}, repo=binding["repo"], timeout=1,
@@ -59,40 +67,53 @@ class ReplayConsumer:
         self._after, self._running = 0, False
 
     @property
-    def binding(self) -> dict:
-        return json.loads(self._scope)
+    def binding(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._scope))
 
-    def _check_binding(self):
+    def _check_binding(self) -> None:
         if self._checkpoint is not None:
             self._checkpoint()
         if not self._binding_current():
             raise ValueError("replay binding changed")
 
-    def _request(self, waiter):
+    def _request(self, waiter: dict[str, Any]) -> Any:
         self._check_binding()
         replay = waiter["delegation"]["replay"]
         if replay_scope(replay["binding"]) != self._scope:
             raise ValueError("replay binding changed")
         return self.request_factory(replay["request_id"], replay["issued_at"])
 
-    def _current(self, waiter, **progress):
+    def _current(self, waiter: dict[str, Any], **progress: Any) -> dict[str, Any]:
         self._check_binding()
-        return self.queue.replay_waiter_progress(waiter, **progress)
+        return cast(dict[str, Any], self.queue.replay_waiter_progress(waiter, **progress))
 
-    async def prepare(self, task_id: str, *, delegation: dict, **options):
+    async def prepare(
+        self, task_id: str, *, delegation: dict[str, Any], **options: Any,
+    ) -> dict[str, Any]:
         """Negotiate before suspension, then durably prepare without remote acceptance."""
         from .delegated_waiter_contract import validate_delegation
         delegation = json.loads(json.dumps(validate_delegation(delegation), allow_nan=False))
         if replay_scope(delegation["replay"]["binding"]) != self._scope:
             raise ValueError("replay binding changed")
         self._check_binding()
-        await self.client.capabilities()
+        capabilities = await self.client.capabilities()
         self._check_binding()
-        return self.queue.prepare_run_waiter(
+        try:
+            admission = capabilities.registration_admission
+        except AttributeError:
+            raise ValueError("replay registration admission capabilities unsupported") from None
+        if admission is not None:
+            admission.validate_registration(
+                until=tuple(delegation["until"]),
+                deadline_at=delegation["replay"]["deadline_at"],
+            )
+        self._check_binding()
+        result: dict[str, Any] = self.queue.prepare_run_waiter(
             task_id, kind="delegated", delegation=delegation, command=[], **options,
         )
+        return result
 
-    async def _settle(self, waiter, receipt):
+    async def _settle(self, waiter: dict[str, Any], receipt: Any) -> bool:
         if receipt.status not in ("active", "acknowledged", "cancelled"):
             raise ValueError("replay receipt unresolved")
         expected = waiter["delegation"]["replay"]["deadline_at"]
@@ -138,12 +159,12 @@ class ReplayConsumer:
         self._current(waiter, settled=True)
         return True
 
-    async def _reconcile(self, waiter):
+    async def _reconcile(self, waiter: dict[str, Any]) -> bool:
         waiter = self._current(waiter)
         if waiter["replay_settled"]:
             return False
         if waiter["state"] not in ("preparing", "active") and not waiter["replay_attempted"]:
-            return self._current(waiter, settle_unattempted=True)["replay_settled"]
+            return cast(bool, self._current(waiter, settle_unattempted=True)["replay_settled"])
         request = self._request(waiter)
         if waiter["state"] == "preparing":
             waiter = self._current(waiter, attempt=True)
@@ -158,7 +179,26 @@ class ReplayConsumer:
             receipt = await self.client.inspect(request)
         return await self._settle(waiter, receipt)
 
-    async def _complete(self, event):
+    def _recover_incompatible(self, waiter: dict[str, Any], admission: Any) -> None:
+        waiter = self._current(waiter)
+        if admission is None or waiter["state"] not in ("preparing", "active"):
+            return
+        spec = waiter["delegation"]
+        try:
+            admission.validate_registration(
+                until=tuple(spec["until"]), deadline_at=spec["replay"]["deadline_at"],
+            )
+        except ValueError:
+            recover = (self.queue.recover_preparing_run_waiter
+                       if waiter["state"] == "preparing" else self.queue.recover_dead_run_waiter)
+            recover(
+                waiter["task_id"], generation=waiter["generation"],
+                reason="service watch admission changed",
+                message="PR watch admission changed; re-check external state.",
+                sender="agent-dispatch-replay-recovery",
+            )
+
+    async def _complete(self, event: Any) -> bool:
         self._check_binding()
         waiter = self.queue.find_replay_waiter(self.binding, event.registration_id)
         if waiter is None or waiter["replay_settled"]:
@@ -208,15 +248,15 @@ class ReplayConsumer:
             receipt = await self.client.cancel(request, registration_id=event.registration_id)
         return await self._settle(waiter, receipt)
 
-    async def cycle(self) -> dict:
+    async def cycle(self) -> dict[str, Any]:
         """At most 32 row reconciliations and one 16-event pending batch."""
         if self._running:
             raise RuntimeError("replay cycle already running")
         self._running = True
-        counts = {"checked": 0, "events": 0, "settled": 0, "blocked": False}
+        counts: dict[str, Any] = {"checked": 0, "events": 0, "settled": 0, "blocked": False}
         try:
             self._check_binding()
-            await self.client.capabilities()
+            capabilities = await self.client.capabilities()
             self._check_binding()
             rows = self.queue.list_replay_waiters(self.binding, after=self._after, limit=32)
             if not rows:
@@ -224,6 +264,9 @@ class ReplayConsumer:
             for waiter in rows:
                 self._after = waiter["id"]
                 counts["checked"] += 1
+                self._recover_incompatible(
+                    waiter, getattr(capabilities, "registration_admission", None),
+                )
                 counts["settled"] += int(await self._reconcile(waiter))
             self._check_binding()
             batch = await self.client.pending(limit=16)

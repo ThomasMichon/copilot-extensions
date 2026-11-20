@@ -35,6 +35,7 @@ SUPPORT_FILES = (
     "installer_engine_uninstall_controllers.py",
     "installer_engine_commands.py", "installer_engine_stop.py",
     "installer_engine_process.py",
+    "bootstrap-protected-install.sh",
 )
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
@@ -49,6 +50,9 @@ PYTHON_FILES = (
     "installer_packaging_seed.py",
     "installer_source_build.py",
     "installer_source_wheel_cache.py",
+    "installer_provider_roots.py",
+    "installer_protected_source.py",
+    "installer_native_executable.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",

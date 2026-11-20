@@ -1635,7 +1635,7 @@ Flags: `--session` (required), `--mux {psmux,tmux}` (default: auto-detect),
 
 
 
-agent-worktrees does **not** deploy, overwrite, or delete your global
+Ordinary worktree launch does **not** deploy, overwrite, or delete your global
 `~/.tmux.conf`. The launcher applies the bar and session behaviors with
 `tmux set -t <session>` (session-scoped, no `-g`) when it creates or rejoins a
 worktree session, so your personal tmux config and any ad-hoc tmux sessions
@@ -1652,17 +1652,25 @@ the keystroke-passthrough root key table -- are **not** applied automatically
 `apply-mux-keybinds.sh`, deployed alongside `session-options.sh`. Run it once
 per machine, or wire it into a machine-restore flow, if you want that
 behavior: it persists a clearly-marked managed block in `~/.tmux.conf` (so it
-survives server restarts) **and** applies to any running server. Neither
-agent-worktrees nor Worktree Manager's installer ever touches `~/.tmux.conf`
-outside this script, and only when you elect to run it (`--no-persist` tunes
-the running server without writing the file; deleting the marked block
-removes the settings).
+survives server restarts) **and** applies to any running server.
+`--no-persist` tunes the running server without writing the file. Deleting
+the marked block removes persisted defaults, not settings already applied
+to a live server.
 
-> Both tmux (Linux/WSL) and psmux (Windows) are configured **per session** by
-> the launcher: `session-options.{sh,ps1}` stamps the bar + behaviors with
-> `set -t` (no `-g`), and the server-global keystroke passthrough lives in the
-> opt-in `apply-mux-keybinds.{sh,ps1}`. Neither agent-worktrees nor Worktree
-> Manager owns `~/.tmux.conf` or `~/.psmux.conf`.
+PSMux differs from shared-server tmux: create/join automatically sources
+`psmux-passthrough.conf` and then Companion bindings into the named private
+worktree server. Those are automatic scoped defaults, not universally opt-in
+keybindings. Ordinary status/behavior options still target the named session.
+The separate optional `apply-mux-keybinds.ps1` deliberately applies its fragment
+to **every listed live PSMux server**, including personal sessions, and persists
+a marked block in `~/.psmux.conf` unless `-NoPersist` is selected.
+
+Neither ordinary launcher rewrites personal mux files. Explicit helper
+persistence and separately guarded legacy installer-owned-file retirement are
+different operations; an old filename/header does not authorize removal of
+unknown or edited personal configuration. See
+[PSMux wheel input](mux.md#psmux-wheel-input) for native forwarding and
+target/application capability limits.
 
 
 ## Claim handoff locality
@@ -2294,6 +2302,21 @@ retain exit 0/2 and their original response. Failed preparation has exit 1 and
 an explicit stderr diagnostic; it must not be interpreted as an absent project
 or retried as an effectful registration. This entry supplies incoming inspection,
 not completed caller adoption, installed readiness or whole-flow recovery.
+
+### Registry sync (`repos sync`)
+
+An ordinary clean, attached checkout with no configured remotes reports
+`skipped (local-only repository (no remotes configured))` before any branch
+switch, fetch or merge. Dirty and detached checkouts keep their existing skip
+reasons. A failed local remote-name observation remains an error; registry
+metadata alone is not evidence that the checkout has no remotes.
+
+Remote-backed checkouts retain declared-default-branch repair and the
+repository-account-aware `origin` fetch. A configured non-`origin` remote
+does not cause automatic remote selection or turn a missing `origin` into a
+local-only skip. Authentication, transport and timeout failures remain errors.
+Each entry's result is collected independently; a local-only skip does not
+make the command fail, while any error still produces a nonzero exit.
 
 ### Bare-anchor sync (`repos sync`)
 

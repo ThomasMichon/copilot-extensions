@@ -28,6 +28,27 @@ usage charts and use the digests for later cross-machine retrieval.
 
 ## Coordination
 
+The proposed finite #10811 selected-session enumeration lane continues through
+this SAME canonical accounting/derivation owner. #8735's tracker was already
+subsumed into OPEN #5665; its separate large-corpus repair and installed-
+consumer acceptance keep their original owners and are not reopened or
+duplicated here. Preserve actual accounting, identity/path, reader, fixture,
+sync and resource custody. Ordinary reviewed complete P10811/V10811/G10811
+delivery and permitted current whole receiving/source/custody readback precede
+a separate tracking judgment. Keep #10811 OPEN during the proposal; no generic
+ACK, collection, corpus access, rollout or source/resource transfer follows.
+
+The proposed finite #11210 reader/output lane below continues through this
+SAME canonical driver and Phase 2 derivation owner, with existing codec,
+session/cold-store, segmenter/collation, output, compatibility and source/resource
+custodians. It neither takes the held preservation driver's shared-module
+reservation nor weakens #5676's separate accepted-handoff condition. Preserve
+every incumbent scope, claim and acceptance gate. Ordinary reviewed complete
+P11210/V11210/G11210 delivery and current permitted whole receiving/source/
+custody readback precede a separate tracking judgment; keep #11210 OPEN during
+the proposal. No transcript/corpus acquisition, rendering, implementation,
+runtime action or source/resource transfer is authorized.
+
 The complete #5677 Phases 2/3 and #5678 Phases 4/5 contracts continue under
 this SAME canonical driver and the existing reserved backend/accounting and
 synthetic compatibility lanes. Their direct Plan and global Validation rows
@@ -205,6 +226,40 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
   sessions, verified container captures, and existing cold session archives.
 
 ### Phase 2 - All-session derivation and durable catalog
+
+- [ ] **P10811-1:** Prevent unrelated `scandir` entries and ignored
+  dot-prefixed metadata from exhausting the pre-filter 10,000-session limit
+  when incremental accounting requests a small valid `include` subset.
+  Use bounded selected-session acquisition OR an explicitly resumable
+  full-corpus path, not a blind limit increase, unbounded scan or silently
+  omitted accounting evidence.
+- [ ] **P10811-2:** Preserve canonical session identity, path/redirection
+  refusal and existing time, byte and row bounds, including genuine
+  oversized-input and invalid-identity refusals. Keep this early enumeration
+  defect distinct from #8682's later aggregate-row batching and #8455's
+  metadata-admission exclusion; neither is whole delivery of this boundary.
+- [ ] **P10811-3:** Add focused synthetic large-directory/small-subset and
+  exactly-10,000-eligible-plus-ignored-metadata controls through the owning
+  collection seam, with truthful complete/deferred/failed accounting.
+  Reuse the existing accounting/derivation and finite sync-repair owners;
+  a successful unrelated transcript or SQLite batch is not this correction.
+
+- [ ] **P11210-1:** Stream the session-events reader, archive codec member
+  reads including tar.gz, cold-store event-list/JSON fetch output, AND
+  segmenter/collation event parsing. Bound memory independently of total
+  transcript size across each complete caller path; a one-turn bound or
+  accounting-only cursor does not satisfy all four families.
+- [ ] **P11210-2:** Write file/stdout results incrementally as produced,
+  retaining durable partial progress and byte-identical current output.
+  Preserve source identity/admission, archive integrity, error/refusal,
+  privacy and caller compatibility rather than dropping records or changing
+  output to lower memory use.
+- [ ] **P11210-3:** Retain per-codec/reader streamed-read controls and a
+  large synthetic bounded-memory regression through actual owning reader
+  AND output consumers. Credit earlier bounded accounting/provider work only
+  for its demonstrated scope; keep remaining full-transcript materialization
+  and unqualified callers explicit, without a new collector or workflow owner.
+
 - [ ] **P5677:** Retain the complete claimed Phases 2/3 catalog and
   chart-complete accounting contract through this same canonical programme:
   all-session derivation independent of prose, stable IDs, continuations,
@@ -318,6 +373,34 @@ retain only the actual unfinished boundary; documentation is not remediation.
 
 ## Validation Plan
 
+- [ ] **V10811-1:** A synthetic root above 10,000 entries with a small valid
+  selected subset completes that selected acquisition without unrelated
+  entries spending its admission budget. The exactly-10,000 eligible-session
+  plus ignored dot-metadata control also preserves the intended boundary.
+- [ ] **V10811-2:** Preserve actual oversized/invalid-identity, redirection
+  and existing time/byte/row refusals. Verify bounded work or explicit durable
+  continuation without silent omission, fabricated complete accounting or
+  changed compaction authority; use synthetic sources, not a private corpus.
+- [ ] **G10811:** Resolve every P10811/V10811 and continuing Coordination
+  clause at the finite enumeration boundary, retaining original alternatives,
+  existing owners and distinct later-reader credit. Planned receiving is not
+  a source fix, scheduled-consumer pass, rollout or custody release; original
+  independent native/release/installed obligations remain with their owners.
+
+- [ ] **V11210-1:** Exercise EACH session-events, archive-member, cold-store/
+  JSON-output and segmenter/collation path with synthetic streamed input;
+  reject accidental whole-transcript materialization and compare complete
+  output byte-for-byte with the existing behavior.
+- [ ] **V11210-2:** Measure peak memory against growing synthetic transcripts
+  and verify it remains bounded independently of total history size. Verify
+  incremental file/stdout publication and durable partial progress at the
+  actual consumer, preserving malformed/oversized/archive and source refusals.
+- [ ] **G11210:** Resolve every P11210/V11210 and continuing Coordination
+  clause across ALL four reader/output families, preserving original memory,
+  byte-equivalence and progress requirements, existing owners and separate
+  preservation/accounting/adoption gates. Planned consolidation is not a
+  passing regression, complete catalog/consumer parity or custody transfer.
+
 - [ ] **G5677:** Resolve the complete P5677 and Phases 2/3 contract against a
   fixed synthetic corpus: event/session IDs, integer tokens/nano-credits,
   intervals, weighted model active-minute variance, attribution/provenance,
@@ -392,6 +475,19 @@ retain only the actual unfinished boundary; documentation is not remediation.
 Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-11-19 - Proposed bounded enumeration and transcript-streaming receiving
+
+The complete qualified #10811 and #11210 originals are retained directly in
+Phase 2 and the actual global Validation Plan: bounded selected enumeration
+OR explicit corpus continuation with both original boundary controls, plus
+four independent reader/output families, transcript-size-independent memory,
+incremental durable output and byte equivalence. Fresh actual tracker
+reconciliation retained #8735's already accepted #5665 route rather than
+creating a second accounting owner. All twelve new technical rows remain unchecked.
+The [six-source receiving record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+preserves the separate review, source-specific and custody judgments.
+No private transcript, source execution, implementation or resource was acquired.
 
 ### 2026-10-30 - Complete three-finding ancestor contract retained
 

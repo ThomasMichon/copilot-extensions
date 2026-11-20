@@ -123,8 +123,11 @@ class WorkspaceConfig:
             key: {"comment_mappings": True} for key in mappings
         }
         terminal_options: dict[tuple[str, str], _TerminalOptions] = {}
+        terminal_operations: type[WorkspaceOperations] = WorkspaceOperations
         if self.terminal_targets:
             terminal.core()
+            from .terminal_policy import TerminalWorkspaceOperations
+            terminal_operations = TerminalWorkspaceOperations
             if self.terminal_mapping_reads:
                 terminal.mapping_core()
             for binding in self.terminal_targets:
@@ -151,7 +154,9 @@ class WorkspaceConfig:
             for p, t, reader in self.readers if (p, t) == (principal, target)
         }
         return {
-            (principal, target): WorkspaceOperations(
+            (principal, target): (
+                terminal_operations if (principal, target) in terminal_options else WorkspaceOperations
+            )(
                 store, cache, scope=dict(reader.scope), read_owner=reader,
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
                 max_work_seconds=seconds, conversations=True,
@@ -191,13 +196,14 @@ class HostConfig:
     def store(self) -> ReplayStore:
         if self.workspaces and self.workspaces.terminal_targets:
             terminal.core()
+            from .terminal_policy import TerminalReplayStore
             mapping_options: dict[str, Any] = {}
             if self.workspaces.terminal_mapping_reads:
                 terminal.mapping_core()
                 if _mapping_store() is None:
                     raise ValueError("selected comment mapping core unsupported")
                 mapping_options["terminal_comment_mapping"] = True
-            return ReplayStore(
+            return TerminalReplayStore(
                 self.root, self.namespace,
                 service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
                 terminal_retention=True, terminal_recovery=True, terminal_cache_retirement=True,

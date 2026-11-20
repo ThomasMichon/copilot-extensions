@@ -154,6 +154,23 @@ Preparation checks capabilities **before** suspending the task, then records the
 intent atomically in the existing `run_waiters` row. It performs no registration.
 Retry that same preparation after a lost local result; do not generate a new ID.
 
+For the PR service's optional
+[terminal admission profile](../../agent-pull-requests/docs/watch-gateway.md#optional-terminal-admission-profile),
+the current client decodes policy from the capabilities media profile while
+retaining strict legacy JSON. `ReplayConsumer.prepare` validates the requested
+criteria and original finite deadline before `prepare_run_waiter`: unsupported
+criteria leave the task unsuspended and emit no registration. Discovery applies
+to watch-only bindings too; no workspace route or extra policy request is
+required. The selected client must expose `registration_admission`; an older
+client without that attribute refuses new preparation before suspension.
+Only a capable client reporting `None` selects baseline policy. An absent
+provider media profile through that capable client remains supported;
+unsupported metadata refuses capability negotiation. The normal cycle still reconciles existing
+receipts, cancellation and wake-before-ACK; it does not apply a new-admission
+check to settlement. Actual TLS/PoP controls cover both v1 and scoped-v2 callers.
+Provider/consumer rollout and operational enrollment remain separate; this
+source change activates no coordinator, consumer or polling loop.
+
 Each `await consumer.cycle()` visits at most 32 indexed unsettled rows and reads
 one pending batch of at most 16 events. It returns checked/event/settled counts
 and a `blocked` flag. The cursor advances over visited rows, including a failed

@@ -113,7 +113,7 @@ item in this umbrella.
 | Profile preparation implementer | Owns only the reviewed pre-adoption dependency-preparation follow-up under #11989; preserves #356/#8545 setup and #11976 acquisition ownership. | Managed source worktree; public source handle `sluggish-gasket`; coordination through #11989 and the linked subplan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
 | Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer/local-consumer source increment accepted, including complete CLI comparison; other verbs/runtime/platform lanes stay separate, with no PK/WI ownership or rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
-| Native-wheel configuration implementer | Finite #4102/#4305 helper/fragment configuration and scope/default documentation under the linked plan; no native-wheel, version-selection, installer or legacy-file-retirement takeover. | Managed source worktree; public source handle `patient-knob`; finite discussion reservation on #4102. |
+| Native-wheel configuration implementer | Finite #4102/#4305 helper/fragment source and scope/default documentation accepted in #13524; native-wheel, version-selection, installer and legacy-file-retirement ownership remain separate. | Managed source worktree; public source handle `patient-knob`; finite discussion reservation on #4102. |
 
 ## Context
 
@@ -2454,9 +2454,10 @@ not an implementation assignment or accepted source disposition.)_
 
 #### #4305 - Supported wheel forwarding
 
-The [native-wheel configuration proposal](phase-psmux-native-wheel.md)
-defines a bounded source increment and its evidence limits. It does not check
-off the whole wheel or #4102 acceptance by removing unsupported declarations.
+The [finite native-wheel source acceptance](phase-psmux-native-wheel.md)
+records #13524 and its exact-source qualification. It does not check off
+the whole wheel or #4102 acceptance: actual native event evidence and
+whole-contract reconciliation remain separate.
 
 - [ ] **M4305-P1:** Preserve original reported PSMux 3.3.4 context:
   `send-keys -M` was unsupported after clearing default bindings. Establish
@@ -3192,6 +3193,15 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-19 - Finite native-wheel source accepted
+
+Implementation #13524 is merged after genuine current-head approval,
+required CI and 128 exact-head disposable Windows controls with zero
+failed/skipped cases. The [finite receipt](phase-psmux-native-wheel.md#journal)
+accepts only W-P1..5/W-V1..4, including the validation-fixture prerequisites.
+All direct M4305/global check states, the broader #4102 contract and native,
+installer, session, configuration, legacy-file and resource owners remain.
 
 ### 2026-11-19 - Finite native-wheel configuration proposal
 

@@ -153,9 +153,10 @@ After the reviewed proposal, the operator admitted execution:
   explicit pending-parent retention can resume each exact target and compose a
   whole-claim candidate only after every named version/correlation is retained.
   An explicit prepared-journal binding requalifies and retains that exact complete
-  application candidate without replacing the pending parent. Application
-  constructors do not consume it yet, and it establishes no durable
-  application/current-claim completion coverage.
+  application candidate without replacing the pending parent. Explicit
+  `PreparedApplication` consumption now requalifies that complete binding before
+  chunking/embedding and uses scoped native vector reads; point-domain native
+  publication and current-claim completion coverage remain open.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
@@ -309,6 +310,8 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-19 retained point model/table ownership](journal/2026/11.19%20point-model-binding.md)
+- [2026-11-19 caught nested source effects](journal/2026/11.19%20nested-writer-latch.md)
 - [2026-11-19 point-domain binding and read refusal](journal/2026/11.19%20point-read-domains.md)
 - [2026-11-19 component application prerequisites](journal/2026/11.19%20component-application.md)
 - [2026-11-18 Azure DevOps response and selected-record coverage](journal/2026/11.18%20ado-response-coverage.md)

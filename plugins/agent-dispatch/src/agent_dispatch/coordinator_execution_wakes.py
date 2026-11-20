@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .wake_recovery_records import WakeRecoveryRecords
 
 from .bridge_command_delivery import NativePromptNotSent
 from .coordinator_execution_sender import CoordinatorExecutionProvenance
@@ -14,7 +18,8 @@ from .queue_records import TaskError
 
 
 def deliver_execution_wake(
-    queue: TaskQueue, wake: Wake, incarnation: str | None, deliver: Callable[[], bool]
+    queue: TaskQueue, wake: Wake, incarnation: str | None, deliver: Callable[[], bool],
+    *, records: WakeRecoveryRecords | None = None,
 ) -> bool:
     from .queue_pool_recovery import prepare_recovery_wake
     prepare_recovery_wake(queue, wake)
@@ -30,7 +35,15 @@ def deliver_execution_wake(
         if task is None:
             raise TaskError("wake task is missing")
         provenance = CoordinatorExecutionProvenance(queue, task, incarnation or "").prepare()
-    admission = queue.admit_execution_wake(wake, provenance=provenance)
+    if records is None:
+        admission = queue.admit_execution_wake(wake, provenance=provenance)
+    else:
+        if wake_table(wake) != "wake_outbox":
+            raise TaskError("independent records require an ordinary wake")
+        admission = queue.admit_execution_wake(
+            wake, provenance=provenance, before_commit=lambda conn, task, identity:
+            records.retain(conn, task, wake.id, identity),
+        )
     if not admission.send_required:
         return True
     accepted = False
@@ -59,3 +72,5 @@ def deliver_execution_wake(
                 outcome=outcome,
                 detail=detail,
             )
+            if records is not None and outcome == "sent":
+                records.retain_settlement(queue, wake.task_id, wake.id, admission.identity)

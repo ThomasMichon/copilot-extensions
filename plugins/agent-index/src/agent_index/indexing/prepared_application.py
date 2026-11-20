@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import nullcontext
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -14,8 +15,10 @@ from agent_index.indexing.embedding_batch import routed_model_chunks
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage, input_hash
 from agent_index.indexing.file_batches import FileBatch, file_batches
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
+from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.prepared_journal import PreparedJournal
 from agent_index.indexing.work_counts import current_counts
+from agent_index.store.source_layout import SourceLayoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -64,7 +67,15 @@ class PreparedApplication:
         before_model_embed: Callable[[str], None] | None = None,
         progress_cb: ProgressCallback | None = None,
         component_selection: frozenset[tuple[str, str]] | None = None,
+        point_claim: PendingPointClaim | None = None,
     ) -> None:
+        if point_claim is not None:
+            if (
+                type(point_claim) is not PendingPointClaim
+                or component_selection is None or full is not False
+            ):
+                raise ValueError("Point preparation requires a whole typed claim and component selection")
+            manifest = deepcopy(manifest)
         if component_selection is None:
             require_unordered_application(manifest)
         else:
@@ -85,15 +96,37 @@ class PreparedApplication:
         payload = PendingCrawls(paths).read_payload(manifest.source, scope)
         if payload is None:
             raise PendingCrawlConflict("Prepared application requires its pending crawl")
-        self.journal = PreparedJournal(
-            paths, manifest.source, scope, payload, manifest=manifest, full=full,
-        )
+        self.point_scope = point_claim.hints.scope if point_claim is not None else None
+        domain = store._source_domain
+        if domain is not None and (
+            domain.writing is True or getattr(domain._local, "operation", False) is True
+            or getattr(domain._local, "reading", False) is True
+        ):
+            raise SourceLayoutError("Preparation requires no active native operation")
+        if point_claim is None:
+            self.journal = PreparedJournal(
+                paths, manifest.source, scope, payload, manifest=manifest, full=full,
+            )
+        else:
+            if domain is None:
+                raise SourceLayoutError("Point preparation requires a selected point domain")
+            with domain.read(store.content_store.db, point_scope=self.point_scope):
+                pass
+            # Retained target recomposition must not hold native readers/writers out.
+            self.journal = PreparedJournal.for_point_application(
+                paths, manifest.source, scope, payload, manifest=manifest,
+                point_claim=point_claim,
+            )
         self.profiles = profiles
         self.progress_cb = progress_cb
         self.identities = [(entry.source, entry.path) for entry in files]
         self.checkpoints = paths.get_entries(self.identities)
         self.batch_count = 0
-        self.journal.reset_batches()
+        self.journal.reset_batches(
+            bind_plan=True, guard=domain.read(
+                store.content_store.db, point_scope=self.point_scope,
+            ) if domain is not None else None,
+        )
         coverage = EmbeddingCoverage(paths)
         for batch in file_batches(
             files, path_index=paths, model_profiles=profiles,
@@ -144,11 +177,21 @@ class PreparedApplication:
             return
         table = store.get_vector_table(model)
         domain = store._source_domain
-        with domain.read(store.content_store.db) if domain is not None else nullcontext():
-            to_embed = missing if force else coverage.missing(table, missing, profile)
+        with domain.read(
+            store.content_store.db, point_scope=self.point_scope,
+        ) if domain is not None else nullcontext():
+            to_embed = missing if force else coverage.missing(
+                table, missing, profile, point_scope=self.point_scope, wal_aware=True,
+            )
             needed_ids = {chunk.chunk_id for chunk in to_embed}
             reusable = [chunk for chunk in missing if chunk.chunk_id not in needed_ids]
-            vectors = table.get_vectors([chunk.chunk_id for chunk in reusable], strict=True) if reusable else {}
+            vectors = {}
+            if reusable:
+                ids = [chunk.chunk_id for chunk in reusable]
+                vectors = (
+                    table.get_vectors(ids, strict=True) if self.point_scope is None
+                    else table.get_point_vectors(ids, point_scope=self.point_scope)
+                )
         if reusable:
             self.journal.put_vectors(
                 self._keys(model, reusable),
