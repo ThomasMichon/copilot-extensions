@@ -33,10 +33,11 @@ def test_expiry_keeps_other_filters_and_deadlines_and_emits_one_terminal_outcome
     expired = registry.register(
         key, "expired", until=(MERGED,), notify={}, timeout=1, acknowledged=acknowledged,
     )
-    registry.register(
+    later_subscriber = registry.register(
         key, "later", until=(REVIEW_CHANGED,), notify={}, timeout=600,
         acknowledged=acknowledged,
     )
+    later_deadline = later_subscriber.deadline, later_subscriber.deadline_at
     unchanged = PRSnapshot(pr_state="open", review_decision="REVIEW_REQUIRED")
     assert registry.apply_snapshot(key, unchanged) == ()
     expired.deadline = 0
@@ -50,6 +51,9 @@ def test_expiry_keeps_other_filters_and_deadlines_and_emits_one_terminal_outcome
     if acknowledged:
         registry.acknowledge(fired[0])
     assert registry.subscriber_count(key) == 1
+    remaining = registry.subscriber(key, "later")
+    assert remaining is not None
+    assert (remaining.deadline, remaining.deadline_at) == later_deadline
     later = registry.apply_snapshot(key, PRSnapshot(pr_state="open", review_decision="APPROVED"))
     assert len(later) == 1 and later[0].subscriber.subscriber_id == "later"
     assert later[0].transitions == (REVIEW_CHANGED,) and not later[0].timed_out
@@ -95,8 +99,10 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
             if not publish_allowed.wait(2):
                 raise AssertionError("expiry publication fixture was not released")
             original_write(entries)
+            first_committed = read_subscriptions_state()
+            assert first_committed == entries
+            committed.append(first_committed)
             published.set()
-            committed.append(copy.deepcopy(entries))
             if failure == "uncertain":
                 failed.set()
                 raise StateCommitUncertain("controlled expiry replacement acknowledgement loss")
