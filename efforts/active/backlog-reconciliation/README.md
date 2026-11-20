@@ -410,6 +410,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Windows attribution and retained-transition unit](journal/2026/11.20-path-attribution-and-retained-transitions.md)
+records #13663's actual reviewed receiving and four separate audited
+tracking retirements, while proposing three distinct finite contracts in
+their existing Portfolio, upgrade-recovery and PR-watch homes. Ten new
+technical rows remain unchecked; #13598's selected separate tracking and
+every actual source, implementation, native and resource owner remain.
+
 The [fixture-authority and cleanup receiving proposal](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
 maps four complete source contracts to the existing Portfolio and intake,
 with twenty new unchecked technical rows and nine independent retained

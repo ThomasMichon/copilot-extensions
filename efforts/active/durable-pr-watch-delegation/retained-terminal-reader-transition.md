@@ -1,9 +1,27 @@
 # Retained terminal-reader transition
 
 Review-first T3 refinement of [coordinated terminal retention](terminal-retention.md),
-coordinated by [#13487](https://github.com/ThomasMichon/copilot-extensions/issues/13487)
-under the [canonical effort](README.md). This proposes source behavior, not
+originating in [#13487](https://github.com/ThomasMichon/copilot-extensions/issues/13487)
+and coordinated under the [canonical effort](README.md). This proposes source behavior, not
 permission to migrate an installed volume or stop its owner.
+
+## Tracking and continuing custody
+
+The original bounded transition driver retains design, implementation,
+qualification and publication responsibility. The canonical Root
+P13487/V13487/G13487 and existing detailed states below preserve the complete
+finite source outcome; an administrative tracking change is not its completion.
+Current bootstrap and metadata-only credit remains narrower than positive
+generation-bearing or active-native-watch transition, as the unchecked
+refinement below records. Full T3, providers and installed/whole-parent
+acceptance remain separate.
+
+Only after normally reviewed complete domain/intake delivery and current
+applicable source/receiver/custody readback may a separate judgment retire
+redundant #13487 tracking. Preserve any genuine intervening source-OPEN
+condition and the actual driver/reader/writer/cache/ReplayStore/resource
+owners; this creates no handoff, claim expiry, generic ACK, migration,
+service-stop, forge request, protected send or execution grant.
 
 ## Gap and existing owners
 

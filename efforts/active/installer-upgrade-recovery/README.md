@@ -54,6 +54,15 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
+The proposed finite #13667 retained-capture spelling case joins Phase 2's
+existing U6 source/platform qualification and retained-restoration
+coordination. Preserve the current Dispatch capture/restoration, installer,
+source, fixture, native and resource owners; no implementer is appointed.
+This optional old-assembly qualification is not an incoming-replacement veto,
+master completed-cycle readiness or permission to stop an incumbent.
+Normal reviewed complete receiving/intake and current applicable
+source/receiver/custody readback precede a separate tracking judgment.
+
 The conditional #4122 intake below first resolves whether the reported
 Linux/WSL input belongs to this ROOT's existing supported incoming
 install/update path. Preserve the actual installer/source owner and #4123's
@@ -176,6 +185,14 @@ authorize production updates, recovery mutations or new access.
   required missing/linked inputs and failure. Verify prior healthy-state
   preservation and truthful refusal without weakening incoming readiness,
   ownership or required-payload admission.
+
+#### Finite retained-assembly Windows path identity - #13667
+
+Agent-recommended U6 subcase; the existing recovery and capture owners remain.
+
+- [ ] **P13667-1:** Accept [equivalent native Windows manifest/slot spellings](retained-capture-path-identity.md#p13667-1-native-path-identity) without weakening retained-assembly admission.
+- [ ] **P13667-2:** Preserve [reported evidence limits and independent incoming readiness](retained-capture-path-identity.md#p13667-2-evidence-and-ownership-boundaries), existing owners and no live-manifest repair.
+- [ ] **V13667:** Qualify [the exact immutable Windows capture/validation fixture and negatives](retained-capture-path-identity.md#v13667-capture-and-validation-controls) under the original boundaries.
 
 - [x] Select the first bounded, unclaimed reproducible source gap, or obtain
   explicit coordination with its existing owner. Record its old-footprint case
@@ -359,6 +376,14 @@ a new recovery/provenance veto on explicit incoming replacement.
 
 ## Validation Plan
 
+- [ ] **G13667:** Resolve P13667-1/P13667-2/V13667 and continuing Coordination:
+  equivalent Windows spelling must preserve the same admitted completed slot,
+  all plain-directory/completion/source/immutable/editable/selected-version
+  checks, positive capture/validation and different/indirect/incomplete
+  negatives. Optional retained restoration remains separate from incoming
+  completion and master completed-cycle readiness; preserve actual custody
+  and original execution limits without a live manifest rewrite or host action.
+
 - [ ] **IR4122-G:** Resolve P0 before claiming this ROOT receives #4122,
   then qualify P1 and its local controls at the original finite source-input
   recovery tier. Keep #4123 fixture cleanup, tracked-link removal, ignore
@@ -442,6 +467,8 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### [2026-11-20 UTC - Finite retained-capture path identity proposed](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
 
 ### 2026-11-19 - Corrected prepared inspection passes on Windows
 
