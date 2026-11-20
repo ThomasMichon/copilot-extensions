@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -38,13 +39,14 @@ def native(tmp_path: Path) -> Native:
     script, log, control = tmp_path / "native.py", tmp_path / "calls.jsonl", tmp_path / "control.json"
     control.write_text("{}")
     script.write_text('''
-import hashlib,json,sys
+import hashlib,json,sys,time
 from pathlib import Path
 log,control=map(Path,sys.argv[1:3]);args=sys.argv[3:]
 settings=json.loads(control.read_text())
 with log.open("a") as stream:stream.write(json.dumps(args)+"\\n")
 assert args[:2]==["pr-watch","population"]
 if "--contract" in args:
+ time.sleep(settings.get("qualification_delay",0))
  value={"protocol":"agent-worktrees.pr-population/v1",
  "filter_protocol":"agent-pull-requests.filters/v1",
  "providers":{"azure-devops":{"protocol":"agent-pull-requests.filters/v1",
@@ -57,6 +59,8 @@ if "--contract" in args:
  "query_fields":{"from":"creatorId","assigned":"reviewerId"},"max_query_branches":64}
  if settings.get("unsupported"):value["effects"]="unknown"
 else:
+ assert int(args[args.index("--seconds")+1])<=settings.get("max_seconds",60)
+ time.sleep(settings.get("population_delay",0))
  assert args[2]=="Project/repo"
  path=Path(args[args.index("--filter-file")+1]);assert path.is_absolute()
  raw=path.read_bytes();assert len(raw)<=32768
@@ -68,6 +72,7 @@ else:
  "number":7,"facts":{"repo":"Project/repo","from":["alice"],"assigned":None,"tags":None,
  "created_at":95,"activity_at":None,"publication":"published"},"match":"match"}]}
  if settings.get("foreign"):value["filter_revision"]="foreign"
+ if settings.get("partial"):value.update(outcome="partial",error="deadline_exhausted")
 print(json.dumps(value))
 ''')
     identity = RepositoryIdentity("test", "azure-devops", "https://dev.azure.com/example", "reader", "Project/repo")
@@ -94,7 +99,8 @@ def test_native_process_exact_scope_input_lifetime_and_driver_refusal(
     assert json.loads(command[command.index("--credential-command") + 1]) == list(
         cast(tuple[str, ...], binding.credential_command),
     )
-    assert command[-7:] == ["--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json"]
+    assert command[-7:-2] == ["--max-pages", "4", "--max-pulls", "200", "--seconds"]
+    assert 1 <= int(command[-2]) <= 55 and command[-1] == "--json"
     assert not Path(command[command.index("--filter-file") + 1]).exists()
     control.write_text(json.dumps({"unsupported": True}))
     with pytest.raises(RepositoryNativeUnsupported):
@@ -112,6 +118,84 @@ def test_unavailable_and_wrong_revision_never_broaden_or_leave_an_input_file(
         with pytest.raises(RepositoryNativeUnavailable):
             population(binding, selected, root=tmp_path, checkpoint=lambda: None)
         assert not list(tmp_path.glob(".population-*.json"))
+
+
+def test_population_refuses_insufficient_lifetime_without_launching(
+    native: Native, tmp_path: Path,
+) -> None:
+    binding, log, _control = native
+    selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
+    with pytest.raises(RepositoryNativeUnavailable):
+        population(binding, selected, root=tmp_path, checkpoint=lambda: None,
+                   deadline=time.monotonic() + 1)
+    assert not log.exists()
+    assert not list(tmp_path.glob(".population-*.json"))
+
+
+def test_slow_qualification_consumes_population_budget(
+    native: Native, tmp_path: Path,
+) -> None:
+    binding, log, control = native
+    control.write_text(json.dumps({"qualification_delay": 1.1, "max_seconds": 3, "partial": True}))
+    selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
+    result = population(binding, selected, root=tmp_path, checkpoint=lambda: None,
+                        deadline=time.monotonic() + 10)
+    assert result["outcome"] == "partial" and result["pulls"][0]["number"] == 7
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(calls) == 2
+    assert 1 <= int(calls[-1][calls[-1].index("--seconds") + 1]) <= 3
+    assert not list(tmp_path.glob(".population-*.json"))
+
+
+@pytest.mark.parametrize("phase", ["qualification_delay", "population_delay"])
+def test_population_timeout_settles_before_enclosing_deadline(
+    native: Native, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    from agent_pull_requests import filtered_native
+
+    binding, log, control = native
+    control.write_text(json.dumps({phase: 30}))
+    if phase == "population_delay":
+        # Isolate capture timeout from qualification's independent startup cost.
+        monkeypatch.setattr(filtered_native, "qualify", lambda *_a, **_kw: SUPPORT)
+    selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
+    deadline = time.monotonic() + 8
+    with pytest.raises(RepositoryNativeUnavailable):
+        population(binding, selected, root=tmp_path, checkpoint=lambda: None, deadline=deadline)
+    assert time.monotonic() < deadline
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(calls) == 1
+    assert ("--contract" in calls[0]) is (phase == "qualification_delay")
+    assert not list(tmp_path.glob(".population-*.json"))
+
+
+def test_observer_publishes_partial_population_within_original_authority(
+    native: Native, tmp_path: Path,
+) -> None:
+    binding, log, control = native
+    control.write_text(json.dumps({"max_seconds": 4, "population_delay": 1, "partial": True}))
+    started = time.monotonic()
+    store = ReplayStore(tmp_path / "state", "test",
+                        clock=lambda: 100 + time.monotonic() - started,
+                        repository_cache=True, repository_continuing=True, repository_filtered=True)
+    store.provision()
+    observer = ReplayObserver(store, bindings=(binding,))
+    projection = cast(FilteredProjection, observer.repositories)
+    projection.capabilities[binding.account] = SUPPORT
+    registry = FilteredSubscriptions(projection)
+    subscribed = registry.execute(binding.account, "consumer", "subscribe", {
+        "request_id": "request", "ttl": 60,
+        "filter": {"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}},
+    }, expires_at=10000)
+    assert observer.cycle(expires_at=110)["observed"] == 1
+    page = registry.execute(binding.account, "consumer", "query", {
+        "registration_id": subscribed["subscription"]["registration_id"],
+    }, expires_at=110)
+    assert page["baseline"]["inventory"]["outcome"] == "partial"
+    assert page["baseline"]["pulls"][0]["number"] == 7
+    assert store.clock() < 110
+    command = json.loads(log.read_text().splitlines()[-1])
+    assert 1 <= int(command[command.index("--seconds") + 1]) <= 4
 
 
 def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live_demand(
@@ -165,6 +249,7 @@ def test_inflight_read_keeps_results_for_remaining_captured_demand(
     def acquire(
         _binding: NativeObservationBinding, _expression: Expression, *, root: Path,
         checkpoint: Callable[[], None], start_checkpoint: Callable[[], None], query_offset: int,
+        deadline: float,
     ) -> dict[str, Any]:
         start_checkpoint()
         reads.append("once")

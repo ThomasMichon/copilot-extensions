@@ -53,6 +53,15 @@ Demand must still match before starting new native work. Once started, a shared
 read may finish for any remaining captured registration generation rather than
 discarding another owner's result when one participant withdraws.
 
+Qualification and population capture share the observation cycle's original
+remaining lifetime. Each population pass is capped at 60 seconds including
+qualification; it reserves time for native startup/output, exact process cleanup
+and replay validation/publication rather than requesting a fresh 60-second
+native scan. Insufficient remaining time refuses new native work. A partial
+scan can publish only while the original authority and captured interest remain
+current; it never becomes complete coverage. Delayed cleanup keeps its existing
+owner until settlement, even when the observation can no longer publish.
+
 Each consumer has independent membership and entry/change/departure/coverage
 events and its own last-projected fact snapshots, including when a new subscriber
 joins an acquisition already in flight. Queries return only that registration's
