@@ -842,7 +842,7 @@ def test_native_wake_fleet_uses_same_standard_command_over_ssh(hosted, monkeypat
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr("agent_dispatch.owner_wake_delivery.run_ssh_command", run)
+    monkeypatch.setattr(bridge, "run_ssh_command", run)
     assert deliver_owner_wake(queue, OWNER, NATIVE, task_id, "continue", "wake-1")
     argv, kwargs = calls[0]
     assert argv[:6] == ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", "host-a"]

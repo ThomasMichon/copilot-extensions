@@ -22,10 +22,6 @@ from .session_stop import SESSION_NOT_RUNNING, SESSION_STOPPED
 from .transport import SpawnTarget
 
 
-class SessionBusyBeforeAdmission(ValueError):
-    """The holder refused this attempt before creating its turn."""
-
-
 class SessionStoppedError(ValueError):
     """A ``no_resume`` prompt reached a STOPPED session. A ``ValueError``, so the
     turns route answers 409 with this message, which starts with ``code``."""
@@ -118,7 +114,7 @@ class _SessionPromptMixin:
             raise KeyError(f"Session {session_id} not found")
         assert_prompt_allowed(self._db, session_id, delivery_id)
         if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
-            raise SessionBusyBeforeAdmission(
+            raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
             )
         if no_resume and session.status == SessionStatus.STOPPED:

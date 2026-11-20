@@ -6,10 +6,9 @@ from dataclasses import replace
 import sqlite3
 
 from . import bridge
-from .bridge_command_delivery import native_prompt, steering_prompt
+from .bridge_command_delivery import PeerCommandTransport, native_prompt, steering_prompt
 from .ordinary_agent_facts import identity, native_conflict
 from .ordinary_native_bindings import native_bindings
-from .procutil import run_ssh_command
 from .queue import TaskQueue
 from .queue_common import Task, WakeOperation
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
@@ -141,10 +140,11 @@ def deliver_owner_wake(
         if host is not None and normalize_host(machine) != normalize_host(host):
             raise TaskError("hosted wake owner machine differs from retained execution host")
         host = machine
+    transport: PeerCommandTransport = bridge
     return native_prompt(
         bridge_id, native_id, steering_prompt(task_id, message),
         idempotency_key=idempotency_key,
         machine=host, launch_prefix=bridge._agent_bridge_launch_prefix,
-        run_ssh=run_ssh_command,
+        run_ssh=transport.run_ssh_command,
         **({"no_resume": True} if no_resume else {}),
     )

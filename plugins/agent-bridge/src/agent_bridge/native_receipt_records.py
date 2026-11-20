@@ -8,7 +8,7 @@ import sqlite3
 from typing import Any
 
 from .native_keyed_admission import admission_receipt
-from .native_send_admission import NativeSendPrompt, read_receipt, submit
+from .native_send_admission import NativeSendBusy, NativeSendPrompt, read_receipt, submit
 from .native_send_settlement import request_digest
 
 
@@ -94,10 +94,9 @@ class NativeReceiptRecords:
             db.commit()
         if not inserted:
             return await self.reconcile(manager, session, request)
-        from .session_prompts import SessionBusyBeforeAdmission
         try:
             receipt = await submit(manager, session, request)
-        except SessionBusyBeforeAdmission:
+        except NativeSendBusy:
             with closing(self._open(write=True)) as db:
                 db.execute("DELETE FROM native_v1 WHERE delivery=? AND digest=? AND accepted_turn IS NULL",
                            (request.delivery_id(), request_digest(session, request)))
