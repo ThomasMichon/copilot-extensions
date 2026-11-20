@@ -14,8 +14,6 @@ from datetime import datetime, timezone
 from importlib.metadata import distributions
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from collections.abc import Callable
-from types import ModuleType
 from typing import cast
 
 from packaging.version import Version
@@ -35,6 +33,7 @@ _LIFECYCLE_FILES = (
     "installer_dependency_config.py", "installer_dependency_arguments.py", "installer_retained_content.py",
     "registry_root.py", "command_binding.py", "command_lifecycle.py",
     "installer_source_build.py", "installer_source_wheel_cache.py",
+    "installer_provider_roots.py",
     "install_source.py",
 )
 
@@ -194,7 +193,7 @@ def verify_installed_origins() -> None:
             raise RuntimeError("Closed wheel evidence cannot replace Source wheel evidence")
         from agent_worktrees.runtime_dev_cli import _lifecycle
 
-        inputs = cast(Callable[[], ModuleType], _lifecycle)().engine.WheelReuseInputs(
+        inputs = _lifecycle().engine.WheelReuseInputs(
             slot.name, json.dumps(receipt.get("wheel_inputs"), sort_keys=True, separators=(",", ":"), allow_nan=False),
             time.monotonic() + 30,
         )

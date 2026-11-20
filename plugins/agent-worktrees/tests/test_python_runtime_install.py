@@ -2411,6 +2411,7 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
     "installer_retained_content.py",
     "installer_dependency_arguments.py",
+    "installer_provider_roots.py",
 ])
 def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str | None) -> None:
     import agent_worktrees
