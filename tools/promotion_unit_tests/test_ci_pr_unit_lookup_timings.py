@@ -1,6 +1,7 @@
 """Lookup attribution uses the real packet verifier without provider or child actors."""
 
 from datetime import datetime
+import io
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,15 @@ class Clock:
 
     def __call__(self) -> float:
         return self.value
+
+
+class BufferedOutput(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.visible = ""
+
+    def flush(self) -> None:
+        self.visible = self.getvalue()
 
 
 def read_provider(case: PacketCase, path: str, binary: bool = False) -> reuse.JsonObject | bytes:
@@ -121,7 +131,6 @@ def test_failed_provider_phase_is_retained_without_consuming_another_request(
 
 def test_expired_lookup_emits_attribution_and_keeps_the_existing_fresh_fallback(
     case: PacketCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     (case.root / "tools/promotion-unit-manifest.json").write_text(json.dumps(case.manifest))
     event, output, destination = tmp_path / "event", tmp_path / "outputs", tmp_path / "result"
@@ -131,6 +140,7 @@ def test_expired_lookup_emits_attribution_and_keeps_the_existing_fresh_fallback(
         "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "1", "GH_TOKEN": "synthetic-credential",
     }
     calls: list[list[str]] = []
+    stream = BufferedOutput()
 
     def process(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         calls.append(arguments)
@@ -139,6 +149,7 @@ def test_expired_lookup_emits_attribution_and_keeps_the_existing_fresh_fallback(
             body = (SOURCE + "\n").encode() if "rev-parse" in arguments else b""
             return subprocess.CompletedProcess(arguments, 0, stdout=body, stderr=b"")
         assert arguments[1] == str(case.root / "tools/run-promotion-unit-tests.py")
+        assert '"pr_unit_lookup":' in stream.visible, "diagnostic must be visible before fallback"
         assert kwargs["env"] == reuse.unit_environment(environment)
         destination.mkdir()
         for name in PACKET_FILES:
@@ -150,11 +161,12 @@ def test_expired_lookup_emits_attribution_and_keeps_the_existing_fresh_fallback(
     monkeypatch.setattr(reuse, "_process", process)
     monkeypatch.setattr(reuse, "runtime_identity", lambda: case.runtime)
     monkeypatch.setattr(reuse, "MAX_LOOKUP_SECONDS", -1)
+    monkeypatch.setattr(sys, "stdout", stream)
     monkeypatch.setattr(sys, "argv", [
         "ci_pr_unit_reuse.py", "--source-sha", SOURCE, "--output-dir", str(destination),
     ])
     assert reuse.main() == 0
-    captured = capsys.readouterr().out
+    captured = stream.getvalue()
     reports = [
         json.loads(line)["pr_unit_lookup"] for line in captured.splitlines()
         if line.startswith('{"pr_unit_lookup":')

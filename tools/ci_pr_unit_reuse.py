@@ -728,7 +728,7 @@ def main() -> int:
                 f"::warning::PR unit reuse unavailable ({result['reason']}); fresh units required."
             )
     if timings is not None:
-        print(json.dumps({"pr_unit_lookup": timings.snapshot()}, sort_keys=True))
+        print(json.dumps({"pr_unit_lookup": timings.snapshot()}, sort_keys=True), flush=True)
     if result["mode"] == "executed":
         completed = _process(
             [
