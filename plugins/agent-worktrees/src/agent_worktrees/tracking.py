@@ -3392,9 +3392,8 @@ def set_disposition(
       the immediate focus shifts within the same overall piece of work.
     - ``summary`` -- a broader recap. Update occasionally, to fold newly
       completed work into the existing summary -- not on every sub-task.
-    - ``title`` -- the worktree's persistent goal or standing role. Set it once
-      that is clear and revise it only when the charter, root goal or role
-      changes.
+    - ``title`` -- the rare, intentional headline. Update only when the
+      worktree's main theme genuinely changes.
 
     Stamps ``status_note_at`` (which the postToolUse nudge watches to reset its
     drift counter) on ANY of the three changing, plus its own ``activity_at``
