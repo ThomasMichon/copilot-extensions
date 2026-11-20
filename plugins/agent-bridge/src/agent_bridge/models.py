@@ -752,6 +752,12 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
     remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)
     remote_acp_auth_sources: dict[str, RemoteAuthApproval] = Field(default_factory=dict)
+    consumer_telemetry_harnesses: dict[str, str] | None = Field(
+        default=None,
+        description="Trusted local harness roots keyed by admitted caller_id. "
+        "Null preserves explicitly unbound legacy telemetry. An object enables "
+        "bound selection; callers absent from it export nothing.",
+    )
 
     # Port 0 is the "unset" sentinel: the daemon binds an OS-assigned ephemeral
     # port and advertises it via active.json (dotfiles #694 -- no fixed 9280/9281

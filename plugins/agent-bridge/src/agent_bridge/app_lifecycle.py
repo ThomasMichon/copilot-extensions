@@ -178,6 +178,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
                 await stop_agent_roster_cache(app)
             finally:
-                db = getattr(app.state, "db", None)
-                if db is not None:
-                    await close_database(db)
+                from .consumer_telemetry import close as close_consumer_telemetry
+
+                try:
+                    manager = getattr(app.state, "session_manager", None)
+                    if manager is not None:
+                        await settled_thread_call(close_consumer_telemetry, manager)
+                finally:
+                    db = getattr(app.state, "db", None)
+                    if db is not None:
+                        await close_database(db)
