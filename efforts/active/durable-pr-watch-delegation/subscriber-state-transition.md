@@ -64,7 +64,7 @@ notification, isolated state or activation. This proves those current-owner
 process-exit boundaries, not complete historical startup-family coverage,
 host power-loss durability or the POSIX boot boundary.
 
-The explicit historical packet archives complete source closures from
+The explicit historical packet, merged in #13615, archives complete source closures from
 `24b79724ac81d65f80a50507f6a7bef5b5dc1a33`,
 `a936d3b39f4d069b4e77ed11cf8e0e59bebbcd2b` and
 `3c62c9442c5944640d2c13385d7ff00db614c1aa`, including their declared
@@ -81,6 +81,20 @@ Missing local source commits explicitly skip rather than fetching or falling
 back to current code. This qualifies those pinned legacy-home source entries,
 not released installers, governed installation/adoption, every supported
 historical release or POSIX native behavior.
+
+A follow-on packet also selects the actual promoted payloads
+`9d11a84f794506956dbaeb8341578a0b0f13b899` (`0.3.1-dev1`),
+`c2ee1877fb55f965c141f400a31bc5e95dbebe6b` (`0.3.2-dev1`) and
+`5ee1468f15967fd6e76a0be08ee3dc69da2551bb` (`0.3.16-dev1`).
+These archive the libraries actually bundled under each promoted plugin,
+not the repository-root development libraries. The children verify the
+observed package version as well as loaded source locations. Both scenarios
+pass for all six snapshots: twelve historical cases under unchanged runner
+limits. The first two promotions differ from their development anchors only
+in the package version stamp; the third contains substantive source changes
+and is qualified independently. These versions identify fixture inputs, not
+a support floor or version-equality negotiation rule. Installer, governed
+adoption, complete-window and POSIX qualifications remain separate.
 
 POSIX rename does not revoke a descriptor for the original inode. A delayed
 historical acquisition can consequently succeed after the incumbent releases
