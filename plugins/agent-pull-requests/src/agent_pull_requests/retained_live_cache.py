@@ -9,7 +9,7 @@ from .conversation_journal import ConversationJournal, Observation
 from .generation_cache import CacheInvalid, GenerationCache
 from .terminal_retention import MAX_RECORDS
 from .review_workspace import _scope
-from .watch_replay import ConsumerScope
+from .watch_replay import ConsumerScope, WatchReplay
 from .workspace_conversation import conversation_key
 
 Document = dict[str, Any]
@@ -77,6 +77,10 @@ def validate(
         ]
         if len(matches) != 1:
             raise ValueError("retained conversation is outside the selected workspace scope")
+    if journal.records and WatchReplay(
+        document["namespace"], state=document["replay"], commit=lambda state: None,
+    ).observation_targets():
+        raise ValueError("retained active native watches require their original workspace association")
 
     def visit(generation: Document) -> None:
         checkpoint()

@@ -493,6 +493,10 @@ With the executing core's optional
 `agent-pull-requests.retained-cache-metadata-adoption/v1` declaration, that same
 command also preserves an existing complete open first-epoch conversation
 journal and valid null rebuild pointers when no generation objects remain.
+Populated journal metadata with active legacy native waits refuses unchanged:
+the old envelope cannot prove its original watch-to-workspace association,
+and current account/repository remapping must not defeat reopen fencing.
+Completed frozen delivery remains eligible; empty-journal bootstrap is unchanged.
 It creates no observation, live admission or generation binding. Original
 metadata/events, replay positions and cache misses survive reader restart;
 later fresh acquisition uses the ordinary terminal-aware load/sync owner.

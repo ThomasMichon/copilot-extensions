@@ -185,6 +185,12 @@ original reader. Future positive adoption requires a durable association between
 the exact generation ID and its original observation/epoch, with normal contract
 review before that storage or writer change. Neither timestamp bounds nor exact
 normalized projection equality supplies that missing association.
+Likewise, retained conversation metadata does not record its original native
+watch association. If active legacy native waits coexist with that metadata,
+refuse unchanged instead of assigning the current configuration's mapping:
+cross-account/repository remapping can otherwise let a delayed read escape
+close/reopen fencing. Keep the active watch with its original usable reader.
+Completed frozen delivery and empty-journal bootstrap remain supported.
 Refuse absent/ambiguous conversation evidence,
 closed/reopened histories, incomplete or terminal generations, unsupported
 extensions and unknown scopes before adoption, without changing original reads.
@@ -233,6 +239,9 @@ pre-transition executable still refuses expanded state without rewriting it.
 - [ ] Exercise the actual selected workspace `sync` comparison against a retained
   generation, with new synthetic acquisition and existing CAS/epoch fences.
   Transition itself performs no acquisition, write, ACK or cache retirement.
+- [ ] Qualify active legacy native-watch migration with its original
+  workspace/epoch association; the metadata-only leaf refuses that unqualified
+  combination rather than inventing a mapping or canceling original work.
 - [x] Qualify the narrower metadata-only transition through the actual CLI and
   fresh reader process, preserving original events, frozen replay and null
   misses. Fresh load/sync creates only newly acquired generation bindings.

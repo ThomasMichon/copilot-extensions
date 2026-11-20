@@ -47,6 +47,11 @@ association is supported; even equal normalized metadata can hide distinct
 same-second acquisitions. Metadata-only adoption refuses generation presence
 before decoding or hashing those objects; the full inspection utility remains
 available to its other callers. A selected null rebuild pointer needs no journal.
+Imported conversation metadata cannot prove its original association with
+active legacy native waits. That combination refuses unchanged rather than
+letting current account/repository labels reinterpret an old watch's epoch.
+Original active watches remain usable through their old reader; completed
+frozen delivery remains eligible. Empty-journal bootstrap is unchanged.
 No observation is added and no cache bytes change. Configured growth beyond the
 terminal generation-binding limit refuses rather than reducing capacity.
 Request-local validation composes owner expiry, lifecycle and the original
