@@ -181,11 +181,16 @@ transport; an unavailable authority is reported, not recreated locally.
   credential/venue failures without access escalation, private-store writes,
   fake success or collateral host/workspace/service effects. Preserve current
   owner/operator limits and the independent #7237/#3442 boundaries.
-- [ ] **OA3443-G:** Accept the complete P1..5/V1..3 contract only after required
-  design/source review and CI, direct four-stage/two-shape receiving readback,
-  and separately recorded available evidence tiers. Every unresolved clause
-  and actual custodian remains explicit. Document acceptance is not technical
-  completion, source-issue disposition, resource release or deployment.
+- [ ] **OA3443-G:** Check this technical gate only after EVERY P1..5/V1..3
+  clause is resolved by demonstrated fulfillment at its applicable evidence
+  tier OR an explicit accepted transfer to a named tracked objective that
+  preserves the clause and actual custody. Required design/source review and
+  CI, and direct four-stage/two-shape/original-and-different-machine validation
+  remain part of that resolution. Unavailable evidence stays unresolved
+  unless its obligation is explicitly accepted in such a transfer; it is
+  never a passing tier. Complete documentary receiving acceptance alone
+  checks no technical row and is separate from this gate, source-issue
+  disposition, resource release and deployment.
 
 ## Proposal
 
