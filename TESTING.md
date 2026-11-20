@@ -5662,6 +5662,10 @@ Pytest's whole-protocol finalizer still owns cancellation after teardown; fixtur
 unregistration does not cancel early. Separate pure passing-body and failed-body
 controls retain ordinary capture and a finite 61-second finalizer wait, each with
 its own 120-second item marker covering the 90-second child bound.
+The pytest 8.0 owner has no exit-on-timeout ini option and schedules the stdlib timer
+without an exit argument. The diagnostic adapter treats only that exact missing
+registration as the proven legacy non-exiting contract; registered exiting or
+invalid values retain their ordinary behavior. No minimum dependency changes.
 Bounded independent packets cover Python/native
 no-write refusals, exact `stamp`/`provision` action custody, source replacement,
 deferred real stamping, and actual cold construction after the original caller's

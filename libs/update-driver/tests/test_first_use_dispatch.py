@@ -95,6 +95,49 @@ pytestmark = pytest.mark.skipif(
 REPOSITORY = Path(__file__).resolve().parents[3]
 
 
+def _dispatch_faulthandler_is_nonexiting(config: pytest.Config) -> bool:
+    try:
+        return config.getini("faulthandler_exit_on_timeout") is False
+    except ValueError as error:
+        cause = error.__cause__
+        if not isinstance(cause, KeyError) or cause.args != ("faulthandler_exit_on_timeout",):
+            raise
+        # Legacy pytest omits exit= when scheduling the stdlib's non-exiting timer.
+        return True
+
+
+def test_dispatch_faulthandler_accepts_legacy_option_registry(
+    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config,
+) -> None:
+    option = "faulthandler_exit_on_timeout"
+    with monkeypatch.context() as legacy:
+        legacy.delitem(pytestconfig._parser._inidict, option, raising=False)
+        legacy.delitem(pytestconfig._inicache, option, raising=False)
+        with pytest.raises(ValueError) as missing:
+            pytestconfig.getini(option)
+        assert isinstance(missing.value.__cause__, KeyError)
+        assert _dispatch_faulthandler_is_nonexiting(pytestconfig) is True
+
+
+@pytest.mark.parametrize("value", ["false", "true", "invalid-boolean"])
+def test_dispatch_faulthandler_preserves_registered_option_semantics(
+    monkeypatch: pytest.MonkeyPatch, value: str,
+) -> None:
+    option = "faulthandler_exit_on_timeout"
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    config = pytest.Config.fromdictargs({}, ["--noconftest", "-o", f"{option}={value}"])
+    try:
+        if option not in config._parser._inidict:
+            config._parser.addini(option, "controlled exit option", type="bool", default=False)
+        if value == "invalid-boolean":
+            with pytest.raises((ValueError, pytest.UsageError)):
+                _dispatch_faulthandler_is_nonexiting(config)
+        else:
+            assert _dispatch_faulthandler_is_nonexiting(config) is (value == "false")
+    finally:
+        config._ensure_unconfigure()
+
+
 class _DispatchColdFailureTrace:
     def __init__(self, item: pytest.Item, timeout: float, stderr: int) -> None:
         self.item, self.timeout, self.stderr = item, timeout, stderr
@@ -116,7 +159,7 @@ def _register_dispatch_failure_trace(request: pytest.FixtureRequest, *, active: 
     if config.getoption("usepdb", False) or config.getoption("trace", False):
         return
     timeout = float(config.getini("faulthandler_timeout") or 0)
-    if timeout != 60 or config.getini("faulthandler_exit_on_timeout") is not False:
+    if timeout != 60 or not _dispatch_faulthandler_is_nonexiting(config):
         return
     plugin = _DispatchColdFailureTrace(
         cast(pytest.Item, request.node), timeout, config.stash[fault_handler_stderr_fd_key],
@@ -325,8 +368,11 @@ def test_dispatch_faulthandler_observes_finite_finalizer_without_disabling_captu
     target = suite / "test_controlled_finalizer.py"
     target.write_text(
         "from pathlib import Path\n"
+        "import sys\n"
         "import time\n"
         "import pytest\n"
+        f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
+        "from test_first_use_dispatch import _dispatch_faulthandler_is_nonexiting\n"
         "@pytest.fixture\n"
         "def controlled_fixture_finalizer(request):\n"
         "    yield\n"
@@ -336,7 +382,7 @@ def test_dispatch_faulthandler_observes_finite_finalizer_without_disabling_captu
         "    Path(__file__).with_suffix('.completed').write_text('completed')\n"
         "def test_config_and_capture(request, controlled_fixture_finalizer):\n"
         "    assert float(request.config.getini('faulthandler_timeout')) == 60.0\n"
-        "    assert request.config.getini('faulthandler_exit_on_timeout') is False\n"
+        "    assert _dispatch_faulthandler_is_nonexiting(request.config)\n"
         "    assert request.config.getoption('capture') == 'fd'\n"
         "    print('controlled body remains captured')\n",
         encoding="utf-8",
@@ -380,7 +426,9 @@ def test_dispatch_faulthandler_preserves_failed_body_through_finite_finalizer(
         "import time\n"
         "import pytest\n"
         f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
-        "from test_first_use_dispatch import _register_dispatch_failure_trace\n"
+        "from test_first_use_dispatch import (\n"
+        "    _register_dispatch_failure_trace, _dispatch_faulthandler_is_nonexiting,\n"
+        ")\n"
         "@pytest.fixture\n"
         "def controlled_failure_finalizer(request, monkeypatch):\n"
         "    events = []\n"
@@ -403,7 +451,7 @@ def test_dispatch_faulthandler_preserves_failed_body_through_finite_finalizer(
         "    Path(__file__).with_suffix('.completed').write_text('completed')\n"
         "def test_failed_body(request, controlled_failure_finalizer):\n"
         "    assert float(request.config.getini('faulthandler_timeout')) == 60.0\n"
-        "    assert request.config.getini('faulthandler_exit_on_timeout') is False\n"
+        "    assert _dispatch_faulthandler_is_nonexiting(request.config)\n"
         "    assert request.config.getoption('capture') == 'fd'\n"
         "    pytest.fail('controlled-call-failure', pytrace=False)\n",
         encoding="utf-8",
