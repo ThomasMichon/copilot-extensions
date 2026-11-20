@@ -854,7 +854,15 @@ reviewed in #13624
 separates immutable transition origin from current executor admission and
 requires native same-domain continuity before comparing boots. It proposes a
 versioned recovery adapter, not weaker binding checks or delivered boot/import
-support. Existing source-only authority and every qualification gate remain.
+support. The installation-owner prerequisite merged in #13634 validates full
+retained installation scope under fresh current admission and native transaction
+custody without requiring the historical payload. It does not authenticate
+caller-supplied provenance or adapt a transition journal. The internal
+[prepared-only adapter](subscriber-state-transition.md#prepared-only-version-2-receiver)
+now preserves complete origin under freshly admitted current native custody.
+It does not adapt sealed records, select state authority or enable ordinary
+entry. Version-2 sealing/recovery, native domain/boot qualification and every
+remaining gate still follow under the existing source-only authority.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
