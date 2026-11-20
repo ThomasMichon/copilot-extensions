@@ -157,7 +157,6 @@ def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
         "-c", f"credential.{url}.username={account}",
         "-c", f"credential.{url}.provider=github",
         "-c", "credential.gitHubAccountFiltering=true",
-        "-c", "credential.useHttpPath=true",
         "-c", "http.extraHeader=",
         "-c", f"http.{url}.extraHeader=",
     ]

@@ -239,7 +239,12 @@ def test_explicit_gcm_route_contains_no_token_and_preserves_global_settings(tmp_
     assert not any("token" in a for a in args)
 
 
-def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(("use_http_path", "account"), [
+    (None, "selected-login"), (True, "selected-login"), (None, "missing-login"),
+])
+def test_real_multi_helper_and_http_header_isolation(
+    tmp_path, monkeypatch, use_http_path, account,
+) -> None:
     selected = "https://github.com/example/sample.git"
     config = tmp_path / "isolated.gitconfig"
     helper_bin = tmp_path / "helpers"
@@ -255,7 +260,10 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
         "if sys.argv[-1] == 'get':\n"
         "    request=sys.stdin.read()\n"
         "    pathlib.Path(__file__).with_suffix('.called').write_text(request)\n"
-        "    print('username=selected-login\\npassword=fixture-value\\n')\n",
+        "    fields=dict(line.split('=',1) for line in request.splitlines() if '=' in line)\n"
+        f"    expected_path={'example/sample.git' if use_http_path else None!r}\n"
+        "    if fields.get('username') == 'selected-login' and fields.get('path') == expected_path:\n"
+        "        print('username=selected-login\\npassword=fixture-value\\n')\n",
         encoding="utf-8",
     )
     shim = helper_bin / "git-credential-manager"
@@ -267,13 +275,18 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
     git(tmp_path, "config", "--file", str(config), "credential.helper",
         "!" + shlex.quote(sys.executable) + " " + shlex.quote(str(ambient)))
     git(tmp_path, "config", "--file", str(config), f"credential.{selected}.helper", "manager")
+    git(tmp_path, "config", "--file", str(config), "credential.username", "ambient-login")
+    if use_http_path is not None:
+        git(tmp_path, "config", "--file", str(config),
+            f"credential.{selected}.useHttpPath", str(use_http_path).lower())
     for key in ("http.extraHeader", f"http.{selected}.extraHeader"):
         git(tmp_path, "config", "--file", str(config), key, "Authorization: fixture-only")
     before = config.read_bytes()
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_EXEC_PATH", str(helper_bin))
-    args = bootstrap._credential_args(selected, "selected-login", cwd=tmp_path)
+    monkeypatch.setattr(bootstrap, "_terminal", lambda: False)
+    args = bootstrap._credential_args(selected, account, cwd=tmp_path)
     headers = git(tmp_path, *args, "config", "--get-urlmatch", "http.extraHeader", selected)
     assert headers == ""
     credential = subprocess.run(
@@ -281,12 +294,21 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
         input=f"url={selected}\n\n", text=True, capture_output=True, timeout=30,
         env=bootstrap._acquisition_environment(), **no_window_kwargs(),
     )
-    assert credential.returncode == 0, credential.stderr
-    assert "username=selected-login" in credential.stdout
-    assert "password=fixture-value" in credential.stdout
-    assert "username=selected-login" in owner.with_suffix(".called").read_text()
+    request = dict(
+        line.split("=", 1) for line in owner.with_suffix(".called").read_text().splitlines()
+        if "=" in line
+    )
+    assert request["username"] == account
+    assert request.get("path") == ("example/sample.git" if use_http_path else None)
     assert not ambient.with_suffix(".called").exists()
     assert config.read_bytes() == before
+    if account == "missing-login":
+        assert credential.returncode != 0
+        assert "password=fixture-value" not in credential.stdout
+    else:
+        assert credential.returncode == 0, credential.stderr
+        assert "username=selected-login" in credential.stdout
+        assert "password=fixture-value" in credential.stdout
 
 
 @pytest.mark.parametrize("override", ["config-provider", "env-provider", "legacy-authority"])

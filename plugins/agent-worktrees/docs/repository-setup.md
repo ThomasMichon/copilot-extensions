@@ -43,6 +43,11 @@ and clear inherited HTTP headers for the selected URL without changing persisted
 unsupported explicit-account routes refuse rather than fall back
 to an ambient identity. Other credential-owner routes with no configured
 explicit account retain Git's own authentication behavior.
+Credential lookup retains Git's configured `credential.useHttpPath` behavior.
+The default host-scoped lookup can reuse the selected account's normal GCM
+GitHub login; an explicitly configured repository-path scope remains effective
+and requires a credential at that scope. Acquisition does not copy credentials
+between scopes or start a second login when noninteractive lookup fails.
 The selected registry name's explicit account takes precedence over URL aliases.
 Without that selection, conflicting alias accounts refuse rather than choosing
 the first entry. Only an explicit owner account map may supply an owner default;
