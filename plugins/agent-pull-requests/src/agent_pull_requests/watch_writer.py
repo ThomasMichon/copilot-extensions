@@ -305,6 +305,52 @@ class WatchWriter:
                     raise error from drain_error
                 raise
 
+    def seal_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+    ) -> dict[str, Any]:
+        """Seal/recover an already drained preparation; never adopt either registry."""
+        from .watch_sealing import _exchange_backend, seal
+
+        with self._operation(timeout) as deadline:
+            def validate() -> None:
+                self._validate("seal-state-transition", deadline)
+                if installation is not None:
+                    installation.require_current()
+                    if installation.state_root != self.root:
+                        raise PermissionError("watch sealing installation state root differs")
+                if not self.daemon.quiescent or self.daemon.effects_enabled:
+                    raise PermissionError("watch sealing requires completed preparation quiescence")
+                if self.daemon.has_legacy_pending():
+                    raise RuntimeError("watch sealing cannot discard queued legacy callbacks")
+
+            validate()
+            _exchange_backend()
+            binding: dict[str, Any] = {"kind": "legacy", "stateRoot": str(self.root)}
+            if installation is not None:
+                binding.update(kind="installation", installation=installation.evidence())
+
+            def refuse_persistence() -> None:
+                raise PermissionError("watch sealing requires guarded legacy recovery before writes")
+
+            self.daemon.set_persistence_guard(
+                refuse_persistence, timeout=self._remaining(deadline),
+            )
+            self._preparation_guard = refuse_persistence
+            self._strict_custody = True
+            self._read_ready = False
+            self._drain_started = True
+            def check_deadline() -> None:
+                self._remaining(deadline)
+
+            try:
+                return seal(
+                    self.root, binding, self._lease, validate=validate,
+                    check_deadline=check_deadline,
+                )
+            except BaseException:
+                self._reject_preparation()
+                raise
+
     def drain_and_release(self, *, timeout: float) -> None:
         """Never release on incomplete drain or failed post-drain authorization."""
         with self._operation(timeout) as deadline:

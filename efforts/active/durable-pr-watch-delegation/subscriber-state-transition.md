@@ -10,10 +10,13 @@ retains its limits. Receiver groundwork is delivered in #13320. The first
 runtime slice, merged in #13508, adds an effect-free marker/path reader and
 legacy-absence guards under the existing storage owner. Every present phase still refuses;
 no phase label proves admission or selects an authority. Nothing here
-implements migration or enables versioned/map writes. The current source
-candidate adds an internal, explicitly authorized preparation API and
+implements migration or enables versioned/map writes. The preparation slice,
+merged in #13520, adds an internal, explicitly authorized preparation API and
 same-original-inode prepared recovery. It is not connected to ordinary CLI or
-control-plane entry, and adds no sealing or authority-selection capability.
+control-plane entry. The subsequent internal Linux source path adds physical
+sealing/recovery under the same writer. It still adds no authority selection,
+ordinary entry integration, Windows sealing or qualification of an actual
+boot crossing. Native Linux exchange/interruption qualification remains open.
 
 **Scope:** Historical-root admission, one recoverable state authority and
 P/V/G5947-3/4 prerequisites. No service stop, installation, reboot, rollout,
@@ -234,7 +237,7 @@ using historical lease/entry source with current unrelated imports.
 Measure transition work once per phase and keep ordinary reads on the
 existing owner path; no process, filesystem scan or boot probe per callback.
 
-### Guarded preparation candidate
+### Guarded preparation implementation
 
 The prepared record requires a retained hardlink at the fixed pin path.
 Create it under the original held lease and confirm the file and parent through
@@ -315,5 +318,48 @@ historical writer's intervening legacy registrations remain intact. Later
 phases still refuse and cannot be downgraded to preparation.
 
 This is a source-only internal API, not a released migration command or
-standalone/governed control-plane integration. Physical sealing, final-source
-import, actual boot-crossing qualification and map/cwd activation remain open.
+standalone/governed control-plane integration. Windows sealing, native Linux
+exchange/interruption qualification, final-source import, actual boot-crossing
+qualification and map/cwd activation remain open.
+
+### Internal Linux sealing and recovery
+
+`WatchWriter.seal_state_transition` requires a separately completed, authorized
+preparation and drained application custody. It never drains by releasing a
+lease, adopts a registry or enables effects. Scope, current installation when
+supplied, quiescence, queued legacy custody and the lifecycle deadline are checked
+through the existing writer boundary. Unsupported platforms or an unavailable
+Linux exchange entry refuse before staging or acquisition.
+
+The internal sealing owner extends the prepared journal with `seal`, containing
+the fixed backend identifier, exact barrier device/inode and initially null boot
+evidence. The staged empty owner-private directory and parent are synchronized
+before its identity is published. An unjournaled staged directory is retained
+uncertain evidence, not something recovery silently deletes or guesses.
+The journal never stores caller-chosen filesystem paths.
+
+Only Linux `renameat2` with `RENAME_EXCHANGE` performs the namespace change.
+Each pre-exchange attempt confirms the staging journal's file and parent
+durability and rechecks evidence, including recovery after an uncertain commit.
+There is no move/mkdir or no-replace fallback. An unsupported filesystem leaves
+the original historical lock untouched, retaining staged recovery evidence.
+After exchange the owner readdresses the same held descriptor to the original
+inode at the retained path and validates descriptor/path identity. Cold guarded
+recovery validates the recorded pin, barrier and both actual path identities
+before opening only that original inode with existing-only acquisition.
+No new writer lease is created or acquired.
+
+Recovery recognizes either side of the recorded exchange, independently of its
+phase label, and never exchanges an already installed barrier back. It
+synchronizes the installed barrier and parent before publishing `sealed-legacy`
+with native Linux boot evidence. A prepared record found after exchange obtains
+a fresh epoch rather than using preparation time. This record is not a boot
+comparison or permission to import; execution-domain qualification and
+final-source authority selection remain later gates.
+
+Final journal publication rechecks authorization, deadline, native custody,
+unchanged journal/topology and strict legacy source validity. The writer retains
+its mutation/readiness fence after both success and uncertain failure.
+Ordinary adoption, callbacks and persistence cannot bypass it. Legacy
+subscription bytes remain the sole authority, and neither isolated state nor
+callback effects are produced by sealing.

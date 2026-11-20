@@ -668,12 +668,35 @@ that retained queue. Guard rejection does not spend a legacy attempt or falsely
 acknowledge/increment an acknowledged event. This adds no durable legacy
 delivery guarantee or new callback wire fields.
 
-No CLI or control-plane operation invokes preparation yet, and ordinary
-startup/restart still refuses every present phase. Do not write markers by
-hand or delete evidence to regain startup. Physical sealing, boot qualification,
-post-seal recovery and authority selection remain unimplemented. This API
-performs no boot probe, lease transfer, import or automatic migration, and
-does not change installation selection. Preparation is not an authoritative
+The separate internal `WatchWriter.seal_state_transition()` API requires
+`seal-state-transition` authorization and completed preparation quiescence.
+Its Linux backend durably stages an empty private barrier and records its
+identity before `renameat2(RENAME_EXCHANGE)` atomically swaps the historical
+lock and retained path. Every pre-exchange attempt confirms journal durability
+and rechecks custody, including retries after an uncertain staging commit.
+No move/mkdir or no-replace fallback exists.
+Unsupported platforms refuse before staging or acquisition. A filesystem
+that refuses exchange retains the staged evidence and original lock.
+Recovery validates the journal, original pin and both actual path identities
+before reusing or acquiring only the original inode; it never creates the new
+writer lease or exchanges an installed barrier back. Unjournaled staging and
+conflicting evidence remain retained refusals.
+
+After barrier/parent synchronization, sealing records a native Linux boot epoch
+under `sealed-legacy`. It does not compare boots or qualify descriptor retirement.
+Authorization, current installation when supplied, custody, strict legacy
+source, unchanged journal/topology and deadline are rechecked at publication.
+Readiness and all persistent-write/callback fences remain closed after success
+or uncertain failure. Legacy subscriptions remain the only authority; neither
+registry adoption nor isolated-state publication follows from a seal.
+
+No CLI or control-plane operation invokes preparation or sealing yet, and
+ordinary startup/restart still refuses every present phase. Do not write markers
+by hand or delete evidence to regain startup. Windows sealing, native Linux
+exchange/interruption qualification, boot qualification and authority selection
+remain open. Preparation itself performs no boot probe, lease transfer, import
+or automatic migration; neither internal API changes installation selection.
+Preparation is not an authoritative
 subscription snapshot: later historical writes remain in the sole legacy file
 and must survive final import qualification.
 
