@@ -692,7 +692,13 @@ def select_point_fixture(f: Fixture) -> PointChangeHints:
         targets=(WorkItemRevisionTarget("opaque-item", 3),),
     )
     receipt = f.domain.receipt()
-    receipt.update(protocol=2, point_scope={
+    receipt.update(protocol=2, point_models={
+        "protocol": 1, "content_table": f.config.content_table,
+        "models": {
+            key: {"table_name": profile.table_name, "dim": profile.dim}
+            for key, profile in f.config.model_profiles.items()
+        },
+    }, point_scope={
         "source": hints.source, "canonical_family": hints.canonical_family,
         "account_id": hints.account_id, "binding": hints.binding.to_dict(),
     })

@@ -46,10 +46,26 @@ replace a different binding.
 `initialize_source_store(config, point_scope=hints.scope)` additionally
 bootstraps the configured empty content/model schemas through the existing
 writer and dirty/effect/clean protocol. It requires distinct configured tables
-and matching model IDs. Receipt decisions, native schema validation and creation
+and matching model IDs. The same receipt retains a versioned `point_models` map:
+the content table and each configured model ID's distinct vector table and
+positive integer dimension. This map is first saved only under the existing
+writer while both retained and native table inventories are empty. Receipt saves
+hold the same existing exclusion across the current-ownership read and atomic
+publication and cannot drop or replace a retained map. A bare
+`initialize_source_layout` has no model configuration and retains no map.
+Prepared point tables missing that map are not adopted.
+
+Receipt decisions, native schema validation and creation
 share one existing source-domain operation, so a concurrent initializer cannot
 lend it a stale empty-state decision. Reopening retains the same receipt and
-tables; missing configured tables in an already prepared domain, changed vector
+tables and requires the complete same model/table/dimension mapping, including
+same-dimension model swaps. Registration through any `MultiModelStore` facade
+checks the retained content/model binding before returning even a cached model.
+Unknown IDs, aliases, changed dimensions and content-table collisions refuse.
+Model name/revision, query policy and engine placement do not define this table
+ownership; embedding coverage and profile-policy owners still qualify their
+changes. No model addition, table rebinding or legacy conversion is implied.
+Missing configured tables in an already prepared domain, changed vector
 schemas or a content table with the wrong schema/role refuse rather than being
 added or converted. An interrupted bootstrap remains
 dirty and requires its existing recovery owner; initialization does not replay
@@ -96,9 +112,11 @@ an open failure propagates without the generic create-table fallback.
 Preflight returns selected raw canonical fields at that read boundary, not a
 durable receipt, model-to-table ownership proof or permission to write.
 It performs no content/vector mutation, index preparation or writer acquisition.
-The existing mutation APIs still refuse point domains. Enabling point writes
-first requires durable cross-facade/reopen model ownership and a post-effect
-failure latch that cannot be cleared by catching a nested exception.
+The existing mutation APIs still refuse point domains. Durable model ownership
+and the nested post-effect failure latch are prerequisites, not point-write
+admission. Any future selected mutator must recheck the configured model/table
+binding at its actual effect boundary as well as current canonical input,
+coverage and publication ownership; this read-only preflight is not that check.
 Selected reads retain their separate explicit prepared-index path.
 
 Qualified point application and every v2 executor/producer remain unsupported.

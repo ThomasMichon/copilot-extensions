@@ -7525,6 +7525,10 @@ The point-domain receipt units use in-memory receipt bytes to check exact
 scope/protocol selection, malformed and duplicate binding refusal, unchanged
 protocol-1 metadata, save-time downgrade refusal, late marking and nested/lazy default-reader
 drift. They start no actor or native database and create no domain directory.
+They also check versioned model/table/dimension ownership and save-time refusal
+of dropped, replaced or improperly initialized model bindings. The separately
+selected `plugins/agent-index/tests/test_point_model_binding.py` covers native bootstrap/reopen,
+same-dimension swaps, cross-facade aliases and missing-binding refusal.
 `plugins/agent-index/tests/test_point_source_domain.py` separately covers cold
 directory bootstrap/reopen, both cross-domain refusals, default store and
 cluster constructors, cached-handle separation and unchanged bytes on refusal.
