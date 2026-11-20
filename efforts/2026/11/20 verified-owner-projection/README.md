@@ -12,8 +12,8 @@ uncertainty for unverified or unrelated actors.
 - **Repo:** copilot-extensions
 - **Branch(es):** serial plan, source and acceptance PRs
 - **Created:** 2026-11-20
-- **Status:** Active
-- **Vision:** [Agent Fabric](../../../visions/agent-fabric/README.md), shared identity authority
+- **Status:** Done
+- **Vision:** [Agent Fabric](../../../../visions/agent-fabric/README.md), shared identity authority
 - **Umbrella issue:** #4619, finite OA lane only
 
 ## Guiding Intent
@@ -100,7 +100,7 @@ yields an incomplete snapshot. No new registry or resource effect is authorized.
 - [x] Preserve globally incomplete snapshots for genuine uncertainty, exact
   creator-rooted chains, unrelated owner conclusions when complete, and
   historical receipt bytes. Document any affected existing guarantee.
-- [ ] Clear focused consumer tests, whole-file strict checks and ordinary
+- [x] Clear focused consumer tests, whole-file strict checks and ordinary
   source review/required CI; merge, accept the six finite OA/OAV rows only
   when proved, and record finite acceptance.
 
@@ -117,10 +117,10 @@ yields an incomplete snapshot. No new registry or resource effect is authorized.
   resource operation during scanning; preserve actual no-effect controls.
   Cover missing/malformed/mismatched accepted evidence, nonaccepted bundles
   and evidence replacement during the strict read.
-- [ ] V4: Focused fail-first proof for any new correction, full affected suites,
+- [x] V4: Focused fail-first proof for any new correction, full affected suites,
   touched-file F/E9 lint and whole-file strict Linux/Windows analysis; normal
   contract guards and exact-source review/CI before merge.
-- [ ] V5: Full current parent readback before finite acceptance; original
+- [x] V5: Full current parent readback before finite acceptance; original
   reservation completed by its author, all other parent rows/custodians
   unchanged. Release and rollout are separate.
 
@@ -132,7 +132,7 @@ Archive publication is a closeout action, not its own pre-Done checkbox.
 
 The source driver recommends this finite observation-only sequence. It closes
 an existing shared-identity consistency requirement, not a new identity
-architecture. Existing [patterns](../../../docs/patterns/README.md) require
+architecture. Existing [patterns](../../../../docs/patterns/README.md) require
 shared authority, explicit uncertainty, economical evidence and independent
 plugin operation. Choose the smallest demonstrated correction only after P1;
 do not infer a new global native/owner-ACK gate from this source qualification.
@@ -189,3 +189,31 @@ files. The follow-up renames a reused local variable, narrows test metadata
 and imports the existing record creator from its defining module. No assertion
 is removed and no checker rule changes. Both exact-source qualification and
 strict CI must refresh for that correction before source acceptance.
+
+### 2026-11-20 - Qualified source and finite acceptance
+
+The corrected exact head `fe884ee29601266d51327aa140cbf1206e2b3ac2`
+qualifies all 159 cases, zero skips, in disposable Windows run
+[44665472041](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44665472041):
+all three phases passed in 82.641 seconds. Required CI
+[44665294760](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44665294760)
+passes unit/coverage and strict checking of all three complete Python files
+for Linux and Windows under the original lock. No assertion, checker rule or
+dependency-age constraint was weakened.
+
+Review `5986988354` approves that same head with no findings. Implementation
+#13586 actually merged at `dc74804f4ccb47f0eda77f0fa5a697963117791b`.
+The managed source-completion owner reconciled the squash and retained its
+backup. A full fresh #4619 body and discussion read preceded acceptance of
+exactly OA1-OA3/OAV1-OAV3. Readback proves every other body byte, title,
+label, assignee and Open state unchanged. Original-author
+[completion](https://github.com/ThomasMichon/copilot-extensions/issues/4619#issuecomment-7029346506)
+settles only the finite discussion reservation; no native task or resource
+claim is settled.
+
+All finite Plan and Validation items are resolved, so this effort is Done.
+The dated archive records source acceptance only. The parent stays Open for
+its independent atomicity, settlement, retained-job, lease and live-use lanes,
+with all source/resource custodians preserved. No live ledger, provider,
+resource, service, installation, cleanup or rollout was exercised. Release
+and installed behavior are not inferred from the source merge.

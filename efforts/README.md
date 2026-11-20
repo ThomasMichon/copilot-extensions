@@ -37,7 +37,6 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Verified Owner Projection](active/verified-owner-projection/README.md) | Active; accepted-transaction source correction has contained consumer proof, exact-source qualification pending | #4619 OA1-OA3/OAV1-OAV3 only; preserves historical rename, all other custody lanes and source/resource owners; no live effects or rollout |
 | [Consumer Telemetry Sink Adoption](active/consumer-telemetry-sink-adoption/README.md) | Draft; command-only configuration, bounded delivery, real producer adoption and release sequence | #13545; preserves #7935/#5900 and producer custody; HTTP and adopter rollout remain separate |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |
@@ -206,6 +205,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Verified Owner Projection](2026/11/20%20verified-owner-projection/README.md) | Done; #13586 merged,159 exact-source Windows cases and strict three-file Linux/Windows CI qualify | Only #4619 OA1-OA3/OAV1-OAV3 accepted; original discussion reservation complete, parent Open and all other custodians retained; no rollout |
 | [Registry Local-Only Sync](2026/11/20%20registry-local-only-sync/README.md) | Done; reviewed local-only skip source merged,149 exact-source Windows cases and strict four-file CI qualify | #4173 A5 / historical #4228 only; finite original reservation complete, whole project-context parent Open; no rollout |
 | [Configured Worktree Base Preparation](2026/11/17%20worktree-base-preparation/README.md) | Done for finite source scope; #13033 merged after clean final-head review, required CI and 195-case exact-source qualification | #13013 closed and original claim completed; preserves #4093 fallback, #4303 resume, contributor/workspace custody and #3336 promotion; no rollout |
 | [Verified User-Output Delivery](2026/11/17%20verified-user-output-delivery/README.md) | Done for source scope; #13071 merged after current-head approval, required CI and native Windows/Linux qualification | #13040 closed; normal promotion stays #3336 and broader lifecycle/adoption stays #10968; no real user-storage operation or rollout |
