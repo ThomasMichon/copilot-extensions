@@ -146,7 +146,7 @@ boot identity as a restart of the original execution domain.
 
 ### Execution-domain evidence and current-controller recovery amendment
 
-**Review-first proposal; not runtime support or operational authority.** The
+**Reviewed in #13624; not runtime support or operational authority.** The
 delivered native boot reader identifies a boot, not continuity of its physical
 execution domain. The delivered journal also compares the complete original
 installation binding, including its payload and receipt generations. A changed
