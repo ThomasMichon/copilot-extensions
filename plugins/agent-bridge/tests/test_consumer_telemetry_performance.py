@@ -51,7 +51,7 @@ def test_native_offer_wall_cpu_tail_and_loss(
         owner = slot.configure_commands(source=source)
         binding = owner.admit(str(root))
     admission_ns = time.perf_counter_ns() - start
-    event = (
+    event: dict[str, Any] = (
         {"kind": "state_transition", "name": "session",
          "event": "session_state_changed", "to": "idle"}
         if source == "agent-bridge" else
@@ -107,6 +107,7 @@ def test_native_offer_wall_cpu_tail_and_loss(
     if mode in ("legacy", "disabled"):
         assert not rows and (owner is None or owner.writer is None)
     if mode == "reading":
+        assert owner is not None
         assert rows and receiver_cost is not None, (
             stats, [(item.state, item.started) for item in owner.bindings],
         )
@@ -165,9 +166,9 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
         )
     cfg = ServiceConfig(
         db_path=str(db.db_path),
-        **({} if mode == "legacy" else {
-            "consumer_telemetry_harnesses": {"fixture-caller": str(root)},
-        }),
+        consumer_telemetry_harnesses=(
+            None if mode == "legacy" else {"fixture-caller": str(root)}
+        ),
     )
     manager = session_manager_from_config(
         db, cfg, session_host_state_dir=str(tmp_path / "hosts"),

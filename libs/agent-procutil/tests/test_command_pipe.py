@@ -9,18 +9,20 @@ from agent_procutil import command_pipe
 
 
 @pytest.mark.parametrize("platform", ["nt", "posix"])
-def test_crt_full_pipe_is_retryable_only_on_windows(monkeypatch, platform):
-    writes = []
-    sleeps = []
+def test_crt_full_pipe_is_retryable_only_on_windows(
+    monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    writes: list[bytes] = []
+    sleeps: list[float] = []
 
-    def write(fd, data):
+    def write(fd: int, data: memoryview) -> int:
         writes.append(bytes(data))
         if len(writes) == 1:
             raise OSError(errno.ENOSPC, "fixture full pipe")
         return len(data)
 
     monkeypatch.setattr(command_pipe, "os", SimpleNamespace(name=platform, write=write))
-    monkeypatch.setattr(command_pipe.time, "sleep", sleeps.append)
+    monkeypatch.setattr("agent_procutil.command_pipe.time.sleep", sleeps.append)
     pipe = command_pipe.CommandPipe()
     pipe._stdin = SimpleNamespace(fileno=lambda: 42)
     if platform == "nt":
@@ -33,11 +35,13 @@ def test_crt_full_pipe_is_retryable_only_on_windows(monkeypatch, platform):
         assert len(writes) == 1 and not sleeps
 
 
-def test_crt_full_pipe_still_obeys_original_write_deadline(monkeypatch):
+def test_crt_full_pipe_still_obeys_original_write_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [0.0]
-    writes = []
+    writes: list[bytes] = []
 
-    def write(fd, data):
+    def write(fd: int, data: memoryview) -> int:
         writes.append(bytes(data))
         raise OSError(errno.ENOSPC, "fixture full pipe")
 
