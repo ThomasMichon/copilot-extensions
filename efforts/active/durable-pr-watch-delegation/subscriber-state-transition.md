@@ -639,8 +639,8 @@ The actual-domain/boot, complete released-history, governed-entry and final
 authority-selection gates remain open. No installation, migration, service
 change or rollout is implied.
 
-The contained Windows historical-source packet exercises both journal versions
-against all six pinned historical closures, including three released-source
+The contained Windows historical-source packet merged in #13681 exercises both
+journal versions against all six pinned historical closures, including three released-source
 snapshots with their own vendored lease/startup dependencies. A delayed native
 open prevents sealing until it closes; a raced cold creation remains blocking
 after release rather than being overwritten or adopted. After successful
