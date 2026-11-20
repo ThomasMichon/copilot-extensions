@@ -7775,6 +7775,19 @@ backoff while selection is off-loop. The final admission callback leaves the
 entire task unchanged without provider or executor work; returning to ready
 uses the existing runner wakeup rather than resetting point failure state.
 
+`tests/test_azure_devops_point_service_recovery.py` is an explicit T3
+filesystem/service packet using the same actual ASGI/runner and synthetic
+provider/native fixture. Select it with `--test-file
+tests/test_azure_devops_point_service_recovery.py --allow-explicit-tiers`.
+The sealed-checkpoint case reconstructs native owners and a fresh client/service,
+proves paused startup and dirty-state refusal, explicitly invokes the existing
+sealed publication owner, then completes the retained claim without fetching
+bodies, embedding or replaying content/vector writes. Repair itself does not
+acknowledge the claim or advance polling. The contrasting unsealed-native fault
+remains dirty, parked and unchanged after both service and repair refusal.
+This adds no production repair path, required-unit admission, process-kill/
+cross-generation cutover, native Windows/macOS or live-provider qualification.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and

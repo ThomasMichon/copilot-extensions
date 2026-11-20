@@ -344,10 +344,12 @@ Merged #13649 supplies that host after current-head approval and passing CI;
 its source reconciliation and remaining integration boundary are journaled.
 Merged #13651 serializes supported point cancellation with native ownership;
 merged #13655 adds caller-driven exact-scope queue batches with failure pause.
-Automatic service scheduling and cutover composition remain open.
-The entry also records explicit service composition through the existing
-runner, isolated exact-scope HTTP intake and joined client lifetime; ordinary
-activation, cross-generation recovery and broader acceptance remain separate.
+Merged #13659 composes explicit service construction, isolated exact-scope
+HTTP intake, the existing governed runner and joined client lifetime.
+Ordinary activation, cross-generation recovery and broader acceptance remain
+separate.
+The same entry records explicit service reconstruction around sealed native
+publication and unchanged refusal of an unsealed partial write.
 
 Append-only entries are preserved in dated files, newest first.
 
