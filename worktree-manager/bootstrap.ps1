@@ -32,7 +32,7 @@ if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
 }
 
 if ($args.Count -eq 1 -and $args[0] -ceq '--describe-toolchain-config') {
-    [Console]::Out.WriteLine('{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1"]}')
+    [Console]::Out.WriteLine('{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1","bootstrap-toolchain-only"]}')
     exit 0
 }
 
@@ -715,8 +715,11 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--bootstrap-update') {
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
 }
-if ($commandArgs.Count -and $commandArgs[0] -ceq 'update') {
-    $UpdateStaging = Join-Path $Root ('bootstrap-acquisition\update.' + [Guid]::NewGuid().ToString('N'))
+$ToolchainOnly = $commandArgs.Count -and $commandArgs[0] -ceq 'setup' -and
+    ($commandArgs -ccontains '--toolchain-only')
+if (($commandArgs.Count -and $commandArgs[0] -ceq 'update') -or $ToolchainOnly) {
+    $acquisitionKind = if ($ToolchainOnly) { 'toolchain' } else { 'update' }
+    $UpdateStaging = Join-Path $Root ('bootstrap-acquisition\' + $acquisitionKind + '.' + [Guid]::NewGuid().ToString('N'))
     $Staging = Join-Path $UpdateStaging 'source'
 }
 if (-not $Repo -or $Repo.StartsWith('-') -or -not $Ref -or $Ref.StartsWith('-') -or
@@ -840,8 +843,10 @@ try {
         }
         $installerArgs += @('--bootstrap-uv', $Uv)
     }
-    if ($ToolchainConfig) {
-        foreach ($capability in @('toolchain-config', 'toolchain-context')) {
+    if ($ToolchainConfig -or $ToolchainOnly) {
+        $capabilities = @('toolchain-config', 'toolchain-context')
+        if ($ToolchainOnly) { $capabilities += 'toolchain-bootstrap-only' }
+        foreach ($capability in $capabilities) {
             if (-not (Select-String -LiteralPath (Join-Path $PWD 'scripts\runtime_install.py') `
                 -CaseSensitive -Quiet -Pattern "^# copilot-extensions:${capability}=1$")) {
                 throw 'Selected Manager source does not support toolchain configuration; installation was not started.'

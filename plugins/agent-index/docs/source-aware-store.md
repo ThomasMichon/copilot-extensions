@@ -112,12 +112,26 @@ an open failure propagates without the generic create-table fallback.
 Preflight returns selected raw canonical fields at that read boundary, not a
 durable receipt, model-to-table ownership proof or permission to write.
 It performs no content/vector mutation, index preparation or writer acquisition.
-The existing mutation APIs still refuse point domains. Durable model ownership
-and the nested post-effect failure latch are prerequisites, not point-write
-admission. Any future selected mutator must recheck the configured model/table
-binding at its actual effect boundary as well as current canonical input,
-coverage and publication ownership; this read-only preflight is not that check.
+The ordinary mutation APIs still refuse point domains.
 Selected reads retain their separate explicit prepared-index path.
+
+`VectorTable.upsert_point` and `MultiModelStore.upsert_point_vectors` provide a
+separate, explicit native vector effect under an **already-owned** exact scoped
+writer. Registered handles retain the configured model ID. Every call, including
+empty input and cached handles, rechecks the current receipt's content/model
+table and dimension binding. An unbound direct handle refuses. The call repeats
+the current preflight, reading canonical input once, and writes through the exact
+qualified vector handle without the generic open/create fallback. Missing
+indices, uncovered tails and exhausted segment capacity refuse before effects.
+Its nested existing writer latches post-effect failures even when the caller
+catches them; no implicit retry or rollback is provided.
+
+This effect neither publishes applied-version/embedding coverage nor maintains
+indices, cleans stale chunks, writes path checkpoints or completes claims. Those
+remain the composing application's existing owners. A caller must budget and
+perform existing index upkeep before another nonempty selected write. The
+returned row count is not an application certificate. Ordinary vector APIs,
+prepared point publication and all frontdoors remain disabled.
 
 Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not

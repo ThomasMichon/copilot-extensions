@@ -21,9 +21,12 @@ on:
       - worktree-manager/scripts/bootstrap_inputs.py
       - worktree-manager/scripts/bootstrap_update.py
       - worktree-manager/scripts/runtime_install.py
+      - worktree-manager/scripts/runtime_install_inputs.py
       - worktree-manager/src/worktree_manager/update_driver_cli.py
       - worktree-manager/src/worktree_manager/toolchain_config.py
       - worktree-manager/src/worktree_manager/setup_cli.py
+      - worktree-manager/src/worktree_manager/setup_arguments.py
+      - worktree-manager/src/worktree_manager/repository_bootstrap.py
       - worktree-manager/src/worktree_manager/mux_daemon_process.py
       - worktree-manager/src/worktree_manager/runtime_application_inputs.py
       - worktree-manager/src/worktree_manager/update_bootstrap.py

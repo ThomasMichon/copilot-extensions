@@ -966,3 +966,24 @@ source/fixture/runner/resource custody. No product test, native run, runtime
 repair, source takeover or resource release follows. The
 [campaign record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
 retains this proposal and its independent source judgment.
+
+## Proposed finite visual and worker-witness receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #11372 Recovery comparison visual fixture | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Manager fixture wave, P11372/V11372/G11372 through Phase 7 | Original fourteen-case selection, `evidence-size3`, actual selected-tab/Recovery interaction and fixture/expectation OR UI-behavior alternative; static finding is not runtime cause |
+| #11512 supported-interpreter independent worker witness and five related local-failure families | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Dispatch fixture wave, P11512/V11512/G11512 through Phase 7 | Original-worker evidence despite poisoned/replaced facade, supported legacy/native matrix, retirement/release/error/cleanup and separate exact related-family triage with unnamed-node uncertainty |
+
+This same planning unit supplies complete direct domain Plan, local and actual
+global Validation, Coordination and dated Journal. Ledger publication alone
+is not domain acceptance. Each family has one primary placement and its
+existing public tracker during proposal; no new issue, administrative checkbox,
+implementation appointment or common cause is introduced. Normal reviewed
+whole receiving delivery and permitted current source/receiver/custody
+readback precede separate source-specific judgments. All fourteen technical
+rows remain unchecked. Preserve OPEN #1303, all existing source/UI/worker/
+witness/related-family/runner/native/release and resource custodians, unit-only
+required CI, hosted-Windows quiescence and original budgets. No test, code,
+native/GUI/process operation, rollout, source takeover or resource release
+follows. The [campaign record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+retains the independent evidence and proposal/disposition boundaries.
