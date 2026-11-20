@@ -174,3 +174,11 @@ The expanded packet passes 29 source controls plus 152 existing admitted units,
 with both platform type checks and the unchanged contract/sync/size gates.
 Static data admission retains canonical Git/LF bytes, not local newline
 conversion. Required current-head review/CI and containing release remain open.
+
+The next review correction completes the lazy lifecycle-helper closure in the
+runtime-input-provider layout. Both packaged layouts now execute actual
+synthetic preparation without checkout imports, not merely module loading.
+The existing static source/wheel validator also admits explicit flat package
+discovery with include selectors, preserving original metadata and exact member
+binding. The expanded packet passes 186 controls, both platform type checks and
+the unchanged contract/sync/size gates; required review/CI still applies.

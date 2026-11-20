@@ -5974,6 +5974,10 @@ wheel must match the original static Python, package-data, runtime-metadata and
 entry-point declarations. The inspected complete closure must exactly equal the
 selected roots, extras and native target. An independent SDK is an explicit
 runtime input, not a substitution for an unselected development extra.
+Static setuptools association supports the existing src layout and an explicit
+flat package-discovery root with nonempty include selectors; selected package
+Python members must match the wheel exactly. Unsupported discovery forms still
+refuse rather than executing a backend to discover their meaning.
 
 Preparation preserves the application's original bytes, including development
 `tool.uv.sources` mappings and local artifacts. A recorded `input_mode` of

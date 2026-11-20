@@ -328,3 +328,76 @@ def test_equivalent_distribution_names_keep_original_primary_command(
     declaration = json.loads((prepared / selected.project["application"] / "application.json").read_text())
     assert declaration["name"] == "aaa-probe"
     assert (prepared / selected.project["application"] / "uv.lock").is_file()
+
+
+@pytest.mark.parametrize("sibling", ["unselected", "demo_app_extra"])
+def test_original_flat_package_discovery_is_bound_to_the_actual_wheel(
+    application: dict[str, Any], sibling: str,
+) -> None:
+    repository = application["repository"]
+    project = repository / "app"
+    (project / "src/demo_app").rename(project / "demo_app")
+    extra = project / sibling
+    extra.mkdir()
+    (extra / "__init__.py").write_bytes(b"UNSELECTED = True\n")
+    metadata = project / "pyproject.toml"
+    content = metadata.read_text().replace('where=["src"]', 'include=["demo_app*"]')
+    metadata.write_text(content)
+    git = source.preparation._git
+    git(repository, "add", "--all")
+    git(
+        repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Original flat package discovery",
+    )
+    application["commit"] = git(repository, "rev-parse", "HEAD")
+    if sibling == "demo_app_extra":
+        with pytest.raises(RuntimeError, match="Python member set differs"):
+            closed.prepare(**application)
+        return
+    prepared = closed.prepare(**application)
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    assert (selected.payload / "pyproject.toml").read_text() == content
+    assert (selected.payload / "demo_app/__init__.py").read_bytes() == (project / "demo_app/__init__.py").read_bytes()
+    assert (selected.payload / sibling / "__init__.py").read_bytes() == b"UNSELECTED = True\n"
+    assert (prepared / selected.project["application"] / "uv.lock").is_file()
+
+
+@pytest.mark.parametrize("layout", ["runtime-input-provider", "runtime-source-tools"])
+def test_packaged_provider_completes_preparation_without_checkout_imports(
+    application: dict[str, Any], tmp_path: Path, layout: str,
+) -> None:
+    import materialize_launch_wrapper_assets as wrappers
+
+    root = Path(closed.__file__).resolve().parents[1]
+    destination = tmp_path / "packaged/worktree-manager"
+    destination.mkdir(parents=True)
+    report = wrappers.materialize_into(
+        source_consumer_dir=root / "worktree-manager", dest_consumer_dir=destination,
+        canonical_root=root, manifest_name="packaged-assets.json",
+    )
+    assert report and all(line.startswith("OK") for line in report), report
+    tools = destination / "scripts" / layout / "tools"
+    options = dict(application)
+    options["repository"] = str(options["repository"])
+    options["output"] = str(options["output"])
+    options["archives"] = {name: str(path) for name, path in options["archives"].items()}
+    code = (
+        "import json,sys; from pathlib import Path; "
+        "sys.path.insert(0,sys.argv[1]); import local_install_closed_wheels as owner; "
+        "assert Path(owner.__file__).parent == Path(sys.argv[1]); "
+        "options=json.loads(sys.argv[2]); "
+        "options['repository']=Path(options['repository']); options['output']=Path(options['output']); "
+        "options['archives']={name:Path(path) for name,path in options['archives'].items()}; "
+        "snapshot=owner.prepare(**options); "
+        "selected=owner.profiles.source_inputs.select_project(snapshot,'demo-app'); "
+        "application=snapshot/selected.project['application']; "
+        "assert (application/'uv.lock').is_file(); "
+        "assert (application/'runtime/daemon_instance_runtime.pyz').is_file(); "
+        "print(snapshot)"
+    )
+    result = source.preparation_process.run(
+        [sys.executable, "-I", "-B", "-c", code, str(tools), json.dumps(options)],
+        cwd=tmp_path, capture_output=True, text=True, deadline=application["deadline"],
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(result.stdout.strip()) == application["output"] / "snapshot"
