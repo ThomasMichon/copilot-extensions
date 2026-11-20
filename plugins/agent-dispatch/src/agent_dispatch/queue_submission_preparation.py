@@ -116,7 +116,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " 'submission preparation requires authoritative readiness'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v3"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v4"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
@@ -154,6 +154,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " OR NEW.require_verification<>1)"
         " BEGIN SELECT RAISE(ABORT, 'submission preparation result is retained'); END"
     )
+    conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v3")
     conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v2")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained")
     conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard")

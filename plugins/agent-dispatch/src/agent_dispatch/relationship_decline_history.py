@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Literal
 
@@ -30,8 +31,14 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id"]) -> str:
           AND json_extract(e.value,'$.state')='closed' AND json_extract(e.value,'$.receipt.phase')='closed'
           AND json_extract(e.value,'$.request.event_id')=e.id AND json_extract(e.value,'$.request.task_id')=e.task_id
           AND json_extract(e.value,'$.receipt.request_id')=json_extract(e.value,'$.request.request_id')
-          AND json_extract(e.value,'$.receipt.producer.identity.assignment_event_id')=e.id
-          AND json_extract(e.value,'$.receipt.producer.identity.worker_id')=e.worker
+          AND CASE WHEN json_type(e.value,'$.receipt.producer.identity') IS NULL THEN
+              json_extract(e.value,'$.receipt.producer.recovery')=json_extract(e.value,'$.request.recovery')
+              AND json_type(e.value,'$.request.recovery.version')='integer'
+              AND json_extract(e.value,'$.request.recovery.version')=2
+              AND json_extract(e.value,'$.request.recovery.assignment_event_id')=e.id
+              AND json_extract(e.value,'$.request.recovery.worker_id')=e.worker
+          ELSE json_extract(e.value,'$.receipt.producer.identity.assignment_event_id')=e.id
+              AND json_extract(e.value,'$.receipt.producer.identity.worker_id')=e.worker END
           AND json_type(e.value,'$.receipt.producer.closeout.relationship_verification.retired')='true'
           AND json_type(e.value,'$.receipt.producer.closeout.relationship_verification.quiescent')='true'
           AND json_extract(e.value,'$.receipt.producer.closeout.relationship_verification.subject')
@@ -60,6 +67,17 @@ def admit_ungoverned_replacement(
 ) -> None:
     if conn.execute("SELECT " + _undischarged(":id"), {"id": task_id}).fetchone()[0]:
         raise TaskError("ordinary capture cannot drop a governed assignment")
+    # Validate canonical refs with the same AssignmentSubject decoder that admitted
+    # the original receipt. SQLite keeps enforcing the audited binding after rollback.
+    from .queue_task_relationships import _matches_receipt
+
+    for row in conn.execute(
+        "SELECT task_relationship FROM task_events WHERE task_id=? AND task_relationship IS NOT NULL"
+        " AND json_type(task_relationship,'$.request.reservation_key')='null'", (task_id,),
+    ):
+        event = json.loads(row[0])
+        if not _matches_receipt(event["receipt"], event["request"], phase="closed"):
+            raise TaskError("ordinary capture cannot confirm the original direct assignment receipt")
     conn.execute(
         "UPDATE spawn_reservations SET task_relationship_generation=? WHERE key=?",
         (generation, key),

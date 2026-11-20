@@ -42,22 +42,40 @@ def replace_after_decline(queue: TaskQueue, task_id: str, now: float) -> SpawnRe
     return replacement
 
 
-@pytest.mark.parametrize("foreign_proof", [False, True])
+@pytest.mark.parametrize(
+    "history",
+    [
+        "bound",
+        "foreign",
+        "prebind",
+        "prebind-foreign-ref",
+        "prebind-conflicting-identity",
+        "prebind-foreign-recovery",
+    ],
+)
 def test_direct_unassignment_before_decline_survives_removal_of_capture(
     q: TaskQueue,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    foreign_proof: bool,
+    history: str,
 ) -> None:
     owner = GroundOwner()
     owner.queue = q
     q._relationship_writer, q._relationship_authority = owner, "local"
     t = task(q)
     first = AssignmentWorkspace("host-a", "example", "manual", str(tmp_path / "manual"), "first")
-    claim(q, first, t)
+    if history.startswith("prebind"):
+        owner.lose_reply = "reserve"
+        with pytest.raises(TaskError, match="unresolved"):
+            claim(q, first, t)
+    else:
+        claim(q, first, t)
     q.yield_task(t.id, first.worker_id)
     direct = q.reconcile_task_relationship(t.id)
     assert direct["state"] == "closed"
+    if history.startswith("prebind"):
+        assert "identity" not in direct["receipt"]["producer"]
+        assert direct["receipt"]["producer"]["recovery"] == direct["request"]["recovery"]
     publish(q, pool())
     held, _ = place(q, t)
     q.record_spawn_worktree(
@@ -92,6 +110,17 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
     q.retire_spawn(held.key, exact_absence=True, conclusion_state="skipped")
     reopened = TaskQueue(q.db_path)
     due = closed.receipt["not_before"]
+    if history == "prebind-foreign-ref":
+        with reopened._connect() as conn:
+            conn.execute(
+                "UPDATE task_events SET task_relationship=json_set(task_relationship,"
+                " '$.receipt.ref','foreign', '$.receipt.producer.closeout.relationship_verification.subject','foreign')"
+                " WHERE id=?",
+                (direct["request"]["event_id"],),
+            )
+        with pytest.raises(TaskError, match="original direct assignment receipt"):
+            replace_after_decline(reopened, t.id, due)
+        return
     replacement = replace_after_decline(reopened, t.id, due)
     queued = reopened.exhaust_pool_startup(
         replacement.key,
@@ -124,13 +153,18 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
         startup_complete=True,
         startup_revision=1,
     )
-    if foreign_proof:
-        # In a disposable DB, make a once-qualified direct receipt name another subject.
+    damaged_field = {
+        "foreign": "$.receipt.producer.closeout.relationship_verification.subject",
+        "prebind-conflicting-identity": "$.receipt.producer.identity.worker_id",
+        "prebind-foreign-recovery": "$.receipt.producer.recovery.worker_id",
+    }.get(history)
+    if damaged_field is not None:
+        # Even after admission, conflicting assignment evidence retains custody.
         with reopened._connect() as conn:
             conn.execute(
                 "UPDATE task_events SET task_relationship=json_set(task_relationship,"
-                " '$.receipt.producer.closeout.relationship_verification.subject','foreign') WHERE id=?",
-                (direct["request"]["event_id"],),
+                " ?, 'foreign') WHERE id=?",
+                (damaged_field, direct["request"]["event_id"]),
             )
             with pytest.raises(TaskError, match="unconfirmed"):
                 require_relationship(conn, t.id)
