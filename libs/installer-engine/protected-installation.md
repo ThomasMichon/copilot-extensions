@@ -132,6 +132,10 @@ closure must remain inside the admitted snapshot. Existing Source/profile
 association, closed-wheel retention, expected selection, numbered construction,
 application callbacks, publication, readiness and uncertain-effect recovery
 remain with their existing owners.
+The package-containment guard retains the selected Source's closed-wheel mode:
+its development metadata remains data, while the existing inspected-wheel
+owners validate the complete runtime closure. Ordinary source-building inputs
+retain their development-package and release-age policy.
 The prepared POSIX install launcher must declare
 `installer-uv-selection: absolute/v1`. The constructor passes the admitted
 absolute UV executable through `COPILOT_INSTALLER_UV`, without adding UV's
