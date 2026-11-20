@@ -144,6 +144,17 @@ The author subsequently agrees the bootstrap-only handoff on #12708, and
 acceptance is posted before editing. The restorative source fix and real cold-
 CLI regression now proceed independently through ordinary review and CI,
 preserving the broader PR and its existing ownership.
+That bounded correction merges in #13496 at `ef88d21b28c87c5cc9d6ce30ec007156650622c5`
+after current-head Copilot approval and required CI. The
+[November 19 journal](journal/2026/11.19-bootstrap-restoration.md) records the
+result: merged to Dev, not released or native-qualified. The consumed one-run
+grant, broader #12708 ownership and every retained hold remain unchanged.
+After a new explicit one-run grant and verified containing release #13527,
+follow-up `44654996590` reaches preparation in all three modes but fails
+materialization on ten already-present declared assets. All three diagnostics
+are retained; no Manager lifecycle result is qualified and no retry is
+authorized. The dated journal records the separate settlement limits and
+preserves the materializer and authentic-source owners.
 Separately, the [portfolio audit](workflow-portfolio-audit.md#november-17-source-pr-edit-repeated-execution-not-a-reuse-hit)
 proves one exact-context repeated source-CI execution after an evidence-only
 body edit. The base-retarget/event seam is coordinated on #3336 before shared
@@ -511,15 +522,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   completes their group in twelve seconds and executes all 1,012 admitted
   units. Empty-pass removal and local paired timing are not controlled
   whole-flow latency; the full source-CI invocation remains.
-- [ ] Observe qualified release adoption of #8213 separately from source-CI
+- [x] Observe qualified release adoption of #8213 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
   retains all three scanners and all 1,012 admitted units. Local recipe timing
   and omitted analysis are not controlled whole-flow latency.
-- [ ] Observe qualified release adoption of #8227 separately from source-CI
+- [x] Observe qualified release adoption of #8227 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
+  The [November 20 adoption audit](journal/2026/11.20-release-adoption.md)
+  verifies both delivered guard blobs, retained optimization branches and the
+  already executed source consumer. It establishes no controlled timing gain.
 - [x] Land and observe conservative narrative-only PR omission of the three
   source AST scans (#7706), retaining full non-narrative and non-PR execution,
   pinned input/error handling, every other guard and all required unit evidence.
@@ -601,8 +615,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and all 1,010 admitted units in 19.780 seconds. The integrated merged packet
   preserves the independent peer's two nodes. Local paired timing remains
   separate; this is reduced recipe work, not fewer workflow invocations.
-- [ ] Observe qualified release adoption of #8199 separately from source-CI
+- [x] Observe qualified release adoption of #8199 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
+  The [same adoption audit](journal/2026/11.20-release-adoption.md) binds the
+  retained suffix admission and actual documentation-guard execution to the
+  exact released blob without claiming a controlled latency result.
 - [x] Land and observe bounded asyncio ancestry-map reduction, preserving
   every file read/parse, path validation, handler classification and ordered
   diagnostic/list output (#7865). Actual required source CI runs all three
@@ -618,8 +635,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   scanning first, then remove legacy CI allocation while retaining full
   main-push validation.
   #6789 proves zero CI invocations and preserved required admission/configured
-  scanning. Main-push CI still runs; its generated-tree failures remain open
-  below and are not a passing-coverage claim or permission to remove that lane.
+  scanning. At that delivery, Main-push CI still ran and its generated-tree
+  failures remained open. The
+  [November 20 snapshot](journal/2026/11.20-release-adoption.md#main-metadata-is-a-distinct-current-contract)
+  records the later metadata-only Main declaration; it does not restore the
+  old test lane or silently settle its historical failures.
 - [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
   #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
@@ -1073,6 +1093,9 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
+- [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)
+- [2026-11-19 UTC - Cold CLI bootstrap restoration](journal/2026/11.19-bootstrap-restoration.md)
 - [2026-11-14 UTC - Source-attribution receiving](journal/2026/11.14-attribution-receiving.md)
 - [2026-11-14 UTC - Finite fixture receiving](journal/2026/11.14-fixture-receiving.md)
 - [2026-11-09 - Installed Manager lifecycle contract](journal/2026/11.09-installed-manager-lifecycle.md)
