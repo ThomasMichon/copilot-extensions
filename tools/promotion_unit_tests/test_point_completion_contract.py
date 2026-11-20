@@ -246,10 +246,47 @@ def _worker(api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Any:
         lambda journal: SimpleNamespace(compose=lambda: events.append("acquisition:compose")),
     )
     worker = api.load("point_worker")
-    return lambda: worker.run_retained_point_worker(
+    return lambda **kwargs: worker.run_retained_point_worker(
         api.claim, scope="scope", paths=api.paths, tasks=api.tasks,
-        ledger=api.ledger, clients={}, max_rows=8,
+        ledger=api.ledger, clients={}, max_rows=8, **kwargs,
     )
+
+
+def test_retained_worker_requalifies_outside_native_effects_and_skips_completed_retry(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _worker(api, monkeypatch)
+    def qualify() -> None:
+        api.events.append("provider:qualify")
+    completed = run(qualify_claim=qualify)
+    events = api.events
+    checks = [i for i, event in enumerate(events) if event == "provider:qualify"]
+    assert len(checks) == 3
+    assert checks[0] < events.index("application:prepare") < checks[1]
+    assert checks[1] < events.index("application:publish") < checks[2]
+    assert checks[2] < events.index("native:enter") < events.index("queue:complete")
+    events.clear()
+    assert run(qualify_claim=qualify) == completed
+    assert "provider:qualify" not in events and "application:prepare" not in events
+
+
+@pytest.mark.parametrize("boundary", [1, 2, 3])
+def test_retained_worker_qualification_failure_never_acknowledges(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, boundary: int,
+) -> None:
+    run = _worker(api, monkeypatch)
+    calls = 0
+    def qualify() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == boundary:
+            raise ValueError("fixture eligibility changed")
+    with pytest.raises(ValueError, match="eligibility changed"):
+        run(qualify_claim=qualify)
+    assert "queue:complete" not in api.events and "pending:retire" not in api.events
+    assert ("application:prepare" in api.events) == (boundary > 1)
+    assert ("application:publish" in api.events) == (boundary > 2)
+    assert api.events[-1] == "writer:exit"
 
 
 def test_retained_worker_publishes_before_whole_completion_and_never_reapplies_success(
