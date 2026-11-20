@@ -15,6 +15,7 @@ from agent_worktrees import claim_handoffs as handoffs
 from agent_worktrees import claim_providers, config as cfg, installer, producer_view_scan, tracking
 from agent_worktrees.producer_view_scan import scan_ownership
 from agent_worktrees.tracking_producer_write import apply_resource_producer
+from agent_worktrees.tracking_lifecycle import create_new_record
 
 
 def _prepare_scan(path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -53,11 +54,13 @@ def test_accepted_legacy_consumer_projects_the_verified_record(
     )
     assert accepted.state == "accepted"
     record = tracking.load_record(path)
-    assert record.resources[0].producer["transfer"]["consumer"] == bundle.consumer
+    metadata = record.resources[0].producer
+    assert isinstance(metadata, dict)
+    assert metadata["transfer"]["consumer"] == bundle.consumer
     config = cfg.load_config()
     checkout = Path(config.repos["p"].worktree_root) / "independent"
     checkout.mkdir()
-    tracking.create_new_record(
+    create_new_record(
         "independent", "worktree/independent", str(checkout), "p",
         "example-host-wsl", "wsl", path.parent,
     )

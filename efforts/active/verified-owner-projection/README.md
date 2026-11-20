@@ -180,3 +180,12 @@ The four original rename controls pass separately. Touched Python F/E9 lint,
 the 13-plugin install contract and 25-plugin documentation consistency pass.
 Exact complete-file strict analysis and published-source qualification remain
 open; an unavailable local checker environment is not a typing pass.
+
+The first exact published candidate `7d70803fe19bfc19425b4fd009ef627c71f43bf4`
+qualifies all 159 cases, zero skips, in disposable Windows run `44664629864`
+(86.437 seconds, all three owner phases passed). Required unit/coverage CI
+passes, while complete-file strict CI finds four annotation errors in two
+files. The follow-up renames a reused local variable, narrows test metadata
+and imports the existing record creator from its defining module. No assertion
+is removed and no checker rule changes. Both exact-source qualification and
+strict CI must refresh for that correction before source acceptance.

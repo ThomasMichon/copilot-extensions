@@ -217,9 +217,9 @@ def scan_ownership(
                 issues.append(issue("record-unavailable", f"{project}/{path.name}", str(exc)))
     rows = _qualify_transfer_aliases(rows, issues, stamps)
     # Detect ordinary replacement/deletion/write races, not a cross-record transaction.
-    for path, stamp, directory in stamps:
+    for path, stamp, is_directory in stamps:
         try:
-            if _stamp(path, directory=directory) != stamp:
+            if _stamp(path, directory=is_directory) != stamp:
                 raise ValueError("tracking input changed during scan")
         except _READ_ERRORS as exc:
             issues.append(issue("snapshot-changed", str(path), str(exc)))
