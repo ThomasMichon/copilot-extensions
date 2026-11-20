@@ -481,8 +481,9 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
 @pytest.mark.parametrize("supported", [False, None, True])
+@pytest.mark.parametrize("configuration_only", [False, True])
 def test_toolchain_config_native_source_skew_is_explicit(
-    tmp_path: Path, kind: str, supported: bool | None,
+    tmp_path: Path, kind: str, supported: bool | None, configuration_only: bool,
 ) -> None:
     from test_bootstrap_ps1 import _GIT_ID, _fake_tools, _source_repo
 
@@ -495,7 +496,8 @@ def test_toolchain_config_native_source_skew_is_explicit(
         entry.write_text(
             entry.read_text(encoding="utf-8")
             + "# copilot-extensions:toolchain-config=1\n"
-            + ("# copilot-extensions:toolchain-context=1\n" if supported else ""),
+            + ("# copilot-extensions:toolchain-context=1\n" if supported or configuration_only else "")
+            + ("# copilot-extensions:toolchain-bootstrap-only=1\n" if supported and configuration_only else ""),
             encoding="utf-8",
         )
         for args in (["add", "."], [*_GIT_ID, "commit", "-qm", "toolchain capability"]):
@@ -511,6 +513,10 @@ def test_toolchain_config_native_source_skew_is_explicit(
     (root / "config.toml").write_text(
         f'[source]\nrepo = "{source.as_posix()}"\nref = "main"\n', encoding="utf-8",
     )
+    staging = root / "staging" / "unrelated-installation"
+    if configuration_only:
+        staging.parent.mkdir()
+        staging.write_bytes(b"retain unrelated staging\n")
     config = tmp_path / "toolchain.conf"
     config.write_text(f"schema=1\npython_index_url={INDEX}\n", encoding="ascii")
     env = {
@@ -529,18 +535,36 @@ def test_toolchain_config_native_source_skew_is_explicit(
     command = [shell]
     if kind == "ps1":
         command += ["-NoProfile", "-NonInteractive", "-File"]
+    arguments = ["setup", "--toolchain-only", "--apply"] if configuration_only else ["--version"]
+    if configuration_only and supported:
+        metadata = subprocess.run(
+            [*command, str(bootstrap), "--describe-toolchain-config"],
+            env=env, cwd=home, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        import json
+
+        assert metadata.returncode == 0, metadata.stdout + metadata.stderr
+        assert "bootstrap-toolchain-only" in json.loads(metadata.stdout)["capabilities"]
     result = subprocess.run(
-        [*command, str(bootstrap), "--toolchain-config", str(config), "--version"],
+        [*command, str(bootstrap), "--toolchain-config", str(config), *arguments],
         env=env, cwd=home, capture_output=True, text=True, timeout=30,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if supported:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "--bootstrap-uv" in handoff.read_text(encoding="utf-8")
+        if configuration_only:
+            assert " ".join(handoff.read_text(encoding="utf-8").split()).endswith(
+                " -- setup --toolchain-only --apply"
+            )
+            assert list((root / "bootstrap-acquisition").iterdir()) == []
     else:
         assert result.returncode != 0
         assert "does not support toolchain configuration" in result.stdout + result.stderr
         assert not handoff.exists()
+    if configuration_only:
+        assert staging.read_bytes() == b"retain unrelated staging\n"
 
 
 def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
@@ -652,8 +676,9 @@ def test_toolchain_config_only_help_is_safe_with_invalid_selection(
     assert configuration.read_text(encoding="ascii") == "invalid data"
 
 
+@pytest.mark.parametrize("entry", ["installed", "source"])
 def test_toolchain_config_only_actual_cli_does_not_need_bootstrap_or_core(
-    tmp_path: Path,
+    tmp_path: Path, entry: str,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -678,8 +703,16 @@ def test_toolchain_config_only_actual_cli_does_not_need_bootstrap_or_core(
     )
 
     def invoke(*arguments: str) -> subprocess.CompletedProcess[str]:
+        command = (
+            [sys.executable, "-m", "worktree_manager", "setup"] if entry == "installed"
+            else [
+                sys.executable, "-I", "-S", "-B",
+                str(Path(__file__).resolve().parents[1] / "scripts" / "runtime_install.py"),
+                "--root", str(root), "--", "setup",
+            ]
+        )
         return subprocess.run(
-            [sys.executable, "-m", "worktree_manager", "setup", *arguments],
+            [*command, *arguments],
             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -693,9 +726,15 @@ def test_toolchain_config_only_actual_cli_does_not_need_bootstrap_or_core(
     assert (home / ".npmrc").read_text(encoding="utf-8").strip() == f"registry={REGISTRY}"
     assert tc.read_configuration(root / "toolchain.conf") == tc.read_configuration(selected)
     assert sentinel.read_bytes() == before[sentinel]
+    assert not (root / "versions").exists()
+    assert not (root / "current-version").exists()
+    assert not (home / ".local" / "bin").exists()
     first_apply = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     result = invoke("--toolchain-only", "--apply")
     assert result.returncode == 0, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == first_apply
+    result = invoke("--toolchain-only", "--apply", "--repository", "https://example.invalid/repository")
+    assert result.returncode == 2, result.stdout + result.stderr
     assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == first_apply
     (home / ".npmrc").write_text("registry=https://other.example.invalid/npm/\n", encoding="ascii")
     conflicting = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
@@ -703,7 +742,7 @@ def test_toolchain_config_only_actual_cli_does_not_need_bootstrap_or_core(
     assert result.returncode == 2, result.stdout + result.stderr
     assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == conflicting
     selected.write_text("invalid data", encoding="ascii")
-    result = invoke("--help")
+    result = invoke(*(["--toolchain-only"] if entry == "source" else []), "--help")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "toolchain-config-only=1" in result.stdout.splitlines()
 

@@ -37,6 +37,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Verified Owner Projection](active/verified-owner-projection/README.md) | Draft; exact accepted-alias and unverified-negative qualification before any correction | #4619 OA1-OA3/OAV1-OAV3 only; preserves historical rename, all other custody lanes and source/resource owners; no live effects or rollout |
 | [Consumer Telemetry Sink Adoption](active/consumer-telemetry-sink-adoption/README.md) | Draft; command-only configuration, bounded delivery, real producer adoption and release sequence | #13545; preserves #7935/#5900 and producer custody; HTTP and adopter rollout remain separate |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |

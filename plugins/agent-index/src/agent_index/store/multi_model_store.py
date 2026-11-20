@@ -149,6 +149,7 @@ class MultiModelStore(_ItemRepresentationMixin):
             dim=profile.dim,
             source_domain=self._source_domain,
             content_table=self._content._table_name,
+            model_id=profile.model_id,
         )
         self._vector_tables[profile.model_id] = vt
         logger.info(
@@ -208,6 +209,15 @@ class MultiModelStore(_ItemRepresentationMixin):
     ) -> dict[str, dict[str, Any]]:
         """Inspect selected canonical input; no model-ownership or mutation receipt."""
         return self.get_vector_table(model_id).preflight_point_upsert(
+            chunks, vectors, point_scope=point_scope,
+        )
+
+    def upsert_point_vectors(
+        self, model_id: str, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> int:
+        """Write selected native vectors; caller owns publication and coverage."""
+        return self.get_vector_table(model_id).upsert_point(
             chunks, vectors, point_scope=point_scope,
         )
 

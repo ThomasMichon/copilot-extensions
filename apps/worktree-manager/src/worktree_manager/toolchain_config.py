@@ -370,3 +370,18 @@ def configure_selected(*, root: Path, apply: bool) -> None:
             values, Path(current.get("USERPROFILE") or Path.home()), current,
             windows=os.name == "nt",
         )
+
+
+def configure_setup(*, root: Path, apply: bool, configuration_only: bool) -> int:
+    """Apply the shared setup configuration stage without runtime dependencies."""
+    try:
+        configure_selected(root=root, apply=apply)
+    except (OSError, ValueError, UnicodeError, configparser.Error) as error:
+        # Parser exceptions can contain native file contents.
+        reason = f": {error}" if type(error) is ValueError else ""
+        print(f"  ! toolchain configuration refused: {type(error).__name__}{reason}")
+        return 2
+    if configuration_only:
+        mode = "applied" if apply else "preflight complete (plan only)"
+        print(f"  toolchain configuration: {mode}; no prerequisite/core/repository setup requested.")
+    return 0

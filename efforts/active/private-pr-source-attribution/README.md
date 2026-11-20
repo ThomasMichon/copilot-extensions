@@ -24,6 +24,17 @@ only protection of each machine's local copy is machine-bound.
 
 ## Coordination
 
+The proposed finite #11348 inactive-event lane below stays with the existing
+repository-specific source-attribution workflow/check owner and metadata
+validator, without changing key/cache, marker-generation or configured-vault
+custody. It is Phase 5 correctness follow-through, not reopening the earned
+enforcement foundation or adding a generic review engine. Preserve every
+incumbent check and the independent configured-consumer/unknown-diagnostic
+conditions. Ordinary reviewed complete P11348/V11348/G11348 delivery and
+permitted current receiving/source/custody readback precede a separate tracking
+judgment; keep #11348 OPEN during the proposal. No workflow retry, dummy edit,
+rule change, credential/key/cache operation, execution or rollout follows.
+
 - **Topology:** independent per-slice PRs
 - **Host (owns PRs):** attribution owner
 - **Delegates:** none
@@ -133,6 +144,40 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
   automation origins, manual repair guidance and silent operator-only
   exception in [dev-pr-enforcement.md](dev-pr-enforcement.md) (#6295).
 
+#### Finite inactive description-edit lifecycle from #11348
+
+Agent-recommended maintenance of that existing required-context contract.
+
+- [ ] **P11348-1:** Retain the merged #11329 description-edit observation:
+  valid marker preserved, run 42393024015 failed on the original attempt
+  AND one bounded retry with an unrecoverable open-PR retry diagnostic.
+  Retain the signature `Pull request metadata changed or could not be
+  verified; retry the current check.`
+  Correct closed/merged description-event handling without asserting that
+  this post-merge defect invalidated the actual passing pre-merge gates.
+- [ ] **P11348-2:** Keep inactive-event contexts separate from the required
+  commit-scoped `source-attribution` context. A closed-event success OR skip
+  must not clear an open same-head peer's required gate. Preserve departed-
+  head reevaluation and shared-head refusal; do not weaken source admission
+  or add an attribution/CI exception to suppress the diagnostic.
+- [ ] **P11348-3:** Preserve fail-closed current metadata validation for
+  genuinely open events, including an admitted open event whose PR closes
+  during live validation. Qualify the actual workflow/validator lifecycle
+  boundary with its existing owner; earlier static event/context findings
+  and an example's merged state are not a current whole repair.
+
+##### Local Validation for #11348
+
+- [ ] **V11348-1:** Cover closed AND merged description edits, an open peer
+  sharing the head, and an admitted open event closing during validation.
+  Prove the first cases avoid the repairable-open-PR diagnostic without
+  emitting success/skip into the peer's required context; the live-close
+  case remains fail-closed.
+- [ ] **V11348-2:** Preserve departed-head refresh, shared-head refusal,
+  valid marker/current metadata and ordinary open-PR behavior at the owning
+  workflow/validator seam. Use focused synthetic event/API controls and
+  unchanged required gates, not a live dummy edit, blind retry or bypass.
+
 ### Phase 6 — Standardized configured-vault setup
 
 - [ ] Review and deliver the reusable local-agent setup/status/verification
@@ -182,6 +227,13 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
 
 ## Validation Plan
 
+- [ ] **G11348:** Resolve every P11348/V11348 and continuing Coordination
+  clause: inactive versus required commit contexts, BOTH terminal edit
+  cases, same-head peer and live-close race, current metadata and departure/
+  refusal compatibility. Preserve actual pre-merge credit, existing owners
+  and every key/cache/adoption obligation. Planned receiving is not a
+  repaired workflow, live validation, policy exception or custody release.
+
 - [x] Root identity round trips from a multi-repo ownership chain while public
   marker fields contain no raw origin identifiers.
 - [x] Cover opt-outs, malformed/cyclic ancestry, remote or missing ancestors,
@@ -221,6 +273,15 @@ obligations, not a preselected encryption implementation or a deployment action.
 No production secret is read or written by the planning slice.
 
 ## Journal
+
+### 2026-11-20 UTC - Proposed finite inactive-event correctness receiving
+
+The complete qualified #11348 original is proposed directly in the existing
+Phase 5 Plan, local and actual global Validation, with required-context and
+terminal/open-race semantics retained together. All six new technical rows
+remain unchecked. The [four-source receiving record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+retains actual owner boundaries and separate tracking judgments.
+No workflow, marker, rule, cache/key, runtime or resource operation occurred.
 
 ### 2026-11-13 - Configured consumer and adoption evidence retained
 
