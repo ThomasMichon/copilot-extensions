@@ -124,7 +124,7 @@ def test_required_admission_refuses_before_queue_callback(
 def test_required_admission_joins_queue_before_closing_selected_resources(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(api.module.asyncio, "create_task", _Task)
+    monkeypatch.setattr(api.module, "_CleanupTask", _Task)
     service = api.service(runtime_context=lambda: api.context(api.qualified))
     api.finish(service.start(legacy_data_dir=Path("legacy")))
     api.finish(service.activate())
@@ -154,7 +154,7 @@ def test_required_admission_joins_queue_before_closing_selected_resources(
 def test_required_intake_route_receipts_selected_peer_scope_and_typed_union(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(api.module.asyncio, "create_task", _Task)
+    monkeypatch.setattr(api.module, "_CleanupTask", _Task)
     hints = _hints(api)
     service = api.service(runtime_context=lambda: api.context(api.qualified))
     api.finish(service.start(legacy_data_dir=Path("legacy")))

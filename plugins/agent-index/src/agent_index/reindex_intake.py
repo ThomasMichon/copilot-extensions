@@ -106,4 +106,7 @@ async def enqueue_hinted_request(
         notify()
         return task
 
+    if body.required_point_service_version is not None:
+        # PointService owns this chain; do not introduce a separately cancellable task.
+        return await enqueue_and_notify()
     return cast("TaskRecord", await _settle(asyncio.create_task(enqueue_and_notify())))

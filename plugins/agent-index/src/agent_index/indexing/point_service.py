@@ -9,7 +9,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from .point_hints import AcquisitionHints, PointChangeHints
 from .point_queue_consumer import PointQueueConsumer
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 PointExecutor = Callable[[TaskRecord], object]
 PointReader = Callable[[str], "ComponentRead"]
+_T = TypeVar("_T")
 
 
 class PointAdmissionRefused(RuntimeError):
@@ -47,8 +48,8 @@ class _ConfiguredPointRuntime(PointRuntime):
     """Owned production composition; custom callable pairs remain unadvertised."""
 
 
-class _CleanupTask(asyncio.Task[None]):
-    """Keep joined async exits running even through pre-entry loop cancellation."""
+class _CleanupTask(asyncio.Task[_T]):
+    """Keep joined service operations running through loop-wide cancellation."""
 
     def cancel(self, msg: object = None) -> bool:
         return False
@@ -190,7 +191,7 @@ class PointService:
         async def admitted() -> TaskRecord:
             return await enqueue(store)
 
-        operation = asyncio.create_task(admitted())
+        operation = _CleanupTask(admitted())
         self._intakes.add(operation)
         operation.add_done_callback(self._intakes.discard)
         return cast("TaskRecord", await _settle(operation))

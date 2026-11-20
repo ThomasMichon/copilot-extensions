@@ -431,9 +431,9 @@ def test_required_point_http_admission_preserves_scope_identity_and_paused_reten
 
 
 @pytest.mark.parametrize("closure", ["drain", "stop"])
-@pytest.mark.parametrize("cancelled", [False, True])
+@pytest.mark.parametrize("cancelled", ["none", "caller", "loop"])
 def test_required_point_enqueue_is_joined_through_closure_and_cancellation(
-    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, closure: str, cancelled: bool,
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, closure: str, cancelled: str,
 ) -> None:
     from agent_index import server
 
@@ -476,20 +476,30 @@ def test_required_point_enqueue_is_joined_through_closure_and_cancellation(
                         await asyncio.sleep(0.02)
                         assert not closing.done()
                     assert points._intakes and lifetime == ["open"] and notifications == []
-                    if cancelled:
-                        posting.cancel()
-                        await asyncio.sleep(0.02)
-                        posting.cancel()
+                    if cancelled != "none":
+                        for _ in range(2):
+                            if cancelled == "loop":
+                                for task in asyncio.all_tasks():
+                                    if task is not asyncio.current_task():
+                                        task.cancel()
+                            else:
+                                posting.cancel()
+                            await asyncio.sleep(0.02)
                     assert not posting.done()
+                    assert points._intakes and lifetime == ["open"] and notifications == []
                 finally:
                     release.set()
-                    if cancelled:
+                    if cancelled != "none":
                         with pytest.raises(asyncio.CancelledError):
                             await posting
                     else:
                         assert (await posting).json()["accepted"]
                     if closing is not None:
-                        await closing
+                        if cancelled == "loop":
+                            with pytest.raises(asyncio.CancelledError):
+                                await closing
+                        else:
+                            await closing
                 assert notifications == ["notify"]
                 assert not points._intakes
                 if closure == "drain":
