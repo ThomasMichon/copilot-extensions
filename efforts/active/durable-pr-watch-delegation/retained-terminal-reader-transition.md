@@ -378,8 +378,8 @@ G13487 and both parents open until their own remaining gates are satisfied.
 
 ### Original native-target association refinement
 
-This is the next review-first source refinement, not implemented native-watch
-adoption. `HostConfig` already relates each admitted caller/target's
+This is the reviewed source refinement for original native-watch adoption,
+not installed migration. `HostConfig` already relates each admitted caller/target's
 `ConsumerScope` to a `NativeReadHandler` with an immutable full workspace scope.
 `NativeReadHandler.read` verifies the acquired evidence against that scope, but
 its result does not preserve the native account/repository association.
@@ -465,12 +465,13 @@ replays an operation, adds an effect receiver or declares full T3 complete.
 - [x] Review this native-target contract before changing writer/storage or
   admitting active native waits (#13748; current-head approval and required
   green CI). Fresh-writer qualification does not admit its later adoption reader.
-- [ ] Qualify the selected fresh writer through actual load/sync and fresh
+- [x] Qualify the selected fresh writer through actual load/sync and fresh
   process reconstruction, proving capture precedes native discovery/IO.
   Include original absence, close/reopen during acquisition, scope/target
   mismatch, repeated IDs, shared native targets, definite CAS/capacity refusal
   and every uncertain publication boundary. Preserve v1/default behavior and
-  missing/skewed-core/old-reader refusal.
+  missing/skewed-core/old-reader refusal. #13751 delivered the writer; the
+  subsequent native-adoption packet adds the shared-native/full-scope control.
 - [ ] Qualify the later actual transition CLI with current/noncurrent recorded
   generations and active coalesced native waits. Cover target-A/target-B
   configuration changes, unmatched old waits, conflicting historical mappings,

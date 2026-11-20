@@ -26,7 +26,7 @@ def contract() -> Document:
 
 
 def complete(document: Document) -> bool:
-    return document.get(MARKER) == 1 and all(
+    return document.get(MARKER) in (1, 2) and all(
         document.get(name + "_version") == 1 for name in (
             "terminal_retention", "terminal_recovery", "terminal_cache_retirement",
         )
@@ -95,6 +95,7 @@ def readable_bindings(
 def stage(
     document: Document, cache: GenerationCache, records: dict[PRKey, Document],
     visit_pointer: Callable[[Document], None], checkpoint: Callable[[], None],
+    *, native_targets: list[Document] | None = None,
 ) -> None:
     """Called under replay custody; inspect each immutable cache object once."""
     associations = selected(document, cache)["records"]
@@ -127,11 +128,20 @@ def stage(
     cache.inspect_retained(visit, visit_pointer)
     checkpoint()
     bindings.sort(key=encoded)
+    imported: list[Document] = []
+    marker = 1 if native_targets is None else 2
+    if native_targets is not None:
+        from .recorded_native_cache import admissions
+        imported = admissions(document, bindings, native_targets, checkpoint)
     state = document["terminal_retention"]
-    if state["records"] or state["admissions"] or (
-        document.get(MARKER) == 1 and state["generations"] != bindings
-    ) or document.get(MARKER) is None and state["generations"]:
+    if state["records"] or (
+        document.get(MARKER) is not None and (
+            document[MARKER] != marker or state["generations"] != bindings
+            or state["admissions"] != imported
+        )
+    ) or document.get(MARKER) is None and (state["generations"] or state["admissions"]):
         raise CacheInvalid("populated terminal state differs from the original recorded transition")
     state["generations"] = bindings
-    document[MARKER] = 1
+    state["admissions"] = imported
+    document[MARKER] = marker
     checkpoint()
