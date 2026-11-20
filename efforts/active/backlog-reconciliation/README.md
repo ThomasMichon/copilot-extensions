@@ -410,6 +410,22 @@ the non-public approval conversation.
 
 ## Plan
 
+The [idle-steering and existing-keeper unit](journal/2026/11.20-idle-steering-and-existing-keepers.md)
+proposes the finite #13734 idle/hint slice in the existing Active Queued
+Steering owner: supported idle submission without another unrelated turn,
+resume/re-registration, truthful conditional hints and exact message identity.
+Five technical rows remain unchecked. A qualified later repeat also reports
+a possibly separate resumed-headless carrier handshake failure; it remains
+unreceived under existing carrier owners in OPEN #13734, not folded into the
+idle slice or waived by its review.
+Eight complete current original/discussion unions retain actual canonical,
+claim, incident, policy, source/native and explicit acceptance gates; #3507's
+literal accepted-transfer alternative resolves an older OPEN-placement
+statement without replay or a native-pass claim. The same record follows
+through reviewed #13733, #13082's separate NOT_PLANNED retirement and
+#13369/#13378's unfinished-other-party KEEP judgments. The complete 13:21 PT
+census is unchanged at 880 whole, 151 above fixed 729.
+
 The [portable fixture and runtime-resource unit](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
 proposes complete #13082/#13369/#13378 receiving in existing Test Portfolio
 Phase 4 waves through Phase 7: portable peer handles, complete distribution/

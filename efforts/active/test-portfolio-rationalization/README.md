@@ -55,7 +55,7 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
-The proposed finite #13082 portable-pidfd, #13369 distribution/profile
+The reviewed finite #13082 portable-pidfd, #13369 distribution/profile
 and #13378 caller-session/PID-reuse fixture families enter the existing
 Phase 4 Vault/shared-library, Containers and Bridge waves through Phase 7
 migration-intake and domain review. Preserve the primary maintainer and
@@ -64,11 +64,13 @@ runner, source/native/release and resource custodians, OPEN #1303, all
 incumbent states/holds, unit-only required CI and hosted-Windows quiescence.
 No implementer, common cause, execution or resource is appointed.
 
-Normal review must deliver every P/V/G clause, continuing Coordination,
-dated Journal and intake route. Keep all three source issues OPEN during
-proposal; permitted current whole receiving/source/custody readback and
-separate source-specific judgments follow actual complete reviewed delivery.
-All fifteen new technical rows remain unchecked. Preserve each original
+#13733 delivered every P/V/G clause, continuing Coordination, dated Journal
+and intake route after current-head review and required CI. Complete current
+finite receiving/source/discussion/custody readback preceded three separate
+judgments: #13082's acknowledged NOT_PLANNED tracking retirement, and KEEP
+OPEN for #13369/#13378 because their other contributor's requests remain
+unfinished. Planned receiving is not fulfillment of those requests.
+All fifteen technical rows remain unchecked. Preserve each original
 fallback/tier alternative and failure packet; unrelated source delivery or
 required unit success is not qualification. No generic ACK, unrelated
 whole-portfolio prerequisite, production-policy waiver or execution grant
@@ -3612,6 +3614,8 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### [2026-11-20 UTC - Fixture receiving accepted, with separate source judgments](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md#previous-reviewed-receiving-and-separate-source-judgments)
 
 ### [2026-11-20 UTC - Proposed portable fixture and runtime-resource receiving](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
 
