@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.point_hints import PointChangeHints
+from agent_index.indexing.point_service import require_point_isolation
 from agent_index.indexing.source_ownership import source_writer
 from agent_index.indexing.task_store import TaskStatus, TaskStore
 from agent_index.sources.azure_devops_point_worker import run_azure_devops_point_worker
@@ -23,20 +24,6 @@ if TYPE_CHECKING:
     from agent_index.indexing.runner import ProgressCallback
     from agent_index.indexing.task_store import TaskRecord
     from agent_index.sources.azure_devops import AzureDevOpsConnector
-
-
-def _require_isolation(config: IndexConfig, legacy_data_dir: Path) -> None:
-    root, legacy = config.data_dir.resolve(), legacy_data_dir.resolve()
-    if root.is_relative_to(legacy) or legacy.is_relative_to(root):
-        raise ValueError("Point runtime requires a separate legacy data directory")
-    for path in (
-        config.lance_dir, config.clusters_db, config.state_file,
-        config.data_dir / "tasks.db", config.data_dir / "path_index.db",
-    ):
-        if not path.resolve().is_relative_to(root):
-            raise ValueError("Point runtime state must remain inside its selected data directory")
-    if not all((root / name).is_file() for name in ("tasks.db", "path_index.db")):
-        raise ValueError("Point runtime requires existing configured queue and path owners")
 
 
 def run_configured_azure_devops_points(
@@ -58,7 +45,7 @@ def run_configured_azure_devops_points(
         or type(max_rows) is not int or max_rows < 1
     ):
         raise ValueError("Point runtime requires its complete configured scope and row budget")
-    _require_isolation(config, legacy_data_dir)
+    require_point_isolation(config, legacy_data_dir)
     if (
         point_scope[1] != connector.source_name + ":workitem-components"
         or point_scope[3].endpoint != nonsecret_target(

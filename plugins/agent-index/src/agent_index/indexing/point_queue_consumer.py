@@ -51,6 +51,11 @@ class PointQueueConsumer:
         """Whether dispatch requires explicit resume."""
         return self._paused
 
+    @property
+    def tasks(self) -> TaskStore:
+        """The isolated queue used by both configured intake and selection."""
+        return self._tasks
+
     async def __aenter__(self) -> PointQueueConsumer:
         await self._host.__aenter__()
         self._entered = True
@@ -95,9 +100,13 @@ class PointQueueConsumer:
         finally:
             self._running = False
 
+    def pause(self) -> None:
+        """Close admission synchronously, including during off-loop selection."""
+        self._paused = True
+
     async def drain(self, *, timeout: float = 300.0) -> bool:
         """Pause this consumer and observe its joined worker without cancelling it."""
-        self._paused = True
+        self.pause()
         return await self._host.drain(timeout=timeout)
 
     async def resume(self) -> None:

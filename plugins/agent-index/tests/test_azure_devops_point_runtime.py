@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from pathlib import Path
 import threading
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import httpx
 import pytest
 
 import test_azure_devops_point_worker as worker
@@ -16,11 +18,15 @@ import test_azure_devops_point_worker as worker
 from agent_index.engine.client import EngineClient
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
 from agent_index.indexing.point_queue_consumer import PointQueueConsumer
+from agent_index.indexing.point_service import PointExecutor, PointService
 from agent_index.indexing.point_worker_host import PointWorkerHost
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.worker import run_worker
 from agent_index.sources.azure_devops_point_runtime import run_configured_azure_devops_points
 from agent_index.store.source_layout import SourceLayoutError
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 subject = worker.subject
 application = worker.application
@@ -36,6 +42,243 @@ def run(f: worker.Fixture, task: TaskRecord, **kwargs: Any) -> TaskRecord:
         "max_rows": 32,
     }
     return run_configured_azure_devops_points(f.connector, task.id, **(options | kwargs))
+
+
+def _point_service_app(
+    f: worker.Fixture, monkeypatch: pytest.MonkeyPatch, *, passive: bool = False,
+) -> tuple[FastAPI, list[str]]:
+    pytest.importorskip("fastapi")
+    from agent_index import server
+    from agent_index.indexing.runner import TaskRunner
+
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(f.config.data_dir.parent / "legacy"))
+    monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "")
+    monkeypatch.setenv("AGENT_INDEX_NATIVE_INSTALLATION_ID", "")
+    monkeypatch.setattr(server, "_missing_indexing_dependencies", lambda: None)
+    monkeypatch.setattr(server, "_publish_active_evidence", lambda *_, **__: None)
+    create_runner = server._create_task_runner
+
+    def create() -> Any:
+        store, runner = create_runner()
+        runner.set_governance_recheck_fn(None)
+        return store, runner
+
+    def no_spawn(*_: Any) -> None:
+        pytest.fail("point service must not launch a detached worker")
+
+    monkeypatch.setattr(server, "_create_task_runner", create)
+    monkeypatch.setattr(TaskRunner, "_spawn_worker", no_spawn)
+    lifetime: list[str] = []
+
+    @asynccontextmanager
+    async def executor_context() -> AsyncIterator[PointExecutor]:
+        lifetime.append("open")
+        clients = {
+            model: cast(EngineClient, worker.Client(f, model)) for model in f.config.model_profiles
+        }
+
+        def execute(task: TaskRecord) -> TaskRecord:
+            assert lifetime == ["open"] and not f.connector._http.client.is_closed
+            return run(f, task, expected_hints=task.change_hints, clients=clients)
+
+        try:
+            yield execute
+        finally:
+            f.connector._http.client.close()
+            lifetime.append("closed")
+
+    return server.build_app(
+        passive=passive,
+        point_service_factory=lambda: PointService(
+            config=f.config, point_scope=f.claim.hints.scope, executor_context=executor_context,
+        ),
+    ), lifetime
+
+
+async def _wait_point_state(predicate: Callable[[], bool]) -> None:
+    deadline = asyncio.get_running_loop().time() + 8
+    while not await asyncio.to_thread(predicate):
+        assert asyncio.get_running_loop().time() < deadline, "point service did not settle"
+        await asyncio.sleep(0.01)
+
+
+def test_selected_service_refuses_legacy_overlap_before_opening_clients(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    f.config = replace(f.config, data_dir=f.config.data_dir.parent / "legacy")
+    app, lifetime = _point_service_app(f, monkeypatch)
+
+    async def exercise() -> None:
+        with pytest.raises(ValueError, match="separate legacy data directory"):
+            async with app.router.lifespan_context(app):
+                pytest.fail("explicit point configuration must not fall back to legacy startup")
+        assert lifetime == [] and not f.provider.requests
+
+    asyncio.run(exercise())
+
+
+def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch, passive=True)
+    other_hints = replace(f.claim.hints, account_id="another-account")
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://fixture",
+            ) as client:
+                assert lifetime == []
+                body = {"source": f.claim.hints.source, "change_hints": f.claim.hints.to_dict()}
+                assert (await client.post("/reindex/hints", json=body)).status_code == 503
+                assert (await client.post("/promote")).json()["promoted"]
+                runner = app.state.task_runner
+                assert lifetime == ["open"] and runner.point_service.status()["paused"]
+                assert 2 not in (await client.get("/health")).json()[
+                    "indexing_contract"
+                ]["execution_versions"]
+                accepted = (await client.post("/reindex/hints", json=body)).json()
+                assert accepted["accepted"]
+                task_id = accepted["task"]["id"]
+                assert runner.store.get_task(task_id) is None
+                assert f.tasks.get_task(task_id) is not None
+                other = (await client.post("/reindex/hints", json={
+                    "source": other_hints.source, "change_hints": other_hints.to_dict(),
+                })).json()["task"]
+                assert runner.store.get_task(other["id"]) is not None
+                assert f.tasks.get_task(other["id"]) is None
+                await asyncio.sleep(2.1)
+                assert not f.provider.requests
+                await runner.point_service.activate()
+                runner.notify()
+                await _wait_point_state(lambda: bool(
+                    (task := f.tasks.get_task(task_id)) and task.status == TaskStatus.COMPLETE
+                ))
+                original = f.tasks.get_task(f.claim.task_id)
+                assert original is not None and original.status == TaskStatus.COMPLETE
+                unselected = runner.store.get_task(other["id"])
+                assert unselected is not None and unselected.status == TaskStatus.QUEUED_HINTS_V2
+                assert f.provider.body_reads == 4
+        assert lifetime == ["open", "closed"] and f.connector._http.client.is_closed
+
+    asyncio.run(exercise())
+
+
+def test_service_failure_stays_paused_across_wake_and_drain_rollback(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+
+    def interrupt() -> None:
+        raise RuntimeError("fixture interrupted embedding")
+
+    f.hook = interrupt
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            runner = app.state.task_runner
+            await runner.point_service.activate()
+            runner.notify()
+            await _wait_point_state(lambda: runner.point_service.status()["failed"])
+            pinned = f.tasks.get_task(f.claim.task_id)
+            assert pinned is not None and pinned.point_claim_id == f.claim.point_claim_id
+            assert f.retained_count() == 2 and f.provider.body_reads == 2
+            calls = list(f.calls)
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://fixture",
+            ) as client:
+                assert (await client.post("/drain", json={"timeout": 0})).json()["clean"]
+                assert (await client.post("/undrain")).json() == {"draining": False}
+                runner.notify()
+                await asyncio.sleep(0.1)
+                assert f.calls == calls and runner.point_service.status()["failed"]
+                assert lifetime == ["open"]
+                f.reopen()
+                f.hook = None
+                await runner.point_service.activate()
+                runner.notify()
+                await _wait_point_state(lambda: bool(
+                    (task := f.tasks.get_task(f.claim.task_id))
+                    and task.status == TaskStatus.COMPLETE
+                ))
+                assert not runner.point_service.status()["failed"]
+                assert f.provider.body_reads == 0 and f.calls
+        assert lifetime == ["open", "closed"]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("phase", ["selection", "embedding"])
+def test_service_drain_and_cancelled_shutdown_join_native_effects_before_client_close(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+
+    def block() -> None:
+        entered.set()
+        assert release.wait(timeout=8)
+        assert lifetime == ["open"] and not f.connector._http.client.is_closed
+
+    if phase == "embedding":
+        f.hook = block
+    else:
+        select = TaskStore.next_point_task
+
+        def blocked_select(self: TaskStore, **kwargs: Any) -> TaskRecord | None:
+            selected = select(self, **kwargs)
+            if self.data_dir == f.config.data_dir:
+                block()
+            return selected
+
+        monkeypatch.setattr(TaskStore, "next_point_task", blocked_select)
+
+    async def exercise() -> None:
+        lifespan = app.router.lifespan_context(app)
+        await lifespan.__aenter__()
+        stopping: asyncio.Task[Any] | None = None
+        try:
+            runner = app.state.task_runner
+            await runner.point_service.activate()
+            runner.notify()
+            assert await asyncio.to_thread(entered.wait, 5)
+            assert runner.status()["running"] and runner.status()["point"]["running"]
+            trailing = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://fixture",
+            ) as client:
+                drained = (await client.post("/drain", json={"timeout": 0})).json()
+                assert drained["clean"] == drained["drained"] == (phase == "selection")
+                assert (await client.post("/undrain")).status_code == 200
+            stopping = asyncio.create_task(lifespan.__aexit__(None, None, None))
+            for _ in range(2):
+                await asyncio.sleep(0.03)
+                stopping.cancel()
+                assert not stopping.done() and lifetime == ["open"]
+            release.set()
+            with suppress(asyncio.CancelledError):
+                await stopping
+            assert lifetime == ["open", "closed"] and f.connector._http.client.is_closed
+            completed = f.tasks.get_task(f.claim.task_id)
+            assert completed is not None and completed.status == (
+                TaskStatus.COMPLETE if phase == "embedding" else TaskStatus.QUEUED_HINTS_V2
+            )
+            if phase == "selection":
+                assert not f.provider.requests and not f.calls
+            assert f.tasks.get_task(trailing.id) == trailing
+        finally:
+            release.set()
+            if stopping is None:
+                await lifespan.__aexit__(None, None, None)
+            else:
+                with suppress(asyncio.CancelledError):
+                    await stopping
+
+    asyncio.run(exercise())
 
 
 def test_configured_runtime_pins_executes_and_retries_without_ordinary_dequeue(

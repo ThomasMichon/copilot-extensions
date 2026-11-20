@@ -341,7 +341,11 @@ truthful drain tests; service/queue admission and cutover wiring remain open.
 Merged #13649 supplies that host after current-head approval and passing CI;
 its source reconciliation and remaining integration boundary are journaled.
 Merged #13651 serializes supported point cancellation with native ownership;
-actual queue selection and service/cutover composition remain open.
+merged #13655 adds caller-driven exact-scope queue batches with failure pause.
+Automatic service scheduling and cutover composition remain open.
+The entry also records explicit service composition through the existing
+runner, isolated exact-scope HTTP intake and joined client lifetime; ordinary
+activation, cross-generation recovery and broader acceptance remain separate.
 
 Append-only entries are preserved in dated files, newest first.
 

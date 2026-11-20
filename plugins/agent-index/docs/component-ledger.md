@@ -483,10 +483,10 @@ does not acquire this lock. The lock does not fence raw SQL or older,
 nonparticipating cancellation implementations; it is not a new running state,
 cross-version adoption contract or cooperative interruption of native work.
 
-This Python-only owner is not yet attached to the service or `TaskRunner`.
-Their detached-worker stop/drain semantics remain unchanged and do not qualify
-in-process cutover. No automatic task selection, shared-queue coordination,
-ordinary v2 capability, process adoption or runtime activation is added.
+This standalone Python owner does not select tasks or configure a service.
+The explicit service binding below composes it without changing detached-worker
+survival/adoption. Ordinary v2 capability, cross-consumer coordination and
+runtime activation remain separate.
 
 ### Explicit point queue consumer
 
@@ -525,9 +525,59 @@ The task limit bounds dispatch count, not candidate-queue reads, provider
 requests, total elapsed time or native I/O. Selection may inspect parked rows
 for the selected source to find an exact binding; it does not scan indexed
 content or provider history. This is not a transactional dequeue lease or
-cross-consumer scheduling coordinator. Service construction, notifications,
-cutover/adoption and ordinary v2 execution advertisement remain unimplemented.
-The detached runner, CLI and default ingestion behavior are unchanged.
+cross-consumer scheduling coordinator. The explicit binding below supplies
+service construction and notifications; cross-process cutover/adoption and
+ordinary v2 execution advertisement remain separate. The CLI and default
+ingestion behavior are unchanged.
+
+### Explicit service binding
+
+`server.build_app(point_service_factory=...)` optionally constructs a
+`indexing.point_service.PointService` when the service's existing task runner
+starts. A passive application does not invoke that factory until promotion.
+The binding takes an explicit `IndexConfig`, complete `PointScope`, and
+`executor_context`: an async-context-manager factory yielding the synchronous
+point executor. That context owns the configured connector and all model
+clients, and remains entered until native dispatch and runner shutdown settle.
+No callback or new configuration form is serialized.
+
+The point state must already exist in its selected directory, wholly disjoint
+from the legacy runner's directory. Invalid explicit configuration fails startup
+or promotion instead of silently falling back to legacy execution. There is no
+implicit store bootstrap, discovery or engine selection.
+
+Every new binding starts paused, including reconstruction after failure or
+interruption. The configuring in-process owner must inspect retained state,
+then explicitly `await app.state.task_runner.point_service.activate()` and call
+`app.state.task_runner.notify()`. Activation does not repair partial native
+effects or certify restore currentness. The existing qualified retry and
+recovery owners still govern that decision.
+
+The existing `/reindex/hints` route sends only exact-scope v2 envelopes to the
+binding's isolated queue and wakes the existing runner. Other bindings and all
+legacy/v1/source-only requests retain their legacy queue behavior. Matching
+intake may park work while point execution is paused; notification cannot
+activate it. The HTTP contract remains intake v1/v2 with no ordinary v2
+execution declaration, selector or activation endpoint.
+
+There is no second scheduler, timer or child process. The existing governed
+`TaskRunner` iteration executes at most one point claim before its legacy queue
+turn, and never starts point work alongside an adopted detached worker. A
+failure pauses point dispatch, records `indexing.point.failed` in `/status`,
+and leaves legacy scheduling available. Repeated wakes and `/undrain` do not
+clear that failure. `indexing.running` includes an active point batch; the
+additional `indexing.point` object reports its running/admitted/paused/failed
+state only for explicitly configured bindings.
+
+Drain synchronously pauses admission and reports false if native point effects
+have not settled within its budget. `/undrain` can roll back that pause without
+activating reconstructed or failed work. Stop closes point admission before its
+asynchronous join, including while read-only selection is off the event loop,
+and joins the existing iteration before closing the executor/client context.
+Cancellation cannot turn a native thread into an adoptable detached worker or
+release its clients early. Forced process interruption, cross-generation
+adoption, cross-consumer arbitration, native platform qualification and runtime
+rollout remain separate; this binding does not promise bounded thread shutdown.
 
 ### Sealed native publication suffix
 
