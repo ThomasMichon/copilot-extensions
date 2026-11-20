@@ -7807,6 +7807,31 @@ unadvertised.
 This adds no production repair path, required-unit admission, process-kill/
 cross-generation cutover, native Windows/macOS or live-provider qualification.
 
+`tests/test_native_azure_devops_point_matrix.py` is an explicit Linux T3
+filesystem packet, selected with `--test-file
+tests/test_native_azure_devops_point_matrix.py --allow-explicit-tiers`.
+It composes the actual finite queue consumer, configured acquisition caller,
+worker, native point store and named reader with two injected models.
+Outside measurement, the existing scoped mutation/index owners prepare
+100/10,000/100,000 unrelated content rows, corresponding vectors and path
+checkpoints. First application, equal-version duplicate, superseded claim and
+completed retry must have identical logical counts and measured native query
+counts/rows/read I/Os across those sizes, for live content and a comment
+tombstone. Whole-checkpoint enumeration is trapped. Native versions remain
+unchanged on duplicate/superseded/retry; full native row counts and sampled raw
+content/vector/checkpoint bytes preserve the unrelated corpus.
+
+The packet emits `POINT_NATIVE_WORK` records with Linux process I/O, elapsed
+wall/process-CPU time and separately reported setup time. Process bytes include
+query-plan diagnostic replay and metadata/queue traffic, and are not asserted
+constant: measured read-byte growth remains a separate investigation, not a
+physical-disk or whole-CPU/memory acceptance claim. Stage counters retain their
+existing instrumentation scope; the point checkpoint owner's writes are not
+inferred from a zero shared-engine counter. This packet does not populate
+100,000 ordering-evidence entries, exercise HTTP service intake, replace the
+service/recovery packet above, enable ordinary v2 execution, or qualify broader
+provider/consumer rollout.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
