@@ -273,6 +273,36 @@ def test_bound_optout_preserves_ordinary_result_without_legacy_or_worker(
         telemetry.clear_telemetry_sink()
 
 
+def test_normal_file_loader_normalizes_once_without_admitting_a_different_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import server
+
+    admitted = "https://git.example.test/team/project.git.git"
+    unlisted = "https://git.example.test/team/project.git"
+    root = receiver(tmp_path / "origin")
+    policy_file(tmp_path, {admitted: str(root)})
+    monkeypatch.setattr(server, "_owns_active_route", lambda: True)
+    app = build_app(Config(db_path=str(tmp_path / "tasks.db"), token="fixture-data"))
+    with TestClient(app) as client:
+        first = client.post("/tasks", headers=AUTH, json={
+            "title": "admitted", "repo": admitted, "proposed": True,
+        })
+        other = client.post("/tasks", headers=AUTH, json={"title": "unlisted", "repo": unlisted})
+        assert first.status_code == other.status_code == 200
+        assert first.json()["repo"] == "git.example.test/team/project.git"
+        assert other.json()["repo"] == "git.example.test/team/project"
+        assert client.post(f"/tasks/{first.json()['id']}/approve", headers=AUTH).status_code == 200
+        wait_for(lambda: (root / "readback.jsonl").exists() and len(
+            (root / "readback.jsonl").read_text(encoding="utf-8").splitlines()
+        ) == 2)
+        assert app.state.consumer_telemetry.owner.stats()["dropped_route"] == 1
+    records = [row["record"] for row in readback(root)]
+    assert [row["event"]["event"] for row in records] == ["task.proposed", "task.approved"]
+    assert [row["sequence"] for row in records] == [1, 3]
+    assert (root / "eof.json").exists()
+
+
 def test_unknown_origin_and_unauthenticated_owner_never_borrow_service_route(tmp_path: Path) -> None:
     root = receiver(tmp_path / "service")
     policy = {"schema_version": 1, "service_root": str(root)}

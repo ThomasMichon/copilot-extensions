@@ -65,7 +65,7 @@ def load_policy() -> Any:
         path = install_dir() / "consumer-telemetry.json"
         value = read_object(path, 16384)
         if value is not None:
-            return validate_policy(value)
+            return value
         try:
             path.lstat()
         except FileNotFoundError:

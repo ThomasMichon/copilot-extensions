@@ -30,6 +30,8 @@ At most four roots are admitted in total, including the optional service root.
 Repository keys use the queue's existing remote canonicalization; duplicate
 canonical lanes refuse the entire policy. Duplicate JSON members, invalid
 UTF-8, unknown fields and an opened file larger than 16,384 bytes also refuse it.
+The loader preserves the parsed keys; owner construction normalizes them once,
+matching queue admission rather than repeatedly removing repository suffixes.
 
 The normal `serve` -> `server.build_app` owner reads this exact file once.
 Absence preserves the existing convention-located factory/spool/environment
