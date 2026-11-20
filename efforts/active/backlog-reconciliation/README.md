@@ -410,6 +410,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [native crypto and existing-owner receiving unit](journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+records acknowledged whole #12119 fulfillment through #12122 and proposes
+complete #11995 portfolio receiving plus #12111's same-parent TargetLock
+lane under final-OPEN #2709. All eleven new technical rows remain unchecked.
+Thirteen current source identities preserve the other delivery, claimant,
+scope and source/copy gaps. It also records actual #13590 follow-through
+and the complete 901-open census; no new disposition follows automatically
+from either receiving proposal or the numerical observation.
+
 The [source-claim and credential-generation unit](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
 proposes one complete #11816 Vault P2 receiving contract, with six unchecked
 technical rows, and an acknowledged #11783 source completion after the actual

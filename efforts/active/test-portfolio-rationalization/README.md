@@ -55,6 +55,19 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The finite #11995 PowerShell 5.1 child-budget family enters Phase 4's
+Worktrees/owning-fixture wave through existing Phase 7 migration-intake and
+domain review. Preserve the primary maintainer, actual prepared-membership/
+native-write, workflow/runner, production, platform, source/native/release
+and resource custodians, OPEN #1303 and every incumbent state/hold.
+This is independent of the existing six-family timeout grouping, not a
+common-cause finding or new execution assignment. Normal reviewed complete
+P11995/V11995/G11995 Plan, local/global Validation, Coordination, dated
+Journal and intake delivery, then permitted current whole receiving/source/
+custody readback, precede a separate tracking judgment. Keep #11995 OPEN
+during proposal. No generic ACK, unrelated whole-portfolio prerequisite,
+required-native-CI expansion or resource release follows.
+
 The proposed finite #11372 visual-fixture and #11512 supported-interpreter/
 independent-witness families enter the existing Phase 4 Manager and Dispatch
 waves, respectively, through Phase 7 migration-intake deduplication and
@@ -589,6 +602,47 @@ Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite prepared-membership PowerShell child-budget contract from #11995
+
+Agent-recommended Phase 4 Worktrees/owning-fixture receiving through Phase 7;
+the original budget-policy question and its alternatives remain unresolved.
+
+- [ ] **P11995-1:** Retain intermittent hosted-Windows PowerShell 5.1
+  native-write AND membership failures at the original 10-second child
+  limit: runs 42793382667, 42857991671, 42881289827 and 42931808880,
+  including job 130232156330 and the registered-file/local-write guard
+  case. Preserve the reported phase offsets from process start:
+  command-entry 3.3s, marker-decoded 5.7s, membership-complete 8.8s and
+  native-proof-start 9.0s; other entry observations were 1.7s and
+  3.4s-4.2s. Later passing reruns/pushes are not causal repairs.
+- [ ] **P11995-2:** Establish whether 10 seconds is intended to qualify
+  production latency on a loaded hosted runner. If so, retain that contract
+  and investigate a possible budget regression. Otherwise select the
+  original warmed-host OR phase-based assertion excluding process start
+  OR runner-calibrated fixture-limit alternative, explicitly stating what
+  it measures. Do not raise production timeouts merely to make CI pass.
+- [ ] **P11995-3:** Preserve the actual native-write/membership assertions,
+  phase diagnostics, owned child/stream cleanup and applicable item/group/
+  process bounds. A fixture-policy adjustment must retain the original
+  failed 10-second evidence and remain distinct from production policy.
+  Keep #11745 related, not an established common cause; unrelated Index
+  or documentary deliveries do not complete this finite contract.
+
+##### Local Validation for #11995
+
+- [ ] **V11995-1:** At the existing separately admitted bounded Windows
+  PowerShell 5.1 consumer, distinguish real process startup from marker,
+  membership and native-proof work for both affected families. Preserve
+  meaningful positive/failure controls and actual behavior assertions;
+  mocked startup, a different PowerShell edition or an unrelated pass
+  cannot supply the selected native measurement.
+- [ ] **V11995-2:** Validate the selected production-latency OR fixture-only
+  policy at its declared boundary, with attributable source/selection,
+  phases, elapsed limits, results/skips and cleanup. Keep original
+  failures, later passes and unexplained variation distinct. Unit-only
+  required CI and hosted-Windows quiescence remain; this intake authorizes
+  no run, larger budget, production change or accepted-flake declaration.
 
 #### Finite Recovery comparison visual fixture from #11372
 
@@ -1367,6 +1421,13 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The finite P11995/V11995/G11995 family has one primary placement in
+Phase 4's Worktrees/owning-fixture wave. Its append-only migration-intake
+row records deduplication and unchanged custodians; this same planning
+unit supplies complete domain Plan, local/global Validation, Coordination
+and dated Journal for review. Existing #11995 supplies the tracker during
+proposal; no new issue, administrative checkbox or implementer is appointed.
 
 The proposed P11372/V11372/G11372 and P11512/V11512/G11512 families each
 have one primary Phase 4 placement, in the Manager and Dispatch fixture
@@ -2688,6 +2749,15 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G11995:** Resolve every P11995/V11995 and continuing Coordination
+  clause: both actual PowerShell 5.1 families, original 10-second failures/
+  phase evidence, production-latency classification and the original
+  warmed-host OR phase-based OR calibrated-fixture alternative. Preserve
+  behavior assertions, original-versus-selected budget distinctions,
+  ownership, Phase 7 domain acceptance and required unit-only CI. Planned
+  consolidation is neither causal repair, native PASS, production-timeout
+  authority nor completion of this ROOT's remaining portfolio acceptance.
+
 - [ ] **G11372:** Resolve every P11372/V11372 and continuing Coordination
   clause at the original fourteen-case visual boundary: correct Recovery/
   selected-tab/size interaction, original fixture/expectation OR behavior
@@ -3062,6 +3132,18 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-20 UTC - Proposed finite PowerShell budget-policy receiving
+
+The complete qualified #11995 original and empty discussion are retained
+in the existing Phase 4 Worktrees/owning-fixture wave through Phase 7.
+Three direct Plan, two local Validation and one actual global Validation
+row preserve the source's production-versus-fixture question and all
+three alternatives, phase measurements and unchanged production policy.
+All six technical rows remain unchecked. The [native crypto and receiving record](../backlog-reconciliation/journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+separates this proposal from source completion, actual execution and the
+independent six-family timeout grouping. No test, native, runtime or
+resource operation occurred.
 
 ### 2026-11-20 UTC - Proposed visual and worker-witness fixture receiving
 
