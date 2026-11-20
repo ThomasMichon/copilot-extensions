@@ -32,13 +32,14 @@ authority nor evidence that a replacement is needed.
 | Participant | Role in this effort | Reached via |
 |---|---|---|
 | Planning coordinator | Complete requirement mapping and proposal publication; no implementation claim | #7556 and this effort |
-| Implementation coordinator | Unassigned; claim the bounded implementation through the existing public coordination convention | #3443 |
+| Implementation coordinator | Unassigned; claim the bounded implementation through the existing public coordination convention | This effort and a later eligible OPEN implementation claim |
 | Existing component custodians | Retain their current task, workspace, hosting, provider, credential and service responsibilities | Their existing component coordination records |
 
 ## Coordination
 
-- **Topology:** Review this planning contract before assigning or implementing
-  its dependent source slices. No worker, provider or controller is allocated.
+- **Topology:** #13718 delivered the reviewed planning contract. Its technical
+  design/source and validation gates remain; no worker, provider or controller
+  is allocated.
 - **Host (owns proposal PR):** Planning coordinator. A later implementation
   coordinator must record its own accepted claim; this proposal appoints none.
 - **Delegates:** None.
@@ -56,6 +57,11 @@ authority nor evidence that a replacement is needed.
 - #3442's unattended credential lifetime and the remote-job presentation work
   remain separate. Adoption conveys no new credentials, destination access,
   provider lease, process termination or service-management authority.
+- **Accepted planned tracking:** Complete current source/receiving/custody
+  readback after #13718 preceded the separate acknowledged NOT_PLANNED
+  tracking retirement of #3443. All nine technical rows remain unchecked.
+  Draft status and actual resource custodians are unchanged; the historical
+  source number is requirement provenance, not a future live claim token.
 
 ## Context
 
@@ -194,14 +200,23 @@ transport; an unavailable authority is reported, not recreated locally.
 
 ## Proposal
 
-Draft, planning only. All nine Plan/Validation rows remain unchecked.
-#3443 remains OPEN while this proposal is reviewed. After complete reviewed
-receiving lands, any permitted source-tracking judgment is separate from
-implementation and from custody of an actual job. Neither this proposal nor
-ordinary document approval authorizes running adoption, launching a
-controller, acquiring a provider or changing credentials.
+Draft, planning only. #13718 delivered complete reviewed receiving; the
+subsequent separate judgment retired #3443 as redundant planned tracking,
+not completed functionality. All nine Plan/Validation rows remain unchecked.
+Neither accepted planning nor source-tracking retirement authorizes running
+adoption, launching a controller, acquiring a provider, changing credentials
+or taking custody of an actual job.
 
 ## Journal
+
+### 2026-11-20 - Reviewed planning and separate tracking disposition
+
+#13718 merged after current-head Copilot approval, required CI and correction
+of all actionable findings. Complete current source and receiving readback
+accepted the four-stage/two-shape planned contract before the separately
+acknowledged #3443 NOT_PLANNED closure. The nine technical rows, Draft status,
+independent #7237 relationship and all resource owners remain unchanged.
+See the [subsequent campaign record](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md#previous-reviewed-adoption-and-separate-source-disposition).
 
 ### 2026-11-20 - Complete four-stage, two-shape planning
 
