@@ -5,21 +5,51 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sqlite3
 import subprocess
+from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agent_dispatch.action_controls_cli import command
 from agent_dispatch.config import Config
-from agent_dispatch.queue import TaskError
+from agent_dispatch.client import DispatchClient
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import TaskError
 from agent_dispatch.server import build_app
 from agent_dispatch.supervisor import Supervisor
 from tests._helpers import TEST_REPO
-from tests.test_supervisor import OwnerResultQueue, QueueBackedClient, _ok_spawn
+from tests import test_pool_placement_client as controls
+
+q = controls.q
+api = controls.api
+
+
+@pytest.fixture
+def client(api: TestClient) -> Iterator[DispatchClient]:
+    with controls.connected(api, []) as connected:
+        yield connected
+
+
+def _create(queue: TaskQueue, title: str, now: float | None = None) -> Task:
+    record = queue.create(title, repo=TEST_REPO, now=now)
+    assert isinstance(record, Task)
+    return record
+
+
+class RecordingSpawn:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, row: dict[str, Any]) -> tuple[bool, dict[str, str]]:
+        self.calls.append(row["id"])
+        return True, {"session": "sess-1", "worktree": "wt-1"}
 
 
 def _policy(root: Path, active: bool) -> None:
@@ -28,6 +58,13 @@ def _policy(root: Path, active: bool) -> None:
         json.dumps({"worker-admission": {"disabled": active, "reason": "temporary"}}),
         encoding="utf-8",
     )
+
+
+def _own_test_route(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from zdd.routing import publish_active
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(root))
+    publish_active(root, bind="127.0.0.1", port=12345, pid=os.getpid(), version="test")
+    monkeypatch.setattr("agent_dispatch.server._wake_route_owned", False)
 
 
 @pytest.mark.parametrize("operation", ["claim", "reserve"])
@@ -69,6 +106,7 @@ def test_rest_claim_and_reservation_report_explicit_retryable_denial(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "install"
+    _own_test_route(tmp_path / "routing", monkeypatch)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     _policy(root, True)
     app = build_app(Config(db_path=str(tmp_path / "tasks.db")))
@@ -89,16 +127,15 @@ def test_rest_claim_and_reservation_report_explicit_retryable_denial(
 
 
 def test_same_supervisor_polls_and_restores_without_burning_attempts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, q: TaskQueue, client: DispatchClient,
 ) -> None:
     root = tmp_path / "install"
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
-    queue = OwnerResultQueue(tmp_path / "tasks.db")
-    client = QueueBackedClient(queue)
-    task = queue.create("pending")
-    held = queue.create("independent hold")
+    queue = q
+    task = _create(queue, "pending")
+    held = _create(queue, "independent hold")
     queue.set_hold(held.id, reason="separate", actor="operator")
-    spawn = _ok_spawn()
+    spawn = RecordingSpawn()
     lane = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO)
     for _ in range(2):
         _policy(root, True)
@@ -108,19 +145,21 @@ def test_same_supervisor_polls_and_restores_without_burning_attempts(
     _policy(root, False)
     assert lane.poll_once() == [task.id]
     assert spawn.calls == [task.id]
-    assert queue.latest_reservation(task.id).attempt == 1
+    reservation = queue.latest_reservation(task.id)
+    assert reservation and reservation.attempt == 1
     _policy(root, True)
     assert lane.poll_once() == []
-    assert queue.get(held.id).hold_reason == "separate"
+    still_held = queue.get(held.id)
+    assert still_held and still_held.hold_reason == "separate"
 
 
 def test_redrive_pause_precedes_startup_fence_and_restores_same_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, q: TaskQueue, client: DispatchClient,
 ) -> None:
     root = tmp_path / "install"
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
-    queue = OwnerResultQueue(tmp_path / "tasks.db")
-    task = queue.create("pending")
+    queue = q
+    task = _create(queue, "pending")
     reservation, _ = queue.reserve_spawn(task.id, reserved_by="lane")
     queue.record_spawn(
         reservation.key, session_handle="native-one", worktree="wt-one",
@@ -128,13 +167,16 @@ def test_redrive_pause_precedes_startup_fence_and_restores_same_identity(
     )
     before = queue.get_reservation(reservation.key)
     sends: list[str] = []
+    def redrive(_wt: str, _machine: str | None, _task: dict[str, Any],
+                _session: dict[str, Any], res: dict[str, Any]) -> bool:
+        sends.append(res["key"])
+        return True
+
     lane = Supervisor(
-        QueueBackedClient(queue), spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        client, spawn_fn=RecordingSpawn(), repo=TEST_REPO,
         supervisor_id="lane",
         liveness_fn=lambda *_: {"session_id": "native-one", "worktree_id": "wt-one"},
-        redrive_fn=lambda _wt, _machine, _task, _session, res: (
-            sends.append(res["key"]) or True
-        ),
+        redrive_fn=redrive,
     )
     _policy(root, True)
     assert lane.redrive_unclaimed_spawns() == 0
@@ -143,6 +185,7 @@ def test_redrive_pause_precedes_startup_fence_and_restores_same_identity(
     _policy(root, False)
     assert lane.redrive_unclaimed_spawns() == 1
     after = queue.get_reservation(reservation.key)
+    assert after and before
     assert (after.key, after.attempt, after.worktree, after.session_handle) == (
         before.key, before.attempt, before.worktree, before.session_handle,
     )
@@ -184,21 +227,20 @@ def test_claim_rechecks_after_selection_and_preserves_pending_reservation(
 
 
 def test_admitted_launch_finishes_but_later_poll_rechecks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, q: TaskQueue, client: DispatchClient,
 ) -> None:
     root = tmp_path / "install"
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     _policy(root, False)
-    queue = OwnerResultQueue(tmp_path / "tasks.db")
-    client = QueueBackedClient(queue)
-    first = queue.create("first", now=1)
-    second = queue.create("second", now=2)
-    spawn = _ok_spawn()
+    queue = q
+    first = _create(queue, "first", now=1)
+    second = _create(queue, "second", now=2)
+    spawn = RecordingSpawn()
     lane = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=3)
     reserve = client.reserve_spawn
 
-    def reserve_then_pause(*args: object, **kwargs: object) -> dict:
-        result = reserve(*args, **kwargs)
+    def reserve_then_pause(task_id: str, *, reserved_by: str) -> dict[str, Any]:
+        result = reserve(task_id, reserved_by=reserved_by)
         _policy(root, True)
         return result
 
@@ -216,21 +258,25 @@ def test_admitted_launch_finishes_but_later_poll_rechecks(
 def test_mcp_claim_retries_through_the_same_running_coordinator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.test_mcp_http import _boot, _call
+    from tests import test_mcp_http
+    from fastapi import FastAPI
+    boot: Callable[[FastAPI], tuple[str, Callable[[], None]]] = test_mcp_http._boot
+    call: Callable[[str, str, dict[str, str]], Coroutine[Any, Any, Any]] = test_mcp_http._call
 
     root = tmp_path / "install"
+    _own_test_route(tmp_path / "routing", monkeypatch)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     _policy(root, True)
     app = build_app(Config(db_path=str(tmp_path / "tasks.db")))
     task = app.state.queue.create("pending", repo=TEST_REPO)
-    url, stop = _boot(app)
+    url, stop = boot(app)
     args = {"machine": "host", "worktree": "wt", "repo": TEST_REPO, "task_id": task.id}
     try:
-        denied = asyncio.run(_call(url, "dispatch_claim", args))
+        denied = asyncio.run(call(url, "dispatch_claim", args))
         assert "worker-admission" in json.loads(denied.content[0].text)["error"]
         assert app.state.queue.get(task.id).attempts == 0
         _policy(root, False)
-        admitted = asyncio.run(_call(url, "dispatch_claim", args))
+        admitted = asyncio.run(call(url, "dispatch_claim", args))
         assert json.loads(admitted.content[0].text)["id"] == task.id
     finally:
         stop()
@@ -242,9 +288,10 @@ def test_pure_queue_does_not_inherit_the_host_action_policy(
     root = tmp_path / "install"
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     _policy(root, True)
-    queue = OwnerResultQueue(tmp_path / "tasks.db")
-    task = queue.create("embedded queue")
-    assert queue.claim_one("host/wt", task_id=task.id).id == task.id
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = _create(queue, "embedded queue")
+    claimed = queue.claim_one("host/wt", task_id=task.id)
+    assert isinstance(claimed, Task) and claimed.id == task.id
 
 
 def test_fallback_does_not_consume_its_one_attempt_during_inhibition(
@@ -274,24 +321,28 @@ def test_fallback_does_not_consume_its_one_attempt_during_inhibition(
 
 
 def test_restricted_startup_retry_is_checked_before_preparation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, q: TaskQueue, client: DispatchClient,
 ) -> None:
     root = tmp_path / "install"
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
-    queue = OwnerResultQueue(tmp_path / "tasks.db")
-    task = queue.create("pending")
+    queue = q
+    task = _create(queue, "pending")
     reservation, _ = queue.reserve_spawn(
         task.id, reserved_by="lane", driver="restricted-bridge",
     )
-    spawn = _ok_spawn()
-    spawn.restricted_bridge_for = lambda _: True
+    class RestrictedSpawn(RecordingSpawn):
+        def restricted_bridge_for(self, _task: dict[str, Any]) -> bool:
+            return True
+
+    spawn = RestrictedSpawn()
     lane = Supervisor(
-        QueueBackedClient(queue), spawn_fn=spawn, repo=TEST_REPO, supervisor_id="lane",
+        client, spawn_fn=spawn, repo=TEST_REPO, supervisor_id="lane",
     )
     prepared: list[str] = []
-    monkeypatch.setattr(lane, "_prepare_spawn_task", lambda task, _res: (
-        prepared.append(task["id"]) or task
-    ))
+    def prepare(row: dict[str, Any], _res: object) -> dict[str, Any]:
+        prepared.append(row["id"])
+        return row
+    monkeypatch.setattr(lane, "_prepare_spawn_task", prepare)
     _policy(root, True)
     assert lane.reconcile_reserving() == 0
     assert spawn.calls == [] and prepared == []
