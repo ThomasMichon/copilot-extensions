@@ -5877,9 +5877,20 @@
         "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[budget]",
         "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[binding]",
         "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[borrowed]",
-        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[second-client]"
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[second-client]",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_paired_context_binds_both_owners_without_readiness_on_read",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_requires_one_explicit_context[False]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_requires_one_explicit_context[True]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[config]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[scope]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[reader]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[shape]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[consumer]",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_executor_only_context_never_exposes_qualified_reads",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_paired_service_reads_paused_and_joins_admitted_read_before_context_close"
     ],
     "coverage_targets": [
+        "plugins/agent-index/src/agent_index/indexing/point_service.py",
         "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py",
         "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py",
         "libs/update-driver/src/update_driver/boot.py",
@@ -6288,9 +6299,9 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py"
     ],
     "sources": {
-        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "cd5f4841fd6b1f3a6d81d55484564b256901fe0082dc674a242f2e22b3a3cce0",
+        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "1843d32b92a677243c0555fe9c412531d12e003d818277a0be507e0a82c2eb97",
         "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py": "549224017c93c0413ed8a2f475f441fe3d2a2537d35e7c615acf53e40779483e",
-        "tools/promotion_unit_tests/test_point_executor_context.py": "9c82793173c0346c05b8ce579f503d35574266223d036914cf7647f0ccf63626",
+        "tools/promotion_unit_tests/test_point_executor_context.py": "0a6455ade547cde9b9ab5c4db4882486c346f703ba9906afd426ddbbad4b5fc7",
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
         "tools/promotion_unit_tests/test_point_completion_contract.py": "a6ccb6cf2fc76b2a83c8a6e35b1f370be4c619f413b18b873479eacc29a03a17",
         "plugins/agent-index/src/agent_index/indexing/point_worker.py": "bcde0f1c3e8b1e1c7330d6e72358ece09806511bdbfd96d8e546ec7975705317",
@@ -7245,6 +7256,8 @@
         "libs/update-driver/src/update_driver/boot.py": "ea3957d4a7458566a4cf844c7c94ceb1b6363bec93265f30087d062e32c5037b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_private.py": "9e45fa5807c7ecd0bb7d870450f562bd004528005510f35dc2df0b733f34741b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py": "892d522e26ab426018652c34c05f8f0c4cb3f3c9e943addaaa5b7ca0d67ff5d7",
-        "tools/promotion_unit_tests/test_boot_domain.py": "42da2cacbbdb6ff58618fabe1552530f2500bfea5cd6d16edabe18a291610e1d"
+        "tools/promotion_unit_tests/test_boot_domain.py": "42da2cacbbdb6ff58618fabe1552530f2500bfea5cd6d16edabe18a291610e1d",
+        "plugins/agent-index/src/agent_index/indexing/point_service.py": "c3364115ab48008aeac030983131b47e8f040167b3cf41e33372ac931435a999",
+        "tools/promotion_unit_tests/test_point_service_binding.py": "1ce8ae505e49027b2d3e188b0db2b87dc499aa3a4ddecdd4e53f9e6ffce5d16f"
     }
 }

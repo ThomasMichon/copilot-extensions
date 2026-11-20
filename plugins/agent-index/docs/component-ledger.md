@@ -218,7 +218,9 @@ Nonempty WAL or rollback journals refuse qualification rather than being
 silently ignored; their existing writer/recovery owner must settle them first.
 Qualification never checkpoints, deletes journals or repairs missing, empty
 or corrupt path evidence. Ordinary application/reuse connection defaults are
-unchanged.
+unchanged. `PathIndex(path, read_only=True)` opens only an existing file,
+skips schema initialization and forces every connection through that read-only
+policy; a missing parent directory is not created.
 
 This helper supports the existing explicit native application prerequisites.
 Its optional exact `point_scope` propagates through the existing ledger, raw
@@ -589,6 +591,30 @@ tasks is prepared again when needed. Exit stops only engines reported as started
 by this context, once per model, then closes its clients. Higher-covered execution
 still qualifies provider eligibility but acquires no bodies and requests no model
 work; a completed-task retry stays entirely local.
+
+Alternatively, pass `runtime_context` yielding
+`indexing.point_service.PointRuntime` instead of `executor_context`.
+`sources.azure_devops_point_executor.configured_azure_devops_point_runtime(...)`
+composes the production owned executor with a qualified named-path reader over
+the same configuration object, exact point scope, application scope and row
+budget. The service validates its configuration/scope and both callables before
+installing the pair. Missing, partial or conflicting selections refuse and close
+their opened context; supplying both context alternatives refuses construction.
+Executor-only callers retain their existing API and do not gain qualified reads.
+
+`await service.read_component(path)` returns the existing
+[`ComponentRead`](#selected-named-component-reads) unchanged. Every call opens
+and closes its own native connection on the executing thread, configures only
+in-memory routing against retained model-table bindings, and uses the existing
+non-initializing path owner and current qualification. It never creates native
+model bindings, fetches provider data, invokes model readiness or prepares state.
+Missing, busy, changed or incomplete evidence refuses rather than reusing an old
+observation. Reads can qualify applied state while execution is paused, without
+activating or acknowledging queued work. Pause/drain/stop close read admission;
+drain shares its existing timeout across reads and workers without cancellation.
+Stop joins admitted reader Futures and workers before closing clients, including
+repeated caller or loop-wide cancellation. Its completion Future coordinates
+concurrent stops without a cleanup Task that could be cancelled before entry.
 
 The point state must already exist in its selected directory, wholly disjoint
 from the legacy runner's directory. Invalid explicit configuration fails startup

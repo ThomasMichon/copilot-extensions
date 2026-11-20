@@ -68,11 +68,25 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             kwargs["before_model_embed"](model)
         return "complete"
 
+    def read(path: str, **kwargs: Any) -> str:
+        assert path == "named"
+        assert kwargs["point_scope"] == requested.scope
+        assert kwargs["config"] is options["config"]
+        assert (kwargs["scope"], kwargs["max_rows"], kwargs["legacy_data_dir"]) == (
+            options["scope"], options["max_rows"], options["legacy_data_dir"],
+        )
+        events.append("read")
+        return "qualified"
+
     stub("agent_index.indexing.point_service",
-         require_point_isolation=lambda *args: events.append("isolation"))
+         require_point_isolation=lambda *args: events.append("isolation"),
+         PointRuntime=lambda config, point_scope, execute, reader: SimpleNamespace(
+             config=config, point_scope=point_scope, execute=execute, read_component=reader,
+         ))
     stub("agent_index.store.source_layout", _point_scope_json=lambda scope: "scope")
     stub("agent_index.sources.azure_devops_point_runtime",
-         _require_connector_binding=require_binding, run_configured_azure_devops_points=execute)
+         _require_connector_binding=require_binding, run_configured_azure_devops_points=execute,
+         read_configured_azure_devops_component=read)
     context = load("sources.azure_devops_point_executor")
 
     async def offloop(call: Any) -> Any:
@@ -116,6 +130,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
     return SimpleNamespace(
         context=context.configured_azure_devops_point_executor,
+        paired_context=context.configured_azure_devops_point_runtime,
         options=options, state=state, events=events,
         task=SimpleNamespace(id="task", change_hints=requested),
     )
@@ -140,6 +155,22 @@ def test_executor_opens_inertly_and_stops_only_started_engines(
         if work:
             expected.insert(0, "first:stop")
         assert api.events[-len(expected):] == expected
+
+    with pytest.raises(StopIteration):
+        exercise().send(None)
+
+
+def test_paired_context_binds_both_owners_without_readiness_on_read(api: SimpleNamespace) -> None:
+    async def exercise() -> None:
+        async with api.paired_context(**api.options) as runtime:
+            assert runtime.config is api.options["config"]
+            assert runtime.point_scope == api.options["point_scope"]
+            assert runtime.read_component("named") == "qualified"
+            assert api.events == ["isolation", "connector", "first:open", "second:open", "read"]
+            assert runtime.execute(api.task) == "complete"
+        assert api.events[-4:] == [
+            "first:stop", "second:close", "first:close", "connector:close",
+        ]
 
     with pytest.raises(StopIteration):
         exercise().send(None)

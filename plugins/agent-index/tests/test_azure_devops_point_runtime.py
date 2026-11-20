@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager, suppress
+from contextlib import AbstractAsyncContextManager, closing, suppress
 from contextvars import ContextVar
 from dataclasses import replace
+import hashlib
 from pathlib import Path
+import sqlite3
 import threading
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,12 +24,14 @@ from agent_index.index_config import ModelProfile
 from agent_index.indexing.embedding_runtime import EmbeddingRuntime
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
 from agent_index.indexing.point_queue_consumer import PointQueueConsumer
-from agent_index.indexing.point_service import PointExecutor, PointService
+from agent_index.indexing.point_service import PointService
 from agent_index.indexing.point_worker_host import PointWorkerHost
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.worker import run_worker
 from agent_index.sources.azure_devops import AzureDevOpsConnector
-from agent_index.sources.azure_devops_point_executor import configured_azure_devops_point_executor
+from agent_index.sources.azure_devops_point_executor import (
+    configured_azure_devops_point_executor, configured_azure_devops_point_runtime,
+)
 from agent_index.sources.azure_devops_point_runtime import run_configured_azure_devops_points
 from agent_index.store.source_layout import SourceLayoutError
 
@@ -52,8 +56,8 @@ def run(f: worker.Fixture, task: TaskRecord, **kwargs: Any) -> TaskRecord:
 
 def _owned_executor_context(
     f: worker.Fixture, lifetime: list[str], events: list[tuple[str, str]],
-    *, embedding_runtime: EmbeddingRuntime | None = None,
-) -> AbstractAsyncContextManager[PointExecutor]:
+    *, embedding_runtime: EmbeddingRuntime | None = None, paired: bool = False,
+) -> AbstractAsyncContextManager[Any]:
     class Transport(httpx.MockTransport):
         def close(self) -> None:
             super().close()
@@ -86,7 +90,10 @@ def _owned_executor_context(
         lambda profile: cast(EngineClient, Client(f, profile.model_id)),
         ensure, lambda profile: events.append(("stop", profile.model_id)),
     )
-    return configured_azure_devops_point_executor(
+    context = (
+        configured_azure_devops_point_runtime if paired else configured_azure_devops_point_executor
+    )
+    return context(
         config=f.config, legacy_data_dir=f.config.data_dir.parent / "legacy",
         point_scope=f.claim.hints.scope, scope=worker.SCOPE, max_rows=32,
         create_connector=create_connector, embedding_runtime=runtime,
@@ -125,7 +132,7 @@ def _point_service_app(
         passive=passive,
         point_service_factory=lambda: PointService(
             config=f.config, point_scope=f.claim.hints.scope,
-            executor_context=lambda: _owned_executor_context(f, lifetime, events),
+            runtime_context=lambda: _owned_executor_context(f, lifetime, events, paired=True),
         ),
     ), lifetime
 
@@ -322,10 +329,234 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
                 unselected = runner.store.get_task(other["id"])
                 assert unselected is not None and unselected.status == TaskStatus.QUEUED_HINTS_V2
                 assert f.provider.body_reads == 4
+                await _wait_point_state(lambda: not runner.point_service.running)
+                before = list(f.provider.requests), list(events), list(f.calls)
+                observed = await runner.point_service.read_component("workitems/7/body.md")
+                assert observed.coverage == "named-target-only"
+                assert observed.applied_version == 3 and not observed.deleted and observed.chunks
+                assert (f.provider.requests, events, f.calls) == before
         assert lifetime == ["open", "closed"] and f.connector._http.client.is_closed
         assert events.count(("ensure", "first")) == events.count(("ensure", "second")) == 1
         assert [model for action, model in events if action == "stop"] == ["first"]
         assert sorted(model for action, model in events if action == "close") == ["first", "second"]
+
+    asyncio.run(exercise())
+
+
+def _read_state(f: worker.Fixture) -> dict[str, str]:
+    return {
+        str(path.relative_to(f.config.data_dir)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in f.config.data_dir.rglob("*") if path.is_file()
+    }
+
+
+@pytest.fixture
+def reader_connections(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    from agent_index.sources import azure_devops_point_runtime as runtime
+    from agent_index.store.multi_model_store import MultiModelStore
+
+    connections: list[Any] = []
+
+    def open_store(*args: Any, **kwargs: Any) -> MultiModelStore:
+        store = MultiModelStore(*args, **kwargs)
+        connections.append(store.content_store.db)
+        return store
+
+    monkeypatch.setattr(runtime, "MultiModelStore", open_store)
+    return connections
+
+
+def test_read_only_path_owner_never_initializes_or_mutates_state(
+    application: worker.Fixture,
+) -> None:
+    from agent_index.indexing.path_index import PathIndex
+
+    f = application
+    missing = f.config.data_dir / "missing" / "path_index.db"
+    with pytest.raises(sqlite3.OperationalError, match="existing state"):
+        PathIndex(missing, read_only=True)
+    assert not missing.parent.exists()
+    before = _read_state(f)
+    paths = PathIndex(f.config.data_dir / "path_index.db", read_only=True)
+    with closing(paths._connect()) as connection:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute("DELETE FROM indexed_files")
+    assert _read_state(f) == before
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_selected_reader_reopens_paused_without_native_preparation_or_provider_work(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, deleted: bool,
+    reader_connections: list[Any],
+) -> None:
+    from agent_index.indexing.path_index import PathIndex
+
+    f = application
+    if deleted:
+        f.provider.comment = {"id": 5, "version": 2, "isDeleted": True}
+    assert f.run().status == TaskStatus.COMPLETE
+    f.reopen()
+    trailing = f.tasks.enqueue(f.claim.hints.source, change_hints=replace(
+        f.claim.hints, targets=(WorkItemRevisionTarget("7", 4, ("trailing",)),),
+    ))
+    events: list[tuple[str, str]] = []
+    app, lifetime = _point_service_app(f, monkeypatch, model_events=events)
+
+    def no_schema(_: PathIndex) -> None:
+        pytest.fail("reader must not initialize path schemas")
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            service = app.state.task_runner.point_service
+            assert service.status()["paused"] and not service.status()["admitted"]
+            monkeypatch.setattr(PathIndex, "_init_schema", no_schema)
+            before = _read_state(f)
+            for path in ("workitems/7/body.md", "workitems/7/comments/5.md"):
+                result = await service.read_component(path)
+                assert result.point_scope == f.claim.hints.scope
+                assert result.coverage == "named-target-only"
+                assert result.deleted == (deleted and "/comments/" in path)
+                assert bool(result.chunks) != result.deleted
+            assert _read_state(f) == before
+            assert len(reader_connections) == 2
+            assert all(not connection.is_open() for connection in reader_connections)
+            assert f.tasks.get_task(trailing.id) == trailing
+            assert not f.provider.requests and not f.calls and not events
+            assert service.status()["paused"] and not service.status()["admitted"]
+        assert lifetime == ["open", "closed"]
+        assert all(action == "close" for action, _ in events)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("invalid", ["unknown", "checkpoint", "receipt"])
+def test_selected_reader_requalifies_and_refuses_missing_or_changed_evidence(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, invalid: str,
+    reader_connections: list[Any],
+) -> None:
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.store.source_layout import MARKER
+
+    f = application
+    assert f.run().status == TaskStatus.COMPLETE
+    f.reopen()
+    app, lifetime = _point_service_app(f, monkeypatch)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            service = app.state.task_runner.point_service
+            path = "workitems/7/body.md"
+            assert (await service.read_component(path)).chunks
+            if invalid == "unknown":
+                path = "workitems/8/body.md"
+            elif invalid == "checkpoint":
+                f.paths.invalidate_batch([(f.claim.hints.canonical_family, path)])
+            else:
+                marker = f.config.lance_dir / MARKER
+                marker.write_text("{}")
+            monkeypatch.setattr(PathIndex, "_init_schema", lambda _: pytest.fail("read initialized"))
+            before = _read_state(f)
+            with pytest.raises(SourceLayoutError):
+                await service.read_component(path)
+            assert _read_state(f) == before
+            assert reader_connections
+            assert all(not connection.is_open() for connection in reader_connections)
+            assert not f.provider.requests and not f.calls
+            assert service.status()["paused"] and not service.status()["admitted"]
+        assert lifetime == ["open", "closed"]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("application", [True], indirect=True)
+def test_selected_reader_refuses_a_different_retained_point_binding(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            before = _read_state(f)
+            with pytest.raises(SourceLayoutError):
+                await app.state.task_runner.point_service.read_component("workitems/7/body.md")
+            assert _read_state(f) == before
+            assert not f.provider.requests and not f.calls
+        assert lifetime == ["open", "closed"]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancelled_owner", ["caller", "loop"])
+def test_selected_reader_shutdown_joins_cancelled_reads_before_resource_close(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, cancelled_owner: str,
+) -> None:
+    from agent_index.indexing.component_read import read_component as read
+    from agent_index.sources import azure_devops_point_runtime as runtime
+
+    f = application
+    assert f.run().status == TaskStatus.COMPLETE
+    f.reopen()
+    entered, release = threading.Event(), threading.Event()
+    lifetime: list[str] = []
+    events: list[tuple[str, str]] = []
+    selection: ContextVar[str] = ContextVar("reader_selection", default="unselected")
+
+    def blocked(*args: Any, **kwargs: Any) -> Any:
+        assert selection.get() == "selected"
+        entered.set()
+        assert release.wait(timeout=8)
+        assert lifetime == ["open"] and not events
+        return read(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "read_component", blocked)
+
+    async def exercise() -> None:
+        selection.set("selected")
+        service = PointService(
+            config=f.config, point_scope=f.claim.hints.scope,
+            runtime_context=lambda: _owned_executor_context(f, lifetime, events, paired=True),
+        )
+        await service.start(legacy_data_dir=f.config.data_dir.parent / "legacy")
+        reader = asyncio.create_task(service.read_component("workitems/7/body.md"))
+        stopping: asyncio.Task[None] | None = None
+        joining: asyncio.Task[None] | None = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            assert not await service.drain(timeout=0.01)
+            with pytest.raises(RuntimeError, match="not accepting"):
+                await service.read_component("workitems/7/body.md")
+            await service.resume()
+            stopping = asyncio.create_task(service.stop())
+            await asyncio.sleep(0)
+            joining = asyncio.create_task(service.stop())
+            await asyncio.sleep(0)
+            for _ in range(2):
+                if cancelled_owner == "loop":
+                    for task in asyncio.all_tasks():
+                        if task is not asyncio.current_task():
+                            task.cancel()
+                else:
+                    reader.cancel()
+                    stopping.cancel()
+                    joining.cancel()
+                await asyncio.sleep(0.02)
+                assert not reader.done() and not stopping.done() and not joining.done()
+                assert lifetime == ["open"] and not events
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await reader
+        assert stopping is not None
+        with pytest.raises(asyncio.CancelledError):
+            await stopping
+        assert joining is not None
+        with pytest.raises(asyncio.CancelledError):
+            await joining
+        await service.stop()
+        assert lifetime == ["open", "closed"]
+        assert sorted(events) == [("close", "first"), ("close", "second")]
+        assert not f.provider.requests and not f.calls
 
     asyncio.run(exercise())
 

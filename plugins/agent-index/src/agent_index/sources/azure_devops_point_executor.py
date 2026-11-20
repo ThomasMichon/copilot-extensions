@@ -11,15 +11,17 @@ from typing import TYPE_CHECKING
 
 from agent_index.indexing.embedding_runtime import _model_readiness
 from agent_index.indexing.point_hints import PointChangeHints
-from agent_index.indexing.point_service import require_point_isolation
+from agent_index.indexing.point_service import PointRuntime, require_point_isolation
 from agent_index.indexing.runner import _settle
 from agent_index.sources.azure_devops_point_runtime import (
-    _require_connector_binding, run_configured_azure_devops_points,
+    _require_connector_binding, read_configured_azure_devops_component,
+    run_configured_azure_devops_points,
 )
 from agent_index.store.source_layout import _point_scope_json
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig, ModelProfile
+    from agent_index.indexing.component_read import ComponentRead
     from agent_index.indexing.embedding_runtime import EmbeddingRuntime
     from agent_index.indexing.point_service import PointExecutor
     from agent_index.indexing.task_store import TaskRecord
@@ -91,3 +93,28 @@ async def configured_azure_devops_point_executor(
         yield executor
     finally:
         await _settle(loop.run_in_executor(None, copy_context().run, cleanup.close))
+
+
+@asynccontextmanager
+async def configured_azure_devops_point_runtime(
+    *, config: IndexConfig, legacy_data_dir: Path, point_scope: PointScope,
+    scope: str, max_rows: int, create_connector: Callable[[], AzureDevOpsConnector],
+    embedding_runtime: EmbeddingRuntime,
+) -> AsyncIterator[PointRuntime]:
+    """Compose the owned executor and per-operation reader over the same binding.
+
+    The service joins admitted execution and reads before this context exits.
+    Reader calls cannot override the selected domain, application scope or budget.
+    """
+    async with configured_azure_devops_point_executor(
+        config=config, legacy_data_dir=legacy_data_dir, point_scope=point_scope,
+        scope=scope, max_rows=max_rows, create_connector=create_connector,
+        embedding_runtime=embedding_runtime,
+    ) as execute:
+        def read(path: str) -> ComponentRead:
+            return read_configured_azure_devops_component(
+                path, config=config, legacy_data_dir=legacy_data_dir,
+                point_scope=point_scope, scope=scope, max_rows=max_rows,
+            )
+
+        yield PointRuntime(config, point_scope, execute, read)

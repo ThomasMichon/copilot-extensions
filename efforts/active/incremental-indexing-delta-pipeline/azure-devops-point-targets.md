@@ -328,13 +328,15 @@ that a running service's selected binding and reader satisfy those semantics.
 
 ### Selected executor and qualified-reader composition
 
-The next **agent-recommended refinement** stays inside the existing
+This reviewed **agent-recommended refinement** stays inside the existing
 `build_app(point_service_factory=...)` / `PointService` Python binding. Compose
 the configured executor above with the existing
 `indexing.component_read.read_component` owner as one explicit selection, not
 two independently supplied callables whose metadata happens to agree. This
-proposal does not implement that selection or change health, intake receipts,
-queue eligibility, HTTP routes or any other wire contract.
+contract changes no health, intake receipts, queue eligibility, HTTP routes or
+other wire form. The explicit
+[paired implementation](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
+realizes the selection independently of later wire-caller migration.
 
 The configured selection binds one `IndexConfig`, exact `PointScope`,
 application/recovery scope and finite qualification row budget. Its resource
@@ -359,8 +361,10 @@ remain explicit refusals, never an empty legacy-shaped success. Do not retain
 an earlier qualification as permission for a later read.
 
 Open only existing native state needed by this operation through its current
-owners; do not prepare schemas/indexes, register models, repair coverage,
+owners; do not prepare schemas/indexes, create native model registrations, repair coverage,
 enumerate a discussion or invoke acquisition/embedding readiness for a read.
+Configuring in-memory model-table routing must validate existing retained bindings,
+not create or repair native tables.
 Keep thread-affine native handles within their owning operation and close them
 on success or refusal. Paused intake/recovery is not application evidence:
 starting or reading must neither activate retained work nor acknowledge it.
