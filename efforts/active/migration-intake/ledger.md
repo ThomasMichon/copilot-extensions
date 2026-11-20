@@ -1250,3 +1250,26 @@ now record that acceptance rather than presenting it as still pending.
 All nine technical rows remain unchecked; Draft status, temporary-token
 implementation restriction and actual owners remain. Earlier proposed rows
 are unchanged history, not a second current acceptance gate or claim release.
+
+## Proposed retained legacy supervisor receiving - 2026-11-20 UTC
+
+| Source | Complete proposed receiver | Retained boundary |
+|---|---|---|
+| #13617 | Existing [Installer Upgrade Recovery Plan](../installer-upgrade-recovery/README.md#retained-legacy-supervisor-transition---13617), [case](../installer-upgrade-recovery/legacy-supervisor-upgrade.md) and G13617: P13617-1..3/V13617-1..3 preserve the complete original and discussion. | Seven technical rows unchecked; original transition OR actionable prerequisite, actual native/cycle/worker custody, distinct coordinator-only positive, full-update/repeat truth and optional capture. Review/current complete receiving and custody readback/separate judgment precede source disposition. No implementation, process action or owner appointment. |
+
+The [dated mapping](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+retains #13614's independent same-running-consumer qualification and existing
+owners; it is not forced into the incoming-installation gate. Other existing
+canonicals retain their precise gaps, not another documentary umbrella.
+
+## Orphan adoption reviewed receiving receipt - 2026-11-20 UTC
+
+#13718 delivered complete four-stage/two-shape planned receiving. Complete
+current original/discussions, ROOT/intake and custody readback preceded the
+separate acknowledged #3443 NOT_PLANNED tracking retirement. The
+[live receiver](../orphan-task-adoption/README.md#coordination) and
+[follow-through](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md#previous-reviewed-adoption-and-separate-source-disposition)
+record actual acceptance; all nine technical rows, Draft status, #7237's
+independent relationship and actual resource owners remain unchanged.
+Earlier proposed entries are preserved history, not an additional pending
+receiving gate or proof of feature implementation.
