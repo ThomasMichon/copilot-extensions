@@ -519,7 +519,10 @@ effects unchanged. Admission is revalidated after the initial source read,
 before acquisition; final source/admission work precedes the journal/topology
 check. Candidate serialization is bounded before acquisition/publication so a
 valid origin cannot produce an unreadable oversized record. Fresh current-cell
-checks ignore stale launch-payload metadata without weakening receipt policy.
+checks omit only `COPILOT_PLUGIN_ROOT`, preserving WSL distribution identity
+and other observed environment evidence. Four focused propagation/identity
+controls pass after this final correction; guest resolution uses the canonical
+owner with fixture-only observations, not native WSL qualification.
 This is neither native Linux qualification nor actual domain/boot evidence.
 Sealed reconciliation, final import, ordinary command integration and the
 complete historical installed window remain open. No installation, migration,

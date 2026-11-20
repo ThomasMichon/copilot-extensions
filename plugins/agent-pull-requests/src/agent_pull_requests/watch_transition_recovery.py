@@ -26,6 +26,10 @@ from .watch_transition import (
 Document = dict[str, Any]
 
 
+def _controller_environment() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if key != "COPILOT_PLUGIN_ROOT"}
+
+
 def _validate_scope(
     root: Path, binding: object, installation: WatchInstallation | None,
     guard: CutoverLock | None,
@@ -39,7 +43,9 @@ def _validate_scope(
     else:
         if binding["kind"] != "installation" or guard is None:
             raise PermissionError("watch prepared recovery requires its installation transaction")
-        installation.require_transition_origin(binding["installation"], guard=guard, environment={})
+        installation.require_transition_origin(
+            binding["installation"], guard=guard, environment=_controller_environment(),
+        )
 
 
 def _read_prepared(

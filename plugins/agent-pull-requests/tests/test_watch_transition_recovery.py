@@ -624,10 +624,47 @@ def test_fresh_controller_ignores_only_stale_launch_payload_environment(
 ) -> None:
     old, current, origin = prepared
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(old.payload_root))
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Observed Fixture Guest")
+    require_current = WatchInstallation.require_current
+
+    def preserved(self: WatchInstallation, **kwargs: Any) -> Document:
+        environment = kwargs["environment"]
+        assert environment["WSL_DISTRO_NAME"] == "Observed Fixture Guest"
+        assert "COPILOT_PLUGIN_ROOT" not in environment
+        return require_current(self, **kwargs)
+
     with current.transaction(timeout=2, environment={}) as guard:
-        result = controller.recover_prepared_state_transition(
-            timeout=10, installation=current, guard=guard,
-        )
+        with monkeypatch.context() as checks:
+            checks.setattr(WatchInstallation, "require_current", preserved)
+            result = controller.recover_prepared_state_transition(
+                timeout=10, installation=current, guard=guard,
+            )
     assert result["origin"] == origin
     assert result["controller"]["installation"] == current.evidence()
     assert controller.writer_held
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_current_controller_preserves_guest_observation_and_conflict_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registered: bool,
+) -> None:
+    from agent_pull_requests import _installation_context as primitive
+    from agent_pull_requests.watch_transition_recovery import _controller_environment
+
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: True)
+    monkeypatch.setattr(
+        primitive, "_read_guest_environment",
+        lambda _profile: {"distribution": "Example Distro"} if registered else None,
+    )
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Other Distro" if registered else "Example Distro")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(tmp_path / "stale-launch-payload"))
+    monkeypatch.setenv("AGENT_FIXTURE_CURRENT_SCOPE", "retain-current-observation")
+    environment = _controller_environment()
+    assert "COPILOT_PLUGIN_ROOT" not in environment
+    assert environment["AGENT_FIXTURE_CURRENT_SCOPE"] == "retain-current-observation"
+    resolve = cast(Callable[..., str | None], getattr(primitive, "_resolve_wsl_distribution"))
+    if registered:
+        with pytest.raises(ValueError, match="guest-identity-conflict"):
+            resolve(tmp_path, environment=environment, explicit=None)
+    else:
+        assert resolve(tmp_path, environment=environment, explicit=None) == "Example Distro"

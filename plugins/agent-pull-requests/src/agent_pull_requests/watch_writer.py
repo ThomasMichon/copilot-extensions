@@ -314,7 +314,7 @@ class WatchWriter:
         """Receive a prepared journal under fresh admission, without restoring effects."""
         from zdd.cutover_lock import lock_path
 
-        from .watch_transition_recovery import recover_prepared
+        from .watch_transition_recovery import _controller_environment, recover_prepared
 
         with self._operation(timeout) as deadline:
             def validate() -> None:
@@ -325,7 +325,7 @@ class WatchWriter:
                     guard.require_owned()
                     if guard.path != lock_path(installation.run_root):
                         raise PermissionError("watch prepared recovery requires its own installation transaction")
-                    installation.require_current(environment={})
+                    installation.require_current(environment=_controller_environment())
                     if installation.state_root != self.root:
                         raise PermissionError("watch prepared recovery installation state root differs")
                 elif guard is not None:

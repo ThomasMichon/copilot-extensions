@@ -644,7 +644,9 @@ payload to exist.
 Precondition refusal leaves an existing owner unchanged. Fresh installation
 checks use the already selected cell rather than a stale launch-payload
 environment. Admission is checked again after the initial source read, before
-acquisition. Candidate serialization must fit the reader's 1 MiB metadata limit
+acquisition. Only `COPILOT_PLUGIN_ROOT` is omitted from current admission;
+WSL distribution identity and all other current environment evidence remain.
+Candidate serialization must fit the reader's 1 MiB metadata limit
 before custody or publication changes. The final source and admission work
 precedes the unchanged-journal and full-topology check.
 
