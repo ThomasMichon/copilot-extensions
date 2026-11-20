@@ -5994,9 +5994,11 @@ local-artifact release-age rules.
 
 This path builds no backend, acquires no dependency, creates no tooling or
 application environment, publishes no selector/command and invokes no
-application/setup callback. It currently prepares one independent application;
-transitive `application-sources` require their separate owning preparation and
-are explicitly refused rather than silently resolved. Occupied output refuses,
+application/setup callback. It currently prepares one independent application.
+Declared `application-sources` behind unselected optional extras remain inert;
+only applicable dependencies in the inspected root/extra/target closure require
+their separate owning preparation. A selected missing or unassociated input
+refuses rather than silently resolving through the registry. Occupied output refuses,
 and partial output remains retained after failure or an uncertain child result;
 there is no automatic replay. Preparation, installed protection and actual
 readiness remain separate acceptance stages. Existing state-preserving

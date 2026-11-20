@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-11-20
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
@@ -14,7 +14,8 @@
 A reviewer loop turns one target change into one durable collaboration between
 its submitter and a reviewer. The submitter improves the change; the reviewer
 renders timely, explicit verdicts and actionable feedback; the loop preserves
-their shared context until the change lands or is deliberately abandoned.
+their shared context until the change lands, is abandoned, or meets the
+review flow's explicit inactivity policy.
 
 The review is not a sequence of disposable jobs. It is one long-lived dispatch
 task embodied by one worktree-identified reviewer in any supported fabric venue
@@ -230,11 +231,29 @@ to card merely for ordinary unanswered waiting.
 
 ### settle-and-release
 
-Merge or deliberate abandonment records the review's terminal resolution,
-retires its reviewer session, and releases its worktree allocation through the
-parent vision's reclamation guarantees. If the target later becomes reviewable
-again after terminal settlement, it begins a new review generation rather than
-reviving a released lineage.
+A verdict ends a round, not the assignment. The task suspends; its worker
+stops and frees a slot. The next revision resumes the same task, worktree and
+conversation. The reviewer does not submit the task just because it posted an
+approval or requested changes. Suspension must not lose a ready landing
+action: when policy assigns landing to the reviewer, a ready-to-merge signal
+resumes that same reviewer without waiting for another author edit. Where
+the author or automation owns landing, it remains their action.
+
+The reviewer flow, not core Dispatch, determines when review work is over.
+It verifies that the target merged, was abandoned, or meets its stale-PR
+policy (for example, more than seven days without an author update). A stale
+verdict, a worker timeout or missing forge data is not a stale PR.
+
+On merge the assigned reviewer wakes for closeout. Before submitting it
+settles downstream claims and finalizes its work: it may hard-reset and
+remove its **own disposable candidate checkout**, not the driver's assigned
+worktree or an author's branch. Any edits the reviewer owns as deliverables
+must land through the normal PR flow. The driver's worktree is now cleanable
+on acceptance but still assigned; rejection resumes the same reviewer there,
+recreating disposable state as needed. Only a completed or abandoned task, or an
+explicit release for reassignment, may give up its worktree. A forge merge
+is not itself task completion. If the target becomes reviewable again after
+terminal settlement, it begins a new review generation.
 
 ## Non-Goals / Boundaries
 

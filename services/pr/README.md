@@ -346,8 +346,8 @@ The selected executing core must declare
 `agent-pull-requests.workspace-generation-associations/v1`; an absent or
 incompatible declaration refuses this selection before provisioning.
 Omitting the field retains the existing workspace behavior and wire contract.
-This profile cannot compose with terminal reads, preparation or comment
-mappings.
+This writer profile cannot compose with preparation or comment mappings.
+Terminal reads require the separate retained transition below.
 
 The existing cache owner rejects definite CAS conflicts and full-cache outcomes
 before recording an observation or reservation. After that guarded admission,
@@ -371,10 +371,41 @@ a terminal live admission or evidence of a fresh provider read.
 `serve` validates the selected existing storage, never adopts it. Adding this
 selection to a previously provisioned baseline refuses instead of backfilling
 associations. Removing it or selecting a strict older reader also refuses the
-expanded envelope without rewriting it. Retained terminal adoption remains
-unsupported for these populated volumes until the separate positive-transition
-slice is qualified. This profile authorizes no installed migration, native
+expanded envelope without rewriting it. This profile authorizes no installed migration, native
 watch reassignment, unknown-effect recovery, provider access or service stop.
+
+#### Recorded-generation terminal transition
+
+For an existing volume provisioned with the association writer, retaining
+`generation_associations: true` and selecting `terminal_reads: true` enables
+the recorded-cache variant of the existing `adopt-terminal` command. The
+executing core must separately declare
+`agent-pull-requests.recorded-terminal-cache-adoption/v1`.
+Fresh provisioning with both selections refuses; `serve` only validates
+already-adopted state. Missing support never falls back to another transition.
+
+Preflight requires confirmed original associations for every current and
+noncurrent generation, complete open first-epoch conversations and unchanged
+cache limits. Any pending publication, unassociated object, closed/reopened
+history, active legacy native observation or unsupported recovery state
+refuses unchanged. The cache owner validates each object once. Adoption uses
+the existing writer lease, finite budget, replay-before-cache lock order and
+complete-envelope capacity reservation; interruption retains valid progress
+for explicit retry.
+
+The versioned `recorded_terminal_cache_version: 1` marker selects workspace-only
+generation/epoch bindings in the existing terminal ledger. It does not create
+native target admissions, replay observations, journal events or cache writes.
+Current/noncurrent lookup, chunks and sync comparisons retain the original
+bytes and cursors. Partial same-epoch refreshes do not withdraw those recorded
+body bindings; authoritative terminal/reopen evidence still fences them.
+Fresh validated acquisition establishes the actual native
+target through the existing terminal publication path, not the baseline
+association writer. Delayed native samples captured before that binding
+remain fenced. Retry of a complete adoption validates current terminal-owned
+generations without importing them into the old baseline association history.
+Removing either selection or rolling back to a strict older reader refuses
+the expanded envelope unchanged.
 
 ## Optional preparation-only hosting
 
