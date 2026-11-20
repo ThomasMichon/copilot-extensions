@@ -639,6 +639,44 @@ intake may park work while point execution is paused; notification cannot
 activate it. The HTTP contract remains intake v1/v2 with no ordinary v2
 execution declaration, selector or activation endpoint.
 
+### Running point-service declaration
+
+`GET /health` separately reports `point_service_contract` with identity
+`agent-index.point-service` and integer `version: 1`. Only the installed
+production executor/reader composition reports `paired: true`; an unentered
+factory, custom `PointRuntime` callable pair or executor-only context does not.
+The internal configured-runtime type distinguishes this owned composition; it
+is not an attestation boundary against trusted in-process code.
+
+A positive declaration includes `representation: "point-components"`,
+`representation_version: 1`, `coverage: "named-target-only"`,
+`hints_versions: [2]` and `read_boundary: "in-process-only"`. Its
+`scope_fingerprint` is SHA-256 of UTF-8 bytes from the existing complete
+point-scope receipt JSON, with that serializer's defaults unchanged. This
+nonsecret equality selector covers source, family, account and every binding
+field without listing them in health; it is not authentication.
+
+The `state`, `failed`, `execution_admitted` and `read_admitted` fields observe
+current lifecycle admission, not applied content, provider eligibility,
+governance or model readiness. Paused reconstruction can admit named reads;
+explicit activation admits execution. Failure closes execution but does not
+invent reader failure. Drain closes both admissions and preserves the failure
+flag; rollback never activates reconstructed or failed work. Stopped, passive,
+unselected, incomplete and executor-only selections report `paired: false`,
+both admissions false and a specific `reason`, without stale scope semantics.
+Health opens no stores, locks, provider requests or engines.
+
+`indexing.point_service_contract.require_point_service(...)` is a pure optional
+requirement validator, not wired into the existing client. It accepts only the
+complete v1 semantics, exact expected scope and suitable lifecycle admission;
+missing, malformed, incompatible or rolled-back support refuses with recovery
+guidance. Existing source-only and hinted callers remain unchanged. A future
+caller must rediscover on peer/generation change using existing service identity,
+never replay an uncertain acceptance as legacy work, and retain every
+effect-side qualification. Cached positive observations cannot reopen drained
+or stopped readers/executors. Caller migration, HTTP reads, general v2 execution,
+activation and rollout remain separate.
+
 There is no second scheduler, timer or child process. The existing governed
 `TaskRunner` iteration executes at most one point claim before its legacy queue
 turn, and never starts point work alongside an adopted detached worker.

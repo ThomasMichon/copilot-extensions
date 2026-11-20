@@ -125,12 +125,15 @@ by this document.
 
 ## Planning and tracking gate
 
-The complete direct P1475/V1475/G1475 clauses, continuing Coordination,
-Phase 7 intake, dated Journal and route must land through normal domain review.
-Then read back the current original and both discussions together with the whole
-applicable receiving contract and actual custody before a separate source
-judgment. Keep #1475 OPEN during the proposal; no retirement is automatic.
-All six technical rows stay unchecked until their own evidence exists.
+#13701 and the explicit plugin-AND-runtime clarification #13703 delivered
+the complete P1475/V1475/G1475 clauses, continuing Coordination, Phase 7,
+dated Journal and intake route through normal review. Complete corrected
+receiving/original/discussion/custody readback and a separate audited judgment
+preceded #1475's NOT_PLANNED redundant-tracking retirement.
+Continue the planned work under OPEN #1303 and the existing domain Plan,
+not the retired #1475 token. Do not repeat the completed documentary gates.
+All six technical rows stay unchecked until their own evidence exists; accepted
+planning is not a provider, native pass, custody transfer or rollout.
 
 The source's private downstream examples are not reproduced. The portable
 minimal-seed, full-user Windows and repository-restore acceptance is retained

@@ -216,8 +216,13 @@ After the reviewed proposal, the operator admitted execution:
   joined cleanup.
   The [selected executor/qualified-reader refinement](azure-devops-point-targets.md#selected-executor-and-qualified-reader-composition)
   now composes both actual owners through one shared in-process binding, with
-  per-read non-creating qualification and joined shutdown. Running-service
-  declarations and later wire-caller migration remain separate gates.
+  per-read non-creating qualification and joined shutdown. The
+  [reviewed running-service declaration](azure-devops-point-targets.md#running-service-declaration-and-provider-rollback)
+  now has receiver-only selected-pair/lifecycle advertisement and pure optional
+  missing-support/provider-rollback validation. Existing clients remain unchanged;
+  the [request-bound required-admission refinement](point-required-admission.md)
+  must be reviewed before implementation and wire-caller migration: a prior
+  provider can retain the old v2 form after health-to-request rollback.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.

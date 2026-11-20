@@ -241,3 +241,49 @@ def test_ordinary_client_request_does_not_require_negotiation(service: Service) 
     api, calls = _connected_api(client)
     assert api.reindex(source="git:sample", full=True)["accepted"]
     assert calls == [("POST", "/reindex")]
+
+
+def test_point_provider_rollback_refuses_feature_without_losing_retained_or_legacy_work(
+    service: Service,
+) -> None:
+    from agent_index.indexing.point_hints import (
+        PointBinding, PointChangeHints, WorkItemRevisionTarget,
+    )
+    from agent_index.indexing.point_service_contract import require_point_service
+
+    client, store, _ = service
+    hints = PointChangeHints(
+        source="ado:sample:points", canonical_family="ado:points", account_id="account-a",
+        binding=PointBinding("https://example.test/project", "query", "context"),
+        targets=(WorkItemRevisionTarget("42", 7, ("original-event",)),),
+    )
+    accepted = client.post("/reindex/hints", json={
+        "source": hints.source, "change_hints": hints.to_dict(),
+    }).json()["task"]
+    retained = store.pin_point_claim(accepted["id"], expected_hints=hints)
+    prior = FastAPI()
+    effects: list[str] = []
+
+    @prior.get("/health")
+    def health() -> dict[str, Any]:
+        return {"indexing_contract": intake_contract(), "instanceToken": "prior-provider"}
+
+    @prior.post("/reindex")
+    def reindex() -> dict[str, bool]:
+        effects.append("legacy-post")
+        return {"accepted": True}
+
+    prior_client = TestClient(prior)
+    for observed in (client.get("/health").json(), prior_client.get("/health").json()):
+        with pytest.raises(RuntimeError, match="point-service v1"):
+            require_point_service(observed, hints.scope, operation="execute")
+        assert store.get_task(retained.id) == retained
+        assert store.dequeue_next() is None
+    assert effects == []
+    api, calls = _connected_api(client)
+    legacy = api.reindex(source="git:unrelated")["task"]
+    assert calls == [("POST", "/reindex")]
+    dequeued = store.dequeue_next()
+    assert dequeued is not None and dequeued.id == legacy["id"]
+    assert store.get_task(retained.id) == retained
+    assert retained.change_hints == hints and retained.point_claim_id

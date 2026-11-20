@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING
 
 from agent_index.indexing.embedding_runtime import _model_readiness
 from agent_index.indexing.point_hints import PointChangeHints
-from agent_index.indexing.point_service import PointRuntime, require_point_isolation
+from agent_index.indexing.point_service import (
+    PointRuntime, _ConfiguredPointRuntime, require_point_isolation,
+)
 from agent_index.indexing.runner import _settle
 from agent_index.sources.azure_devops_point_runtime import (
     _require_connector_binding, read_configured_azure_devops_component,
@@ -117,4 +119,4 @@ async def configured_azure_devops_point_runtime(
                 point_scope=point_scope, scope=scope, max_rows=max_rows,
             )
 
-        yield PointRuntime(config, point_scope, execute, read)
+        yield _ConfiguredPointRuntime(config, point_scope, execute, read)
