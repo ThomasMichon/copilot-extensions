@@ -126,7 +126,9 @@ def test_exact_winner_is_prospective_across_reconfiguration(
 def test_scoped_original_receipt_and_disposition_survive_drain(
     local: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, retry_stage: str, disposition: str
 ) -> None:
-    from agent_dispatch import submission_readiness_observation
+    import json
+
+    from agent_dispatch import pool_decline_observation, procutil, remote_dispatch, submission_readiness_observation
     from agent_dispatch.ordinary_capture import configured_capture
     from agent_dispatch.queue_relevance import RelevanceScope
     from tests._ordinary_relationship_controls import report
@@ -237,6 +239,36 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         queue.get_reservation(key).worktree_writer_requirement
         == reservation.worktree_writer_requirement
     )
+    ground = local.ground
+    native_id = ground["last_session_id"]
+    observation = {
+        "ok": True, "contract": pool_decline_observation.CONTRACT, "version": 1,
+        "operation": "observe-finalized", "status": "finalized", "task_id": task.id,
+        "reservation_key": first.key, "native_id": native_id, "worktree_id": ground["id"],
+        "project": ground["repo"], "path": ground["path"], "machine": "host-a",
+        "creation_nonce": ground["creation_nonce"], "allocation": ground["dispatch_attempt"],
+        "head_revision": 1, "checkout": {"head": "a" * 40, "branch": "worktree/test"},
+        "checkout_retained": True, "task_release": False, "process_retirement": False,
+    }
+
+    def finalized(*argv: str, timeout: float) -> subprocess.CompletedProcess[str]:
+        assert argv[argv.index("--closeout-reservation") + 1] == first.key
+        assert argv[argv.index("--closeout-native") + 1] == native_id == "native-a"
+        return subprocess.CompletedProcess(argv, 0, json.dumps(observation), "")
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(procutil, "run_agent_worktrees_capture", finalized)
+    arguments = result["receipt"]["arguments"]
+    finished = queue.finish_relevance_closeout(task.id, **arguments)
+    assert finished.event_type == "task.abandoned"
+    assert queue.get(task.id).status == finished.task.status == "abandoned"
+    closeout = queue.relevance_snapshot(task.id)["closeout"]
+    acknowledgement = closeout["acknowledgement"]
+    assert acknowledgement["arguments"] == arguments
+    assert acknowledgement["binding"] == closeout["resource_binding"] == result["receipt"]["binding"]
+    assert acknowledgement["binding"]["reservation_key"] == key
+    assert acknowledgement["observation"] == observation
+    assert acknowledgement["process_retirement"] is False
 
 
 @pytest.mark.parametrize("initially_selected", [False, True])
