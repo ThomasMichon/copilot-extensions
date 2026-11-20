@@ -19,11 +19,11 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
-    from agent_index.indexing.task_store import TaskStore
+    from agent_index.indexing.task_store import TaskRecord, TaskStore
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +124,7 @@ def _install_signal_handlers(cancelled: threading.Event) -> None:
 def run_worker(
     task_id: str, *, config: IndexConfig | None = None,
     indexer: Callable[..., dict[str, object]] | None = None,
+    point_executor: Callable[[TaskRecord], object] | None = None,
 ) -> int:
     """Entry point for ``agent-index index-worker --task <id>``.
 
@@ -133,6 +134,12 @@ def run_worker(
     Consumers may supply their config and bound indexing callable without a
     process-global engine replacement. Hint support is checked on that exact
     callable; binding a capable function does not implicitly copy its capability.
+
+    An explicitly bound point executor instead runs synchronously under the
+    supplied config's writer lock, without process setup or worker registration.
+    It owns point qualification/completion and client lifetime remains with the
+    caller. Its return value is not a completion receipt. The CLI supplies no
+    point executor; ordinary detached execution remains legacy-only.
     """
     from agent_index import config as _config
     from agent_index.index_config import IndexConfig
@@ -143,6 +150,12 @@ def run_worker(
     from agent_index.indexing.task_store import TaskStatus, TaskStore
     from agent_index.runtime_version import current_runtime_version
 
+    if point_executor is not None and (
+        config is None or indexer is not None or not callable(point_executor)
+    ):
+        print("[FAIL] worker: point executor requires explicit config and no legacy indexer",
+              file=sys.stderr)
+        return 2
     forward_config = config is not None and indexer is None
     config = config if config is not None else IndexConfig()
     store = TaskStore(config.data_dir / "tasks.db")
@@ -150,6 +163,8 @@ def run_worker(
     if task is None:
         print(f"[FAIL] worker: task {task_id} not found", file=sys.stderr)
         return 2
+    if point_executor is not None:
+        return _run_point_executor(task, store, config, point_executor)
     if task.status in {
         TaskStatus.COMPLETE.value,
         TaskStatus.PARTIAL.value,
@@ -157,7 +172,9 @@ def run_worker(
     }:
         return 0  # already terminal — idempotent no-op
 
-    run_reindex = indexer if indexer is not None else indexing_engine.run_reindex
+    run_reindex: Callable[..., dict[str, object]] = (
+        indexer if indexer is not None else indexing_engine.run_reindex
+    )
     if task.change_hints is not None:
         if task.status != TaskStatus.PROCESSING.value:
             print("[FAIL] worker: hinted task must be claimed before execution", file=sys.stderr)
@@ -202,7 +219,9 @@ def run_worker(
         log.info("worker: task %s resuming (attempt %d)", task_id, task.attempt_count)
     try:
         cb.check_cancelled()
-        kwargs = {"full": task.full, "source": src, "progress_cb": cb, "resume_since": resume_since}
+        kwargs: dict[str, object] = {
+            "full": task.full, "source": src, "progress_cb": cb, "resume_since": resume_since,
+        }
         if forward_config:
             kwargs["config"] = config
         if task.change_hints is not None:
@@ -213,6 +232,7 @@ def run_worker(
             store.set_result_stats(task_id, result)
         sources_failed = result.get("sources_failed") if isinstance(result, dict) else None
         if sources_failed:
+            failures = cast(list[dict[str, object]], sources_failed)
             # One or more of the requested sources individually failed inside
             # the run-reindex loop (caught per-source so the OTHER sources
             # still get indexed, per #1350) -- the worker itself didn't crash,
@@ -226,8 +246,8 @@ def run_worker(
             log.warning(
                 "worker: task %s partial -- %d source(s) failed: %s",
                 task_id,
-                len(sources_failed),
-                [f.get("source") for f in sources_failed],
+                len(failures),
+                [f.get("source") for f in failures],
             )
             return 0
         store.update_progress(task_id, "complete", 100.0, "Indexing complete")
@@ -242,4 +262,47 @@ def run_worker(
         err = f"{type(exc).__name__}: {exc}"
         store.update_status(task_id, TaskStatus.FAILED.value, err)
         log.error("worker: task %s failed: %s", task_id, err, exc_info=True)
+        return 1
+
+
+def _run_point_executor(
+    task: TaskRecord, store: TaskStore, config: IndexConfig,
+    executor: Callable[[TaskRecord], object],
+) -> int:
+    from contextlib import closing
+
+    from agent_index.indexing.point_claim import PendingPointClaim
+    from agent_index.indexing.point_hints import PointChangeHints
+    from agent_index.indexing.source_ownership import source_writer
+    from agent_index.indexing.task_store import TaskStatus
+
+    if type(task.change_hints) is not PointChangeHints or task.status not in {
+        TaskStatus.QUEUED_HINTS_V2, TaskStatus.COMPLETE,
+    }:
+        print("[FAIL] worker: point executor requires a parked or completed point claim",
+              file=sys.stderr)
+        return 2
+    task_id, hints, original_pin = task.id, task.change_hints, task.point_claim_id
+    try:
+        with source_writer(config.data_dir):
+            if store.get_task(task_id) != task:
+                raise ValueError("Selected point queue snapshot changed")
+            executor(task)
+            completed = store.get_task(task_id)
+            if (
+                completed is None or completed.status != TaskStatus.COMPLETE
+                or completed.point_claim_id is None
+                or (original_pin is not None and completed.point_claim_id != original_pin)
+            ):
+                print("[FAIL] worker: point executor did not durably complete its claim",
+                      file=sys.stderr)
+                return 2
+            with closing(store._connect()) as conn:
+                store._require_point_claim(conn, PendingPointClaim(
+                    task_id, completed.point_claim_id, hints,
+                ))
+        return 0
+    except Exception as exc:
+        log.error("worker: point execution failed; retained state unchanged by dispatcher: %s",
+                  exc, exc_info=True)
         return 1
