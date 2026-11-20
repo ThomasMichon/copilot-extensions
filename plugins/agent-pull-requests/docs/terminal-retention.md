@@ -38,8 +38,12 @@ The optional executing-core declaration
 transition through that same adoption transaction. Its optional `retained_cache`
 and `retained_targets` inputs must be supplied together and retain the original
 root, namespace and service identity. Complete nonterminal generations are
-validated once under their cache lock and bound to the existing journal's open
-first epoch, without adding an observation or changing cache bytes. Adoption
+validated once under their cache lock and bound only when their normalized
+observation matches the existing complete open first-epoch journal head.
+An older timestamp or equal candidate alone is not that evidence. Ambiguous
+historical generations refuse unchanged. A selected null rebuild pointer with
+no generation content needs no journal and creates no admission.
+No observation is added and no cache bytes change. Adoption
 reserves the complete terminal-reader envelope before its first commit; explicit
 retry reconciles compatible partial metadata under the caller's original
 lifecycle/deadline. Active or compact operations, terminal/reopened histories and

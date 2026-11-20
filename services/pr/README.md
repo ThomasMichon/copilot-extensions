@@ -491,13 +491,18 @@ An explicitly stopped standalone workspace owner can instead run
 against an eligible existing version-three conversation volume and empty workspace cache.
 With the executing core's optional
 `agent-pull-requests.retained-live-cache-adoption/v1` declaration, that same
-command also accepts populated live caches and their original open first-epoch
-conversation journal. It validates every committed generation/current pointer
+command also accepts populated live caches and their original complete open
+first-epoch conversation journal. Each generation must match the journal's
+committed normalized observation, including its original interval; older or
+ambiguous generations remain with their original reader rather than being
+assigned an inferred epoch. It validates every committed generation/current pointer
 once within the existing byte/count limits and deadline, then imports terminal
 admissions and generation bindings from the original journal without changing
 events, cursors, observations or cache bytes. Current/noncurrent lookup, framed
 reads and later sync comparisons remain usable after reader restart. A valid
-null current pointer remains a cache miss. Missing/incompatible optional core
+null current pointer remains a cache miss; a selected null pointer with no
+generation content requires no journal and creates no admission.
+Missing/incompatible optional core
 support retains bootstrap-only eligibility and its first-entry empty-cache
 check; baseline hosting is unaffected.
 

@@ -10,7 +10,7 @@ from .conversation_journal import ConversationJournal, Observation
 from .generation_cache import GenerationCache
 from .review_workspace import _digest, _scope
 from .terminal_retention import MAX_RECORDS
-from .workspace_conversation import conversation_key, project_generation
+from .workspace_conversation import conversation_key, _project_validated_generation
 
 Document = dict[str, Any]
 
@@ -43,8 +43,11 @@ def bind(
     for record in journal.records:
         checkpoint()
         observed = Observation.restore(record["current"])
-        if record["epoch"] != 1 or record["previous_terminal"] is not None or observed.state != "open":
-            raise ValueError("retained conversations require a nonterminal original first epoch")
+        if (
+            record["epoch"] != 1 or record["previous_terminal"] is not None
+            or observed.state != "open" or not observed.complete
+        ):
+            raise ValueError("retained conversations require a complete nonterminal original first epoch")
         matches = [
             target for target in targets
             if conversation_key({**target["scope"], "number": observed.key.number}, document["namespace"])
@@ -67,20 +70,26 @@ def bind(
         checkpoint()
         scope = generation["scope"]
         record = by_scope.get(_digest(scope))
-        observed = project_generation(generation, document["namespace"], None)
+        observed = _project_validated_generation(
+            generation, document["namespace"],
+            Observation.restore(record["current"]) if record is not None else None,
+        )
         if (
             record is None or not generation["complete"] or observed is None
             or observed.state != "open" or not observed.complete
-            or observed.observed_to > record["current"]["observed_to"]
+            or observed.document() != record["current"]
         ):
-            raise ValueError("populated cache requires original complete live conversation evidence")
+            raise ValueError("populated cache requires matching original complete live conversation evidence")
         if len(generations) >= MAX_RECORDS:
             raise ValueError("retained generation bindings exceed terminal capacity")
         generations.append({"scope": scope, "generation_id": generation["id"], "epoch": record["epoch"]})
 
     def visit_pointer(pointer: Document) -> None:
         checkpoint()
-        if _digest(pointer["scope"]) not in by_scope:
+        scope = pointer["scope"]
+        if not any({**target["scope"], "number": scope["number"]} == scope for target in targets):
+            raise ValueError("retained pointer is outside the selected workspace scope")
+        if pointer["generation_id"] is not None and _digest(scope) not in by_scope:
             raise ValueError("retained pointer requires original selected conversation evidence")
 
     cache.inspect_retained(visit, visit_pointer)

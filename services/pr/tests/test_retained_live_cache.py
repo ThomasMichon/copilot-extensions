@@ -17,7 +17,7 @@ import pytest
 from single_instance_lease import SingleInstance
 
 from agent_pull_requests.conversation_store import ConversationStore
-from agent_pull_requests.generation_cache import GenerationCache
+from agent_pull_requests.generation_cache import CacheFull, GenerationCache
 from agent_pull_requests.native_read import NativeReadHandler
 from agent_pull_requests.review_workspace import SECTIONS, _digest, build_generation
 from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
@@ -40,13 +40,18 @@ else:
     from test_terminal_transition import cache_bytes, command
 
 
-def generation(index: int, *, terminal: bool = False, complete: bool = True) -> dict[str, Any]:
+def generation(
+    index: int, *, terminal: bool = False, complete: bool = True,
+    inner_offset: float = 0, padding: int = 0,
+) -> dict[str, Any]:
     evidence = json.loads((
         Path(__file__).resolve().parents[3]
         / "plugins/agent-pull-requests/docs/review-evidence.example.json"
     ).read_text())
     pull = evidence["sections"]["pull_request"]
     pull["data"].update(title=f"retained generation {index}", status="completed" if terminal else "active")
+    if padding:
+        pull["data"]["description"] = "x" * padding
     start = datetime.fromisoformat(pull["observed_from"].replace("Z", "+00:00"))
     for name in SECTIONS:
         section = evidence["sections"].setdefault(name, {**pull, "data": []})
@@ -56,12 +61,22 @@ def generation(index: int, *, terminal: bool = False, complete: bool = True) -> 
         )
     if not complete:
         evidence["sections"]["pull_request"]["complete"] = False
+    if inner_offset:
+        evidence["sections"]["policies"].update(
+            observed_from=(start + timedelta(seconds=index * 3 + inner_offset)).isoformat(),
+            observed_to=(start + timedelta(seconds=index * 3 + 1 - inner_offset)).isoformat(),
+        )
     return cast(dict[str, Any], build_generation(evidence)["generation"])
 
 
-def populated(configuration: Configuration) -> tuple[Path, dict[str, Any], HostConfig, list[dict[str, Any]]]:
+def populated(
+    configuration: Configuration, *, padding: int = 0,
+) -> tuple[Path, dict[str, Any], HostConfig, list[dict[str, Any]]]:
     path, value = workspace_config(configuration)
-    values = [generation(0), generation(1)]
+    values = [
+        generation(0, inner_offset=0.1, padding=padding),
+        generation(0, inner_offset=0.2, padding=padding),
+    ]
     value["workspaces"]["bindings"][0]["scope"] = {
         name: selected for name, selected in values[0]["scope"].items() if name != "number"
     }
@@ -393,16 +408,17 @@ def test_null_current_pointer_preserves_cache_miss_and_explicit_retained_read(
 def test_populated_capacity_refuses_without_adoption_or_eviction(
     configuration: Configuration, capacity: str,
 ) -> None:
-    path, value, baseline, _ = populated(configuration)
+    path, value, baseline, _ = populated(configuration, padding=70000 if capacity == "bytes" else 0)
     assert baseline.workspaces is not None
     cache = baseline.workspaces.cache(baseline.store())
     descriptor = json.loads(cache.descriptor.read_bytes())
     name = "max_bytes" if capacity == "bytes" else "max_generations"
-    limit = 1024 if capacity == "bytes" else 1
+    limit = 65536 if capacity == "bytes" else 1
     descriptor["limits"][name] = limit
     value["workspaces"]["cache_bytes" if capacity == "bytes" else "cache_generations"] = limit
     _atomic_write_json(cache.descriptor, descriptor)
     path.write_text(json.dumps(value))
     before, objects = baseline.store().path.read_bytes(), cache_bytes(baseline)
-    assert main(["adopt-terminal", "--config", str(path)]) == 1
+    with pytest.raises(CacheFull):
+        terminal_transition.adopt(load_config(path))
     assert baseline.store().path.read_bytes() == before and cache_bytes(baseline) == objects

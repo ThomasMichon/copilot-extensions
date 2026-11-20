@@ -173,10 +173,15 @@ old-file-reader refusal remain unchanged.
 
 Initially admit only the standalone version-three baseline owner with no
 active/compact review operations and no populated terminal-extension state.
-Every retained conversation must have an existing open, nonterminal first epoch
+Every retained conversation must have an existing complete, open, nonterminal first epoch
 and no previous terminal summary. Every cached generation must be complete,
 nonterminal, reachable through the selected full workspace scope and associated
-with that original conversation. Refuse absent/ambiguous conversation evidence,
+with that original conversation's committed normalized head projection,
+including its original observation interval. A timestamp upper bound alone
+cannot associate an uncommitted pre-reopen generation with a later first
+journal observation. Older generations lacking positive retained association
+remain with their original reader; do not invent a historical admission.
+Refuse absent/ambiguous conversation evidence,
 closed/reopened histories, incomplete or terminal generations, unsupported
 extensions and unknown scopes before adoption, without changing original reads.
 An empty-cache bootstrap remains supported.
@@ -226,7 +231,9 @@ pre-transition executable still refuses expanded state without rewriting it.
   Transition itself performs no acquisition, write, ACK or cache retirement.
 - [x] Qualify missing/skewed core declarations, absent/closed/reopened conversations,
   unsupported operations/extensions, corrupt/dangling/staged objects, scopes,
-  null pointers, capacity and deadline refusal. Original readers and bytes remain
+  null pointers, capacity and deadline refusal. A selected null rebuild pointer
+  without generation content needs no journal or invented admission.
+  Original readers and bytes remain
   usable on refusal; no predicate is silently dropped.
 - [x] Interrupt before and after each durable boundary, lose a replace result and
   explicitly retry under the same lease/budget contract. Prove complete recoverable
