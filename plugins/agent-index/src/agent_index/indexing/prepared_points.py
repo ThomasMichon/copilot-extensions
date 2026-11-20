@@ -231,3 +231,11 @@ class PreparedPoints:
         if supplied != expected:
             raise PendingCrawlConflict("Point application manifest does not match every acquired target")
         self.journal.put_immutable(_APPLICATION_KIND, "manifest", expected)
+
+    def read_application(self) -> CrawlManifest:
+        """Requalify the complete retained application without creating a binding."""
+        candidate = self.compose()
+        expected = _json(PendingCrawls.manifest_data(candidate)).encode()
+        if self.journal.get(_APPLICATION_KIND, ["manifest"]).get("manifest") != expected:
+            raise PendingCrawlConflict("Whole point application binding is missing or changed")
+        return candidate

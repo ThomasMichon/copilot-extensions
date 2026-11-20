@@ -114,6 +114,13 @@ def install_hints_schema(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT, 'Pinned point claim and its entire scope are immutable');
         END;
+        """, """
+        CREATE TRIGGER IF NOT EXISTS tasks_point_completed_immutable
+        BEFORE UPDATE ON tasks
+        WHEN OLD.change_hints_version = 2 AND OLD.status = 'complete'
+        BEGIN
+            SELECT RAISE(ABORT, 'Completed point claim outcome is immutable');
+        END;
     """):
         conn.execute(trigger)
     conn.execute(
