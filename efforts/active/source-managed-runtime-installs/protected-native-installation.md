@@ -120,6 +120,9 @@ Automatic inhibition remains automatic-only.
 - [ ] P4: Migrate a capable consumer through the released contract, retaining
   its explicit target authority and separately owned native installation,
   provider adoption and readiness qualification. Report remaining gates.
+  The [closed-wheel downstream Source preparation proposal](closed-wheel-source-preparation.md)
+  supplies the input-contract sub-slice for applications whose valid development
+  graph is distinct from their independently selected closed-wheel runtime.
 
 ## Validation plan
 
