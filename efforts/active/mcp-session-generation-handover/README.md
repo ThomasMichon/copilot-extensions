@@ -331,6 +331,23 @@ named tracked objective before the whole effort is Done.
 
 ### Maintenance queue recovery
 
+- [x] **Retained installer closure source:** #13555 merged at
+  `9b3f41a4e0048ab8b3f559b27859eae194da3e16` after current-head review and
+  required CI. The production-materialized retained bootstrap now includes its
+  provider-root admission helper. Promotion, installed TTY qualification and
+  separately authorized adoption remain open; see the
+  [packaging follow-up](journal/2026/11.18-settled-update-refusal.md#retained-bootstrap-packaging-follow-up).
+- [x] **Retained installer closure released:** normal promotion `44655473309`
+  passed installed Manager TTY and real Resume qualification and landed Main
+  `e3b27e01febf4f7edbf58425011e2379f1c48d83`, releasing Worktrees
+  `1.27.56-dev1`. Released closure bytes match #13555. This is not a fix for
+  the independently retained #12203 native crash or installed-consumer adoption.
+- [x] **Bounded retained-closure adoption:** an authorized Windows
+  Worktrees-only update completed in 204.345 seconds. Payload, selection,
+  manifest, fresh command and actual serving runtime agree on `1.27.56-dev1`;
+  physical closure bytes match the release and all 59 measured native clients
+  remain. Outgoing retirement is independently pending, not passed. See the
+  [installed result](journal/2026/11.18-settled-update-refusal.md#bounded-installed-retained-closure-acceptance).
 - [x] **Settled-refusal source:** #13243 preserves nonzero refusal results
   without poisoning completed execution custody; unknown outcomes still fence.
 - [x] **Promoted release:** run `44396468041` releases the exact correction
