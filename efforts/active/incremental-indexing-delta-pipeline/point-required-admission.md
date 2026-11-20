@@ -4,8 +4,10 @@ This **agent-recommended, receiver-first refinement** belongs to the existing
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386) slice.
 It follows the [running-service declaration](azure-devops-point-targets.md#running-service-declaration-and-provider-rollback)
 and [contract-evolution pattern](../../../docs/patterns/service-contract-evolution.md).
-Review this contract before implementing it; its merge does not migrate a
-caller, activate work or qualify a rollout.
+Reviewed in PR #13712 before receiver implementation. Its merge does not
+migrate a caller, activate work or qualify a rollout. The
+[receiver documentation](../../../plugins/agent-index/docs/component-ledger.md#required-hinted-intake-admission)
+records the implemented boundary.
 
 ## Gap and narrow expansion
 

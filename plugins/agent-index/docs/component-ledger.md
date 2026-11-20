@@ -677,6 +677,31 @@ effect-side qualification. Cached positive observations cannot reopen drained
 or stopped readers/executors. Caller migration, HTTP reads, general v2 execution,
 activation and rollout remain separate.
 
+#### Required hinted-intake admission
+
+The same health object adds `required_admission_versions: [1]` for the
+receiver's opt-in request/receipt extension. A declaration-only v1 provider
+does not imply this capability. Existing clients remain unchanged.
+
+`POST /reindex/hints` accepts optional `required_point_service_version: 1`.
+Presence requires exact integer 1, typed v2 hints, incremental mode and the
+complete selected scope; null and coerced values refuse. Only this path
+requires the existing matching installation/instance headers, including a
+nonempty instance token even for an empty installation ID. The actual
+production pair must currently admit execution. Unselected, custom,
+executor-only, paused, failed, draining, stopped and changed-scope bindings
+refuse before enqueue/notification, never park under legacy semantics.
+
+The point service registers accepted queue work before its first asynchronous
+handoff and joins it through drain/stop and request cancellation before closing
+resources. Success adds `point_service_admission` with the contract id, version
+and complete scope fingerprint, plus existing peer identity and the accepted
+typed task union. It confirms admission, not applied content or continued
+activation. Lost/malformed confirmation remains an unknown acceptance; never
+replay it under an old form. Absent requirements preserve existing paused
+v1/v2 retention. See the [reviewed request contract](../../../efforts/active/incremental-indexing-delta-pipeline/point-required-admission.md)
+for compatibility and rollback requirements. Caller migration remains separate.
+
 There is no second scheduler, timer or child process. The existing governed
 `TaskRunner` iteration executes at most one point claim before its legacy queue
 turn, and never starts point work alongside an adopted detached worker.

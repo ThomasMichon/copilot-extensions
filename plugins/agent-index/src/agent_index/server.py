@@ -621,6 +621,38 @@ def build_app(
             if store is None or runner is None or not request.app.state.promoted:
                 return {"accepted": False, "error": "indexing task runner unavailable"}
             points = getattr(runner, "point_service", None)
+            if body.required_point_service_version is not None:
+                from .indexing.point_service import PointAdmissionRefused, PointService
+                from .indexing.point_hints import PointChangeHints
+                from .indexing.point_service_contract import point_scope_fingerprint
+                from .indexing.task_store import TaskRecord, TaskStore
+
+                if not request.headers.get(INSTANCE_HEADER):
+                    raise HTTPException(status_code=409, detail="service instance token required")
+                authorize_control(request)
+                if type(points) is not PointService or request.app.state.drain_gate.draining:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Required point-service admission unavailable; select a capable active service",
+                    )
+                identity = service_identity(request)
+                assert isinstance(body.change_hints, PointChangeHints)
+
+                async def enqueue_selected(selected: TaskStore) -> TaskRecord:
+                    return await enqueue_hinted_request(selected, body, runner.notify)
+
+                try:
+                    task = await points.enqueue_required(body.change_hints, enqueue_selected)
+                except PointAdmissionRefused as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from None
+                return {
+                    "accepted": True, "task": task.to_dict(),
+                    "indexing_contract": intake_contract(), **identity,
+                    "point_service_admission": {
+                        "id": "agent-index.point-service", "version": 1,
+                        "scope_fingerprint": point_scope_fingerprint(body.change_hints.scope),
+                    },
+                }
             if points is not None and points.matches(body.change_hints):
                 store = points.store
             task = await enqueue_hinted_request(store, body, runner.notify)

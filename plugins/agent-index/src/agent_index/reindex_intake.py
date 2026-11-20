@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from .indexing.point_hints import AcquisitionHints, decode_change_hints
+from .indexing.point_hints import AcquisitionHints, PointChangeHints, decode_change_hints
 
 if TYPE_CHECKING:
     from .indexing.task_store import TaskRecord, TaskStore
@@ -26,6 +26,15 @@ class HintedReindexRequest(BaseModel):
     source: str
     full: bool = False
     change_hints: AcquisitionHints
+    required_point_service_version: int | None = None
+
+    @field_validator("required_point_service_version", mode="before")
+    @classmethod
+    def check_point_requirement(cls, value: object) -> int:
+        """A present requirement cannot be coerced or silently disabled."""
+        if type(value) is not int or value != 1:
+            raise ValueError("Required point-service version must be integer 1")
+        return value
 
     @field_validator("change_hints", mode="before")
     @classmethod
@@ -38,6 +47,8 @@ class HintedReindexRequest(BaseModel):
         """Validate exact-source incremental scope before queue effects."""
         if self.full or self.source != self.change_hints.source:
             raise ValueError("Change hints require matching exact-source incremental scope")
+        if self.required_point_service_version is not None and type(self.change_hints) is not PointChangeHints:
+            raise ValueError("Required point-service admission needs typed v2 hints")
         return self
 
 
@@ -67,7 +78,10 @@ async def read_hinted_request(request: Request) -> HintedReindexRequest:
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Change-hints request timed out") from None
     except (ValueError, UnicodeError):
-        raise HTTPException(status_code=422, detail="Invalid change-hints request (supported: v1, v2)") from None
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid change-hints request (supported: v1, v2; required point-service: v1)",
+        ) from None
 
 
 async def enqueue_hinted_request(
@@ -92,4 +106,7 @@ async def enqueue_hinted_request(
         notify()
         return task
 
+    if body.required_point_service_version is not None:
+        # PointService owns this chain; do not introduce a separately cancellable task.
+        return await enqueue_and_notify()
     return cast("TaskRecord", await _settle(asyncio.create_task(enqueue_and_notify())))
