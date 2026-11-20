@@ -10,6 +10,7 @@ import subprocess
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from agent_dispatch import assignment_local_ordinary as native
 from agent_dispatch import server, telemetry
 from agent_dispatch.config import Config
@@ -121,11 +122,12 @@ def test_exact_winner_is_prospective_across_reconfiguration(
     ("initial", "source"), ("empty", "source"), ("prepared", "source"),
     ("prepared-before-start", "source"), ("empty", "complete"), ("prepared", "complete"),
     ("empty", "decline"), ("prepared", "decline"),
+    ("initial", "worker-decline"), ("empty", "worker-decline"), ("prepared", "worker-decline"),
     ("bound-project", "decline"), ("bound-project-foreign", "decline"), ("bound-project-native", "decline"),
 ])
 @pytest.mark.parametrize("ordinary", ["scoped"], indirect=True)
 def test_scoped_original_receipt_and_disposition_survive_drain(
-    local: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, retry_stage: str, disposition: str
+    local: SimpleNamespace, api: TestClient, monkeypatch: pytest.MonkeyPatch, retry_stage: str, disposition: str
 ) -> None:
     import json
 
@@ -204,12 +206,19 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         assert (allocation["reservation_key"], allocation["attempt"]) == (first.key, first.attempt)
         assert ref == original["receipt"]["ref"]
         return {"ready": True, "operation": "observe-ready", "allocation": allocation,
+                "checkout_retained": True, "finalized": False, "task_release": False, "process_retirement": False,
                 "reservation_key": allocation["reservation_key"], "task_claim_ref": ref,
                 "task_id": request["task_id"], "native_id": request["owner_session_id"],
                 "worktree_id": reservation.worktree, "creation_nonce": reservation.creation_nonce,
                 "path": reservation.worktree_path, "project": reservation.allocation_project}
 
     monkeypatch.setattr(submission_readiness_observation, "observe", ready)
+    if disposition == "worker-decline":
+        from tests._worker_decline_retry_controls import exercise
+
+        exercise(api, queue, task.id, first.key, dict(worker_id=worker, native_id="native-a", generation=task.generation,
+                 startup_revision=reservation.startup_revision, reservation_key=key), reservation.creation_nonce, monkeypatch)
+        return
     if disposition == "decline":
         binding = dict(worker_id=worker, native_id="native-a", generation=task.generation,
                        startup_revision=reservation.startup_revision, reservation_key=key)

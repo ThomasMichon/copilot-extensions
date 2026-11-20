@@ -113,7 +113,11 @@ Settled history remains unattributed; do not backfill policy or edit receipts.
 
 After a confirmed worker decline, a *new* unselected allocation may proceed only once the old claim is
 closed and its native is retired. This remains true when the admission settings
-are removed. Earlier direct assignments need their own closed receipt and
+are removed. On a governed retry, the worker sends the executing reservation
+key to Dispatch. It finalizes its own workspace using the allocation root only
+after the settled readiness receipt confirms that root, native and workspace
+incarnation. Missing or conflicting evidence retains custody; it does not
+authorize trying either key speculatively. Earlier direct assignments need their own closed receipt and
 matching unassignment. If closed before bind acknowledgement, the canonical
 receipt must instead identify that same assignment in its version-2 recovery
 record. A pending claim or retirement still blocks replacement.
