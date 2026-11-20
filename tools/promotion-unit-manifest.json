@@ -5745,9 +5745,12 @@
         "tools/promotion_unit_tests/test_point_embedding_contract.py::test_selected_pairs_forward_scope_and_prepare_before_coverage",
         "tools/promotion_unit_tests/test_point_embedding_contract.py::test_selected_coverage_checks_stored_vectors_before_opening_receipt_writer",
         "tools/promotion_unit_tests/test_point_completion_contract.py::test_completion_qualifies_all_points_before_success_and_retirement",
-        "tools/promotion_unit_tests/test_point_completion_contract.py::test_completion_outcome_cannot_drop_or_rebind_a_claimed_logical_target"
+        "tools/promotion_unit_tests/test_point_completion_contract.py::test_completion_outcome_cannot_drop_or_rebind_a_claimed_logical_target",
+        "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_publishes_before_whole_completion_and_never_reapplies_success",
+        "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_propagates_uncertain_application_without_false_completion"
     ],
     "coverage_targets": [
+        "plugins/agent-index/src/agent_index/indexing/point_worker.py",
         "plugins/agent-index/src/agent_index/indexing/point_completion.py",
         "plugins/agent-index/src/agent_index/store/file_projection.py",
         "plugins/agent-index/src/agent_index/store/point_reconciliation.py",
@@ -6152,7 +6155,8 @@
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
-        "tools/promotion_unit_tests/test_point_completion_contract.py": "e2196e0f0452818d9113a87ca5f0bff8a21111e0f60cb93e935f91377dde4b92",
+        "tools/promotion_unit_tests/test_point_completion_contract.py": "94bcc96095f03b641099a2341fd56cf6d29d0d8b932a995b6662f95a2095cf83",
+        "plugins/agent-index/src/agent_index/indexing/point_worker.py": "2c1ca4abfa65bb2c02baefc26a5c9e5b3be7f585ac0d26df85c60d9eca91c2ba",
         "plugins/agent-index/src/agent_index/indexing/point_completion.py": "89f43fbac46cd52c53543da8e901bd98c45a47b81962de5aa7bf63ef92126e91",
         "plugins/agent-index/src/agent_index/indexing/point_claim.py": "02cbe2ac90f35fbe6edaec731f8995bab47c73d79ac36c23bc7433c62262c90c",
         "plugins/agent-index/src/agent_index/store/file_projection.py": "8ad033d3e78f58cb701f9e7befd572683475c025e434e82e9c27ad16185c6d50",
