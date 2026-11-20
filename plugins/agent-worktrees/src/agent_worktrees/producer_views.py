@@ -21,6 +21,7 @@ class ObservedClaim:
     handoff_bundle: str
     metadata: object
     receiving_subject: tuple[str, str] | None = None
+    accepted_transfer: bool = False
 
 
 def qualified_owner(value: object) -> bool:
@@ -67,9 +68,11 @@ def _resolve_group(
     ):
         issues.append(issue("token-mismatch", subject, "token entries disagree on immutable metadata"))
         return None
-    def resolve(value: str) -> str | None:
+    def resolve(value: str, *, receiving: bool = False) -> str | None:
         if value in by_owner:
             return value
+        if not receiving:
+            return None
         ref = parse_claim_ref(value) if qualified_owner(value) else None
         if ref is None:
             return None
@@ -87,16 +90,16 @@ def _resolve_group(
         if metadata["phase"] != "transferred":
             continue
         receipt = metadata["transfer"]
-        consumer = resolve(receipt["consumer"])
+        consumer = resolve(receipt["consumer"], receiving=row.accepted_transfer)
         if (
-            resolve(receipt["source"]) != row.owner
+            resolve(receipt["source"], receiving=row.accepted_transfer) != row.owner
             or not qualified_owner(receipt["consumer"])
             or consumer is None
         ):
             issues.append(issue("transfer-unresolved", row.owner, "accepted transfer recipient/source is missing or invalid"))
             return None
         incoming[consumer] += 1
-    creator = resolve(metadata_by_owner[first.owner]["creator"])
+    creator = resolve(metadata_by_owner[first.owner]["creator"], receiving=True)
     roots = [owner for owner in by_owner if not incoming[owner]]
     if creator is None or roots != [creator] or any(count > 1 for count in incoming.values()):
         issues.append(issue("transfer-ambiguous", subject, "ownership is not a single creator-rooted chain"))
@@ -110,7 +113,9 @@ def _resolve_group(
             if len(seen) != len(group):
                 break
             return owner
-        following = resolve(metadata["transfer"]["consumer"])
+        following = resolve(
+            metadata["transfer"]["consumer"], receiving=by_owner[owner].accepted_transfer,
+        )
         if following is None:
             break
         owner = following
