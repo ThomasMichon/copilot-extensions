@@ -5,7 +5,8 @@ import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
 
@@ -15,9 +16,10 @@ from .creation_identity import IdentityMode, new_tracking_identity, validate_mod
 
 if TYPE_CHECKING:
     from . import tracking
+    from .tracking import WorktreeRecord
 
 
-def _tracking():
+def _tracking() -> ModuleType:
     from . import tracking as tracking_mod
 
     return tracking_mod
@@ -274,8 +276,12 @@ class ResourceClaim:
     producer: object = None
     producer_present: bool = False
     metadata_opaque: bool = False
+    claim_nonce: str = ""
 
-    def to_dict(self) -> dict:
+    def __post_init__(self) -> None:
+        self._observed_incarnation: tuple[str, str, str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         """Full wire shape, with producer metadata absent for legacy claims."""
         result: dict[str, object] = {
             "kind": self.kind, "ref": self.ref, "created_at": self.created_at,
@@ -286,6 +292,8 @@ class ResourceClaim:
             result["producer"] = wire_metadata(self.producer)
         if self.metadata_opaque:
             result["metadata_opaque"] = True
+        if self.claim_nonce:
+            result["claim_nonce"] = self.claim_nonce
         return result
 
     def to_public_dict(self) -> dict[str, object]:
@@ -301,6 +309,8 @@ class ResourceClaim:
             result["producer"] = wire_metadata(self.producer)
         if self.metadata_opaque:
             result["metadata_opaque"] = True
+        if self.claim_nonce:
+            result["claim_nonce"] = self.claim_nonce
         return result
 
     @property
@@ -378,7 +388,7 @@ class FollowUpRecord:
     def is_effective_open(self) -> bool:
         return self.state in _FOLLOW_UP_EFFECTIVE_OPEN
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         data: dict[str, object] = {
             "id": self.id,
             "summary": self.summary,
@@ -398,10 +408,10 @@ class FollowUpRecord:
         return data
 
     @staticmethod
-    def from_dict(data: dict) -> FollowUpRecord:
+    def from_dict(data: dict[str, Any]) -> FollowUpRecord:
         raw_refs = data.get("refs") or []
         refs = [
-            FollowUpRef(kind=str(ref.get("kind", "other")), ref=str(ref.get("ref", "")))
+            FollowUpRef(kind=cast(FollowUpRefKind, str(ref.get("kind", "other"))), ref=str(ref.get("ref", "")))
             for ref in raw_refs
             if isinstance(ref, dict)
         ]
@@ -462,7 +472,7 @@ def load_or_create_anchor_record(
             tracking_path=tracking_path, anchor_path=anchor_path, config=config,
         ),
     )
-    return record
+    return cast("WorktreeRecord", record)
 
 
 def claim_handoff_reservation(
@@ -547,6 +557,11 @@ def add_resource_claim(
             raise ValueError(
                 f"claim {claim.ref} is reserved by handoff bundle {reservation}"
             )
+        if claim.kind == "task" or existing.claim_nonce:
+            if existing.kind != claim.kind or existing.state != "active" or not existing.claim_nonce:
+                existing.claim_nonce = secrets.token_hex(16)
+        else:
+            existing.claim_nonce = ""
         existing.kind = claim.kind
         existing.state = claim.state
         if claim.note:
@@ -558,6 +573,8 @@ def add_resource_claim(
         if save:
             tracking.save_record(record)
         return existing
+    if claim.kind == "task" and not claim.claim_nonce:
+        claim.claim_nonce = secrets.token_hex(16)
     record.resources.append(claim)
     if reopens:
         reopen_finalized_owner(record, reason=f"new claim {claim.ref}")
@@ -837,15 +854,15 @@ def orphanage_path(project: str | None = None) -> Path:
     return cfg.project_dir(project) / "orphaned-obligations.yaml"
 
 
-def load_orphaned_obligations(project: str | None = None) -> list[dict]:
+def load_orphaned_obligations(project: str | None = None) -> list[dict[str, Any]]:
     tracking = _tracking()
     try:
-        return tracking.load_orphaned_obligations_strict(project)
+        return cast(list[dict[str, Any]], tracking.load_orphaned_obligations_strict(project))
     except Exception:
         return []
 
 
-def _load_orphaned_obligations_strict_local(project: str | None = None) -> list[dict]:
+def _load_orphaned_obligations_strict_local(project: str | None = None) -> list[dict[str, Any]]:
     tracking = _tracking()
     path = tracking.orphanage_path(project)
     if not path.exists():
@@ -860,7 +877,7 @@ def _load_orphaned_obligations_strict_local(project: str | None = None) -> list[
     return [{key: value for key, value in item.items() if key not in naming} for item in items]
 
 
-def load_orphaned_obligations_strict(project: str | None = None) -> list[dict]:
+def load_orphaned_obligations_strict(project: str | None = None) -> list[dict[str, Any]]:
     return _load_orphaned_obligations_strict_local(project)
 
 
@@ -871,7 +888,7 @@ def rehome_abandoned_obligations(
     config: object,
     handoff_to: str | None = None,
     project: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     tracking = _tracking()
     claims = list(claims)
     if any(claim.has_producer for claim in claims):
@@ -884,7 +901,7 @@ def rehome_abandoned_obligations(
             proj = project or getattr(config, "repo_name", None)
             now = tracking._now_iso()
             target = (handoff_to or "").strip()
-            added: list[dict] = []
+            added: list[dict[str, Any]] = []
             changed = False
             for claim in claims:
                 key = (source_worktree, claim.ref)
@@ -955,7 +972,7 @@ def find_orphaned_children(
     tracking_path: Path,
 ) -> list[tuple[tracking.WorktreeRecord, tracking.WorktreeRecord | None]]:
     tracking = _tracking()
-    out: list[tuple[tracking.WorktreeRecord, tracking.WorktreeRecord | None]] = []
+    out: list[tuple[WorktreeRecord, WorktreeRecord | None]] = []
     try:
         this_machine = cfg.load_config().machine
     except Exception:

@@ -72,12 +72,14 @@ def test_prepared_version_two_is_observation_not_authority(
         lambda *_args, **_kwargs: pytest.fail("must not begin a subscription write"),
     )
     root = Path("fixture-state")
-    assert storage.read_transition_phase(root) == "prepared"
-    with pytest.raises(ValueError, match="watch state transition"):
-        storage.read_subscriptions_state(root)
-    with pytest.raises(storage.StateWriteRefused, match="watch state transition"):
-        storage.write_subscriptions_state([], root)
-    document["phase"] = "sealed-legacy"
+    for phase in ("prepared", "sealed-legacy"):
+        document["phase"] = phase
+        assert storage.read_transition_phase(root) == phase
+        with pytest.raises(ValueError, match="watch state transition"):
+            storage.read_subscriptions_state(root)
+        with pytest.raises(storage.StateWriteRefused, match="watch state transition"):
+            storage.write_subscriptions_state([], root)
+    document["phase"] = "import-ready"
     with pytest.raises(ValueError, match="invalid watch state transition"):
         storage.read_transition_phase(root)
 
