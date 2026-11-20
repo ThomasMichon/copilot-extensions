@@ -299,3 +299,7 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
   immutable reused-session binding and candidate cleanup after success,
   construction failure or cancellation. The existing reserved producer hunks
   remain unchanged.
+- Additional review controls suppress inherited command admission in elevated
+  sub-daemons without changing unbound legacy mode, and retain Linux lifetime
+  custody through the bounded stdin-EOF flush grace before forced retirement.
+  Their native regression persists and reads back the receiver's final batch.

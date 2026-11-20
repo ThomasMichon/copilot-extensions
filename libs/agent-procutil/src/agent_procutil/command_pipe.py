@@ -208,6 +208,12 @@ class CommandPipe:
             from ._caller_owned import _lifetime_lock, _lifetime_writers
             from ._interactive_groups import confirm_session
 
+            grace = min(deadline, time.monotonic() + .25)
+            while self.process is not None and not self.exited():
+                remaining = grace - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(.005, remaining))
             with _lifetime_lock:
                 if self._lifetime is not None:
                     _lifetime_writers.discard(self._lifetime)

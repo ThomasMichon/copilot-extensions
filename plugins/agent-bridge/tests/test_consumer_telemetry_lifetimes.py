@@ -39,6 +39,61 @@ def declare(root: Path, *, active: bool = False) -> None:
     (directory / "config.json").write_text(json.dumps(value), encoding="utf-8")
 
 
+@pytest.mark.parametrize("mode", ["legacy", "bound-empty", "command"])
+def test_elevated_seed_does_not_inherit_ordinary_command_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    from agent_bridge import elevated
+    from agent_bridge.config import load_config, save_config
+
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path / "primary"))
+    admitted = None if mode == "legacy" else {} if mode == "bound-empty" else {
+        "caller": str(tmp_path),
+    }
+    cfg = ServiceConfig(consumer_telemetry_harnesses=admitted)
+    save_config(cfg)
+    directory = elevated._seed_config(elevated.ELEVATED_PORT)
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(directory))
+    restored = load_config(strict=True)
+    assert restored.consumer_telemetry_harnesses == (None if admitted is None else {})
+    assert cfg.consumer_telemetry_harnesses == admitted
+
+
+def test_receiver_can_persist_final_batch_after_stdin_eof(tmp_path: Path) -> None:
+    directory = tmp_path / ".agent-telemetry"
+    directory.mkdir()
+    code = (
+        "import os,pathlib,sys,time;"
+        "data=sys.stdin.buffer.readline();pathlib.Path('ready').touch();"
+        "data+=sys.stdin.buffer.read();time.sleep(.05);"
+        "output=open('final.jsonl','wb');output.write(data);output.flush();"
+        "os.fsync(output.fileno());output.close()"
+    )
+    (directory / "config.json").write_text(json.dumps({
+        "schema_version": 1, "mode": "command",
+        "command": {"argv": [sys.executable, "-I", "-c", code]},
+    }), encoding="utf-8")
+    owner = SinkSlot().configure_commands()
+    binding = owner.admit(str(tmp_path))
+    try:
+        deadline = time.monotonic() + 4
+        while owner.stats()["enqueued"] == 0 and time.monotonic() < deadline:
+            binding.offer({
+                "kind": "event", "name": "session_health", "event": "context_warning",
+            })
+            time.sleep(.005)
+        while not (tmp_path / "ready").exists() and time.monotonic() < deadline:
+            time.sleep(.005)
+        assert (tmp_path / "ready").exists(), (binding.state, owner.stats())
+    finally:
+        owner.close()
+    record = json.loads((tmp_path / "final.jsonl").read_text(encoding="utf-8"))
+    assert record["source_schema"] == "bridge.lifecycle.v1"
+    assert record["sequence"] > 0
+    assert binding.pipe is not None and binding.pipe.closed
+    assert owner.writer is not None and owner.writer.join(0)
+
+
 def test_concurrent_offer_is_nonblocking_and_preserves_wire_sequence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

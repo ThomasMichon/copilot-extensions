@@ -27,6 +27,9 @@ the request's cwd, an environment variable or the most recent caller.
 Use distinct caller identities for distinct initiating harnesses. The same
 target agent can serve different admitted callers without changing their routes.
 Remote hosts never receive a sender's executable path through this feature.
+An elevated sub-daemon inherits no command admission from its primary.
+An inherited bound map becomes empty, not legacy mode. Ordinary receiver
+admission does not authorize elevated receiver execution.
 
 An omitted/null map preserves explicitly unbound legacy factory/spool behavior.
 An object selects bound mode: an unlisted caller exports nothing. A missing,
