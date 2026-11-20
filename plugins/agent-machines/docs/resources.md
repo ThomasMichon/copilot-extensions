@@ -266,6 +266,7 @@ Converge a package-manager package. Identity is `(manager, id)`, so the same
 | `minimum_version` | no | Schema 5 numeric compatibility floor; preserves any acceptable installed version. Cannot share a declaration with `version` or `pin: true`. |
 | `blocked_versions` | no | Schema 5 known-bad numeric release prefixes; requires `minimum_version`. |
 | `state` | no | `present` (default) or `absent`. |
+| `source` | no | `uv-tool`/`pipx` only: install from `{path: <dir>}` or `{git: <url>, ref: <optional ref>}` instead of the index. See [Installing from a source](#installing-from-a-source). |
 | `pin` | no | Hold at `version` where supported. With a schema-5 compatibility declaration, explicit `false` removes a WinGet pin; omission preserves pin metadata. |
 | `process_guard.names` | no | Exact process image names that defer replacement/removal while running. Windows process probing is supported now; an unavailable/unsupported probe defers safely. |
 | `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
@@ -291,6 +292,41 @@ probe platform, or missing probe binary returns `status: deferred` without
 mutation, and reports the reason plus the command that remains pending. If
 installed package state cannot be established, guarded mutation also defers
 instead of assuming that the package is absent.
+
+#### Installing from a source
+
+A `uv-tool` or `pipx` package may declare exactly one `source`, for a
+third-party tool that is not published to an index (or must come from a fork
+or a pinned commit). This is the ordinary `uv tool install` / `pipx install`
+of a source tree; it is not a deployment channel for framework-owned runtimes
+(plugin runtimes keep their own installers, version slots and binstubs), and
+it does not schedule or run the installed tool.
+
+```yaml
+resources:
+  - type: package
+    id: acme-tool              # the installed tool name: detection + uninstall
+    manager: uv-tool
+    source: { path: ../../../tools/acme-tool }
+  - type: package
+    id: other-tool
+    manager: pipx
+    source: { git: https://github.com/acme/other-tool.git, ref: v1.2.0 }
+```
+
+A relative `path` (after `~` expansion) is anchored at the directory of the
+requirement-package file that declares it; `git` installs
+`git+<url>[@<ref>]`. Any other manager rejects `source` at validation, as do
+values starting with `-` and whitespace or `@` in `git`/`ref`. Packages that
+declare different sources for the same identity are a `resource-conflict`
+error.
+
+Installs and updates run `uv tool install --force <spec>` /
+`pipx install --force <spec>`; `id` still names the installed tool, so
+detection and `state: absent` uninstall are unchanged. An installed tool with
+no declared `version` is left as is: declare `version` (or `minimum_version`)
+to force a reinstall from the source when the installed version differs,
+including after moving `ref`.
 
 #### Minimum plus known-bad exclusions
 
@@ -619,6 +655,7 @@ compatibility data from lower-authority declarations remain effective:
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
 | self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | fleet-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| package conflicting `source` | error |
 | copilot-cli-update conflicting `auto_update` or `pinned_version` | highest authority wins; equal-highest disagreement errors |
 
 File `format` and `content` are selected from declarations participating in the

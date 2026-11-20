@@ -196,7 +196,7 @@ to `manifest.py`'s `KNOWN_RESOURCE_TYPES`/`REQUIRED_FIELDS` and
 
 | Type | Identity/field families |
 |---|---|
-| `package` | Required `id`, `manager`; optional `version`, `state` (`present`), `pin`, `process_guard.names` nonempty process-name list. |
+| `package` | Required `id`, `manager`; optional `version`, `state` (`present`), `pin`, `process_guard.names` nonempty process-name list, `source` (`path` or `git`+`ref`; `uv-tool`/`pipx` only). |
 | `file` | Required `path`; optional `id` (path), `format` (`text`/`json`), `content`, `strategy` (`enforce`), managed-block `block`/`begin`/`end` and `state`. |
 | `registry` | Required `path`; value name/data/type (`String`, `ExpandString`, `MultiString`, `DWord`, `QWord`, `Binary`), state/strategy. |
 | `feature` | Required `id`, `manager` (`windows-optional-feature`, `windows-capability`, `linux-systemd`); state. |
