@@ -31,6 +31,14 @@ class Completion(NamedTuple):
     event_id: int
 
 
+def matches_stopped_receipt(conn: sqlite3.Connection, sid: str, receipt: str, updated_at: float) -> bool:
+    last = conn.execute(
+        "SELECT data_json,timestamp FROM events WHERE session_id=? AND event_type='session_state_changed' "
+        "ORDER BY event_id DESC LIMIT 1", (sid,),
+    ).fetchone()
+    return last is not None and (last["data_json"], last["timestamp"]) == (receipt, updated_at)
+
+
 def reconcile_idle(db: Database, conn: sqlite3.Connection, sid: str, completion: Completion) -> bool:
     origin = conn.execute("SELECT timestamp FROM events WHERE session_id=? AND event_id=1", (sid,)).fetchone()
     epoch = db._event_continuity(sid, origin[0] if origin else None)

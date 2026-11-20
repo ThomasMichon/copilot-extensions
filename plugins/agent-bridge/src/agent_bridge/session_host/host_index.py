@@ -191,10 +191,12 @@ class HostIndex:
         self._records = records
         self._records = records
 
-    def _flush(self) -> None:
+    def _flush(self, records: dict[str, HostRecord] | None = None) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        if records is None:
+            records = self._records
         payload = {"version": 1,
-                   "hosts": {sid: asdict(r) for sid, r in self._records.items()}}
+                   "hosts": {sid: asdict(r) for sid, r in records.items()}}
         # Atomic replace so a crashed write never corrupts the index.
         fd, tmp = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
         try:
@@ -349,8 +351,10 @@ class HostIndex:
                     return False
             if settle is not None and not settle(current):
                 return False
-            del self._records[expected.session_id]
-            self._flush()
+            remaining = self._records.copy()
+            del remaining[expected.session_id]
+            self._flush(remaining)
+            self._records = remaining
         return True
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
