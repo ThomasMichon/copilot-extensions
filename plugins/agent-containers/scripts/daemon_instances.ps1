@@ -273,7 +273,8 @@ sys.exit(main(packet))
         $start.FileName = $pythons[$index]
         $State.process = New-Object Diagnostics.Process
         $State.process.StartInfo = $start
-        try { $started = $State.process.Start() }
+        $process = $State.process
+        try { $started = $process.Start() }
         catch [ComponentModel.Win32Exception] {
             $State.process.Dispose()
             $State.process = $null
