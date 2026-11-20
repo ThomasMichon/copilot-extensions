@@ -410,6 +410,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [complete orphan-task adoption planning unit](journal/2026/11.20-orphan-task-adoption-planning.md)
+proposes one distinct Draft for #3443's four stages and BOTH headless ACP
+and bare scripted tasks. Nine technical rows remain unchecked; the existing
+#7237 relationship owner and all task/workspace/provider/credential custodians
+remain. It records #13709's actual reviewed inference-identity delivery and
+#3296's separately retained bounded claim. The complete 09:27 PT census is
+885 open, 156 above fixed 729, with no arrivals, departures or new disposition.
+
 The [independent inference-identity and custody unit](journal/2026/11.20-independent-inference-identity-and-custody.md)
 proposes complete #3296 receiving in existing Account-Aware Operations
 Phase 6, with nine unchecked technical rows and no new effort or credential

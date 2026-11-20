@@ -25,7 +25,7 @@ switch or leaking one operation's credentials into another.
 
 ## Coordination
 
-- **Finite #3296 inference-identity intake (proposed):** Phase 6 is the
+- **Finite #3296 inference-identity intake (reviewed planning accepted):** Phase 6 is the
   separate Copilot inference-identity lane; it does not change Phases 1-4's
   repository-operation authentication contract or conflate the two identities.
   Worktrees retains repo-keyed resolution and launcher integration;
@@ -35,8 +35,14 @@ switch or leaking one operation's credentials into another.
   owners remain unchanged. Preserve Draft status and the temporary-token
   implementation restriction: this amendment appoints no executor, transfers
   no claim and starts no authentication or live inference operation.
-  #3296 remains OPEN during the proposal and until a separate complete
-  receiving/custody judgment; ordinary document review is not claim release.
+  #13709 merged the complete planning contract after current-head review and
+  required CI. Complete current original/discussion, ROOT/detail/global
+  validation, intake and custody readback accepted that planned receiving.
+  The separate source judgment retains #3296 OPEN because its bounded
+  claimant, exclusions and independent launcher/machine-policy/native/
+  credential custody remain. Ordinary document review is not claim release.
+  The [dated follow-through](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md#previous-reviewed-delivery-and-distinct-source-keeper)
+  records this accepted planning gate without claiming implementation.
 
 The proposed #4756 fork-consent lane below is distinct from #5791 credential
 dispatch. It directly receives the WHOLE durable target/account/remote,
@@ -508,6 +514,16 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-20 - Reviewed inference-identity planning accepted, source claim retained
+
+#13709 delivered the complete Phase 6/detail/global contract after current-head
+review and required CI. Complete current original, all three discussions,
+receiving and custody readback accepted the whole planned mapping; a separate
+judgment keeps #3296 OPEN for its actual bounded claimant and independent
+custodians. All nine technical rows remain unchecked. Draft status,
+temporary-token implementation restriction and every existing owner remain.
+See the [dated campaign follow-through](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md#previous-reviewed-delivery-and-distinct-source-keeper).
 
 ### 2026-11-20 - Complete independent inference-identity receiving proposed
 
