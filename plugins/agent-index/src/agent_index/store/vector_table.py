@@ -45,13 +45,15 @@ class VectorTable:
     """
 
     def __init__(self, db: Any, *, table_name: str, dim: int = 768,
-                 source_domain: SourceDomain | None = None, content_table: str = "chunks") -> None:
+                 source_domain: SourceDomain | None = None, content_table: str = "chunks",
+                 model_id: str | None = None) -> None:
         self._db = db
         self._table_name = table_name
         self._dim = dim
         self._table = None
         self._source_domain = source_domain
         self._content_table = content_table
+        self._model_id = model_id
         self._schema = pa.schema([
             pa.field("chunk_id", pa.string()),
             pa.field("vector", pa.list_(pa.float32(), dim)),
@@ -141,6 +143,38 @@ class VectorTable:
         point_scope: PointScope | None,
     ) -> dict[str, dict[str, Any]]:
         """Read current canonical input only; never authorize or execute a point write."""
+        canonical, _ = self._point_upsert_input(chunks, vectors, point_scope=point_scope)
+        return canonical
+
+    def upsert_point(
+        self, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> int:
+        """Write selected vectors inside an already-owned, exact point writer.
+
+        This native effect does not retain applied-version or model coverage,
+        maintain indices, publish checkpoints, or complete acquired work.
+        """
+        domain = self._source_domain
+        if domain is None or point_scope is None or not domain.writing:
+            raise SourceLayoutError("Point vector mutation requires the owning source writer and scope")
+        with domain._write(self._db, point_scope=point_scope):
+            binding = domain.receipt().get("point_models")
+            if (binding is None or self._model_id is None or type(self._dim) is not int
+                    or binding["content_table"] != self._content_table
+                    or binding["models"].get(self._model_id) != {
+                        "table_name": self._table_name, "dim": self._dim,
+                    }):
+                raise SourceLayoutError("Point vector mutation differs from its retained model binding")
+            canonical, table = self._point_upsert_input(chunks, vectors, point_scope=point_scope)
+            if not chunks:
+                return 0
+            return self._write_vectors(chunks, vectors, canonical=canonical, table=table)
+
+    def _point_upsert_input(
+        self, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> tuple[dict[str, dict[str, Any]], Any]:
         from .content_store import ContentStore
         from .source_projection import projection_records
 
@@ -153,17 +187,18 @@ class VectorTable:
             self._validate(chunks, vectors)
             if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
                 raise ValueError("Point vector preflight requires unique chunk IDs")
-            canonical_table = self._require_point_binding(reserve_segment=bool(chunks))
+            canonical_table, vector_table = self._require_point_binding(reserve_segment=bool(chunks))
             content = ContentStore(
                 domain.path, table_name=self._content_table, point_scope=point_scope,
             )
             content._table = canonical_table
-            return projection_records(
+            canonical = projection_records(
                 self._db, self._content_table, chunks, bounded_content=content,
                 require_current_input=True, point_scope=point_scope,
             )
+            return canonical, vector_table
 
-    def _require_point_binding(self, *, reserve_segment: bool) -> Any:
+    def _require_point_binding(self, *, reserve_segment: bool) -> tuple[Any, Any]:
         from .content_store import _CONTENT_SCHEMA
         from .scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index, require_budget
 
@@ -188,7 +223,7 @@ class VectorTable:
         require_budget(state, 0)
         if reserve_segment and state.segments >= MAX_SEGMENTS:
             raise ScalarIndexPreparationRequired("Point vector preflight needs a reserved index segment")
-        return canonical
+        return canonical, vector
 
     @source_write
     def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:
@@ -197,9 +232,10 @@ class VectorTable:
 
     def _write_vectors(
         self, chunks: list[Chunk], vectors: np.ndarray[Any, Any],
-        *, canonical: dict[str, dict[str, object]] | None = None,
+        *, canonical: dict[str, dict[str, object]] | None = None, table: Any = None,
     ) -> int:
-        table = self._get_or_create_table()
+        if table is None:
+            table = self._get_or_create_table()
         now = time.time()
 
         records: list[dict[str, Any]] = [
