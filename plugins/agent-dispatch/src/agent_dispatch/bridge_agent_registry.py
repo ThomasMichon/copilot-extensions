@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from .procutil import agent_bridge_launch_prefix as _agent_bridge_launch_prefix
 from .procutil import no_window_kwargs
 
-def parse_agents(out: str | None) -> list[dict] | None:
+def parse_agents(out: str | None) -> list[dict[str, object]] | None:
     """Extract agent records from ``agent-bridge --json agents`` stdout.
 
     ``agent-bridge`` may print a human preamble line before the JSON array, so we
@@ -59,7 +59,7 @@ def parse_agent_names(out: str | None) -> set[str] | None:
     }
 
 
-def registered_agents(*, timeout: float = 20.0) -> list[dict] | None:
+def registered_agents(*, timeout: float = 20.0) -> list[dict[str, object]] | None:
     """Best-effort agent records from the **local** agent-bridge.
 
     Returns ``None`` (indeterminate) whenever the registry can't be read -- the
@@ -126,7 +126,7 @@ def registered_agent(
     *,
     timeout: float = 18.0,
     include_unaddressable: bool = False,
-) -> dict | _NotFound | _Unsupported | None:
+) -> dict[str, object] | _NotFound | _Unsupported | None:
     """Best-effort single-agent record via agent-bridge's fast ``agent-show``
     lookup -- a static/topology-only lookup that never enumerates namespace
     resolvers (CodeSpaces, containers), unlike :func:`registered_agents`.
@@ -194,7 +194,7 @@ def _resolve_agent_record(
     timeout: float,
     fallback_timeout: float = 20.0,
     include_unaddressable: bool = False,
-) -> dict | _NotFound | None:
+) -> dict[str, object] | _NotFound | None:
     """Resolve one agent's record, preferring the fast single-agent lookup
     and transparently falling back to the full listing when the fast path
     can't answer for this ``name``:
@@ -215,7 +215,7 @@ def _resolve_agent_record(
             timeout=timeout,
             include_unaddressable=include_unaddressable,
         )
-        if row is not _AGENT_SHOW_UNSUPPORTED:
+        if not isinstance(row, _Unsupported):
             return row
     rows = registered_agents(timeout=max(timeout, fallback_timeout))
     if rows is None:
@@ -283,7 +283,7 @@ def registered_agent_project(
                 f"could not read the local agent registry while resolving {agent!r}"
             )
         return None
-    if row is _AGENT_NOT_FOUND:
+    if isinstance(row, _NotFound):
         return None
     project = row.get("project")
     return project if isinstance(project, str) and project else None
@@ -322,7 +322,7 @@ def preflight_headless_agent(
     accordingly (was 20s, sized for the full listing this no longer calls in
     the common case).
     """
-    checks: list[tuple[str, dict | _NotFound | None]] = []
+    checks: list[tuple[str, object]] = []
     if pool:
         from . import embody
 

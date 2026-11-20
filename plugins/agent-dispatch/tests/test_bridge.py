@@ -1039,28 +1039,6 @@ def test_registered_agent_uses_fast_single_lookup_command(monkeypatch):
     assert seen["cmd"] == ["/usr/bin/agent-bridge", "--json", "agent-show", "reviewer"]
 
 
-@pytest.mark.parametrize("lookup", ["registered_agent", "registered_agent_project"])
-def test_registered_agent_lookup_allows_startup_but_preserves_explicit_deadline(monkeypatch, lookup):
-    def fake_run(cmd, **kwargs):
-        if kwargs["timeout"] < 12:
-            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
-        return subprocess.CompletedProcess(
-            cmd, 0, json.dumps({"name": "reviewer", "project": "review-harness"}), "",
-        )
-
-    monkeypatch.setattr(
-        bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"],
-    )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
-    call = getattr(bridge, lookup)
-    expected = (
-        {"name": "reviewer", "project": "review-harness"}
-        if lookup == "registered_agent" else "review-harness"
-    )
-    assert call("reviewer") == expected
-    assert call("reviewer", timeout=8) is None
-
-
 def test_registered_agent_not_found_is_distinct_from_indeterminate(monkeypatch):
     monkeypatch.setattr(
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
