@@ -98,6 +98,7 @@ def session_manager_from_config(
         )
         setattr(manager, "_remote_acp_catalog", catalog)
         manager._consumer_telemetry = consumer
+        consumer.attach_manager(manager)
         for session in manager.list_sessions():
             consumer.bind(session)
         return manager

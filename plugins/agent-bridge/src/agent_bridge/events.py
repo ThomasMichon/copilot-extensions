@@ -234,10 +234,15 @@ class EventLog:
 
         if not hasattr(self, "_consumer_telemetry_binding"):
             owner = getattr(self._db, "_consumer_telemetry_owner", None)
-            self._consumer_telemetry_binding = (
-                LEGACY if owner is None else owner.binding_for_log(self._session_id)
-            )
-        telemetry.emit(record, binding=self._consumer_telemetry_binding)
+            binding = LEGACY if owner is None else owner.binding_for_log(self._session_id)
+            if owner is None or binding is not owner.unavailable:
+                self._consumer_telemetry_binding = binding
+        else:
+            binding = self._consumer_telemetry_binding
+        if binding is LEGACY:
+            telemetry.emit(record)
+        else:
+            telemetry.emit(record, binding=binding)
 
     def set_telemetry_identity(
         self,

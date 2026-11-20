@@ -283,8 +283,9 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
   on the existing `SinkSlot`/`BufferedSink` owner. Bridge admits exact roots from
   trusted caller-to-harness service configuration, independently of the target
   agent and cwd.
-- The native Windows development packet passes 84 controls. Its real configured
-  Bridge `stop_session` operations reached one independent receiver, whose
+- The expanded Windows development packet passes 179 controls, including private
+  restoration and remote-session compatibility. Its real configured,
+  authenticated HTTP stop operations reached one independent receiver, whose
   file readback contained four session/conversation transitions. Literal argv,
   cwd after `chdir`, environment isolation, unlisted-caller suppression,
   non-reading-child failure and finite owned cleanup are explicit controls.
@@ -293,3 +294,8 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
   and merge remain required; source tests do not establish release or rollout.
 - U2 Dispatch adoption, wider coverage/skew qualification and U4 release remain
   open. No receiver installation, live runtime update or deployment is included.
+- Review regressions cover writable-database ownership transfer, nonblocking
+  concurrent sequence ordering, late remote/merge-recovery session admission,
+  immutable reused-session binding and candidate cleanup after success,
+  construction failure or cancellation. The existing reserved producer hunks
+  remain unchanged.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from weakref import WeakValueDictionary
+from weakref import ReferenceType, WeakValueDictionary, ref
 from typing import Any
 
 from process_telemetry.command import Binding, CommandRoutes
@@ -28,6 +28,7 @@ class ConsumerTelemetry:
         self.unavailable: Binding | None = None
         self.refusal: str | None = None
         self._sessions: WeakValueDictionary[str, Any] = WeakValueDictionary()
+        self._manager: ReferenceType[Any] | None = None
         if self.legacy:
             return
         assert harnesses is not None
@@ -48,21 +49,34 @@ class ConsumerTelemetry:
 
     def bind(self, session: Any) -> None:
         """Bind once to the admitted caller, never the target or a supplied path."""
-        binding = LEGACY if self.legacy else self.bindings.get(
-            session.caller_id, self.unavailable,
-        )
-        session._consumer_telemetry_binding = binding
+        if not hasattr(session, "_consumer_telemetry_binding"):
+            session._consumer_telemetry_binding = (
+                LEGACY if self.legacy else self.bindings.get(session.caller_id, self.unavailable)
+            )
+        binding = session._consumer_telemetry_binding
         self._sessions[session.session_id] = session
         if session.event_log is not None:
             session.event_log.bind_consumer_telemetry(binding)
 
     def binding_for_log(self, session_id: str | None) -> Any:
-        """Retain session admission across whole-log replacement without a new lookup."""
+        """Retain admission across replacement and later accepted-session arrival."""
         session = self._sessions.get(session_id) if session_id is not None else None
+        if session is None and self._manager is not None:
+            manager = self._manager()
+            if manager is not None:
+                session = manager._sessions.get(session_id)
+        if session is not None and not hasattr(session, "_consumer_telemetry_binding"):
+            session._consumer_telemetry_binding = (
+                LEGACY if self.legacy else self.bindings.get(session.caller_id, self.unavailable)
+            )
         return (
             session._consumer_telemetry_binding if session is not None
             else LEGACY if self.legacy else self.unavailable
         )
+
+    def attach_manager(self, manager: Any) -> None:
+        """Use the accepted session table, not a second registry or config read."""
+        self._manager = ref(manager)
 
     @contextmanager
     def admission(self, db: Any) -> Iterator[None]:
@@ -100,11 +114,20 @@ def bind(manager: Any, session: Any) -> None:
 def close(manager: Any) -> None:
     """Close optional export without changing product shutdown outcomes."""
     owner = getattr(manager, "_consumer_telemetry", None)
+    if owner is None:
+        owner = getattr(manager, "_consumer_telemetry_owner", None)
     if owner is not None:
         try:
             owner.close()
         except Exception:
             pass
+
+
+def adopt_database(manager: Any, db: Any) -> None:
+    """Keep the original routing owner when an active runtime replaces its database."""
+    owner = getattr(manager, "_consumer_telemetry", None)
+    if owner is not None:
+        setattr(db, "_consumer_telemetry_owner", owner)
 
 
 def capability() -> dict[str, Any]:

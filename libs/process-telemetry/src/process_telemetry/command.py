@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from itertools import count
 import json
 import subprocess
+import threading
 import time
 import uuid
 from typing import Any, TYPE_CHECKING
@@ -43,6 +44,7 @@ class CommandRoutes:
         self.slot = slot
         self.source_instance = str(uuid.uuid4())
         self._sequence = count(1)
+        self._offer_lock = threading.Lock()
         self.bindings: list[Binding] = []
         self.writer: BufferedSink | None = None
         self.closed = False
@@ -75,6 +77,16 @@ class CommandRoutes:
 
     def offer(self, binding: Binding, event: dict[str, Any]) -> None:
         next(self._counts["offered"])
+        if not self._offer_lock.acquire(blocking=False):
+            next(self._sequence)
+            next(self._counts["dropped_full"])
+            return
+        try:
+            self._offer_locked(binding, event)
+        finally:
+            self._offer_lock.release()
+
+    def _offer_locked(self, binding: Binding, event: dict[str, Any]) -> None:
         sequence = next(self._sequence)
         if (
             self.closed or binding.owner is not self or binding.state != "active"

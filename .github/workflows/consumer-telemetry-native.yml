@@ -13,6 +13,7 @@ on:
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
+      - "plugins/agent-bridge/tests/test_consumer_telemetry_lifetimes.py"
 
 permissions:
   contents: read
@@ -46,6 +47,7 @@ jobs:
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
             --test-file tests/test_consumer_telemetry_command.py `
+            --test-file tests/test_consumer_telemetry_lifetimes.py `
             --test-file tests/test_telemetry.py `
             --test-file tests/test_process_telemetry.py `
             --allow-explicit-tiers --timeout 180 --plugin-timeout 600 `

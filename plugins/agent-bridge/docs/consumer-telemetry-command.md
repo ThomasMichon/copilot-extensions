@@ -39,6 +39,10 @@ recovery observations, are explicitly unavailable in bound mode. They do not
 inherit the legacy sink. Binding is separate from replaceable reducer/history
 state. Newly encountered unadmitted logs remain suppressed, not suite-wide
 capture inferred from missing context.
+Later remote attachments and merge-recovery sessions use the accepted manager
+session table and the same snapshotted caller map. Once selected, session
+admission does not change on reuse. Database adoption retains that owner;
+candidate exit and partial construction failure settle its optional writer.
 
 The admitted root contains `.agent-telemetry/config.json`:
 
@@ -93,6 +97,8 @@ not start a process per event. Windows uses atomic caller-owned Job custody;
 Linux reuses the private-session guardian and parent-lifetime pipe.
 Unsupported custody refuses the optional route before any record write.
 There is no second transport queue or blocking pipe-writer thread.
+Concurrent producers use a nonblocking offer guard. Contention drops an offer
+and leaves a sequence gap; accepted records retain increasing source sequences.
 
 Record writes have a one-second aggregate deadline. An explicit off-path close
 stops offers, drains for at most 250 ms, and settles receiver custody within a
@@ -111,7 +117,7 @@ Qualify those independently through receiver-owned readback.
 Use the repository's contained runner:
 
 ```text
-python tools/run-plugin-tests.py agent-bridge --test-file tests/test_consumer_telemetry_command.py --test-file tests/test_telemetry.py --test-file tests/test_process_telemetry.py --allow-explicit-tiers
+python tools/run-plugin-tests.py agent-bridge --test-file tests/test_consumer_telemetry_command.py --test-file tests/test_consumer_telemetry_lifetimes.py --test-file tests/test_telemetry.py --test-file tests/test_process_telemetry.py --allow-explicit-tiers
 ```
 
 The native witness loads the ordinary service configuration and calls the
