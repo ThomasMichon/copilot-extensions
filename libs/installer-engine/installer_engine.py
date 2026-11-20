@@ -57,6 +57,8 @@ from installer_source_build import (
     _construction_hash as _construction_hash,
     _wheel_construction_hash as _wheel_construction_hash)
 from installer_engine_health import (
+    application_staging_environment as _application_staging_environment,
+    application_uv_selection as application_uv_selection,
     HealthRepairRequired as HealthRepairRequired,
     _PREPARE_INSTALLED_CHECK,
     verify_installed_inputs as verify_installed_inputs,
@@ -560,10 +562,7 @@ def _construct(
         if runtime.fingerprint_source(tuple(copied)) != before:
             raise RuntimeError("Application inputs changed while copying the slot project")
         _verify_application_wheels(inputs, slot)
-        environment = {
-            **os.environ, "PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", ""),
-            "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
-        }
+        environment = _application_staging_environment(inputs.application, uv, base_python)
         command = (
             [
                 str(Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0"
