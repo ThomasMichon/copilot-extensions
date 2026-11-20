@@ -6288,9 +6288,9 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py"
     ],
     "sources": {
-        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "f723127c2a49f8895ad6abb4fd12906bde7ccb845af29a6460baaeb5f0432ea0",
+        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "cd5f4841fd6b1f3a6d81d55484564b256901fe0082dc674a242f2e22b3a3cce0",
         "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py": "549224017c93c0413ed8a2f475f441fe3d2a2537d35e7c615acf53e40779483e",
-        "tools/promotion_unit_tests/test_point_executor_context.py": "0d31894095d7fc8880b94a8091238bc8616ed93c1c340ee53ea97ca5acabdca6",
+        "tools/promotion_unit_tests/test_point_executor_context.py": "9c82793173c0346c05b8ce579f503d35574266223d036914cf7647f0ccf63626",
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
         "tools/promotion_unit_tests/test_point_completion_contract.py": "a6ccb6cf2fc76b2a83c8a6e35b1f370be4c619f413b18b873479eacc29a03a17",
         "plugins/agent-index/src/agent_index/indexing/point_worker.py": "bcde0f1c3e8b1e1c7330d6e72358ece09806511bdbfd96d8e546ec7975705317",

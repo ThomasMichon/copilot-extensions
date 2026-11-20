@@ -79,7 +79,9 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         return call()
 
     monkeypatch.setattr(context, "asyncio", SimpleNamespace(
-        create_task=lambda operation: operation, to_thread=offloop,
+        get_running_loop=lambda: SimpleNamespace(
+            run_in_executor=lambda executor, context_run, call: offloop(lambda: context_run(call)),
+        ),
     ))
 
     def create_connector() -> SimpleNamespace:
@@ -131,7 +133,7 @@ def test_executor_opens_inertly_and_stops_only_started_engines(
             if work:
                 assert execute(api.task) == "complete"
                 assert execute(api.task) == "complete"
-                assert api.events.count("first:ensure") == api.events.count("second:ensure") == 1
+                assert api.events.count("first:ensure") == api.events.count("second:ensure") == 2
             else:
                 assert not any(event.endswith(":ensure") for event in api.events)
         expected = ["second:close", "first:close", "connector:close"]

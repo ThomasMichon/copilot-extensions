@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack, asynccontextmanager
+from contextvars import copy_context
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,7 @@ from agent_index.sources.azure_devops_point_runtime import (
 from agent_index.store.source_layout import _point_scope_json
 
 if TYPE_CHECKING:
-    from agent_index.index_config import IndexConfig
+    from agent_index.index_config import IndexConfig, ModelProfile
     from agent_index.indexing.embedding_runtime import EmbeddingRuntime
     from agent_index.indexing.point_service import PointExecutor
     from agent_index.indexing.task_store import TaskRecord
@@ -57,11 +58,11 @@ async def configured_azure_devops_point_executor(
             client = embedding_runtime.create_client(profile)
             cleanup.callback(client.close)
             clients[profile.model_id] = client
-        prepare, started = _model_readiness(config.model_profiles, clients, embedding_runtime)
+        started_engines: dict[str, ModelProfile] = {}
 
         def stop_started() -> None:
             with ExitStack() as stopping:
-                for profile in started:
+                for profile in started_engines.values():
                     stopping.callback(embedding_runtime.stop_engine, profile)
 
         cleanup.callback(stop_started)
@@ -70,16 +71,23 @@ async def configured_azure_devops_point_executor(
             hints = task.change_hints
             if type(hints) is not PointChangeHints or hints.scope != point_scope:
                 raise ValueError("Point executor requires its exact configured task scope")
-            return run_configured_azure_devops_points(
-                connector, task.id, expected_hints=hints, config=config,
-                legacy_data_dir=legacy_data_dir, point_scope=point_scope, scope=scope,
-                clients=clients, max_rows=max_rows, before_model_embed=prepare,
-            )
+            prepare, started = _model_readiness(config.model_profiles, clients, embedding_runtime)
+            try:
+                return run_configured_azure_devops_points(
+                    connector, task.id, expected_hints=hints, config=config,
+                    legacy_data_dir=legacy_data_dir, point_scope=point_scope, scope=scope,
+                    clients=clients, max_rows=max_rows, before_model_embed=prepare,
+                )
+            finally:
+                for profile in started:
+                    started_engines[profile.model_id] = profile
 
         return execute
 
+    loop = asyncio.get_running_loop()
+    # Executor Futures survive loop-wide Task cancellation until their threads settle.
     try:
-        executor = await _settle(asyncio.create_task(asyncio.to_thread(open_executor)))
+        executor = await _settle(loop.run_in_executor(None, copy_context().run, open_executor))
         yield executor
     finally:
-        await _settle(asyncio.create_task(asyncio.to_thread(cleanup.close)))
+        await _settle(loop.run_in_executor(None, copy_context().run, cleanup.close))

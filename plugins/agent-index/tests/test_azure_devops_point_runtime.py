@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager, suppress
+from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 import threading
@@ -51,6 +52,7 @@ def run(f: worker.Fixture, task: TaskRecord, **kwargs: Any) -> TaskRecord:
 
 def _owned_executor_context(
     f: worker.Fixture, lifetime: list[str], events: list[tuple[str, str]],
+    *, embedding_runtime: EmbeddingRuntime | None = None,
 ) -> AbstractAsyncContextManager[PointExecutor]:
     class Transport(httpx.MockTransport):
         def close(self) -> None:
@@ -80,7 +82,7 @@ def _owned_executor_context(
         events.append(("ensure", profile.model_id))
         return profile.model_id == "first"
 
-    runtime = EmbeddingRuntime(
+    runtime = embedding_runtime or EmbeddingRuntime(
         lambda profile: cast(EngineClient, Client(f, profile.model_id)),
         ensure, lambda profile: events.append(("stop", profile.model_id)),
     )
@@ -136,12 +138,14 @@ async def _wait_point_state(predicate: Callable[[], bool]) -> None:
 
 
 @pytest.mark.parametrize("phase", ["opening", "closing"])
+@pytest.mark.parametrize("cancelled_owner", ["caller", "loop"])
 def test_owned_executor_cancelled_open_and_close_join_resource_cleanup(
-    application: worker.Fixture, phase: str,
+    application: worker.Fixture, phase: str, cancelled_owner: str,
 ) -> None:
     f = application
     entered, release = threading.Event(), threading.Event()
     closed: list[str] = []
+    selection: ContextVar[str] = ContextVar("executor_selection", default="unselected")
 
     def block() -> None:
         entered.set()
@@ -149,12 +153,14 @@ def test_owned_executor_cancelled_open_and_close_join_resource_cleanup(
 
     class Transport(httpx.MockTransport):
         def close(self) -> None:
+            assert selection.get() == "selected"
             if phase == "closing":
                 block()
             super().close()
             closed.append("connector")
 
     def create_connector() -> AzureDevOpsConnector:
+        assert selection.get() == "selected"
         connector = AzureDevOpsConnector(
             "ado:acme/widgets", token="fixture-token", min_interval_s=0,
             work_item_queries=[{"wiql": named._QUERY}], pull_request_queries=[],
@@ -172,6 +178,7 @@ def test_owned_executor_cancelled_open_and_close_join_resource_cleanup(
         pytest.fail("inert context must not ensure or stop engines")
 
     async def use() -> None:
+        selection.set("selected")
         async with configured_azure_devops_point_executor(
             config=f.config, legacy_data_dir=f.config.data_dir.parent / "legacy",
             point_scope=f.claim.hints.scope, scope=worker.SCOPE, max_rows=32,
@@ -188,7 +195,12 @@ def test_owned_executor_cancelled_open_and_close_join_resource_cleanup(
         try:
             assert await asyncio.to_thread(entered.wait, 5)
             for _ in range(2):
-                task.cancel()
+                if cancelled_owner == "loop":
+                    for owned in asyncio.all_tasks():
+                        if owned is not asyncio.current_task():
+                            owned.cancel()
+                else:
+                    task.cancel()
                 await asyncio.sleep(0.02)
                 assert not task.done()
         finally:
@@ -197,6 +209,54 @@ def test_owned_executor_cancelled_open_and_close_join_resource_cleanup(
             await task
         assert closed == ["second", "first", "connector"]
         assert not f.provider.requests and not f.calls
+
+    asyncio.run(exercise())
+
+
+def test_owned_executor_rechecks_expired_engines_for_a_second_missing_target(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    available = {model: False for model in f.config.model_profiles}
+    ensured: list[str] = []
+    stopped: list[str] = []
+    closed: list[str] = []
+    lifetime: list[str] = []
+
+    class Client(worker.Client):
+        def embed_texts(self, texts: list[str]) -> Any:
+            assert available[self.model], "expired engine was not prepared again"
+            return super().embed_texts(texts)
+
+        def close(self) -> None:
+            closed.append(self.model)
+
+    def ensure(profile: ModelProfile, _: EngineClient) -> bool:
+        model = profile.model_id
+        ensured.append(model)
+        started = not available[model]
+        available[model] = True
+        return started
+
+    async def exercise() -> None:
+        async with _owned_executor_context(
+            f, lifetime, [], embedding_runtime=EmbeddingRuntime(
+                lambda profile: cast(EngineClient, Client(f, profile.model_id)),
+                ensure, lambda profile: stopped.append(profile.model_id),
+            ),
+        ) as execute:
+            for target in f.claim.hints.targets:
+                task = f.tasks.enqueue(
+                    f.claim.hints.source, change_hints=replace(f.claim.hints, targets=(target,)),
+                )
+                completed = await asyncio.to_thread(execute, task)
+                assert isinstance(completed, TaskRecord) and completed.status == TaskStatus.COMPLETE
+                assert all(available.values()) and not stopped and not closed
+                for model in available:
+                    available[model] = False
+            assert ensured == ["first", "second", "first", "second"]
+        assert sorted(stopped) == sorted(closed) == ["first", "second"]
+        assert lifetime == ["open", "closed"] and f.provider.body_reads == 2
 
     asyncio.run(exercise())
 
@@ -273,12 +333,20 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
 def test_service_rechecks_governance_after_blocked_point_selection(
     application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agent_index.indexing.runner import TaskRunner
+
     f = application
     app, lifetime = _point_service_app(f, monkeypatch)
     entered, release = threading.Event(), threading.Event()
     select = TaskStore.next_point_task
     original = f.tasks.get_task(f.claim.task_id)
     governance = {"status": "ready"}
+    waiting = asyncio.Event()
+    wait_for_wake = TaskRunner._wait_for_wake
+
+    async def observe_wait(self: TaskRunner, timeout: float) -> None:
+        waiting.set()
+        await wait_for_wake(self, timeout)
 
     def blocked_select(self: TaskStore, **kwargs: Any) -> TaskRecord | None:
         selected = select(self, **kwargs)
@@ -288,6 +356,7 @@ def test_service_rechecks_governance_after_blocked_point_selection(
         return selected
 
     monkeypatch.setattr(TaskStore, "next_point_task", blocked_select)
+    monkeypatch.setattr(TaskRunner, "_wait_for_wake", observe_wait)
 
     async def exercise() -> None:
         async with app.router.lifespan_context(app):
@@ -308,6 +377,7 @@ def test_service_rechecks_governance_after_blocked_point_selection(
                 assert f.tasks.get_task(f.claim.task_id) == original
                 assert not f.provider.requests and not f.calls
                 assert not runner.point_service.status()["failed"] and lifetime == ["open"]
+                await asyncio.wait_for(waiting.wait(), timeout=8)
                 governance["status"] = "ready"
                 runner.notify()
                 await _wait_point_state(lambda: bool(

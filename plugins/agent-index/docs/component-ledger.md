@@ -583,10 +583,11 @@ failure, and joins opening/cleanup even if the caller is cancelled. Borrowed
 connector HTTP clients are refused without closing them. Existing direct
 `run_configured_azure_devops_points(...)` callers keep owning their resources.
 Opening does not fetch provider data, register models in a native store or
-request engine readiness. Readiness runs once per needed model, immediately
-before actual missing embeddings; exit stops only engines reported as started
-by this context, then closes its clients. Higher-covered execution still
-qualifies provider eligibility but acquires no bodies and requests no model
+request engine readiness. Readiness runs once per needed model in each execution,
+immediately before actual missing embeddings, so an engine that expires between
+tasks is prepared again when needed. Exit stops only engines reported as started
+by this context, once per model, then closes its clients. Higher-covered execution
+still qualifies provider eligibility but acquires no bodies and requests no model
 work; a completed-task retry stays entirely local.
 
 The point state must already exist in its selected directory, wholly disjoint

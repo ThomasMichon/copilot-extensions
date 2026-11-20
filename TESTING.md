@@ -7781,9 +7781,12 @@ These cases do not start a detached child, enlarge required unit CI, qualify a
 live-provider/cross-generation cutover, or enable ordinary v2 advertisement.
 
 The service fixture uses the production configured Azure DevOps executor context.
-It checks readiness only for actual missing embeddings, one ensure per model,
-and stopping only the engine this context started. Two inert opening/closing
-cancellation controls use actual off-loop resource factories and joined cleanup.
+It checks readiness only for actual missing embeddings, one ensure per model per
+execution, and stopping only the engine this context started. Inert opening/closing
+cancellation controls use actual off-loop resource factories and joined cleanup,
+including loop-wide Task cancellation and preserved context variables. A
+two-execution control expires both fixture engines between distinct missing
+targets, requires readiness again, and stops each context-owned engine once.
 The existing higher-covered service controls require eligibility-only requests,
 no readiness, and an entirely local completed retry through a fresh owned
 executor as well as the explicit caller-owned API. Seven actor-free cases in
