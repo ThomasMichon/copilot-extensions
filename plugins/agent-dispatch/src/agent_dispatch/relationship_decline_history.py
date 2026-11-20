@@ -27,7 +27,7 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"]) -> str:
           AND json_extract(d.receipt,'$.binding.reservation_key')=r.key
           AND json_extract(d.receipt,'$.binding.generation')=r.task_relationship_generation
           AND json_extract(e.value,'$.state')='closed' AND r.release_requested=1
-          AND r.native_release_pending=0 AND r.state='settled'
+          AND r.native_release_pending=0 AND r.state IN ('settled','failed','rearmed')
     ), yielded AS (
         SELECT e.id FROM events e WHERE json_type(e.value,'$.request.reservation_key')='null'
           AND json_extract(e.value,'$.state')='closed' AND json_extract(e.value,'$.receipt.phase')='closed'
