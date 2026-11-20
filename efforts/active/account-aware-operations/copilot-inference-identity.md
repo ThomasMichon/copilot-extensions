@@ -24,6 +24,12 @@ hosted outside GitHub. Never substitute an owner namespace, gh `account_map`,
 active gh account or sibling preference. Keep Git/gh mapping and its scoped
 credentials unchanged.
 
+Distinguish a successfully read absent preference from an unreadable or
+malformed repository-preference source. The latter produces an actionable,
+non-secret unresolved result, not selection of a different configured machine
+account or automatic correction. Resolve this through the existing preference
+owner; do not treat a lookup failure as evidence that no repo override exists.
+
 With no inference preference, preserve ambient behavior only in a mode that
 already permits it, visibly unpinned rather than verified. Strict host-Copilot
 mode still refuses an unset required account even if ambient credentials exist;
@@ -32,9 +38,15 @@ no-preference compatibility must not bypass that mode's source/account contract.
 ## Safe correction
 
 **CI3296-P2.** Preserve durable default-off identity-switch policy independently
-of an account preference. Compare intended versus actually effective inference
-identity through a supported source, keeping unknown, unavailable and verified
-results distinct.
+of an account preference. Disabled automatic shared-store enforcement remains
+a pure no-op even when an account preference exists: no automatic identity
+comparison, mismatch warning or correction. Explicit read-only diagnostics
+may still report their requested resolution result; strict container credential
+admission remains independent.
+
+After opt-in, compare intended versus actually effective inference identity
+through a supported source, keeping unknown, unavailable and verified results
+distinct. An unresolved preference source cannot authorize automatic correction.
 
 Automatic correction of a shared machine-wide identity store requires the
 existing opt-in and otherwise-idle Copilot condition. Unknown concurrent-session
@@ -94,7 +106,13 @@ targets, alias-equivalent identity and sibling isolation. Include no-preference
 ambient compatibility only where permitted, plus strict-mode unset-account
 refusal with ambient credentials present.
 
-Exercise mismatch, unknown/unavailable identity, default-off, opted-in idle,
+Include unreadable and malformed repo preferences with a distinct configured
+machine account: prove actionable unresolved results, no fallback to that
+account and no automatic correction. With automatic enforcement disabled,
+prove no comparison/warning/correction even with a preference. Preserve
+explicit diagnostic results and independent strict admission.
+
+Exercise opted-in mismatch, unknown/unavailable identity, opted-in idle,
 concurrent/unknown-session warning and explicit risk-acceptance paths.
 Ordinary launch remains nonblocking when only unsafe shared-store correction
 is refused; independent strict admission remains enforced. Unchanged Git/gh

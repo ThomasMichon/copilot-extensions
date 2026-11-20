@@ -3528,17 +3528,7 @@ the inventory and evidence gates are available.
 
 ## Journal
 
-### 2026-11-20 UTC - Full-user WinGet receiving and tracking accepted
-
-#13701 and clarification #13703 delivered the complete P1475/V1475/G1475
-family, explicit marketplace seed-plugin AND runtime setup, continuing
-Coordination, Phase 7 and intake route. Complete corrected receiving/original/
-custody readback and a separate audited acknowledgment preceded #1475's
-NOT_PLANNED disposition. The [follow-through record](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md#previous-reviewed-delivery-and-independently-audited-retirement)
-preserves those actual gates without replay. OPEN #1303 retains all six
-unchecked technical rows, existing owners and independent #688/#1192/F3-E
-conditions. No provider, native test, resource transfer or rollout is claimed.
-The earlier proposed entries remain historical evidence.
+### [2026-11-20 UTC - Full-user WinGet receiving and tracking accepted](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md#accepted-portfolio-receiving-follow-through)
 
 ### [2026-11-20 UTC - Proposed complete full-user WinGet bootstrap venue](../backlog-reconciliation/journal/2026/11.20-winget-venue-and-retained-contracts.md)
 

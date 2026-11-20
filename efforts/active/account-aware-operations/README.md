@@ -412,8 +412,8 @@ source crosswalk, mechanisms left open, existing owners and evidence tiers.
 
 - [ ] **CI3296-P1:** Implement [repo/default selection and mode-qualified
   ambient compatibility](copilot-inference-identity.md#repo-selection).
-- [ ] **CI3296-P2:** Preserve [default-off shared-session safety and
-  nonblocking mismatch guidance](copilot-inference-identity.md#safe-correction).
+- [ ] **CI3296-P2:** Preserve [disabled enforcement's no-op, opted-in
+  shared-session safety and mismatch guidance](copilot-inference-identity.md#safe-correction).
 - [ ] **CI3296-P3:** Reconcile [supported launch consumers and machine-policy
   restoration](copilot-inference-identity.md#launch-and-policy-owners).
 - [ ] **CI3296-P4:** Resolve [supported account-selection mechanisms and
