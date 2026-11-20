@@ -5,9 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from .pool_instances import pool_instance_identity
-from .registrar_json import unique_json_fields
-
 
 @dataclass(frozen=True)
 class OrdinaryCapture:
@@ -27,9 +24,12 @@ def configured_capture(spec: str | None, authority: str | None) -> OrdinaryCaptu
     if spec in ("local-ordinary", "local-ordinary-drain"):
         capture = OrdinaryCapture(spec)
     elif isinstance(spec, str) and spec.startswith(prefix):
+        from .pool_instances import pool_instance_identity
+        from .registrar_json import unique_json_fields
+
         try:
             identity = pool_instance_identity(
-                json.loads(spec[len(prefix):], object_pairs_hook=unique_json_fields)
+                json.loads(spec[len(prefix) :], object_pairs_hook=unique_json_fields)
             )
             if any(
                 part != part.strip() or not part.isprintable() or any(c in part for c in "*?[]")

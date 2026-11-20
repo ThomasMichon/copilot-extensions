@@ -92,6 +92,11 @@ coordinator. A capable coordinator stores `task_relationship_required` in the
 reservation transaction; the unchanged receipt path must then bind the original
 workspace and retain its writer requirement before the first prompt. Changing
 the selector does not reclassify reservations or repair ungoverned history.
+Retrying an allocation keeps its original decision, even in all-pool mode;
+re-emitting work against an old ungoverned workspace does not retrofit it.
+A captured allocation cannot switch startup drivers. After a confirmed worker
+decline, a *new* unselected allocation may proceed only once the old claim is
+closed and its native is retired. A pending claim or retirement still blocks it.
 
 **Roll back prospectively.** With authority still `local`, change admission to
 `local-ordinary-drain`. This starts no new captures; it keeps the native writer
@@ -110,7 +115,12 @@ additional native participant. A null head never identifies a yielded session;
 the original native must still be the sole indexed identity. Missing identity
 projection from an older Worktrees provider refuses without falling back to a
 count. The owner's null/default-managed checkout representation is accepted;
-explicit unmanaged checkouts refuse. Carried/targeted workspaces, uncaptured natives
+explicit unmanaged checkouts refuse. A verified retry of the same task may
+supply the first workspace receipt after an empty attempt, or the first native
+after the workspace was bound. Its owner checks the original creation stamp,
+workspace incarnation and writer requirement against the audited assignment;
+the executing reservation supplies the native receipt, not a new writer choice.
+Other carried/targeted workspaces, uncaptured natives
 and historical requests without the original evidence refuse; current labels
 or an idle process list cannot retrofit them.
 

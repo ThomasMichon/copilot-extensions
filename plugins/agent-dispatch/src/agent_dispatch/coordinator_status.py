@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -19,7 +20,7 @@ from .queue_pool_placement import pool_placement_contract
 from .queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY
 
 
-def _slot_descriptor(app_state: Any) -> dict:
+def _slot_descriptor(app_state: Any) -> dict[str, Any]:
     """Render this coordinator's own slot-ownership view for ``/health``."""
     import os as _os
 
@@ -74,7 +75,7 @@ def register_status_routes(
     cohort_source_owned: bool = False,
 ) -> None:
     @app.get("/health")
-    def health(request: Request, repo: str | None = None) -> dict:
+    def health(request: Request, repo: str | None = None) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
         loop_health: dict[str, LoopHealth] = getattr(
             request.app.state, "loop_health", {}
@@ -146,7 +147,7 @@ def register_status_routes(
 
     @app.get("/events")
     async def events_stream(ready_frame: bool = False) -> StreamingResponse:
-        async def gen():
+        async def gen() -> AsyncIterator[str]:
             # Opt-in via the request only (never unconditional): an
             # already-installed old client never sends ``ready_frame=1`` and
             # therefore never receives this frame from any daemon, old or

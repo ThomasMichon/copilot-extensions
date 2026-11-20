@@ -449,7 +449,7 @@
       ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-service-index-requirements.txt"
+      "requirements": "tools/typecheck-bridge-requirements.txt"
     },
     {
       "name": "agent-index",

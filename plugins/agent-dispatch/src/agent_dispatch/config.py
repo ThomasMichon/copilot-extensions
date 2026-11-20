@@ -69,6 +69,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .rendezvous import Endpoint
 
 from .install_paths import install_dir
 
@@ -319,10 +323,10 @@ def _discovered_wsl_port(default_port: int) -> int:
         except ValueError:
             pass
     for d in _windows_run_dirs():
-        ep = rendezvous.read_endpoint(d)
-        if ep is not None and ep.transport == "tcp":
+        discovered = rendezvous.read_endpoint(d)
+        if discovered is not None and discovered.transport == "tcp":
             try:
-                return ep.tcp_host_port[1]
+                return discovered.tcp_host_port[1]
             except ValueError:
                 continue
     return default_port
@@ -346,7 +350,7 @@ def _routing_url() -> str | None:
     return ep.base_url if ep is not None else None
 
 
-def _discover_local_endpoint():
+def _discover_local_endpoint() -> Endpoint | None:
     """The coordinator endpoint from the local discovery ladder, or ``None``.
 
     ``AGENT_DISPATCH_ENDPOINT`` override -> the local rendezvous file (this host's
@@ -421,7 +425,8 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0, token: str | None
         request.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback host from our own routing table
-            return 200 <= resp.status < 300
+            status: int = resp.status
+            return 200 <= status < 300
     except urllib.error.HTTPError:
         # Any HTTP status (401/403/...) proves a live process answered --
         # only connection-level failures below mean nothing is there.
@@ -431,7 +436,7 @@ def _health_responsive(base_url: str, *, timeout: float = 3.0, token: str | None
 
 
 def _discovered_endpoint_health_responsive(
-    endpoint, *, timeout: float = 3.0, token: str | None = None,
+    endpoint: Endpoint, *, timeout: float = 3.0, token: str | None = None,
 ) -> bool:
     """True if a discovered ``rendezvous.Endpoint`` answers ``/health``.
 

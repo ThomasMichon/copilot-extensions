@@ -106,9 +106,14 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
     allocation = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key=?", (original_key,),
     ).fetchone()
+    if original_key != request["reservation_key"]:
+        if reservation["driver"] != "ordinary-bridge":
+            raise TaskError("relevance closeout original allocation changed; custody retained")
+        from .ordinary_capture_proof import original_evidence
+        allocation = original_evidence(conn, request)
     if (
         allocation is None or allocation["task_id"] != task_id
-        or request["reservation_key"] != original_key
+        or allocation["key"] != original_key
         or allocation["worktree_ownership"] != "created"
         or allocation["driver"] not in {"cli", "ordinary-bridge"}
         or not allocation["reserved_by"]

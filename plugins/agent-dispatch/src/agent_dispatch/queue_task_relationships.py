@@ -9,8 +9,12 @@ import secrets
 import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict
+from typing import TYPE_CHECKING, Any, cast
 
-from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
+if TYPE_CHECKING:
+    from .queue import TaskQueue
+
+from .assignment_workspace import AssignmentWorkspace, RelationshipWriter, same_assignment_worker
 from .ordinary_capture import OrdinaryCapture
 from .queue_common import Task
 from .queue_records import Status, TaskError
@@ -35,26 +39,27 @@ def valid_record_writer(value: object) -> bool:
     )
 
 
-def _encoded(value: dict) -> str:
+def _encoded(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
 def latest_relationship(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
-    return conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT * FROM task_events WHERE task_id=? AND task_relationship IS NOT NULL"
         " ORDER BY id DESC LIMIT 1",
         (task_id,),
     ).fetchone()
+    return row
 
 
 def require_relationship(conn: sqlite3.Connection, task_id: str) -> None:
-    row = latest_relationship(conn, task_id)
+    from .relationship_decline_history import relationship_required_condition
+
     required = conn.execute(
-        "SELECT 1 FROM spawn_reservations"
-        " WHERE task_id=? AND task_relationship_required=1 LIMIT 1",
+        "SELECT " + relationship_required_condition("t") + " FROM tasks t WHERE t.id=?",  # noqa: S608
         (task_id,),
     ).fetchone()
-    if row is None and required is None:
+    if required is None or not required[0]:
         return
     from .queue_relationship_schema import bound_relationship_condition
 
@@ -68,7 +73,7 @@ def require_relationship(conn: sqlite3.Connection, task_id: str) -> None:
         )
 
 
-def _matches_receipt(value: object, request: dict, *, phase: str | None = None) -> bool:
+def _matches_receipt(value: object, request: dict[str, Any], *, phase: str | None = None) -> bool:
     workspace = AssignmentWorkspace(**request["workspace"])
     if not isinstance(value, dict) or not (
         value.get("schema") == SCHEMA
@@ -138,24 +143,28 @@ def _matches_receipt(value: object, request: dict, *, phase: str | None = None) 
 class QueueTaskRelationshipsMixin:
     _ordinary_capture = OrdinaryCapture()
 
-    def _spawn_relationship_selection(self, driver: str | None) -> tuple[object, str | None]:
+    @property
+    def _relationship_queue(self) -> TaskQueue:
+        return cast("TaskQueue", self)
+
+    def _spawn_relationship_selection(self, driver: str | None) -> tuple[RelationshipWriter | None, str | None]:
         if driver == "ordinary-bridge" and getattr(self, "_ordinary_relationship_writer", None) is not None:
-            return self._ordinary_relationship_writer, "local"
-        return self._relationship_writer, self._relationship_authority
+            return self._relationship_queue._ordinary_relationship_writer, "local"
+        return self._relationship_queue._relationship_writer, self._relationship_queue._relationship_authority
 
     def _relationship_selection(
         self, task: Task, *, reservation_key: str | None = None,
-    ) -> tuple[object, str | None]:
-        if task.kind == "standing-charter" and self._standing_relationship_writer is not None:
-            return self._standing_relationship_writer, "local"
+    ) -> tuple[RelationshipWriter | None, str | None]:
+        if task.kind == "standing-charter" and self._relationship_queue._standing_relationship_writer is not None:
+            return self._relationship_queue._standing_relationship_writer, "local"
         if reservation_key is not None and getattr(self, "_ordinary_relationship_writer", None) is not None:
-            reservation = self.get_reservation(reservation_key)
+            reservation = self._relationship_queue.get_reservation(reservation_key)
             if (
                 reservation is not None and reservation.task_id == task.id
                 and reservation.task_relationship_required
             ):
                 return self._spawn_relationship_selection(reservation.driver)
-        return self._relationship_writer, self._relationship_authority
+        return self._relationship_queue._relationship_writer, self._relationship_queue._relationship_authority
 
     def _retain_pool_relationship_requirement(
         self, conn: sqlite3.Connection, task: Task, key: str, driver: str | None,
@@ -163,27 +172,25 @@ class QueueTaskRelationshipsMixin:
     ) -> None:
         governed = latest_relationship(conn, task.id) is not None
         writer, authority = self._spawn_relationship_selection(driver)
-        if (
-            driver == "ordinary-bridge"
-            and self._ordinary_relationship_writer is not None
-            and self._ordinary_capture.scope != "local-ordinary"
-        ):
-            if allocation_key == key:
-                required = self._ordinary_capture.selects(winner)
-            else:
-                # Only the original task can continue its allocation's capture.
+        if self._relationship_queue._ordinary_relationship_writer is not None:
+            if allocation_key != key:
                 prior = conn.execute(
-                    "SELECT task_id, task_relationship_required FROM spawn_reservations WHERE key=?",
+                    "SELECT task_id, driver, task_relationship_required FROM spawn_reservations WHERE key=?",
                     (allocation_key,),
                 ).fetchone()
                 if prior is None:
                     raise TaskError("ordinary capture cannot confirm the original allocation")
-                if prior["task_id"] != task.id and self._ordinary_capture.selects(winner):
-                    raise TaskError("ordinary capture cannot adopt another task's allocation")
-                required = prior["task_id"] == task.id and bool(prior["task_relationship_required"])
-            if not required:
+                if prior["driver"] == "ordinary-bridge" and prior["task_relationship_required"] and (
+                    driver != "ordinary-bridge" or prior["task_id"] != task.id
+                ):
+                    raise TaskError("captured ordinary allocation requires its original task and driver")
+                required = bool(prior["task_relationship_required"])
+            else:
+                required = self._ordinary_capture.selects(winner)
+            if writer is None or (driver == "ordinary-bridge" and not required):
                 if governed:
-                    raise TaskError("ordinary capture cannot drop a governed assignment")
+                    from .relationship_decline_history import admit_ungoverned_replacement
+                    admit_ungoverned_replacement(conn, task.id, key, task.generation + 1)
                 return
         if governed and writer is None:
             raise TaskError("governed allocator assignment requires its original relationship writer")
@@ -206,10 +213,10 @@ class QueueTaskRelationshipsMixin:
     ) -> Task | None:
         if task_id is None:
             return None
-        task = self.get(task_id)
+        task = self._relationship_queue.get(task_id)
         if task is not None and task.kind == "standing-charter":
             raise TaskError("standing charter requires explicit attachment admission")
-        if workspace is None:
+        if workspace is None or task is None:
             return None
         value = self.task_relationship(task_id)
         if value is None:
@@ -234,9 +241,9 @@ class QueueTaskRelationshipsMixin:
         value = self.reconcile_task_relationship(task_id, event_id=event_id)
         if value["state"] != "bound":
             raise TaskError("task assignment was cancelled during relationship reconciliation")
-        with self._connect() as conn:
+        with self._relationship_queue._connect() as conn:
             conn.execute("BEGIN")
-            task = self._fetch(conn, task_id)
+            task = self._relationship_queue._fetch(conn, task_id)
             current = latest_relationship(conn, task_id)
             if (
                 task is None or task.status != Status.CLAIMED
@@ -287,6 +294,8 @@ class QueueTaskRelationshipsMixin:
             ),
         )
         event_id = cursor.lastrowid
+        if event_id is None:
+            raise TaskError("assignment event was not persisted")
         identity = {"assignment_event_id": event_id, "worker_id": worker_id}
         from .queue_assignment_cohort import capture_cohort
 
@@ -318,10 +327,10 @@ class QueueTaskRelationshipsMixin:
         )
         return event_id
 
-    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None:
+    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict[str, Any] | None:
         if event_id is not None and (type(event_id) is not int or not 1 <= event_id <= 2**63 - 1):
             raise TaskError("invalid original task relationship event")
-        with self._connect() as conn:
+        with self._relationship_queue._connect() as conn:
             row = (
                 latest_relationship(conn, task_id)
                 if event_id is None
@@ -333,15 +342,15 @@ class QueueTaskRelationshipsMixin:
             )
         return json.loads(row["task_relationship"]) if row is not None else None
 
-    def _admit_original_relationship_request(self, request: dict) -> dict:
+    def _admit_original_relationship_request(self, request: dict[str, Any]) -> dict[str, Any]:
         from .task_obligations import read_snapshot
 
-        task = self.get(request["task_id"])
+        task = self._relationship_queue.get(request["task_id"])
         authority = self._relationship_selection(
             task, reservation_key=request.get("reservation_key"),
         )[1] if task is not None else None
         snapshot = read_snapshot(
-            self, request["task_id"], assignment_event_id=request["event_id"],
+            self._relationship_queue, request["task_id"], assignment_event_id=request["event_id"],
         )
         if (
             authority != request["authority"]
@@ -355,7 +364,7 @@ class QueueTaskRelationshipsMixin:
         ):
             raise TaskError("original queue and audited relationship request are unconfirmed")
         if request["reservation_key"] is not None:
-            with self._connect() as conn:
+            with self._relationship_queue._connect() as conn:
                 prepared = conn.execute(
                     "SELECT task_id, worktree, allocation_project, worktree_path,"
                     " execution_machine, creation_nonce, task_relationship_required,"
@@ -383,13 +392,13 @@ class QueueTaskRelationshipsMixin:
     def reconcile_task_relationship(
         self, task_id: str, *, event_id: int | None = None,
         authority_guard: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Replay the same ground-owner request; never hold SQLite during I/O."""
         value = self.task_relationship(task_id, event_id=event_id)
         if value is None:
             raise TaskError("no retained task relationship request")
         request = value["request"]
-        task = self.get(task_id)
+        task = self._relationship_queue.get(task_id)
         selected_writer, authority = self._relationship_selection(
             task, reservation_key=request.get("reservation_key"),
         ) if task is not None else (None, None)
@@ -412,14 +421,14 @@ class QueueTaskRelationshipsMixin:
             )
         if not retiring and value["state"] == "bound":
             return value
-        with self._connect() as conn:
-            task = self._fetch(conn, task_id)
+        with self._relationship_queue._connect() as conn:
+            task = self._relationship_queue._fetch(conn, task_id)
             current = latest_relationship(conn, task_id)
             from .queue_relationship_continuation import current_binding
 
             binding = current_binding(value)
             if not retiring and (
-                current["id"] != request["event_id"]
+                current is None or task is None or current["id"] != request["event_id"]
                 or task.generation != binding["generation"]
                 or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
                 or (
@@ -438,7 +447,7 @@ class QueueTaskRelationshipsMixin:
         elif callable(bind_request):
             writer = bind_request(copy.deepcopy(request))
 
-        def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:
+        def write(operation: str, payload: dict[str, Any], *, phase: str | None = None) -> dict[str, Any]:
             self._admit_original_relationship_request(request)
             if authority_guard is not None:
                 authority_guard()
@@ -505,7 +514,7 @@ class QueueTaskRelationshipsMixin:
                 phase="bound",
             )
             state = "bound"
-        with self._connect() as conn:
+        with self._relationship_queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if authority_guard is not None:
                 authority_guard()
@@ -515,9 +524,10 @@ class QueueTaskRelationshipsMixin:
             ).fetchone()
             if retained is None or json.loads(retained["task_relationship"])["request"] != request:
                 raise TaskError("original task relationship request changed")
-            task = self._fetch(conn, task_id)
+            task = self._relationship_queue._fetch(conn, task_id)
+            current = latest_relationship(conn, task_id)
             if state == "bound" and (
-                latest_relationship(conn, task_id)["id"] != request["event_id"]
+                current is None or task is None or current["id"] != request["event_id"]
                 or task.generation != binding["generation"]
                 or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
                 or (
