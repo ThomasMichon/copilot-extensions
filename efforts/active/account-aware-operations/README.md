@@ -25,6 +25,19 @@ switch or leaking one operation's credentials into another.
 
 ## Coordination
 
+- **Finite #3296 inference-identity intake (proposed):** Phase 6 is the
+  separate Copilot inference-identity lane; it does not change Phases 1-4's
+  repository-operation authentication contract or conflate the two identities.
+  Worktrees retains repo-keyed resolution and launcher integration;
+  agent-machines retains machine-default policy and restoration. The existing
+  trusted-container claimant keeps that bounded launch/isolation slice and
+  its explicit exclusions. Other launcher, credential, source and native
+  owners remain unchanged. Preserve Draft status and the temporary-token
+  implementation restriction: this amendment appoints no executor, transfers
+  no claim and starts no authentication or live inference operation.
+  #3296 remains OPEN during the proposal and until a separate complete
+  receiving/custody judgment; ordinary document review is not claim release.
+
 The proposed #4756 fork-consent lane below is distinct from #5791 credential
 dispatch. It directly receives the WHOLE durable target/account/remote,
 existence-before-creation and confirmation outcome, not only its residual
@@ -123,6 +136,15 @@ venue-specific credential transport and launch authentication remain with
 Define and adopt a general-purpose account-aware execution contract for
 repository operations, including concurrent use, diagnostics, and safe
 degradation without global identity mutation.
+
+The finite Phase 6 intake preserves #3296's independently stated request:
+"Per-repo/per-machine enforcement of Copilot CLI's own inference identity
+(distinct from gh account_map)". Its requested repo override and machine
+default, supported launch enforcement OR actionable warning, independent
+Git identity and prerequisite question are retained below. Private deployment
+examples are deliberately not reproduced. This is a source-contract intake,
+not an operator amendment or a grant to use the original speculative
+credential-extraction mechanism.
 
 ## Plan
 
@@ -381,7 +403,106 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#545** agent-worktrees: <project> --version mis-routes to the bare Picker seam instead of the CLI
   - `<project> --version` mis-routing is exactly this effort's `project-addressed-not-cwd-bound` scope.
 
+### Phase 6 - Independent Copilot inference identity from #3296
+
+**Agent-recommended tracking amendment.** This is the complete independent
+repo/machine inference-identity program, not another gh account wrapper.
+It advances the Worktrees vision's
+[per-repo account identity](../../../visions/plugins/agent-worktrees/README.md#per-repo-account-identity-resolution)
+without changing that standing intent. The original issue's proposed
+credential-extraction/log-parsing mechanism was a feasibility question, not
+an accepted implementation or authority to access credentials.
+
+- [ ] **CI3296-P1:** Resolve the intended Copilot inference identity from an
+  optional exact repository `copilot_account` override, then the
+  machine-level `default_copilot_account`. Use stable repository identity,
+  including repositories hosted outside GitHub; never substitute an owner
+  namespace, gh `account_map`, active gh account or sibling repo preference.
+  Keep the existing Git/gh mapping and its process-scoped credentials
+  unchanged. With no inference preference, preserve ordinary ambient
+  behavior and report that it is unpinned rather than verified.
+- [ ] **CI3296-P2:** Preserve the durable default-off identity-switch policy
+  independently of an account preference. Compare intended versus actually
+  effective inference identity through a supported source, keeping unknown,
+  unavailable and verified results distinct. Automatic correction of a shared
+  machine-wide identity store is permitted only under the existing opt-in
+  and otherwise-idle Copilot condition; unknown concurrent-session state is
+  not proof of idleness. Otherwise warn clearly without blocking launch or
+  changing another session, unless the operator explicitly accepts that
+  shared-session risk. Do not silently enable switching on update or adoption.
+- [ ] **CI3296-P3:** Inventory and reconcile the actual supported local
+  Manager/direct, Windows/POSIX, remote/venue and repository-context-change
+  launch boundaries through their existing owners. Preserve exact selected
+  repository/account, effective identity reporting, argument/exit behavior
+  and explicit unsupported outcomes. A Windows prototype call, successful
+  credential injection or gh result is not proof of effective inference at
+  another boundary. Worktrees owns resolution/integration; agent-machines
+  owns declarative machine-default policy and restore/reconcile behavior,
+  not a second resolver or credential store.
+- [ ] **CI3296-P4:** Reuse only supported authentication/account-selection
+  interfaces. Resolve the original prerequisite question about selecting an
+  already-cached account versus a vendor-supported login/switch interface;
+  if unsupported, retain actionable mismatch guidance instead of inventing
+  credential-store extraction or parsing private token formats. Preserve
+  cold/stale/unavailable/expired-source distinctions and explicit
+  host-Copilot versus legacy launch modes. Configured strict-source/account
+  failure must refuse that credential route, never silently fall back to
+  ambient or legacy credentials; this is distinct from P2's nonblocking
+  warning when a shared-store correction would disturb another session.
+- [ ] **CI3296-P5:** Preserve the existing trusted-container claimant's
+  bounded token-resolution/native child-environment isolation scope and
+  exclusions: no vendor source-parser, auth-store, expiry/refresh-schema or
+  restricted-proxy redesign is received implicitly. Keep process-only
+  credential lifetime, no secret disclosure/persistence and independent Git
+  authentication. Credit #3344/#3498's prototype/default-off policy,
+  #6415's four trusted builders and explicit strict/legacy isolation, and
+  #6725's local preference editing at their reported source scope. None
+  proves complete machine-policy restoration, live OAuth/inference,
+  all-launcher identity or deployment. Publish owner-appropriate configuration,
+  diagnostics and migration guidance, with separately authorized
+  source/release/installed qualification rather than a shared-store rollout.
+
+#### Local Validation - #3296
+
+- [ ] **CI3296-V1:** With synthetic non-secret repository/machine settings,
+  prove exact-repo override/default/no-preference precedence for GitHub and
+  non-GitHub targets, alias-equivalent identity and sibling isolation.
+  Exercise intended/effective mismatch, unknown/unavailable identity,
+  default-off, opted-in idle, concurrent/unknown-session warning and explicit
+  risk-acceptance paths. Prove ordinary launch stays nonblocking when only
+  unsafe shared-store correction is refused; unchanged Git/gh identity and
+  other sessions remain controls.
+- [ ] **CI3296-V2:** Qualify each actually supported P3 boundary through its
+  real owning launcher/configuration consumer, including machine-default
+  restore/reconcile and context changes. Use controlled identity sources and
+  fixture-owned state before separately authorized native/live checks.
+  Preserve literal arguments, exit and independent Git authentication.
+  Mark unavailable/unsupported boundaries honestly; successful Windows or
+  container injection does not stand in for effective inference elsewhere.
+- [ ] **CI3296-V3:** Exercise configured strict-source/account failures,
+  cold/stale/expired/unavailable providers, explicit legacy selection,
+  incompatible/missing vendor capability and successful scoped launch.
+  Prove no strict-to-ambient/legacy fallback, shared-store surprise, secret
+  leakage or second credential owner. Keep isolation, supported mechanism,
+  actual effective inference, containing release and authorized installed
+  evidence distinct. No credential lookup, login, account switch, model
+  request, container operation or runtime mutation is authorized by this plan.
+
 ## Validation Plan
+
+The existing machine-global-account invariants below continue to govern
+Git/gh repository operations. Phase 6 separately qualifies the inference
+store's already-explicit opt-in/idle-machine OR accepted-risk correction
+and nonblocking-warning alternative; it does not relax operation scoping.
+
+- [ ] **CI3296-G:** Resolve EVERY CI3296-P1..5/V1..3 clause at its actual
+  supported source/consumer and separately authorized native/installed tier.
+  Preserve repo-keyed inference versus Git/gh independence, machine-policy
+  ownership, default-off/shared-session warning safety, strict/legacy
+  compatibility, unknown versus verified identity and the bounded claimant.
+  Keep all incumbent Plan/Validation states, Draft and temporary-token
+  implementation restriction. Reviewed receiving is not technical completion,
+  source-claim release, live authentication, deployment or authority transfer.
 
 - [ ] **FC4756-G:** Complete EVERY FC4756-P1..3/LV1..3 clause at its original
   source/consumer tier: durable private target/account/remote consent and reuse,
@@ -450,6 +571,19 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-20 - Complete independent inference-identity receiving proposed
+
+Added five unchecked Phase 6 Plan, three local Validation and one actual
+global Validation rows for #3296, through the existing Phase 5 intake.
+The complete repo/default/ambient policy, machine restoration, actual launcher
+matrix, safe shared-store warning behavior and strict/legacy source contract
+remain independent of Git/gh operation identity. Existing source milestones
+retain their reported scope; the trusted-container claim and its exclusions
+remain with their owner. Draft, temporary coordination, original intent,
+every incumbent check state and all source/resource/native duties remain.
+No implementation, credential operation, inference trial or issue disposition
+is performed by this planning amendment.
 
 ### 2026-11-17 - Whole durable fork-consent receiving proposed
 
