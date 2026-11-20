@@ -28,6 +28,7 @@ RECIPES = {
     "agent-logger": "AGENT_LOGGER",
     "agent-bridge": "AGENT_BRIDGE",
     "agent-mcp": "AGENT_MCP",
+    "agent-dispatch": "AGENT_DISPATCH",
 }
 LOGGER_COMMANDS = (
     ("agent-logger", "agent_logger"),
@@ -80,6 +81,14 @@ MCP_CONTEXT_KEYS = (
     "AGENT_MCP_NO_CUTOVER", "AGENT_MCP_CUTOVER_DRAIN_TIMEOUT",
     "AGENT_MCP_CUTOVER_HEALTH_TIMEOUT", "AGENT_MCP_NO_VERSION_REAP",
 )
+DISPATCH_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_DISPATCH_HOME", "AGENT_DISPATCH_INSTALLATION_ID",
+    "AGENT_DISPATCH_NO_SELFPROVISION", "AGENT_DISPATCH_PINNED_CONTEXT",
+    "AGENT_DISPATCH_ALLOW_DOWNGRADE", "AGENT_DISPATCH_WSL_WINDOWS_CLIENT",
+    "AGENT_DISPATCH_SUPERVISE_MACHINE", "AGENT_DISPATCH_BASE_PYTHON",
+    "AGENT_DISPATCH_INSTALLATION_CONFIG",
+)
 BRIDGE_HELPERS = (
     "installer-engine.ps1", "installer-engine.sh",
     "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py", "runtime_launcher.py",
@@ -109,6 +118,24 @@ MCP_HELPERS = (
     "versioned_runtime_construction.py", "versioned_runtime_source.py",
     "versioned_runtime_publication.py", "versioned_runtime_leases.py", "uninstall-profile.json",
     "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
+)
+DISPATCH_HELPERS = (
+    "installer-engine.ps1", "installer-engine.sh",
+    "installer_driver.py",
+    "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "installer_wheel_acquisition.py",
+    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_dependency_arguments.py",
+    "installer_source_build.py", "installer_source_wheel_cache.py",
+    "installation-context/installation_context.py",
+    "installation-context/installation-context.ps1", "installation-context/installation-context.sh",
+    "install.ps1", "install.sh", "versioned_runtime_native.ps1", "versioned_runtime.py",
+    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py", "versioned_runtime_leases.py",
+    "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
+    "installer-instance-reconcile.ps1", "installer-instance-reconcile.sh", "installer_instance_reconcile.py",
+    "installer_retained_content.py",
+    "source-runtime.ps1", "source-runtime.sh", "supervisor-lifecycle.ps1", "base-python.ps1",
+    "runtime-gate.ps1", "runtime-gate.sh", "resolve-runtime.ps1", "resolve-runtime.sh",
 )
 
 
@@ -153,6 +180,11 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
         "AGENT_MCP_VALIDATED_CONTEXT", "AGENT_MCP_PAYLOAD_ROOT", "AGENT_MCP_ACTION",
         "AGENT_MCP_MARKETPLACE_ROOT",
+        "AGENT_DISPATCH_VALIDATED_CONTEXT", "AGENT_DISPATCH_PAYLOAD_ROOT",
+        "AGENT_DISPATCH_ACTION", "AGENT_DISPATCH_DRY_RUN", "AGENT_DISPATCH_FORCE",
+        "AGENT_DISPATCH_CONFIG_DIR", "AGENT_DISPATCH_INSTALL_DIR",
+        "AGENT_DISPATCH_ROUTING_DIR", "AGENT_DISPATCH_RUN_DIR",
+        "AGENT_DISPATCH_COMMAND_MODULE",
     ):
         result.pop(key, None)
     return result
@@ -206,6 +238,20 @@ def _inspect_payload(
         or manifest.get("windowsCatalogShim") != "cmd"
     ):
         raise ProvisionError("MCP first use requires its native installer lifecycle and CMD catalog")
+    if plugin == "agent-dispatch":
+        if (
+            any(not (scripts / name).is_file() for name in DISPATCH_HELPERS)
+            or not (payload / "src/agent_dispatch/windows-scheduling.ps1").is_file()
+            or (
+                os.path.lexists(runtime_root / "action-controls.json")
+                and not (scripts / "action_controls.py").is_file()
+            )
+        ):
+            raise ProvisionError("Dispatch first use requires its complete materialized installation helpers")
+        if "AGENT_DISPATCH_INSTALLATION_CONFIG" in os.environ:
+            raise ProvisionError("Dispatch first use requires its default installation policy")
+        if manifest.get("installerLifecycle") is not True or manifest.get("windowsCatalogShim") != "cmd":
+            raise ProvisionError("Dispatch first use requires its native lifecycle and CMD catalog declaration")
     if plugin == "agent-bridge" and sys.platform.startswith("linux"):
         for tool in ("xargs", "seq"):
             if shutil.which(tool) is None:
@@ -239,9 +285,9 @@ def _inspect_payload(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
-    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger", "agent-bridge", "agent-mcp"):
+    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger", "agent-bridge", "agent-mcp", "agent-dispatch"):
         label = {"agent-ssh": "SSH", "agent-codespaces": "CodeSpaces", "agent-logger": "Logger",
-                 "agent-bridge": "Bridge", "agent-mcp": "MCP"}[plugin]
+                 "agent-bridge": "Bridge", "agent-mcp": "MCP", "agent-dispatch": "Dispatch"}[plugin]
         if (
             (plugin != "agent-logger" and manifest.get("module") != plugin.replace("-", "_"))
             or manifest.get("legacyRuntimeRoot") != "." + plugin
@@ -251,7 +297,7 @@ def _inspect_payload(
             }
         ):
             raise ProvisionError(f"{label} first use requires its declared native runtime gate")
-    if plugin in ("agent-codespaces", "agent-logger", "agent-bridge", "agent-mcp") and (
+    if plugin in ("agent-codespaces", "agent-logger", "agent-bridge", "agent-mcp", "agent-dispatch") and (
         prefix + "_INSTALLATION_ID" in os.environ
         or runtime_root != Path.home() / ("." + plugin)
         or not (
@@ -415,6 +461,7 @@ def enqueue(
         "agent-logger": LOGGER_CONTEXT_KEYS,
         "agent-bridge": BRIDGE_CONTEXT_KEYS,
         "agent-mcp": MCP_CONTEXT_KEYS,
+        "agent-dispatch": DISPATCH_CONTEXT_KEYS,
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
@@ -466,6 +513,7 @@ def _execute(admission: dict[str, Any], *, root: Path, client_only: bool = False
                 "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
                 "agent-bridge",
                 "agent-mcp",
+                "agent-dispatch",
             }
             inputs = _path(
                 runtime_root / ".install-stage" if legacy_stage
@@ -495,6 +543,8 @@ def _execute(admission: dict[str, Any], *, root: Path, client_only: bool = False
             return 1
         custody.assert_owned()
         environment = _environment(payload)
+        if admission["plugin"] == "agent-dispatch":
+            environment.pop("AGENT_DISPATCH_INSTALLATION_CONFIG", None)
         # This trusted adapter, not ambient caller hints, attests the copied
         # source after queue authentication and full before/after verification.
         environment["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
@@ -504,7 +554,9 @@ def _execute(admission: dict[str, Any], *, root: Path, client_only: bool = False
         environment["PATH"] = os.pathsep.join(filter(None, (
             str(Path(sys.executable).parent), environment.get("PATH"),
         )))
-        if os.name == "nt" and admission["plugin"] in {"agent-mcp", "agent-vault"} and installer_action == "provision":
+        if os.name == "nt" and admission["plugin"] in {
+            "agent-mcp", "agent-vault", "agent-dispatch",
+        } and installer_action == "provision":
             environment.update(participant_environment())
             environment["COPILOT_EXTENSIONS_NATIVE_INSTALLER"] = admission["plugin"]
         code = _run_installer(

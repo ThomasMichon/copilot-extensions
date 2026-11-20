@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import importlib.util
 import json
 import os
@@ -1185,6 +1186,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "gateway-continuity-application-linux", "gateway-continuity-application-windows",
         "gateway-normal-setup-linux", "gateway-normal-setup-windows",
         "dependency-compile-linux", "dependency-compile-windows",
+        "packaging-seed-linux", "packaging-seed-windows",
+        "update-diagnostics-linux", "update-diagnostics-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
         "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
@@ -2253,6 +2256,188 @@ def test_bridge_snapshots_use_explicit_bounded_native_portfolio() -> None:
              "--test-file", "tests/test_bootstrap_driver.py",
              "--test-timeout", "60", "--timeout", "180"],
         ]
+
+
+@pytest.mark.parametrize(("platform", "runner", "opt_in"), [
+    ("linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+    ("windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+])
+def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
+    platform: str, runner: str, opt_in: str,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "dispatch-recipes" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    name = f"dispatch-recipes-{platform}"
+    job = workflow["jobs"][name]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-recipes'"
+    )
+    assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+    assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+    expected_environment = {opt_in: "1", "UV_PYTHON": "3.12"}
+    if platform == "windows":
+        expected_environment["PYTEST_ADDOPTS"] = (
+            "${{ matrix.packet.name == 'cold-original' && "
+            "'-o faulthandler_timeout=60 -o faulthandler_exit_on_timeout=false' || '' }}"
+        )
+    assert job["env"] == expected_environment
+    assert job["strategy"]["fail-fast"] is False
+    assert set(job["strategy"]["matrix"]) == {"packet"}
+    packets = job["strategy"]["matrix"]["packet"]
+    assert len(packets) == 12
+    assert {item["name"]: item["file"] for item in packets} == {
+        "python-refusals": "test_first_use_dispatch.py",
+        "native-policy-refusals": "test_first_use_dispatch.py",
+        "native-source-refusals": "test_first_use_dispatch.py",
+        "recipe-controls": "test_first_use_dispatch.py",
+        "deferred-stamp": "test_first_use_dispatch.py",
+        "cold-original": "test_first_use_dispatch.py",
+        "concurrent": "test_first_use_dispatch.py",
+        "reuse-failed-source": "test_first_use_dispatch.py",
+        "supervisor-failure": "test_first_use_dispatch.py",
+        "bridge-python-refusals": "test_first_use_bridge.py",
+        "bridge-native-refusals": "test_first_use_bridge.py",
+        "bridge-recipe-controls": "test_first_use_bridge.py",
+    }
+    policy = (
+        "(client-only or no-self or pinned or managed or malformed or custom-root "
+        "or cell or installation-policy or nested or dispatcher or module)"
+    )
+    assert {item["name"]: item["select"] for item in packets} == {
+        "python-refusals": "(refusal or actual_installer_missing_prerequisite) and python-api",
+        "native-policy-refusals": "refusal and native-front and " + policy,
+        "native-source-refusals": (
+            "(refusal or actual_installer_missing_prerequisite) and native-front and not " + policy
+        ),
+        "recipe-controls": (
+            "(not refusal and not actual) or copied_foundation_supplies_the_actual_lifecycle_archive"
+        ),
+        "deferred-stamp": "actual and stamp",
+        "cold-original": "original_provision",
+        "concurrent": "actual and concurrent",
+        "reuse-failed-source": "reuse_failed",
+        "supervisor-failure": "supervisor_effect_failure",
+        "bridge-python-refusals": "refusal and False",
+        "bridge-native-refusals": "refusal and True",
+        "bridge-recipe-controls": "not refusal and not actual",
+    }
+    checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["persist-credentials"] is False
+    execution_step, = [step for step in job["steps"] if "run" in step]
+    assert "env" not in execution_step
+    execution = execution_step["run"]
+    assert execution.split() == [
+        "python", "tools/run-plugin-tests.py", "update-driver",
+        "--test-file", "tests/${{", "matrix.packet.file", "}}",
+        "-k", '"${{', "matrix.packet.select", '}}"',
+        "--test-timeout", "900", "--timeout", "1080",
+    ]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert name not in required["jobs"]
+
+
+@pytest.fixture(scope="module")
+def dispatch_recipe_collections() -> dict[str, dict[str, list[str]]]:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    packets = {
+        platform: workflow["jobs"][f"dispatch-recipes-{platform}"]["strategy"]["matrix"]["packet"]
+        for platform in ("linux", "windows")
+    }
+    original = {
+        "python-refusals": "refusal and python-api",
+        "native-source-refusals": (
+            "refusal and native-front and not (client-only or no-self or pinned or managed "
+            "or malformed or custom-root or cell or installation-policy or nested or dispatcher or module)"
+        ),
+        "recipe-controls": "not refusal and not actual",
+    }
+    packets["baseline"] = [
+        {**packet, "select": original.get(packet["name"], packet["select"])}
+        for packet in packets["linux"]
+    ]
+    script = """
+import contextlib, io, json, sys
+from pathlib import Path
+root = Path.cwd()
+sys.path[:0] = [str(root / "libs" / name / "src") for name in
+               ("update-driver", "agent-procutil", "single-instance-lease", "zdd")]
+import pytest
+from _pytest.mark import KeywordMatcher
+from _pytest.mark.expression import Expression
+packets = json.load(sys.stdin)
+class Collected:
+    def pytest_collection_finish(self, session):
+        self.results = {
+            "inventory": {
+                name: [item.nodeid for item in session.items if item.path.name == name]
+                for name in ("test_first_use_dispatch.py", "test_first_use_bridge.py")
+            },
+        }
+        for platform, entries in packets.items():
+            self.results[platform] = {
+                packet["name"]: [
+                    item.nodeid for item in session.items
+                    if item.path.name == packet["file"]
+                    and Expression.compile(packet["select"]).evaluate(KeywordMatcher.from_item(item))
+                ]
+                for packet in entries
+            }
+collected = Collected()
+output = io.StringIO()
+with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+    status = pytest.main([
+        "--collect-only", "-q", "--color=no", "-p", "no:cacheprovider", "-o", "addopts=",
+        "libs/update-driver/tests/test_first_use_dispatch.py",
+        "libs/update-driver/tests/test_first_use_bridge.py",
+    ], plugins=[collected])
+if status:
+    print(output.getvalue(), file=sys.stderr)
+    raise SystemExit(status)
+print(json.dumps(collected.results))
+"""
+    environment = {
+        **os.environ, "PYTEST_ADDOPTS": "", "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", script], input=json.dumps(packets), cwd=HERE.parent,
+        env=environment, capture_output=True, text=True, timeout=20,
+        creationflags=_CREATION_FLAGS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    collections: dict[str, dict[str, list[str]]] = json.loads(result.stdout)
+    return collections
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_dispatch_recipes_collect_existing_and_new_controls_exactly_once(
+    platform: str, dispatch_recipe_collections: dict[str, dict[str, list[str]]],
+) -> None:
+    inventory = dispatch_recipe_collections["inventory"]["test_first_use_dispatch.py"]
+    prerequisites = {
+        node for node in inventory
+        if "::test_dispatch_actual_installer_missing_prerequisite_refuses_before_acquisition[" in node
+    }
+    archive = {
+        node for node in inventory
+        if node.endswith("::test_dispatch_copied_foundation_supplies_the_actual_lifecycle_archive")
+    }
+    assert len(prerequisites) == 6 and len(archive) == 1
+    additions = {
+        "python-refusals": {node for node in prerequisites if node.endswith("-python-api]")},
+        "native-source-refusals": {node for node in prerequisites if node.endswith("-native-front]")},
+        "recipe-controls": archive,
+    }
+    selected = dispatch_recipe_collections[platform]
+    for packet, previous in dispatch_recipe_collections["baseline"].items():
+        assert set(selected[packet]) == set(previous) | additions.get(packet, set()), packet
+    counts = Counter(node for nodes in selected.values() for node in nodes)
+    assert all(counts[node] == 1 for node in prerequisites | archive), counts
 
 
 def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:

@@ -5640,6 +5640,89 @@ integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
 
+## Optional Dispatch fixed recipes
+
+The manual `installation-context-full.yml` portfolio `dispatch-recipes` qualifies
+only Dispatch's canonical installed payload and default legacy runtime root on
+native Windows and Ubuntu. Its twelve packets per platform retain twenty-four
+jobs. Python/native refusal packets include actual-installer missing-prerequisite
+controls; recipe controls include the copied foundation's actual lifecycle
+archive. A real pytest collection/keyword-selection guard checks that each of
+these seven cases is selected exactly once per platform, preserving every
+previous packet selection. Source fixtures bind `COPILOT_HOME` to the same private
+profile containing their installed payload and marketplace declaration, retaining
+normal provenance validation even when the runner supplies another Copilot home.
+The Windows original-caller-loss case emits bounded fixed phase names and elapsed
+times through pytest's disabled-capture scope with immediate flushing. These
+diagnostic-only markers distinguish fixture preparation, acknowledgement,
+foundation observation, caller closure, receipt waiting and body exit before
+owner teardown; they contain no arguments, paths or source logs and grant no
+qualification credit. All original assertions, custody and time limits remain.
+Only the existing Windows `cold-original` cell also supplies pytest's
+`faulthandler_timeout=60` with `faulthandler_exit_on_timeout=false`. The standard
+runner preserves these diagnostic options without disabling ordinary capture.
+The one-shot whole-protocol dump can expose a capture-restoration or finalizer
+stack; sixty seconds is an observation point, not a test deadline or process exit.
+Other cells receive no additional pytest options and all portfolio bounds remain.
+An owner-scoped wrapper re-arms that same non-exiting timer only after ordinary
+exception-interaction hooks return for an unexpected call failure. Passing calls,
+debugger modes and hook exceptions leave existing pytest behavior untouched.
+After re-arming, the scoped hook makes an early copy of the already-configured
+pytest failure report through its existing terminal renderer and flushes it
+before teardown. Only that optional copy is best-effort; rendering/flush errors
+cannot replace the original call result or skip cleanup. No additional capture
+pause, locals, environment dump, descriptor or native stream change is added.
+Pytest's whole-protocol finalizer still owns cancellation after teardown; fixture
+unregistration does not cancel early. Separate pure passing-body and failed-body
+controls retain ordinary capture and a finite 61-second finalizer wait, each with
+its own 120-second item marker covering the 90-second child bound.
+The failed-body control checks its fixture-owned stdout file from inside the
+finalizer: the original failure and a real terminal flush must be visible before
+the finite wait starts. A renderer-error case must still finish cleanup and retain
+its original failed result. This checks live visibility, not output released only
+when the child exits.
+The pytest 8.0 owner has no exit-on-timeout ini option and schedules the stdlib timer
+without an exit argument. The diagnostic adapter treats only that exact missing
+registration as the proven legacy non-exiting contract; registered exiting or
+invalid values retain their ordinary behavior. No minimum dependency changes.
+Bounded independent packets cover Python/native
+no-write refusals, exact `stamp`/`provision` action custody, source replacement,
+deferred real stamping, and actual cold construction after the original caller's
+Job/group is closed. The original ordinary receipt must complete before any
+follower is submitted. Module/distribution identity and the real payload and
+ordinary installed help consumers are checked against the completed slot.
+Separate native packets cover equivalent concurrent callers, healthy immutable
+reuse, preservation across a failed new candidate, unavailable accepted source,
+and visible supervisor-effect failures. Explicit Windows registration failure
+produces a failed receipt; Linux retains its native tolerated-disable outcome.
+Safe consumers retain unrelated failed/pending queue history.
+Source-loss qualification invokes the already-selected installed runtime
+directly; it does not claim that the unchanged primary publisher can resolve
+an unavailable legacy payload. Ordinary help fronts are checked while their
+own source remains available.
+
+Task/unit registration and the Windows installer's otherwise auto-starting
+health/deploy probes use explicitly synthetic, isolated effects. The fixture
+explicitly enables compatibility task registration; the task remains Ready
+while the separate deploy probe supplies synthetic readiness. It never uses
+task execution as startup proof. The source-only health
+adapter is applied before acceptance and construction, never to a completed
+slot; actual CLI help remains unchanged. Inspect S4U/startup coordinator
+registration and the label-free disabled supervisor on Windows, and the real
+generated user units plus intercepted systemctl operations on Linux. The adapter
+replaces only the fixture's systemctl symlink, never its target. A separate
+regression proves the target bytes remain unchanged. No host
+task, unit, registry entry, firewall rule or coordinator daemon is created.
+Linux retains native compilation tools but exposes no host Python or UV.
+Acknowledged owners, foundation, queue and kernel custody settle before cleanup.
+
+Retained Bridge recipe controls cover the common admission-helper loop.
+Existing 35-minute job, 900-second native case, 1080-second runner and 2 GiB
+temporary-storage bounds remain unchanged. Platform/explicit-native skips are
+not acceptance. This portfolio does not adopt Dispatch's ordinary cold command
+publishers, hooks, snapshots/copies, cells/custom roots, explicit installers,
+macOS, live serving or rollout.
+
 ## Optional Bridge selected-source snapshots
 
 The manual `installation-context-full.yml` portfolio `bridge-snapshots` qualifies

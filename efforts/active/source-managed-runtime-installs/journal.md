@@ -2,6 +2,8 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+- [2026-11-19 - Dispatch native provenance and cold-execution gates](<journal/2026/11.19 dispatch-native-provenance-and-cold-gates.md>)
+
 ## 2026-11-13 - Original application integration merged
 
 [Source and bounded native evidence](<journal/2026/11.13 canonical-application-integration.md>)
@@ -61,6 +63,7 @@ another producer implementation is not needed while this owner retains it.
 - [2026-10-31 - Independent replacement review corrections](<journal/2026/10.31 review-corrections.md>)
 - [2026-10-27 - Finite native footprints merged and macOS qualified](<journal/2026/10.27 native-runtime-removal.md>)
 - [2026-10-26 - State-preserving removal foundation](<journal/2026/10.26 runtime-removal.md>)
+- [2026-10-25 - Dispatch fixed-recipe prerequisite](<journal/2026/10.25 dispatch-first-use.md>)
 - [2026-10-25 - Bridge fixed-recipe prerequisite](<journal/2026/10.25 bridge-first-use.md>)
 - [2026-10-25 - Bridge legacy bootstrap adoption](<journal/2026/10.25 bridge-bootstrap.md>)
 - [2026-10-24 - Logger fixed-recipe prerequisite](<journal/2026/10.24 logger-first-use.md>)

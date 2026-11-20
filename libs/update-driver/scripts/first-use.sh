@@ -6,6 +6,7 @@
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
 # Installation driver lifecycle contract: mcp-recipes-v1
+# Installation driver lifecycle contract: dispatch-first-use-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -69,6 +70,7 @@ case "$plugin" in
     agent-logger) prefix=AGENT_LOGGER ;;
     agent-bridge) prefix=AGENT_BRIDGE ;;
     agent-mcp) prefix=AGENT_MCP ;;
+    agent-dispatch) prefix=AGENT_DISPATCH ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
@@ -91,17 +93,47 @@ if [[ "$plugin" == agent-bridge ]]; then
             printf 'Bridge first use requires native tool: %s\n' "$tool" >&2; exit 1;
         }
     done
+fi
+if [[ "$plugin" == agent-bridge || "$plugin" == agent-dispatch ]]; then
+    label=Bridge; [[ "$plugin" != agent-dispatch ]] || label=Dispatch
     for helper in installer-engine.ps1 installer-engine.sh installer_engine.py installer_engine_process.py runtime_launcher.py \
         installer_wheel_inputs.py installer_wheel_snapshot.py installer_wheel_acquisition.py \
         installer_dependency_policy.py installer_dependency_config.py installer_dependency_arguments.py installation-context/installation_context.py \
         installation-context/installation-context.ps1 installation-context/installation-context.sh \
-        install.ps1 install.sh repair-scheduled-task.ps1 versioned_runtime_native.ps1 versioned_runtime.py \
+        install.ps1 install.sh versioned_runtime_native.ps1 versioned_runtime.py \
         versioned_runtime_construction.py versioned_runtime_source.py \
         versioned_runtime_publication.py versioned_runtime_leases.py; do
         [[ -f "$payload/scripts/$helper" ]] || {
-            printf 'Bridge first use requires its complete materialized installation helpers.\n' >&2; exit 1;
+            printf '%s first use requires its complete materialized installation helpers.\n' "$label" >&2; exit 1;
         }
     done
+    own_helpers=(repair-scheduled-task.ps1)
+    if [[ "$plugin" == agent-dispatch ]]; then
+        own_helpers=(installer_driver.py installer-instance-reconcile.ps1 installer-instance-reconcile.sh
+            installer_instance_reconcile.py installer_engine_health.py installer_retained_content.py
+            installer_source_build.py installer_source_wheel_cache.py
+            versioned_runtime_cache.py daemon_instance_runtime.pyz
+            source-runtime.ps1 source-runtime.sh supervisor-lifecycle.ps1 base-python.ps1
+            runtime-gate.ps1 runtime-gate.sh resolve-runtime.ps1 resolve-runtime.sh)
+    fi
+    for helper in "${own_helpers[@]}"; do
+        [[ -f "$payload/scripts/$helper" ]] || {
+            printf '%s first use requires its complete materialized installation helpers.\n' "$label" >&2; exit 1;
+        }
+    done
+    if [[ "$plugin" == agent-dispatch ]]; then
+        [[ -f "$payload/src/agent_dispatch/windows-scheduling.ps1" ]] || {
+            printf 'Dispatch first use requires its complete materialized installation helpers.\n' >&2; exit 1;
+        }
+        if [[ -e "$runtime/action-controls.json" || -L "$runtime/action-controls.json" ]]; then
+            [[ -f "$payload/scripts/action_controls.py" ]] || {
+                printf 'Dispatch first use requires its complete materialized installation helpers.\n' >&2; exit 1;
+            }
+        fi
+        [[ ! -v AGENT_DISPATCH_INSTALLATION_CONFIG ]] || {
+            printf 'Dispatch first use requires its default installation policy.\n' >&2; exit 1;
+        }
+    fi
 fi
 if [[ "$plugin" == agent-mcp ]]; then
     [[ "$(query_type "$manifest" installerLifecycle)" == boolean &&
@@ -127,11 +159,19 @@ if [[ "$plugin" == agent-mcp ]]; then
         }
     done
 fi
-if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge || "$plugin" == agent-mcp ]]; then
+if [[ "$plugin" == agent-dispatch ]]; then
+    [[ "$(query_type "$manifest" installerLifecycle)" == boolean &&
+        "$(query "$manifest" installerLifecycle)" == true &&
+        "$(query "$manifest" windowsCatalogShim)" == cmd ]] || {
+        printf 'Dispatch first use requires its native lifecycle and CMD catalog declaration.\n' >&2; exit 1;
+    }
+fi
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge || "$plugin" == agent-mcp || "$plugin" == agent-dispatch ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
     [[ "$plugin" != agent-logger ]] || label=Logger
     [[ "$plugin" != agent-bridge ]] || label=Bridge
     [[ "$plugin" != agent-mcp ]] || label=MCP
+    [[ "$plugin" != agent-dispatch ]] || label=Dispatch
     [[ ( "$plugin" == agent-logger || "$(query "$manifest" module)" == "${plugin//-/_}" ) &&
         "$(query "$manifest" legacyRuntimeRoot)" == ".$plugin" &&
         "$(query "$manifest" payloadRootEnv)" == "${prefix}_PAYLOAD_ROOT" &&
@@ -142,7 +182,7 @@ if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == ag
         printf '%s first use requires its declared native runtime gate.\n' "$label" >&2; exit 1;
     }
 fi
-if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge || "$plugin" == agent-mcp ]]; then
+if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge || "$plugin" == agent-mcp || "$plugin" == agent-dispatch ]]; then
     installation_hint="${prefix}_INSTALLATION_ID"
     [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
