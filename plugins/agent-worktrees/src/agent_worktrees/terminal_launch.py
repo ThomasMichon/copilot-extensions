@@ -66,7 +66,7 @@ def select_receiver(
     validate_or_exit()
     selector = command[-1:] if command[-1:] == ["--resident-picker"] else []
     query_command = command[:-1] if selector else command
-    from agent_procutil.owned_process import run_caller_owned
+    from agent_procutil.owned_process import require_caller_owned_support, run_caller_owned
 
     query_environment = {
         **environment, QUERY_ENVIRONMENT: "1",
@@ -76,6 +76,13 @@ def select_receiver(
     query_arguments = [*query_command, "--version"]
     if query_arguments[0].lower().endswith((".cmd", ".bat")):
         query_arguments = _batch_probe_command(query_arguments, query_environment)
+    try:
+        require_caller_owned_support()
+    except (OSError, RuntimeError):
+        raise RuntimeError(
+            "Selected Manager terminal capability query requires unavailable caller-owned "
+            "process support; no launch was admitted"
+        ) from None
     try:
         result = run_caller_owned(
             query_arguments, env=query_environment, timeout=timeout,

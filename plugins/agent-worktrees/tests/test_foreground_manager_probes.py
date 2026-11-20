@@ -60,6 +60,124 @@ def test_bare_entry_explicitly_selects_owned_deadline_free_probe(
     assert calls == [[*selected.command, "--version"]]
 
 
+@pytest.mark.parametrize("reason", ["runtime", "os"])
+@pytest.mark.parametrize("fallback", ["bundled", "install-trigger"])
+def test_unsupported_public_preflight_uses_normal_fallback_without_launch(
+    selected: _ControlPlaneProviderManifest, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], reason: str, fallback: str,
+) -> None:
+    calls: list[str] = []
+
+    def unsupported() -> NoReturn:
+        calls.append("support")
+        message = "pidfd support unavailable https://example.invalid/path?token=fixture-secret"
+        if reason == "os":
+            raise OSError(38, message)
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", unsupported)
+    monkeypatch.setattr(
+        owned_process, "run_caller_owned",
+        lambda *_args, **_options: pytest.fail("unsupported preflight reached native launch"),
+    )
+    monkeypatch.setattr(core, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(core, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(core, "_bundled_picker_available", lambda: fallback == "bundled")
+    monkeypatch.setattr(cfg, "active_project", lambda: "sample")
+    monkeypatch.setattr(
+        core, "_exec_worktree_manager",
+        lambda *_args: pytest.fail("unsupported ownership must not admit Manager"),
+    )
+
+    def bundled(_arguments: list[str]) -> int:
+        calls.append("bundled")
+        return 17
+
+    def install(_project: str | None) -> int:
+        calls.append("install-trigger")
+        return 0
+
+    monkeypatch.setattr(core, "cmd_launch", bundled)
+    monkeypatch.setattr(core, "cmd_manager_install_trigger", install)
+    assert launch.dispatch_bare_invocation(True) == (17 if fallback == "bundled" else 1)
+    assert calls == ["support", fallback]
+    captured = capsys.readouterr()
+    assert "caller-owned process support" in captured.err
+    assert "pidfd support unavailable" in captured.err
+    assert "fixture-secret" not in captured.out + captured.err
+    assert selected.command[0] in captured.err
+
+
+@pytest.mark.parametrize("reason", ["runtime", "os"])
+@pytest.mark.parametrize("timeout", [None, 10.0])
+def test_terminal_support_refusal_precedes_capture(
+    monkeypatch: pytest.MonkeyPatch, reason: str, timeout: float | None,
+) -> None:
+    calls: list[str] = []
+
+    def unsupported() -> NoReturn:
+        calls.append("support")
+        if reason == "os":
+            raise OSError(38, "native observation is unavailable")
+        raise RuntimeError("native observation is unavailable")
+
+    monkeypatch.setattr(terminal_launch, "_channel", "selected-offer")
+    monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(terminal_launch, "validate_or_exit", lambda: None)
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", unsupported)
+    monkeypatch.setattr(
+        owned_process, "run_caller_owned",
+        lambda *_args, **_options: pytest.fail("unsupported terminal capture reached native launch"),
+    )
+    environment = {"FIXTURE_KEPT": "original"}
+    with pytest.raises(RuntimeError, match="process support; no launch was admitted"):
+        terminal_launch.select_receiver(["selected-manager"], environment, timeout=timeout)
+    assert calls == ["support"]
+    assert environment == {"FIXTURE_KEPT": "original"}
+
+
+@pytest.mark.parametrize("consumer", ["health", "terminal"])
+@pytest.mark.parametrize("failure", ["preflight-cleanup", "preflight-cancel", "capture-runtime"])
+def test_preflight_cannot_swallow_custody_cancellation_or_later_runtime_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    consumer: str, failure: str,
+) -> None:
+    problem: BaseException
+    if failure == "preflight-cleanup":
+        problem = owned_process.OwnedCleanupError(None)
+    elif failure == "preflight-cancel":
+        problem = KeyboardInterrupt()
+    else:
+        problem = RuntimeError("caller-owned completion is unconfirmed")
+    calls: list[str] = []
+
+    def support() -> None:
+        calls.append("support")
+        if failure.startswith("preflight"):
+            raise problem
+
+    def capture(_command: list[str], **options: object) -> NoReturn:
+        calls.append("capture")
+        assert options["timeout"] is None
+        assert options["max_stdout_bytes"] == options["max_stderr_bytes"] == 4096
+        raise problem
+
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", support)
+    monkeypatch.setattr(owned_process, "run_caller_owned", capture)
+    monkeypatch.setattr(terminal_launch, "_channel", "selected-offer")
+    monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(terminal_launch, "validate_or_exit", lambda: None)
+    with pytest.raises(type(problem)) as caught:
+        if consumer == "health":
+            launch._probe_worktree_manager_version(["manager", "--version"], timeout=None)
+        else:
+            terminal_launch.select_receiver(["manager"], {}, timeout=None)
+    assert caught.value is problem
+    assert calls == (["support"] if failure.startswith("preflight") else ["support", "capture"])
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native registered Windows batch provider")
 @pytest.mark.parametrize("suffix", [".cmd", ".BAT"])
 @pytest.mark.parametrize("prefix", [
@@ -370,6 +488,10 @@ def test_nonforeground_health_retains_finite_retry(
     monkeypatch.setattr(
         owned_process, "run_caller_owned",
         lambda *_args, **_kwargs: pytest.fail("diagnostic recovery opted into foreground custody"),
+    )
+    monkeypatch.setattr(
+        owned_process, "require_caller_owned_support",
+        lambda: pytest.fail("finite diagnostic recovery unexpectedly required foreground support"),
     )
     assert launch._usable_worktree_manager() == selected.command
     assert calls == [[*selected.command, "--version"]] * 2

@@ -177,6 +177,17 @@ def _probe_worktree_manager_version(
     """Keep recovery probes finite; foreground entry explicitly opts out."""
     from agent_procutil.owned_process import OwnedCleanupError
 
+    if timeout is None:
+        from agent_procutil.owned_process import require_caller_owned_support
+
+        try:
+            require_caller_owned_support()
+        except (OSError, RuntimeError) as error:
+            _report_manager_probe_failure(
+                "Control-plane --version probe requires unavailable caller-owned process support.",
+                str(error),
+            )
+            return None, None
     probe_attempts = 1 if timeout is None else max(1, attempts)
     timeout_detail: str | bytes = ""
     for _attempt in range(probe_attempts):
