@@ -183,6 +183,8 @@ def apply_claim_release(args: dict[str, Any]) -> dict[str, Any]:
             }
         kind = match.kind
         if remove:
+            from .resource_producer import task_claim_removal
+            stack.enter_context(task_claim_removal(record, ref, yaml_path))
             record.resources = [c for c in record.resources if c.ref != ref]
             action = "removed"
         else:

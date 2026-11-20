@@ -20,8 +20,12 @@ class HandoffClaimClientMixin:
         self, task_id: str, *, binding: dict[str, Any] | None = None, owner_ref: str | None = None,
     ) -> dict[str, Any]:
         """Bind or retry exact creator bookkeeping without replaying task abandonment."""
+        timeout = httpx.Timeout(self._http.timeout)
+        if timeout.read is not None:
+            timeout.read = max(timeout.read, 60.0)
         return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/tasks/{task_id}/handoff-claim",
             json={"binding": binding, "owner_ref": owner_ref},
             headers=self._control_headers(),
+            timeout=timeout,
         )))

@@ -153,6 +153,42 @@ def test_journaling_returns_durable_idempotent_task_binding(owners: dict[str, An
     assert first["claim_nonce"] == record.resources[0].claim_nonce
 
 
+@pytest.mark.parametrize("stale_change", ["title", "state", "kind", "omission"])
+def test_stale_record_cannot_restore_an_obsolete_task_claim(
+    owners: dict[str, Any], stale_change: str,
+) -> None:
+    first = _journal_binding(owners)
+    stale = _record(owners, "creator")
+    assert _settle_binding(owners, first)[0] == 0
+    tracking.save_record(stale)
+    assert _record(owners, "creator").resources[0].state == "released"
+    replacement = _journal_binding(owners)
+    assert replacement["claim_nonce"] != first["claim_nonce"]
+    stale.title = "An unrelated status update"
+    if stale_change == "state":
+        stale.resources[0].state = "released"
+    elif stale_change == "kind":
+        stale.resources[0].kind = "workdir"
+    elif stale_change == "omission":
+        stale.resources = []
+    path = owners["roots"]["creator"] / "worktrees" / "shared-id.yaml"
+    tracking.save_record(stale, path)
+    current = _record(owners, "creator")
+    assert current.title == stale.title
+    assert len(current.resources) == 1
+    assert current.resources[0].kind == "task"
+    assert current.resources[0].claim_nonce == replacement["claim_nonce"]
+    assert current.resources[0].state == "active"
+    before = path.read_bytes()
+    assert _settle_binding(owners, first)[0] != 0
+    assert path.read_bytes() == before
+    assert _settle_binding(owners, replacement)[0] == 0
+    active = _journal_binding(owners)
+    assert active["claim_nonce"] != replacement["claim_nonce"]
+    assert _claims("release", first["ref"], "--worktree", "shared-id", "--remove")[0] == 0
+    assert _record(owners, "creator").resources == []
+
+
 @pytest.mark.parametrize("replacement", ["record", "claim", "kind"])
 def test_bound_settlement_refuses_replaced_identity(
     owners: dict[str, Any], replacement: str,

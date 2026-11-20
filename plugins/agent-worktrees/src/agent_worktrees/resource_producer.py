@@ -26,6 +26,9 @@ FROZEN_OWNER_STATUSES = frozenset({
 })
 _TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}\Z")
 _write_paths: ContextVar[frozenset[str]] = ContextVar("producer_write_paths", default=frozenset())
+_task_removals: ContextVar[frozenset[tuple[str, str, tuple[str, str, str]]]] = ContextVar(
+    "task_claim_removals", default=frozenset(),
+)
 
 
 def is_valid_token(value: object) -> bool:
@@ -260,8 +263,51 @@ def transaction(*paths: Path) -> Iterator[None]:
         _write_paths.reset(token)
 
 
+@contextmanager
+def task_claim_removal(record: WorktreeRecord, ref: str, path: Path) -> Iterator[None]:
+    """Retain the exact read performed by an already-locked removal transaction."""
+    claim = next(claim for claim in record.resources if claim.ref == ref)
+    expected = (str(path.resolve()), ref, (claim.kind, claim.claim_nonce, claim.state))
+    token = _task_removals.set(_task_removals.get() | {expected})
+    try:
+        yield
+    finally:
+        _task_removals.reset(token)
+
+
+def _preserve_task_incarnations(
+    record: WorktreeRecord, current: WorktreeRecord | None, path: Path,
+) -> None:
+    authoritative = {
+        claim.ref: claim for claim in current.resources
+        if claim.claim_nonce and not claim.has_producer and not claim.handoff_bundle
+    } if current is not None else {}
+    merged = []
+    for claim in record.resources:
+        prior = authoritative.pop(claim.ref, None)
+        if prior is not None:
+            incarnation = (prior.kind, prior.claim_nonce, prior.state)
+            if incarnation not in (
+                claim._observed_incarnation, (claim.kind, claim.claim_nonce, claim.state),
+            ):
+                retained = copy.deepcopy(prior)
+                retained.note = claim.note
+                claim = retained
+        merged.append(claim)
+    for prior in authoritative.values():
+        expected = (
+            str(path.resolve()), prior.ref, (prior.kind, prior.claim_nonce, prior.state),
+        )
+        if prior.is_live and expected not in _task_removals.get():
+            merged.append(copy.deepcopy(prior))
+    for claim in merged:
+        claim._observed_incarnation = (claim.kind, claim.claim_nonce, claim.state)
+    record.resources = merged
+
+
 def preserve_claims(record: WorktreeRecord, current: WorktreeRecord | None, path: Path) -> None:
     """Fence generic full-record writers, including stale saves and repairs."""
+    _preserve_task_incarnations(record, current, path)
     sides = (record.resources, current.resources if current is not None else [])
     if not any(claim.has_producer for claims in sides for claim in claims):
         return

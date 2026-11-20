@@ -278,6 +278,9 @@ class ResourceClaim:
     metadata_opaque: bool = False
     claim_nonce: str = ""
 
+    def __post_init__(self) -> None:
+        self._observed_incarnation = (self.kind, self.claim_nonce, self.state)
+
     def to_dict(self) -> dict[str, Any]:
         """Full wire shape, with producer metadata absent for legacy claims."""
         result: dict[str, object] = {

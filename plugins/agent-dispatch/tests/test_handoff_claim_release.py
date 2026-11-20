@@ -211,6 +211,54 @@ def test_binding_is_durable_immutable_and_does_not_change_task_custody(tmp_path:
     assert required(queue.get(task.id)).handoff_claim == binding
 
 
+@pytest.mark.parametrize("control_token", [None, "", "fixture-control"])
+def test_health_only_advertises_reconciliation_with_control_authority(
+    tmp_path: Path, control_token: str | None,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent_dispatch.coordinator_handoff_claim import register_routes
+    from agent_dispatch.coordinator_loops import DrainGate
+    from agent_dispatch.coordinator_status import register_status_routes
+    from agent_dispatch.events import EventBus
+
+    app = FastAPI()
+    app.state.drain_gate = DrainGate()
+    queue, bus = TaskQueue(tmp_path / "tasks.db"), EventBus()
+    register_status_routes(app, queue, bus, control_token=control_token)
+    register_routes(app, queue, bus, control_token=control_token)
+    with TestClient(app) as api:
+        health = api.get("/health")
+        assert health.status_code == 200
+        assert (health.json().get("handoff_claim_contract") == CONTRACT) == bool(control_token)
+        assert api.post("/tasks/T1/handoff-claim", json={}).status_code == (
+            503 if control_token is None else 403
+        )
+
+
+@pytest.mark.parametrize("read_timeout", [10.0, 90.0, None])
+def test_reconciliation_read_timeout_covers_native_budgets_without_shortening(
+    read_timeout: float | None,
+) -> None:
+    from agent_dispatch.client import DispatchClient
+
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"taskTerminal": True, "claimSettled": False})
+
+    with DispatchClient("http://testserver", transport=httpx.MockTransport(handle)) as owner:
+        owner._http.timeout = httpx.Timeout(read_timeout)
+        assert owner.reconcile_handoff_claim("T1")["taskTerminal"]
+        assert owner._http.timeout.read == read_timeout
+    assert len(requests) == 1
+    timeout = requests[0].extensions["timeout"]
+    assert timeout["read"] == (max(read_timeout, 60.0) if read_timeout is not None else None)
+    assert timeout["connect"] == timeout["write"] == timeout["pool"] == read_timeout
+
+
 def test_actual_client_and_route_preserve_control_auth_and_partial_results(tmp_path: Path) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

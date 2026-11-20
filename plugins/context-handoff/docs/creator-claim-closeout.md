@@ -14,6 +14,9 @@ contract `context-handoff-creator-claim/v1`: `machine`, `project`, `worktree_id`
 actual locked journal transaction, not the caller's current directory or an
 optional author observation. Re-journaling the same active task preserves its
 nonce; replacing its kind or reactivating a released claim does not.
+Ordinary full-record saves retain a newer task-claim incarnation and its
+disposition, including when a stale snapshot omits it. Explicit native removal
+and reserved claim handoff retain their existing locked transactions.
 
 Context-handoff records that binding once in the existing Dispatch task row's
 `handoff_claim` metadata, including when completion raced ahead of journaling.
@@ -73,12 +76,15 @@ authority independently of the selector. The terminal hook remains
 fire-and-forget on its existing daemon thread; subprocess latency does not
 block the request that completed/abandoned the task. Native failures leave a
 pending result rather than causing an unqualified fallback.
+The targeted HTTP retry allows at least 60 seconds for its bounded native
+reads and settlement, preserving longer or unlimited caller read timeouts.
 
 ## Independently updated peers
 
-The running Dispatch owner's existing health/detail responses advertise
-`handoff_claim_contract: "context-handoff-creator-claim/v1"`. New task-backed
-saves check health before task publication; missing or unsupported capability
+The running Dispatch owner's task detail advertises
+`handoff_claim_contract: "context-handoff-creator-claim/v1"`. Health advertises
+it only when control authority is configured. New task-backed saves check
+health before task publication; missing or unsupported capability
 falls back to the existing file store. Metadata binding and targeted retry use
 the same declared contract. Old callers can still create/read tasks, but a new
 owner conservatively retains their unbound legacy obligations.
