@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .supervisor import Supervisor
 
 from .ordinary_agent_facts import identity
 from .queue_records import SpawnReservation, SpawnState, TaskError
@@ -76,6 +80,47 @@ def require_pending_redrive(before: dict[str, Any], facts: dict[str, Any], pendi
         raise ValueError("retained native redrive pending startup publication not confirmed")
 
 
+def drive_or_observe(
+    owner: Supervisor, current: dict[str, Any], task: dict[str, Any], session: dict[str, Any], *, held: bool,
+) -> bool:
+    """A pending caller denied send authority can still settle an accepted exact receipt."""
+    from .bridge_command_delivery import native_prompt_receipt
+    from .client_errors import DispatchError
+
+    pending_before = current["startup_complete"] is False
+    observe = held
+    if held and not pending_before:
+        return False
+
+    def confirm(observation: bool) -> dict[str, Any]:
+        facts = {**session, "observe_only": True} if observation else session
+        pending: dict[str, Any] = owner.client.record_spawn(
+            current["key"], session_handle=current["session_handle"], worktree=current["worktree"],
+            startup_complete=False, startup_revision=session["startup_revision"], ordinary_redrive=facts,
+        )
+        require_pending_redrive(current, session, pending)
+        return pending
+
+    try:
+        pending = confirm(observe)
+    except DispatchError as exc:
+        if observe or not pending_before or exc.status_code != 409:
+            raise
+        # A provider-side hold need not be visible on this installation. Ask
+        # only for read-back; a changed incarnation still fails that check.
+        pending = confirm(True)
+        observe = True
+    if observe:
+        invocation = session["invocation"]
+        native_prompt_receipt(session["session_id"], session["native_session_id"], invocation["prompt"],
+                              idempotency_key=invocation["idempotency_key"], machine=session["machine"])
+    elif not owner.redrive_fn(session["worktree_id"], session["machine"], task, session, current):
+        return False
+    owner.client.record_spawn(current["key"], session_handle=pending["session_handle"], worktree=pending["worktree"],
+                              startup_complete=True, startup_revision=pending["startup_revision"], ordinary_redrive=session)
+    return True
+
+
 def record_redrive(
     queue: Any, key: str, *, ordinary_redrive: dict[str, Any], startup_complete: bool,
     startup_revision: int, session_handle: str | None, worktree: str | None,
@@ -115,11 +160,17 @@ def record_redrive(
             ):
                 raise TaskError("retained native redrive completion does not own this startup")
         else:
+            facts = retained_redrive_facts(conn, row, task)
+            if ordinary_redrive.get("observe_only") is True and ordinary_redrive == {**facts, "observe_only": True}:
+                marker = info.get("retained_redrive")
+                if row["startup_complete"] or marker != {"startup_revision": revision, "invocation": facts["invocation"]}:
+                    raise TaskError("receipt observation requires the exact pending redrive")
+                return SpawnReservation._from_row(row)
+            if facts != ordinary_redrive:
+                raise TaskError("retained native redrive admission changed")
             queue.require_worker_admission()
             if queue._spawn_admission is not None:
                 queue._spawn_admission(task, row["reserved_by"], None, row["driver"], {"agent_info": info})
-            if retained_redrive_facts(conn, row, task) != ordinary_redrive:
-                raise TaskError("retained native redrive admission changed")
             if not row["startup_complete"]:
                 return SpawnReservation._from_row(row)
             revision += 1

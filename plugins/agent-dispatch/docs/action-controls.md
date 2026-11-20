@@ -273,6 +273,18 @@ clear sibling holds, start a pool, change the positive
 [allocation selector](pool-claim-start.md), or override a global stop.
 A held managed placement is not permission to claim through the legacy API,
 change the global winner, or borrow capacity from another pool.
+For managed placement, `--pool` matches **either** the requesting allocator
+ID or the selected registration ID; these need not be the same.
+
+A full newest-first page (200 finite queued tasks per watched label, or one
+page for a catch-all lane) triggers **one** supplemental page per cycle. It
+walks at most 200 queued finite tasks within the repository scope in indexed
+task-ID order. The supervisor advances a local cursor, wraps at the end, and
+deduplicates with the normal pages before applying its unchanged lane and
+admission checks. Stable older work can therefore surface behind held tasks
+without loading the entire backlog. Discovery latency grows with backlog
+size, cursor progress resets on supervisor restart, and older coordinators
+without the page endpoint provide only the original bounded head pages.
 
 **Enforcement:** Each supervisor checks just before asking for a reservation,
 including label-routed, fleet, restricted and coordinator-launched CI work.
@@ -294,7 +306,13 @@ can finish its original launch/send; a file update and a remote launch are
 not one transaction. No process is killed, attempt reset, task canceled or
 custody cleared. Existing claims, same-owner continuations, observation of
 an already-issued retry, exhaustion, retirement and cleanup keep their normal
-rules. Clear the last applicable hold to allow the next eligible attempt.
+rules. For a pending ordinary Bridge redrive, the updated supervisor can
+request observation of its exact retained revision and invocation during a
+hold. Only an accepted receipt for that same native, caller, key and prompt
+permits completion. A missing or ambiguous receipt leaves the attempt
+pending; it does not send, resume a session or authorize a replacement.
+Older providers that cannot confirm this observation retain custody instead.
+Clear the last applicable hold to allow the next eligible attempt.
 This is not a switch for task enqueue, direct execution claims, standing
 attachments, manual external launchers, or older runtimes. Use the existing
 global admission control when its broader semantics are needed.

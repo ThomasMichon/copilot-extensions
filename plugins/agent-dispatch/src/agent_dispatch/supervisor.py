@@ -396,6 +396,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         #: reservation key -> redrive attempted in this supervisor process. A
         #: restarted supervisor may retry; a healthy worker claims promptly.
         self._redriven_spawn_keys: set[str] = set()
+        self._admission_cursor = ""
         #: Optional pre-reservation capacity gate. When it returns False for a
         #: task, the task is **skipped this cycle without a reservation** -- so a
         #: transient "no capacity" (e.g. a fleet pool that is entirely asleep)
@@ -447,20 +448,27 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         matching tasks behind other lanes' work or standing charters, which only
         explicit attachment admission may select. Deduplicate locally.
         """
-        if self.labels:
-            seen: dict[str, dict[str, Any]] = {}
-            for label in sorted(self.labels):
-                for t in self.client.list(
-                    repo=self.repo, status=Status.QUEUED, label=label, kind="finite", limit=200
-                ):
-                    seen[t["id"]] = t
-            tasks = list(seen.values())
+        from .admission_page import PAGE_SIZE, next_page
+        seen: dict[str, dict[str, Any]] = {}
+        saturated = False
+        streams: Sequence[str | None] = sorted(self.labels) if self.labels else (None,)
+        for label in streams:
+            rows = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=PAGE_SIZE,
+                                    **({"label": label} if label is not None else {}))
+            seen.update((t["id"], t) for t in rows)
+            saturated |= len(rows) == PAGE_SIZE
+        if saturated and isinstance(self.client, DispatchClient):
+            try:
+                extra, self._admission_cursor = next_page(self.client, self.repo, self._admission_cursor)
+                seen.update((t["id"], t) for t in extra)
+            except (DispatchError, httpx.TransportError, ValueError) as exc:
+                # Old coordinators have no supplemental endpoint. Never
+                # replace the bounded head pages or relax an admission check.
+                log.warning("supplemental admission candidate page unavailable (%s)", type(exc).__name__)
         else:
-            # No label restriction (a catch-all pool) -- nothing to scope the
-            # server-side query to; same broad page as before.
-            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=200)
+            self._admission_cursor = ""
         out: list[dict[str, Any]] = []
-        for t in tasks:
+        for t in seen.values():
             if t.get("kind", "finite") != "finite":
                 continue  # standing charters are never finite executable work
             if (t.get("not_before") or 0) > now:
@@ -3394,26 +3402,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         task.get("generation") != session.get("task_generation")
                     ) or task.get("hold_reason") is not None or task.get("awaiting_steer"):
                         continue
-                    if action_inhibited("worker-admission", logger=log):
-                        break
-                    if supervisor_inhibited(self, task, current):
-                        continue
-                    pending = self.client.record_spawn(
-                        key, session_handle=current["session_handle"], worktree=current["worktree"],
-                        startup_complete=False, startup_revision=session["startup_revision"],
-                        ordinary_redrive=session,
-                    )
-                    from .ordinary_native_redrive import require_pending_redrive
-
-                    require_pending_redrive(current, session, pending)
-                    if self.redrive_fn(
-                        session["worktree_id"], session["machine"], task, session, current,
-                    ):
-                        self.client.record_spawn(
-                            key, session_handle=pending["session_handle"], worktree=pending["worktree"],
-                            startup_complete=True, startup_revision=pending["startup_revision"],
-                            ordinary_redrive=session,
-                        )
+                    from .ordinary_native_redrive import drive_or_observe
+                    held = action_inhibited("worker-admission", logger=log) or supervisor_inhibited(self, task, current)
+                    if drive_or_observe(self, current, task, session, held=held):
                         self._redriven_spawn_keys.add(key)
                         redriven += 1
                 except (DispatchError, ValueError, KeyError, RuntimeError):

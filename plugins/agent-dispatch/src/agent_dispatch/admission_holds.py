@@ -72,6 +72,7 @@ def inhibited(*, pool: str | None, instance: tuple[str, str, str] | None,
         if pool:
             candidates.append(("pool", (pool,)))
         if instance:
+            candidates.append(("pool", (instance[0],)))
             candidates.append(("instance", instance))
         if kind:
             candidates.append(("kind", (kind,)))
@@ -135,7 +136,7 @@ def require_spawn_admission(task: Task, reserved_by: str | None,
     """The queue knows its actual placement and CI body, not a remote lane's named agent."""
     from .queue_records import WorkerAdmissionInhibited
 
-    pool = instance[0] if instance else reserved_by
+    pool = reserved_by
     agents = [DRIVER_BODIES[driver]] if driver is not None and driver in DRIVER_BODIES else []
     if driver == "handoff-fallback":
         from .bridge import DEFAULT_WORKER_AGENT
