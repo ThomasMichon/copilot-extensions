@@ -210,6 +210,9 @@ After the reviewed proposal, the operator admitted execution:
   comparison, mixed claims retain whole acquisition and existing pending work
   is never bypassed. Explicit HTTP/service qualification covers that distinct
   no-acquisition outcome and its client-free completed retry.
+  The next [configured executor ownership step](azure-devops-point-targets.md#configured-executor-ownership-before-caller-migration)
+  proposes production connector/model lifetime composition under that existing
+  Python binding, before a separate selected-binding/reader caller migration.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
@@ -356,6 +359,10 @@ preservation. The separate HTTP/service scale packet now exercises the existing
 higher-covered path and client-free completed retry at those same cardinalities,
 with equal logical/native query metrics and separately reported process-byte
 growth. Ordinary activation, automatic repair and broader acceptance remain open.
+Merged #13689 supplies that HTTP/service packet after current-head approval
+and actual unit CI. Next, inspect the explicit selected-runtime capability seam
+against the reviewed point-target contract before choosing further source wiring;
+successful fixture composition is not blanket v2 execution advertisement.
 
 ### 2026-11-20 - Point-worker dispatch and lifetime
 
