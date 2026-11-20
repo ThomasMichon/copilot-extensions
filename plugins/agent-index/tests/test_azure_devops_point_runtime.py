@@ -368,6 +368,149 @@ def _read_state(f: worker.Fixture) -> dict[str, str]:
     }
 
 
+def test_required_point_http_admission_preserves_scope_identity_and_paused_retention(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://fixture",
+            ) as client:
+                from agent_index import server
+                from agent_index.indexing.point_hints import PointChangeHints
+
+                runner = app.state.task_runner
+                points = runner.point_service
+                health = (await client.get("/health")).json()
+                assert health["point_service_contract"]["required_admission_versions"] == [1]
+                headers = {
+                    server.INSTALLATION_HEADER: health["installationId"],
+                    server.INSTANCE_HEADER: health["instanceToken"],
+                }
+                body = {
+                    "source": f.claim.hints.source, "change_hints": f.claim.hints.to_dict(),
+                    "required_point_service_version": 1,
+                }
+                before = f.tasks.get_queue(), runner.store.get_queue()
+                assert (await client.post("/reindex/hints", json=body, headers=headers)).status_code == 409
+                assert (f.tasks.get_queue(), runner.store.get_queue()) == before
+                assert not f.provider.requests and not f.calls
+                await points.activate()
+                for bad_headers in ({}, headers | {server.INSTANCE_HEADER: "previous"}):
+                    assert (await client.post(
+                        "/reindex/hints", json=body, headers=bad_headers,
+                    )).status_code == 409
+                wrong = replace(f.claim.hints, account_id="different")
+                assert (await client.post("/reindex/hints", json={
+                    **body, "change_hints": wrong.to_dict(),
+                }, headers=headers)).status_code == 409
+                accepted = (await client.post("/reindex/hints", json=body, headers=headers)).json()
+                points.pause()
+                assert accepted["accepted"] and accepted["installationId"] == health["installationId"]
+                assert accepted["instanceToken"] == health["instanceToken"]
+                assert accepted["point_service_admission"] == {
+                    "id": "agent-index.point-service", "version": 1,
+                    "scope_fingerprint": point_scope_fingerprint(f.claim.hints.scope),
+                }
+                retained = PointChangeHints.from_dict(accepted["task"]["change_hints"])
+                assert retained.union(f.claim.hints) == retained
+                assert runner.store.get_task(accepted["task"]["id"]) is None
+                assert (await client.post("/reindex/hints", json=body, headers=headers)).status_code == 409
+                unrequired = {key: value for key, value in body.items() if key != "required_point_service_version"}
+                assert (await client.post("/reindex/hints", json=unrequired)).json()["accepted"]
+                assert not points.contract()["execution_admitted"]
+        assert lifetime == ["open", "closed"]
+        reopened = TaskStore(f.config.data_dir / "tasks.db")
+        assert reopened.get_queue()
+        assert reopened.dequeue_next() is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("closure", ["drain", "stop"])
+@pytest.mark.parametrize("cancelled", ["none", "caller", "loop"])
+def test_required_point_enqueue_is_joined_through_closure_and_cancellation(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, closure: str, cancelled: str,
+) -> None:
+    from agent_index import server
+
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    original = TaskStore.enqueue
+    notifications: list[str] = []
+
+    def enqueue(store: TaskStore, *args: Any, **kwargs: Any) -> TaskRecord:
+        if store._db_path == f.tasks._db_path:
+            entered.set()
+            assert release.wait(timeout=8)
+        return original(store, *args, **kwargs)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            points = app.state.task_runner.point_service
+            await points.activate()
+            monkeypatch.setattr(TaskStore, "enqueue", enqueue)
+            monkeypatch.setattr(app.state.task_runner, "notify", lambda: notifications.append("notify"))
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://fixture",
+            ) as client:
+                health = (await client.get("/health")).json()
+                posting = asyncio.create_task(client.post("/reindex/hints", json={
+                    "source": f.claim.hints.source, "change_hints": f.claim.hints.to_dict(),
+                    "required_point_service_version": 1,
+                }, headers={
+                    server.INSTALLATION_HEADER: health["installationId"],
+                    server.INSTANCE_HEADER: health["instanceToken"],
+                }))
+                closing = None
+                try:
+                    assert await asyncio.to_thread(entered.wait, 5)
+                    if closure == "drain":
+                        assert await points.drain(timeout=0) is False
+                    else:
+                        closing = asyncio.create_task(points.stop())
+                        await asyncio.sleep(0.02)
+                        assert not closing.done()
+                    assert points._intakes and lifetime == ["open"] and notifications == []
+                    if cancelled != "none":
+                        for _ in range(2):
+                            if cancelled == "loop":
+                                for task in asyncio.all_tasks():
+                                    if task is not asyncio.current_task():
+                                        task.cancel()
+                            else:
+                                posting.cancel()
+                            await asyncio.sleep(0.02)
+                    assert not posting.done()
+                    assert points._intakes and lifetime == ["open"] and notifications == []
+                finally:
+                    release.set()
+                    if cancelled != "none":
+                        with pytest.raises(asyncio.CancelledError):
+                            await posting
+                    else:
+                        assert (await posting).json()["accepted"]
+                    if closing is not None:
+                        if cancelled == "loop":
+                            with pytest.raises(asyncio.CancelledError):
+                                await closing
+                        else:
+                            await closing
+                assert notifications == ["notify"]
+                assert not points._intakes
+                if closure == "drain":
+                    assert await points.drain(timeout=1)
+                    assert lifetime == ["open"]
+        assert lifetime == ["open", "closed"]
+        assert f.tasks.get_queue() and not f.provider.requests and not f.calls
+
+    asyncio.run(exercise())
+
+
 @pytest.fixture
 def reader_connections(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     from agent_index.sources import azure_devops_point_runtime as runtime

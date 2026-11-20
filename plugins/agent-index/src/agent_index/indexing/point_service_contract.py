@@ -24,6 +24,7 @@ def unavailable_point_service(
 ) -> dict[str, object]:
     return {
         "id": "agent-index.point-service", "version": 1, "paired": False,
+        "required_admission_versions": [1],
         "state": "stopped" if stopped else "unavailable", "reason": reason,
         "failed": failed, "execution_admitted": False, "read_admitted": False,
     }
