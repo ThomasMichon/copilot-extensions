@@ -312,6 +312,8 @@ class WatchWriter:
         guard: CutoverLock | None = None,
     ) -> dict[str, Any]:
         """Receive a prepared journal under fresh admission, without restoring effects."""
+        from zdd.cutover_lock import lock_path
+
         from .watch_transition_recovery import recover_prepared
 
         with self._operation(timeout) as deadline:
@@ -321,7 +323,9 @@ class WatchWriter:
                     if guard is None:
                         raise PermissionError("watch prepared recovery requires an installation transaction")
                     guard.require_owned()
-                    installation.require_current()
+                    if guard.path != lock_path(installation.run_root):
+                        raise PermissionError("watch prepared recovery requires its own installation transaction")
+                    installation.require_current(environment={})
                     if installation.state_root != self.root:
                         raise PermissionError("watch prepared recovery installation state root differs")
                 elif guard is not None:
@@ -337,6 +341,7 @@ class WatchWriter:
             def check_deadline() -> None:
                 self._remaining(deadline)
 
+            validate()
             self.daemon.set_persistence_guard(
                 refuse_persistence, timeout=self._remaining(deadline),
             )

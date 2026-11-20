@@ -641,6 +641,13 @@ stored controller evidence never authorizes recovery. Later compatible
 controllers revalidate the original scope without requiring either older
 payload to exist.
 
+Precondition refusal leaves an existing owner unchanged. Fresh installation
+checks use the already selected cell rather than a stale launch-payload
+environment. Admission is checked again after the initial source read, before
+acquisition. Candidate serialization must fit the reader's 1 MiB metadata limit
+before custody or publication changes. The final source and admission work
+precedes the unchanged-journal and full-topology check.
+
 Before native acquisition and at guarded atomic publication, recovery validates
 the exact root, original lease/pin, absence of physical-transition artifacts,
 strict legacy source and full current installation admission. It acquires only

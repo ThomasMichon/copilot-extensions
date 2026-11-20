@@ -15,7 +15,7 @@ from .watch_installation import WatchInstallation
 from .watch_private import confirm_private, require_private, write_private as write_private
 from .watch_registry import WatchRegistry
 from .watch_storage import (
-    _read_subscriptions_state, _regular_bytes, _reject_constant, _unique_object,
+    _MAX_METADATA_BYTES, _read_subscriptions_state, _regular_bytes, _reject_constant, _unique_object,
     watch_state_paths,
 )
 from .watch_transition import (
@@ -39,7 +39,7 @@ def _validate_scope(
     else:
         if binding["kind"] != "installation" or guard is None:
             raise PermissionError("watch prepared recovery requires its installation transaction")
-        installation.require_transition_origin(binding["installation"], guard=guard)
+        installation.require_transition_origin(binding["installation"], guard=guard, environment={})
 
 
 def _read_prepared(
@@ -76,9 +76,16 @@ def _read_prepared(
     _validate_record(origin, origin["binding"])
     if (
         identity != (origin["lease"]["device"], origin["lease"]["inode"])
+        or _historical_identity(root) != identity
         or _pin_identity(root) != identity
     ):
         raise PermissionError("watch prepared recovery no longer names its original pinned inode")
+    for path in (paths.retained_lock, paths.staged_barrier, paths.isolated_subscriptions.parent):
+        if os.path.lexists(path):
+            raise PermissionError("watch prepared recovery has physical transition evidence")
+    require_private(paths.journal)
+    if _regular_bytes(paths.journal) != raw:
+        raise PermissionError("watch prepared recovery journal changed during admission")
     return cast(Document, document), raw
 
 
@@ -94,6 +101,16 @@ def recover_prepared(
     paths = watch_state_paths(root)
     if lease.lock_path != paths.historical_lock:
         raise PermissionError("watch prepared recovery lease belongs to another state root")
+    controller: Document = {"kind": "legacy", "stateRoot": str(root)}
+    if installation is not None:
+        controller.update(kind="installation", installation=installation.evidence())
+    origin = prior if prior["version"] == 1 else prior["origin"]
+    document = {
+        **origin, "version": 2, "origin": origin, "controller": controller,
+    }
+    published_bytes = json.dumps(document, allow_nan=False).encode("utf-8")
+    if len(published_bytes) > _MAX_METADATA_BYTES:
+        raise ValueError("watch prepared recovery journal exceeds its bounded size")
 
     def source() -> None:
         WatchRegistry().restore_state(
@@ -101,6 +118,9 @@ def recover_prepared(
         )
 
     source()
+    validate()
+    if _read_prepared(root, installation, guard)[1] != original_bytes:
+        raise PermissionError("watch prepared recovery journal changed before acquisition")
     check_deadline()
     if not lease.held:
         lease.acquire(expected_file_identity=identity)
@@ -109,27 +129,17 @@ def recover_prepared(
         validate()
         if lease.held_file_identity() != identity:
             raise PermissionError("watch prepared recovery native custody changed")
+        source()
+        validate()
         _, current_bytes = _read_prepared(root, installation, guard)
         if current_bytes != expected_bytes:
             raise PermissionError("watch prepared recovery journal changed before publication")
-        source()
-        validate()
-        if (
-            lease.held_file_identity() != identity or _historical_identity(root) != identity
-            or _pin_identity(root) != identity
-        ):
+        if lease.held_file_identity() != identity:
             raise PermissionError("watch prepared recovery native custody changed")
         check_deadline()
 
     recheck(original_bytes)
     _confirm_pin(root, identity)
-    controller: Document = {"kind": "legacy", "stateRoot": str(root)}
-    if installation is not None:
-        controller.update(kind="installation", installation=installation.evidence())
-    origin = prior if prior["version"] == 1 else prior["origin"]
-    document = {
-        **origin, "version": 2, "origin": origin, "controller": controller,
-    }
     if document == prior:
         confirm_private(paths.journal)
         recheck(original_bytes)
@@ -138,5 +148,5 @@ def recover_prepared(
             paths.journal, document, create_parent=False,
             before_publish=lambda: recheck(original_bytes),
         )
-        recheck(json.dumps(document, allow_nan=False).encode("utf-8"))
+        recheck(published_bytes)
     return document

@@ -511,8 +511,15 @@ Contained tests exercise actual receipt/activation replacement through a third
 generation, absent older payloads, serialized version-1/version-2 recovery and
 rollback refusal, scope/topology/source conflicts, transaction custody,
 pre/post-publication failures and uncertain acknowledgement. The focused
-preparation/storage/sealing packet passes 144 tests with three platform-specific
+preparation/storage/sealing packet passes 155 tests with three platform-specific
 skips on Windows; strict typing checks both Linux and Windows targets.
+The final exact-transaction precondition correction passes seven targeted
+negative/positive cases. Precondition refusals leave existing readiness and
+effects unchanged. Admission is revalidated after the initial source read,
+before acquisition; final source/admission work precedes the journal/topology
+check. Candidate serialization is bounded before acquisition/publication so a
+valid origin cannot produce an unreadable oversized record. Fresh current-cell
+checks ignore stale launch-payload metadata without weakening receipt policy.
 This is neither native Linux qualification nor actual domain/boot evidence.
 Sealed reconciliation, final import, ordinary command integration and the
 complete historical installed window remain open. No installation, migration,

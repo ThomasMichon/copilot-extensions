@@ -174,6 +174,7 @@ def test_governed_adapter_requires_actual_current_transaction(
         guard.release()
     assert not controller.writer_held
     assert watch_state_paths(current.state_root).journal.read_bytes() == original
+    assert not controller._strict_custody and controller._preparation_guard is None
 
 
 @pytest.mark.parametrize("change", ["authority", "native", "journal", "source", "admission"])
@@ -458,3 +459,175 @@ def test_original_journal_inode_not_resampled_path_drives_native_acquisition(
     assert paths.historical_lock.read_bytes() == b"replacement-must-not-be-acquired"
     assert paths.journal.read_bytes() == original
     assert displaced.exists() and paths.preparation_pin.exists()
+
+
+@pytest.mark.parametrize("change", ["authority", "admission"])
+def test_initial_source_read_cannot_acquire_after_admission_is_revoked(
+    prepared: tuple[WatchInstallation, WatchInstallation, Document], controller: WatchWriter,
+    monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    from agent_pull_requests import watch_storage, watch_transition_recovery
+
+    _, current, _ = prepared
+    paths = watch_state_paths(current.state_root)
+    original, lease_bytes = paths.journal.read_bytes(), paths.historical_lock.read_bytes()
+    read = watch_storage._read_subscriptions_state
+
+    def revoked(*args: Any, **kwargs: Any) -> Any:
+        result = read(*args, **kwargs)
+        if change == "authority":
+            def refuse(_operation: str) -> None:
+                raise PermissionError("controlled initial-source authority revocation")
+            controller.authorize = refuse
+        else:
+            policy = current.os_profile / ".copilot-extensions" / "installation-mode.json"
+            value = json.loads(policy.read_text(encoding="utf-8"))
+            value["installationMode"]["enabled"] = False
+            policy.write_text(json.dumps(value), encoding="utf-8")
+        return result
+
+    with current.transaction(timeout=2, environment={}) as guard:
+        with monkeypatch.context() as race:
+            race.setattr(watch_transition_recovery, "_read_subscriptions_state", revoked)
+            with pytest.raises(PermissionError):
+                controller.recover_prepared_state_transition(
+                    timeout=10, installation=current, guard=guard,
+                )
+    assert not controller.writer_held
+    assert paths.journal.read_bytes() == original
+    assert paths.historical_lock.read_bytes() == lease_bytes
+
+
+@pytest.mark.parametrize("change", ["journal", "topology"])
+@pytest.mark.parametrize("boundary", ["source", "authority"])
+def test_final_read_or_admission_cannot_hide_changed_journal_or_topology(
+    prepared: tuple[WatchInstallation, WatchInstallation, Document], controller: WatchWriter,
+    monkeypatch: pytest.MonkeyPatch, change: str, boundary: str,
+) -> None:
+    from agent_pull_requests import watch_storage, watch_transition_recovery
+
+    _, current, _ = prepared
+    paths = watch_state_paths(current.state_root)
+    original = paths.journal.read_bytes()
+    persist = watch_transition_recovery.write_private
+    read = watch_storage._read_subscriptions_state
+    publishing = changed = False
+
+    def mutate() -> None:
+        nonlocal changed
+        if changed:
+            return
+        changed = True
+        if change == "journal":
+            paths.journal.write_bytes(original + b"\n")
+        else:
+            paths.staged_barrier.mkdir()
+
+    def about_to_publish(*args: Any, **kwargs: Any) -> None:
+        nonlocal publishing
+        publishing = True
+        persist(*args, **kwargs)
+
+    def source(*args: Any, **kwargs: Any) -> Any:
+        result = read(*args, **kwargs)
+        if publishing and boundary == "source":
+            mutate()
+        return result
+
+    def authorize(_operation: str) -> None:
+        if publishing and boundary == "authority":
+            mutate()
+
+    with current.transaction(timeout=2, environment={}) as guard:
+        with monkeypatch.context() as race:
+            race.setattr(controller, "authorize", authorize)
+            race.setattr(watch_transition_recovery, "write_private", about_to_publish)
+            race.setattr(watch_transition_recovery, "_read_subscriptions_state", source)
+            with pytest.raises(PermissionError):
+                controller.recover_prepared_state_transition(
+                    timeout=10, installation=current, guard=guard,
+                )
+    assert changed
+    assert paths.journal.read_bytes() == original + (b"\n" if change == "journal" else b"")
+    assert controller.writer_held and not controller.read_ready
+    assert paths.staged_barrier.exists() is (change == "topology")
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+def test_serialized_receiver_size_is_checked_before_acquisition_or_publication(
+    prepared: tuple[WatchInstallation, WatchInstallation, Document], controller: WatchWriter,
+    oversized: bool,
+) -> None:
+    from agent_pull_requests.watch_storage import _MAX_METADATA_BYTES
+
+    _, current, origin = prepared
+    origin["binding"]["installation"]["payloadRoot"] = current.payload_root.anchor
+    candidate = {
+        **origin, "version": 2, "origin": origin,
+        "controller": {
+            "kind": "installation", "stateRoot": str(current.state_root),
+            "installation": current.evidence(),
+        },
+    }
+    overhead = len(json.dumps(candidate).encode())
+    padding = (_MAX_METADATA_BYTES - overhead) // 2 + int(oversized)
+    origin["binding"]["installation"]["payloadRoot"] += "x" * padding
+    assert (len(json.dumps(candidate).encode()) > _MAX_METADATA_BYTES) is oversized
+    paths = watch_state_paths(current.state_root)
+    write_private(paths.journal, origin)
+    original = paths.journal.read_bytes()
+    assert len(original) < _MAX_METADATA_BYTES
+    with current.transaction(timeout=2, environment={}) as guard:
+        if oversized:
+            with pytest.raises(ValueError, match="bounded size"):
+                controller.recover_prepared_state_transition(
+                    timeout=10, installation=current, guard=guard,
+                )
+            assert paths.journal.read_bytes() == original
+            assert not controller.writer_held
+        else:
+            result = controller.recover_prepared_state_transition(
+                timeout=10, installation=current, guard=guard,
+            )
+            assert result["origin"] == origin
+            assert len(paths.journal.read_bytes()) <= _MAX_METADATA_BYTES
+            assert controller.writer_held
+
+
+@pytest.mark.parametrize("reason", ["active", "unauthorized"])
+def test_initial_refusal_does_not_fence_or_change_existing_owner(
+    tmp_path: Path, reason: str,
+) -> None:
+    from agent_pull_requests.watch_contract import PRSnapshot
+
+    owner = WatchWriter(root=tmp_path, authorize=lambda _: None, fetch=lambda *_: PRSnapshot())
+    try:
+        owner.adopt(timeout=2)
+        owner.activate(timeout=2)
+        if reason == "unauthorized":
+            def refuse(_operation: str) -> None:
+                raise PermissionError("controlled unauthorized recovery")
+            owner.authorize = refuse
+        with pytest.raises(PermissionError):
+            owner.recover_prepared_state_transition(timeout=2)
+        assert owner.writer_held and owner.read_ready
+        assert owner.daemon.effects_enabled
+        assert owner._preparation_guard is None and not owner._strict_custody
+        assert not watch_state_paths(tmp_path).journal.exists()
+    finally:
+        owner.close(timeout=2)
+
+
+def test_fresh_controller_ignores_only_stale_launch_payload_environment(
+    prepared: tuple[WatchInstallation, WatchInstallation, Document], controller: WatchWriter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old, current, origin = prepared
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(old.payload_root))
+    with current.transaction(timeout=2, environment={}) as guard:
+        result = controller.recover_prepared_state_transition(
+            timeout=10, installation=current, guard=guard,
+        )
+    assert result["origin"] == origin
+    assert result["controller"]["installation"] == current.evidence()
+    assert controller.writer_held

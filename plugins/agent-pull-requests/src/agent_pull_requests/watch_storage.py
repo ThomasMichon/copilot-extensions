@@ -22,6 +22,7 @@ WATCH_ENGINE_GENERATION = 1
 TransitionPhase = Literal["absent", "prepared", "sealed-legacy", "import-ready", "active"]
 _TRANSITION_PHASES = {"prepared", "sealed-legacy", "import-ready", "active"}
 _REPARSE_POINT = 0x400
+_MAX_METADATA_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -76,7 +77,7 @@ def subscriptions_path(root: Path | None = None) -> Path:
     return watch_state_paths(root).legacy_subscriptions
 
 
-def _regular_bytes(path: Path, *, max_bytes: int | None = 1_048_576) -> bytes | None:
+def _regular_bytes(path: Path, *, max_bytes: int | None = _MAX_METADATA_BYTES) -> bytes | None:
     """Read stable plain bytes; None preserves legacy subscription size policy."""
     try:
         info = path.lstat()
