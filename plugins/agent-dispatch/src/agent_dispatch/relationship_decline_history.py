@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Literal
 
-from .queue_allocation_revisions import RETIRED_WITHOUT_WORKSPACE
+from .queue_allocation_revisions import RETIRED_BEFORE_ALLOCATION, recovered_empty_condition
 from .queue_records import TaskError
 
 
@@ -33,13 +33,12 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"], *, before_ac
           AND json_extract(e.value,'$.state')='closed' AND r.release_requested=1
           AND r.native_release_pending=0 AND r.state IN ('settled','failed','rearmed')
     ), recovered_roots AS (
-        SELECT r.allocation_reservation_key AS key, r.task_id, r.creation_key, r.allocation_revision,
-               r.ordinary_admission_policy, r.reserved_by, r.allocation_project, r.allocation_cohort,
-               json_extract(d.receipt,'$.observation.allocation.attempt') AS original_attempt
+        SELECT p.key AS prepared_key
         FROM declined c JOIN spawn_reservations r ON r.key=c.execution_key
         JOIN pool_worker_decline_closeouts d ON d.reservation_key=r.key
         JOIN events e ON e.id=c.id
         JOIN spawn_reservations p ON p.key=json_extract(e.value,'$.request.reservation_key')
+        JOIN spawn_reservations o ON o.key=r.allocation_reservation_key
         WHERE r.driver='ordinary-bridge' AND p.driver=r.driver AND p.worktree_ownership='created'
           AND p.task_id=r.task_id AND p.task_relationship_event_id=c.id AND p.reserved_by=r.reserved_by
           AND p.allocation_reservation_key=r.allocation_reservation_key AND p.creation_key=r.creation_key
@@ -58,6 +57,9 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"], *, before_ac
                           AND a.native_session_id IS NOT json_extract(d.receipt,'$.binding.native_id'))
           AND json_extract(d.receipt,'$.observation.operation')='observe-ready'
           AND json_type(d.receipt,'$.observation.ready')='true'
+          AND json_type(e.value,'$.receipt.producer.closeout.relationship_verification.retired')='true'
+          AND json_type(e.value,'$.receipt.producer.closeout.relationship_verification.quiescent')='true'
+          AND json_extract(e.value,'$.receipt.producer.closeout.relationship_verification.subject')=json_extract(e.value,'$.receipt.ref')
           AND json_extract(d.receipt,'$.observation.task_claim_ref')=json_extract(e.value,'$.receipt.ref')
           AND json_extract(d.receipt,'$.observation.task_id')=r.task_id
           AND json_extract(d.receipt,'$.observation.native_id')=json_extract(d.receipt,'$.binding.native_id')
@@ -68,6 +70,8 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"], *, before_ac
           AND json_extract(d.receipt,'$.observation.reservation_key')=r.allocation_reservation_key
           AND json_extract(d.receipt,'$.observation.allocation.task_id')=r.task_id
           AND json_extract(d.receipt,'$.observation.allocation.reservation_key')=r.allocation_reservation_key
+          AND json_type(d.receipt,'$.observation.allocation.attempt')='integer'
+          AND json_extract(d.receipt,'$.observation.allocation.attempt')=o.attempt
           AND json_extract(d.receipt,'$.observation.allocation.driver')=r.driver
           AND json_extract(d.receipt,'$.observation.allocation.supervisor')=r.reserved_by
           AND json_extract(d.receipt,'$.observation.allocation.ownership')='created'
@@ -117,15 +121,13 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"], *, before_ac
           )
           OR EXISTS (
               SELECT 1 FROM spawn_reservations s WHERE s.task_id={task} AND s.task_relationship_required=1 {prior_reservations}
-                AND NOT ({RETIRED_WITHOUT_WORKSPACE} AND (s.allocation_project IS NULL OR EXISTS (
-                    SELECT 1 FROM recovered_roots root WHERE root.key=s.key AND s.key=s.allocation_reservation_key
-                      AND s.cooling_token IS NULL AND s.cleanup_claim_token IS NULL
-                      AND root.task_id=s.task_id AND root.creation_key=s.creation_key AND root.allocation_revision=s.allocation_revision
-                      AND root.original_attempt=s.attempt AND root.allocation_project=s.allocation_project
-                      AND root.allocation_cohort IS s.allocation_cohort
-                      AND root.reserved_by=s.reserved_by AND root.ordinary_admission_policy=s.ordinary_admission_policy
-                ))) AND NOT (
-                    s.task_relationship_event_id IS NOT NULL AND s.task_relationship_event_id IN (SELECT id FROM declined)
+                AND NOT ({RETIRED_BEFORE_ALLOCATION} OR EXISTS (
+                    SELECT 1 FROM recovered_roots root JOIN spawn_reservations p ON p.key=root.prepared_key
+                    WHERE {recovered_empty_condition()}
+                )) AND NOT (
+                    s.task_relationship_event_id IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM declined d JOIN events e ON e.id=d.id WHERE e.id=s.task_relationship_event_id
+                        AND s.key IN (d.execution_key,json_extract(e.value,'$.request.reservation_key')))
                     AND s.release_requested=1 AND s.native_release_pending=0 AND s.state IN ('settled','failed','rearmed')
                 )
           ))"""

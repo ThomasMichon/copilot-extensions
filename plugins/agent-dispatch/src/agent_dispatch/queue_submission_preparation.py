@@ -124,7 +124,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
     )
     # Install the replacement before removing the stricter rollback-era trigger.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v5"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v6"
         " BEFORE UPDATE ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
@@ -152,7 +152,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " 'submission preparation requires authoritative readiness'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v7"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v8"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
@@ -179,7 +179,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " BEGIN SELECT RAISE(ABORT, 'submission advancement receipt is immutable'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v5"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v6"
         " BEFORE UPDATE ON tasks"
         " WHEN OLD.status IN ('submitted','completed')"
         " AND NEW.status IN ('submitted','completed')"
@@ -189,8 +189,11 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " OR (OLD.require_verification=1 AND NEW.require_verification IS NOT 1))"
         " BEGIN SELECT RAISE(ABORT, 'submission preparation result is retained'); END"
     )
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained_v5")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained_v4")
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard_v5")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard_v4")
+    conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v7")
     conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v6")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained_v3")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard_v3")

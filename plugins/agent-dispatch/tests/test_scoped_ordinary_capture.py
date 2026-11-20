@@ -124,6 +124,7 @@ def test_exact_winner_is_prospective_across_reconfiguration(
     ("empty", "decline"), ("prepared", "decline"),
     ("initial", "worker-decline"), ("empty", "worker-decline"), ("prepared", "worker-decline"),
     ("bound-project", "decline"), ("bound-project-foreign", "decline"), ("bound-project-native", "decline"),
+    ("bound-project-twice", "decline"),
 ])
 @pytest.mark.parametrize("ordinary", ["scoped"], indirect=True)
 def test_scoped_original_receipt_and_disposition_survive_drain(
@@ -178,6 +179,9 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         assert retry.key != first.key and retry.task_relationship_required
         local.placed["reservation"] = asdict(retry)
         local.task.update(asdict(queue.get(first.task_id)), spawn_reservation_key=retry.key)
+        if retry_stage == "bound-project-twice":
+            from tests._project_retry_controls import retry_after_project
+            assert retry_after_project(local, monkeypatch).attempt == 3
     launch(local)
     key = local.placed["reservation"]["key"]
     reservation = queue.get_reservation(key)
@@ -227,6 +231,9 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         assert closed.applied and closed.receipt["binding"] == binding
         assert closed.relationship == {"state": "closed", "event_id": original["request"]["event_id"]}
         queue.retire_spawn(key, exact_absence=True, conclusion_state="skipped")
+        if retry_stage == "bound-project-twice":
+            from tests._project_retry_controls import check_intermediate_fences
+            check_intermediate_fences(queue, task.id, decline=True)
         from tests.test_relationship_discharge import replace_after_decline
         reopened = TaskQueue(queue.db_path)
         if retry_stage in {"bound-project-foreign", "bound-project-native"}:
@@ -518,11 +525,15 @@ def test_settled_decline_permits_unselected_replacement(
 
 
 @pytest.mark.parametrize("ordinary", ["disposed"], indirect=True)
-@pytest.mark.parametrize("evidence", ["disposed", "retained-workspace", "unsettled-relationship", "foreign-handle"])
+@pytest.mark.parametrize("evidence", ["disposed", "disposed-third", "retained-workspace", "unsettled-relationship", "foreign-handle"])
 def test_only_fully_disposed_captured_revision_can_begin_again(local: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, evidence: str) -> None:
     import json
     from agent_dispatch import submission_readiness_observation
 
+    if evidence == "disposed-third":
+        from tests._project_retry_controls import retry_after_project
+        retry_after_project(local, monkeypatch)
+        assert retry_after_project(local, monkeypatch).attempt == 3
     launch(local)
     q = local.q
     reservation = q.get_reservation(local.placed["reservation"]["key"])
@@ -544,7 +555,10 @@ def test_only_fully_disposed_captured_revision_can_begin_again(local: SimpleName
             conn.execute("UPDATE spawn_reservations SET session_handle='local-body:other' WHERE key=?", (old.key,))
         old = q.get_reservation(old.key)
     successor = new_task(q, dedup_key="recurring")
-    if evidence != "disposed":
+    if evidence == "disposed-third":
+        from tests._project_retry_controls import check_intermediate_fences
+        check_intermediate_fences(q, reservation.task_id, decline=False)
+    if evidence not in {"disposed", "disposed-third"}:
         with pytest.raises(TaskError, match="original task and driver"):
             q.reserve_spawn(successor.id, reserved_by="allocator", driver="cli", pool_catalog_revision=q.pool_catalog_snapshot().revision)
         assert not q.list_reservations(task_id=successor.id)

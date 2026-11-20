@@ -113,7 +113,9 @@ Settled history remains unattributed; do not backfill policy or edit receipts.
 For a retried allocation, the closed claim must identify its preparing attempt and
 any continuation. The executing native's retained creation record must attest the
 original allocation stamp, workspace incarnation and writer. This can account for
-a retired project-bound root that never recorded a workspace itself. A project
+several earlier project-bound attempts, but each must independently prove retirement
+without a workspace, native, send or outstanding claim and match the later prepared
+workspace's allocator, project, revision, cohort and execution location. A project
 name or terminal task alone cannot: missing native creation evidence, conflicting
 receipts or unresolved sends still block the upgrade.
 
@@ -132,7 +134,7 @@ allocation revision for either the CLI or ordinary-Bridge pool driver if every
 attempt in the captured predecessor revision was retired before workspace preparation,
 or the entire same-origin revision has verified workspace disposal, settled claims and retired natives.
 A missing workspace receipt after project binding is not proof of absence. For a decline,
-a retired project-bound root can instead be accounted for by its exact recovered workspace,
+retired project-bound attempts can instead be accounted for by their exact recovered workspace,
 closed relationship and retired native under the same creation key and revision. Unresolved sends or wakes still block placement.
 
 **Roll back prospectively.** With authority still `local`, change admission to

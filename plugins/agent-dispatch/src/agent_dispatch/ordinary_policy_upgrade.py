@@ -41,12 +41,10 @@ def _settled(
             return False
         if row["allocation_project"] is None:
             return True
-        if key != row["allocation_reservation_key"]:
-            return False
         events = conn.execute(
             "SELECT DISTINCT task_relationship_event_id FROM spawn_reservations"
             " WHERE task_id=? AND allocation_reservation_key=? AND task_relationship_event_id IS NOT NULL LIMIT 2",
-            (task, key),
+            (task, row["allocation_reservation_key"]),
         ).fetchall()
         if len(events) != 1:
             return False
@@ -96,11 +94,7 @@ def _settled_retry(conn: sqlite3.Connection, row: sqlite3.Row, value: dict[str, 
         "SELECT * FROM spawn_reservations WHERE task_id=? AND key=?",
         (task, binding["reservation_key"]),
     ).fetchone()
-    if execution is None or key not in {
-        execution["allocation_reservation_key"],
-        request["reservation_key"],
-        execution["key"],
-    }:
+    if execution is None:
         return False
     allocation = managed_allocation(conn, task, execution, value)
     # Each participant must pass its own legacy retirement/transport check. A
@@ -114,10 +108,8 @@ def _settled_retry(conn: sqlite3.Connection, row: sqlite3.Row, value: dict[str, 
     ):
         return False
     if row["task_relationship_event_id"] is None:
-        return bool(
-            key == allocation["key"]
-            and row["allocation_project"] == allocation["allocation_project"]
-        )
+        from .queue_allocation_revisions import recovered_empty
+        return recovered_empty(conn, row, request["reservation_key"])
     if key != execution["key"]:
         return (
             key == request["reservation_key"]

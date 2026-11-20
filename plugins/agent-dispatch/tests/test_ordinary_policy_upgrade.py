@@ -111,7 +111,7 @@ def test_upgrade_reads_each_wake_table_once(q: TaskQueue, tmp_path: Path) -> Non
         assert len(scans) == 1
 
 
-@pytest.mark.parametrize("stage", ["project-bound", "prepared"])
+@pytest.mark.parametrize("stage", ["project-bound", "project-bound-twice", "prepared"])
 @pytest.mark.parametrize("ordinary", [True], indirect=True)
 def test_settled_factory_retry_upgrade(
     ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str,
@@ -122,7 +122,7 @@ def test_settled_factory_retry_upgrade(
     q = ordinary.q
     task = ordinary.task["id"]
     first = q.get_reservation(ordinary.placed["reservation"]["key"])
-    if stage == "project-bound":
+    if stage.startswith("project-bound"):
         q.record_spawn_allocation(first.key, "example")
     else:
         run = ordinary_bridge.subprocess.run
@@ -144,6 +144,10 @@ def test_settled_factory_retry_upgrade(
                                pool_catalog_revision=q.pool_catalog_snapshot().revision)
     ordinary.placed["reservation"] = asdict(retry)
     ordinary.task.update(asdict(q.get(task)), spawn_reservation_key=retry.key)
+    if stage == "project-bound-twice":
+        from tests._project_retry_controls import retry_after_project
+        retry = retry_after_project(ordinary, monkeypatch)
+        assert retry.attempt == 3
     launch(ordinary)
     current = q.get_reservation(retry.key)
     q.record_spawn(retry.key, session_handle=current.session_handle, worktree=current.worktree,
@@ -196,4 +200,4 @@ def test_settled_factory_retry_upgrade(
             with upgraded._connect() as conn:
                 assert [r[0] for r in conn.execute(
                     "SELECT ordinary_admission_policy FROM spawn_reservations WHERE task_id=?", (task,)
-                )] == [None, None]
+                )] == [None] * retry.attempt

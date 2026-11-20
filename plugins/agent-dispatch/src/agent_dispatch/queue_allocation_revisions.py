@@ -80,6 +80,46 @@ RETIRED_WITHOUT_WORKSPACE = (
 RETIRED_BEFORE_ALLOCATION = f"({RETIRED_WITHOUT_WORKSPACE} AND s.allocation_project IS NULL)"
 
 
+def recovered_empty_condition(*, cohort: bool = True, policy: bool = True) -> str:
+    """Match retired s to later prepared p. The caller must independently prove p's disposition."""
+    retained = "".join(
+        f" AND o.{column} IS s.{column} AND s.{column} IS p.{column}"
+        for column, present in (("allocation_cohort", cohort), ("ordinary_admission_policy", policy))
+        if present
+    )
+    return f"""COALESCE(({RETIRED_WITHOUT_WORKSPACE}
+        AND s.cooling_token IS NULL AND s.cleanup_claim_token IS NULL
+        AND COALESCE(s.conclusion_state,'') NOT IN ('held','pending')
+        AND s.allocation_project=p.allocation_project AND s.reserved_by=p.reserved_by
+        AND s.task_id=p.task_id AND s.driver=p.driver AND p.task_relationship_required=1
+        AND p.worktree_ownership='created' AND p.inherited_worktree IS NULL
+        AND p.task_relationship_event_id IS NOT NULL AND p.worktree_writer_requirement IS NOT NULL
+        AND s.allocation_reservation_key=p.allocation_reservation_key AND s.creation_key=p.creation_key
+        AND s.allocation_revision=p.allocation_revision AND s.attempt<p.attempt
+        AND s.task_relationship_generation<p.task_relationship_generation
+        AND (s.execution_machine IS NULL OR lower(s.execution_machine)=lower(p.execution_machine))
+        AND EXISTS (SELECT 1 FROM pool_reservation_bindings b JOIN pool_reservation_bindings a
+            ON a.reservation_key=p.key AND a.machine=b.machine AND a.env=b.env
+            WHERE b.reservation_key=s.key AND lower(b.machine)=lower(p.execution_machine))
+        AND EXISTS (SELECT 1 FROM spawn_reservations o WHERE o.key=p.allocation_reservation_key
+            AND o.key=o.allocation_reservation_key AND o.task_id=p.task_id AND o.driver=p.driver
+            AND o.creation_key=p.creation_key AND o.allocation_revision=p.allocation_revision
+            AND o.reserved_by=p.reserved_by AND o.task_relationship_required=1
+            AND o.attempt<=s.attempt AND o.task_relationship_generation<=s.task_relationship_generation
+            AND (o.allocation_project IS NULL OR o.allocation_project=p.allocation_project){retained})),0)"""
+
+
+def recovered_empty(conn: sqlite3.Connection, row: sqlite3.Row, prepared_key: str) -> bool:
+    # A legacy producer may predate a column. If present, compare its actual value, including NULL.
+    condition = recovered_empty_condition(
+        cohort="allocation_cohort" in row.keys(), policy="ordinary_admission_policy" in row.keys(),
+    )
+    return conn.execute(
+        "SELECT 1 FROM spawn_reservations s JOIN spawn_reservations p ON p.key=? WHERE s.key=? AND "
+        + condition, (prepared_key, row["key"]),
+    ).fetchone() is not None
+
+
 def _disposed_captured_revision(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> bool:
     """Disposal certifies a workspace, not a native, claim or transport."""
     from .managed_assignment_proof import managed_allocation
@@ -138,14 +178,10 @@ def _disposed_captured_revision(conn: sqlite3.Connection, rows: list[sqlite3.Row
             ):
                 return False
             if not row["worktree"]:
-                # A project-bound root is not empty by inference: managed_allocation
-                # verified its later prepared receipt on this exact creation key.
-                if row["allocation_project"] is not None and (
-                    row["key"] != origin["key"]
-                    or row["allocation_project"] != origin["allocation_project"]
-                ):
-                    return False
-                if not conn.execute(
+                if row["allocation_project"] is not None:
+                    if not recovered_empty(conn, row, relationship["request"]["reservation_key"]):
+                        return False
+                elif not conn.execute(
                     "SELECT 1 FROM spawn_reservations s WHERE key=? AND "
                     + RETIRED_WITHOUT_WORKSPACE,
                     (row["key"],),
