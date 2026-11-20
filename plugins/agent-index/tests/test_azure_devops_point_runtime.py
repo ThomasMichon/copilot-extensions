@@ -13,6 +13,7 @@ import test_azure_devops_point_worker as worker
 from agent_index.engine.client import EngineClient
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
 from agent_index.indexing.task_store import TaskRecord, TaskStatus
+from agent_index.indexing.worker import run_worker
 from agent_index.sources.azure_devops_point_runtime import run_configured_azure_devops_points
 from agent_index.store.source_layout import SourceLayoutError
 
@@ -103,15 +104,55 @@ def test_fresh_composition_reuses_retained_acquisition_after_interruption(
     def interrupt() -> None:
         raise RuntimeError("fixture interrupted embedding")
     f.hook = interrupt
-    with pytest.raises(RuntimeError, match="interrupted embedding"):
-        run(f, task)
+    assert run_worker(
+        task.id, config=f.config, point_executor=lambda selected: run(f, selected),
+    ) == 1
     pinned = f.tasks.get_task(task.id)
     assert pinned is not None and pinned.point_claim_id is not None
     assert pinned.status == TaskStatus.QUEUED_HINTS_V2 and f.retained_count() == 2
     f.reopen()
     f.hook = None
-    assert run(f, pinned).status == TaskStatus.COMPLETE
+    assert run_worker(
+        task.id, config=f.config, point_executor=lambda selected: run(f, selected),
+    ) == 0
+    completed = f.tasks.get_task(task.id)
+    assert completed is not None and completed.status == TaskStatus.COMPLETE
     assert f.provider.body_reads == 0 and f.calls
+
+
+def test_selected_point_dispatch_owns_synchronous_lifetime_without_process_setup(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.indexing import priority, worker as dispatcher
+
+    f = application
+    task = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("Point dispatch must not configure or register a detached process")
+
+    monkeypatch.setattr(priority, "lower_current_process_priority", forbidden)
+    monkeypatch.setattr(dispatcher, "_install_signal_handlers", forbidden)
+    monkeypatch.setattr(type(f.tasks), "set_worker", forbidden)
+    assert run_worker(task.id, config=f.config) == 2
+    assert not f.provider.requests and f.tasks.get_task(task.id) == task
+
+    def execute(selected: TaskRecord) -> TaskRecord:
+        assert selected == task
+        result = run(f, selected)
+        assert result.status == TaskStatus.COMPLETE
+        return result
+
+    assert run_worker(task.id, config=f.config, point_executor=execute) == 0
+    completed = f.tasks.get_task(task.id)
+    assert completed is not None and completed.status == TaskStatus.COMPLETE
+    assert completed.worker_pid is None and f.provider.body_reads == 2 and f.calls
+    f.reopen()
+    f.provider.user = "changed"
+    assert run_worker(
+        task.id, config=f.config, point_executor=lambda selected: run(f, selected, clients={}),
+    ) == 0
+    assert not f.provider.requests and not f.calls
 
 
 @pytest.mark.parametrize("overlap", ["same", "ancestor", "descendant", "symlink"])
