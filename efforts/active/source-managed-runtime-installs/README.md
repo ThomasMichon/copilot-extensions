@@ -703,6 +703,10 @@ other protected work.
   supported interface, without importing Fleet from another app's environment
   or relaxing review authorization. Select standalone Fleet from the target's
   knowledge-owned role policy, not from Worktrees or an ambient host role.
+  Move outbound-only enrollment and reconnect to the explicitly selected
+  connectivity provider before removing its current Worktrees entry. Preserve
+  the enrolled identity and existing state; provider absence must not cause
+  re-enrollment, state loss, or a fallback connection.
 
 **Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
 recorded evidence; the open rows are finite work, not new completion claims.
