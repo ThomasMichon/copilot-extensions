@@ -45,8 +45,14 @@ try {
     if ($null -eq $script:worker -or -not $script:worker.WaitForExit(10000)) {
         throw 'fixture worker did not retire'
     }
+    if (-not $failure.ReservationSettled) {
+        if (-not (Complete-NativeDaemonFailedLaunch -Failure $failure -ObservedProcess $script:worker)) {
+            throw 'fixture receipt did not settle after pinned exit'
+        }
+    }
     @{
         settled = $failure.CleanupConfirmed
+        receiptSettled = $failure.ReservationSettled
         workerCode = $script:worker.ExitCode
         error = $failure.InnerException.Message
     } | ConvertTo-Json -Compress

@@ -677,6 +677,12 @@ it does not infer abort custody from a nonzero process exit. See Windows'
 
 ### Daemon and finite-process entrypoints
 
+Python daemon admission ignores only `ERROR_FILE_NOT_FOUND` when opening a
+tracked cleanup Job: a destroyed Job cannot retain a child. It still pins and
+checks every existing Job before resume. Malformed scope metadata, access
+denial, other native query failures and retained membership remain errors.
+This does not clear the caller's scope environment or authorize a launch retry.
+
 The packaged `native_daemon.ps1` retains compiled process creation/control
 while its compiler-free replacement remains open. `native_owned.ps1` uses the
 existing shared Python atomic Job owner. Both require setup-provided Python
@@ -723,6 +729,18 @@ acknowledgement; only an explicit refusal or observed cleanup clears that
 uncertainty. `RetainedChild` preserves native custody after unconfirmed cleanup
 for an explicit bounded `Stop()` retry followed by `Dispose()`. Callers must
 consult their durable operation state rather than retrying installation.
+Failed native launches also retain their instance receipt. Only the original,
+authenticated launcher can cancel a positively refused creation or settle a
+child whose exact retained handle proves exit. `ReservationSettled` reports
+that tracking result separately from `CleanupConfirmed`; neither authorizes
+replay. After retiring a retained child, call
+`Complete-NativeDaemonFailedLaunch -Failure <exception>` before disposing its
+handle. A retained child's own receipt also supports `-Child <retained-child>`.
+An independent pinned `-ObservedProcess` is accepted only when its PID and
+birth match the original child. Generic reconciliation still holds a
+reservation with no PID; it never infers refused creation from missing data.
+The native type and helper advertise version-one failed-launch support before
+reservation, so a newer caller refuses an older helper before creating state.
 With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
 windowless child and deliberately retains the caller's Job.
 

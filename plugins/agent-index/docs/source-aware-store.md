@@ -181,6 +181,38 @@ The default legacy path is unchanged. The composing selected application must
 run this preflight inside its writer before effects; this helper does not
 enable that application or establish provider ordering.
 
+`indexing.embedding_batch.embed_and_store_pairs` also accepts an explicit
+`point_scope` in its existing bounded mode. The caller must already own the
+matching writer and supply coverage, the complete retained model-profile map
+and an after-store preparation callback. Native table/ledger qualification and
+zero-tail vector indices are checked before inference; current raw canonical
+input and selected family are checked before routing. Task-local qualified
+handles ignore caller caches without changing them. Default pair/batch calls
+and canonical content remain unchanged.
+
+Routing, missing-pair selection, prepared-vector callbacks, lazy readiness and
+work counters retain their existing owners. Only missing routed pairs use the
+selected native vector effect, followed by receipt invalidation, explicitly
+budgeted index preparation and stored-vector verification. Selected
+`EmbeddingCoverage.record` requires the existing writer, requalifies model/table
+and canonical input through the native owner, and compares actual indexed
+vectors before opening its SQLite receipt writer. Failed or incomplete reads
+cannot publish coverage. A caught post-effect pair/preparation/publication
+failure anywhere after an earlier effect, including later batch-input or
+model-selection checks, latches the enclosing native writer uncertain. The
+nested writer covers the complete pair invocation, not only individual writes;
+there is no implicit
+retry or recovery. A successful reopen can reuse qualified unchanged pairs
+without inference or native row writes.
+
+This is selected pair composition, not complete component application. It does
+not acquire or order provider versions, replace canonical content, remove stale
+IDs, retain applied versions, advance path/source checkpoints or complete a
+claim. Preparation remains the outside-exclusion owner's responsibility when
+that policy is required; passing a prepared-vector callback avoids inference
+inside this already-owned writer. Ordinary application, point producers and v2
+execution remain disabled.
+
 `store.point_reconciliation.reconcile_point_file` separately provides bounded
 stale-ID cleanup under an already-owned exact point writer. It reuses the native
 table qualification and raw file projection above through task-local owners;

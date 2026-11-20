@@ -615,6 +615,20 @@ function Set-DaemonInstanceProcess {
     }
 }
 
+function Complete-DaemonInstanceFailedLaunch {
+    param(
+        [Parameter(Mandatory)]$Receipt, [hashtable]$ProcessFrame,
+        [switch]$CreationRefused, [bool]$AdmissionPossible=$false
+    )
+    $request = @{
+        command='failed-launch'; receipt=(Get-DaemonInstanceReceiptFrame $Receipt)
+        creation_refused=[bool]$CreationRefused; admission_possible=$AdmissionPossible
+    }
+    if ($ProcessFrame) { $request.process = $ProcessFrame }
+    $result = Invoke-DaemonInstanceRequest $request
+    return ($result.settled -ceq $true)
+}
+
 function Enter-DaemonInstance {
     param(
         [Parameter(Mandatory)][string]$Service, [Parameter(Mandatory)][string]$RuntimeRoot,
