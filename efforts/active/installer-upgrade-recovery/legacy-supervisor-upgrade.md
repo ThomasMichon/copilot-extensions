@@ -132,3 +132,9 @@ Document review accepts planned tracking only and checks no technical row.
 Normal review, complete current source/receiving/custody readback and a
 separate judgment precede any source-tracker disposition; neither a plan
 merge nor that disposition migrates a master or releases a resource.
+
+Reviewed #13723 delivered this planned case. Complete current receiving,
+original/discussion and custody readback preceded a separate acknowledged
+#13617 NOT_PLANNED tracking retirement. All seven technical checks remain
+unchecked; the native legacy/current transition, repeat reporting and
+independent capture obligations above are not implementation-complete.

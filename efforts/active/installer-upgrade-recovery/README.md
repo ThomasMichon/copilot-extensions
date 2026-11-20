@@ -54,13 +54,16 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
-The proposed [retained legacy supervisor case](legacy-supervisor-upgrade.md)
-receives #13617's ordinary full-update/post-install gap while preserving its
+The reviewed [retained legacy supervisor case](legacy-supervisor-upgrade.md)
+records #13723's complete planned receiving of #13617's ordinary
+full-update/post-install gap while preserving its
 distinct coordinator-only result, optional capture and actual Dispatch,
 installer, completed-cycle, worker and native-process owners. It appoints
 no implementer and authorizes no transition. Old capability is not an
 incoming-replacement veto; a healthy coordinator is not complete master
-adoption. #13614's already-running client/policy-consumer continuity remains
+adoption. A separate complete current receiving/source/custody judgment
+preceded #13617's acknowledged NOT_PLANNED tracking retirement; all seven
+technical rows remain unchecked. #13614's already-running client/policy-consumer continuity remains
 with its existing #5035/#3303/#7935 owners, outside this case and not an
 incoming-replacement prerequisite. The existing #10486 full-client boundary
 is unchanged; this intake does not appoint it to #13614.
@@ -494,6 +497,8 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### [2026-11-20 UTC - Legacy supervisor planned receiving accepted; technical gap retained](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#previous-reviewed-receiving-and-distinct-tracking-retirements)
 
 ### [2026-11-20 UTC - Retained legacy supervisor case proposed](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
 

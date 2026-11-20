@@ -1273,3 +1273,35 @@ record actual acceptance; all nine technical rows, Draft status, #7237's
 independent relationship and actual resource owners remain unchanged.
 Earlier proposed entries are preserved history, not an additional pending
 receiving gate or proof of feature implementation.
+
+## Proposed finite Vault copy-transaction receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13077 | residual | Proposed existing [Vault Service P2](../vault-service/README.md#finite-copy-transaction-contracts), P13077-1..3/V13077-1..3/G13077 and [whole case](../vault-service/copy-transaction-contracts.md#relocation-and-cache-fences---13077): BOTH outside-group move/copy with move safety; invalidate ONLY values at/below the pre-revocation ceiling; preserve pending journal AND newer writes; expire floors at lookup; all three regression findings. Seven technical rows unchecked. |
+| #13083 | residual | Proposed same P2, P13083-1..2/V13083-1..2/G13083 and [whole case](../vault-service/copy-transaction-contracts.md#running-service-copy-support---13083): running-service health copy capability, selected-peer pre-mutation refusal/message, provider-first migration, mixed-version/rollback and declared support window. Five technical rows unchecked. |
+| #13085 | residual | Proposed same P2, P13085-1..3/V13085-1..2/G13085 and [whole case](../vault-service/copy-transaction-contracts.md#explicit-overwrite-and-uncertain-renames---13085): explicit overwrite separate from ordinary no-overwrite copy, re-list-before-restore for uncertain renames, committed-backup timeout AND final/restore failure, every surviving staged/backup name and both regressions. Six technical rows unchecked. |
+
+The [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md)
+retains all three OPEN sources during proposal; each becomes `routed` only
+after reviewed complete domain receiving. The existing credential/
+cache/journal/provider/CLI/service/recovery custodians, P0 design and applicable
+owner/slice admission, current R1-R4 priority and every incumbent state remain.
+This appoints no relay implementer and authorizes no credential, cache,
+copy/rename/overwrite, cleanup, service, source, native or resource operation.
+Actual complete reviewed receiving and current whole source/receiver/custody
+readback precede separate source judgments; no prospective retirement or
+technical completion is credited.
+
+## Vault generation and legacy supervisor reviewed receipts - 2026-11-20 UTC
+
+#13590/#11816 and #13723/#13617 are actual reviewed planned receiving followed
+by distinct, acknowledged NOT_PLANNED tracking retirements. The live
+[Vault Coordination](../vault-service/README.md#coordination) and
+[upgrade-recovery Coordination](../installer-upgrade-recovery/README.md#coordination)
+now record accepted tracking rather than another pending gate. Their six
+generation/freshness and seven legacy-supervisor technical checks respectively
+remain unchecked. Original source, native, credential, worker and resource
+custody is unchanged; neither retirement claims an implementation fix.
+Earlier proposed entries remain history. The [dated follow-through](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#previous-reviewed-receiving-and-distinct-tracking-retirements)
+does not repeat the already-published #13718/#3443 disposition.
