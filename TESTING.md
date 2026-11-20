@@ -6752,6 +6752,13 @@ owner without changing original cache, replay or association bytes.
 `plugins/agent-pull-requests/tests/test_recorded_terminal_cache.py` supplies the
 focused core contracts, including body-only admission and original-reader
 refusals. Neither packet qualifies installed migration or a live provider.
+The same process lane now includes the separately selected original-native
+transition: coalesced active waits, frozen events, current/noncurrent bytes,
+all adoption boundaries, competing lifecycle owners, fresh native payloads and
+old-sample refusal across adoption or close/reopen. The focused
+`test_recorded_native_cache.py` core packet adds historical target conflicts,
+unmatched old waits, shared native/full-scope identities and original capacity
+and deadline controls. Required unit-only CI is unchanged.
 
 The existing `pr_service=true` manual selector retains two disposable jobs
 (Linux and Windows), each capped at 10 minutes. Its source-pinned standalone

@@ -82,6 +82,13 @@ def capture(
     def original(document: Document) -> NativeGenerationCapture:
         if document.get("generation_associations_version") != 2:
             raise ReplayStoreInvalid("native generation association storage unavailable")
+        if owner.recorded_terminal_cache:
+            target = {"account": admitted.account, "repo": admitted.repo, "number": scope["number"]}
+            if any(
+                row["scope"] == scope and row["target"] != target
+                for row in document.get("terminal_retention", {}).get("admissions", [])
+            ):
+                raise ReplayStoreInvalid("native selection differs from the original imported admission")
         epoch, state = _position(document, scope)
         return NativeGenerationCapture(
             owner.root, owner.namespace, _service(owner), _digest(scope),
