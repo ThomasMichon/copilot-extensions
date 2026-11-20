@@ -170,8 +170,9 @@ The reviewed intent under #13487/#13560 remains open. The bootstrap
 implementation merged in #13495. Implementation review proved that the baseline
 journal cannot durably associate a legacy generation with an observation:
 distinct same-second acquisitions can share its rounded normalized projection.
-Positive generation migration therefore remains unimplemented; do not infer
-bindings or restore the unsafe projection-equality path.
+Unassociated legacy generation migration remains unsupported; the separately
+selected recorded-association transition below does not infer bindings or
+restore the unsafe projection-equality path.
 
 The finite source leaf is narrowed to retained journal metadata and cache
 misses, not generation content. This preserves useful original state without
@@ -285,8 +286,10 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 ### Durable generation association
 
-The optional fresh-baseline writer records original associations; positive
-populated terminal adoption remains unimplemented. The unselected
+The optional fresh-baseline writer records original associations. Source
+controls qualify recorded-generation adoption and body reads. Active
+native-watch and unknown-effect transition,
+installed migration and full T3 remain unqualified. The unselected
 baseline `WorkspaceOperations` path publishes through `GenerationCache` before
 calling `ConversationStore.observe_workspace`. Its feedback-only
 `_generation_positions` map is process-local. `project_generation` rounds native

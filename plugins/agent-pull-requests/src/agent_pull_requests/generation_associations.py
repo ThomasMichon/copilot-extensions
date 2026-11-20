@@ -113,7 +113,7 @@ def provision(
     checkpoint: Callable[[], None], lifecycle_checkpoint: Callable[[], None],
 ) -> None:
     """Initialize only the explicitly selected fresh baseline under its writer lease."""
-    if not owner.workspace_generation_associations:
+    if not owner.workspace_generation_associations or owner.recorded_terminal_cache:
         raise ValueError("generation associations require explicit selection")
     _bound(owner, cache)
 
@@ -144,7 +144,7 @@ def publish(
     expected_current: str | None, expires_at: int, checkpoint: Callable[[], None],
 ) -> tuple[Document, Document]:
     """Reserve original custody after cache CAS admission but before its writes."""
-    if not owner.workspace_generation_associations:
+    if not owner.workspace_generation_associations or owner.recorded_terminal_cache:
         raise ValueError("generation associations require explicit selection")
     _bound(owner, cache)
     scope = _scope(generation["scope"])

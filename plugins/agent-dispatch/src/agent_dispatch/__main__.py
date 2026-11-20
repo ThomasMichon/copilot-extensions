@@ -829,8 +829,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "claimant",
         help="task -> claiming worktree: which worktree owns a task (the inbound "
-        "reverse of worktree-status). Reports the actual owner once claimed, "
-        "else the pinned target worktree.",
+        "reverse of worktree-status). Reports the assigned workspace, "
+        "execution owner, or pinned target, in that order.",
     )
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_claimant)
