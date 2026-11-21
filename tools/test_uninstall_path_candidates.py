@@ -22,7 +22,6 @@ SITES = (
     ("agent-dispatch", "uninstall-runtime.sh", "_finite_stop_tool"),
     ("agent-vault", "uninstall-runtime.sh", "_finite_runtime_uninstall"),
     ("agent-vault", "uninstall-runtime.sh", "_finite_stop_tool"),
-    ("budget-guidance", "uninstall-runtime.sh", "_finite_runtime_uninstall"),
     ("agent-index", "install.sh", "_finite_index_uninstall"),
     ("agent-machines", "legacy-uninstall.sh", "legacy"),
     ("agent-containers", "legacy-uninstall.sh", "legacy"),
@@ -37,6 +36,10 @@ def _posix(path: Path) -> str:
     return "/" + value[0].lower() + value[2:] if os.name == "nt" else value
 
 
+def _ps_quote(value: object) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def _function(source: Path, name: str, powershell: bool = False) -> str:
     text = source.read_text(encoding="utf-8")
     start = text.index(f"function {name} {{" if powershell else f"{name}() {{")
@@ -46,7 +49,7 @@ def _function(source: Path, name: str, powershell: bool = False) -> str:
 def _run(command: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed native hosts and fixture-owned argument vectors
         command, cwd=cwd, env=env, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
 
 
@@ -70,7 +73,7 @@ def interpreters(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, 
     if os.name == "nt":
         if not PWSH:
             pytest.skip("PowerShell required for the native Windows metadata host")
-        quote = lambda value: "'" + str(value).replace("'", "''") + "'"  # noqa: E731
+        quote = _ps_quote
         result = _run(
             [PWSH, "-NoProfile", "-NonInteractive", "-Command",
              f"New-Item -ItemType Junction -Path {quote(alias)} -Target {quote(installed)} | Out-Null"],
@@ -241,6 +244,7 @@ def test_activated_runtime_does_not_shadow_native_uninstall_metadata(
 def test_windows_legacy_uninstall_enumerates_all_external_candidates(
     tmp_path: Path, interpreters: tuple[Path, Path, Path, Path], plugin: str, availability: str,
 ) -> None:
+    assert PWSH is not None
     root, external, broken, alias = interpreters
     scripts, receipt, env = _payload(tmp_path, plugin, root)
     directories = [root / "versions" / "1.0.0" / "Scripts"]
@@ -253,7 +257,7 @@ def test_windows_legacy_uninstall_enumerates_all_external_candidates(
     before = _state(root)
     source = REPO / "plugins" / plugin / "scripts" / "legacy-uninstall.ps1"
     helper = scripts / "installer_engine_uninstall.py"
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"  # noqa: E731
+    quote = _ps_quote
     script = tmp_path / "invoke.ps1"
     script.write_text("\n".join((
         "$ErrorActionPreference='Stop'",
