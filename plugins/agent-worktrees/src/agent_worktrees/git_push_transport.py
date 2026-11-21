@@ -236,13 +236,13 @@ def _refresh_tracking(remote: str, destinations: tuple[str, ...], refspec: str, 
     """Preserve Git's named-remote tracking update only for the still-matching remote."""
     from . import pr_publish
 
-    _, separator, target = refspec.partition(":")
+    source, separator, target = refspec.partition(":")
     if not separator:
         target = "refs/heads/" + refspec.removeprefix("refs/heads/")
     if not target.startswith("refs/heads/"):
         return
     sha = published_oid
-    if not sha:
+    if not sha and source:
         return
     with pr_publish.publish_lock(str(cwd), acquire_timeout=1.0):
         current = git_ops.git("remote", "get-url", "--push", "--all", remote,
@@ -283,6 +283,10 @@ def _refresh_tracking(remote: str, destinations: tuple[str, ...], refspec: str, 
                 continue
             previous = git_ops.git("rev-parse", "--verify", tracked, cwd=cwd,
                                    check=False, isolated_repository=True).stdout.strip()
+            if not sha:
+                if previous:
+                    git_ops.git("update-ref", "-d", tracked, previous, cwd=cwd, isolated_repository=True)
+                return
             if previous and previous != expected and not git_ops.is_commit_ancestor(previous, sha, cwd=cwd):
                 # Another completed publication may already have advanced this
                 # tracking ref. Never roll it back to an older successful push.
