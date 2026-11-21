@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 from typing import Any
 
 import pytest
@@ -64,6 +65,94 @@ def test_pinned_invocation_owner_replaces_candidate_outputs_without_running_them
                       for path in source.rglob("*") if path.is_file()}
 
 
+def test_uv_launcher_is_materialized_with_prepared_exact_environment(tmp_path: Path) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data.update(bootstrapPython="3.13.12", pythonLauncher="uv")
+        manifest.write_text(json.dumps(data))
+    log = owner.materialize(candidate, canonical_root=source)
+    assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+    shell = (plugin / "bin/sample").read_text()
+    powershell = (plugin / "bin/sample.ps1").read_text()
+    arguments = "run --no-project --no-config --no-env-file --no-python-downloads --managed-python"
+    assert f'"$_uv" {arguments} --python "$AGENT_RT_PY" python' in shell
+    assert f'$_uv {arguments} --python $_py python' in powershell
+    for text in (shell, powershell):
+        assert "UV_WORKING_DIR" in text and "UV_WORKING_DIRECTORY" in text
+        assert "runtime is not prepared; run the owning scripts/install." in text
+    assert (plugin / "scripts/bootstrap-python-version.txt").read_bytes() == b"cpython@3.13.12\n"
+
+
+@pytest.mark.parametrize(("manifest_name", "payload_directory"), [
+    ("launch-wrapper-assets.json", "scripts/libs/payload-invocation"),
+    ("packaged-assets.json", "scripts/runtime-input-provider/libs/payload-invocation"),
+    ("packaged-assets.json", "scripts/runtime-source-tools/libs/payload-invocation"),
+], ids=["launch-wrapper", "input-provider", "source-tools"])
+def test_packaged_invocation_renders_without_checkout(
+    tmp_path: Path, manifest_name: str, payload_directory: str,
+) -> None:
+    record = json.loads((ROOT / "worktree-manager" / manifest_name).read_bytes())
+    groups = record.get("groups", [record])
+    group = next(item for item in groups if item["payloadDir"] == payload_directory)
+    packaged = tmp_path / "packaged" / payload_directory
+    packaged.mkdir(parents=True)
+    for name in group["files"]:
+        (packaged / name).write_bytes((ROOT / group["canonicalDir"] / name).read_bytes())
+    spec = importlib.util.spec_from_file_location("_packaged_invocation", packaged / "generate.py")
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    previous = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(generator)
+        source, candidate, plugin = _candidate(tmp_path / "fixture")
+        manifest = plugin / "payload-invocation.json"
+        for launcher in ("direct", "uv"):
+            for root in (source, candidate):
+                declaration = root / "plugins/sample/payload-invocation.json"
+                data = json.loads(declaration.read_bytes())
+                data.update(pythonLauncher=launcher, bootstrapPython="3.13.12")
+                declaration.write_text(json.dumps(data), encoding="utf-8")
+            log = owner.materialize(candidate, canonical_root=source)
+            assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+            for path, output in generator.expected_files(manifest, canonical_root=source).items():
+                assert path.read_bytes() == (
+                    output.encode("utf-8") if isinstance(output, str) else output
+                )
+    finally:
+        sys.dont_write_bytecode = previous
+    assert not list(packaged.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("selection", [
+    "null", "boolean", "unknown", "missing-declaration", "dispatcher",
+])
+def test_uv_launcher_refuses_incomplete_contract_before_candidate_writes(
+    tmp_path: Path, selection: str,
+) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data.update(bootstrapPython="3.13.12", pythonLauncher="uv")
+        if selection in ("null", "boolean", "unknown"):
+            data["pythonLauncher"] = {"null": None, "boolean": True, "unknown": "unsupported"}[selection]
+        elif selection == "missing-declaration":
+            del data["bootstrapPython"]
+        else:
+            data["payloadDispatcher"] = {"posix": "scripts/install.sh", "windows": "scripts/install.ps1"}
+        manifest.write_text(json.dumps(data))
+    before = {path.relative_to(candidate): path.read_bytes()
+              for path in candidate.rglob("*") if path.is_file()}
+    log = owner.materialize(candidate, canonical_root=source)
+    assert len(log) == 1 and log[0].startswith("SKIP Invocation materialization:"), log
+    assert before == {path.relative_to(candidate): path.read_bytes()
+                      for path in candidate.rglob("*") if path.is_file()}
+    assert not (plugin / "bin").exists()
+
+
 def test_pinned_invocation_owner_refuses_corrupted_actual_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -116,7 +205,9 @@ def test_source_phase_refuses_unmaterializable_output_types(tmp_path: Path, bloc
 
 @pytest.mark.parametrize(("relative", "expected"), [
     ("tools/materialize_payload_invocation.py", {"libs/payload-invocation/generate.py"}),
-    ("libs/payload-invocation/generate.py", {"libs/payload-invocation/runtime_admission.py"}),
+    ("libs/payload-invocation/generate.py", {
+        "libs/payload-invocation/runtime_admission.py", "libs/payload-invocation/template_rendering.py",
+    }),
     ("libs/payload-invocation/runtime_admission.py", {"libs/payload-invocation/bootstrap_python.py"}),
 ], ids=["candidate-producer", "canonical-packager", "bootstrap-provider"])
 def test_pinned_invocation_loader_closure_is_statically_admitted(relative: str, expected: set[str]) -> None:

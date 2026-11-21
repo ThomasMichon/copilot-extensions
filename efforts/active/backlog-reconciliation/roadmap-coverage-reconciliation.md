@@ -12,6 +12,11 @@ Fixed-cohort completion of identity accounting:
 [remaining 89 receipt/gap decisions](roadmap-coverage-final-cohort.md).
 All 153 identities are accounted for across the linked registers; unresolved
 research, source, interpretation and current-coverage duties remain open.
+The [thirteen later identities](roadmap-coverage-later-inflow.md) have a
+separate register; they do not enlarge or replace the fixed cohort.
+The [292 historical assignments](roadmap-historical-current-admission.md)
+retain their own current metadata, provenance and authored-contract-delta
+boundaries rather than being silently counted as fresh technical coverage.
 
 ## Fixed cohort and observation boundary
 

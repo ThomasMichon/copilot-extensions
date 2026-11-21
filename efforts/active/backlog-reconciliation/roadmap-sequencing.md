@@ -30,6 +30,16 @@ identities stay separate; no implementation assignment follows.
 
 ## Select by evidence class before scheduling
 
+The [later-inflow register](roadmap-coverage-later-inflow.md) preserves the
+independent dehydration subissues, native fixture debts, caller inventory,
+anchor scope and inventory intent. An actual OPEN delivery, an explicit
+owner keeper and a merged documentary reference lead to different next
+decisions; none changes a historical hard edge or appoints an implementer.
+The [historical admission audit](roadmap-historical-current-admission.md)
+supplies current metadata and specific source-provenance/enumeration gaps,
+not priority, completion, original-content permission or a new prerequisite
+requiring every historical program to finish before a selected leaf.
+
 The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
 completes identity-level continuation accounting for the original 153, not
 whole-current coverage or a new execution order. Its research, keeper,

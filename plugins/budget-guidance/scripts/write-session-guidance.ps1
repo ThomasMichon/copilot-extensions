@@ -23,7 +23,10 @@ function Resolve-ConsolePython([string]$source) {
         if ($homes.Count -ne 1) { throw 'venv home unavailable' }
         $homePath = ($homes[0] -split '=', 2)[1].Trim()
         if (-not [IO.Path]::IsPathRooted($homePath)) { throw 'venv home is relative' }
-        $source = Join-Path $homePath 'python.exe'
+        $executableName = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            'python.exe'
+        } else { [IO.Path]::GetFileName($source) }
+        $source = Join-Path $homePath $executableName
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'base interpreter unavailable' }
     }
     throw 'base interpreter did not resolve'

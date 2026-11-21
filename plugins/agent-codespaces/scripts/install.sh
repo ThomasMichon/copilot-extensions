@@ -82,7 +82,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1

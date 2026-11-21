@@ -53,6 +53,24 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [later-inflow register](roadmap-coverage-later-inflow.md) separately maps
+the thirteen newer identities at the complete 02:52 PST observation to
+retained whole-original research, current qualification and actual changed
+refinement evidence. It does not extend the fixed 153 denominator or promote
+metadata, reviewed intent or a campaign journal into runtime acceptance.
+The [dated journal](journal/2026/11.21-current-inflow-and-admission-gaps.md)
+preserves the current counting boundary and remaining integration duties.
+The [complete selected historical metadata audit](roadmap-historical-current-admission.md)
+distinguishes 268 qualifying records from 24 actual provenance gaps and the
+additional #6237 enumeration gap. Current metadata is not the remaining
+per-issue authored-contract correspondence; the coverage gate stays open.
+Its [authored-delta continuation](roadmap-historical-current-admission.md#existing-metadata-authored-comparison)
+reuses existing observations to isolate five discussion changes and 23 exact
+earlier research correspondences. The finite #13862/#13873 delivery evidence
+retains incomplete receipt/carrier acceptance, actual keepers and every
+source/copy restriction; neither metadata equality nor source progress closes
+the current-coverage or other integration gates.
+
 The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
 adds 89 receipt/gap decisions to the preceding 64, accounting for all 153
 original outside-wave identities without claiming 153 technical assessments.

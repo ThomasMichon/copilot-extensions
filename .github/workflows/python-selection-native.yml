@@ -10,16 +10,77 @@ on:
       - libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
       - libs/agent-procutil/tests/test_daemon_python_selection.py
       - libs/installer-engine/bootstrap-uv.ps1
+      - libs/installer-engine/bootstrap-uv.sh
+      - libs/payload-invocation/generate.py
+      - libs/payload-invocation/template_rendering.py
+      - libs/payload-invocation/templates/posix-shim.tmpl
+      - libs/payload-invocation/templates/powershell-shim.tmpl
+      - libs/payload-invocation/tests/test_uv_runtime_launch.py
       - libs/installation-context/tests/test_managed_python_transport.py
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
       - plugins/agent-worktrees/scripts/install.ps1
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
+      - plugins/budget-guidance/payload-invocation.json
+      - plugins/budget-guidance/scripts/install.ps1
+      - plugins/budget-guidance/tests/test_installers.py
+      - plugins/budget-guidance/tests/test_install_transaction_lock.py
 
 permissions:
   contents: read
 
 jobs:
+  budget-uv-launch:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare the addressed interpreter without publishing Python commands
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
+          uv python install --no-bin --no-registry cpython@3.13.12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Qualify prepared command argv, streams, exit and setup refusal
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_uv_runtime_launch.py
+          --junit-dir qualification-evidence/budget-launch
+          --allow-explicit-tiers -k "ps1 or winps or declaration or powershell_early_exit"
+      - name: Qualify native installer failure and clean retry
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_installers.py
+          --junit-dir qualification-evidence/budget-setup
+          --allow-explicit-tiers -k "native_failed_install or native_retry or command_path_publication or closed_wheel_uv"
+      - name: Qualify lock admission before prerequisite preparation
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_install_transaction_lock.py
+          --junit-dir qualification-evidence/budget-lock
+          --allow-explicit-tiers
+          -k "contend_before_snapshot_publication and prerequisites and not bash"
+      - name: Require actual command, installer and lock controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4};
+          assert all(case.find(tag) is None for cases in groups.values() for case in cases
+          for tag in ('error','failure','skipped'));
+          print('29 command, nine installer and four prerequisite-lock controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

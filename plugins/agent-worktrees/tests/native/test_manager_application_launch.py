@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -10,13 +11,16 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import TYPE_CHECKING, cast
 
 from agent_procutil._interpreter import physical_executable
-from agent_procutil.daemon_instances import TEST_CONTEXT_ENV, daemon_test_lifecycle
+from agent_procutil.daemon_instances import (
+    TEST_CONTEXT_ENV, InstanceCleanupResult, daemon_test_lifecycle,
+)
 from agent_procutil.owned_process import run_caller_owned
 import pytest
 
-from test_native_seed_application import ROOT, _run
+from test_native_seed_application import ROOT, _BuilderExports, _run, _SandboxFactory
 
 _NATIVE_COPILOT = (
     os.name == "nt"
@@ -25,7 +29,9 @@ _NATIVE_COPILOT = (
 )
 
 
-def _run_lifetime_native(command, *, directory, cwd, environment):
+def _run_lifetime_native(
+    command: list[str], *, directory: Path, cwd: Path, environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
     from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     stdout, stderr = directory / "native.stdout.log", directory / "native.stderr.log"
@@ -50,7 +56,10 @@ def _run_lifetime_native(command, *, directory, cwd, environment):
     )
 
 
-def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jobs, worktrees_environment):
+def _manager_install_environment(
+    home: Path, root: Path, tmp_path: Path, interpreter: str, *, caller_jobs: bool,
+    worktrees_environment: dict[str, str] | None,
+) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("UV_", "COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_RT_",
@@ -62,6 +71,7 @@ def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jo
     }
     environment.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        COPILOT_HOME=str(home / ".copilot"),
         WORKTREE_MANAGER_ROOT=str(root), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
         AGENT_WORKTREES_STATUS_MONITOR="0",
         UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
@@ -74,7 +84,10 @@ def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jo
     return environment
 
 
-def _run_manager_native(directory, control, *, script, python, root, environment, picker_decision):
+def _run_manager_native(
+    directory: Path, control: str, *, script: Path, python: Path, root: Path,
+    environment: dict[str, str], picker_decision: bool,
+) -> None:
     command = [
         sys.executable, "-I", "-B", "-X", "utf8", "-c",
         "import sys;from pathlib import Path;"
@@ -99,14 +112,16 @@ def _run_manager_native(directory, control, *, script, python, root, environment
     "control", ["manager-no-mux", "manager-mux"] if _NATIVE_COPILOT else ["manager-no-mux"],
 )
 @pytest.mark.timeout(300)
-def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(tmp_path, monkeypatch, control):
+def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str,
+) -> None:
     _qualify_manager_application(tmp_path, monkeypatch, control)
 
 
 @pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
 @pytest.mark.timeout(300)
-def test_manager_no_mux_decision(monkeypatch):
-    from plugin_test_containment import TestSandbox
+def test_manager_no_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    TestSandbox = cast(_SandboxFactory, import_module("plugin_test_containment").TestSandbox)
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     with TestSandbox(prefix="m-", dir=sandbox) as directory:
@@ -117,8 +132,8 @@ def test_manager_no_mux_decision(monkeypatch):
 
 @pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
 @pytest.mark.timeout(300)
-def test_manager_mux_decision(monkeypatch):
-    from plugin_test_containment import TestSandbox
+def test_manager_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    TestSandbox = cast(_SandboxFactory, import_module("plugin_test_containment").TestSandbox)
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     with TestSandbox(prefix="m-", dir=sandbox) as directory:
@@ -128,19 +143,27 @@ def test_manager_mux_decision(monkeypatch):
 
 
 def _qualify_manager_application(
-    tmp_path, monkeypatch, control, *, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
-    picker_decision=False, rollback_application=None,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str, *,
+    worktrees_python: Path | None = None, worktrees_root: Path | None = None,
+    worktrees_environment: dict[str, str] | None = None, caller_jobs: bool = False,
+    replacement_slot: Path | None = None, picker_decision: bool = False,
+    rollback_application: Path | None = None,
+) -> None:
     paired = worktrees_python is not None
     assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
+    selected_worktrees = {} if worktrees_environment is None else worktrees_environment
     assert not picker_decision or (not paired and control in {"manager-no-mux", "manager-mux"})
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    import build_python_artifacts as builder
-    import local_install_profile as profiles
-    import prepare_runtime_source as preparation
-    import standalone_python_artifacts as standalone
-    from governed_feed_trust import _governed_feed_configured
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder, local_install_profile as profiles
+        from tools import prepare_runtime_source as preparation, standalone_python_artifacts as standalone
+        from tools.governed_feed_trust import _governed_feed_configured
+    else:
+        import build_python_artifacts as builder
+        import local_install_profile as profiles
+        import prepare_runtime_source as preparation
+        import standalone_python_artifacts as standalone
+        from governed_feed_trust import _governed_feed_configured
 
     if not _governed_feed_configured():
         pytest.skip("native application construction requires the configured governed feed")
@@ -171,7 +194,7 @@ def _qualify_manager_application(
             out_dir=artifacts, python=interpreter, toolchain=None,
         )
     engine = profiles.source_inputs.engine
-    project = builder.tomllib.loads((source / "pyproject.toml").read_text())["project"]
+    project = cast(_BuilderExports, builder).tomllib.loads((source / "pyproject.toml").read_text())["project"]
     source_hash = engine.runtime_source.assembly_hash(source)
     identity = engine.runtime_source.SourceIdentity(
         "worktree-manager", project["version"], "a" * 40, "b" * 40, source_hash,
@@ -204,10 +227,16 @@ def _qualify_manager_application(
         home, root, tmp_path, interpreter,
         caller_jobs=caller_jobs, worktrees_environment=worktrees_environment,
     )
+    from application_python_fixture import managed_python_environment
+
+    environment = managed_python_environment(
+        environment, directory=tmp_path / "managed-python", uv=uv,
+        deadline=deadline, run=_run,
+    )
     (tmp_path / "mux-data").mkdir()
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]
-    cleanup = []
+    cleanup: list[InstanceCleanupResult] = []
     lifecycle_owner = nullcontext({}) if caller_jobs else daemon_test_lifecycle(
         owner="manager-application-launch-fixture", registry_root=tmp_path / "daemon-instances",
         deadline=deadline + (180 if paired else 0), cleanup_results=cleanup,
@@ -237,7 +266,7 @@ def _qualify_manager_application(
                 "assert directory is not None,'Worktrees rejected the real current Manager application';"
                 "print(json.dumps({'directory':str(directory)}))",
             ], cwd=caller, env={
-                **(worktrees_environment if paired else environment),
+                **(selected_worktrees if paired else environment),
                 "WORKTREE_MANAGER_ROOT": str(root),
             }, deadline=deadline)
             assert Path(json.loads(consumer.stdout)["directory"]).samefile(script.parent)
@@ -263,7 +292,7 @@ def _qualify_manager_application(
                     str(rollback_application) if rollback_application is not None else "",
                 ]
                 native_environment = {
-                    **worktrees_environment, **lifecycle,
+                    **selected_worktrees, **lifecycle,
                     "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],
                 }
                 if caller_jobs:

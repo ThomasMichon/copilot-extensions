@@ -100,7 +100,7 @@ def test_planning_and_refusal_do_not_write_bytecode(
 ) -> None:
     tooling = tmp_path / "tooling/libs/payload-invocation"
     tooling.mkdir(parents=True)
-    for name in ("generate.py", "runtime_admission.py", "bootstrap_python.py"):
+    for name in ("generate.py", "runtime_admission.py", "bootstrap_python.py", "template_rendering.py"):
         shutil.copyfile(Path(__file__).resolve().parents[1] / name, tooling / name)
     spec = importlib.util.spec_from_file_location("_private_bootstrap_generator", tooling / "generate.py")
     assert spec and spec.loader

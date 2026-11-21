@@ -3,6 +3,8 @@
   "version": 1,
   "command": "budget-guidance",
   "module": "budget_guidance",
+  "bootstrapPython": "3.13.12",
+  "pythonLauncher": "uv",
   "runtimeRoot": ".budget-guidance",
   "noSelfProvisionEnv": "BUDGET_GUIDANCE_NO_SELFPROVISION",
   "purpose": "Report current attributable budget posture",

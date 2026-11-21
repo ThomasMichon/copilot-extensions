@@ -73,9 +73,9 @@ def materialize(
         for source in inputs:
             _ordinary(source, canonical_root)
         tooling_root = Path(__file__).resolve().parents[1]
-        producer = tooling_root / "libs/payload-invocation/generate.py"
         # uv may hard-link this read-only installed producer to its cache.
-        _ordinary(producer, tooling_root, allow_hardlinks=True)
+        for name in ("generate.py", "template_rendering.py"):
+            _ordinary(tooling_root / "libs/payload-invocation" / name, tooling_root, allow_hardlinks=True)
         spec = importlib.util.spec_from_file_location(
             "_promotion_payload_invocation",
             Path(__file__).resolve().parents[1] / "libs" / "payload-invocation" / "generate.py",

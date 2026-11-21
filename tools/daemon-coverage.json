@@ -538,7 +538,6 @@
       "r:plugins/budget-guidance/scripts/bootstrap-check.ps1::<script>::Start-Process": 1,
       "r:plugins/budget-guidance/scripts/bootstrap-check.sh::<script>::nohup": 1,
       "r:plugins/budget-guidance/scripts/install.ps1::<script>::Start-Process": 5,
-      "r:plugins/budget-guidance/scripts/install.ps1::<script>::Process.Start": 1,
       "r:plugins/budget-guidance/scripts/write-session-guidance.ps1::<script>::Process.Start": 1,
       "r:plugins/efforts/scripts/emit-policy.ps1::<script>::Process.Start": 2,
       "r:plugins/wsl-setup/skills/setting-up-wsl/references/wsl-keepalive.ps1::<script>::New-ScheduledTaskAction": 1,

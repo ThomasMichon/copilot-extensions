@@ -26,8 +26,8 @@ fi
 # (via hooks.json) from the plugin's scripts/ dir. Derives the install dir from
 # plugin.json's name (~/.<name>). Two jobs, both grace-window-cheap:
 #   1. FIRST install (unprovisioned): if the installer supports a cheap 'stamp'
-#      action, splat the self-provisioning binstub now (deferring the venv build
-#      to the binstub's first use) so the CLI is on PATH this session -- no venv
+#      action, publish the prepared-only binstub now (deferring the venv build
+#      to explicit snapshot provision) so the CLI is on PATH this session -- no venv
 #      build on the hook. Installers without 'stamp' keep the old no-op.
 #   2. RECONCILE (already provisioned): re-run the installer in the BACKGROUND
 #      only when the deployed version drifts. Reconciles the TOOL, never state.
@@ -71,7 +71,7 @@ assert_bootstrap_publication() {
 Manifest="$InstallDir/deploy-manifest.json"
 if [ ! -f "$Manifest" ]; then
   # Not provisioned yet -- do the cheap FIRST install (stamp) so the binstub is
-  # callable this session; it self-provisions the runtime on first use. Fully
+  # callable this session; it reports the required explicit provision action. Fully
   # back-compatible: only fires when the installer declares a 'stamp' action.
   installer=""
   for candidate in "$PluginDir/scripts/init.sh" "$PluginDir/scripts/install.sh"; do
