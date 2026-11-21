@@ -3,15 +3,18 @@ from __future__ import annotations
 import argparse
 import threading
 import time
-import types
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
+from machine_transport import detect_platform
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import finalize_local, git_ops, sessions, tracking, worktree_identity
+from agent_worktrees import activity, claimant, finalize as fin, finalize_local, git_ops, reclaim, sessions, tracking, worktree_identity
+from agent_worktrees import config as cfg
 
 S = git_ops.WorktreeState
 _REAL_BUILD_ACTIVE_PATHS = cli._build_active_paths
@@ -40,7 +43,7 @@ def make_record(
     root: Path,
     *,
     wt_id: str = "wt1",
-    status: str = "finalized",
+    status: tracking.WorktreeStatus = "finalized",
     exists: bool = True,
     branch: str | None = None,
     path_name: str | None = None,
@@ -55,9 +58,9 @@ def make_record(
         worktree_id=wt_id,
         branch=branch or f"worktree/{wt_id}",
         worktree_path=str(worktree_path),
-        repo="owner/repo",
+        repo="demo",
         machine="m",
-        platform="wsl",
+        platform=detect_platform(),
         started_at=started_at or iso_at(0),
         last_resumed_at=last_resumed_at or iso_at(0),
         resume_count=0,
@@ -113,22 +116,28 @@ def hold_record_lock_worker(yaml_path_str: str, ready_file: str, release_file: s
 
 
 class CleanupHarness:
-    def __init__(self, monkeypatch, tmp_path: Path):
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self.monkeypatch = monkeypatch
         self.root = tmp_path
-        self.tracking_dir = tmp_path / "tracking"
-        self.tracking_dir.mkdir()
+        self.tracking_dir = tmp_path / "project" / "worktrees"
+        self.tracking_dir.mkdir(parents=True)
         self.anchor = tmp_path / "anchor"
         self.anchor.mkdir()
-        self.worktree_root = tmp_path / "worktrees"
-        self.worktree_root.mkdir()
-        self.repo = types.SimpleNamespace(
+        self.worktree_root = tmp_path
+        self.repo = cfg.RepoConfig(
             anchor=str(self.anchor),
             remote="origin",
             default_branch="main",
             worktree_root=str(self.worktree_root),
         )
-        self.config = types.SimpleNamespace(default_repo=self.repo, repo_name="copilot-extensions")
+        self.config = cfg.Config(
+            srcroot=str(tmp_path), machine="m", platform=detect_platform(),
+            repo_name="demo", repos={"demo": self.repo},
+        )
+        def receiving_config(project: str, **kwargs: Any) -> cfg.Config:
+            return replace(
+                self.config, repo_name=project, repos={**self.config.repos, project: self.repo},
+            )
         self.reaped: list[tuple[str, str]] = []
         self.finalize_held = False
         self.finalize_events: list[str] = []
@@ -138,20 +147,23 @@ class CleanupHarness:
         self.has_mux_calls = 0
         self.claimant_calls = 0
         self.on_reap: Callable[[tracking.WorktreeRecord, git_ops.WorktreeStateInfo], tuple[int, list[str]]] | None = None
-        self.monkeypatch.setattr(cli.cfg, "load_config", lambda: self.config)
-        self.monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: self.tracking_dir)
-        self.monkeypatch.setattr(cli.git_ops, "has_remote", lambda *_a, **_k: False)
-        self.monkeypatch.setattr(cli.git_ops, "fetch", lambda *_a, **_k: None)
+        self.monkeypatch.setattr(cfg, "load_config", lambda *a, **k: self.config)
+        self.monkeypatch.setattr(cfg, "load_project_config", receiving_config)
+        self.monkeypatch.setattr(cfg, "tracking_dir", lambda project=None: self.tracking_dir)
+        self.monkeypatch.setattr(cfg, "project_dir", lambda project=None: tmp_path / "project")
+        self.monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {})
+        self.monkeypatch.setattr(git_ops, "has_remote", lambda *_a, **_k: False)
+        self.monkeypatch.setattr(git_ops, "fetch", lambda *_a, **_k: None)
         self.monkeypatch.setattr(
             finalize_local, "resolve_upstream", lambda *_a, **_k: ("origin/main", False),
         )
-        self.monkeypatch.setattr(cli.git_ops, "prune_worktrees", lambda *_a, **_k: None)
+        self.monkeypatch.setattr(git_ops, "prune_worktrees", lambda *_a, **_k: None)
         self.monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
         self.monkeypatch.setattr(cli, "_hosted_session_blocks_cleanup", lambda rec: False)
-        self.monkeypatch.setattr(cli.sessions, "_list_mux_sessions", lambda: {})
-        self.monkeypatch.setattr(cli.sessions, "_mux_session_activity", lambda: {})
-        self.monkeypatch.setattr(cli.reclaim, "live_bridge_worktrees", lambda: set())
-        self.monkeypatch.setattr(cli.activity, "log_event", lambda *_a, **_k: None)
+        self.monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: {})
+        self.monkeypatch.setattr(sessions, "_mux_session_activity", lambda: {})
+        self.monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
+        self.monkeypatch.setattr(activity, "log_event", lambda *_a, **_k: None)
         self.monkeypatch.setattr(
             cli,
             "_reap_worktree",
@@ -193,10 +205,10 @@ class CleanupHarness:
         harness = self
 
         class _Lock:
-            def __init__(self, *args, **kwargs):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
                 pass
 
-            def acquire(self):
+            def acquire(self) -> None:
                 if order is not None:
                     order.append("finalize-acquire")
                 harness.finalize_events.append("finalize-acquire")
@@ -204,13 +216,13 @@ class CleanupHarness:
                 if on_acquire is not None:
                     on_acquire()
 
-            def release(self):
+            def release(self) -> None:
                 if order is not None:
                     order.append("finalize-release")
                 harness.finalize_events.append("finalize-release")
                 harness.finalize_held = False
 
-        self.monkeypatch.setattr(cli.fin, "FinalizeLock", _Lock)
+        self.monkeypatch.setattr(fin, "FinalizeLock", _Lock)
 
     def set_session_contexts(
         self,
@@ -222,14 +234,14 @@ class CleanupHarness:
         if not seq:
             seq = [session_ctx()]
 
-        def _scan(_records):
+        def _scan(_records: Any) -> sessions.SessionContext:
             idx = min(self.scan_calls, len(seq) - 1)
             self.scan_calls += 1
             if assert_revalidation_under_finalize and self.scan_calls >= 2:
                 assert self.finalize_held is True
             return seq[idx]
 
-        self.monkeypatch.setattr(cli.sessions, "scan_sessions_fast", _scan)
+        self.monkeypatch.setattr(sessions, "scan_sessions_fast", _scan)
 
     def set_build_active_paths_sequence(self, values: Sequence[set[str]]) -> None:
         seq = list(values)
@@ -237,7 +249,7 @@ class CleanupHarness:
             seq = [set()]
         calls = {"count": 0}
 
-        def _build(_records, _ctx=None):
+        def _build(_records: Any, _ctx: Any = None) -> set[str]:
             idx = min(calls["count"], len(seq) - 1)
             calls["count"] += 1
             return set(seq[idx])
@@ -253,7 +265,7 @@ class CleanupHarness:
     ) -> None:
         fresh_info = initial if fresh is None else fresh
 
-        def _classify(worktree_path, _branch, *, active_paths, **_kwargs):
+        def _classify(worktree_path: str, _branch: str, *, active_paths: set[str], **_kwargs: Any) -> git_ops.WorktreeStateInfo:
             self.classify_calls += 1
             if assert_revalidation_under_finalize and self.classify_calls >= 2:
                 assert self.finalize_held is True
@@ -261,31 +273,31 @@ class CleanupHarness:
                 return info(S.ACTIVE)
             return initial if self.classify_calls == 1 else fresh_info
 
-        self.monkeypatch.setattr(cli.git_ops, "classify_worktree", _classify)
+        self.monkeypatch.setattr(git_ops, "classify_worktree", _classify)
 
     def set_branch_merged_sequence(self, values: Sequence[bool]) -> None:
         seq = list(values)
         if not seq:
             seq = [True]
 
-        def _merged(*_args, **_kwargs):
+        def _merged(*_args: Any, **_kwargs: Any) -> bool:
             idx = min(self.merge_calls, len(seq) - 1)
             self.merge_calls += 1
             return seq[idx]
 
-        self.monkeypatch.setattr(cli.git_ops, "is_branch_merged", _merged)
+        self.monkeypatch.setattr(git_ops, "is_branch_merged", _merged)
 
     def set_claimant_alive_sequence(self, values: Sequence[bool | None]) -> None:
         seq = list(values)
         if not seq:
             seq = [False]
 
-        def _claimant(_owner_ref):
+        def _claimant(_owner_ref: str) -> bool | None:
             idx = min(self.claimant_calls, len(seq) - 1)
             self.claimant_calls += 1
             return seq[idx]
 
-        self.monkeypatch.setattr(cli.claimant_mod, "resolve_claimant_alive", _claimant)
+        self.monkeypatch.setattr(claimant, "resolve_claimant_alive", _claimant)
 
     def use_real_build_active_paths_with_mux_sequence(
         self,
@@ -297,27 +309,27 @@ class CleanupHarness:
         if not seq:
             seq = [False]
         self.monkeypatch.setattr(cli, "_build_active_paths", _REAL_BUILD_ACTIVE_PATHS)
-        self.monkeypatch.setattr(cli.sessions, "_list_mux_sessions", lambda: None)
+        self.monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: None)
 
-        def _has_mux(_wt_id):
+        def _has_mux(_wt_id: str) -> bool:
             idx = min(self.has_mux_calls, len(seq) - 1)
             self.has_mux_calls += 1
             return seq[idx]
 
-        self.monkeypatch.setattr(cli.sessions, "has_mux_session", _has_mux)
+        self.monkeypatch.setattr(sessions, "has_mux_session", _has_mux)
 
-    def use_real_build_active_paths_with_mux_catalogs(self, catalogs) -> None:
+    def use_real_build_active_paths_with_mux_catalogs(self, catalogs: Sequence[dict[str, int] | None]) -> None:
         self.mux_list_calls = 0
         self.monkeypatch.setattr(cli, "_build_active_paths", _REAL_BUILD_ACTIVE_PATHS)
 
-        def _list_mux():
+        def _list_mux() -> dict[str, int] | None:
             index = min(self.mux_list_calls, len(catalogs) - 1)
             self.mux_list_calls += 1
             return catalogs[index]
 
-        self.monkeypatch.setattr(cli.sessions, "_list_mux_sessions", _list_mux)
+        self.monkeypatch.setattr(sessions, "_list_mux_sessions", _list_mux)
         self.monkeypatch.setattr(
-            cli.sessions, "has_mux_session",
+            sessions, "has_mux_session",
             lambda *a, **kw: pytest.fail("complete catalog must not fall back to a probe"),
         )
 
@@ -331,22 +343,22 @@ class CleanupHarness:
         harness = self
 
         class _WrappedRecordLock:
-            def __init__(self, *args, **kwargs):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
                 self._inner = real_lock(*args, **kwargs)
 
-            def __enter__(self):
+            def __enter__(self) -> tracking._RecordLock:
                 order.append("record-enter")
                 if assert_finalize_held:
                     assert harness.finalize_held is True
                 return self._inner.__enter__()
 
-            def __exit__(self, *exc):
+            def __exit__(self, *exc: Any) -> None:
                 return self._inner.__exit__(*exc)
 
-            def __getattr__(self, name):
+            def __getattr__(self, name: str) -> Any:
                 return getattr(self._inner, name)
 
-        self.monkeypatch.setattr(cli.tracking, "_RecordLock", _WrappedRecordLock)
+        self.monkeypatch.setattr(tracking, "_RecordLock", _WrappedRecordLock)
 
     def assert_record_lock_blocks_peer_thread(self, yaml_path: Path) -> None:
         outcome: dict[str, bool] = {}
@@ -386,7 +398,7 @@ class CleanupHarness:
         include_unused: bool = False,
         include_conversations: bool = False,
         reconcile_prs: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         return cli.reap_one(
             wt_id,
             force=force,
@@ -401,7 +413,7 @@ class CleanupHarness:
         dry_run: bool = False,
         min_idle_secs: float | None = 0,
         now: float | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         return cli.sweep_finished_session_worktrees(
             dry_run=dry_run,
             min_idle_secs=min_idle_secs,

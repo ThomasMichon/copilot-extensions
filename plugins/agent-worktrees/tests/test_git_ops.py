@@ -10,6 +10,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import agent_procutil
@@ -48,6 +49,47 @@ class _GitCall(typing.TypedDict, total=False):
 
 class _ObservedTimeout(subprocess.TimeoutExpired):
     observation_started: bool = True
+
+
+@pytest.fixture
+def mocked_git_destination(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Supply repository metadata separately from these transport-only Git mocks."""
+    from agent_worktrees import config, git_push_binding, git_push_transport, pr_publish
+    def binding(refspec: str, *, cwd: str | Path, timeout: float | None) -> git_push_binding.Binding:
+        source, separator, target = refspec.partition(":")
+        target = target if separator else "refs/heads/" + source.removeprefix("refs/heads/")
+        return git_push_binding.Binding("a" * 40 + ":" + target, "a" * 40, source)
+    monkeypatch.setattr(git_push_binding, "_capture", binding)
+    def metadata(*args: str, **kwargs: typing.Any) -> subprocess.CompletedProcess[str]:
+        if args == ("rev-parse", "--git-common-dir"):
+            return subprocess.CompletedProcess(args, 0, str(tmp_path), "")
+        assert args[:3] == ("config", "--null", "--get-regexp")
+        return subprocess.CompletedProcess(args, 1, "", "")
+    def snapshot(remote: str, *, cwd: str) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str], pr_publish.PushTarget]:
+        assert remote == "origin" and cwd == "."
+        result = subprocess.CompletedProcess(["remote", "get-url"], 0, "https://example.com/owner/repo.git\n", "")
+        return result, result, pr_publish.PushTarget(remote, "owner/repo", "example.com/owner/repo")
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path / "runtime")
+    monkeypatch.setattr(pr_publish, "git_ops", SimpleNamespace(git=metadata))
+    monkeypatch.setattr(pr_publish, "_remote_snapshot", snapshot)
+    class TransportGit:
+        def git(self, *args: str, **kwargs: typing.Any) -> subprocess.CompletedProcess[str]:
+            if args == ("rev-parse", "--git-path", "hooks/pre-push"):
+                return subprocess.CompletedProcess(args, 0, str(tmp_path / "absent-hook"), "")
+            if args[:2] == ("rev-parse", "--verify"):
+                return subprocess.CompletedProcess(args, 0, "a" * 40, "")
+            assert "push" in args
+            return go.git(*args, **kwargs)
+        def __getattr__(self, name: str) -> typing.Any:
+            if name == "_auth_config_args_for_url":
+                return lambda url: go._auth_config_args("origin", cwd=".")
+            return getattr(go, name)
+    def refreshed(remote: str, destinations: tuple[str, ...], refspec: str, cwd: str | Path,
+                  expected: str | None = None, *, published_oid: str) -> None:
+        assert remote == "origin" and destinations == ("https://example.com/owner/repo.git",)
+        assert published_oid == "a" * 40
+    monkeypatch.setattr(git_push_transport, "git_ops", TransportGit())
+    monkeypatch.setattr(git_push_transport, "_refresh_tracking", refreshed)
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +331,7 @@ class TestNoHooks:
         assert seen["no_hooks"] is True
 
 
+@pytest.mark.usefixtures("mocked_git_destination")
 class TestPush:
     """#3561: unlike ``TestNoHooks``'s squash/rebase plumbing, ``push()`` is
     the terminal action that actually publishes to remote -- a real pre-push
@@ -311,7 +354,8 @@ class TestPush:
 
         monkeypatch.setattr(go, "git", fake_git)
         assert bool(go.push("origin", "main", cwd=".")) is True
-        assert seen["args"][:1] == ("push",)
+        assert "push" in seen["args"]
+        assert seen["args"][seen["args"].index("push") + 1].startswith("agent-worktrees-pinned-")
         assert seen["no_hooks"] is False
         assert seen["isolated_repository"] is True
 
@@ -343,6 +387,7 @@ class TestPush:
         assert no_hooks_seen == [False, False]  # neither the injected nor the fallback call
 
 
+@pytest.mark.usefixtures("mocked_git_destination")
 class TestPushTimeout:
     """A repo's pre-push hook re-invokes the full agent-worktrees binstub,
     which resolves its own runtime slot on every call and can stall for the
@@ -795,6 +840,7 @@ class TestPathHelpers:
 from agent_worktrees import git_ops as go  # noqa: E402
 
 
+@pytest.mark.usefixtures("mocked_git_destination")
 class TestCrossAccountAuth:
     @pytest.mark.parametrize("url,owner", [
         ("https://github.com/ThomasMichon/copilot-extensions.git", "ThomasMichon"),
@@ -1075,7 +1121,7 @@ class TestCrossAccountAuth:
         monkeypatch.setattr(go, "git", fake_git)
         res = go.push("origin", "pr/head", cwd=".", force_with_lease_expect="deadbeef")
         assert bool(res) is True
-        assert any("--force-with-lease=pr/head:deadbeef" in a for a in git_calls[0])
+        assert any("--force-with-lease=refs/heads/pr/head:deadbeef" in a for a in git_calls[0])
 
     def test_push_with_lease_expect_targets_refspec_dest(
         self, monkeypatch: pytest.MonkeyPatch,
@@ -1102,7 +1148,7 @@ class TestCrossAccountAuth:
             force_with_lease_expect="deadbeef",
         )
         assert bool(res) is True
-        assert seen == {"expect": "deadbeef", "ref": "worktree/x"}
+        assert seen == {"expect": "deadbeef", "ref": "a" * 40}
         assert any("--force-with-lease=refs/heads/pr/head:deadbeef" in a for a in git_calls[0])
 
     def test_push_success_returns_truthy_no_stderr(self, monkeypatch: pytest.MonkeyPatch) -> None:

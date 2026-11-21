@@ -23,7 +23,7 @@ jobs:
           AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard"
+          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source"
           --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800
   windows:
@@ -42,6 +42,6 @@ jobs:
           AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard"
+          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source"
           --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800

@@ -24,7 +24,7 @@ from typing import cast, overload
 from plugin_resolve.git import resolve_git
 
 
-from . import env_scrub, git_acquisition_budget, git_tree_diff, push_timeout
+from . import env_scrub, git_acquisition_budget, git_push_binding, git_tree_diff, push_timeout
 from .git_process import (
     ProcessRunner as _ProcessRunner, TextRunner as _TextRunner,
     execute as _execute_git, current_branch as _probe_current_branch,
@@ -858,6 +858,7 @@ def is_commit_ancestor(ancestor: str, descendant: str, *, cwd: str | Path) -> bo
     return git("--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd, check=False, isolated_repository=True).returncode == 0
 
 
+@git_push_binding.capture
 def push(
     remote: str,
     branch: str,
@@ -876,8 +877,6 @@ def push(
     Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real pre-push release guard
     must be allowed to block a push. Worktree callers wrap this with ``hooks.allow_pr_push()``.
     """
-    if allow_history_rewrite and not force_with_lease_expect:
-        return PushResult(ok=False, stderr="History rewrites require an exact expected-head lease.")
     if force_with_lease_expect and not allow_history_rewrite and not is_commit_ancestor(
         force_with_lease_expect, branch.split(":", 1)[0] if ":" in branch else branch, cwd=cwd):
         return PushResult(ok=False, stderr=f"Refusing: {force_with_lease_expect} not an ancestor.")

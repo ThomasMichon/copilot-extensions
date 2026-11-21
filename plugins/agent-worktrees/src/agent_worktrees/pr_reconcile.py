@@ -32,7 +32,7 @@ from .config import Config
 from .pr_ops import _reconcile_active_pr
 
 
-def tracked_pr_slug(pr, fallback: str = "", api_base: str = "") -> str | None:
+def tracked_pr_slug(pr: tracking.PRRecord | None, fallback: str = "", api_base: str = "") -> str | None:
     """The hosting ``owner/name`` a tracked PR lives in: ``pr.repo``, else *fallback*
     (the worktree record's own ``repo``).
 
@@ -84,6 +84,9 @@ def heal_numberless_active_pr(
         return False
     active = record.active_pr()
     if active is None or active.number is not None or not active.branch:
+        return False
+    from . import pr_creation_reconcile
+    if pr_creation_reconcile.requires_qualification(active):
         return False
     prcfg = config.default_repo.pr
     provider_name = active.provider or prcfg.provider

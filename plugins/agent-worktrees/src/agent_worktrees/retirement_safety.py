@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .tracking import WorktreeRecord
+    from .tracking import PRRecord, WorktreeRecord
 
 
 @dataclass(frozen=True)
@@ -18,8 +18,10 @@ class RetirementBlocker:
 
 
 def retains_artifact_metadata(record: WorktreeRecord) -> bool:
-    """Keep retained-byte custody and historical delivery receipts after retirement."""
-    return any(
+    """Keep retained-byte custody and uncertain publication history after retirement."""
+    from . import pr_creation_reconcile
+
+    return any(pr_creation_reconcile.requires_qualification(pr) for pr in record.prs) or any(
         claim.has_producer and isinstance(claim.producer, dict)
         and (
             claim.producer.get("lifetime") == "artifact-owned"
@@ -31,9 +33,35 @@ def retains_artifact_metadata(record: WorktreeRecord) -> bool:
     )
 
 
+def record_paths(record: WorktreeRecord, tracking_path: Path) -> list[Path]:
+    """Lock the same complete owner set before teardown and ledger retirement."""
+    from . import config as cfg
+
+    paths = {tracking_path / f"{record.worktree_id}.yaml"}
+    ref = record.pair_claim_ref if record.is_paired else None
+    if ref is not None and ref.is_qualified and ref.project:
+        paths.add(cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml")
+    return sorted(paths, key=str)
+
+
+def pending_prs(record: WorktreeRecord, *, live_only: bool = False) -> list[PRRecord]:
+    """Preserve each consumer's terminal-state policy and require held receipt proof."""
+    from . import pr_creation_reconcile, tracking
+
+    pending = []
+    for pr in record.prs:
+        if pr_creation_reconcile.requires_qualification(pr):
+            held = not pr_creation_reconcile.qualified(record, pr)
+        else:
+            held = pr.state in tracking._PR_NON_TERMINAL if live_only else pr.state not in ("merged", "closed")
+        if held:
+            pending.append(pr)
+    return pending
+
+
 def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
-    """Require explicit terminal PR state and released outbound ownership."""
-    pending = [pr for pr in record.prs if pr.state not in ("merged", "closed")]
+    """Require terminal or freshly fenced PR disposition and released ownership."""
+    pending = pending_prs(record)
     if pending:
         numbers = ", ".join(
             "?" if pr.number is None else f"#{pr.number}" for pr in pending
