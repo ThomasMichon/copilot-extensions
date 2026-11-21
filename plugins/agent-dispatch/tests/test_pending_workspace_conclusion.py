@@ -16,7 +16,7 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
     assert isinstance(task, Task)
     with queue._connect() as conn:
         conn.execute("BEGIN")
-        conn.execute("UPDATE tasks SET completed_by='host-a/tree',owner_session_id='local-body:s' "
+        conn.execute("UPDATE tasks SET completed_by='host-a/tree',owner_session_id='native-id' "
                      "WHERE id=?", (task.id,))
         conn.execute(
             "INSERT INTO spawn_reservations(key,task_id,attempt,state,reserved_at,updated_at,"
@@ -33,17 +33,24 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
         def result(machine: str) -> DriverMatch:
             return pending_workspace_conclusion(conn, machine=machine, worktree="tree")
 
+        assert result("host-a") is DriverMatch.UNKNOWN
+        conn.execute(
+            "INSERT INTO acquisition_receipts VALUES ('retry',?,0,'tree','s','native-id',"
+            "'created','delivery')", (task.id,),
+        )
         conn.set_authorizer(observe)
         assert result("host-a") is DriverMatch.MATCH
         assert columns <= {"id", "owner", "owner_session_id", "completed_by"}
         conn.set_authorizer(None)
         conn.execute(
             "INSERT INTO task_attachments(task_id,session_id,worktree_id,machine,attached_at)"
-            " VALUES (?,'local-body:s','tree','host-c',1)", (task.id,),
+            " VALUES (?,'native-id','tree','host-c',1)", (task.id,),
         )
         assert result("host-a") is DriverMatch.UNKNOWN
         conn.execute("UPDATE tasks SET owner_session_id='different' WHERE id=?", (task.id,))
         assert result("host-c") is DriverMatch.MATCH
+        conn.execute("UPDATE acquisition_receipts SET session_id='different'")
+        assert result("host-c") is DriverMatch.UNKNOWN
 
 
 def test_plain_writer_pending_retry_until_owner_records_completion(tmp_path: Path) -> None:
@@ -56,6 +63,10 @@ def test_plain_writer_pending_retry_until_owner_records_completion(tmp_path: Pat
             "INSERT INTO spawn_reservations(key,task_id,attempt,state,reserved_at,updated_at,"
             "worktree,creating_host,session_handle) VALUES ('retry',?,1,'settled',1,1,'tree',"
             "'MÜNCHEN','local-body:bridge-id')", (task.id,),
+        )
+        writer.execute(
+            "INSERT INTO acquisition_receipts VALUES ('retry',?,0,'tree','bridge-id','native-id',"
+            "'created','delivery')", (task.id,),
         )
         writer.commit()
 

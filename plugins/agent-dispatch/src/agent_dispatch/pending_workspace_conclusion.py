@@ -1,5 +1,6 @@
 """Read the conclusion owner's outstanding workspace work without claiming its retry."""
 
+import json
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -7,6 +8,8 @@ from typing import cast
 
 from .bridge_remote import normalize_host
 from .current_driver_lookup import DriverMatch
+from .ordinary_agent_facts import identity
+from .queue_records import TaskError
 from .tracking import machine_from_owner
 
 _INDEX = "idx_pending_conclusion_workspace_v1"
@@ -24,6 +27,35 @@ def install_index(conn: sqlite3.Connection) -> None:
     )
 
 
+def _local_native(row: sqlite3.Row, bridge: str) -> str | None:
+    natives: set[str] = set()
+    if row["receipt_bridge"] is not None:
+        if (row["receipt_bridge"], row["receipt_tree"], row["receipt_task"]) != (
+            bridge, row["worktree"], row["task_id"],
+        ):
+            return None
+        natives.add(row["receipt_native"])
+    if row["agent_info"]:
+        try:
+            info = json.loads(row["agent_info"])
+            if not isinstance(info, dict):
+                return None
+            if row["driver"] == "restricted-bridge":
+                from .restricted_delivery import validate_receipt
+                validate_receipt(info)
+                if info["session_id"] != bridge:
+                    return None
+                natives.add(info["native_session_id"])
+            else:
+                body = identity(info)
+                if body.bridge != bridge or body.worktree != row["worktree"]:
+                    return None
+                natives.add(body.native)
+        except (TaskError, ValueError, TypeError, KeyError):
+            return None
+    return next(iter(natives)) if len(natives) == 1 else None
+
+
 def _hosts(conn: sqlite3.Connection, row: sqlite3.Row) -> set[str]:
     hosts: set[str] = set()
     session = row["session_handle"] or ""
@@ -38,13 +70,18 @@ def _hosts(conn: sqlite3.Connection, row: sqlite3.Row) -> set[str]:
     if row["worktree"] == owner.partition("/")[2] and (machine := machine_from_owner(owner)):
         hosts.add(normalize_host(machine))
     if session:
-        if session == row["owner_session_id"]:
+        native = session
+        if session.startswith("local-body:"):
+            native = _local_native(row, session.removeprefix("local-body:"))
+            if not native:
+                return set()
+        if row["owner_session_id"] in (session, native):
             if machine := machine_from_owner(row["completed_by"] or owner):
                 hosts.add(normalize_host(machine))
         attachments = conn.execute(
             "SELECT machine FROM task_attachments "
-            "WHERE task_id=? AND session_id=? AND worktree_id=? AND machine IS NOT NULL "
-            "LIMIT ?", (row["task_id"], session, row["worktree"], _CANDIDATE_LIMIT + 1),
+            "WHERE task_id=? AND session_id IN (?,?) AND worktree_id=? AND machine IS NOT NULL "
+            "LIMIT ?", (row["task_id"], session, native, row["worktree"], _CANDIDATE_LIMIT + 1),
         )
         for i, (machine,) in enumerate(attachments):
             if i == _CANDIDATE_LIMIT:
@@ -70,9 +107,12 @@ def pending_workspace_conclusion(
         )
         candidates.execute(
             f"SELECT r.task_id,r.worktree,r.session_handle,r.execution_machine,r.creating_host,"  # noqa: S608 -- fixed SQL
-            f"t.owner,t.completed_by,t.owner_session_id"
+            f"r.driver,r.agent_info,t.owner,t.completed_by,t.owner_session_id,"
+            f"a.session_id receipt_bridge,a.native_session_id receipt_native,"
+            f"a.worktree_id receipt_tree,a.task_id receipt_task"
             f" FROM spawn_reservations AS r INDEXED BY {_INDEX}"
             f" LEFT JOIN tasks AS t ON t.id=r.task_id"
+            f" LEFT JOIN acquisition_receipts AS a ON a.reservation_key=r.key"
             f" WHERE {_PENDING} AND worktree=? LIMIT ?",
             (worktree, _CANDIDATE_LIMIT + 1),
         )

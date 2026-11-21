@@ -51,7 +51,10 @@ conclusion prompt for the recorded local body.
 The read uses a partial workspace index. It compares the reservation's route
 with the session-bound worker and indexed attachments for that task, session,
 and workspace. The creating host is a fallback, not proof against a retained
-worker on another host. Task prompts, results, and cards are not read.
+worker on another host. A local Bridge handle is not a native session ID:
+the reservation's acquisition receipt or recorded agent identity must link
+them. Missing or conflicting links return `UNKNOWN`. Task prompts, results,
+and cards are not read.
 A matching host returns `MATCH`; missing or conflicting host evidence returns
 `UNKNOWN` unless a match is found. If more than 32 pending candidates for that
 tree or 32 matching attachment records per candidate would need examination,
