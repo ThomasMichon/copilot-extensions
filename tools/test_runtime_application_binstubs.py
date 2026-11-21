@@ -1298,6 +1298,7 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
     digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
     profile = {
         "component": component,
+        "roots": [distribution],
         "release": {"identity": "source:" + identity.source_commit,
                     "sha256": "sha256:" + identity.assembly_hash},
         "wheels": [{
@@ -1341,6 +1342,13 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
         if not key.startswith("UV_") and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
     }
     environment["UV_CACHE_DIR"] = str(root / "cache" / "uv")
+    managed = subprocess.run(
+        [uv, "python", "dir"], capture_output=True, text=True, timeout=30,
+        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
+    )
+    assert managed.returncode == 0, managed.stderr
+    environment["UV_PYTHON_INSTALL_DIR"] = managed.stdout.strip()
+    environment["UV_PYTHON_DOWNLOADS"] = "never"
     home = tmp_path / "home"
     home.mkdir()
     environment.update(HOME=str(home), USERPROFILE=str(home))
@@ -1493,8 +1501,52 @@ else:
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
+def test_application_run_requires_prepared_environment(
+    application: tuple[Path, Path, Path, dict[str, str]], extension: str,
+) -> None:
+    _root, slot, caller, environment = application
+    result = invoke(slot / ("fixture-app" + extension), [], caller, environment)
+    assert result.returncode != 0
+    assert "not staged" in result.stderr
+    assert not (slot / ".venv").exists()
+
+
+@pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
+def test_prepared_application_ignores_ambient_python_selection(
+    application: tuple[Path, Path, Path, dict[str, str]], extension: str,
+) -> None:
+    _root, slot, caller, environment = application
+    managed = Path(environment["UV_PYTHON_INSTALL_DIR"])
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    before = (slot / "uv.lock").read_bytes()
+    poison = caller / ("python.exe" if os.name == "nt" else "python")
+    poison.write_text("not an interpreter", encoding="utf-8")
+    poison.chmod(0o700)
+    environment.update(
+        UV_PYTHON=str(poison), UV_PYTHON_PREFERENCE="only-system",
+        VIRTUAL_ENV=str(caller / "foreign-environment"),
+        PATH=str(caller) + os.pathsep + environment["PATH"],
+    )
+    result = invoke(slot / ("fixture-app" + extension), ["space value", "--fail"], caller, environment)
+    assert result.returncode == 17, result.stderr
+    record = json.loads(result.stdout)
+    assert record["args"] == ["space value", "--fail"]
+    assert Path(record["prefix"]).samefile(slot / ".venv")
+    configuration = dict(
+        line.split(" = ", 1) for line in (slot / ".venv" / "pyvenv.cfg").read_text().splitlines()
+        if " = " in line
+    )
+    assert Path(configuration["home"]).resolve().is_relative_to(managed.resolve())
+    assert (slot / "uv.lock").read_bytes() == before
+    assert not (caller / "foreign-environment").exists()
+
+
+@pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_isolated_frontdoor_prints_unicode_without_environment_encoding(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     _root, slot, caller, environment = application
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
     environment.update(PYTHONUTF8="0", PYTHONIOENCODING="ascii", UV_PYTHON=sys.executable)
     result = invoke(slot / ("fixture-app" + extension), ["--unicode-output"], caller, environment)
     assert result.returncode == 0, result.stderr
@@ -2102,6 +2154,8 @@ def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(app
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_global_uses_nested_home_relative_root(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
     nested = Path(environment["HOME"]) / ".fixture-app" / "engine"
     copied = nested / "versions" / slot.name
     shutil.copytree(slot, copied)
@@ -2125,6 +2179,8 @@ def test_global_uses_nested_home_relative_root(application: tuple[Path, Path, Pa
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_global_forwards_to_slot_uv_and_preserves_failure(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
     binaries = root / "global"
     binaries.mkdir()
     for name, text in global_binstubs("fixture-app", "FIXTURE_APP_HOME", ".fixture-app").items():
