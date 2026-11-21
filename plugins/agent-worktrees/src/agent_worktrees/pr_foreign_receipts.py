@@ -152,7 +152,7 @@ class Attempt:
 
     def _owner(self, record: tracking.WorktreeRecord) -> dict[str, Any]:
         return {
-            "subject": list(record_machine_identity.subject_fence(record, self.owner_path)),
+            "subject": list(record_machine_identity.subject_fence(record, self.owner_path.resolve())),
             "nonce": record.creation_nonce, "allocation": serialized_receipt(record),
         }
 
@@ -250,6 +250,12 @@ def claim_owner(
             validate_url(pull.url, pull.number, attempt.binding["target"], attempt.binding["endpoint"])
         yield record
         if not reused:
+            from . import obligations
+            durable = tracking.load_record(path)
+            attempt.require_owner(durable)
+            if not any(claim.kind == "pr" and claim.ref == pull.url and claim.state == obligations.ACTIVE
+                       for claim in durable.resources):
+                raise ProviderError("Foreign creation has no durable active PR claim; retain its pending receipt.")
             assert attempt.expected is not None
             attempt._store({
                 **attempt.expected, "revision": attempt.expected["revision"] + 1, "phase": "verified",

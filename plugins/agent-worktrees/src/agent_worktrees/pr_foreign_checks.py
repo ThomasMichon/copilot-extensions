@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any, cast
 
-from . import pr_publication_checks as checks
+from . import pr_foreign_source, pr_publication_checks as checks
 from .config import RepoConfig
 from .providers.base import PRProvider
 from .pr_worker_config import matches_remote
@@ -24,13 +24,16 @@ def source_binding(
     selected = source_repository
     if not selected and workspace:
         from .pr_publish import _identity
-        urls = checks._git(Path(workspace), "remote", "get-url", "--push", "--all", repo.remote).splitlines()
-        identities = {_identity(url, workspace) for url in urls}
-        if len(identities) == 1:
-            endpoint, _, candidate = identities.pop().partition("/")
-            target_identity = _identity("https://" + provider.authority_endpoint(repo.pr.api_base) + "/" + repository, workspace)
-            if endpoint.casefold() == target_identity.partition("/")[0]:
-                selected = candidate
+        target_identity = _identity("https://" + provider.authority_endpoint(repo.pr.api_base) + "/" + repository, workspace)
+        candidates = set()
+        for urls in pr_foreign_source.remotes(Path(workspace), repo.remote).values():
+            if len(urls) == 1:
+                endpoint, _, candidate = _identity(urls[0], workspace).partition("/")
+                if (endpoint.casefold() == target_identity.partition("/")[0]
+                        and candidate.partition("/")[0].casefold() == owner.casefold()):
+                    candidates.add(candidate)
+        if len(candidates) == 1:
+            selected = candidates.pop()
     if not selected and not workspace:
         reader = getattr(provider, "resolve_head_repository", None)
         if callable(reader):
@@ -113,9 +116,7 @@ def qualify(
     if checks._commit(root, "HEAD") != expected_head:
         raise checks.CheckError("source workspace no longer contains the expected candidate")
     source_repository = source_repository or repository
-    urls = checks._git(root, "remote", "get-url", "--push", "--all", repo.remote).splitlines()
-    if len(urls) != 1 or not matches_remote(urls[0], source_repository, repo.pr, str(root)):
-        raise checks.CheckError("source push destination does not match the selected target")
+    source_binding = pr_foreign_source.binding(root, source_repository, repo)
     if branch == repo.default_branch or not branch or branch.startswith("-"):
         raise checks.CheckError("foreign creation needs a feature branch, not the target default")
     endpoint = repo.pr.api_base
@@ -135,12 +136,14 @@ def qualify(
         or observe(provider, repository, target_branch, api_base=endpoint, token=token) != target
         or checks._commit(root, "HEAD") != expected_head
         or target_ref(root, repository, target_branch, repo, target) != target_binding
+        or pr_foreign_source.binding(root, source_repository, repo) != source_binding
     ):
         raise checks.CheckError("source or target moved while qualifying publication")
     return {
         "ok": True, "adapter": "reachable-workspace", "repository": repository,
         "branch": branch, "head": source, "base": target_branch, "base_head": target,
         "target_binding": target_binding,
+        "source_binding": source_binding,
         "checks": result,
         "source_repository": source_repository,
         "atomic": False,

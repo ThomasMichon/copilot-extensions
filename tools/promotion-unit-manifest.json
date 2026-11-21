@@ -10035,10 +10035,10 @@
     "worktree-manager/scripts/installer_dependency_arguments.py": "395e0ac408c8666dc268000affdeb5730c3898a536dac5412abb7b72f43fd18f",
     "worktree-manager/scripts/installer_retained_content.py": "b6cfb196232ea4fd56d7ede393486d6708e67a8ee2d4bae4348a024db08dfbc6",
     "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl": "58948f9aff9db08316734c0be2a120f6dc502124d9642f55e90ac82ffb16a18b",
-    "plugins/agent-worktrees/src/agent_worktrees/git_push_binding.py": "22f9181127422ed9b6627d3bc3b9c26a5fca4fc695be21d7d9cd5f22da976dfe",
+    "plugins/agent-worktrees/src/agent_worktrees/git_push_binding.py": "0115feaa6b6e8a8621604228ad62fcbf8faa16d213a8979193af7f0962071948",
     "plugins/agent-worktrees/src/agent_worktrees/completion_tracking.py": "28ccbe7b8760717e540d139ca5c4ac7b67df4a4e2b198256e6ae2b29c70b3ee5",
     "plugins/agent-worktrees/src/agent_worktrees/source_owner_lookup.py": "36294015c33a45f84532776cdcc57814707e4794450913c4400b57b0214d78c5",
-    "plugins/agent-worktrees/src/agent_worktrees/source_path_admission.py": "fb33508316eb591bfb13ce5407bdd97a012297b78e0da604e1bfc1560500e0ed",
+    "plugins/agent-worktrees/src/agent_worktrees/source_path_admission.py": "fcc0ff0d027a76e96644e4056a9607e28056422364a551d983ab9a3d7cd64bc5",
     "plugins/agent-worktrees/src/agent_worktrees/providers/github_publication_labels.py": "e0afa70068d6772469978b99c4a0d5bf18b062731deb5bb7f10dc29072069d9c",
     "plugins/agent-worktrees/src/agent_worktrees/pr_unverified_creation.py": "7718a997ffadf9104603ca6b156805153c9a96d104ce30c860aac1b6f80ed26a"
   },

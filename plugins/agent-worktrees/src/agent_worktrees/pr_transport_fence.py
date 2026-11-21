@@ -236,12 +236,12 @@ def cleanup_guard(record: object, repo: object) -> Iterator[None]:
 @contextmanager
 def cleanup_guards(owners: list[tuple[object, object]]) -> Iterator[None]:
     """Fence the union once, then locally revalidate every affected owner."""
-    from . import pr_creation_reconcile, pr_foreign_receipts, tracking
+    from . import pr_creation_reconcile, retirement_safety, tracking
     from .config import RepoConfig
     selected = []
     for record, repo in owners:
         if isinstance(record, tracking.WorktreeRecord):
-            pr_foreign_receipts.require_settled(record)
+            retirement_safety.require_publication_settled(record)
         if not isinstance(record, tracking.WorktreeRecord) or not any(
             pr_creation_reconcile.requires_qualification(pr) for pr in record.prs
         ):
