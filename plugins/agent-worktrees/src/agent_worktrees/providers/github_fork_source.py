@@ -58,8 +58,6 @@ def resolve(
         or type(target.get("fork")) is not bool
     ):
         raise ProviderError("GitHub fork resolution did not identify the selected target.")
-    if repository.partition("/")[0].casefold() == owner.casefold():
-        return repository
     source = target.get("source") if target["fork"] else target
     if not isinstance(source, dict):
         raise ProviderError("GitHub did not expose the target's fork network; pass --source-repo.")
@@ -67,7 +65,10 @@ def resolve(
     pages = read(network, forks=True)
     if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
         raise ProviderError("GitHub fork resolution did not return complete fork pages.")
-    candidates: set[str] = set()
+    candidates = {
+        slug.casefold(): slug for slug in (_slug(target["full_name"]), network)
+        if slug.partition("/")[0].casefold() == owner.casefold()
+    }
     for page in pages:
         for fork in page:
             if not isinstance(fork, dict) or fork.get("fork") is not True:
@@ -80,7 +81,7 @@ def resolve(
             ):
                 raise ProviderError("GitHub fork resolution returned a mismatched repository owner.")
             if identity["login"].casefold() == owner.casefold():
-                candidates.add(slug)
+                candidates[slug.casefold()] = slug
     if len(candidates) != 1:
         raise ProviderError("GitHub head repository is unavailable or ambiguous; pass --source-repo owner/repository.")
-    return candidates.pop()
+    return next(iter(candidates.values()))

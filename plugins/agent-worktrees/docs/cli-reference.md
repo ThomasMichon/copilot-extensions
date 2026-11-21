@@ -1098,10 +1098,16 @@ Foreign GitHub creation with `create-pr --repo <target> --from-branch
 Use `--source-repo <owner>/<repository>` when the fork network is ambiguous;
 reachable `--source-workspace` input can also supply that identity. Reuse
 requires the exact repository and branch, not merely a matching owner or
-branch name. Qualified creation sends GitHub's explicit `head_repo` field
+branch name. A supplied workspace must match the selected push destination,
+branch and expected HEAD even when reusing an existing PR. Sharing the
+target's owner does not remove fork-network ambiguity.
+Qualified creation sends GitHub's explicit `head_repo` field
 and checks the returned source and target before claiming success. A created
-PR whose identity cannot be verified retains its number/URL and unknown
-publication outcome; reconcile it rather than creating another PR.
+PR whose identity cannot be verified retains its number, available URL and
+unknown publication outcome; reconcile it rather than creating another PR.
+The same receipt rule applies to ordinary fork `create-pr`: a malformed URL
+does not discard a valid number, and an unverified receipt is not claimed
+or automatically recreated.
 
 ### Owner rewrite of a private PR branch
 
