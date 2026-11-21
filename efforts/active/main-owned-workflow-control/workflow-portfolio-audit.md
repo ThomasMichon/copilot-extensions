@@ -3201,6 +3201,79 @@ remaining original materializer source closure without weakening its native,
 process, Git, toolkit or whole-checkout boundaries. Installed, release,
 full-census, comparable whole-flow and retained-custody gates remain open.
 
+### November 21 original invocation-boundary admission
+
+Three exact original functions retain foreign-manifest refusal before writes,
+escaping-output refusal and the materializer's invocation-owner callback.
+Original fixtures, assertions and node suffixes remain unchanged. The callback
+case covers the real materializer with its original owner stub; it is not
+generator-execution evidence. All 106 mapped original cases are disjoint;
+59 remain outside, including process, Git, symlink, native-import and broader
+toolkit or checkout requirements.
+
+The first development attempt correctly refuses a copied, unbound
+`capabilities.py`. The corrected manifest explicitly binds that unchanged
+fixture-data input and the adapter without changing any guard or original.
+Development qualification then passes all three in 2.078 seconds with zero
+prohibited effects, 27 bound source reads and actual per-case owning-production
+call coverage. The 6,798-node, 1,070-source compact manifest is 779,672 bytes.
+All preceding nodes/hashes, 441 targets, 89 helper decisions, compact/flat-v1
+contracts and the 300-second limit remain. Ruff and strict Linux/Windows
+new-code typing pass.
+
+Source #13947 merges at `2026-11-21T18:37:50Z` as
+`8d563d86f9b4d7b4c551f57e85a3e8a7ea8929db`. Copilot approval `6007292602`
+names exact head `9fc22fda6dfdd25a9bb2dbd30bbe4b1ded5798d2`; complete review
+and thread pagination finds no outstanding finding. Required source CI
+`44936008554` and trusted metadata CI `44936008763` succeed. Actual unit job
+`136942648762` freshly executes all 6,798 cases with 35 deselections in
+166.66 pytest seconds and 187.925 packet seconds. Lookup takes 2,015 ms;
+no reuse or controlled whole-flow saving is credited.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. Scoped synchronization retains
+the published head and pulls forward the current Dev base. After rereading the
+full canonical parent, only this finite source item is resolved. Continue
+qualification of the four original driver-refresh cases with their real copied
+data closure. Native, installed, release, full-census, comparable whole-flow
+and retained-custody gates remain open.
+
+### November 21 remaining fixture and data-contract boundaries
+
+The four original driver-refresh cases require two Python helper bindings
+and six copied shell/PowerShell assets not admitted by the current explicit
+`BUILD_SOURCE_DATA` contract. Development collection refuses them before
+execution or manifest publication. Their temporary adapter is removed; the
+originals remain unchanged outside the packet. No data allowlist, effect guard,
+limit or helper decision is widened to manufacture admission.
+
+The unchanged positive invocation original is then executed directly under
+UnitRun. It fails its existing assertion because materialization returns
+`SKIP` for missing `runtime_admission_bootstrap`, with zero prohibited effects.
+This proves a stale synthetic fixture rather than an observed native failure.
+The source correction adds the producer's three missing entry modules and
+eight required build resources without changing production. All original
+assertions and parameterization remain; the bound original module digest is
+explicitly refreshed, not silently trusted.
+
+The required strict new-code ratchet selects the whole original module and
+reports 117 errors. The in-file migration adds annotations, a typed native
+symlink-fixture protocol, Python-3.10-compatible TOML imports, equivalent direct
+module references and the existing portable native-flag lookup pattern.
+Both declared strict platform targets and Ruff pass without suppressions.
+A development AST comparison preserves all 119 original top-level functions,
+every assertion and every nonfixture executable body after those exact
+equivalent-reference normalizations; runtime module identities are checked.
+
+Eleven original output cases pass under UnitRun with zero prohibited effects
+and actual producer call coverage. A separate complete mapped-materializer
+regression passes all 117 selected cases in 19.360 seconds with zero prohibited
+effects and positive per-case production call coverage. This is not execution
+of all 165 originals. The 48 residuals, current-head review, fresh full-packet
+CI and every broader native/installed/release/full-census/whole-flow/custody
+gate remain separate.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
