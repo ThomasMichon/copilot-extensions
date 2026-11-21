@@ -410,6 +410,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current Python-prerequisite contract](journal/2026/11.21-current-python-prerequisite-contract.md)
+resolves #6888's specific reference-derived research stop through actual
+cause reconciliation and a qualified complete original/all-discussion read.
+It preserves every constructor/helper/ordinary-consumer lane and owner,
+credits reported source leaves without a new code trace, and distinguishes
+the separate #13937 portfolio delivery. Actual #13939 delivery and the
+complete 900-open census are recorded; the fixed target is still 171 away.
+
 The [specific correspondence follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
 recovers #6082's actual incomplete copied-source boundary and ten other
 particular retained controls, leaving #6888/#7208 correspondence explicit.

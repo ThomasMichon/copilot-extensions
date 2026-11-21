@@ -22,7 +22,10 @@ discriminators for those retained contracts, not replacement specifications,
 fresh complete authored unions or new implementation-absence findings.
 Historical operational labels do not establish what was actually read.
 Current metadata refers to the existing serial audit, not a new whole census.
-No original, discussion, product-source or native study is repeated here.
+The original continuation reused earlier evidence without another original,
+discussion, product-source or native study. The later selected #6888 study
+below is explicitly new current original/discussion qualification, not an
+unchanged product-source trace or retrospective amendment to that observation.
 
 All actual source/copy, author/editor, owner, claim, privacy and resource
 conditions survive unless their precise cause was already reconciled.
@@ -172,8 +175,10 @@ neither releases a real restriction nor establishes copying by itself.
 The earlier thirteen-row correspondence gap now has a specific follow-through.
 #6082 resolves to the actual copied-source boundary above. Ten other rows
 below recover particular earlier studies, preflight decisions or retained
-controls; #6888 and #7208 still lack complete case correspondence. None of
-these historical receipts establishes a complete current authored union.
+controls. #6888 was still unresolved at that observation; the later selected
+study below now resolves its original/discussion correspondence. #7208's
+retained boundary is unchanged. None of the historical receipts alone
+establishes a complete current authored union.
 Selected metadata and a historical source locator are not whole-original
 proof, missing research, a new source prohibition or permission to repeat an
 arbitrary original study. Actual source/copy and ownership conditions remain.
@@ -188,10 +193,29 @@ arbitrary original study. Actual source/copy and ownership conditions remain.
 | #6796 | Preserve first WinError 5 cause OR an attributable original-scope disposition, with a guarded fix if needed. The later different watchdog retry is not causal proof. Further execution remains with #6600's owner; this receipt grants no retry. |
 | #6814 | Earlier selected identity-source and existing-session-file evidence credits #6816/#6842, not qualified release/attestation or acceptance of the original intended session file. Keep the actual custodian; do not invent a universal host, paid-model or generic acknowledgment gate. #2173 was reference-only. |
 | #6859 | The specific earlier whole-source boundary and unqualified PersistentDiagnostics/LaunchAttempt origin remain distinct from a numerical-reference inference. This control is not a newly admitted original, source, native result or owner transfer. |
-| #6888 | The earlier whole-source no-retry marker is recorded, but its precise cause and complete current correspondence remain unresolved. Reconcile that case rather than treating a marker as missing research, a fresh blanket prohibition or alternate-read permission. No original read is admitted here. |
 | #6925 | Earlier selected MCP child-wait/updater evidence is not phase/cap acceptance. Preserve all thirteen payload helpers, receipt/manifests, staging/context, native-language parity and no-Python first touch; real extension/cap/invalid/exit-race, unchanged build timeout and safe-tree cleanup remain with the existing watchdog owners. |
 | #7208 | Specific correspondence remains unestablished. Earlier dormant/no-wake markers are preserved, not evidence of present cause, missing research, a new whole-source prohibition or permission to wake/retry. |
 | #7758 | Durable update custody and existing #7117/#7743 owners remain. The later qualified #13605 description is a documentation-only receiving proposal, not delivered foreground-finite caller/native implementation or fulfillment of L1-L6. No held home is read and no global prerequisite is added. |
+
+## Later current original and discussion qualification
+
+This is one separately qualified complete current issue study, not a new
+whole-home comparison or a relabeling of all 75 retained correspondences.
+The [dated evidence](journal/2026/11.21-current-python-prerequisite-contract.md)
+preserves the exact source-form and refusal-cause distinctions.
+
+| Issue | Qualified current contract and retained boundary |
+|---|---|
+| #6888 | Complete original and all 33 discussions retain the three actual Dispatch/Index/MCP constructor lanes PLUS distinct #10060 dtssh alias/pre-host/no-log and #10186 helper old-first/public-consumer convergence intake. Credit the reported selection, propagation, ingress, actual-old-interpreter, detector and managed-foundation leaves, not missing implementations or whole installed acceptance. Later managed-Python/finite-controller intent, selected cold entry, production opt-in, all launchers, subsequent consumers and existing custodians remain distinct. All five Plan/five Validation rows remain unchecked; the final shared-binstub reservation is not a constructor/helper-owner takeover. |
+
+The precise old stop was mechanical propagation from a #7556 reference to
+#6888, then #10186, then back to #6888. That exact reference-only cause was
+reconciled prospectively under the existing class, with fresh complete
+author/editor/provenance qualification. It did not clear actual copied-source
+restrictions, reopen old unknown outputs or establish retrospective compliance.
+The identified embedded #10060/#10186 original sources were separately
+qualified; an unrelated withheld #10348 PR description is not the #10060
+original. Genuine independent containing-copy conditions remain protected.
 
 ## Owner and publication receipts
 
@@ -211,9 +235,12 @@ three Phase 2b Plan items, not whole-home or technical fulfillment. All 43
 current parent check states, including 21 open items, and global Validation
 are unchanged by this correspondence follow-through.
 
-The latest complete census is **899 open at 09:26:47 PST on November 21**,
-**170 above fixed 729**, including 455 creator-eligible and 444 excluded
-identities and all later inflow. This replaces the earlier 897-open numerical
-observation, not its historical receipt scope. No new census is claimed here.
+The latest complete census is **900 open at 09:59:53 PST on November 21**,
+**171 above fixed 729**, including 455 creator-eligible and 445 excluded
+identities and all later inflow. Two equal complete nine-page observations
+and the stable fourteen-member roster support it. The eligible 455 identities
+are unchanged; the sole arrival is excluded metadata-only #13938, with no
+departure or disposition credit. Earlier 897/899 observations retain their
+historical scope.
 Receipt accounting is not issue reduction, technical credit, whole-program
 acceptance, source admission or an execution charter.
