@@ -44,13 +44,15 @@ An embedding can supply the same trusted object as `create_app`'s
 No HTTP field, MCP argument, current working directory, task payload or sender
 executable selects a root or a command.
 
-Command admission requires a configured data bearer token. Existing
-authentication and task-scoped mutation authorization remain authoritative.
-The configured data/control principals can act on the approved repository
-lanes; this policy is **not** per-principal isolation between clients sharing
-one bearer. Do not approve a lane for an untrusted principal. Remote callers
-can select only the receiving coordinator's approved local lanes, never send
-their own root or executable.
+Command admission does not require an API bearer token. The trusted local
+service policy selects the receiver independently of API authentication.
+Existing authentication and task-scoped mutation authorization remain
+authoritative: a coordinator with a configured bearer still requires it, while
+credential-free local clients keep their existing behavior. Network-bind
+policy is unchanged. This policy is **not** per-principal isolation; approve
+only lanes and roots appropriate for the coordinator's existing clients.
+Remote callers can select only the receiving coordinator's approved local
+lanes, never send their own root or executable.
 
 Each approved root supplies the exact shared `.agent-telemetry/config.json`
 and optional gated `config.local.json`. Their parser, precedence and local
@@ -100,7 +102,7 @@ Missing context stays absent.
 
 The selected executing package carries
 `agent_dispatch/metadata/consumer-telemetry-contract.json`.
-The existing authenticated `/health.consumer_telemetry_contract` advertises
+The existing `/health.consumer_telemetry_contract` advertises
 the running generation. Both advertise **only** `dispatch.lifecycle.v1`,
 not Bridge's schema. `/health.consumer_telemetry` returns content-free route
 states/counters, without configured roots, argv, repository keys or credentials.
@@ -116,10 +118,11 @@ selecting it. Never claim a mandatory disable is enforced by an old reader.
 
 ## Reproducible producer recipe
 
-In a disposable authenticated coordinator, approve a repository root and place
+In a disposable local coordinator, approve a repository root and place
 the standard command declaration in that root. Supply an independent receiver
 which reads JSONL from stdin, flushes/fsyncs its own output, and finishes on EOF.
 Use ordinary `POST /tasks`, then claim/approve/start through the existing API.
+No bearer is needed when the coordinator has none configured.
 A producer-fence rejection exercises the explicit service route separately.
 Read the receiver's file independently after owned teardown; a pipe write is
 not persistence or backend acceptance.
