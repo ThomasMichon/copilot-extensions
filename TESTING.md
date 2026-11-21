@@ -11210,6 +11210,14 @@ cases and assertions. These exercise the real lexical scanner, persistent-
 environment diagnostics and scan-path filter with synthetic text and paths;
 they do not execute PowerShell, access the registry or run runtime-retention
 checks. The broader install-contract integration suite remains separate.
+Six configuration-guard adapters likewise export the original tests and
+workflow-directory fixtures: feed neutrality (20 cases), runtime resolution
+(19), action pins (12), compiler version (10), package-tree exclusion (7) and
+version consistency (21). The feed fixture that writes a synthetic `.git`
+path, its whole-checkout scan and the package guard's real CLI smoke remain
+unchanged outside the packet. Version tests read the already hash-bound Chat
+initializer as data; they do not import or start Chat. Original assertions,
+parameter IDs and the production guards are unchanged.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
