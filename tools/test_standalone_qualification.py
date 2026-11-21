@@ -1,17 +1,21 @@
 """Standalone qualification lanes and their separation from source CI."""
 
 import json
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from _promotion_workflow_test_support import source_workflow
+from promotion_unit_contract import admit_manifest, decode_json
 from test_run_standalone_tests import SCRIPT, runner
 from test_run_standalone_tests import runner_scratch as runner_scratch
 
 
-def test_fleet_client_portfolio_is_manual_exact_source_and_native_only():
-    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
-    trigger = workflow.get("on", workflow.get(True))
+def test_fleet_client_portfolio_is_manual_exact_source_and_native_only() -> None:
+    workflow: dict[Any, Any] = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    trigger = cast(dict[str, Any], workflow.get("on", workflow.get(True)))
     portfolio = trigger["workflow_dispatch"]["inputs"]["portfolio"]
     assert portfolio["default"] == "context" and "fleet-client-generations" in portfolio["options"]
     selected = {
@@ -30,13 +34,14 @@ def test_fleet_client_portfolio_is_manual_exact_source_and_native_only():
     assert workflow["permissions"] == {"contents": "read"}
 
 
-def test_installed_artifact_inspection_consumes_large_resource_map_and_checks_last_member(tmp_path):
+def test_installed_artifact_inspection_consumes_large_resource_map_and_checks_last_member(tmp_path: Path) -> None:
     import hashlib
     import os
-    from pathlib import Path
     import sys
-    from promotion_python_artifacts import PromotionArtifactError
-    from smoke_public_toolchain import _run, inspect_installed_artifact
+    from promotion_python_artifacts import PromotionArtifactError, _run
+    from smoke_public_toolchain import inspect_installed_artifact
+
+    inspect: Callable[..., str] = inspect_installed_artifact
 
     environment = tmp_path / "consumer"
     _run([sys.executable, "-m", "venv", "--without-pip", str(environment)], cwd=tmp_path)
@@ -63,16 +68,17 @@ def test_installed_artifact_inspection_consumes_large_resource_map_and_checks_la
         "versions": {"inspection-fixture": "1.0"}, "resources": resources,
         "primary": "inspection-fixture", "component": "fixture",
     }
-    inspect_installed_artifact(python, environment, **arguments)
+    inspect(python, environment, **arguments)
     (site / name).write_bytes(b"changed last resource")
     with pytest.raises(PromotionArtifactError, match="AssertionError"):
-        inspect_installed_artifact(python, environment, **arguments)
+        inspect(python, environment, **arguments)
 
 
 @pytest.mark.parametrize("fault", [None, "source", "consumer", "skipped"])
 def test_fleet_client_requests_preserve_bounds_and_require_complete_native_reports(
-    tmp_path, monkeypatch, capsys, fault,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    fault: str | None,
+) -> None:
     import os
     import runpy
     import shlex
@@ -103,9 +109,12 @@ def test_fleet_client_requests_preserve_bounds_and_require_complete_native_repor
             for transition in ("construct", "register-commands", "unregister-commands", "remove-runtime")
         ],
     ]
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(command, *, cwd, timeout, max_stdout_bytes, max_stderr_bytes, env=None):
+    def run(
+        command: list[str], *, cwd: Path, timeout: float, max_stdout_bytes: int,
+        max_stderr_bytes: int, env: dict[str, str] | None = None,
+    ) -> SimpleNamespace:
         assert cwd == tmp_path and max_stdout_bytes == max_stderr_bytes == 16 * 1024 * 1024
         calls.append(command)
         output = ""
@@ -113,6 +122,7 @@ def test_fleet_client_requests_preserve_bounds_and_require_complete_native_repor
             assert timeout == 30
             output = ("b" if fault == "source" else "a") * 40
         elif command[1] == "tools/run-standalone-tests.py":
+            assert env is not None
             assert command[:6] == [
                 sys.executable, "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "120",
                 *(["--prepare"] if "--prepare" in command else []),
@@ -129,7 +139,10 @@ def test_fleet_client_requests_preserve_bounds_and_require_complete_native_repor
                 expression = Expression.compile(arguments[arguments.index("-k") + 1])
                 suite = ET.Element("testsuite")
                 for name in cases:
-                    if expression.evaluate(lambda value: value.lower() in name.lower()):
+                    def matches(value: str, /, **_kwargs: str | int | bool | None) -> bool:
+                        return value.lower() in name.lower()
+
+                    if expression.evaluate(matches):
                         case = ET.SubElement(suite, "testcase", name=name)
                         if fault == "skipped" and "remove-runtime" in name:
                             ET.SubElement(case, "skipped")
@@ -162,18 +175,39 @@ def test_fleet_client_requests_preserve_bounds_and_require_complete_native_repor
     assert dict(os.environ) == original
 
 
-def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
-    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope() -> None:
+    workflow: dict[Any, Any] = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
     inputs = triggers["workflow_dispatch"]["inputs"]
     assert "bridge-contracts" in inputs["portfolio"]["options"]
     assert inputs["portfolio"]["default"] == "context"
     job = workflow["jobs"]["bridge-contracts-linux"]
     assert job["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'"
+        "github.event_name == 'workflow_dispatch' && "
+        "(inputs.portfolio == 'bridge-contracts' || inputs.portfolio == 'bridge-http52-capture')"
     )
     assert job["runs-on"] == "ubuntu-latest"
-    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert job["timeout-minutes"] == "${{ inputs.portfolio == 'bridge-http52-capture' && 30 || 10 }}"
+    historical = next(
+        step for step in job["steps"]
+        if step.get("name") == "Exercise immutable bytes and historical publication guards"
+    )
+    assert "if" not in historical
+    capture_steps = [
+        step for step in job["steps"]
+        if step.get("name") in {
+            "Capture current HTTP-52 controlled source evidence",
+            "Independently verify current HTTP-52 controlled source evidence",
+        }
+    ]
+    assert len(capture_steps) == 2
+    assert all(step["if"] == "inputs.portfolio == 'bridge-http52-capture'" for step in capture_steps)
+    canonical = next(
+        step for step in job["steps"]
+        if step.get("name") == "Validate canonical historical evidence"
+    )
+    assert "if" not in canonical
+    commands = [canonical["run"], historical["run"]]
     assert commands[0] == "python tools/check-agent-bridge-contracts.py"
     assert commands[1].split()[:3] == ["python", "tools/run-plugin-tests.py", "agent-bridge"]
     assert "--timeout" not in commands[1] and "--test-timeout" not in commands[1]
@@ -184,8 +218,9 @@ def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
 
 @pytest.mark.parametrize("fault", [None, "consumer", "missing", "duplicate", "skipped"])
 def test_managed_fleet_packet_requires_all_exact_consumers_without_wider_budgets(
-    tmp_path, monkeypatch, capsys, fault,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    fault: str | None,
+) -> None:
     import os
     import runpy
     import shlex
@@ -208,11 +243,15 @@ def test_managed_fleet_packet_requires_all_exact_consumers_without_wider_budgets
     monkeypatch.setattr(sys, "path", sys.path.copy())
     monkeypatch.setenv("PYTEST_ADDOPTS", "--unsafe-inherited-selection")
     original = dict(os.environ)
-    observed = []
+    observed: list[str] = []
 
-    def run(command, *, cwd, timeout, max_stdout_bytes, max_stderr_bytes, env=None):
+    def run(
+        command: list[str], *, cwd: Path, timeout: float, max_stdout_bytes: int,
+        max_stderr_bytes: int, env: dict[str, str] | None = None,
+    ) -> SimpleNamespace:
         assert cwd == tmp_path and max_stdout_bytes == max_stderr_bytes == 16 * 1024 * 1024
         if command[1] == "tools/run-standalone-tests.py":
+            assert env is not None
             assert command == [
                 sys.executable, "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "120",
             ] and timeout == 180
@@ -264,8 +303,10 @@ def test_managed_fleet_packet_requires_all_exact_consumers_without_wider_budgets
     ("pane-argv", "3.3.6", "a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947"),
     ("mux-companion", "3.4.0", "a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721"),
 ])
-def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped(portfolio, version, digest):
-    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped(
+    portfolio: str, version: str, digest: str,
+) -> None:
+    workflow: dict[Any, Any] = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
     inputs = triggers["workflow_dispatch"]["inputs"]
     assert "pane-argv" in inputs["portfolio"]["options"]
@@ -302,8 +343,8 @@ def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped(portfolio, v
     ]
 
 
-def test_manager_uninstall_portfolio_is_manual_and_keeps_native_owner():
-    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+def test_manager_uninstall_portfolio_is_manual_and_keeps_native_owner() -> None:
+    workflow: dict[Any, Any] = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
     inputs = triggers["workflow_dispatch"]["inputs"]
     assert "manager-uninstall" in inputs["portfolio"]["options"]
@@ -323,7 +364,7 @@ def test_manager_uninstall_portfolio_is_manual_and_keeps_native_owner():
     ]
 
 
-def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path):
+def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path: Path) -> None:
     assert runner.standalone_build_resources("services/chat", source_root=tmp_path) == (
         tmp_path / "libs" / "versioned-runtime",
         tmp_path / "libs" / "installer-engine",
@@ -331,7 +372,9 @@ def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path)
 
 
 @pytest.mark.parametrize("suffix,host", [("linux", "ubuntu-latest"), ("windows", "windows-latest")])
-def test_dispatch_fingerprint_lane_is_unfiltered_and_outside_actor_free_inventory(suffix, host):
+def test_dispatch_fingerprint_lane_is_unfiltered_and_outside_actor_free_inventory(
+    suffix: str, host: str,
+) -> None:
     root = SCRIPT.parent.parent
     workflow = source_workflow(root, "installation-context-acceptance.yml")
     job = workflow["jobs"]["uv-deployment-compatibility-" + suffix]
@@ -348,14 +391,16 @@ def test_dispatch_fingerprint_lane_is_unfiltered_and_outside_actor_free_inventor
     assert "if" not in step and not step.get("continue-on-error")
     for settings in (workflow, job, step):
         assert "PYTEST_ADDOPTS" not in settings.get("env", {})
-    manifest = json.loads((root / "tools/promotion-unit-manifest.json").read_text(encoding="utf-8"))
+    manifest = admit_manifest(decode_json(
+        (root / "tools/promotion-unit-manifest.json").read_text(encoding="utf-8"),
+    ))
     source = "plugins/agent-dispatch/" + target
     assert source not in manifest["sources"]
     assert all(node.split("::", 1)[0] != source for node in manifest["nodes"])
 
 
-def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_python():
-    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
+def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_python() -> None:
+    workflow: dict[Any, Any] = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
     assert set(triggers) == {"workflow_dispatch"}
     selected = triggers["workflow_dispatch"]["inputs"]["chat_construction"]
@@ -392,8 +437,9 @@ def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_pytho
 ])
 @pytest.mark.parametrize("outcome", [0, 1])
 def test_chat_qualification_lane_defaults_preserve_full_collection(
-    tmp_path, monkeypatch, profile, timeout, explicit, outcome,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str, timeout: int,
+    explicit: bool, outcome: int,
+) -> None:
     monkeypatch.setattr(runner, "REPO", tmp_path)
     root = tmp_path / "services" / "chat"
     (root / "tests").mkdir(parents=True)
@@ -402,7 +448,7 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
     python.touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: type("Lease", (), {"release": lambda _: None})())
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> int:
         selected = command[command.index("-q") + 1:command.index("--basetemp")]
         assert selected == [str(root / "tests")]
         assert kwargs["env"]["AGENT_CHAT_TEST_SUITE"] == profile
@@ -438,17 +484,18 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
 ])
 @pytest.mark.parametrize("retain", [False, True])
 def test_membership_validation_preserves_original_failure_without_terminal_summary(
-    tmp_path, monkeypatch, capsys, outcome, map_state, retain,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    outcome: int, map_state: str, retain: bool,
+) -> None:
     monkeypatch.setattr(runner, "REPO", tmp_path)
     (tmp_path / "services" / "chat" / "tests").mkdir(parents=True)
     python = runner.default_python("services/chat")
     python.parent.mkdir(parents=True)
     python.touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: type("Lease", (), {"release": lambda _: None})())
-    owned_sandboxes = []
+    owned_sandboxes: list[Path] = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> int:
         sandbox = kwargs["sandbox"]
         owned_sandboxes.append(sandbox)
         if map_state != "missing":
@@ -486,7 +533,9 @@ def test_membership_validation_preserves_original_failure_without_terminal_summa
     assert all(not sandbox.exists() for sandbox in owned_sandboxes)
 
 
-def test_membership_export_destination_failure_preserves_original_nonzero_result(tmp_path, capsys):
+def test_membership_export_destination_failure_preserves_original_nonzero_result(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     sandbox = tmp_path / "sandbox"
     (sandbox / "pytest").mkdir(parents=True)
     (sandbox / "pytest" / "chat-membership.json").write_text('{"nodes":{}}', encoding="utf-8")
@@ -497,14 +546,14 @@ def test_membership_export_destination_failure_preserves_original_nonzero_result
     assert "membership export failed" in capsys.readouterr().err
 
 
-def test_chat_lane_refuses_other_consumers_before_admission(monkeypatch):
+def test_chat_lane_refuses_other_consumers_before_admission(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as error:
         runner.main(["fleet-manager", "--chat-suite", "full"])
     assert error.value.code == 2
 
 
-def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
+def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive() -> None:
     root = SCRIPT.parent.parent
     ci = source_workflow(root, "ci.yml")["jobs"]
     promotion = source_workflow(root, "validate-and-promote.yml")["jobs"]
@@ -520,7 +569,25 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
                 if "run" in step
             ]
             assert not any("run-standalone-tests.py" in command for command in commands)
-            assert not any("run-plugin-tests.py" in command for command in commands)
+            native = [
+                (name, step["run"])
+                for name, job in jobs.items() for step in job.get("steps", [])
+                if "run-plugin-tests.py" in step.get("run", "")
+            ]
+            if jobs is ci:
+                assert native == []
+            else:
+                assert len(native) == 1
+                name, command = native[0]
+                assert name == "native-resume-windows"
+                assert command.splitlines() == [
+                    'Set-Location "$env:RUNNER_TEMP\\candidate"',
+                    'python tools/run-plugin-tests.py worktree-manager --test-file '
+                    'tests/native/test_resume_pane_startup.py --allow-explicit-tiers '
+                    '--junit-dir "$env:RUNNER_TEMP\\resume-evidence" '
+                    '--timeout 360 --plugin-timeout 600 --test-timeout 180',
+                    "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+                ]
             packets = [
                 step["run"] for step in jobs[owner]["steps"]
                 if producer in step.get("run", "")
@@ -531,9 +598,9 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion)
 
 
-def test_ssh_manual_lane_selects_only_bounded_disposable_native_acceptance():
-    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
-    events = workflow.get("on", workflow.get(True))
+def test_ssh_manual_lane_selects_only_bounded_disposable_native_acceptance() -> None:
+    workflow: dict[Any, Any] = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
+    events = cast(dict[str, Any], workflow.get("on", workflow.get(True)))
     assert events["workflow_dispatch"]["inputs"]["ssh_service"]["default"] is False
     for suffix in ("linux", "windows"):
         job = workflow["jobs"]["ssh-service-" + suffix]
@@ -556,7 +623,9 @@ def test_ssh_manual_lane_selects_only_bounded_disposable_native_acceptance():
         assert "!inputs.ssh_service" in workflow["jobs"]["derived-diagnostics-" + suffix]["if"]
 
 
-def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):
+def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(
+    ci: dict[str, Any], promotion: dict[str, Any],
+) -> None:
     import shlex
     from packaging.requirements import Requirement
 

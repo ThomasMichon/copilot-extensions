@@ -210,6 +210,15 @@ No whole-backlog acyclicity claim follows from these finite relationships.
 
 ## Finite integration research queue
 
+The [selected current framing contribution](roadmap-selected-framing-contribution.md)
+advances the priority/receiver and scoped-wave lane with exact reused current
+source, current vision and complete unchanged contract metadata. #1803's
+client-limit repair remains P1 under the original framing custodian; its
+accepted whole-effort home is still an explicit gap. The source/review then
+release/consumer sequence is local, adds no cross-issue hard edge and does not
+require endpoint cleanup, handoff atomicity, installer or whole-Bridge work
+to finish first. Other selected predicates and all six integration gates remain.
+
 The [outside-wave coverage register](roadmap-coverage-reconciliation.md)
 records the first 32 identities in this lane as existing research with
 retained scope, explicit refresh needs or admission/interpretation gaps.
