@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 if sys.version_info >= (3, 11):
     import tomllib

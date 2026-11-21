@@ -286,7 +286,7 @@ def capture(root: Path, plugin: str, pid_file: Path | None = None) -> dict[str, 
     rows = _inventory()
     selected = {}
     for pid, (identity, _, arguments) in rows.items():
-        if identity.uid != os.getuid():
+        if identity.uid != getattr(os, "getuid")():
             continue
         argv = list(arguments)
         if admits_argv(argv, root, plugin):
@@ -329,7 +329,7 @@ def stop(root: Path, plugin: str, admission: dict[str, Any], timeout: float = 15
                 or not re.fullmatch(r"[0-9a-f]{64}", value["command_digest"])):
             raise StopRefused("Malformed original process identity")
         identity = Identity(**value)
-        if identity.uid != os.getuid():
+        if identity.uid != getattr(os, "getuid")():
             raise StopRefused("Original admission does not own this daemon")
         records.append(identity)
     if len({value.pid for value in records}) != len(records):
