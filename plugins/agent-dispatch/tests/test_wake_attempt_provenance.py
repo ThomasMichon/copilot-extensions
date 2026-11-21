@@ -66,7 +66,8 @@ def test_qualified_result_covers_only_its_attempts(
     assert settled.execution_send_state == ("sent" if accepted else "not_sent")
     restarted = TaskQueue(queue.db_path)
     with restarted._connect() as conn:
-        original = restarted.get(task.id)
+        conn.execute("BEGIN")
+        original = restarted._fetch(conn, task.id)
         assert original is not None
         assert controls._row(restarted, wake)["first_qualified_attempt"] == (
             2 if initial == "unqualified" else 1
@@ -111,12 +112,13 @@ def test_v2_upgrade_never_infers_first_attempt_from_later_receipt(
         1 if attempts == 1 and valid else None
     )
     with restarted._connect() as conn:
+        conn.execute("BEGIN")
         indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
         for table in TABLES:
             for suffix in ("task", "target"):
                 assert f"idx_{table}_driver_{suffix}_v3" in indexes
                 assert f"idx_{table}_driver_{suffix}_v2" not in indexes
-        task = restarted.get(wake.task_id)
+        task = restarted._fetch(conn, wake.task_id)
         assert task is not None
         reservation = {"execution_machine": "host", "worktree": "worktree", "task_id": task.id}
         if attempts > 1:

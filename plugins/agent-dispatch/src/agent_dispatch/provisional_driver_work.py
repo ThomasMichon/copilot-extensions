@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from .current_driver_lookup import DriverMatch, current_driver_match
 from .queue_common import RunWaiterWakeOperation, Task, WakeOperation
 from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_execution_wakes import TABLES, _retryable_native_refusal, _wake_targets_reservation
@@ -17,24 +18,6 @@ if TYPE_CHECKING:
 
 _TREE = "substr(owner,instr(owner,'/')+1)"
 _TARGET = f"COALESCE(NULLIF(owner_session_id,''),{_TREE})"
-_LIVE_WAITER = "state IN ('preparing','active')"
-_RETAINED_ASSIGNMENT = (
-    "(status IN ('claimed','started','suspended') OR"
-    " (status='submitted' AND completed_by IS NOT NULL AND owner_session_id IS NOT NULL))"
-)
-_ASSIGNED_WORKER = "CASE WHEN status='submitted' THEN completed_by ELSE owner END"
-_ASSIGNED_TREE = f"substr({_ASSIGNED_WORKER},instr({_ASSIGNED_WORKER},'/')+1)"
-
-
-def _host_sql(owner: str) -> str:
-    # Bridge routes a bare/partially qualified owner by native ID, not to that hostname.
-    slash = f"instr({owner},'/')"
-    return (f"CASE WHEN {slash}>0 AND length({owner})>{slash} THEN"
-            f" lower(trim(substr({owner},1,{slash}-1))) ELSE '' END")
-
-
-_ASSIGNED_HOST = _host_sql(_ASSIGNED_WORKER)
-_WAITER_HOST = _host_sql("owner")
 # A terminal first delivery can settle an unqualified send, but a later
 # successful retry says nothing about the outcome of an earlier attempt.
 _AMBIGUOUS = (
@@ -92,22 +75,6 @@ def migrate(conn: sqlite3.Connection) -> None:
             )
             conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}_v2")
             conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}")
-    conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_work"
-        f" ON run_waiters(task_id) WHERE {_LIVE_WAITER}"
-    )
-    for table, predicate, host, tree, previous in (
-        ("tasks", _RETAINED_ASSIGNMENT, _ASSIGNED_HOST, _ASSIGNED_TREE, "_v2"),
-        ("run_waiters", _LIVE_WAITER, _WAITER_HOST, _TREE, ""),
-    ):
-        for suffix, key in (("native", "owner_session_id"), ("tree", tree)):
-            conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_driver_{suffix}_host"
-                f" ON {table}({key},{host}) WHERE {predicate}"
-            )
-            conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}{previous}")
-            if previous:
-                conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}")
 
 
 def _pending_delivery(queue: TaskQueue, conn: sqlite3.Connection, row: sqlite3.Row,
@@ -138,31 +105,12 @@ def require_no_outstanding_driver_work(
 ) -> None:
     require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
     tree = reservation["worktree"]
-    host = reservation["execution_machine"].strip().lower()
-    params = {"task": task.id, "native": native, "tree": tree, "host": host}
-    if conn.execute(
-        "SELECT 1 FROM spawn_reservations s CROSS JOIN task_pool_assignments a"
-        " ON a.reservation_key=s.key AND a.task_id=s.task_id JOIN tasks t ON t.id=a.task_id"
-        " WHERE s.worktree=:tree AND a.task_id<>:task AND a.assignment_released=0"
-        " AND lower(trim(a.machine))=:host AND t.generation=a.task_generation"
-        " AND t.status='claimed' AND t.owner IS NULL LIMIT 1", params,
-    ).fetchone():
-        raise TaskError("provisional observation has an outstanding pool placement")
-    for table, predicate, owner_host, owner_tree in (
-        ("tasks", _RETAINED_ASSIGNMENT + " AND id<>:task", _ASSIGNED_HOST, _ASSIGNED_TREE),
-        ("run_waiters", _LIVE_WAITER, _WAITER_HOST, _TREE),
-    ):
-        probes = [
-            f"owner_session_id=:native AND {owner_host} IN (:host,'')",
-            f"{owner_tree}=:tree AND {owner_host}=:host",
-        ]
-        if table == "run_waiters":
-            probes.append("task_id=:task")
-        for probe in probes:
-            if conn.execute(
-                f"SELECT 1 FROM {table} WHERE {predicate} AND {probe} LIMIT 1", params,  # noqa: S608 -- fixed SQL; caller data is bound
-            ).fetchone():
-                raise TaskError("provisional observation has an outstanding assignment or waiter")
+    binding = current_driver_match(
+        conn, task_id=task.id, machine=reservation["execution_machine"], worktree=tree,
+        native_id=native,
+    )
+    if binding is not DriverMatch.CLEAR:
+        raise TaskError(f"cannot exclude an outstanding assignment or waiter ({binding.value})")
     for table in TABLES:
         bookkeeping = (
             " AND (sender<>? OR execution_send_state IN ('pending','unknown'))"

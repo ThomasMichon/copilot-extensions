@@ -56,7 +56,11 @@ the independent owner read. A driver that submitted before the source closeout
 can also inspect readiness: the recorded submitter, native session and generation
 must still match the captured assignment, even though its lease has ended.
 Dispatch checks its held assignments, detached waiters and wake/send records
-on both sides of the owner read. Other work holding the same worker or native
+on both sides of the owner read. Each snapshot uses the
+[current driver lookup](pool-placement.md#current-driver-lookup-internal);
+both a match and an unknown binding block. A clear binding result does not
+supersede the independent transport checks or the Worktrees observation.
+Other work holding the same worker or native
 on the same host blocks even without a corresponding Worktrees claim.
 An unreleased pre-start placement targeting
 that tree on its selected machine blocks before the task has an owner or native.

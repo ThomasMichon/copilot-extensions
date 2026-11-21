@@ -525,6 +525,7 @@ def test_other_submitted_return_binding_blocks_until_confirmed(
             "execution_machine": host, "worktree": tree, "task_id": observer.id,
         }
         with queue._connect() as conn:
+            conn.execute("BEGIN")
             provisional_driver_work.require_no_outstanding_driver_work(
                 queue, conn, observer, identity, native,
             )
@@ -595,6 +596,7 @@ def test_other_pool_claim_can_reserve_driver_before_binding(
                          headers=transport.headers(ready), json=transport.body(ready))
         assert again.status_code == 409 and len(ready[4]) == 1
     with queue._connect() as conn:
+        conn.execute("BEGIN")
         provisional_driver_work.require_no_outstanding_driver_work(
             queue, conn, ready[3],
             {"task_id": ready[3].id, "worktree": workspace.worktree,
