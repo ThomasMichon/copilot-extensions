@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .ci_repair_spawn import Snapshot
 
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_cooling import SpawnCoolingMixin, require_no_cooling
@@ -14,6 +18,10 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         self, key: str, *, startup_revision: int, now: float | None = None,
     ) -> SpawnReservation:
         """Close terminal startup admission without releasing resource custody."""
+        from .native_attachment_custody import require_not_reassigned
+        from .queue import TaskQueue
+
+        assert isinstance(self, TaskQueue)
         if type(startup_revision) is not int or startup_revision < 1:
             raise TaskError("startup fence requires the current startup revision")
         with self._connect() as conn:
@@ -30,6 +38,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             ):
                 raise TaskError("terminal startup changed or remains incomplete")
             require_no_cooling(row)
+            require_not_reassigned(conn, row)
             if not row["startup_fenced"]:
                 conn.execute(
                     "UPDATE spawn_reservations SET startup_fenced=1, updated_at=? WHERE key=?",
@@ -43,6 +52,8 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
 
     def record_staging_spawn(self, key: str, session_handle: str) -> SpawnReservation:
         """Persist an idle body before admission without making it claimable."""
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         return self._update_reservation(
             key, to_state=SpawnState.RESERVING,
             allowed_from=frozenset({SpawnState.RESERVING}),
@@ -58,9 +69,9 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         startup_complete: bool | None = None,
         startup_revision: int | None = None,
         now: float | None = None,
-        authority_expected: tuple | None = None,
-        ordinary_redrive: dict | None = None,
-        pool_startup_retry: dict | None = None,
+        authority_expected: Snapshot | None = None,
+        ordinary_redrive: dict[str, Any] | None = None,
+        pool_startup_retry: dict[str, Any] | None = None,
         cold_admission: Callable[[sqlite3.Connection], None] | None = None,
         cold_restarted: Callable[[sqlite3.Connection], None] | None = None,
     ) -> SpawnReservation:
@@ -75,6 +86,8 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         and ``cold_restarted`` writes the caller's own bookkeeping in that same
         transaction only when the body actually restarts from ``cold``.
         """
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         if startup_complete is not None and type(startup_complete) is not bool:
             raise TaskError("startup_complete must be a boolean")
         if startup_complete is not None and (
@@ -86,7 +99,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         if ordinary_redrive is not None:
             from .ordinary_native_redrive import record_redrive
 
-            if startup_complete is None or authority_expected is not None:
+            if startup_complete is None or startup_revision is None or authority_expected is not None:
                 raise TaskError("retained native redrive requires an explicit startup operation")
             return record_redrive(
                 self, key, ordinary_redrive=ordinary_redrive,
@@ -121,7 +134,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
 
                 with self._connect() as probe:
                     task = self._fetch(probe, row["task_id"])
-                    if authority_snapshot(probe, task) != authority_expected:
+                    if task is None or authority_snapshot(probe, task) != authority_expected:
                         raise TaskError("CI repair authority changed before spawn publication")
             if row["state"] == SpawnState.COLD:
                 from .queue_pool_recovery import admit_cold_lane
@@ -129,6 +142,13 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                     with self._connect() as probe:
                         cold_admission(probe)
                 admit_cold_lane(self, row)
+
+        def verify_transfer(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+            if startup_complete is False and session_handle:
+                from .native_attachment_custody import require_not_reassigned
+                require_not_reassigned(conn, row, session_handle)
+            if row["state"] == SpawnState.COLD and cold_restarted is not None:
+                cold_restarted(conn)
 
         return self._update_reservation(
             key,
@@ -146,7 +166,5 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             now=now,
             guard=authority_guard,
             pool_startup_retry=pool_startup_retry,
-            in_transaction=None if cold_restarted is None else (
-                lambda conn, row: cold_restarted(conn) if row["state"] == SpawnState.COLD else None
-            ),
+            in_transaction=verify_transfer,
         )

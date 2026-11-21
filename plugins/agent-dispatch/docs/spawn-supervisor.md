@@ -519,8 +519,10 @@ double-spawned. Each cycle:
    reservation-created worktree enters `releasing`; targeted/reused legacy
    rows may fail directly. Unknown liveness remains reserved. An unbound
    reservation is never guessed away.
-3. **fulfill yield/release requests** — yielding marks the active reservation
-   for release but does not settle it transactionally. The supervisor ends a
+3. **fulfill reservation release requests** — an independent worker can yield
+   or release its task without authorizing any cleanup of its native or workspace.
+   An active pool placement retains the assignment until its owner completes
+   the return. For an explicit reservation release, the supervisor ends a
    confirmed-live headless body (or observes it gone), concludes only a
    provenance-verified reservation-created worktree, and persists pending or
    held cleanup across restarts. Targeted, reused, foreign-host, origin-unknown,
@@ -1163,6 +1165,16 @@ cooling, conflicting reservation, active waiter or unresolved owner/waiter wake
 prevents the send; failed or superseded attempted wakes are not absence proof.
 Qualified execution scopes remain held until supervisor send enrollment is
 implemented, even if the owner-wake list is empty.
+
+If that native leaves the original assignment and attaches to another task,
+the later attachment fences both the old prompt and terminal cleanup of the
+old reservation. Conversely, a new task cannot attach that native while a
+previously admitted redrive or terminal cleanup still owns it. This comparison
+uses the recorded assignments, not the yield message or transport name.
+Case and surrounding whitespace do not distinguish host identities. When a
+detached assignment and a later task share a native or checkout, an unfamiliar
+host alias or unmapped process handle cannot establish that they are disjoint.
+An unrelated native in a different checkout is not held by that comparison.
 
 Before transport, the existing `record_spawn` operation atomically rechecks the
 snapshot and records a pending startup revision together with the frozen

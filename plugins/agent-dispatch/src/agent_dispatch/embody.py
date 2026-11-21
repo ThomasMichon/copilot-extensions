@@ -885,11 +885,9 @@ def _classify_body_status(proc: subprocess.CompletedProcess[str]) -> str:
     from . import tracking
 
     if proc.returncode != 0:
-        # A missing session exits non-zero ("[FAIL] Session <id> not found") --
-        # but so could a transport failure. Distinguish: a genuine not-found is
-        # GONE; any other non-zero (unreachable, auth) is UNKNOWN.
-        err = (proc.stderr or "") + (proc.stdout or "")
-        return tracking.GONE if "not found" in err.lower() else tracking.UNKNOWN
+        # The status CLI renders even a missing HTTP route as "Session ... not
+        # found". Neither that string nor an SSH error proves native absence.
+        return tracking.UNKNOWN
     out = (proc.stdout or "").strip()
     if not out:
         return tracking.UNKNOWN
@@ -917,8 +915,8 @@ def fleet_body_verdict(host: str, session_id: str, *, timeout: float | None = No
     that capability is absent, and classifies (see
     :func:`_classify_body_status`):
 
-    - **GONE** -- the bridge answers that the session is **absent** (not found,
-      non-zero exit) or in a **terminal** status (:data:`_FLEET_BODY_TERMINAL`),
+    - **GONE** -- the carrier explicitly identifies a missing session or the
+      bridge reports a **terminal** status (:data:`_FLEET_BODY_TERMINAL`),
       or reports ``liveness`` dead/gone. The body's ACP session has ended, so a
       non-terminal origin task means it died before completing -> re-embody.
     - **LIVE** -- the session is present in a known-alive status
@@ -954,7 +952,7 @@ def fleet_body_verdict(host: str, session_id: str, *, timeout: float | None = No
     except bridge_remote.RemoteBridgeUnavailable:
         pass
     except bridge_remote.RemoteBridgeOperationError as exc:
-        if exc.code == "session_not_found" or exc.status == 404:
+        if exc.code == "session_not_found":
             return tracking.GONE
         return tracking.UNKNOWN
 
@@ -1071,8 +1069,8 @@ def local_body_verdict(session_id: str, *, timeout: float | None = None) -> str:
     this machine (:func:`agent_dispatch.supervisor.make_headless_spawn`) is an
     agent-bridge ACP session on the *local* daemon, so its liveness is probed by
     running ``agent-bridge --json status <session_id>`` directly (no SSH). Same
-    tri-state safety contract as the fleet probe -- only a positive not-found /
-    terminal answer yields GONE; any transport/parse failure is UNKNOWN, so
+    tri-state     safety contract as the fleet probe -- only a positive terminal/dead
+    answer yields GONE; any CLI/transport/parse failure is UNKNOWN, so
     recovery never fires on ignorance.
 
     Returns the string verdict (values match ``tracking.LIVE/GONE/UNKNOWN``).

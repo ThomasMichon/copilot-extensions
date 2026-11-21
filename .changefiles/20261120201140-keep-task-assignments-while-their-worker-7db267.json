@@ -1,0 +1,9 @@
+{
+  "comment": "Protect allocator-placed tasks and source-obsolete closeouts while allowing independent workers to yield without workspace cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -16,8 +16,10 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
 from .queue_records import SpawnState, Status
+from .reservation_assignment import protects_disposition
 
 #: Upper bound on concurrent per-task liveness probes across ALL
 #: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
@@ -58,6 +60,14 @@ def _get_probe_executor() -> ThreadPoolExecutor:
 class LivenessMixin:
     """Liveness, orphan-reaping, and backlog-health methods for
     :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _now(self, now: float | None) -> float: ...
+        def _canonical_repo(self, repo: str | None) -> str | None: ...
+        def _audit(self, conn: sqlite3.Connection, task_id: str, *, ts: float,
+                   from_status: str, to_status: str, worker: str | None = None,
+                   note: str | None = None) -> None: ...
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.
@@ -292,6 +302,8 @@ class LivenessMixin:
                 )
                 if verdict != self.LIVENESS_GONE:
                     continue
+                if protects_disposition(conn, task_id):
+                    continue  # Pool custody or source closeout is resolved by its original owner.
                 restricted = conn.execute(
                     "SELECT 1 FROM spawn_reservations s JOIN tasks t ON t.id=s.task_id "
                     "WHERE s.task_id=? AND t.generation=? AND s.driver='restricted-bridge' "
@@ -474,6 +486,8 @@ class LivenessMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             for task_id, generation, status in victims:
+                if protects_disposition(conn, task_id):
+                    continue
                 cur = conn.execute(
                     "UPDATE tasks SET status = ?, updated_at = ?, completed_at = ?,"
                     " owner = NULL, lease_expires_at = NULL"
@@ -524,10 +538,10 @@ class LivenessMixin:
         with self._connect() as conn:
 
             def _count(status: str) -> int:
-                return conn.execute(
+                return int(conn.execute(
                     f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
                     (status, *args),
-                ).fetchone()[0]
+                ).fetchone()[0])
 
             queued = _count(Status.QUEUED)
             proposed = _count(Status.PROPOSED)

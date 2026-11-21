@@ -817,19 +817,17 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 _target_directory_missing(target_dir) if target_dir is not None else None
             )
             if target_missing is True:
+                # Missing workspace does not prove a missing worker. A retained
+                # normal Bridge conversation is never disposed of by this sweep.
+                if res.get("driver") in {"ordinary-bridge", "restricted-bridge"}:
+                    continue
                 try:
-                    self._conclusion_client.record_spawn_conclusion(
-                        key,
-                        conclusion_state=_CONCLUSION_COMPLETE,
-                        conclusion_detail=json.dumps(
-                            {
-                                "action": "already-removed",
-                                "reason": "recorded-target-directory-missing",
-                            },
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
-                    )
+                    verdict = self.local_body_verdict_fn(local_sid)
+                except Exception:
+                    verdict = _tracking().UNKNOWN
+                if verdict != _tracking().GONE:
+                    continue
+                try:
                     self.client.release(
                         task["id"],
                         owner,
@@ -3156,7 +3154,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                                 release_spawn=False,
                             )
                         except DispatchError:
-                            pass  # lease-expiry GC is the backstop requeue
+                            continue  # Refusal or lost reply does not authorize retirement.
                     try:
                         detail = f"fleet body confirmed gone ({host}:{bridge_sid})"
                         productive = _reservation_made_progress(res, task)
@@ -3218,7 +3216,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                                 release_spawn=False,
                             )
                         except DispatchError:
-                            pass  # lease-expiry GC is the backstop requeue
+                            continue
                     try:
                         detail = f"local body confirmed gone ({local_sid})"
                         productive = _reservation_made_progress(res, task)
@@ -3279,7 +3277,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         except DispatchError:
                             log.exception("failed to release unclaimed script startup %s", res["key"])
                         continue
-                    _cleanup_script_task_file(task_file)
                     detail = (
                         "script body exited without explicit complete/abandon "
                         f"(worker {worker_id}, pid {pid})"
@@ -3295,6 +3292,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         )
                     except DispatchError:
                         log.exception("failed to abandon gone script task %s", task["id"])
+                        continue  # Preserve context on refusal or unknown outcome.
+                    _cleanup_script_task_file(task_file)
                     try:
                         self.client.settle_spawn(
                             res["key"], detail=detail, release_requested=True
@@ -3337,7 +3336,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                             release_spawn=False,
                         )
                     except DispatchError:
-                        pass  # lease-expiry GC is the backstop requeue
+                        continue
                 detail = f"owner confirmed gone ({worktree})"
                 productive = _reservation_made_progress(res, task)
                 if res.get("worktree_ownership") == "created":
