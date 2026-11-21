@@ -1471,6 +1471,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [remaining fixed-cohort coverage register](roadmap-coverage-final-cohort.md)
+accounts for numeric positions 65-153 using existing research/control receipts
+and explicit gaps. Together with the preceding register, all 153 original
+identities have continuation decisions, not whole technical acceptance.
+The [dated journal](journal/2026/11.21-remaining-fixed-cohort-coverage.md)
+records actual #13874 delivery and the distinction between 151 open cohort
+identities, two already counted departures and thirteen later identities.
+Current historical-assignment deltas and all six integration gates remain open.
+
 The [next outside-wave coverage slice](journal/2026/11.21-outside-wave-coverage-continuation.md)
 accounts for numeric positions 33-64 of the existing finite 153-identity lane.
 The [coverage register](roadmap-coverage-reconciliation.md#next-32-receipt-and-gap-decisions)
