@@ -15,7 +15,8 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import (
     no_window_kwargs as _no_window_kwargs,
@@ -30,6 +31,11 @@ from .install_paths import (
     scheduled_task_name,
     systemd_unit_name,
 )
+
+if TYPE_CHECKING:
+    from .client import BridgeClient
+    from .models import PhasedTimeouts
+    from .render import StreamRenderer
 
 no_window_kwargs = _no_window_kwargs
 spawn_daemon = _spawn_daemon
@@ -57,7 +63,7 @@ def _exit_bridge_outage(exc: Exception) -> None:
     sys.exit(1)
 
 
-def _connection_identity(client, session_id: str) -> dict[str, Any]:
+def _connection_identity(client: BridgeClient, session_id: str) -> dict[str, Any]:
     ident: dict[str, Any] = {"session_id": session_id}
     try:
         s = client.get_session(session_id)
@@ -128,7 +134,7 @@ def _age_str(iso: str | None) -> str:
     return f"{secs // 3600}h{(secs % 3600) // 60}m"
 
 
-def _liveness_line(s: dict) -> str | None:
+def _liveness_line(s: dict[str, Any]) -> str | None:
     liveness = s.get("liveness")
     if not liveness:
         return None
@@ -139,10 +145,10 @@ def _liveness_line(s: dict) -> str | None:
         return f"STALLED - no output for {out_age} (channel alive)"
     if liveness == "disconnected":
         return "DISCONNECTED - transport down"
-    return liveness
+    return cast(str, liveness)
 
 
-def _get_client(*, ensure: bool = True, require_available: bool = False):
+def _get_client(*, ensure: bool = True, require_available: bool = False) -> BridgeClient:
     from .client import BridgeClient, BridgeClientError, BridgeConnectionError
 
     if ensure and _ensure_daemon() is False and require_available:
@@ -262,11 +268,11 @@ def _sender_repo() -> str | None:
 def _caller_id_for(args: argparse.Namespace) -> str | None:
     explicit = getattr(args, "caller", None)
     if explicit:
-        return explicit
+        return cast(str, explicit)
     return _get_caller_id()
 
 
-def _phased_timeouts():
+def _phased_timeouts() -> PhasedTimeouts:
     from .models import PhasedTimeouts
 
     try:
@@ -295,7 +301,7 @@ def _startup_request_timeout(*, resume: bool = False, fresh_fallback: bool = Fal
     return one_round * rounds
 
 
-def _make_renderer(args: argparse.Namespace):
+def _make_renderer(args: argparse.Namespace) -> StreamRenderer:
     from .render import StreamRenderer
 
     expand = set(getattr(args, "expand", None) or [])
@@ -355,7 +361,6 @@ from .service_process_cli import (  # noqa: F401
     _ensure_daemon,
     _ensure_retired_daemon_exited,
     _force_kill_agent_bridge_tree,
-    _kill_pid,
     _launch_bridge_daemon,
     _pid_from_lock,
     _pid_is_agent_bridge,
@@ -488,6 +493,11 @@ from .venue_cli import (  # noqa: F401
 )
 
 
+from . import service_process_cli as _service_process_cli
+
+_kill_pid = getattr(_service_process_cli, "_kill_pid")
+
+
 class _LazyVersionAction(argparse.Action):
     """Defer ``__version__`` resolution until ``--version`` is actually
     passed, instead of eagerly formatting it into every parser build
@@ -495,14 +505,19 @@ class _LazyVersionAction(argparse.Action):
     front, forcing the ``importlib.metadata`` lookup on every invocation
     regardless of subcommand)."""
 
-    def __init__(self, option_strings, dest=argparse.SUPPRESS,
-                 default=argparse.SUPPRESS, help=None):
+    def __init__(
+        self, option_strings: Sequence[str], dest: str = argparse.SUPPRESS,
+        default: Any = argparse.SUPPRESS, help: str | None = None,
+    ) -> None:
         super().__init__(
             option_strings=option_strings, dest=dest, default=default,
             nargs=0, help=help,
         )
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(
+        self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None, option_string: str | None = None,
+    ) -> None:
         from . import __version__
 
         parser._print_message(f"{parser.prog} {__version__}\n", sys.stdout)
@@ -526,8 +541,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scope project-addressed verbs to REPO instead of the caller's cwd project. For send/create the remote worktree resolve targets REPO; for agents/machines the displayed catalog is filtered to REPO. Injected by the `<repo> <slug>` router.",
     )
     sub = parser.add_subparsers(dest="command")
-    from . import attention_cli, owner_membership_cli, session_observation_cli
+    from . import attention_cli, owner_membership_cli, pending_queue_cli, session_observation_cli
     attention_cli.register_attention_commands(sub)
+    pending_queue_cli.register_commands(sub)
     session_observation_cli.register_commands(sub)
     owner_membership_cli.register_commands(sub)
     register_service_start_commands(sub)

@@ -29,7 +29,7 @@ or an attention response.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs targeting `dev`
 - **Created:** 2026-11-20
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Bridge inspectable delivery decisions](../../../visions/plugins/agent-bridge/README.md#inspectable-delivery-decisions)
 - **Umbrella issue:** #13734
 - **Related effort:** [Bridge Queued Steering](../bridge-queued-steering/README.md)
@@ -167,15 +167,15 @@ not additional operator requirements.
 - [ ] Inspect the selected live state read-only and trace the existing inbox,
   notice, SDK submission and receipt owners; record the actual causal boundary
   and which observations are unavailable.
-- [ ] Review this finite command/diagnosis plan before implementation.
+- [x] Review this finite command/diagnosis plan before implementation.
 
 ### Phase 2 - Implement through the existing owner
 
-- [ ] Add supported outside-session pending-queue inspection with structured
+- [x] Add supported outside-session pending-queue inspection with structured
   stage/identity/coverage/freshness information, existing bounds and truthful
   empty, unavailable, unsupported and uncertain outcomes. Do not expose
   message bodies by default or make an inspection submit/consume work.
-- [ ] Add explicit bounded reconciliation through the existing queue/delivery
+- [x] Add explicit bounded reconciliation through the existing queue/delivery
   owner, preserving original IDs/order, mute, serialization, receipt
   monotonicity and unknown native effects. Do not resend bodies, rewind
   cursors, forge consumption or silently clear uncertainty.
@@ -183,7 +183,7 @@ not additional operator requirements.
   files; preserve supported old/current runtime behavior. Implement distinct
   causal fixes that the diagnosis establishes outside that PR's coverage,
   without further owner contact or coordination notes.
-- [ ] Document the actual command, scope and refusal semantics through its
+- [x] Document the actual command, scope and refusal semantics through its
   existing CLI/service documentation owners.
 
 ### Phase 3 - Deliver and verify
@@ -235,6 +235,35 @@ boundary expansion must advertise supported semantics and retain old-peer
 refusal without inventing a second delivery authority.
 
 ## Journal
+
+### 2026-11-20 - Backend command implementation begun
+
+- The finite plan passed review and merged as #13774 before implementation.
+- Traced the distinct owners: delivery attention observes pending native
+  questions/permissions and mute, while the pending hook observes a local
+  offered-but-not-submitted set. Neither is a backend inbox census. The
+  existing retained ledger separately records offers, started attempts,
+  SDK acceptance and consumption.
+- Added a disjoint metadata-only backend inspection path and bounded original
+  offer preparation through the existing compatible inbox owner. This does
+  not implement a second native sender or clear a receiver-local notice.
+  Running SDK/notice coverage remains explicitly unavailable; live sufficiency
+  still awaits the containing release and authorized rollout.
+- Kept a bounded, expiring diagnostic projection of the existing emitted hook
+  notice separate from backend receipts and the unobservable native SDK queue.
+  An older notice or changed consumer cannot establish a current pending set.
+- The contained command/API and existing delivery-state packet passed 38 tests,
+  including original-offer preparation racing normal polling, unchanged
+  uncertain receipts, mute and strict old-provider refusal. The changed
+  nine-file strict typing cohort passed for both Python 3.10 analysis targets,
+  Linux and Windows; this is not native Windows execution or project admission.
+- Required changed-Python lint, documentation consistency and the installation
+  contract guard passed. Whole-project Bridge typing remains pending under
+  #9807; its broader probe stops at duplicate spike module names. A moving
+  base also selected unrelated files, so the passing changed-code ratchet is
+  explicitly pinned to this implementation's actual base.
+- Source review/CI, merge, containing release, authorized installation and the
+  selected running-state observations remain open.
 
 ### 2026-11-20 - Non-overlapping assignment captured
 
