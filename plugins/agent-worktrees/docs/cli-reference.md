@@ -1107,7 +1107,8 @@ PR whose identity cannot be verified retains its number, available URL and
 unknown publication outcome; reconcile it rather than creating another PR.
 The same receipt rule applies to ordinary fork `create-pr`: a malformed URL
 does not discard a valid number, and an unverified receipt is not claimed
-or automatically recreated.
+or automatically recreated. The command reports failure with the known receipt
+and unknown outcome, not a successful authoritative `pr` handle.
 
 ### Owner rewrite of a private PR branch
 

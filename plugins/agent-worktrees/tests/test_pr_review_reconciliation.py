@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import yaml
 
 from agent_worktrees import config as cfg, tracking
 from agent_worktrees.providers import github
@@ -142,6 +143,49 @@ def test_publication_labels_pin_the_endpoint_and_every_selected_credential_alias
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("use_json", [False, True])
+@pytest.mark.parametrize("unverified", [False, True])
+def test_create_cli_distinguishes_unverified_receipts_from_created_pr_authority(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], use_json: bool, unverified: bool,
+) -> None:
+    from agent_worktrees import __main__ as main
+    from agent_worktrees import finalize_cli, pr_ops
+
+    config, caller, _owner, _workspace = native_source_owners
+    result: dict[str, Any] = {
+        "success": not unverified, "pr_opened": True, "number": 7,
+        "url": "https://forge.example.test/upstream/target/pull/7",
+        "repo": "upstream/target", "provider": config.default_repo.pr.provider,
+        "branch": "pr/topic", "remote": "origin", "base_sha": "b" * 40, "head_sha": "a" * 40,
+        "state": "unknown" if unverified else "open",
+    }
+    if unverified:
+        result.update(
+            publication_state="unknown", pr_identity_verified=False,
+            error="Created PR identity is unverified; reconcile the known receipt before retrying.",
+            pr_open_error="Created PR identity is unverified.",
+        )
+    monkeypatch.setattr(pr_ops, "create_pr", lambda *a, **k: dict(result))
+    args = main.build_parser().parse_args(
+        ["create-pr", caller.worktree_id, "--title", "Fix"] + (["--json"] if use_json else []),
+    )
+    assert finalize_cli.cmd_create_pr(args) == (1 if unverified else 0)
+    captured = capfd.readouterr()
+    if use_json:
+        data = json.loads(captured.out)
+        assert data["number"] == 7
+        if unverified:
+            assert "pr" not in data and data["publication_state"] == "unknown"
+        else:
+            assert data["pr"]["number"] == 7
+    elif unverified:
+        text = (captured.out + captured.err).lower()
+        assert "unverified" in text and "unknown" in text and "#7" in text
+    else:
+        assert "Opened PR #7" in captured.out
+
+
 @pytest.mark.parametrize("state", ["open", "closed"])
 def test_deleted_historical_fork_does_not_hide_a_valid_open_source(
     monkeypatch: pytest.MonkeyPatch, state: str,
@@ -168,8 +212,9 @@ def test_deleted_historical_fork_does_not_hide_a_valid_open_source(
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("owner_changed", [False, True])
 def test_ordinary_creation_retains_unknown_receipt_without_claiming_or_recreating(
-    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch,
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch, owner_changed: bool,
 ) -> None:
     from agent_worktrees import pr_ops, providers
     from agent_worktrees.providers.github_pull_source import CreatedSourceMismatch
@@ -183,14 +228,21 @@ def test_ordinary_creation_retains_unknown_receipt_without_claiming_or_recreatin
     target = caller.prs[0]
     before = list(caller.resources)
     calls: list[PRScope] = []
+    replacement: bytes | None = None
 
     def create(scope: PRScope, **kwargs: Any) -> PullResult:
+        nonlocal replacement
         calls.append(scope)
+        if owner_changed:
+            raw = yaml.safe_load(caller.yaml_path.read_text(encoding="utf-8"))
+            raw["creation_nonce"] = "replacement-incarnation"
+            caller.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+            replacement = caller.yaml_path.read_bytes()
         raise CreatedSourceMismatch(PullResult(number=7, url="https://forge.example.test/upstream/target/pull/7"))
 
     monkeypatch.setattr(providers, "get_provider", lambda *_: SimpleNamespace(create_pull=create))
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
-    for _ in range(2):
+    for _ in range(1 if owner_changed else 2):
         result: dict[str, Any] = {"success": True, "repo": target.repo, "branch": target.branch,
                                   "remote": "origin", "base_sha": "b" * 40}
         pr_ops._open_via_provider(
@@ -199,8 +251,14 @@ def test_ordinary_creation_retains_unknown_receipt_without_claiming_or_recreatin
         )
         assert result["pr_opened"] and result["number"] == 7, result
         assert result["publication_state"] == "unknown" and not result.get("claimed")
+        assert not result["success"] and result["error"] and result["state"] == "unknown"
         current = tracking.load_record(caller.yaml_path)
-        assert current.prs[0].creation["provider_number"] == "7"
+        if owner_changed:
+            assert result.get("pr_receipt_tracking_error"), result
+            assert replacement is not None and caller.yaml_path.read_bytes() == replacement
+            assert current.creation_nonce == "replacement-incarnation"
+        else:
+            assert current.prs[0].creation["provider_number"] == "7"
         assert current.prs[0].number is None and current.prs[0].state == "creating"
         assert current.resources == before
     assert len(calls) == 1
