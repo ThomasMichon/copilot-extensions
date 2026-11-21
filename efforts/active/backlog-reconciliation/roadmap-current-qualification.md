@@ -27,6 +27,13 @@ not any implementation or campaign-wide acceptance.
 
 ## 2026-11-21 selected current force-identity contribution
 
+The [ordinary cleanup refinement](roadmap-selected-force-identity.md#ordinary-cleanup-diagnostic-current-receiving-boundary)
+credits the current Darwin adapter and opt-in diagnostic before selecting the
+default-False caller's missing unconfirmed-descendant outcome. The
+[delivery journal](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+also distinguishes five finite unit-source reports from whole #6237/#1303
+acceptance; it records actual #13928 delivery and the unchanged scheduled census.
+
 The [bounded force-identity proposal](roadmap-selected-force-identity.md)
 reads the entire current #5006 contract before its qualified source/API delta.
 The still-bare force fallback and shared SIGTERM-only primitive require a

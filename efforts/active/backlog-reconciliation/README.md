@@ -410,6 +410,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [cleanup and packet-delivery unit](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+records actual #13928 delivery, the distinct ordinary cleanup diagnostic and
+five bounded source-admission reports. It preserves current native/opt-in
+credits, excluded Git/threaded/lifecycle duties and the unchanged 899-open
+census; no technical completion or new hard edge follows.
+
 The [current force-identity contribution](roadmap-selected-force-identity.md)
 retains #5006's independent keeper lanes and credits delivered birth/caller
 foundations. Its qualified force/API distinction supports a finite proposal,

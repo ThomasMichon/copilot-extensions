@@ -821,12 +821,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13924 merges at `1d33ace36596e1be64e0350d9a6658322689f55a` after
   exact-head Copilot approval and complete required Linux CI with all 6,684
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land the two exact original release-message test objects
+- [x] Qualify and land the two exact original release-message test objects
   under source closure, positive production call coverage and effect auditing,
   retaining all 46 Git/process originals outside the packet. Preserve every
   prior node/hash/target/helper decision and the 300-second limit; require
   strict typing, current-head review and complete Linux source CI. Formatter
   admission is not promotion, native, full-census or whole-flow acceptance.
+  #13927 merges at `76e0a0b850c65fc21ca8c4635ff60467df36113c` after
+  exact-head Copilot approval and complete required Linux CI with all 6,686
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land six original preview cases through four exact test
+  objects and the original isolation fixture. Retain all eleven real-Git-head
+  residuals, unchanged preceding admission/helper/budget gates, exact
+  producer/template inputs, positive per-case production call coverage and
+  zero prohibited effects. Require strict typing, current-head review and
+  complete Linux source CI; this does not qualify an installed preview or
+  native/release/full-census/whole-flow behavior.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

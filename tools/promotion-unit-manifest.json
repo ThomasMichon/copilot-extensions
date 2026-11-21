@@ -3,6 +3,17 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_preview_release_units.py",
+      [
+        "test_build_unknown_plugin_raises",
+        "test_preview_generates_invocation_outputs_before_publication[absent]",
+        "test_preview_generates_invocation_outputs_before_publication[stale]",
+        "test_preview_generates_invocation_outputs_before_publication[conflict]",
+        "test_main_missing_plugin_reports_error",
+        "test_build_refuses_a_retired_directory_pointer"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_promotion_message_units.py",
       [
         "test_promote_message_lists_bumps_and_changefiles",
@@ -8330,6 +8341,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_preview_release_units.py": "868c518cb89a065fe9d0c984892187c3350a24d4216be1289691b2115555c5ee",
+    "tools/test_preview_release.py": "b36e512d6938aa000c1b29e29f5ed26cebfdda1387233198838d6521518c9c0f",
+    "tools/preview_release.py": "8e13ce2c64e4e6b810e97644d1de61a37818eef853d8c8de9b6026dcc6577809",
     "tools/promotion_unit_tests/test_promotion_message_units.py": "8bda810a8c5d55b4d50097c4ddef36865aab67308e33889431957dc618d259cb",
     "tools/test_promote_release.py": "7c53ae3fb3e067b14fafd5337a4b574394e24c784fa6da3dee8e777df1204b60",
     "tools/promotion_unit_tests/test_accumulate_bumps_units.py": "3f28a972c12266bcd2e49c167898bcad76e8f4bd05c6245633e1df8ef5be97d2",
@@ -9391,6 +9405,7 @@
     "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d"
   },
   "coverage_targets": [
+    "tools/preview_release.py",
     "libs/payload-invocation/command_binding.py",
     "tools/check-dependency-age.py",
     "worktree-manager/scripts/picker-snapshot/install.py",
