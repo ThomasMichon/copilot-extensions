@@ -419,10 +419,11 @@ def session_claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> boo
     holds the claim, not a child) so :func:`load_claim_child_record` resolves
     it correctly with no special-casing. Corroborated against a real PID
     check for that SPECIFIC session id (:func:`sessions.session_id_is_live`,
-    factored out of ``worktree_session_lock_state``'s "any session" check) --
-    never inferred from staleness/timestamps alone -- so a crashed/killed
-    session cannot wedge finalize forever, matching the invariant every other
-    claim kind already gets from this sweep. Cross-machine (or otherwise
+    factored out of ``worktree_session_lock_state``'s "any session" check),
+    so a crashed/killed session cannot wedge finalize forever, matching the
+    invariant every other claim kind already gets from this sweep. A live
+    process whose activity lease expired (:mod:`session_lease`) is also gone:
+    the claim is a lease, so an idle pane cannot pin it. Cross-machine (or otherwise
     unresolvable) is ``None`` (spare); the record itself being gone entirely
     is a stronger, positive "gone" signal than any per-session PID check.
     """
@@ -434,8 +435,12 @@ def session_claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> boo
         return None
     if record is None:
         return True
-    from . import sessions
-    return not sessions.session_id_is_live(record, parsed.session)
+    from . import session_lease, sessions
+    if not sessions.session_id_is_live(record, parsed.session):
+        return True
+    # A live but idle session holds only a lease; expiry releases it without
+    # sessionEnd. Missing activity evidence stays live (False), never gone.
+    return session_lease.lease_expired(record, claim) is True
 
 
 def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:

@@ -273,7 +273,9 @@ def _apply_session_register_locked(args: dict[str, Any]) -> dict[str, Any]:
                 kind="session",
                 ref=self_session_ref,
                 created_at=event_at,
-                state=obligations.ACTIVE,
+                # Finalize latches: a resumed or continuing session records
+                # activity at rest instead of reopening the finalized record.
+                state=obligations.AT_REST if record.status == "finalized" else obligations.ACTIVE,
                 note="live Copilot session",
             ),
             save=False,

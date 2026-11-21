@@ -4352,6 +4352,18 @@ class TestAddResourceClaim:
         assert rec.completed_at is None
         assert rec.last_finalized_at == "2026-09-01T00:00:00"
 
+    def test_session_self_claim_does_not_reopen_finalized_owner(self, tmp_path: Path):
+        """Continued conversation is not new work: the finalize latch holds."""
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+
+        add_resource_claim(
+            rec, ResourceClaim(kind="session", ref="host/repo/wt-A#sess-1"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
+
     def test_reactivating_a_released_claim_reopens_finalized_owner(
         self, tmp_path: Path,
     ):

@@ -505,7 +505,7 @@ def _claim_reopens_owner(
     record: tracking.WorktreeRecord,
     claim: ResourceClaim,
 ) -> bool:
-    if not claim.is_live:
+    if not claim.is_live or claim.kind == "session":  # finalize latch: own session never reopens
         return False
     existing = next((existing for existing in record.resources if existing.ref == claim.ref), None)
     if existing is None:

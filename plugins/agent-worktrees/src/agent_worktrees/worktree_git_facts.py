@@ -20,7 +20,7 @@ def apply_tracking_override(
     record: tracking.WorktreeRecord,
     info: git_ops.WorktreeStateInfo,
 ) -> git_ops.WorktreeStateInfo:
-    """Honor finalized tracking, except for missing, live, or dirty checkouts.
+    """Honor finalized tracking, except for missing, live, dirty, or moved checkouts.
 
     Squash-merged commits and zero-commit finalizations can look WIP/UNUSED
     to git alone. New uncommitted work must never be masked as prune-able:
@@ -34,9 +34,37 @@ def apply_tracking_override(
             info.state != git_ops.WorktreeState.DIRTY
             and info.dirty == 0
             and info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE)
+            and not _moved_past_finalized_head(record, info)
         ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
+
+
+def _moved_past_finalized_head(
+    record: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+) -> bool:
+    """Finalize latches at its recorded HEAD; new unlanded commits reopen it.
+
+    Only a ``finalized`` record carrying a ``finalized_checkout`` stamp is
+    judged (legacy records keep the old masking). HEAD equal to the stamp, or
+    with nothing ahead of upstream (landed or fast-forwarded content), stays
+    latched. An unreadable HEAD keeps the pre-latch behavior.
+    """
+    stamp = record.finalized_checkout
+    if record.status != "finalized" or not isinstance(stamp, dict):
+        return False
+    recorded = stamp.get("head")
+    if not isinstance(recorded, str) or not recorded or info.ahead <= 0:
+        return False
+    try:
+        head = git_ops.git(
+            "rev-parse", "HEAD", cwd=record.worktree_path, timeout=5,
+            isolated_repository=True,
+        ).stdout.strip()
+    except Exception:
+        return False
+    return bool(head) and head != recorded
 
 
 def compute(

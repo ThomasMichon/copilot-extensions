@@ -677,6 +677,9 @@ def _build_active_paths(
         for rec in records:
             if rec.worktree_path and rec.worktree_id in bridge_live:
                 active.add(sessions._normalize_path(rec.worktree_path))
+    from . import session_lease
+    session_lease.drop_expired_finalized(records, session_ctx.active_sessions, active, keep=lambda rec: (
+        _hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)))
     return active
 
 
