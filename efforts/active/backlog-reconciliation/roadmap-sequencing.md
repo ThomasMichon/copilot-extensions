@@ -204,6 +204,15 @@ queue.
 
 ## A bounded contribution's exit
 
+The [selected startup wave](roadmap-startup-wave.md) supplies a concrete
+execution proposal for two later source-qualified contracts: keyed `no_pair`
+composition and explicit New launch prerequisites. Its two local
+provider/selection-to-consumer precedences leave the contributions parallel,
+retain original homes and source/release/selected-consumer exits, and do not
+alter the 145 historical relationship rows. Pending author PRs and unknown
+whole-source/home acceptance remain observation or admission gaps, not
+implementation assignments.
+
 Select one residual with its existing owner, original acceptance and applicable
 permission; consult the appropriate wave record and exact prerequisite row.
 Then require evidence for that contribution, not a whole-harness readiness
