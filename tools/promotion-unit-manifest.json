@@ -3,6 +3,48 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_dependency_attribution_graph.py",
+      [
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[sibling-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[sibling-payload]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[unowned-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[unowned-payload]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[foreign-payload-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[foreign-payload-payload]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[wrong-identity-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[wrong-identity-payload]"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_dependency_cli_refusals.py",
+      [
+        "test_probe_preserves_arguments_environment_and_cwd",
+        "test_effective_remote_override_is_not_an_index_exemption",
+        "test_flat_index_is_not_a_registry_timestamp_proof",
+        "test_environment_resolver_closure_bypass_refused[dependency_mode-Direct]",
+        "test_environment_resolver_closure_bypass_refused[build_isolation-Shared]",
+        "test_parserless_bootstrap_fails_explicitly_without_installing",
+        "test_payload_metadata_alone_without_owner_provenance_grants_no_roots",
+        "test_registry_only_cli_does_not_discover_product_roots",
+        "test_default_cli_retains_product_attribution",
+        "test_deployment_cli_does_not_duplicate_caller_immutable_options[options0]",
+        "test_deployment_cli_does_not_duplicate_caller_immutable_options[options1]",
+        "test_deployment_cli_does_not_duplicate_caller_immutable_options[options2]",
+        "test_deployment_cli_refuses_live_or_shared_code_before_resolver[arguments0]",
+        "test_deployment_cli_refuses_live_or_shared_code_before_resolver[arguments1]",
+        "test_deployment_cli_refuses_live_or_shared_code_before_resolver[arguments2]",
+        "test_deployment_cli_refuses_live_or_shared_code_before_resolver[arguments3]",
+        "test_deployment_cli_refuses_live_or_shared_code_before_resolver[arguments4]",
+        "test_registry_only_cannot_grant_explicit_source_roots",
+        "test_registry_only_refuses_local_sources_before_uv[direct]",
+        "test_registry_only_refuses_local_sources_before_uv[editable]",
+        "test_registry_only_refuses_local_sources_before_uv[requirements]",
+        "test_registry_only_refuses_local_sources_before_uv[nested-requirements]",
+        "test_registry_only_refuses_local_sources_before_uv[project]",
+        "test_registry_only_refuses_local_sources_before_uv[configured]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_dependency_cutoff_controls.py",
       [
         "test_exact_floor_and_reinstall",
@@ -8781,6 +8823,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_dependency_attribution_graph.py": "f92810f50bc6bd0e1d37b2e0923d38b8811d6bdf2a468b5782188c9b023572b3",
+    "tools/promotion_unit_tests/test_dependency_cli_refusals.py": "749eee348eef9d3048b62dc85ac39f7e8f600c233e49267af63d6d30131cca82",
     "tools/promotion_unit_tests/test_dependency_cutoff_controls.py": "60e49a49eac1db555407a1eb1fb6601f3209bdfe3a6760c4e16c3318af26bd14",
     "tools/promotion_unit_tests/test_dependency_retention_controls.py": "feebb728fd835274c4007a8984d38609e4b1b982d8f8141c422a91803e37dcfb",
     "tools/promotion_unit_tests/test_uv_executable_fixture_units.py": "9c468cf8f61ded25396bdebd6185cb89ffef3c3ee3e9335e8a937b08c6dc10c5",
