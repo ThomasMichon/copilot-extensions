@@ -1165,6 +1165,9 @@ def _open_via_provider(
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
     from . import providers, pr_publication_labels
     from .providers import attribution as attr
+    from . import pr_unverified_creation
+    if pr_unverified_creation.pending(result, target_pr):
+        return
 
     machine = record.execution_machine if record else ""
     session = ""
@@ -1271,10 +1274,8 @@ def _open_via_provider(
         token = providers.account_token_for_slug(scope.repo, prcfg)
         pull = provider.create_pull(scope, token=token)
     except (providers.ProviderError, OSError) as e:
-        # A provider failure (or a spawn error that slipped past run_cli) must
-        # degrade to a recorded pr_open_error, never crash create-pr -- the
-        # feature branch is already pushed, so the agent can open the PR
-        # manually from the surfaced error.
+        if pr_unverified_creation.retain(result, config, record, target_pr, e):
+            return
         result["pr_open_error"] = str(e)
         result["pr_opened"] = False
         result["draft"] = False  # nothing opened -> no draft was created

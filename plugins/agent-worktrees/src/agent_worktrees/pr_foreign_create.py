@@ -216,6 +216,14 @@ def create_foreign_pr_from_branch(
         elif source_repository:
             return {"error": "--source-repo is only supported for GitHub foreign creation.",
                     "repo": target_repo}
+        if source_workspace:
+            from . import pr_foreign_checks
+            assert expected_head is not None
+            evidence = pr_foreign_checks.qualify(
+                source_workspace, target_repo, local_branch, expected_head,
+                repo_cfg, provider, token=token, source_repository=source_repo,
+            )
+            scope.expected_head_sha = evidence["head"]
         reused = False
         pull = None
         if not new:
@@ -273,17 +281,6 @@ def create_foreign_pr_from_branch(
                     ),
                     "repo": target_repo,
                 }
-            if source_workspace:
-                from . import pr_foreign_checks
-                assert expected_head is not None
-                try:
-                    evidence = pr_foreign_checks.qualify(
-                        source_workspace, target_repo, local_branch, expected_head,
-                        repo_cfg, provider, token=token, source_repository=source_repo,
-                    )
-                    scope.expected_head_sha = evidence["head"]
-                except ValueError as exc:
-                    return {"error": str(exc), "repo": target_repo}
             creation_attempted = True
             pull = provider.create_pull(scope, token=token)
     except (providers.ProviderError, OSError, ValueError) as e:
