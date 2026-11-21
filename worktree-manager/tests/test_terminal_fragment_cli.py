@@ -15,11 +15,14 @@ pre-Step-5 behaviour exactly (``mirrored: false``, no plan computed).
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from worktree_manager.__main__ import main
 
 
-def _make_home(tmp_path, *, machine="book2"):
+def _make_home(tmp_path: Path, *, machine: str = "book2") -> Path:
     awt = tmp_path / ".agent-worktrees"
     awt.mkdir(parents=True)
     anchor = tmp_path / "checkout"
@@ -37,20 +40,25 @@ def _make_home(tmp_path, *, machine="book2"):
         f"    anchor: \"{str(anchor).replace(chr(92), chr(92) * 2)}\"\n",
         encoding="utf-8",
     )
-    (awt / "repos.yaml").write_text("schema_version: 1\nrepos: {}\n", encoding="utf-8")
+    (awt / "repos.yaml").write_text(
+        "schema_version: 1\nrepos:\n  myproj:\n    class: worktree\n    agent: true\n",
+        encoding="utf-8",
+    )
     proj_cfg = tmp_path / ".myproj"
     proj_cfg.mkdir()
     (proj_cfg / "config.yaml").write_text(f"machine: {machine}\n", encoding="utf-8")
     return tmp_path
 
 
-def _run(monkeypatch, tmp_path, args):
+def _run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, args: list[str]) -> int:
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     return main(args)
 
 
-def test_terminal_fragment_json_default(monkeypatch, tmp_path, capsys):
+def test_terminal_fragment_json_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     assert _run(monkeypatch, tmp_path, ["terminal-fragment", "myproj"]) == 0
     out = capsys.readouterr().out
@@ -59,7 +67,9 @@ def test_terminal_fragment_json_default(monkeypatch, tmp_path, capsys):
     assert fragment["schemes"][0]["name"] == "Example Research"
 
 
-def test_terminal_fragment_explain(monkeypatch, tmp_path, capsys):
+def test_terminal_fragment_explain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     assert _run(monkeypatch, tmp_path, ["terminal-fragment", "myproj", "--explain"]) == 0
     out = capsys.readouterr().out
@@ -67,13 +77,17 @@ def test_terminal_fragment_explain(monkeypatch, tmp_path, capsys):
     assert "unmanaged -> default column" in out
 
 
-def test_terminal_fragment_requires_resolvable_machine(monkeypatch, tmp_path, capsys):
+def test_terminal_fragment_requires_resolvable_machine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     tmp_path.joinpath(".agent-worktrees").mkdir()
     assert _run(monkeypatch, tmp_path, ["terminal-fragment", "no-such-project"]) == 2
     assert "could not resolve" in capsys.readouterr().out
 
 
-def test_profiles_get_reports_default_column(monkeypatch, tmp_path, capsys):
+def test_profiles_get_reports_default_column(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     assert _run(monkeypatch, tmp_path, ["profiles", "myproj", "get", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -82,7 +96,9 @@ def test_profiles_get_reports_default_column(monkeypatch, tmp_path, capsys):
     assert any(t["kind"] == "agent" for t in payload["targets"])
 
 
-def test_profiles_apply_then_get_roundtrips(monkeypatch, tmp_path, capsys):
+def test_profiles_apply_then_get_roundtrips(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     rc = _run(monkeypatch, tmp_path, [
         "profiles", "myproj", "apply",
@@ -102,7 +118,9 @@ def test_profiles_apply_then_get_roundtrips(monkeypatch, tmp_path, capsys):
     assert any(t["machine"] == "other" for t in fetched["targets"])
 
 
-def test_profiles_apply_requires_set(monkeypatch, tmp_path, capsys):
+def test_profiles_apply_requires_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     rc = _run(monkeypatch, tmp_path, ["profiles", "myproj", "apply"])
     assert rc == 2
@@ -113,7 +131,9 @@ def test_profiles_apply_requires_set(monkeypatch, tmp_path, capsys):
 # Phase 3e Step 5 -- deploy/mirror, dry-run by default, --live opts in.
 # ---------------------------------------------------------------------------
 
-def test_terminal_fragment_deploy_defaults_to_dry_run(monkeypatch, tmp_path, capsys):
+def test_terminal_fragment_deploy_defaults_to_dry_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
     rc = _run(monkeypatch, tmp_path, ["terminal-fragment", "myproj", "--deploy"])
@@ -123,7 +143,9 @@ def test_terminal_fragment_deploy_defaults_to_dry_run(monkeypatch, tmp_path, cap
     assert not (tmp_path / "localappdata" / "Microsoft" / "Windows Terminal").exists()
 
 
-def test_terminal_fragment_deploy_live_writes_fragment(monkeypatch, tmp_path, capsys):
+def test_terminal_fragment_deploy_live_writes_fragment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     local = tmp_path / "localappdata"
     monkeypatch.setenv("LOCALAPPDATA", str(local))
@@ -137,7 +159,9 @@ def test_terminal_fragment_deploy_live_writes_fragment(monkeypatch, tmp_path, ca
     assert any(p["name"] == "Myproj" for p in fragment["profiles"])
 
 
-def test_profiles_apply_mirror_without_live_is_a_preview(monkeypatch, tmp_path, capsys):
+def test_profiles_apply_mirror_without_live_is_a_preview(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     local = tmp_path / "localappdata"
     monkeypatch.setenv("LOCALAPPDATA", str(local))
@@ -153,7 +177,9 @@ def test_profiles_apply_mirror_without_live_is_a_preview(monkeypatch, tmp_path, 
     assert not (local / "Microsoft" / "Windows Terminal").exists()
 
 
-def test_profiles_apply_mirror_live_writes_fragment(monkeypatch, tmp_path, capsys):
+def test_profiles_apply_mirror_live_writes_fragment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     _make_home(tmp_path)
     local = tmp_path / "localappdata"
     monkeypatch.setenv("LOCALAPPDATA", str(local))

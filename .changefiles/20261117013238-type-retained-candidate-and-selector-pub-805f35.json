@@ -1,0 +1,9 @@
+{
+  "comment": "Type retained candidate and selector publication regression fixtures",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

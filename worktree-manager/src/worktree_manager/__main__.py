@@ -37,11 +37,17 @@ import json
 import math
 import os
 import subprocess
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from .catalog import Prereq
+    from .engine_client import LaunchPlan, Worktree
+    from .picker_app import LaunchRequest
     from .runtime_source import ResolvedSource
+    from .update_events import UpdateRun
 
 from . import __version__
 from .catalog import load_catalog
@@ -76,7 +82,7 @@ def _print_intro() -> None:
     print_startup_status()
 
 
-def _fmt_prereq(pr) -> str:
+def _fmt_prereq(pr: Prereq) -> str:
     bits = [pr.name]
     if pr.min:
         bits.append(f">={pr.min}")
@@ -258,8 +264,8 @@ def _cmd_projects(rest: list[str]) -> int:
             print("usage: worktree-manager projects --json", file=sys.stderr)
             return 2
         try:
-            projects = build_project_ownership()
-            print(json.dumps({"version": 1, "projects": [asdict(p) for p in projects]}))
+            ownership = build_project_ownership()
+            print(json.dumps({"version": 1, "projects": [asdict(p) for p in ownership]}))
         except (OSError, ValueError, TypeError, AttributeError) as error:
             print(json.dumps({"version": 1, "state": "unavailable", "error": str(error)}))
             return 1
@@ -341,7 +347,9 @@ def _cmd_repos(rest: list[str]) -> int:
     return 0
 
 
-def _parse_flagged_args(rest: list[str], *, flags_with_value: set[str], flags_bool: set[str]):
+def _parse_flagged_args(
+    rest: list[str], *, flags_with_value: set[str], flags_bool: set[str],
+) -> tuple[list[str], dict[str, str | bool | None]]:
     """Minimal flag parser shared by ``terminal-fragment``/``profiles``.
 
     Returns ``(positionals, values)`` where ``values`` maps each
@@ -349,7 +357,7 @@ def _parse_flagged_args(rest: list[str], *, flags_with_value: set[str], flags_bo
     ``None``) and each ``flags_bool`` name to ``True``/``False``.
     """
     positionals: list[str] = []
-    values: dict[str, object] = {f: None for f in flags_with_value}
+    values: dict[str, str | bool | None] = {f: None for f in flags_with_value}
     values.update({f: False for f in flags_bool})
     i = 0
     while i < len(rest):
@@ -410,7 +418,7 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
         flags_bool={"explain", "doctor", "migrate_selections", "deploy", "live"},
     )
     project = positionals[0] if positionals else None
-    machine = _resolve_terminal_fragment_machine(project, values["machine"])
+    machine = _resolve_terminal_fragment_machine(project, cast(str | None, values["machine"]))
     if not machine:
         print("error: could not resolve this machine's key -- pass --machine <key> "
               "or a <project> whose config.yaml records one")
@@ -457,7 +465,7 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
     return 0
 
 
-def _terminal_fragment_doctor(tf, machine: str, project: str | None) -> int:
+def _terminal_fragment_doctor(tf: ModuleType, machine: str, project: str | None) -> int:
     """Read-only report of Windows Terminal state drift vs. the fragment.
 
     Ported from agent-worktrees' own ``_terminal_fragment_doctor``. Never
@@ -517,7 +525,9 @@ def _terminal_fragment_doctor(tf, machine: str, project: str | None) -> int:
     return 0
 
 
-def _terminal_fragment_deploy(tf, machine: str, project: str | None, *, live: bool) -> int:
+def _terminal_fragment_deploy(
+    tf: ModuleType, machine: str, project: str | None, *, live: bool,
+) -> int:
     """``terminal-fragment <project> --deploy [--live]`` -- print the deploy
     plan; only ``--live`` actually writes anything.
 
@@ -584,7 +594,7 @@ def _cmd_profiles(rest: list[str]) -> int:
         flag_rest, flags_with_value={"machine", "set"},
         flags_bool={"json", "mirror", "live"},
     )
-    machine = _resolve_terminal_fragment_machine(project, values["machine"])
+    machine = _resolve_terminal_fragment_machine(project, cast(str | None, values["machine"]))
     if not machine:
         print("error: could not resolve this machine's key -- pass --machine <key> "
               "or a <project> whose config.yaml records one")
@@ -622,7 +632,7 @@ def _cmd_profiles(rest: list[str]) -> int:
         print(f"error: unknown action {action!r} (expected 'get' or 'apply')")
         return 2
 
-    raw = values["set"]
+    raw = cast(str | None, values["set"])
     if raw is None:
         print("error: profiles apply requires --set '<json-array>'")
         return 2
@@ -674,7 +684,7 @@ def _cmd_profiles(rest: list[str]) -> int:
     return 0
 
 
-def _worktree_row(w) -> str:
+def _worktree_row(w: Worktree) -> str:
     """One rendered worktree line: id4 · machine · repo · STATE sync · title."""
     state = (w.state or "-").upper()
     dirty = " DIRTY" if w.dirty and "DIRTY" not in state else ""
@@ -1009,14 +1019,17 @@ def _cmd_picker(rest: list[str]) -> int:
     return 0
 
 
-def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
+def _remote_machine_env(decision: Mapping[str, Any]) -> tuple[str | None, str | None]:
     """(machine, environment) for a remote decision, else (None, None) for local."""
     if decision.get("is_local", True):
         return None, None
-    return decision.get("machine") or None, decision.get("env") or None
+    return cast(str | None, decision.get("machine") or None), cast(str | None, decision.get("env") or None)
 
 
-def _run_production_picker(project: str, *, initial_decision=None, front_door=False) -> int:
+def _run_production_picker(
+    project: str, *, initial_decision: Mapping[str, Any] | None = None,
+    front_door: bool = False,
+) -> int:
     """Run the transplanted production UX and act on its launch decision.
 
     ``"refresh"``/``"manager-update"`` apply an update and loop back to
@@ -1028,8 +1041,9 @@ def _run_production_picker(project: str, *, initial_decision=None, front_door=Fa
     )
 
     from . import picker_app
-    from .production_picker import runner
+    from .production_picker import context as picker_context, runner
 
+    decision: Mapping[str, Any] | None
     while True:
         # Boost only around the interactive TUI session itself, never across
         # a launch dispatch below: a dispatched decision (resume/restore/...)
@@ -1041,7 +1055,9 @@ def _run_production_picker(project: str, *, initial_decision=None, front_door=Fa
         else:
             raise_current_process_priority()
             try:
-                decision = runner.run(project, **({"front_door": True} if front_door else {}))
+                decision = cast(Mapping[str, Any] | None, (
+                    runner.run(project, front_door=True) if front_door else runner.run(project)
+                ))
             except runner.ProjectSelectionError as error:
                 print(f"error: {error}")
                 return 2
@@ -1053,7 +1069,7 @@ def _run_production_picker(project: str, *, initial_decision=None, front_door=Fa
         if not decision:
             return 0
         if not project:
-            project = str(decision.get("project") or runner.context.project())
+            project = str(decision.get("project") or picker_context.project())
         action = str(decision.get("action") or "")
         options = decision.get("options")
         opts = dict(options) if isinstance(options, dict) else {}
@@ -1205,7 +1221,7 @@ def _restore_production_picker_session(
                     "a machine and environment."
                 )
                 return launch_observations.refuse(attempt_id)
-            argv = data_ssh.remote_op_argv(
+            argv = cast(Callable[[str, str, str, str], list[str] | None], data_ssh.remote_op_argv)(
                 machine,
                 environment,
                 "remux",
@@ -1214,7 +1230,7 @@ def _restore_production_picker_session(
             if argv is None:
                 print("error: the selected source does not support session restore.")
                 return launch_observations.refuse(attempt_id)
-            result = maintenance._ssh_json(argv)
+            result = cast(Callable[[list[str]], dict[str, Any]], maintenance._ssh_json)(argv)
     except LaunchAttemptError:
         print("error: could not retain restore observation; no further restore step was authorized.")
         return 1
@@ -1258,10 +1274,12 @@ def _restore_production_picker_session(
     return _run_launch(request)
 
 
-def _resolve_for(req, *, defer_projections: bool = False) -> "tuple[object | None, int]":
+def _resolve_for(
+    req: LaunchRequest, *, defer_projections: bool = False,
+) -> tuple[LaunchPlan | None, int]:
     """Resolve through the engine process boundary and retain Manager evidence."""
     from .launch_observations import resolve_for
-    return resolve_for(req, defer_projections=defer_projections)
+    return cast(tuple["LaunchPlan | None", int], resolve_for(req, defer_projections=defer_projections))
 
 
 def _is_windows() -> bool:
@@ -1269,12 +1287,12 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def _run_launch(req) -> int:
+def _run_launch(req: LaunchRequest) -> int:
     from .launch_observations import run_attempt
     return run_attempt(getattr(req, "attempt_id", None), lambda: _execute_launch(req))
 
 
-def _execute_launch(req) -> int:
+def _execute_launch(req: LaunchRequest) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
     _terminal_launch.validate()
     from . import engine_client, launch_observations, launcher
@@ -1287,7 +1305,7 @@ def _execute_launch(req) -> int:
 
     use_ahp = bool(getattr(req, "ahp", False))
     script = (
-        _relocated_launch_script()
+        cast(Callable[[], Path | None], _relocated_launch_script)()
         if getattr(req, "machine", None) is None and not use_ahp else None
     )
     backend_checked = script is not None
@@ -1315,8 +1333,9 @@ def _execute_launch(req) -> int:
         if use_ahp:
             print("error: AHP is supported only for same-machine launches")
             return launch_observations.refuse(attempt_id)
+        remote_plan = plan
         return launch_observations.launch(
-            attempt_id, lambda: launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+            attempt_id, lambda: launcher.launch(remote_plan, want_mux=not getattr(req, "no_mux", False)),
         )
     if not backend_checked:
         try:
@@ -1500,13 +1519,23 @@ def _extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
 
 def _cmd_update(rest: list[str]) -> int:
     """Delegate update admission while retaining the existing CLI callback seam."""
+    from .automatic_updates_cli import guarded_update
+
+    return guarded_update(rest, _cmd_update_recorded)
+
+
+def _cmd_update_recorded(
+    rest: list[str], trigger: str = "manual", automatic_trigger: str | None = None,
+) -> int:
     from .update_orchestration import execute_update
 
-    return execute_update(rest, _cmd_update_steps)
+    return execute_update(
+        rest, _cmd_update_steps, trigger=trigger, automatic_trigger=automatic_trigger,
+    )
 
 
 def _cmd_update_steps(
-    rest: list[str], run, *, fresh_manager: bool = False,
+    rest: list[str], run: UpdateRun, *, fresh_manager: bool = False,
     environment: dict[str, str] | None = None,
     runtime_source: ResolvedSource | None = None,
 ) -> int:
@@ -1588,6 +1617,9 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "update":
         from .update_driver_cli import cmd_update_request
         return cmd_update_request(args[1:])
+    if args and args[0] == "automatic-updates":
+        from .automatic_updates_cli import main as automatic_updates_main
+        return automatic_updates_main(args[1:])
     if args and args[0] == "--project":
         if len(args) != 2 or not args[1]:
             print("error: --project needs exactly one project name")

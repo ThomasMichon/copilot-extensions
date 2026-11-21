@@ -1,0 +1,9 @@
+{
+  "comment": "Type complete Manager update fixtures and bind synthetic local-source delivery tests to the current installed activation owner.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

@@ -21,8 +21,8 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 sys.dont_write_bytecode = True
 SELECTORS = ("current-version", "last-known-good", "payload-dir", "payload-origin",
@@ -157,7 +157,9 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             arrays[key] = tuple(validate(value) for value in record[key])
             if len(set(arrays[key])) != len(arrays[key]):
                 raise UninstallRefused("Duplicate finite uninstall entry")
-        profile = Profile(**arrays, **{key: record[key] for key in (
+        profile = Profile(arrays["root_entries"], arrays["bin_entries"],
+                          arrays["script_entries"], arrays["local_bin_entries"],
+                          **{key: record[key] for key in (
             "module", "guard_module", "guard_function", "nested_engine",
         ) if key in record})
     else:
@@ -171,7 +173,9 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
         }
         if plugin not in extras:
             raise UninstallRefused("This plugin requires an explicit trusted uninstall profile")
-        helpers = RESOLVERS
+        helpers: tuple[str, ...] = RESOLVERS
+        if plugin == "agent-vault":
+            helpers += ("vault-service.sh",)
         if plugin == "agent-dispatch":
             helpers += ("runtime-gate.ps1", "runtime-gate.sh",
                         "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")
@@ -179,7 +183,7 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             helpers += ("killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
                         "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                         "emit-mesh-pointer.ps1", "emit-mesh-pointer.sh")
-        commands = (plugin, plugin + ".ps1", plugin + ".cmd")
+        commands: tuple[str, ...] = (plugin, plugin + ".ps1", plugin + ".cmd")
         if plugin == "agent-dispatch":
             commands += ("agent-dispatch-board", "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
         if plugin == "agent-vault":
@@ -442,18 +446,18 @@ def _local_bindings(payload: Path, root: Path, profile: Profile, *, home: Path |
             record = deployment if deployment is not None else json.loads(
                 manifest.read_text(encoding="utf-8-sig"))
             source = record.get("source", {})
-            path = source.get("path") if isinstance(source, dict) else None
-            if path is not None:
-                if not isinstance(path, str) or not path:
+            publisher_path = source.get("path") if isinstance(source, dict) else None
+            if publisher_path is not None:
+                if not isinstance(publisher_path, str) or not publisher_path:
                     raise UninstallRefused("Invalid installed command publisher")
-                publisher = Path(path)
+                publisher = Path(publisher_path)
     return directory, commands.owned_local_names(
         payload, root, profile.module, contents, publisher_root=publisher, home=home,
     )
 
 
 def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ...]) -> list[tuple[Path, tuple[str, ...]]]:
-    operations = []
+    operations: list[tuple[Path, tuple[str, ...]]] = []
     for target in targets:
         current = target.root
         operations.extend(((current / "versions", target.versions),
@@ -547,10 +551,11 @@ def _consumer_closure(shell: str, operations: list[tuple[Path, tuple[str, ...]]]
 
 
 def _run(payload: Path, command: list[str], *, timeout: float = 45) -> str:
+    result: subprocess.CompletedProcess[str]
     if os.name == "nt":
         result = subprocess.run(  # noqa: S603 - finite, validated native argument vector
             command, capture_output=True, text=True, timeout=timeout, check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
         )
     else:
         runner = _load(_dependency(payload, "installer_engine_process.py"))
@@ -564,8 +569,8 @@ def _run(payload: Path, command: list[str], *, timeout: float = 45) -> str:
 def _argv(command: str, image: str) -> list[str]:
     if os.name == "nt":
         import ctypes
-        shell = ctypes.WinDLL("shell32", use_last_error=True)
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        shell = getattr(ctypes, "WinDLL")("shell32", use_last_error=True)
+        kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         shell.CommandLineToArgvW.argtypes = (ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int))
         shell.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
         kernel.LocalFree.argtypes = (ctypes.c_void_p,)
@@ -573,7 +578,7 @@ def _argv(command: str, image: str) -> list[str]:
         count = ctypes.c_int()
         values = shell.CommandLineToArgvW(command, ctypes.byref(count))
         if not values:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
         try:
             arguments = [values[index] for index in range(count.value)]
         finally:
@@ -651,15 +656,15 @@ def _transaction_helper(row: dict[str, Any], payload: Path, root: Path,
 def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
                            plugin: str) -> tuple[list[Path], set[int]]:
     helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
-    return helper.lifecycle_controllers(
+    return cast(tuple[list[Path], set[int]], helper.lifecycle_controllers(
         rows, payload, root, plugin, load=_load, authority_payload=_authority_payload,
         arguments=_arguments, parent=_parent, dependency=_dependency,
-    )
+    ))
 
 
-def _controller_proofs(payload: Path):
+def _controller_proofs(payload: Path) -> SimpleNamespace:
     helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
-    return helper.bind(plain=_plain, run=_run, error=UninstallRefused)
+    return cast(SimpleNamespace, helper.bind(plain=_plain, run=_run, error=UninstallRefused))
 
 
 def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
@@ -761,7 +766,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                 row = {"pid": int(directory.name), "ppid": parent, "image": image,
                        "command": command, "argv": argv, "created": created}
                 if descendants:
-                    children = set()
+                    children: set[int] = set()
                     try:
                         for task in (directory / "task").iterdir():
                             try:
@@ -784,7 +789,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
         raise UninstallRefused("Runtime removal requires native Windows, Linux /proc or Darwin process inspection")
     if not any(row["pid"] == os.getpid() for row in rows):
         raise UninstallRefused("Process inventory did not include its inspector")
-    return rows
+    return cast(list[dict[str, Any]], rows)
 
 
 def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile: Profile, *,
@@ -976,9 +981,9 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
 
 def main(argv: Sequence[str] | None = None) -> int:
     helper = _load(Path(__file__).with_name("installer_engine_uninstall_controllers.py"))
-    return helper.run_cli(
+    return cast(int, helper.run_cli(
         argv, description=__doc__, cleanup=cleanup, root_check=_root, load=_load, error=UninstallRefused,
-    )
+    ))
 
 
 if __name__ == "__main__":

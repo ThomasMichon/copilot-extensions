@@ -74,6 +74,22 @@ def admits_argv(argv: list[str], root: str | Path, plugin: str) -> bool:
     tail = argv[1:]
     while tail and tail[0] in {"-I", "-B", "-S"}:
         tail = tail[1:]
+    if len(tail) >= 2 and tail[0] == "-X" and tail[1].startswith("pycache_prefix="):
+        prefix = _posix(tail[1].removeprefix("pycache_prefix="))
+        installation = hashlib.sha256(str(_posix(root)).encode("utf-8")).hexdigest()
+        legacy = (
+            prefix.parent == _posix(root) / "cache" / "python"
+            and re.fullmatch(r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", prefix.name)
+        )
+        shared = (
+            prefix.name == "bytecode"
+            and re.fullmatch(r"installed-[0-9a-f]{64}", prefix.parent.name)
+            and prefix.parent.parent.name == installation
+            and prefix.parent.parent.parent.parts[-3:] == ("copilot-extensions", "python", "v1")
+        )
+        if not prefix.is_absolute() or ".." in prefix.parts or not (legacy or shared):
+            return False
+        tail = tail[2:]
     if len(tail) < 2 or tail[0] != "-m" or tail[1] != plugin.replace("-", "_") + (
         ".service" if plugin == "agent-vault" else ""
     ):
@@ -82,6 +98,12 @@ def admits_argv(argv: list[str], root: str | Path, plugin: str) -> bool:
     if plugin == "agent-bridge":
         return tail in (["start"], ["service", "start", "--direct"])
     if plugin == "agent-vault":
+        if "--configuration-root" in tail:
+            if (tail.count("--configuration-root") != 1 or len(tail) < 2
+                    or tail[-2] != "--configuration-root"
+                    or not _posix(tail[-1]).is_absolute() or ".." in _posix(tail[-1]).parts):
+                return False
+            tail = tail[:-2]
         allowed = {"--foreground", "--persistent", "--handoff-stdin"}
         return len(set(tail)) == len(tail) and all(value in allowed for value in tail)
     if plugin == "agent-dispatch":
@@ -101,6 +123,13 @@ def admits_argv(argv: list[str], root: str | Path, plugin: str) -> bool:
 
 def _owns_unit_argv(argv: list[str], unit: Path, root: str | Path, plugin: str) -> bool:
     owned = admits_argv(argv, root, plugin)
+    if plugin == "agent-vault" and len(argv) == 9:
+        owned = owned or (
+            argv[0] == "/bin/sh" and _posix(argv[1]) == _posix(root) / "bin" / "vault-service.sh"
+            and _posix(argv[3]) == _posix(root)
+            and argv[4:7] == ["--foreground", "--persistent", "--handoff-stdin"]
+            and admits_argv([argv[2], "-B", "-m", "agent_vault.service", *argv[4:]], root, plugin)
+        )
     if plugin == "agent-dispatch":
         coordinator = (
             bool(argv) and _runtime_path(argv[0], root, {"python", "python3"})
@@ -257,7 +286,7 @@ def capture(root: Path, plugin: str, pid_file: Path | None = None) -> dict[str, 
     rows = _inventory()
     selected = {}
     for pid, (identity, _, arguments) in rows.items():
-        if identity.uid != os.getuid():
+        if identity.uid != getattr(os, "getuid")():
             continue
         argv = list(arguments)
         if admits_argv(argv, root, plugin):
@@ -300,7 +329,7 @@ def stop(root: Path, plugin: str, admission: dict[str, Any], timeout: float = 15
                 or not re.fullmatch(r"[0-9a-f]{64}", value["command_digest"])):
             raise StopRefused("Malformed original process identity")
         identity = Identity(**value)
-        if identity.uid != os.getuid():
+        if identity.uid != getattr(os, "getuid")():
             raise StopRefused("Original admission does not own this daemon")
         records.append(identity)
     if len({value.pid for value in records}) != len(records):

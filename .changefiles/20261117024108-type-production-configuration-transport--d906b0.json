@@ -1,0 +1,9 @@
+{
+  "comment": "Type production configuration transport tests using real Textual widgets, explicit pending-picker interfaces and a hash-locked checker profile; retain manual engine observer delegation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

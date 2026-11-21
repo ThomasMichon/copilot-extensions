@@ -17,6 +17,8 @@ from __future__ import annotations
 import importlib.util
 import shutil
 from pathlib import Path
+from types import ModuleType
+from collections.abc import Callable
 
 import pytest
 
@@ -25,12 +27,13 @@ from worktree_manager import _trusted_pointer_materializer as trusted
 _TOOLS_MATERIALIZE_MAIN = Path(__file__).resolve().parents[2] / "tools" / "materialize_main.py"
 
 
-def _load_canonical_materialize_main():
+def _load_canonical_materialize_main() -> ModuleType:
     if not _TOOLS_MATERIALIZE_MAIN.is_file():
         pytest.skip("tools/materialize_main.py not reachable (not a full monorepo checkout)")
     spec = importlib.util.spec_from_file_location(
         "materialize_main_parity_reference", _TOOLS_MATERIALIZE_MAIN
     )
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -38,13 +41,15 @@ def _load_canonical_materialize_main():
 
 
 @pytest.fixture()
-def canonical():
+def canonical() -> ModuleType:
     return _load_canonical_materialize_main()
 
 
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("editable", [False, True])
-def test_declared_flat_reference_materialization_parity(tmp_path, canonical, nested, editable):
+def test_declared_flat_reference_materialization_parity(
+    tmp_path: Path, canonical: ModuleType, nested: bool, editable: bool,
+) -> None:
     for name, materializer in (("trusted", trusted), ("canonical", canonical)):
         root = tmp_path / name / "repo"
         flat = root / "libs" / "flat"
@@ -138,7 +143,9 @@ def _outcome(log: list[str]) -> str:
     return f"skip: {line.split(': ', 1)[1].strip()}"
 
 
-def _run_uv_editable_scenario(tmp_path: Path, canonical_mod, *, name: str, build) -> tuple[str, str]:
+def _run_uv_editable_scenario(
+    tmp_path: Path, canonical_mod: ModuleType, *, name: str, build: Callable[[Path], object],
+) -> tuple[str, str]:
     trusted_root = tmp_path / f"{name}-trusted" / "repo"
     build(trusted_root)
     trusted_dest = tmp_path / f"{name}-trusted" / "slot"
@@ -172,8 +179,9 @@ def _run_uv_editable_scenario(tmp_path: Path, canonical_mod, *, name: str, build
     ("services/dispatch", "agent-dispatch", "../plugins/other-plugin", False),
 ])
 def test_standalone_dispatch_package_reference_is_explicit(
-    tmp_path, canonical, implementation, consumer_name, dependency, path, allowed,
-):
+    tmp_path: Path, canonical: ModuleType, implementation: str, consumer_name: str,
+    dependency: str, path: str, allowed: bool,
+) -> None:
     module = canonical if implementation == "canonical" else trusted
     root = tmp_path / "repo"
     plugin = root / "plugins" / path.rsplit("/", 1)[-1]
@@ -184,6 +192,11 @@ def test_standalone_dispatch_package_reference_is_explicit(
         '[tool.uv.sources]\nagent-zdd = { path = "../../libs/zdd", editable = true }\n'
     )
     _canonical_lib(root, "zdd", version="0.1.0", content="VALUE = 2\n")
+    shutil.copytree(
+        _TOOLS_MATERIALIZE_MAIN.parents[1] / "libs" / "installer-engine",
+        root / "libs" / "installer-engine",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     consumer = root / consumer_name
     consumer.mkdir(parents=True)
     (consumer / "pyproject.toml").write_text(
@@ -212,7 +225,9 @@ def test_standalone_dispatch_package_reference_is_explicit(
 
 @pytest.mark.parametrize("implementation", ["canonical", "trusted"])
 @pytest.mark.parametrize("linked", ["source", "plugins"])
-def test_standalone_dispatch_reference_refuses_symlinked_ancestors(tmp_path, canonical, implementation, linked):
+def test_standalone_dispatch_reference_refuses_symlinked_ancestors(
+    tmp_path: Path, canonical: ModuleType, implementation: str, linked: str,
+) -> None:
     module = canonical if implementation == "canonical" else trusted
     root = tmp_path / "repo"
     plugin = root / "plugins/agent-dispatch"
@@ -238,7 +253,9 @@ def test_standalone_dispatch_reference_refuses_symlinked_ancestors(tmp_path, can
     assert not (dest / "libs").exists()
 
 
-def test_uv_editable_parity_expands_a_clean_reference_from_canonical(tmp_path: Path, canonical):
+def test_uv_editable_parity_expands_a_clean_reference_from_canonical(
+    tmp_path: Path, canonical: ModuleType,
+) -> None:
     def build(root: Path) -> None:
         _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
         _uv_editable_consumer(root, lib="zdd", raw_path="../libs/zdd")
@@ -249,7 +266,9 @@ def test_uv_editable_parity_expands_a_clean_reference_from_canonical(tmp_path: P
     assert got_trusted == got_canonical == "ok"
 
 
-def test_uv_editable_parity_refuses_a_reference_missing_editable_true(tmp_path: Path, canonical):
+def test_uv_editable_parity_refuses_a_reference_missing_editable_true(
+    tmp_path: Path, canonical: ModuleType,
+) -> None:
     def build(root: Path) -> None:
         _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
         consumer_dir = root / "consumer"
@@ -268,7 +287,9 @@ def test_uv_editable_parity_refuses_a_reference_missing_editable_true(tmp_path: 
     assert "missing editable" in got_trusted
 
 
-def test_uv_editable_parity_refuses_a_symlinked_canonical(tmp_path: Path, canonical):
+def test_uv_editable_parity_refuses_a_symlinked_canonical(
+    tmp_path: Path, canonical: ModuleType,
+) -> None:
     def build(root: Path) -> None:
         canon = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
         outside = root.parent / "uv-outside-target"
@@ -284,7 +305,9 @@ def test_uv_editable_parity_refuses_a_symlinked_canonical(tmp_path: Path, canoni
     assert got_trusted == got_canonical == "skip: is a symlink"
 
 
-def test_uv_editable_parity_fixes_up_a_nested_canonical_dependency(tmp_path: Path, canonical):
+def test_uv_editable_parity_fixes_up_a_nested_canonical_dependency(
+    tmp_path: Path, canonical: ModuleType,
+) -> None:
     def _build(root: Path) -> Path:
         procutil = _canonical_lib(root, "agent-procutil", version="0.2.0-dev1", content="real = True\n")
         egg = procutil / "src" / "agent_procutil.egg-info"
@@ -343,7 +366,9 @@ def test_uv_editable_parity_fixes_up_a_nested_canonical_dependency(tmp_path: Pat
         assert not (consumer / "libs/agent-procutil/.venv").exists()
 
 
-def test_lib_tree_matches_parity_ignores_only_relative_build_dir_names(tmp_path: Path, canonical):
+def test_lib_tree_matches_parity_ignores_only_relative_build_dir_names(
+    tmp_path: Path, canonical: ModuleType,
+) -> None:
     build_root = tmp_path / "build" / "checkout"
     a = _canonical_lib(build_root, "zdd", version="0.1.0", content="x = 1\n")
     b = build_root / "libs" / "zdd-b"
@@ -364,7 +389,9 @@ def test_lib_tree_matches_parity_ignores_only_relative_build_dir_names(tmp_path:
     assert canonical.uer.lib_tree_matches(a, c) is True
 
 
-def test_uv_editable_parity_ignores_egg_info_in_comparison_and_materialization(tmp_path: Path, canonical):
+def test_uv_editable_parity_ignores_egg_info_in_comparison_and_materialization(
+    tmp_path: Path, canonical: ModuleType,
+) -> None:
     def build(root: Path) -> None:
         canon = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
         egg = canon / "src" / "agent_zdd.egg-info"

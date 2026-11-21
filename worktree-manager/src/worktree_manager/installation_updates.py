@@ -6,12 +6,16 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Sequence
-from typing import Any, cast
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, cast
 
 from update_telemetry import redact
 
-from . import __version__, engine_client
+from . import __version__, engine_client as engine_client
+
+if TYPE_CHECKING:
+    from .production_picker.picker_tui.configuration_form import ConfigurationResultScreen
+    from .production_picker.picker_tui.pivots import RegisteredPivot
 
 PIVOT_NAME = "manager-installation-updates"
 ENGINE_INVENTORY_TIMEOUT = 8
@@ -37,7 +41,7 @@ def _restore_engine_context(pointer: str) -> None:
     os.environ["COPILOT_EXTENSIONS_CONTEXT"] = pointer
 
 
-def _engine_rows(payload: Any) -> list[dict[str, Any]]:
+def _engine_rows(payload: object) -> list[dict[str, Any]]:
     from .maintenance_policy import CONTROL_ID
     from .bootstrap_policy import CONTROL_ID as BOOTSTRAP_CONTROL_ID
 
@@ -57,10 +61,12 @@ def _engine_rows(payload: Any) -> list[dict[str, Any]]:
         ):
             raise ValueError("Selected engine returned invalid or duplicate component facts; refresh after repairing its inventory")
         seen.add(row["id"])
-    return rows
+    return cast(list[dict[str, Any]], rows)
 
 
-def run_targeted_update(rest: list[str]) -> int:
+def run_targeted_update(
+    rest: list[str], *, trigger: str = "manual", automatic_trigger: str | None = None,
+) -> int:
     from .update_driver_cli import parse_options
     from .update_events import UpdateRun
 
@@ -71,8 +77,10 @@ def run_targeted_update(rest: list[str]) -> int:
     parser.add_argument("--project")
     parser.add_argument("--no-manager", action="store_true")
     parser.add_argument("--no-project-controller", action="store_true")
+    parser.add_argument("--no-anchor-sync", action="store_true")
+    parser.add_argument("--no-prune-pivots", action="store_true")
     args = parser.parse_args(forwarded)
-    run = UpdateRun()
+    run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
     try:
         if args.target == "worktree-manager":
             from .self_install import self_update
@@ -94,10 +102,14 @@ def run_targeted_update(rest: list[str]) -> int:
         if not preflight_runtime_source(run):
             return run.finish(1)
         # Strictly parsed by the selected engine; an older provider rejects it.
-        rc = engine_client.run_engine_passthrough(
-            args.project, ["update", "--no-manager", "--target", args.target,
-                           *(["--auto"] if args.auto else [])],
-        )
+        engine_args = ["update", "--no-manager", "--target", args.target]
+        if args.auto:
+            engine_args.append("--auto")
+        if args.no_anchor_sync:
+            engine_args.append("--no-anchor-sync")
+        if args.no_prune_pivots:
+            engine_args.append("--no-prune-pivots")
+        rc = engine_client.run_engine_passthrough(args.project, engine_args)
         return run.finish(rc)
     except (engine_client.EngineError, OSError, ValueError) as error:
         run.say(str(error), state="failed")
@@ -109,6 +121,7 @@ def run_targeted_update(rest: list[str]) -> int:
 
 def _operations(*, engine_source: str | None = None) -> dict[str, dict[str, Any]]:
     import update_driver
+    from .agent_plugin_runtime import resolve_installed_plugin_invocation
     from .update_driver_cli import _source_key
 
     operations: dict[str, dict[str, Any]] = {}
@@ -126,17 +139,34 @@ def _operations(*, engine_source: str | None = None) -> dict[str, dict[str, Any]
         )
         if expected_source is None or request.spec.source != expected_source:
             continue
-        state, error = request.state, request.error
+        if request.spec.backend == "manager" and target != "worktree-manager":
+            try:
+                if not engine_source:
+                    raise ValueError("selected engine did not report its installation identity")
+                invocation = resolve_installed_plugin_invocation(
+                    "agent-worktrees", environment=dict(request.spec.context),
+                )
+                if invocation is None:
+                    raise ValueError("saved engine installation context is unavailable or invalid")
+                if str(invocation[1].resolve()) != engine_source:
+                    continue
+            except (OSError, ValueError, RuntimeError) as error:
+                operations[target] = {
+                    "state": "unknown", "request_id": request.id,
+                    "error": f"Durable update attribution unavailable: {error}; refresh after repairing its saved context",
+                }
+                continue
+        state, operation_error = request.state, request.error
         if state == "completed":
             state = "succeeded" if request.exit_code == 0 else "failed"
         elif state == "pending":
             if getattr(request, "unresolved", False):
                 state = "blocked"
-                error = error or "pending execution evidence requires recovery"
+                operation_error = operation_error or "pending execution evidence requires recovery"
             else:
                 state = "queued"
         operations[target] = {
-            "state": state, "request_id": request.id, "error": error,
+            "state": state, "request_id": request.id, "error": operation_error,
             "exit_code": request.exit_code, "log": str(request.log_path),
         }
         if request.log_path.is_file():
@@ -221,8 +251,8 @@ def inventory() -> dict[str, Any]:
         findings.append(history_error)
     for row in rows:
         if row["id"] in authored:
-            item = authored[row["id"]]
-            row["kind"] = f"{getattr(item, 'kind', 'component')} / {row['kind']}"
+            catalog_item = authored[row["id"]]
+            row["kind"] = f"{getattr(catalog_item, 'kind', 'component')} / {row['kind']}"
         if row["id"] != "worktree-manager":
             from .runtime_source_config import configured_source, require_marketplace
 
@@ -260,7 +290,7 @@ def inventory() -> dict[str, Any]:
     }}
 
 
-def request_result_screen(label: str) -> Any:
+def request_result_screen(label: str) -> ConfigurationResultScreen:
     from .production_picker.picker_tui.configuration_form import ConfigurationResultScreen
 
     class InstallationRequestScreen(ConfigurationResultScreen):
@@ -268,10 +298,10 @@ def request_result_screen(label: str) -> Any:
         success_message = "Request accepted. Installation is not yet complete; return and refresh for owner progress."
         failure_message = "Submission failed. Inspect the owner receipt below before retrying."
 
-    return cast(Any, InstallationRequestScreen)(label)
+    return cast(Callable[[str], ConfigurationResultScreen], InstallationRequestScreen)(label)
 
 
-def diagnostic_result_screen(label: str) -> Any:
+def diagnostic_result_screen(label: str) -> ConfigurationResultScreen:
     from .production_picker.picker_tui.configuration_form import ConfigurationResultScreen
 
     class DiagnosticResultScreen(ConfigurationResultScreen):
@@ -279,7 +309,7 @@ def diagnostic_result_screen(label: str) -> Any:
         success_message = "Diagnostics completed. Read the report for scope and limitations; no setup or repair was applied."
         failure_message = "Diagnostics failed or are incomplete. Read the report before retrying; no repair was applied."
 
-    return cast(Any, DiagnosticResultScreen)(label)
+    return cast(Callable[[str], ConfigurationResultScreen], DiagnosticResultScreen)(label)
 
 
 def submit(target: str) -> int:
@@ -348,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     return submit(args.target)
 
 
-def configuration_pivot() -> Any:
+def configuration_pivot() -> RegisteredPivot:
     from .maintenance_policy import CONTROL_ID
     from .bootstrap_policy import CONTROL_ID as BOOTSTRAP_CONTROL_ID
     from .production_picker.picker_tui.pivots import parse_manifest

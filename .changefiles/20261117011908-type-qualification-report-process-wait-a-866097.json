@@ -1,0 +1,9 @@
+{
+  "comment": "Type qualification report, process-wait and Win32 adapter contracts without changing execution admission or acceptance criteria.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

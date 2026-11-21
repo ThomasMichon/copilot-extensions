@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import argparse
 import json
 import os
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import cast
 
 import update_driver
 
@@ -21,12 +23,12 @@ def main() -> int:
     package.__path__ = [str(source.parent)]
     config = ModuleType(f"{package.__name__}.config")
     installer = ModuleType(f"{package.__name__}.update_cli")
-    installer.update_options = SimpleNamespace(
+    installer.__dict__["update_options"] = SimpleNamespace(
         validate_auth_flags=lambda args: None,
         RUNTIME_BACKEND_INTENT_CAPABILITY="project-runtime-backend-intent/v1",
     )
 
-    def execute(args):
+    def execute(args: argparse.Namespace) -> int:
         requests = update_driver.status()
         assert len(requests) == 1 and requests[0].state == "running"
         request = requests[0]
@@ -35,18 +37,24 @@ def main() -> int:
                 "phase": "engine", "pid": os.getpid(),
                 "context_keys": sorted(dict(request.spec.context)),
                 "no_manager": args.no_manager,
+                "unattended": os.environ.get("CE_UPDATE_UNATTENDED"),
+                "session_credentials_present": any(os.environ.get(key) for key in (
+                    "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+                )),
+                "askpass_requirement": os.environ.get("SSH_ASKPASS_REQUIRE"),
             }) + "\n")
         return 6
 
-    installer.cmd_update = execute
+    installer.__dict__["cmd_update"] = execute
     for module in (package, config, installer):
         sys.modules[module.__name__] = module
     spec = importlib.util.spec_from_file_location(
         f"{package.__name__}.update_driver_cli", source,
     )
+    assert spec is not None and spec.loader is not None
     adapter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(adapter)
-    return adapter.cmd_update_request(SimpleNamespace(no_manager=True))
+    return cast(int, adapter.cmd_update_request(SimpleNamespace(no_manager=True)))
 
 
 if __name__ == "__main__":

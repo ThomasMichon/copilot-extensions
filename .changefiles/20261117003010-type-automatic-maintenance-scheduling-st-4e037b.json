@@ -1,0 +1,13 @@
+{
+  "comment": "Type automatic-maintenance scheduling, startup, telemetry and update-orchestration boundaries while retaining native lazy bindings, legacy retirement evidence and canonical materializer fixture inputs",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

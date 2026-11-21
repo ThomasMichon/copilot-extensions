@@ -1,6 +1,9 @@
 """Successful waited updates publish their physical Python, including no-op installs."""
 
+from __future__ import annotations
+
 from contextlib import nullcontext
+import importlib
 from types import SimpleNamespace
 import sys
 from pathlib import Path
@@ -47,7 +50,8 @@ def public_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleName
     monkeypatch.setattr(path_update, "_notify_environment_change", notify)
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(sys, "_base_executable", str(base))
-    monkeypatch.setattr(path_update, "os", SimpleNamespace(environ={"PATH": original}))
+    state.environment = {"PATH": original}
+    monkeypatch.setattr(path_update, "os", SimpleNamespace(environ=state.environment))
     state.base, state.original, state.registry = base, original, registry
     state.expected = f"{base.parent};{older};{base.parent}\\;{unrelated}"
     return state
@@ -260,9 +264,9 @@ def test_bootstrap_observer_owns_publication_only_after_successful_wait(
     mode: str, exit_code: int, publication_fails: bool,
 ) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
-    import bootstrap_inputs
-    import bootstrap_update
-    import runtime_install
+    bootstrap_inputs = importlib.import_module("bootstrap_inputs")
+    bootstrap_update = importlib.import_module("bootstrap_update")
+    runtime_install = importlib.import_module("runtime_install")
     from update_driver import core
     from update_driver.authority import UpdateAuthority
 

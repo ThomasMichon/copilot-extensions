@@ -1,4 +1,4 @@
-"""Publish the running interpreter's physical prerequisite after a waited update."""
+"""Publish the physical Python prerequisite after an explicit waited update."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _notify_environment_change() -> None:
     import ctypes
     from ctypes import wintypes
 
-    send = ctypes.WinDLL("user32", use_last_error=True).SendMessageTimeoutW
+    send = getattr(ctypes, "WinDLL")("user32", use_last_error=True).SendMessageTimeoutW
     send.argtypes = [
         wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPCWSTR,
         wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t),
@@ -34,7 +34,9 @@ def _notify_environment_change() -> None:
 
 
 def _publish_user_path(directory: str) -> bool:
-    import winreg
+    import importlib
+
+    winreg = importlib.import_module("winreg")
 
     with config_write_lock(Path.home() / ".agent-worktrees" / "python-user-path"), winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE,
@@ -60,8 +62,8 @@ def _publish_user_path(directory: str) -> bool:
 
 def finish_update(command: list[str], exit_code: int) -> int:
     excluded = {
-        "--auto", "--detach", "--auth-report", "--request-status", "--recovery-status",
-        "--recover-after-restart", "--recover-for-repair", "--target", "--help", "-h",
+        "--auto", "--automatic-trigger", "--detach", "--auth-report", "--request-status",
+        "--recovery-status", "--recover-after-restart", "--recover-for-repair", "--target", "--help", "-h",
     }
     if (
         exit_code != 0 or sys.platform != "win32" or command[:1] != ["update"]
@@ -69,7 +71,7 @@ def finish_update(command: list[str], exit_code: int) -> int:
     ):
         return exit_code
     try:
-        python = Path(sys._base_executable).resolve(strict=True)
+        python = Path(getattr(sys, "_base_executable")).resolve(strict=True)
         if (
             sys.version_info < (3, 11) or python.name.casefold() != "python.exe"
             or not python.is_file() or "windowsapps" in {part.casefold() for part in python.parts}

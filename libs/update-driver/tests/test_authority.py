@@ -14,41 +14,32 @@ from update_driver import (
     InterruptedError,
     RequestSpec,
     StateError,
-    TrustedRunner,
+    Transaction,
+    UpdateAuthority,
     change_authority,
     current_authority,
     drain,
     enqueue,
     status,
 )
+from update_driver._invocation import spec_document
+from authority_fixtures import (
+    commit_legacy_submission as _commit_legacy_submission,
+    interrupt_first_authority_switch as _interrupt_first_authority_switch,
+    prevalidated_legacy_submission as _prevalidated_legacy_submission,
+    record_requests,
+    receipt as _receipt,
+    runner as _runner,
+    submit as _submit,
+)
 
 
 @pytest.fixture
-def area(tmp_path_factory):
+def area(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("authority").resolve()
 
 
-def _runner(area):
-    import sys
-
-    return TrustedRunner((sys.executable, "-c", "pass"), str(area))
-
-
-def _submit(area, *, authority="", project="", context=(), backend="engine"):
-    return enqueue(
-        RequestSpec(backend, project=project, context=context, authority=authority),
-        runner=_runner(area), root=area / "state",
-    )
-
-
-def _receipt(area, marketplace, plugin):
-    path = area / "marketplaces" / marketplace / "plugins" / plugin / "install.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{}", encoding="utf-8")
-    return path
-
-
-def test_absent_authority_keeps_standalone_behavior_without_creating_state(area):
+def test_absent_authority_keeps_standalone_behavior_without_creating_state(area: Path) -> None:
     root = area / "state"
     assert current_authority(root=root).mode == "standalone"
     assert current_authority(root=root).configured is False
@@ -59,18 +50,70 @@ def test_absent_authority_keeps_standalone_behavior_without_creating_state(area)
         _submit(area, authority="project", project="example")
 
 
-def test_switch_waits_for_active_writer_and_enforces_both_modes(area):
+def test_authority_read_during_first_queue_publication_is_read_only(area: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from update_driver import core
+
+    root = area / "state"
+    publishing, release = threading.Event(), threading.Event()
+    errors: list[BaseException] = []
+    validate = core._validate_db
+
+    def pause_publication(db: sqlite3.Connection) -> None:
+        validate(db)
+        if db.in_transaction and threading.current_thread() is writer:
+            publishing.set()
+            assert release.wait(5)
+
+    def submit() -> None:
+        try:
+            _submit(area)
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(core, "_validate_db", pause_publication)
+    writer = threading.Thread(target=submit)
+    writer.start()
+    try:
+        assert publishing.wait(5)
+        before = (root / "queue.sqlite3").read_bytes()
+        assert current_authority(root=root).configured is False
+        assert (root / "queue.sqlite3").read_bytes() == before
+    finally:
+        release.set()
+        writer.join(10)
+    assert not writer.is_alive() and not errors
+    assert current_authority(root=root).configured is False
+
+
+@pytest.mark.parametrize("state", ["guard", "table", "version"])
+def test_pristine_authority_read_never_accepts_incomplete_or_foreign_state(area: Path, state: str) -> None:
+    from update_driver.authority import ensure_guard
+
+    root = area / "state"
+    root.mkdir()
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        if state == "guard":
+            ensure_guard(root)
+        elif state == "table":
+            db.execute("CREATE TABLE unrelated (id INTEGER)")
+        else:
+            db.execute("PRAGMA user_version=99")
+    with pytest.raises(StateError):
+        current_authority(root=root)
+
+
+def test_switch_waits_for_active_writer_and_enforces_both_modes(area: Path) -> None:
     root = area / "state"
     request = _submit(area)
     entered, release, switched = threading.Event(), threading.Event(), threading.Event()
-    errors = []
+    errors: list[BaseException] = []
 
-    def execute(_transaction):
+    def execute(_transaction: Transaction) -> int:
         entered.set()
         assert release.wait(5)
         return 0
 
-    def switch():
+    def switch() -> None:
         try:
             change_authority(
                 "project", project="example", root=root, timeout=5,
@@ -112,7 +155,7 @@ def test_switch_waits_for_active_writer_and_enforces_both_modes(area):
     assert _submit(area, authority="standalone").state == "pending"
 
 
-def test_switch_preserves_pending_and_uncertain_work(area):
+def test_switch_preserves_pending_and_uncertain_work(area: Path) -> None:
     root = area / "state"
     request = _submit(area)
     with pytest.raises(StateError, match="pending"):
@@ -122,7 +165,7 @@ def test_switch_preserves_pending_and_uncertain_work(area):
         )
     assert status(request.id, root=root).state == "pending"
 
-    def interrupted(_transaction):
+    def interrupted(_transaction: Transaction) -> int:
         raise RuntimeError("unsettled")
 
     with pytest.raises(RuntimeError, match="unsettled"):
@@ -135,7 +178,7 @@ def test_switch_preserves_pending_and_uncertain_work(area):
     assert current_authority(root=root).mode == "standalone"
 
 
-def test_first_protocol_upgrade_waits_for_unrelated_legacy_requests(area):
+def test_first_protocol_upgrade_waits_for_unrelated_legacy_requests(area: Path) -> None:
     root = area / "state"
     request = _submit(area, backend="other-product")
     with pytest.raises(StateError, match="pending"):
@@ -149,7 +192,7 @@ def test_first_protocol_upgrade_waits_for_unrelated_legacy_requests(area):
     ).mode == "project"
 
 
-def test_authority_is_scoped_and_unrelated_requests_remain_independent(area):
+def test_authority_is_scoped_and_unrelated_requests_remain_independent(area: Path) -> None:
     root = area / "state"
     first = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     sibling = _receipt(area, "first--0123456789abcdef", "agent-bridge")
@@ -172,7 +215,7 @@ def test_authority_is_scoped_and_unrelated_requests_remain_independent(area):
     ).mode == "standalone"
 
 
-def test_invalid_cell_context_fails_closed_after_authority_is_configured(area):
+def test_invalid_cell_context_fails_closed_after_authority_is_configured(area: Path) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -182,7 +225,7 @@ def test_invalid_cell_context_fails_closed_after_authority_is_configured(area):
         _submit(area, context=(("COPILOT_EXTENSIONS_CONTEXT", str(area / "missing.json")),))
 
 
-def test_removed_queued_receipt_is_refused_without_stalling_unrelated_work(area):
+def test_removed_queued_receipt_is_refused_without_stalling_unrelated_work(area: Path) -> None:
     root = area / "state"
     receipt = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     change_authority("project", project="example", context=str(receipt), root=root, timeout=1,
@@ -193,15 +236,16 @@ def test_removed_queued_receipt_is_refused_without_stalling_unrelated_work(area)
     )
     unrelated = _submit(area, backend="other-product")
     receipt.unlink()
-    ran = []
-    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    ran: list[str] = []
+    assert drain(root=root, executor=record_requests(ran)) == 0
     assert status(stale.id, root=root).exit_code == 3
-    assert "context" in status(stale.id, root=root).error
+    error = status(stale.id, root=root).error
+    assert error is not None and "context" in error
     assert status(unrelated.id, root=root).exit_code == 0
     assert ran == [unrelated.id]
 
 
-def test_missing_global_guard_still_fences_all_pending_work(area):
+def test_missing_global_guard_still_fences_all_pending_work(area: Path) -> None:
     root = area / "state"
     change_authority("standalone", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -213,13 +257,13 @@ def test_missing_global_guard_still_fences_all_pending_work(area):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows short-name aliases")
-def test_short_receipt_path_selects_the_same_cell(area):
+def test_short_receipt_path_selects_the_same_cell(area: Path) -> None:
     import ctypes
 
     root = area / "state"
     receipt = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     buffer = ctypes.create_unicode_buffer(32768)
-    if not ctypes.windll.kernel32.GetShortPathNameW(str(receipt), buffer, len(buffer)):
+    if not getattr(ctypes, "windll").kernel32.GetShortPathNameW(str(receipt), buffer, len(buffer)):
         pytest.skip("volume does not provide short-name aliases")
     alias = Path(buffer.value)
     if alias == receipt:
@@ -229,7 +273,7 @@ def test_short_receipt_path_selects_the_same_cell(area):
     assert current_authority(root=root, context=str(alias)).mode == "project"
 
 
-def test_linked_receipt_does_not_select_an_authority(area):
+def test_linked_receipt_does_not_select_an_authority(area: Path) -> None:
     root = area / "state"
     receipt = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     link = receipt.parent.parent / "agent-bridge" / "install.json"
@@ -244,7 +288,7 @@ def test_linked_receipt_does_not_select_an_authority(area):
         current_authority(root=root, context=str(link))
 
 
-def test_invalid_or_unqualified_authority_never_changes_mode(area):
+def test_invalid_or_unqualified_authority_never_changes_mode(area: Path) -> None:
     root = area / "state"
     with pytest.raises(StateError, match="capabilit"):
         change_authority("project", project="example", root=root, timeout=1,
@@ -260,7 +304,7 @@ def test_invalid_or_unqualified_authority_never_changes_mode(area):
         _submit(area)
 
 
-def test_configured_standalone_fences_legacy_queue_protocol(area):
+def test_configured_standalone_fences_legacy_queue_protocol(area: Path) -> None:
     root = area / "state"
     change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
     with sqlite3.connect(root / "queue.sqlite3") as db:
@@ -272,7 +316,7 @@ def test_configured_standalone_fences_legacy_queue_protocol(area):
     assert native.state == "pending" and native.spec.authority == "standalone"
 
 
-def test_existing_project_selection_requires_verified_protocol_upgrade(area):
+def test_existing_project_selection_requires_verified_protocol_upgrade(area: Path) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -280,10 +324,15 @@ def test_existing_project_selection_requires_verified_protocol_upgrade(area):
         db.execute("PRAGMA user_version=5")
     with pytest.raises(StateError, match="protocol upgrade"):
         current_authority(root=root)
-    calls = []
+    calls: list[float] = []
+
+    def probe(deadline: float) -> bool:
+        calls.append(deadline)
+        return True
+
     selected = change_authority(
         "project", project="example", root=root, timeout=1,
-        verify_capabilities=lambda deadline: calls.append(deadline) or True,
+        verify_capabilities=probe,
     )
     assert selected.mode == "project" and len(calls) == 1
     with sqlite3.connect(root / "queue.sqlite3") as db:
@@ -292,7 +341,7 @@ def test_existing_project_selection_requires_verified_protocol_upgrade(area):
 
 
 @pytest.mark.parametrize("previous", ["standalone", "project"])
-def test_interrupted_v5_upgrade_preserves_the_previous_selection(area, monkeypatch, previous):
+def test_interrupted_v5_upgrade_preserves_the_previous_selection(area: Path, monkeypatch: pytest.MonkeyPatch, previous: str) -> None:
     from update_driver import authority
 
     root = area / "state"
@@ -302,8 +351,8 @@ def test_interrupted_v5_upgrade_preserves_the_previous_selection(area, monkeypat
         db.execute("PRAGMA user_version=5")
     write = authority.write
 
-    def interrupt(*args):
-        write(*args)
+    def interrupt(db: sqlite3.Connection, context: str, selected: UpdateAuthority) -> None:
+        write(db, context, selected)
         raise RuntimeError("interrupted during upgrade")
 
     with monkeypatch.context() as change:
@@ -325,7 +374,7 @@ def test_interrupted_v5_upgrade_preserves_the_previous_selection(area, monkeypat
     ).mode == "project"
 
 
-def test_protocol_upgrade_waits_for_pending_standalone_native_writer(area):
+def test_protocol_upgrade_waits_for_pending_standalone_native_writer(area: Path) -> None:
     root = area / "state"
     change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
     with sqlite3.connect(root / "queue.sqlite3") as db:
@@ -343,7 +392,7 @@ def test_protocol_upgrade_waits_for_pending_standalone_native_writer(area):
     ).mode == "project"
 
 
-def test_v5_project_upgrade_preserves_independent_cell_work(area):
+def test_v5_project_upgrade_preserves_independent_cell_work(area: Path) -> None:
     root = area / "state"
     selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
@@ -364,11 +413,11 @@ def test_v5_project_upgrade_preserves_independent_cell_work(area):
     ).mode == "project"
 
 
-def test_capability_probe_receives_deadline_and_cannot_publish_late(area):
+def test_capability_probe_receives_deadline_and_cannot_publish_late(area: Path) -> None:
     root = area / "state"
     deadlines = []
 
-    def probe(deadline):
+    def probe(deadline: float) -> bool:
         deadlines.append(deadline)
         time.sleep(.15)
         return True
@@ -382,7 +431,7 @@ def test_capability_probe_receives_deadline_and_cannot_publish_late(area):
 
 
 @pytest.mark.parametrize("backend", ["manager-self-install", "engine-dev-release"])
-def test_project_authority_fences_direct_suite_owner_changes(area, backend):
+def test_project_authority_fences_direct_suite_owner_changes(area: Path, backend: str) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -396,7 +445,7 @@ def test_project_authority_fences_direct_suite_owner_changes(area, backend):
     ["engine-native-install", "plugin-native-install", "manager-bootstrap",
      "manager-uninstall", "owning-plugin-provision"],
 )
-def test_project_authority_fences_direct_native_writers(area, backend):
+def test_project_authority_fences_direct_native_writers(area: Path, backend: str) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -407,7 +456,7 @@ def test_project_authority_fences_direct_native_writers(area, backend):
     assert _submit(area, backend="other-product").state == "pending"
 
 
-def test_direct_native_writer_is_restored_after_return_to_standalone(area):
+def test_direct_native_writer_is_restored_after_return_to_standalone(area: Path) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -420,7 +469,7 @@ def test_direct_native_writer_is_restored_after_return_to_standalone(area):
     assert status(request.id, root=root).exit_code == 0
 
 
-def test_cell_authority_fences_direct_writers_only_in_that_cell(area):
+def test_cell_authority_fences_direct_writers_only_in_that_cell(area: Path) -> None:
     root = area / "state"
     selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
@@ -433,7 +482,7 @@ def test_cell_authority_fences_direct_writers_only_in_that_cell(area):
                    context=(("COPILOT_EXTENSIONS_CONTEXT", str(other)),)).state == "pending"
 
 
-def test_global_project_authority_preserves_independent_cell_native_writer(area):
+def test_global_project_authority_preserves_independent_cell_native_writer(area: Path) -> None:
     root = area / "state"
     cell = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     change_authority("project", project="example", root=root, timeout=1,
@@ -443,7 +492,7 @@ def test_global_project_authority_preserves_independent_cell_native_writer(area)
     assert request.state == "pending"
 
 
-def test_global_switch_waits_for_shared_writer_with_cell_context(area):
+def test_global_switch_waits_for_shared_writer_with_cell_context(area: Path) -> None:
     root = area / "state"
     cell = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
@@ -459,7 +508,7 @@ def test_global_switch_waits_for_shared_writer_with_cell_context(area):
                             verify_capabilities=lambda _deadline: True).mode == "project"
 
 
-def test_native_writer_cell_root_cannot_bypass_authority_by_omitting_context(area):
+def test_native_writer_cell_root_cannot_bypass_authority_by_omitting_context(area: Path) -> None:
     root = area / "state"
     selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
@@ -475,7 +524,7 @@ def test_native_writer_cell_root_cannot_bypass_authority_by_omitting_context(are
     assert _submit(area, backend="engine-native-install", project=str(other.parent)).state == "pending"
 
 
-def test_native_writer_rechecks_inferred_cell_receipt_before_execution(area):
+def test_native_writer_rechecks_inferred_cell_receipt_before_execution(area: Path) -> None:
     root = area / "state"
     receipt = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     change_authority("standalone", context=str(receipt), root=root, timeout=1,
@@ -493,7 +542,7 @@ def test_native_writer_rechecks_inferred_cell_receipt_before_execution(area):
     ["engine-native-install", "plugin-native-install", "manager-bootstrap",
      "manager-uninstall", "manager-self-install", "owning-plugin-provision"],
 )
-def test_legacy_direct_writer_cannot_bypass_global_authority_with_cell_context(area, backend):
+def test_legacy_direct_writer_cannot_bypass_global_authority_with_cell_context(area: Path, backend: str) -> None:
     root = area / "state"
     other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
     legacy = area / "legacy-runtime"
@@ -505,7 +554,7 @@ def test_legacy_direct_writer_cannot_bypass_global_authority_with_cell_context(a
                 context=(("COPILOT_EXTENSIONS_CONTEXT", str(other)),))
 
 
-def test_legacy_direct_writer_also_honors_its_cell_authority(area):
+def test_legacy_direct_writer_also_honors_its_cell_authority(area: Path) -> None:
     root = area / "state"
     cell = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     legacy = area / "legacy-runtime"
@@ -517,7 +566,7 @@ def test_legacy_direct_writer_also_honors_its_cell_authority(area):
                 context=(("COPILOT_EXTENSIONS_CONTEXT", str(cell)),))
 
 
-def test_native_writer_cell_alias_cannot_select_global_authority(area):
+def test_native_writer_cell_alias_cannot_select_global_authority(area: Path) -> None:
     root = area / "state"
     selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     alias = area / "cell-alias"
@@ -532,13 +581,13 @@ def test_native_writer_cell_alias_cannot_select_global_authority(area):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows short-name aliases")
-def test_native_writer_short_cell_path_uses_cell_authority(area):
+def test_native_writer_short_cell_path_uses_cell_authority(area: Path) -> None:
     import ctypes
 
     root = area / "state"
     selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
     buffer = ctypes.create_unicode_buffer(32768)
-    if not ctypes.windll.kernel32.GetShortPathNameW(str(selected.parent), buffer, len(buffer)):
+    if not getattr(ctypes, "windll").kernel32.GetShortPathNameW(str(selected.parent), buffer, len(buffer)):
         pytest.skip("volume does not provide short-name aliases")
     alias = Path(buffer.value)
     if alias == selected.parent:
@@ -549,7 +598,7 @@ def test_native_writer_short_cell_path_uses_cell_authority(area):
         _submit(area, backend="plugin-native-install", project=str(alias))
 
 
-def test_project_authority_fences_reconcile_even_when_launch_update_is_disabled(area):
+def test_project_authority_fences_reconcile_even_when_launch_update_is_disabled(area: Path) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -567,7 +616,7 @@ def test_project_authority_fences_reconcile_even_when_launch_update_is_disabled(
 
 @pytest.mark.parametrize("mode", ["standalone", "project"])
 @pytest.mark.parametrize("backend", ["engine", "engine-native-install", "plugin-native-install"])
-def test_prevalidated_legacy_writer_racing_switch_cannot_execute(area, backend, mode):
+def test_prevalidated_legacy_writer_racing_switch_cannot_execute(area: Path, backend: str, mode: str) -> None:
     from update_driver import core
 
     root = area / "state"
@@ -575,7 +624,7 @@ def test_prevalidated_legacy_writer_racing_switch_cannot_execute(area, backend, 
     assert drain(root=root, executor=lambda _transaction: 0) == 0
     change_authority(mode, project="example" if mode == "project" else "", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
-    spec = core._spec_document(core._spec(RequestSpec(backend, project="example")))
+    spec = spec_document(core._spec(RequestSpec(backend, project="example")))
     runner = asdict(core._runner(_runner(area)))
     spec_json, runner_json = core._json(spec), core._json(runner)
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
@@ -585,20 +634,25 @@ def test_prevalidated_legacy_writer_racing_switch_cannot_execute(area, backend, 
             "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
             (request_id, identity, spec_json, runner_json, "pending", time.time()),
         )
-    ran = []
-    assert drain(root=root, executor=lambda _transaction: ran.append(True) or 0) == 0
+    ran: list[bool] = []
+
+    def execute(_transaction: Transaction) -> int:
+        ran.append(True)
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
     assert ran == []
     assert status(request_id, root=root).exit_code == 3
 
 
-def test_interrupted_authority_switch_fails_closed_and_can_be_retried(area, monkeypatch):
+def test_interrupted_authority_switch_fails_closed_and_can_be_retried(area: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from update_driver import authority
 
     root = area / "state"
     write = authority.write
 
-    def interrupt(*args):
-        write(*args)
+    def interrupt(db: sqlite3.Connection, context: str, selected: UpdateAuthority) -> None:
+        write(db, context, selected)
         raise RuntimeError("interrupted before commit")
 
     monkeypatch.setattr(authority, "write", interrupt)
@@ -613,25 +667,7 @@ def test_interrupted_authority_switch_fails_closed_and_can_be_retried(area, monk
     assert result.mode == "project" and result.project == "example"
 
 
-def _prevalidated_legacy_submission(area, identifier, backend, *, authority=""):
-    from update_driver import core
-
-    spec = core._spec_document(core._spec(RequestSpec(backend, project="example", authority=authority)))
-    runner = asdict(core._runner(_runner(area)))
-    spec_json, runner_json = core._json(spec), core._json(runner)
-    identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
-    return identifier, identity, spec_json, runner_json, time.time()
-
-
-def _commit_legacy_submission(root, request):
-    with sqlite3.connect(root / "queue.sqlite3") as db:
-        db.execute(
-            "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,'pending',?)",
-            request,
-        )
-
-
-def test_v5_project_upgrade_refuses_late_native_writer_but_preserves_unrelated_work(area):
+def test_v5_project_upgrade_refuses_late_native_writer_but_preserves_unrelated_work(area: Path) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -646,7 +682,7 @@ def test_v5_project_upgrade_refuses_late_native_writer_but_preserves_unrelated_w
                          verify_capabilities=lambda _deadline: True)
     refused = status(late[0], root=root)
     assert refused.state == "completed" and refused.exit_code == 3 and refused.started_at is None
-    assert "authority upgrade" in refused.error
+    assert refused.error is not None and "authority upgrade" in refused.error
     assert status(unrelated[0], root=root).state == "pending"
     assert drain(root=root, executor=lambda _transaction: 0) == 0
     assert change_authority(
@@ -656,7 +692,7 @@ def test_v5_project_upgrade_refuses_late_native_writer_but_preserves_unrelated_w
 
 
 @pytest.mark.parametrize("reason", ["capability", "execution-evidence"])
-def test_v5_upgrade_never_discards_unqualified_native_work(area, reason):
+def test_v5_upgrade_never_discards_unqualified_native_work(area: Path, reason: str) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -685,15 +721,15 @@ def test_v5_upgrade_never_discards_unqualified_native_work(area, reason):
 @pytest.mark.parametrize("backend", [
     "plugin-native-install", "manager-bootstrap", "owning-plugin-provision",
 ])
-def test_v5_standalone_executes_previously_accepted_unstamped_native_work(area, backend):
+def test_v5_standalone_executes_previously_accepted_unstamped_native_work(area: Path, backend: str) -> None:
     root = area / "state"
     change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
     with sqlite3.connect(root / "queue.sqlite3") as db:
         db.execute("PRAGMA user_version=5")
     accepted = _prevalidated_legacy_submission(area, "e" * 32, backend)
     _commit_legacy_submission(root, accepted)
-    ran = []
-    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    ran: list[str] = []
+    assert drain(root=root, executor=record_requests(ran)) == 0
     assert ran == [accepted[0]] and status(accepted[0], root=root).exit_code == 0
     assert change_authority("project", project="example", root=root, timeout=1,
                             verify_capabilities=lambda _deadline: True).mode == "project"
@@ -702,7 +738,7 @@ def test_v5_standalone_executes_previously_accepted_unstamped_native_work(area, 
 @pytest.mark.parametrize("field,value", [
     ("started_at", 1), ("finished_at", 1), ("boot_id", "uncertain"),
 ])
-def test_pending_execution_evidence_fences_worker_and_authority_change(area, field, value):
+def test_pending_execution_evidence_fences_worker_and_authority_change(area: Path, field: str, value: str | float) -> None:
     from update_driver import recover_for_repair
 
     root = area / "state"
@@ -727,7 +763,7 @@ def test_pending_execution_evidence_fences_worker_and_authority_change(area, fie
                             verify_capabilities=lambda _deadline: True).mode == "standalone"
 
 
-def test_v5_project_read_requires_matching_live_custody_and_scope(area, monkeypatch):
+def test_v5_project_read_requires_matching_live_custody_and_scope(area: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from update_driver import borrowed_custody
     from update_driver.participant import ENVIRONMENT_KEY
 
@@ -745,10 +781,12 @@ def test_v5_project_read_requires_matching_live_custody_and_scope(area, monkeypa
         current_authority(root=root, context=str(first))
     witnesses = []
 
-    def execute(transaction):
+    def execute(transaction: Transaction) -> int:
         environment = transaction.participant_env()
         witnesses.append(environment[ENVIRONMENT_KEY])
-        with borrowed_custody(root=root, environ=environment) as custody:
+        custody = borrowed_custody(root=root, environ=environment)
+        assert custody is not None
+        with custody:
             custody.assert_owned()
             assert current_authority(root=root, context=str(first)).project == "example"
             with pytest.raises(StateError, match="protocol upgrade"):
@@ -772,7 +810,7 @@ def test_v5_project_read_requires_matching_live_custody_and_scope(area, monkeypa
             current_authority(root=root, context=str(first))
 
 
-def test_v5_project_read_rejects_unrelated_running_custody(area):
+def test_v5_project_read_rejects_unrelated_running_custody(area: Path) -> None:
     from update_driver import borrowed_custody
 
     root = area / "state"
@@ -782,8 +820,10 @@ def test_v5_project_read_rejects_unrelated_running_custody(area):
     with sqlite3.connect(root / "queue.sqlite3") as db:
         db.execute("PRAGMA user_version=5")
 
-    def execute(transaction):
-        with borrowed_custody(root=root, environ=transaction.participant_env()):
+    def execute(transaction: Transaction) -> int:
+        custody = borrowed_custody(root=root, environ=transaction.participant_env())
+        assert custody is not None
+        with custody:
             with pytest.raises(StateError, match="protocol upgrade"):
                 current_authority(root=root)
         return 0
@@ -792,7 +832,7 @@ def test_v5_project_read_rejects_unrelated_running_custody(area):
     assert status(request.id, root=root).exit_code == 0
 
 
-def test_v5_project_upgrade_preserves_accepted_project_request(area):
+def test_v5_project_upgrade_preserves_accepted_project_request(area: Path) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)
@@ -804,8 +844,8 @@ def test_v5_project_upgrade_preserves_accepted_project_request(area):
         change_authority("project", project="example", root=root, timeout=.1,
                          verify_capabilities=lambda _deadline: True)
     assert status(accepted[0], root=root).state == "pending"
-    ran = []
-    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    ran: list[str] = []
+    assert drain(root=root, executor=record_requests(ran)) == 0
     assert ran == [accepted[0]] and status(accepted[0], root=root).exit_code == 0
     assert change_authority(
         "project", project="example", root=root, timeout=1,
@@ -813,26 +853,7 @@ def test_v5_project_upgrade_preserves_accepted_project_request(area):
     ).mode == "project"
 
 
-def _interrupt_first_authority_switch(root, monkeypatch):
-    from update_driver import authority
-
-    write = authority.write
-
-    def interrupt(*args):
-        write(*args)
-        raise RuntimeError("interrupted before commit")
-
-    with monkeypatch.context() as change:
-        change.setattr(authority, "write", interrupt)
-        with pytest.raises(RuntimeError, match="interrupted"):
-            change_authority("project", project="example", root=root, timeout=1,
-                             verify_capabilities=lambda _deadline: True)
-    assert (root / "authority.guard").is_file()
-    with sqlite3.connect(root / "queue.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
-
-
-def test_retry_refuses_late_legacy_suite_without_discarding_unrelated_work(area, monkeypatch):
+def test_retry_refuses_late_legacy_suite_without_discarding_unrelated_work(area: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = area / "state"
     late_suite = _prevalidated_legacy_submission(area, "a" * 32, "engine")
     unrelated = _prevalidated_legacy_submission(area, "b" * 32, "other-product")
@@ -844,10 +865,11 @@ def test_retry_refuses_late_legacy_suite_without_discarding_unrelated_work(area,
                          verify_capabilities=lambda _deadline: True)
     refused = status(late_suite[0], root=root)
     assert refused.state == "completed" and refused.exit_code == 3
-    assert refused.started_at is None and "authority" in refused.error
+    assert refused.started_at is None
+    assert refused.error is not None and "authority" in refused.error
     assert status(unrelated[0], root=root).state == "pending"
-    ran = []
-    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    ran: list[str] = []
+    assert drain(root=root, executor=record_requests(ran)) == 0
     assert ran == [unrelated[0]]
     assert change_authority(
         "project", project="example", root=root, timeout=1,
@@ -855,7 +877,7 @@ def test_retry_refuses_late_legacy_suite_without_discarding_unrelated_work(area,
     ).mode == "project"
 
 
-def test_incomplete_switch_recovery_requires_capabilities_and_is_atomic(area, monkeypatch):
+def test_incomplete_switch_recovery_requires_capabilities_and_is_atomic(area: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from update_driver import authority
 
     root = area / "state"
@@ -868,8 +890,8 @@ def test_incomplete_switch_recovery_requires_capabilities_and_is_atomic(area, mo
     assert status(late_suite[0], root=root).state == "pending"
     write = authority.write
 
-    def interrupt(*args):
-        write(*args)
+    def interrupt(db: sqlite3.Connection, context: str, selected: UpdateAuthority) -> None:
+        write(db, context, selected)
         raise RuntimeError("recovery interrupted")
 
     with monkeypatch.context() as change:
@@ -890,7 +912,7 @@ def test_incomplete_switch_recovery_requires_capabilities_and_is_atomic(area, mo
 @pytest.mark.parametrize(("field", "value"), [
     ("started_at", 1.0), ("finished_at", 1.0), ("boot_id", "unverified-boot"),
 ])
-def test_incomplete_switch_never_refuses_pending_execution_evidence(area, monkeypatch, field, value):
+def test_incomplete_switch_never_refuses_pending_execution_evidence(area: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: str | float) -> None:
     root = area / "state"
     late_suite = _prevalidated_legacy_submission(area, "e" * 32, "engine")
     _interrupt_first_authority_switch(root, monkeypatch)
@@ -905,17 +927,17 @@ def test_incomplete_switch_never_refuses_pending_execution_evidence(area, monkey
         current_authority(root=root)
 
 
-def test_process_death_mid_switch_leaves_a_retryable_fence(area):
+def test_process_death_mid_switch_leaves_a_retryable_fence(area: Path) -> None:
     import agent_procutil
     import single_instance_lease
     import update_driver
 
     root = area / "state"
     late_suite = _prevalidated_legacy_submission(area, "d" * 32, "engine")
-    paths = [
-        str(Path(module.__file__).resolve().parent.parent)
-        for module in (update_driver, single_instance_lease, agent_procutil)
-    ]
+    paths = []
+    for module in (update_driver, single_instance_lease, agent_procutil):
+        assert module.__file__ is not None
+        paths.append(str(Path(module.__file__).resolve().parent.parent))
     program = """
 import json, os, pathlib, sys
 sys.path[:0] = json.loads(sys.argv[1])
@@ -946,7 +968,7 @@ change_authority('project', project='example', root=pathlib.Path(sys.argv[2]),
 
 
 @pytest.mark.parametrize("missing", ["database", "guard"])
-def test_missing_authority_state_does_not_restore_legacy_mode(area, missing):
+def test_missing_authority_state_does_not_restore_legacy_mode(area: Path, missing: str) -> None:
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
                      verify_capabilities=lambda _deadline: True)

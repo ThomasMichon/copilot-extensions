@@ -4,14 +4,51 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import re
 import stat
 import sys
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
-if TYPE_CHECKING:
-    from .core import RequestSpec, TrustedRunner
+
+@dataclass(frozen=True)
+class RequestSpec:
+    """Credential-free normalized request identity, supplied by a product adapter."""
+
+    backend: str
+    argv: tuple[str, ...] = ()
+    project: str = ""
+    cwd: str = ""
+    source: str = ""
+    context: tuple[tuple[str, str], ...] = ()
+    repair: bool = False
+    killswitch_path: str = ""
+    authority: str = ""
+
+
+@dataclass(frozen=True)
+class TrustedRunner:
+    """Internal pinned invocation, never constructed from an arbitrary CLI command."""
+
+    argv: tuple[str, ...]
+    cwd: str
+    timeout: float = 7200
+    env: tuple[tuple[str, str], ...] = ()
+    context_keys: tuple[str, ...] = ()
+
+
+def spec_document(spec: RequestSpec) -> dict[str, Any]:
+    """Serialize a request while preserving ordinary downlevel identities."""
+    document = asdict(spec)
+    if not spec.repair:
+        # Preserve identities and downlevel readability of ordinary queued jobs.
+        document.pop("repair")
+    if not spec.killswitch_path:
+        document.pop("killswitch_path")
+    if not spec.authority:
+        document.pop("authority")
+    return document
 
 
 def validate_spec(spec: RequestSpec) -> RequestSpec:

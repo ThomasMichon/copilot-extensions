@@ -12,32 +12,37 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any, Literal, NoReturn
 
 import pytest
+from update_telemetry import Run
 from _manager_constructor_fixture import apply_constructor_fixture
+from _manager_engine_fixtures import runtime_installer
 
 
 @pytest.fixture(autouse=True)
-def _unit_constructor(monkeypatch):
+def _unit_constructor(monkeypatch: pytest.MonkeyPatch) -> None:
     apply_constructor_fixture(monkeypatch)
 
 from worktree_manager import __main__ as wm
 from worktree_manager import engine_client as ec
 from worktree_manager import self_install
+from worktree_manager.self_install_payload import _safe_extract
 
 
-def test_update_double_completion_write_failure_cannot_report_done(monkeypatch):
+def test_update_double_completion_write_failure_cannot_report_done(monkeypatch: pytest.MonkeyPatch) -> None:
     from update_telemetry.human import current_operation
     from worktree_manager import update_events
 
     class Sink(io.StringIO):
         failures = 0
 
-        def write(self, text):
+        def write(self, text: str) -> int:
             if "[duration " in text and self.failures < 2:
                 self.failures += 1
                 raise OSError("completion sink unavailable")
@@ -54,12 +59,13 @@ def test_update_double_completion_write_failure_cannot_report_done(monkeypatch):
     assert current_operation() is None
 
 
-def test_update_finish_failure_is_not_rendered_as_success(monkeypatch):
+def test_update_finish_failure_is_not_rendered_as_success(monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager import update_events
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> NoReturn:
         raise RuntimeError("finish failed")
 
+    assert update_events._ut is not None
     monkeypatch.setattr(update_events._ut.Run, "finish", fail)
     sink = io.StringIO()
     with redirect_stderr(sink):
@@ -70,7 +76,7 @@ def test_update_finish_failure_is_not_rendered_as_success(monkeypatch):
     assert " done " not in sink.getvalue()
 
 
-def _symlink_to_or_skip(link, target, *, target_is_directory: bool = False) -> None:
+def _symlink_to_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
     """Create ``link -> target``, skipping the test if this machine's account
     lacks symlink-creation privilege (``SeCreateSymbolicLinkPrivilege`` absent
     on Windows without admin/Developer Mode) -- same convention already used
@@ -82,21 +88,21 @@ def _symlink_to_or_skip(link, target, *, target_is_directory: bool = False) -> N
 
 
 def _run_update(
-    rest, monkeypatch, *, su_action="already-current", su_kwargs=None, engine_rc=0,
-):
+    rest: list[str], monkeypatch: pytest.MonkeyPatch, *, su_action: str="already-current", su_kwargs: dict[str, Any] | None=None, engine_rc: int=0,
+) -> tuple[int, dict[str, Any], str]:
     from worktree_manager.self_install import SelfUpdateResult
     calls = {}
     monkeypatch.setattr(
         wm, "_cmd_update", wm._cmd_update)  # ensure real function under test
 
-    def fake_self_update(**kw):
+    def fake_self_update(**kw: Any) -> self_install.SelfUpdateResult:
         calls["self_update"] = kw
         return SelfUpdateResult(action=su_action, version="0.1.0-dev9",
                                 previous="0.1.0-dev8", **(su_kwargs or {}))
 
     monkeypatch.setattr(self_install, "self_update", fake_self_update)
 
-    def fake_passthrough(project, args, **kw):
+    def fake_passthrough(project: str | None, args: list[str], **kw: Any) -> int:
         calls["passthrough"] = {"project": project, "args": args}
         return engine_rc
 
@@ -108,7 +114,7 @@ def _run_update(
     return rc, calls, buf.getvalue()
 
 
-def test_update_self_updates_then_orchestrates_bypass(monkeypatch):
+def test_update_self_updates_then_orchestrates_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
     rc, calls, out = _run_update([], monkeypatch)
     assert rc == 0
     # Self-update ran first…
@@ -119,13 +125,13 @@ def test_update_self_updates_then_orchestrates_bypass(monkeypatch):
 
 
 @pytest.mark.parametrize("flags", [[], ["--auto"]])
-def test_update_mode_survives_the_inner_suite_handoff_without_force(monkeypatch, flags):
+def test_update_mode_survives_the_inner_suite_handoff_without_force(monkeypatch: pytest.MonkeyPatch, flags: list[str]) -> None:
     rc, calls, _out = _run_update(flags, monkeypatch)
     assert rc == 0
     assert calls["passthrough"]["args"] == ["update", "--no-manager", *flags]
 
 
-def test_update_forwards_project_and_flags(monkeypatch):
+def test_update_forwards_project_and_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     rc, calls, out = _run_update(
         ["--force", "--project", "dotfiles", "--skip-modules", "agent-bridge"],
         monkeypatch)
@@ -138,14 +144,14 @@ def test_update_forwards_project_and_flags(monkeypatch):
         "update", "--no-manager", "--force", "--skip-modules", "agent-bridge"]
 
 
-def test_update_reports_self_update_and_continues(monkeypatch):
+def test_update_reports_self_update_and_continues(monkeypatch: pytest.MonkeyPatch) -> None:
     rc, calls, out = _run_update([], monkeypatch, su_action="updated")
     assert rc == 0
     assert "updated" in out and "active on next run" in out
     assert "passthrough" in calls  # continues to the harness update regardless
 
 
-def test_update_auth_required_is_required_and_keeps_exit_four(monkeypatch):
+def test_update_auth_required_is_required_and_keeps_exit_four(monkeypatch: pytest.MonkeyPatch) -> None:
     rc, calls, _ = _run_update([], monkeypatch, su_action="auth_required")
     assert rc == 4
     assert "passthrough" in calls
@@ -156,8 +162,8 @@ def test_update_auth_required_is_required_and_keeps_exit_four(monkeypatch):
 ])
 @pytest.mark.parametrize("telemetry", [False, True])
 def test_update_auth_exit_precedence_with_or_without_telemetry(
-    monkeypatch, engine_rc, expected, telemetry, update_home,
-):
+    monkeypatch: pytest.MonkeyPatch, engine_rc: int, expected: int, telemetry: bool, update_home: Path,
+) -> None:
     from worktree_manager import update_events
 
     if not telemetry:
@@ -169,7 +175,7 @@ def test_update_auth_exit_precedence_with_or_without_telemetry(
     assert "passthrough" in calls
 
 
-def test_update_surfaces_cutover_failure_and_returns_nonzero(monkeypatch):
+def test_update_surfaces_cutover_failure_and_returns_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
     rc, calls, out = _run_update(
         [],
         monkeypatch,
@@ -181,12 +187,12 @@ def test_update_surfaces_cutover_failure_and_returns_nonzero(monkeypatch):
     assert "passthrough" in calls
 
 
-def test_update_engine_absent_hints_setup(monkeypatch):
+def test_update_engine_absent_hints_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",
                         lambda **kw: SelfUpdateResult(action="skipped", reason="git not found"))
 
-    def boom(project, args, **kw):
+    def boom(project: str | None, args: list[str], **kw: Any) -> NoReturn:
         raise ec.EngineError("not installed", install_hint=True)
 
     monkeypatch.setattr(ec, "run_engine_passthrough", boom)
@@ -199,7 +205,7 @@ def test_update_engine_absent_hints_setup(monkeypatch):
     assert "worktree-manager setup" in buf.getvalue()
 
 
-def test_update_invalidates_the_manager_update_cache(tmp_path, monkeypatch):
+def test_update_invalidates_the_manager_update_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """After self-updating, the pre-update `manager_update_check` cache is
     stale (computed against the OLD version) -- `_cmd_update` must drop it so
     the Picker's next poll re-checks for real instead of continuing to show
@@ -228,13 +234,13 @@ def test_update_invalidates_the_manager_update_cache(tmp_path, monkeypatch):
     assert muc.read_status() == {}
 
 
-def test_extract_project_pulls_pair_and_leaves_rest():
+def test_extract_project_pulls_pair_and_leaves_rest() -> None:
     project, rest = wm._extract_project(["--force", "--project", "x", "--skip-modules"])
     assert project == "x"
     assert rest == ["--force", "--skip-modules"]
 
 
-def test_extract_project_none_when_absent():
+def test_extract_project_none_when_absent() -> None:
     project, rest = wm._extract_project(["--force", "--skip-modules"])
     assert project is None
     assert rest == ["--force", "--skip-modules"]
@@ -242,11 +248,12 @@ def test_extract_project_none_when_absent():
 
 # ── update-run telemetry ──────────────────────────────────────────────────────
 
-def _telemetry_status(home) -> dict:
-    return json.loads((home / "update-status.json").read_text(encoding="utf-8"))
+def _telemetry_status(home: Path) -> dict[str, Any]:
+    status: dict[str, Any] = json.loads((home / "update-status.json").read_text(encoding="utf-8"))
+    return status
 
 
-def test_update_startup_diagnostics_share_the_human_scope(monkeypatch, update_home, capsys):
+def test_update_startup_diagnostics_share_the_human_scope(monkeypatch: pytest.MonkeyPatch, update_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     import update_telemetry as telemetry
     from update_telemetry import run as telemetry_run
     from update_telemetry.human import current_operation
@@ -254,9 +261,9 @@ def test_update_startup_diagnostics_share_the_human_scope(monkeypatch, update_ho
 
     original = telemetry.Run.from_env_or_new
 
-    def startup(proc):
+    def startup(proc: str, *, trigger: str="manual") -> Run:
         telemetry_run._stderr("telemetry startup diagnostic")
-        return original(proc)
+        return original(proc, trigger=trigger)
 
     monkeypatch.setattr(telemetry.Run, "from_env_or_new", startup)
     run = UpdateRun()
@@ -268,7 +275,7 @@ def test_update_startup_diagnostics_share_the_human_scope(monkeypatch, update_ho
 
 
 @pytest.fixture
-def update_home(tmp_path, monkeypatch):
+def update_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import update_telemetry as ut
     for key in (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER):
         monkeypatch.delenv(key, raising=False)
@@ -276,7 +283,7 @@ def update_home(tmp_path, monkeypatch):
     return tmp_path / "update-home"
 
 
-def test_cutover_failure_command_failed(monkeypatch, update_home):
+def test_cutover_failure_command_failed(monkeypatch: pytest.MonkeyPatch, update_home: Path) -> None:
     rc, _calls, _out = _run_update(
         [],
         monkeypatch,
@@ -292,7 +299,7 @@ def test_cutover_failure_command_failed(monkeypatch, update_home):
 
 
 @pytest.mark.parametrize(("engine_rc", "expected"), [(0, 0), (2, 2), (6, 6), (5, 5), (75, 1)])
-def test_engine_exit_code_maps_through_table(monkeypatch, update_home, engine_rc, expected):
+def test_engine_exit_code_maps_through_table(monkeypatch: pytest.MonkeyPatch, update_home: Path, engine_rc: int, expected: int) -> None:
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",
                         lambda **kw: SelfUpdateResult(action="already-current", version="1"))
@@ -302,7 +309,7 @@ def test_engine_exit_code_maps_through_table(monkeypatch, update_home, engine_rc
 
 
 @pytest.mark.parametrize("prepared_environment", [False, True])
-def test_run_env_reaches_engine(monkeypatch, update_home, prepared_environment):
+def test_run_env_reaches_engine(monkeypatch: pytest.MonkeyPatch, update_home: Path, prepared_environment: bool) -> None:
     import update_telemetry as ut
     from worktree_manager import update_bootstrap
     from worktree_manager.self_install import SelfUpdateResult
@@ -319,11 +326,11 @@ def test_run_env_reaches_engine(monkeypatch, update_home, prepared_environment):
         monkeypatch.setattr(ec, "installed_engine_command", lambda environment: ["/fake/agent-worktrees"])
     seen = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         seen["env"] = kw["env"]
         return subprocess.CompletedProcess(cmd, 0)
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     with redirect_stdout(io.StringIO()):
         assert wm._cmd_update([]) == 0
     env = seen["env"]
@@ -338,7 +345,7 @@ def test_run_env_reaches_engine(monkeypatch, update_home, prepared_environment):
         assert ut.ENV_RUN_ID not in snapshot, "preparation's environment remains unchanged"
 
 
-def test_prepared_environment_engine_child_joins_manager_run(monkeypatch, update_home):
+def test_prepared_environment_engine_child_joins_manager_run(monkeypatch: pytest.MonkeyPatch, update_home: Path) -> None:
     import update_telemetry as ut
     from worktree_manager import update_bootstrap
     from worktree_manager.self_install import SelfUpdateResult
@@ -378,7 +385,7 @@ def test_prepared_environment_engine_child_joins_manager_run(monkeypatch, update
 
 # ── run_engine_passthrough ────────────────────────────────────────────────────
 
-def test_passthrough_builds_command_and_returns_code(monkeypatch):
+def test_passthrough_builds_command_and_returns_code(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
     monkeypatch.setattr(
@@ -387,18 +394,18 @@ def test_passthrough_builds_command_and_returns_code(monkeypatch):
     ec.set_engine_command(None)
     seen = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0)
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     rc = ec.run_engine_passthrough(None, ["update", "--no-manager"])
     assert rc == 0
     assert seen["cmd"][-2:] == ["update", "--no-manager"]
     assert "/fake/agent-worktrees" in seen["cmd"][0]
 
 
-def test_passthrough_absent_engine_hints_install(monkeypatch):
+def test_passthrough_absent_engine_hints_install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
     monkeypatch.setattr(ec, "installed_engine_command", lambda: None)
@@ -409,7 +416,7 @@ def test_passthrough_absent_engine_hints_install(monkeypatch):
 
 
 @pytest.mark.parametrize("scoped", [False, True])
-def test_update_passthrough_preserves_captured_caller_directory(monkeypatch, tmp_path, scoped):
+def test_update_passthrough_preserves_captured_caller_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scoped: bool) -> None:
     caller = tmp_path / "caller"
     staging = tmp_path / "staging"
     caller.mkdir()
@@ -420,30 +427,30 @@ def test_update_passthrough_preserves_captured_caller_directory(monkeypatch, tmp
         monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(caller))
     seen = {}
 
-    def execute(command, **options):
+    def execute(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         seen.update(options)
         return subprocess.CompletedProcess(command, 23)
 
-    monkeypatch.setattr(ec.subprocess, "run", execute)
+    monkeypatch.setattr(subprocess, "run", execute)
     assert ec.run_engine_passthrough(
         None, ["update", "--no-manager"], engine_command=["synthetic-engine"],
-        **({"environment": environment} if scoped else {}),
+        environment=environment if scoped else None,
     ) == 23
     assert seen["cwd"] == str(caller)
     assert Path.cwd() == staging
 
 
 @pytest.mark.parametrize("context", ["", "relative", "missing", "file"])
-def test_update_passthrough_refuses_invalid_captured_directory(monkeypatch, tmp_path, context):
+def test_update_passthrough_refuses_invalid_captured_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, context: str) -> None:
     path = tmp_path / context
     if context == "file":
         path.write_text("not a directory")
     value = context if context in {"", "relative"} else str(path)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("invalid update context reached the engine")
 
-    monkeypatch.setattr(ec.subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
     with pytest.raises(ec.EngineError, match="existing absolute directory"):
         ec.run_engine_passthrough(
             None, ["update"], engine_command=["synthetic-engine"],
@@ -451,14 +458,14 @@ def test_update_passthrough_refuses_invalid_captured_directory(monkeypatch, tmp_
         )
 
 
-def test_non_update_passthrough_does_not_apply_update_directory(monkeypatch):
+def test_non_update_passthrough_does_not_apply_update_directory(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = {}
 
-    def execute(command, **options):
+    def execute(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         seen.update(options)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(ec.subprocess, "run", execute)
+    monkeypatch.setattr(subprocess, "run", execute)
     assert ec.run_engine_passthrough(
         None, ["list"], engine_command=["synthetic-engine"],
         environment={"AGENT_WORKTREES_UPDATE_CONTEXT": "not-an-update-directory"},
@@ -468,22 +475,22 @@ def test_non_update_passthrough_does_not_apply_update_directory(monkeypatch):
 
 # ── self_update (best-effort, git-fetch + version-install) ────────────────────
 
-def test_self_update_without_git_non_github_skips(monkeypatch, tmp_path):
+def test_self_update_without_git_non_github_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Without git AND a non-GitHub source, there is no tarball endpoint — skip."""
     from worktree_manager import source_config as sc
-    monkeypatch.setattr(self_install.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     sc.set_source(repo=str(tmp_path / "local-remote"), root=tmp_path)  # non-GitHub
     res = self_install.self_update(root=tmp_path, dry_run=True)
     assert res.action == "skipped"
     assert "git" in (res.reason or "")
 
 
-def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
+def test_self_update_without_git_falls_back_to_tarball(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Without git but a GitHub source, self_update fetches the codeload tarball."""
     from _manager_constructor_fixture import apply_constructor_fixture
     from worktree_manager import source_config as sc
     apply_constructor_fixture(monkeypatch)
-    monkeypatch.setattr(self_install.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(self_install, "local_bin", lambda: tmp_path / "localbin")
     # Isolate the control-plane provider registry (matches
     # test_self_install.py's _patch_provider_registry convention) -- this
@@ -499,9 +506,9 @@ def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
         lambda: tmp_path / ".agent-worktrees" / "control-plane-providers.d",
     )
     sc.set_source(repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def fake_fetch(staging, url, **kw):
+    def fake_fetch(staging: Path, url: str, **kw: Any) -> None:
         seen["url"] = url
         pkg = staging / "worktree-manager" / "src" / "worktree_manager"
         pkg.mkdir(parents=True, exist_ok=True)
@@ -512,12 +519,12 @@ def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
 
     monkeypatch.setattr(self_install, "_fetch_via_tarball", fake_fetch)
     # Isolate the installed V2 activation process, not its source acquisition.
-    def _fake_cutover(**kw):
+    def _fake_cutover(**kw: Any) -> dict[str, Any]:
         seen["cutover_kwargs"] = kw
         return {"action": "cutover", "result": {"ok": True}}
 
     monkeypatch.setattr(
-        self_install._runtime_installer(), "_activate_after_bootstrap_update",
+        runtime_installer(), "_activate_after_bootstrap_update",
         lambda root, slot: _fake_cutover(root=root, slot=slot, version=slot.name),
     )
     res = self_install.self_update(root=tmp_path, dry_run=False)
@@ -535,19 +542,19 @@ def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
     ("git@github.com:acme/widgets.git", "main",
      "https://codeload.github.com/acme/widgets/tar.gz/main"),
 ])
-def test_manager_tarball_url_github(tmp_path, repo, ref, expected):
+def test_manager_tarball_url_github(tmp_path: Path, repo: str, ref: str, expected: str) -> None:
     from worktree_manager import source_config as sc
     sc.set_source(repo=repo, ref=ref, root=tmp_path)
     assert self_install.manager_tarball_url(tmp_path) == expected
 
 
-def test_manager_tarball_url_non_github_is_none(tmp_path):
+def test_manager_tarball_url_non_github_is_none(tmp_path: Path) -> None:
     from worktree_manager import source_config as sc
     sc.set_source(repo=str(tmp_path / "local"), root=tmp_path)
     assert self_install.manager_tarball_url(tmp_path) is None
 
 
-def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
+def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A tarball-only fetch previously grabbed ONLY the worktree-manager/
     subtree, silently dropping the sibling libs/ that any src-passthrough
     vendor pointer inside the payload needs to resolve canonical content
@@ -579,10 +586,10 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
         def __init__(self, data: bytes) -> None:
             self._data = data
 
-        def __enter__(self):
+        def __enter__(self) -> _FakeResponse:
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *exc: Any) -> Literal[False]:
             return False
 
         def read(self) -> bytes:
@@ -601,7 +608,7 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
     assert not (staging / "tools").exists()
 
 
-def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_path, monkeypatch):
+def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Round-8 review finding (superseded by round-11's stronger fix):
     shutil.copytree's default (symlinks=False) DEREFERENCES a symlink
     anywhere in the source tree, silently copying whatever it points to --
@@ -642,10 +649,10 @@ def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_pa
         def __init__(self, data: bytes) -> None:
             self._data = data
 
-        def __enter__(self):
+        def __enter__(self) -> _FakeResponse:
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *exc: Any) -> Literal[False]:
             return False
 
         def read(self) -> bytes:
@@ -666,7 +673,7 @@ def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_pa
     )
 
 
-def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
+def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Round-9 review finding: symlinks=True on copytree does NOT protect
     the copytree's own SOURCE ROOT -- shutil.copytree always creates dst
     as a real directory, so if libs_source itself were a symlink,
@@ -702,10 +709,10 @@ def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
         def __init__(self, data: bytes) -> None:
             self._data = data
 
-        def __enter__(self):
+        def __enter__(self) -> _FakeResponse:
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *exc: Any) -> Literal[False]:
             return False
 
         def read(self) -> bytes:
@@ -722,7 +729,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
 
 
 
-def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monkeypatch):
+def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Refuse a native directory symlink above a non-symlink payload.
 
     Windows requires a native target path and the directory flag that tarfile's
@@ -754,7 +761,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
             SimpleNamespace(**(vars(os) | {"symlink": directory_symlink})),
         )
 
-    original_extract = self_install._safe_extract
+    original_extract = _safe_extract
 
     def inspect_extract(tf: tarfile.TarFile, dest: Path) -> None:
         original_extract(tf, dest)
@@ -798,10 +805,10 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
         def __init__(self, data: bytes) -> None:
             self._data = data
 
-        def __enter__(self):
+        def __enter__(self) -> _FakeResponse:
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *exc: Any) -> Literal[False]:
             return False
 
         def read(self) -> bytes:
@@ -829,19 +836,19 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
      "https://raw.githubusercontent.com/acme/widgets/main"
      "/worktree-manager/src/worktree_manager/__init__.py"),
 ])
-def test_remote_init_url_github(tmp_path, repo, ref, expected):
+def test_remote_init_url_github(tmp_path: Path, repo: str, ref: str, expected: str) -> None:
     from worktree_manager import source_config as sc
     sc.set_source(repo=repo, ref=ref, root=tmp_path)
     assert self_install.remote_init_url(tmp_path) == expected
 
 
-def test_remote_init_url_non_github_is_none(tmp_path):
+def test_remote_init_url_non_github_is_none(tmp_path: Path) -> None:
     from worktree_manager import source_config as sc
     sc.set_source(repo=str(tmp_path / "local"), root=tmp_path)
     assert self_install.remote_init_url(tmp_path) is None
 
 
-def test_fetch_remote_version_parses_the_fetched_init_py(monkeypatch, tmp_path):
+def test_fetch_remote_version_parses_the_fetched_init_py(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A successful GET returns the parsed ``__version__`` -- no git, no
     clone/tarball, a single small file read."""
     from worktree_manager import source_config as sc
@@ -850,18 +857,18 @@ def test_fetch_remote_version_parses_the_fetched_init_py(monkeypatch, tmp_path):
         repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
 
     class _FakeResp:
-        def __enter__(self):
+        def __enter__(self) -> _FakeResp:
             return self
 
-        def __exit__(self, *a):
+        def __exit__(self, *a: Any) -> Literal[False]:
             return False
 
-        def read(self):
+        def read(self) -> bytes:
             return b'__version__ = "9.9.9"\n'
 
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def fake_urlopen(url, timeout=None):
+    def fake_urlopen(url: str, timeout: float | None=None) -> _FakeResp:
         seen["url"] = url
         seen["timeout"] = timeout
         return _FakeResp()
@@ -874,7 +881,7 @@ def test_fetch_remote_version_parses_the_fetched_init_py(monkeypatch, tmp_path):
         "/worktree-manager/src/worktree_manager/__init__.py")
 
 
-def test_fetch_remote_version_degrades_to_none_on_any_failure(monkeypatch, tmp_path):
+def test_fetch_remote_version_degrades_to_none_on_any_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Network error, timeout, unparsable content -- all degrade to ``None``,
     never raise. This is the property a background poll depends on."""
     from worktree_manager import source_config as sc
@@ -882,14 +889,14 @@ def test_fetch_remote_version_degrades_to_none_on_any_failure(monkeypatch, tmp_p
     sc.set_source(
         repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
 
-    def boom(url, timeout=None):
+    def boom(url: str, timeout: float | None=None) -> NoReturn:
         raise OSError("network is down")
 
     monkeypatch.setattr("urllib.request.urlopen", boom)
     assert self_install.fetch_remote_version(tmp_path) is None
 
 
-def test_fetch_remote_version_non_github_source_is_none(tmp_path):
+def test_fetch_remote_version_non_github_source_is_none(tmp_path: Path) -> None:
     from worktree_manager import source_config as sc
     sc.set_source(repo=str(tmp_path / "local"), root=tmp_path)
     assert self_install.fetch_remote_version(tmp_path) is None
@@ -897,17 +904,17 @@ def test_fetch_remote_version_non_github_source_is_none(tmp_path):
 
 
 @pytest.mark.parametrize("generation", ["0.1.0-dev9", "0.1.0-dev9+repair.fixture"])
-def test_self_update_reports_updated(monkeypatch, tmp_path, generation):
+def test_self_update_reports_updated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, generation: str) -> None:
     from worktree_manager.self_install import SelfInstallResult
     monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _, **kwargs: None)
-    monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")
-    monkeypatch.setattr(self_install.subprocess, "run",
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/git")
+    monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
     # Pretend the fetched payload exists and self_install reports an install.
-    monkeypatch.setattr(self_install.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
     monkeypatch.setattr(self_install, "payload_version", lambda *_: "0.1.0-dev9")
     retained = []
-    def installed(**kw):
+    def installed(**kw: Any) -> self_install.SelfInstallResult:
         retained.append(True)
         kw["_after_activate"](self_install.version_slot(generation, tmp_path))
         retained.pop()
@@ -915,13 +922,13 @@ def test_self_update_reports_updated(monkeypatch, tmp_path, generation):
     monkeypatch.setattr(self_install, "self_install", installed)
     seen = {}
 
-    def _fake_cutover(**kw):
+    def _fake_cutover(**kw: Any) -> dict[str, Any]:
         assert retained == [True]
         seen.update(kw)
         return {"action": "cutover", "result": {"ok": True}}
 
     monkeypatch.setattr(
-        self_install._runtime_installer(), "_activate_after_bootstrap_update",
+        runtime_installer(), "_activate_after_bootstrap_update",
         lambda root, slot: _fake_cutover(root=root, slot=slot, version=slot.name),
     )
     res = self_install.self_update(root=tmp_path, dry_run=False)
@@ -933,28 +940,28 @@ def test_self_update_reports_updated(monkeypatch, tmp_path, generation):
     assert seen["slot"] == self_install.version_slot(generation, tmp_path)
 
 
-def test_self_update_runs_cutover_even_when_already_current(monkeypatch, tmp_path):
+def test_self_update_runs_cutover_even_when_already_current(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from worktree_manager.self_install import SelfInstallResult
     monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _, **kwargs: None)
 
-    monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/git")
     monkeypatch.setattr(
-        self_install.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0)
+        subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0)
     )
-    monkeypatch.setattr(self_install.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
     monkeypatch.setattr(self_install, "payload_version", lambda *_: "0.1.0-dev9")
-    def already_current(**kw):
+    def already_current(**kw: Any) -> self_install.SelfInstallResult:
         kw["_after_activate"](self_install.version_slot("0.1.0-dev9", tmp_path))
         return SelfInstallResult(version="0.1.0-dev9", action="already-current", root=str(tmp_path))
     monkeypatch.setattr(self_install, "self_install", already_current)
     seen = {}
 
-    def _fake_cutover(**kw):
+    def _fake_cutover(**kw: Any) -> dict[str, Any]:
         seen.update(kw)
         return {"action": "cutover", "result": {"ok": True}}
 
     monkeypatch.setattr(
-        self_install._runtime_installer(), "_activate_after_bootstrap_update",
+        runtime_installer(), "_activate_after_bootstrap_update",
         lambda root, slot: _fake_cutover(root=root, slot=slot, version=slot.name),
     )
 
@@ -965,7 +972,7 @@ def test_self_update_runs_cutover_even_when_already_current(monkeypatch, tmp_pat
     assert seen["slot"] == self_install.version_slot("0.1.0-dev9", tmp_path)
 
 
-def test_safe_extract_refuses_the_classic_tar_symlink_traversal_attack(tmp_path):
+def test_safe_extract_refuses_the_classic_tar_symlink_traversal_attack(tmp_path: Path) -> None:
     """Round-11 review finding: a path-only pre-check computed against
     getmembers() BEFORE any extraction happens cannot catch the classic
     tar symlink attack -- a symlink member (evil -> /tmp/outside) followed
@@ -999,14 +1006,14 @@ def test_safe_extract_refuses_the_classic_tar_symlink_traversal_attack(tmp_path)
     dest.mkdir()
     with tarfile.open(archive_path, "r:gz") as tf:
         with pytest.raises(OSError, match="symlink|link to"):
-            self_install._safe_extract(tf, dest)
+            _safe_extract(tf, dest)
 
     # Nothing must have been written outside dest -- the attack's whole
     # point was landing payload.py at outside/payload.py.
     assert not (outside / "payload.py").exists()
 
 
-def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
+def test_safe_extract_never_uses_the_filter_kwarg(tmp_path: Path) -> None:
     """Round-12 review finding: the project declares
     requires-python >= 3.10 (worktree-manager/pyproject.toml), but
     TarFile.extractall(filter=...)/.extract(filter=...) is only available
@@ -1021,7 +1028,7 @@ def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
 
     original_extract = tarfile.TarFile.extract
 
-    def _spy_extract(self, member, path="", set_attrs=True, *, numeric_owner=False, filter=None):
+    def _spy_extract(self: tarfile.TarFile, member: tarfile.TarInfo | str, path: str | os.PathLike[str]="", set_attrs: bool=True, *, numeric_owner: bool=False, filter: object | None=None) -> None:
         assert filter is None, "filter= was passed -- must stay version-independent"
         return original_extract(self, member, path, set_attrs=set_attrs,
                                 numeric_owner=numeric_owner)
@@ -1038,7 +1045,7 @@ def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
         dest = tmp_path / "dest"
         dest.mkdir()
         with tarfile.open(archive_path, "r:gz") as tf:
-            self_install._safe_extract(tf, dest)
+            _safe_extract(tf, dest)
 
     assert (dest / "stuff" / "a.txt").read_text() == "hello\n"
 
@@ -1047,12 +1054,12 @@ def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
     (True, 3, "configuration_limitation"),
     (False, 1, "command_failed"),
 ])
-def test_engine_error_is_recorded(monkeypatch, update_home, install_hint, expected, outcome):
+def test_engine_error_is_recorded(monkeypatch: pytest.MonkeyPatch, update_home: Path, install_hint: bool, expected: int, outcome: str) -> None:
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",
                         lambda **kw: SelfUpdateResult(action="already-current", version="1"))
 
-    def boom(project, args, **kw):
+    def boom(project: str | None, args: list[str], **kw: Any) -> NoReturn:
         raise ec.EngineError("engine unavailable", install_hint=install_hint)
 
     monkeypatch.setattr(ec, "run_engine_passthrough", boom)
@@ -1065,7 +1072,7 @@ def test_engine_error_is_recorded(monkeypatch, update_home, install_hint, expect
 
 def _sharing_violation() -> OSError:
     exc = OSError(13, "The process cannot access the file")
-    exc.winerror = 32
+    setattr(exc, "winerror", 32)
     return exc
 
 
@@ -1075,12 +1082,12 @@ def _sharing_violation() -> OSError:
     (OSError(5, "Input/output error"), 1, "command_failed", "io_error"),
 ])
 def test_engine_launch_error_is_classified_by_its_cause(
-        monkeypatch, update_home, cause, expected, outcome, code):
+        monkeypatch: pytest.MonkeyPatch, update_home: Path, cause: OSError, expected: int, outcome: str, code: str) -> None:
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",
                         lambda **kw: SelfUpdateResult(action="already-current", version="1"))
 
-    def boom(project, args, **kw):
+    def boom(project: str | None, args: list[str], **kw: Any) -> NoReturn:
         raise ec.EngineError("could not start the engine") from cause
 
     monkeypatch.setattr(ec, "run_engine_passthrough", boom)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,20 @@ from tools.typecheck_source_views import (
 
 if TYPE_CHECKING:
     from tools.typecheck import Project
+
+
+def git_environment() -> dict[str, str]:
+    """Keep repository selectors from redirecting inventory or change comparison."""
+    selectors = {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    }
+    env = {
+        key: value for key, value in os.environ.items()
+        if key.upper() not in selectors and not key.upper().startswith("GIT_CONFIG")
+    }
+    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
+    return env
 
 
 def select_new_code(

@@ -674,7 +674,15 @@ def _check_program(
             str(root.joinpath(*file.split("/")[:file.split("/").index("src") + 1]))
             for file in all_paths if "src" in file.split("/")
         )
-        ordered_imports = [] if program_root else sorted(imports)
+        selected_imports = {
+            str(root.joinpath(*file.split("/")[:file.split("/").index("src") + 1]))
+            for file in all_paths if project.owns(file) and "src" in file.split("/")
+        }
+        # A bundled consumer copy must not shadow the selected project's package.
+        ordered_imports = (
+            [] if program_root
+            else sorted(selected_imports) + sorted(imports - selected_imports)
+        )
         if project.import_roots:
             import_inputs = _import_inputs(root, project.import_roots, all_paths)
         for relative in project.import_roots:

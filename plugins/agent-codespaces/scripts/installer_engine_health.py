@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
 
+import versioned_runtime as runtime
 from installer_dependency_policy import DependencyPolicyError, _native_retained_path
 from installer_source_build import SourceWheelInputs
 from installer_wheel_inputs import WheelDeadlineError, WheelError, _ordinary
@@ -75,6 +77,37 @@ def application_staging_environment(
         ),
         "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
     }
+
+
+class ContentRepairRequired(RuntimeError):
+    """Published bytes differ; a caller must select a distinct generation."""
+
+
+@dataclass(frozen=True)
+class ReadyCandidate:
+    slot: Path
+    payload_hash: str
+    reused: bool
+    descriptor: int | None
+    frozen_plugin: Path
+    extras: tuple[str, ...] = ()
+    local_packages: tuple[str, ...] | None = None
+
+
+def refuse_admission(decision: str, version: str) -> None:
+    """Classify immutable-content and health admission without replacing a slot."""
+    if decision == runtime.ADMIT_CONTENT_CONFLICT:
+        raise ContentRepairRequired(
+            f"Published runtime {version} has different content; publish a new version "
+            "or use an explicitly owned dev slot. Force cannot rewrite a numbered runtime."
+        )
+    if decision == runtime.ADMIT_HEALTH_REPAIR_REQUIRED:
+        raise HealthRepairRequired(
+            f"Runtime {version} requires distinct-generation health repair; "
+            "ordinary construction cannot replace its published or selected identity."
+        )
+    if decision not in (runtime.ADMIT_CONSTRUCT, runtime.ADMIT_REUSE):
+        raise RuntimeError(f"Unrecognized runtime admission for {version}: {decision}")
 
 
 def verify_installed_inputs(

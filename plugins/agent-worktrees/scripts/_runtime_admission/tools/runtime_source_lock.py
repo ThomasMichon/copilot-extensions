@@ -39,6 +39,7 @@ dependencies = installer_dependency_policy
 from installer_dependency_policy import RetainedUVInstall
 from installer_engine import _package_roots, _source_files, runtime as runtime
 from installer_wheel_inputs import _check_deadline
+import installer_provider_roots
 from versioned_runtime_source import SourceIdentity, read_source_identity
 
 _CREATION_FLAGS = 0
@@ -130,7 +131,7 @@ def _pins(content: bytes, environment: Mapping[str, Any], deadline: float) -> li
         names = set()
         for line in text.splitlines():
             _check_deadline(deadline)
-            if not line.strip():
+            if not line.strip() or line.lstrip().startswith("#"):
                 continue
             parts = re.split(r"\s+--hash=", line.strip())
             requirement = Requirement(parts[0].strip())
@@ -395,6 +396,12 @@ def retain_source_configuration(
         raise ProfileError("source candidate target differs from the selected interpreter")
     payload = payload.resolve(strict=True)
     project = _source(payload, expected_source)
+    runtime_root = Path(policy["owner"]["runtimeRoot"])
+    provider_roots = installer_provider_roots.read(runtime_root)
+    if provider_roots is not None and provider_roots != installer_provider_roots.normalize(
+        provider_roots, core=project["name"],
+    ):
+        raise ProfileError("provider roots must not include the owning source application")
 
     def recheck_source() -> None:
         if source_verifier is None:
@@ -414,6 +421,10 @@ def retain_source_configuration(
     ]
     with dependencies._temporary_inputs(None) as temporary:
         temporary = dependencies._private_retained_root(Path(temporary))
+        if provider_roots:
+            registry = temporary / "provider-requirements.in"
+            registry.write_text("\n".join(provider_roots) + "\n", encoding="utf-8")
+            arguments.append(str(registry))
         build_roots = _build_roots(payload, deadline) if include_build_tools else None
         if build_roots is not None:
             registry = temporary / "build-requirements.in"
@@ -459,11 +470,15 @@ def retain_source_configuration(
                 record["configuration_policy"] = configuration_policy
             if build_roots is not None:
                 record["build_roots"] = build_roots
+            if provider_roots is not None:
+                record["provider_roots"] = provider_roots
             canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
             def verify_selection() -> None:
                 _check_deadline(deadline)
                 recheck_source()
+                if installer_provider_roots.read(runtime_root) != provider_roots:
+                    raise ProfileError("selected provider roots changed during source reconstruction")
                 if installation is not None:
                     observed = validate_source_resolution_inputs(
                         plan, installation=installation, transaction=transaction,

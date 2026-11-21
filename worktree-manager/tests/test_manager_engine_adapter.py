@@ -8,47 +8,59 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import tomllib
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Callable, Iterator, NoReturn, cast
 
 import pytest
 
 from worktree_manager import self_install as si
+from worktree_manager.self_install_payload import _copy_payload
+from _manager_engine_fixtures import (
+    attribute_source as _attribute_source,
+    bundled_wheel_source as _bundled_wheel_source,
+    capture as _capture,
+    closed_inputs as _closed_inputs,
+    runtime_installer,
+    source as _source,
+)
+
+if TYPE_CHECKING:
+    from installer_engine import FrozenInputs
+    from installer_wheel_snapshot import WheelInstallInputs
 
 
-def _source(tmp_path, version="1.2.3-dev1"):
-    payload = tmp_path / "source"
-    package = payload / "src" / "worktree_manager"
-    package.mkdir(parents=True)
-    (package / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
-    (package / "__main__.py").write_text("", encoding="utf-8")
-    (payload / "pyproject.toml").write_text(
-        f'[project]\nname = "copilot-extensions-worktree-manager"\nversion = "{version}"\n',
-        encoding="utf-8",
-    )
-    uv = tmp_path / "uv"
-    uv.touch()
-    return payload, tmp_path / "root", uv
 
 
-def _capture(adapter, monkeypatch):
-    calls = []
-    @contextmanager
-    def candidate(root, version, **kwargs):
-        calls.append((root, version, kwargs))
-        yield SimpleNamespace(slot=root / "versions" / version, reused=False)
-    monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
-    return calls
 
 
-def test_adapter_delegates_construction_health_and_retention_without_selecting(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+@pytest.mark.parametrize("path,uri", [
+    (r"\\?\C:\held inputs\package", "file:///C:/held%20inputs/package"),
+    (r"\\?\UNC\server\share\package", "file://server/share/package"),
+    (r"C:\held inputs\package", "file:///C:/held%20inputs/package"),
+], ids=["extended-drive", "extended-unc", "ordinary-drive"])
+def test_local_source_origin_uses_regular_windows_file_uri(tmp_path: Path, path: str, uri: str) -> None:
+    engine = runtime_installer().engine
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text('[project]\nname="example-app"\n', encoding="utf-8")
+
+    class SourcePath(PureWindowsPath):
+        def read_text(self, *, encoding: str) -> str:
+            assert self.name == "pyproject.toml"
+            return manifest.read_text(encoding=encoding)
+
+    package = SourcePath(path)
+    inputs = engine.FrozenInputs(package, (package,), "source-content")
+    assert engine._input_origins(inputs) == {"example-app": uri}
+
+
+def test_adapter_delegates_construction_health_and_retention_without_selecting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     calls = _capture(adapter, monkeypatch)
-    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv) as ready:
+    with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv) as ready:
         assert ready.slot.name == "1.2.3-dev1"
         assert not (root / "current-version").exists()
         _, _, options = calls[0]
@@ -61,8 +73,8 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length construction inputs")
-def test_adapter_retains_long_windows_members_through_source_observation(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_adapter_retains_long_windows_members_through_source_observation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     native = adapter.engine._native_retained_path
     member = Path("resources") / ("nested-" * 12) / ("retained-" * 12) / "data.bin"
@@ -71,7 +83,7 @@ def test_adapter_retains_long_windows_members_through_source_observation(tmp_pat
     source.write_bytes(b"retained native construction resource")
     calls = _capture(adapter, monkeypatch)
 
-    with adapter.candidate(Path(native(payload)), root, assemble=si._copy_payload, uv=uv):
+    with adapter.candidate(Path(native(payload)), root, assemble=_copy_payload, uv=uv):
         prepared = calls[0][2]["plugin"]
         assert len(str(prepared / member)) > 260
         assert (prepared / member).read_bytes() == source.read_bytes()
@@ -83,12 +95,12 @@ def test_adapter_retains_long_windows_members_through_source_observation(tmp_pat
 
 @pytest.mark.parametrize("qualified", [False, True])
 def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
-    tmp_path, monkeypatch, capsys, qualified,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], qualified: bool,
+) -> None:
     import worktree_manager
     from worktree_manager import runtime_candidate
 
-    adapter = si._runtime_installer()
+    adapter = runtime_installer()
     payload, root, _uv = _source(tmp_path)
     manager = Path(__file__).resolve().parents[1]
     (payload / "references").mkdir()
@@ -111,13 +123,13 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
 
         manifest = retained / nested.relative_to(payload)
         project = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        freeze_source_editables(project)
+        cast(Callable[[dict[str, Any]], None], freeze_source_editables)(project)
         _write_toml(manifest, project)
         assert adapter.runtime_source.assembly_hash(retained) != adapter.runtime_source.assembly_hash(payload)
         data = {"frozen_plugin": str(retained), "source_payload": str(payload)}
     slot = root / "versions" / "1.2.3-dev1"
     slot.mkdir(parents=True)
-    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(slot))
+    monkeypatch.setattr(sys, "prefix", str(slot))
     monkeypatch.setattr(
         worktree_manager, "__file__", str(slot / "Lib" / "site-packages" / "worktree_manager" / "__init__.py"),
     )
@@ -148,44 +160,48 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
     assert record["slot"] == str(slot)
 
 
-def test_explicit_interpreter_is_forwarded_instead_of_reselected(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_explicit_interpreter_is_forwarded_instead_of_reselected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     selected = tmp_path / "selected-python"
     selected.touch()
     calls = _capture(adapter, monkeypatch)
     monkeypatch.setattr(adapter, "base_python", lambda: pytest.fail("explicit interpreter was reselected"))
-    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv, python=selected):
+    with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv, python=selected):
         assert calls[0][2]["base_python"] == selected
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows command discovery")
-def test_default_uv_discovery_uses_the_sdk_before_traversing_the_selected_file(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_default_uv_discovery_uses_the_sdk_before_traversing_the_selected_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     calls = _capture(adapter, monkeypatch)
     selected = []
     original_which = shutil.which
 
-    def which(command, *args, **kwargs):
+    def which(command: str, *args: Any, **kwargs: Any) -> str | None:
         if command == "uv":
             pytest.fail("Manager performed a traversing UV availability check")
         return original_which(command, *args, **kwargs)
 
     monkeypatch.setattr(adapter.shutil, "which", which)
+    def select_uv(command: str) -> str:
+        selected.append(command)
+        return str(uv)
+
     monkeypatch.setattr(
         adapter.engine, "_select_uv_executable",
-        lambda command: selected.append(command) or str(uv),
+        select_uv,
     )
-    with adapter.candidate(payload, root, assemble=si._copy_payload):
+    with adapter.candidate(payload, root, assemble=_copy_payload):
         assert calls[0][2]["uv"] == uv
     assert selected == ["uv"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows command discovery")
 @pytest.mark.parametrize("name", ["uv", "uv.exe"])
-def test_explicit_relative_uv_is_bound_to_its_path_before_sdk_selection(tmp_path, monkeypatch, name):
-    adapter = si._runtime_installer()
+def test_explicit_relative_uv_is_bound_to_its_path_before_sdk_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    adapter = runtime_installer()
     payload, root, original = _source(tmp_path)
     selected_file = tmp_path / name
     if selected_file != original:
@@ -194,14 +210,14 @@ def test_explicit_relative_uv_is_bound_to_its_path_before_sdk_selection(tmp_path
     calls = _capture(adapter, monkeypatch)
     selected = []
 
-    def select(command):
+    def select(command: str) -> str:
         assert Path(command) == selected_file
         assert Path(command).is_absolute()
         selected.append(command)
         return command
 
     monkeypatch.setattr(adapter.engine, "_select_uv_executable", select)
-    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=Path(name)):
+    with adapter.candidate(payload, root, assemble=_copy_payload, uv=Path(name)):
         assert calls[0][2]["uv"] == selected_file
     assert selected == [str(selected_file)]
 
@@ -209,9 +225,9 @@ def test_explicit_relative_uv_is_bound_to_its_path_before_sdk_selection(tmp_path
 @pytest.mark.parametrize("name", ["uv", "uv.exe"])
 @pytest.mark.parametrize("boundary", ["retention", "construction"])
 def test_python_engine_path_arguments_are_not_reinterpreted_as_command_names(
-    tmp_path, monkeypatch, name, boundary,
-):
-    engine = si._runtime_installer().engine
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, boundary: str,
+) -> None:
+    engine = runtime_installer().engine
     payload, root, original = _source(tmp_path)
     selected_file = tmp_path / name
     if selected_file != original:
@@ -221,7 +237,7 @@ def test_python_engine_path_arguments_are_not_reinterpreted_as_command_names(
     class SelectedPath(Exception):
         pass
 
-    def select(command):
+    def select(command: str) -> str:
         assert Path(command) == selected_file
         assert Path(command).is_absolute()
         raise SelectedPath
@@ -240,8 +256,8 @@ def test_python_engine_path_arguments_are_not_reinterpreted_as_command_names(
     "retention", "construction",
     pytest.param("manager", marks=pytest.mark.skipif(os.name != "nt", reason="Windows SDK selection")),
 ])
-def test_explicit_uv_parent_components_survive_binding_until_resolution(tmp_path, monkeypatch, boundary):
-    adapter = si._runtime_installer()
+def test_explicit_uv_parent_components_survive_binding_until_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str) -> None:
+    adapter = runtime_installer()
     engine = adapter.engine
     payload, root, _uv = _source(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -251,7 +267,7 @@ def test_explicit_uv_parent_components_survive_binding_until_resolution(tmp_path
     class ObservedPath(Exception):
         pass
 
-    def select(command):
+    def select(command: str) -> str:
         assert Path(command) == expected
         assert ".." in Path(command).parts
         raise ObservedPath
@@ -259,7 +275,7 @@ def test_explicit_uv_parent_components_survive_binding_until_resolution(tmp_path
     monkeypatch.setattr(engine, "_select_uv_executable", select)
     with pytest.raises(ObservedPath):
         if boundary == "manager":
-            with adapter.candidate(payload, root, assemble=si._copy_payload, uv=relative):
+            with adapter.candidate(payload, root, assemble=_copy_payload, uv=relative):
                 pytest.fail("selection witness was not reached")
         elif boundary == "retention":
             with engine._retained_inputs(
@@ -270,27 +286,13 @@ def test_explicit_uv_parent_components_survive_binding_until_resolution(tmp_path
             engine._construct(None, root, relative, Path(sys.executable), -1, 1)
 
 
-def _bundled_wheel_source(tmp_path):
-    payload, root, _ = _source(tmp_path)
-    manager = Path(__file__).resolve().parents[1]
-    data = tomllib.loads((manager / "pyproject.toml").read_text(encoding="utf-8"))
-    declaration = data["tool"]["uv"]["sources"]["dbus-next"]
-    wheel = Path(declaration["path"])
-    (payload / wheel).parent.mkdir(parents=True)
-    shutil.copyfile(manager / wheel, payload / wheel)
-    with (payload / "pyproject.toml").open("a", encoding="utf-8") as stream:
-        stream.write(
-            'dependencies = ["dbus-next==0.2.3 ; sys_platform == \'linux\'"]\n'
-            '[tool.uv.sources]\ndbus-next = {path = ' + json.dumps(wheel.as_posix()) + '}\n'
-        )
-    return payload, root, wheel
 
 
 @pytest.mark.parametrize("platform,uses_wheel", [("linux", True), ("windows", False)])
 def test_bundled_wheel_reaches_real_manager_installation_inputs(
-    tmp_path, monkeypatch, platform, uses_wheel,
-):
-    adapter = si._runtime_installer()
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, uses_wheel: bool,
+) -> None:
+    adapter = runtime_installer()
     payload, root, wheel = _bundled_wheel_source(tmp_path)
     contents = (payload / wheel).read_bytes()
     frozen = adapter.engine.freeze_inputs(payload, tmp_path / "frozen")
@@ -307,7 +309,7 @@ def test_bundled_wheel_reaches_real_manager_installation_inputs(
     class InstallationReached(Exception):
         pass
 
-    def inspect_installation(inputs, *args, **kwargs):
+    def inspect_installation(inputs: FrozenInputs, *args: object, **kwargs: object) -> NoReturn:
         assert inputs.transaction is not None
         assert all(package.is_dir() for package in inputs.packages)
         assert (inputs.plugin / wheel).read_bytes() == contents
@@ -327,7 +329,7 @@ def test_bundled_wheel_reaches_real_manager_installation_inputs(
         result = subprocess.run(
             command, env=inputs.transaction.environment, cwd=inputs.transaction.cwd,
             capture_output=True, text=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         diagnostic = result.stdout + result.stderr
@@ -340,26 +342,26 @@ def test_bundled_wheel_reaches_real_manager_installation_inputs(
     # stop only at the boundary that would execute venv/UV installation.
     monkeypatch.setattr(adapter.engine, "_construct", inspect_installation)
     with pytest.raises(InstallationReached):
-        with adapter.candidate(frozen.plugin, root, assemble=si._copy_payload, uv=Path(uv)):
+        with adapter.candidate(frozen.plugin, root, assemble=_copy_payload, uv=Path(uv)):
             pytest.fail("installation boundary did not stop construction")
     assert len(reached) == 1
     assert not (tmp_path / "root" / "current-version").exists()
 
 
-def test_real_manager_discovery_rejects_modified_bundled_wheel(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_real_manager_discovery_rejects_modified_bundled_wheel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, relative_wheel = _bundled_wheel_source(tmp_path)
     wheel = payload / relative_wheel
     wheel.write_bytes(wheel.read_bytes() + b"modified")
     uv = tmp_path / "uv"
     uv.touch()
 
-    def unexpected_installation(*args, **kwargs):
+    def unexpected_installation(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("modified wheel reached installation")
 
     monkeypatch.setattr(adapter.engine, "_construct", unexpected_installation)
     with pytest.raises(adapter.engine.DependencyPolicyError, match="local UV artifacts"):
-        with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+        with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv):
             pytest.fail("modified wheel was admitted")
     assert not (tmp_path / "root" / "current-version").exists()
 
@@ -367,8 +369,8 @@ def test_real_manager_discovery_rejects_modified_bundled_wheel(tmp_path, monkeyp
 @pytest.mark.parametrize("name,accepted", [
     ("Copilot_Extensions_Worktree_Manager", True), ("foreign-manager", False),
 ])
-def test_project_identity_is_normalized_but_foreign_projects_refuse(tmp_path, monkeypatch, name, accepted):
-    adapter = si._runtime_installer()
+def test_project_identity_is_normalized_but_foreign_projects_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, accepted: bool) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     project = payload / "pyproject.toml"
     project.write_text(project.read_text(encoding="utf-8").replace(
@@ -376,18 +378,18 @@ def test_project_identity_is_normalized_but_foreign_projects_refuse(tmp_path, mo
     ), encoding="utf-8")
     calls = _capture(adapter, monkeypatch)
     if accepted:
-        with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+        with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv):
             assert len(calls) == 1
     else:
         with pytest.raises(ValueError, match="attributed project name"):
-            with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+            with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv):
                 pytest.fail("foreign project was admitted")
         assert calls == []
     assert not (root / "current-version").exists()
 
 
-def test_selected_repair_is_reused_instead_of_allocating_another(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_selected_repair_is_reused_instead_of_allocating_another(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     legacy = root / "versions" / "1.2.3-dev1"
     legacy.mkdir(parents=True)
@@ -396,14 +398,14 @@ def test_selected_repair_is_reused_instead_of_allocating_another(tmp_path, monke
     adapter.runtime.mark_complete(root, repair, payload_hash="a" * 64)
     si._write_marker(root, repair)
     calls = _capture(adapter, monkeypatch)
-    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+    with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv):
         assert calls[0][1] == repair
         assert calls[0][2]["reuse_generations"] is False
     assert si.current_version(root) == repair
 
 
-def test_source_identity_survives_payload_assembly(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_source_identity_survives_payload_assembly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     (payload / "plugin.json").write_text(
         '{"name":"worktree-manager","version":"1.2.3-dev1"}', encoding="utf-8",
@@ -418,7 +420,7 @@ def test_source_identity_survives_payload_assembly(tmp_path, monkeypatch):
     }
     (payload / "runtime-source.json").write_text(json.dumps(identity), encoding="utf-8")
     calls = _capture(adapter, monkeypatch)
-    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+    with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv):
         assert calls[0][1] == generation
         assert calls[0][2]["expected_source_identity"]["runtime_version"] == generation
         prepared = calls[0][2]["plugin"]
@@ -429,51 +431,15 @@ def test_source_identity_survives_payload_assembly(tmp_path, monkeypatch):
         assert not (prepared / ".install-complete").exists()
 
 
-def _attribute_source(adapter, payload, version="1.2.3-dev1"):
-    (payload / "plugin.json").write_text(json.dumps({
-        "name": "worktree-manager", "version": version,
-    }), encoding="utf-8")
-    digest = adapter.runtime_source.assembly_hash(payload)
-    generation = adapter.runtime_source.runtime_version(version, "a" * 40, digest)
-    (payload / "runtime-source.json").write_text(json.dumps({
-        "schema": adapter.runtime_source.SOURCE_SCHEMA, "version": 1,
-        "plugin": "worktree-manager", "package_version": version,
-        "source_commit": "a" * 40, "source_tree": "b" * 40,
-        "assembly_hash": digest, "runtime_version": generation,
-    }), encoding="utf-8")
-    return generation
 
 
-@contextmanager
-def _closed_inputs(tmp_path, content=b"constructor fixture", extra_wheels=()):
-    from installer_wheel_snapshot import WheelInstallInputs, retain_wheel_inputs
-
-    filename = "copilot_extensions_worktree_manager-1.2.3.dev1-py3-none-any.whl"
-    archives, expected, distributions = {}, {}, []
-    for name, version, filename, content in (
-        ("copilot-extensions-worktree-manager", "1.2.3.dev1", filename, content), *extra_wheels,
-    ):
-        wheel = tmp_path / filename
-        wheel.write_bytes(content)
-        digest = "sha256:" + hashlib.sha256(content).hexdigest()
-        archives[filename], expected[filename] = wheel, digest
-        distributions.append((name, version, filename, digest))
-    with retain_wheel_inputs(
-        archives, expected, max_wheels=len(archives),
-        max_archive_bytes=1 << 20, max_total_bytes=1 << 20,
-        max_snapshot_bytes=1 << 20, deadline=time.monotonic() + 120,
-    ) as snapshot:
-        yield WheelInstallInputs(
-            snapshot, '{"fixture":"complete-manager-closure"}',
-            tuple(distributions),
-        )
 
 
 @pytest.mark.parametrize("old_marker", [None, b"\xff\xfe\n", b"../foreign\n"])
 def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(
-    tmp_path, monkeypatch, old_marker,
-):
-    adapter = si._runtime_installer()
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_marker: bytes | None,
+) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     generation = _attribute_source(adapter, payload)
     if old_marker is not None:
@@ -481,9 +447,9 @@ def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(
         (root / "current-version").write_bytes(old_marker)
     version_dir = adapter.runtime.version_dir
 
-    def ordinary_slot(actual_root, version):
+    def ordinary_slot(actual_root: Path, version: str) -> Path:
         adapter.runtime._validate_dev_previous_version(version)
-        return version_dir(actual_root, version)
+        return cast(Path, version_dir(actual_root, version))
 
     monkeypatch.setattr(adapter.runtime, "version_dir", ordinary_slot)
     calls = _capture(adapter, monkeypatch)
@@ -491,7 +457,7 @@ def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(
     validate = lambda slot: None
     app = tmp_path / "application"
     with _closed_inputs(tmp_path) as wheels, adapter.candidate(
-        payload, root, assemble=si._copy_payload, uv=uv,
+        payload, root, assemble=_copy_payload, uv=uv,
         wheel_inputs=wheels, local_packages=local, validate_candidate=validate,
         application=app,
     ) as ready:
@@ -507,24 +473,24 @@ def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(
         assert (marker.read_bytes() if marker.exists() else None) == old_marker
 
 
-def test_unattributed_manager_wheels_refuse_before_construction(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_unattributed_manager_wheels_refuse_before_construction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     calls = _capture(adapter, monkeypatch)
     with _closed_inputs(tmp_path) as wheels, pytest.raises(ValueError, match="source identity"):
-        with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv, wheel_inputs=wheels):
+        with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv, wheel_inputs=wheels):
             pytest.fail("unattributed source reached the constructor")
     assert not calls and not (root / "current-version").exists()
 
 
-def test_source_wheel_health_repair_preserves_profile_generation_family(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_source_wheel_health_repair_preserves_profile_generation_family(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     generation = _attribute_source(adapter, payload)
     calls = []
 
     @contextmanager
-    def unhealthy(root, version, **options):
+    def unhealthy(root: Path, version: str, **options: Any) -> Iterator[SimpleNamespace]:
         calls.append((version, options))
         if len(calls) == 1:
             raise adapter.engine.HealthRepairRequired("fixture")
@@ -532,7 +498,7 @@ def test_source_wheel_health_repair_preserves_profile_generation_family(tmp_path
 
     monkeypatch.setattr(adapter.engine, "numbered_candidate", unhealthy)
     with _closed_inputs(tmp_path) as wheels, adapter.candidate(
-        payload, root, assemble=si._copy_payload, uv=uv, wheel_inputs=wheels,
+        payload, root, assemble=_copy_payload, uv=uv, wheel_inputs=wheels,
         local_packages=("copilot-extensions-worktree-manager",),
     ) as ready:
         expected = generation + ".profile." + wheels.receipt()["lock_id"][7:23]
@@ -543,8 +509,8 @@ def test_source_wheel_health_repair_preserves_profile_generation_family(tmp_path
 
 
 @pytest.mark.parametrize("selected", [None, "fixture", "foreign"])
-def test_self_install_forwards_source_inputs_without_replacing_completion_owner(tmp_path, monkeypatch, selected):
-    adapter = si._runtime_installer()
+def test_self_install_forwards_source_inputs_without_replacing_completion_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: str | None) -> None:
+    adapter = runtime_installer()
     payload, root, _ = _source(tmp_path)
     root.mkdir()
     if selected is not None:
@@ -558,11 +524,11 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
     app = tmp_path / "application"
 
     @contextmanager
-    def candidate(payload, root, **options):
+    def candidate(payload: Path, root: Path, **options: Any) -> Iterator[SimpleNamespace]:
         calls.append(options)
         yield SimpleNamespace(slot=root / "versions" / "fixture")
 
-    def complete(ready, actual_payload, actual_root, **options):
+    def complete(ready: SimpleNamespace, actual_payload: Path, actual_root: Path, **options: Any) -> si.SelfInstallResult:
         assert actual_payload == payload and actual_root == root
         assert options["before_publish"] is before
         assert options["previous"] == selected
@@ -581,7 +547,7 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
         )
         assert actual is result
         assert calls == [{
-            "assemble": si._copy_payload, "wheel_inputs": wheels,
+            "assemble": _copy_payload, "wheel_inputs": wheels,
             "local_packages": ("copilot-extensions-worktree-manager",),
             "validate_candidate": validate,
             "python": python,
@@ -593,9 +559,9 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
 @pytest.mark.parametrize("reused", [False, True])
 @pytest.mark.parametrize("readiness_error", [None, "passive readiness refused"])
 def test_stage_only_checks_readiness_under_custody_without_publication(
-    tmp_path, monkeypatch, reused, readiness_error,
-):
-    adapter = si._runtime_installer()
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reused: bool, readiness_error: str | None,
+) -> None:
+    adapter = runtime_installer()
     payload, root, _ = _source(tmp_path)
     root.mkdir()
     paths = [
@@ -606,11 +572,11 @@ def test_stage_only_checks_readiness_under_custody_without_publication(
         path.write_bytes(b"incumbent\n")
     before = {path: path.read_bytes() for path in paths}
     slot = root / "versions" / "1.2.3-dev1"
-    events = []
+    events: list[str] = []
     ready = SimpleNamespace(slot=slot, reused=reused)
 
     @contextmanager
-    def candidate(actual_payload, actual_root, **options):
+    def candidate(actual_payload: Path, actual_root: Path, **options: Any) -> Iterator[SimpleNamespace]:
         assert actual_payload == payload and actual_root == root
         assert options["wheel_inputs"] is wheels
         events.append("retained")
@@ -619,14 +585,14 @@ def test_stage_only_checks_readiness_under_custody_without_publication(
         finally:
             events.append("released")
 
-    def verify(actual_root, actual_ready, *, wheel_inputs):
+    def verify(actual_root: Path, actual_ready: SimpleNamespace, *, wheel_inputs: WheelInstallInputs) -> None:
         assert actual_root == root and actual_ready is ready and wheel_inputs is wheels
         assert events == ["retained"]
         events.append("readiness")
         if readiness_error:
             raise RuntimeError(readiness_error)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("staging reached publication or activation")
 
     monkeypatch.setattr(adapter, "candidate", candidate)
@@ -649,8 +615,8 @@ def test_stage_only_checks_readiness_under_custody_without_publication(
 
 
 @pytest.mark.parametrize("changes", [{}, {"version": True}, {"ready": 1}, {"generation": "foreign"}])
-def test_stage_readiness_uses_owned_installed_child_and_exact_result(tmp_path, monkeypatch, changes):
-    adapter = si._runtime_installer()
+def test_stage_readiness_uses_owned_installed_child_and_exact_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, object]) -> None:
+    adapter = runtime_installer()
     payload, root, _ = _source(tmp_path)
     slot = root / "versions" / "1.2.3-dev1"
     python = slot / "Scripts" / "python.exe"
@@ -664,7 +630,7 @@ def test_stage_readiness_uses_owned_installed_child_and_exact_result(tmp_path, m
     }
     calls = []
 
-    def child(command, **options):
+    def child(command: list[str], **options: Any) -> SimpleNamespace:
         assert command == [
             str(python), "-I", "-S", "-B", "-X", "utf8",
             str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
@@ -689,8 +655,8 @@ def test_stage_readiness_uses_owned_installed_child_and_exact_result(tmp_path, m
     assert len(calls) == 1
 
 
-def test_damaged_repair_uses_a_new_generation_of_the_original_package(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_damaged_repair_uses_a_new_generation_of_the_original_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     legacy = root / "versions" / "1.2.3-dev1"
     legacy.mkdir(parents=True)
@@ -699,13 +665,13 @@ def test_damaged_repair_uses_a_new_generation_of_the_original_package(tmp_path, 
     si._write_marker(root, selected)
     calls = []
     @contextmanager
-    def candidate(root, version, **kwargs):
+    def candidate(root: Path, version: str, **kwargs: Any) -> Iterator[SimpleNamespace]:
         calls.append(version)
         if len(calls) == 1:
             raise adapter.engine.HealthRepairRequired("fixture installed health failed")
         yield SimpleNamespace(slot=root / "versions" / version, reused=False)
     monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
-    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv) as ready:
+    with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv) as ready:
         assert calls[0] == selected
         assert calls[1] != selected
         assert adapter.runtime.package_version(ready.slot.name) == "1.2.3-dev1"
@@ -713,13 +679,13 @@ def test_damaged_repair_uses_a_new_generation_of_the_original_package(tmp_path, 
     assert si.current_version(root) == selected
 
 
-def test_foreign_source_identity_refuses_before_engine_construction(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_foreign_source_identity_refuses_before_engine_construction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     payload, root, uv = _source(tmp_path)
     (payload / "runtime-source.json").write_text('{"schema":"foreign"}', encoding="utf-8")
     calls = _capture(adapter, monkeypatch)
     with pytest.raises(adapter.runtime_source.SourceIdentityError, match="Source identity"):
-        with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+        with adapter.candidate(payload, root, assemble=_copy_payload, uv=uv):
             pytest.fail("foreign source identity was admitted")
     assert calls == []
     assert not (root / "current-version").exists()
@@ -729,9 +695,9 @@ def test_foreign_source_identity_refuses_before_engine_construction(tmp_path, mo
 @pytest.mark.parametrize("had_last_good", [False, True])
 @pytest.mark.parametrize("recovery_fault", [False, True])
 def test_partial_selector_publication_restores_both_states(
-    tmp_path, monkeypatch, had_current, had_last_good, recovery_fault,
-):
-    adapter = si._runtime_installer()
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, had_current: bool, had_last_good: bool, recovery_fault: bool,
+) -> None:
+    adapter = runtime_installer()
     root = tmp_path / "root"
     for version in ("0.9.0", "1.0.0", "2.0.0"):
         adapter.runtime.mark_complete(root, version, payload_hash="a" * 64)
@@ -744,8 +710,8 @@ def test_partial_selector_publication_restores_both_states(
     receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
     publication = adapter.runtime._runtime_component("versioned_runtime_publication")
     replace = publication.replace_selector
-    faults = []
-    retained = set()
+    faults: list[bool] = []
+    retained: set[str] = set()
     retain = adapter.runtime.retention_lease
     held_publication = []
     lease = adapter.runtime._publication_lease
@@ -753,7 +719,7 @@ def test_partial_selector_publication_restores_both_states(
     recoveries = []
 
     @contextmanager
-    def retaining(root, generation, **kwargs):
+    def retaining(root: Path, generation: str, **kwargs: Any) -> Iterator[Path]:
         with retain(root, generation, **kwargs) as slot:
             retained.add(generation)
             try:
@@ -762,7 +728,7 @@ def test_partial_selector_publication_restores_both_states(
                 retained.remove(generation)
 
     @contextmanager
-    def publishing(root):
+    def publishing(root: Path) -> Iterator[None]:
         with lease(root):
             held_publication.append(True)
             try:
@@ -770,7 +736,7 @@ def test_partial_selector_publication_restores_both_states(
             finally:
                 held_publication.pop()
 
-    def recovering(*args):
+    def recovering(*args: Any) -> object:
         assert held_publication == [True]
         assert retained == {
             "2.0.0", *(["1.0.0"] if had_current else []), *(["0.9.0"] if had_last_good else []),
@@ -780,13 +746,13 @@ def test_partial_selector_publication_restores_both_states(
             raise PermissionError("transient recovery failure")
         return recover(*args)
 
-    def fail_second(source, target):
+    def fail_second(source: Path, target: Path) -> None:
         native = adapter.engine._native_retained_path
         if Path(native(target)) == Path(native(last_good)) and not faults:
             assert current.read_bytes() == b"2.0.0\n"
             faults.append(True)
             raise PermissionError("injected second-selector failure")
-        return replace(source, target)
+        replace(source, target)
 
     monkeypatch.setattr(publication, "replace_selector", fail_second)
     monkeypatch.setattr(adapter.runtime, "retention_lease", retaining)
@@ -806,8 +772,8 @@ def test_partial_selector_publication_restores_both_states(
 
 
 @pytest.mark.parametrize("old_last_good", [None, b"\xff\n"])
-def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path, monkeypatch, old_last_good):
-    adapter = si._runtime_installer()
+def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_last_good: bytes | None) -> None:
+    adapter = runtime_installer()
     root = tmp_path / "root"
     adapter.runtime.mark_complete(root, "2.0.0", payload_hash="a" * 64)
     if old_last_good is not None:
@@ -816,7 +782,7 @@ def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path, mo
     retain = adapter.runtime.retention_lease
 
     @contextmanager
-    def concurrent_selection(root, generation, **kwargs):
+    def concurrent_selection(root: Path, generation: str, **kwargs: Any) -> Iterator[Path]:
         with retain(root, generation, **kwargs) as slot:
             (root / "last-known-good").write_bytes(concurrent)
             yield slot
@@ -828,8 +794,8 @@ def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path, mo
     assert (root / "last-known-good").read_bytes() == concurrent
 
 
-def test_unchanged_raw_selector_with_missing_slot_allows_bootstrap_recovery(tmp_path):
-    adapter = si._runtime_installer()
+def test_unchanged_raw_selector_with_missing_slot_allows_bootstrap_recovery(tmp_path: Path) -> None:
+    adapter = runtime_installer()
     root = tmp_path / "root"
     adapter.runtime.mark_complete(root, "2.0.0", payload_hash="a" * 64)
     (root / "current-version").write_text("1.0.0\n")
@@ -848,9 +814,9 @@ def test_unchanged_raw_selector_with_missing_slot_allows_bootstrap_recovery(tmp_
 ])
 @pytest.mark.parametrize("failure", [None, "partial", "after"])
 def test_unknown_old_selectors_allow_valid_target_without_following_them(
-    tmp_path, monkeypatch, current, last_good, failure,
-):
-    adapter = si._runtime_installer()
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current: bytes | None, last_good: bytes | None, failure: str | None,
+) -> None:
+    adapter = runtime_installer()
     root = tmp_path / "root"
     for generation in ("0.9.0", "2.0.0"):
         adapter.runtime.mark_complete(root, generation, payload_hash="a" * 64)
@@ -863,20 +829,20 @@ def test_unknown_old_selectors_allow_valid_target_without_following_them(
         if content is not None:
             path.write_bytes(content)
     receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
-    retained = set()
+    retained: set[str] = set()
     retain, version_dir = adapter.runtime.retention_lease, adapter.runtime.version_dir
     expected_retained = {"2.0.0", *(["0.9.0"] if last_good == b"0.9.0\r\n" else [])}
     publication = adapter.runtime._runtime_component("versioned_runtime_publication")
     replace = publication.os.replace
     io_error = PermissionError("injected partial publication failure")
-    faults = []
+    faults: list[bool] = []
 
-    def ordinary_slot(actual_root, generation):
+    def ordinary_slot(actual_root: Path, generation: str) -> Path:
         assert generation in expected_retained
-        return version_dir(actual_root, generation)
+        return cast(Path, version_dir(actual_root, generation))
 
     @contextmanager
-    def retaining(actual_root, generation, **kwargs):
+    def retaining(actual_root: Path, generation: str, **kwargs: Any) -> Iterator[Path]:
         with retain(actual_root, generation, **kwargs) as slot:
             retained.add(generation)
             try:
@@ -884,15 +850,15 @@ def test_unknown_old_selectors_allow_valid_target_without_following_them(
             finally:
                 retained.remove(generation)
 
-    def fail_second(source, target):
+    def fail_second(source: Path, target: Path) -> None:
         if failure == "partial" and Path(target) == paths[1] and not faults:
             assert paths[0].read_bytes() == b"2.0.0\n"
             assert retained == expected_retained
             faults.append(True)
             raise io_error
-        return replace(source, target)
+        replace(source, target)
 
-    def after_publish():
+    def after_publish() -> None:
         assert retained == expected_retained
         assert all(path.read_bytes() == b"2.0.0\n" for path in paths)
         if failure == "after":
@@ -918,14 +884,14 @@ def test_unknown_old_selectors_allow_valid_target_without_following_them(
     assert sentinel.read_bytes() == b"unrelated content"
 
 
-def test_unsafe_incoming_selector_refuses_before_leases_or_publication(tmp_path, monkeypatch):
-    adapter = si._runtime_installer()
+def test_unsafe_incoming_selector_refuses_before_leases_or_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = runtime_installer()
     root = tmp_path / "root"
     root.mkdir()
     marker = root / "current-version"
     marker.write_bytes(b"\xff\n")
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("invalid incoming target reached mutation custody")
 
     monkeypatch.setattr(adapter.runtime, "_publication_lease", forbidden)
@@ -939,9 +905,9 @@ def test_unsafe_incoming_selector_refuses_before_leases_or_publication(tmp_path,
 @pytest.mark.parametrize("current", [None, b"", b"1.0.0\r\n"])
 @pytest.mark.parametrize("last_good", [None, b" \t\n", b"0.9.0\n"])
 def test_after_publication_failure_restores_selection_with_runtime_custody(
-    tmp_path, monkeypatch, current, last_good,
-):
-    adapter = si._runtime_installer()
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current: bytes | None, last_good: bytes | None,
+) -> None:
+    adapter = runtime_installer()
     root = tmp_path / "root"
     for generation in ("0.9.0", "1.0.0", "2.0.0"):
         adapter.runtime.mark_complete(root, generation, payload_hash="a" * 64)
@@ -951,11 +917,11 @@ def test_after_publication_failure_restores_selection_with_runtime_custody(
             path.write_bytes(contents)
     before = {path: path.read_bytes() if path.exists() else None for path in paths}
     receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
-    retained = set()
+    retained: set[str] = set()
     retain = adapter.runtime.retention_lease
 
     @contextmanager
-    def retaining(root, generation, **kwargs):
+    def retaining(root: Path, generation: str, **kwargs: Any) -> Iterator[Path]:
         with retain(root, generation, **kwargs) as slot:
             retained.add(generation)
             try:
@@ -965,7 +931,7 @@ def test_after_publication_failure_restores_selection_with_runtime_custody(
 
     monkeypatch.setattr(adapter.runtime, "retention_lease", retaining)
 
-    def failed_cutover():
+    def failed_cutover() -> NoReturn:
         assert all(path.read_bytes() == b"2.0.0\n" for path in paths)
         assert "2.0.0" in retained
         assert current is None or not current.strip() or "1.0.0" in retained

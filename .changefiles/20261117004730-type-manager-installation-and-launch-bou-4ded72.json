@@ -1,0 +1,9 @@
+{
+  "comment": "Type Manager installation and launch boundaries; align automatic ownership and terminal fixtures with current contracts.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

@@ -12,9 +12,19 @@ from pathlib import Path
 _spec = importlib.util.spec_from_file_location(
     "_update_driver_participant", Path(__file__).with_name("participant.py"),
 )
+if _spec is None or _spec.loader is None:
+    raise RuntimeError("participant module is unavailable")
 _participant = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_participant)
 participant = _participant.participant
+
+_sqlite_spec = importlib.util.spec_from_file_location(
+    "_update_driver_sqlite", Path(__file__).with_name("_sqlite.py"),
+)
+if _sqlite_spec is None or _sqlite_spec.loader is None:
+    raise RuntimeError("database URI module is unavailable")
+_sqlite = importlib.util.module_from_spec(_sqlite_spec)
+_sqlite_spec.loader.exec_module(_sqlite)
 
 
 def main() -> int:
@@ -25,7 +35,7 @@ def main() -> int:
 
 def execute(root: str, identifier: str, witness: str, procutil_path: str) -> int:
     database = Path(root) / "queue.sqlite3"
-    with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as db:
+    with closing(sqlite3.connect(_sqlite.database_uri(database, mode="ro"), uri=True)) as db:
         row = db.execute(
             "SELECT runner,state,spec FROM requests WHERE id=?", (identifier,),
         ).fetchone()
@@ -48,6 +58,8 @@ def execute(root: str, identifier: str, witness: str, procutil_path: str) -> int
             # CRT exec on Windows retires the shim before its replacement
             # settles. Retain the caller-owned Job root until the child exits.
             proc_spec = importlib.util.spec_from_file_location("agent_procutil", procutil_path)
+            if proc_spec is None or proc_spec.loader is None:
+                raise RuntimeError("process owner module is unavailable")
             procutil = importlib.util.module_from_spec(proc_spec)
             sys.modules["agent_procutil"] = procutil
             proc_spec.loader.exec_module(procutil)

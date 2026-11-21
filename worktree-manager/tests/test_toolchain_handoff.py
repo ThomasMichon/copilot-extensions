@@ -207,8 +207,10 @@ raise SystemExit(update_driver_cli.cmd_update_request([]))
         assert not (root / "toolchain.conf").exists()
 
 
+@pytest.mark.parametrize("automatic", [False, True])
 def test_configured_target_is_enqueued_before_handoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    automatic: bool,
 ) -> None:
     from worktree_manager import project_update_controller
 
@@ -218,14 +220,23 @@ def test_configured_target_is_enqueued_before_handoff(
     config.write_text("schema=1\npython_index_url=https://caller.example.invalid/simple/\n", encoding="ascii")
     monkeypatch.setenv("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG", str(config))
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
+    monkeypatch.setenv("PIP_INDEX_URL", "https://caller.example.invalid/simple/")
+    monkeypatch.delenv(update_driver_cli._UNATTENDED, raising=False)
+    for key in update_driver_cli._TELEMETRY_KEYS:
+        monkeypatch.setenv(key, "fixture-telemetry")
     monkeypatch.setattr(update_driver_cli, "request_source_anchor", lambda: str(tmp_path))
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "fixture-source")
     monkeypatch.setattr(update_driver_cli, "_current_authority",
                         lambda *_a, **_k: SimpleNamespace(configured=False))
     requests: list[update_driver.RequestSpec] = []
+    runners: list[update_driver.TrustedRunner] = []
 
-    def enqueue(spec: update_driver.RequestSpec, **_kwargs: Any) -> Any:
+    def enqueue(
+        spec: update_driver.RequestSpec, *, runner: update_driver.TrustedRunner,
+        **_kwargs: Any,
+    ) -> Any:
         requests.append(spec)
+        runners.append(runner)
         raise update_driver.StateError("fixture stops before execution")
 
     def premature_handoff(*_args: Any, **_kwargs: Any) -> int:
@@ -234,9 +245,22 @@ def test_configured_target_is_enqueued_before_handoff(
     monkeypatch.setattr(update_driver, "enqueue", enqueue)
     monkeypatch.setattr(project_update_controller, "handoff", premature_handoff)
     monkeypatch.setattr(engine_client, "run_engine_passthrough", premature_handoff)
-    assert update_driver_cli.cmd_update_request(["--target", "agent-index"]) == 1
+    arguments = ["--target", "agent-index"]
+    if automatic:
+        arguments.extend(("--automatic-trigger", "manager"))
+    assert update_driver_cli.cmd_update_request(arguments) == 1
     assert len(requests) == 1 and requests[0].backend == "manager"
-    assert requests[0].argv == ("--target", "agent-index")
+    assert requests[0].argv == (*arguments, *(["--auto"] if automatic else []))
+    retained = dict(requests[0].context)
+    assert retained["PIP_INDEX_URL"] == "https://caller.example.invalid/simple/"
+    assert retained[update_driver_cli._TOOLCHAIN_REQUEST_KEY] == "1"
+    assert set(retained) <= set(runners[0].context_keys)
+    assert not set(update_driver_cli._TELEMETRY_KEYS) & retained.keys()
+    if automatic:
+        assert update_driver_cli._UNATTENDED in runners[0].context_keys
+        assert set(update_driver_cli._TELEMETRY_KEYS) <= set(runners[0].context_keys)
+    else:
+        assert not set(update_driver_cli._TELEMETRY_KEYS) & set(runners[0].context_keys)
     assert "fixture stops before execution" in capsys.readouterr().err
     assert not (tmp_path / "manager" / "toolchain.conf").exists()
 
@@ -244,17 +268,28 @@ def test_configured_target_is_enqueued_before_handoff(
 def test_configured_manager_target_remains_visible_in_durable_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from worktree_manager import installation_updates
+    from worktree_manager import agent_plugin_runtime, installation_updates
 
     log = tmp_path / "request.log"
     log.write_bytes(b"configured target\n")
+    engine = tmp_path / "selected-engine"
+    context = {"COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / "engine-install.json")}
     request = SimpleNamespace(
-        spec=SimpleNamespace(backend="manager", source="fixture-source", argv=("--target", "agent-index")),
+        spec=SimpleNamespace(
+            backend="manager", source="fixture-source", argv=("--target", "agent-index"),
+            context=tuple(context.items()),
+        ),
         id="fixture-request", state="completed", error=None, exit_code=0, log_path=log,
     )
+
+    def resolve(plugin: str, *, environment: dict[str, str]) -> tuple[list[str], Path]:
+        assert plugin == "agent-worktrees" and environment == context
+        return (["/fixture/engine"], engine)
+
     monkeypatch.setattr(update_driver, "status", lambda: (request,))
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "fixture-source")
-    operation = installation_updates._operations()["agent-index"]
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation", resolve)
+    operation = installation_updates._operations(engine_source=str(engine))["agent-index"]
     assert operation["state"] == "succeeded"
     assert operation["request_id"] == request.id
     assert operation["progress"] == "configured target\n"

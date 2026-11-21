@@ -1,0 +1,13 @@
+{
+  "comment": "Type scheduler ownership and portable observation fixtures; test shared source selection through current application preparation.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

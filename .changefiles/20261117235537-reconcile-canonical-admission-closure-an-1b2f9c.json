@@ -1,0 +1,13 @@
+{
+  "comment": "Reconcile canonical admission closure and source checker boundaries after qualification integration.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}

@@ -11,14 +11,24 @@ from __future__ import annotations
 
 import contextlib
 import sys
+from collections.abc import Iterator
+from types import ModuleType
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from update_telemetry import Run
+    from update_telemetry.human import HumanOperation as _HumanOperation
 
 try:
-    from update_telemetry.human import HumanOperation, current_operation
+    from update_telemetry.human import HumanOperation as _HumanFactory, current_operation
+    HumanOperation: type[_HumanOperation] | None = _HumanFactory
 except ImportError:  # older runtimes retain their original output
     HumanOperation = None
 
+_ut: ModuleType | None
 try:
-    import update_telemetry as _ut
+    import update_telemetry as _telemetry
+    _ut = _telemetry
 except ImportError:  # pragma: no cover - a slot built before the library existed
     _ut = None
 
@@ -26,13 +36,22 @@ except ImportError:  # pragma: no cover - a slot built before the library existe
 class UpdateRun:
     """The Manager's view of one update run."""
 
-    def __init__(self) -> None:
-        self._human = HumanOperation("update/manager") if HumanOperation else None
-        self._self_update_human = None
+    def __init__(
+        self, *, trigger: str = "manual", automatic_trigger: str | None = None,
+    ) -> None:
+        self._human = HumanOperation("update/manager") if HumanOperation is not None else None
+        self._self_update_human: _HumanOperation | None = None
         if self._human is not None:
             self._human.__enter__()
         try:
-            self._run = _ut.Run.from_env_or_new("manager") if _ut is not None else None
+            self._run: Run | None = (
+                _ut.Run.from_env_or_new("manager", trigger=trigger) if _ut is not None else None
+            )
+            if self._run is not None and self._run.is_owner and automatic_trigger is not None:
+                self._run.emit(
+                    "run", "manager", "info", action="automatic_trigger",
+                    details={"automatic_trigger": automatic_trigger},
+                )
         except BaseException as exc:
             if self._human is not None:
                 self._human.__exit__(type(exc), exc, exc.__traceback__)
@@ -40,7 +59,7 @@ class UpdateRun:
 
     def child_environment(self, environment: dict[str, str] | None) -> dict[str, str] | None:
         """Retain this invocation when bootstrap supplied an earlier environment snapshot."""
-        if environment is None or self._run is None or not self._run.enabled:
+        if environment is None or self._run is None or not self._run.enabled or _ut is None:
             return environment
         return {
             **environment,
@@ -50,12 +69,15 @@ class UpdateRun:
         }
 
     @contextlib.contextmanager
-    def self_update_phase(self):
+    def self_update_phase(self) -> Iterator[None]:
         telemetry = (
             self._run.phase("manager_self_update", action="self_update")
             if self._run is not None else contextlib.nullcontext()
         )
-        scope = HumanOperation("manager_self_update") if HumanOperation else contextlib.nullcontext()
+        scope = (
+            HumanOperation("manager_self_update") if HumanOperation is not None
+            else contextlib.nullcontext()
+        )
         with scope as human, telemetry:
             self._self_update_human = human
             try:
@@ -65,7 +87,7 @@ class UpdateRun:
 
     def say(self, message: str, *, state: str | None = None) -> None:
         if self._human is not None:
-            current_operation().progress(message, state=state)
+            cast("_HumanOperation", current_operation()).progress(message, state=state)
         else:
             print(message)
 
@@ -78,7 +100,7 @@ class UpdateRun:
         )
         if self._self_update_human is not None:
             self._self_update_human.complete(state, detail or "")
-        if self._run is None:
+        if self._run is None or _ut is None:
             return
         required, error = True, None
         if cutover_failed:
@@ -101,7 +123,7 @@ class UpdateRun:
         a sharing violation stays ``blocked_by_lock`` and permission or I/O
         errors keep their own codes.
         """
-        if self._run is None:
+        if self._run is None or _ut is None:
             return
         if missing:
             outcome, error = _ut.CONFIGURATION_LIMITATION, {"code": "engine_missing"}
@@ -112,6 +134,16 @@ class UpdateRun:
         error["message"] = message
         self._run.target("runtime_reconcile", "engine", outcome, detail=message, error=error)
 
+    def record_admission_error(self, message: str, *, locked: bool) -> None:
+        if self._run is None or _ut is None:
+            return
+        outcome = _ut.BLOCKED_BY_LOCK if locked else _ut.CONFIGURATION_LIMITATION
+        code = "update_transaction_held" if locked else "automatic_policy_refused"
+        self._run.target(
+            "lock", "manager", outcome, action="update_admission", detail=message,
+            error={"code": code, "message": message},
+        )
+
     def finish(self, rc: int) -> int:
         """Close the run; ``rc`` is mapped through the shared exit-code table.
 
@@ -119,7 +151,8 @@ class UpdateRun:
         but not to an independent Manager authentication failure.
         """
         try:
-            if self._run is not None:
+            if self._run is not None and _ut is not None:
+                outcome: str | None
                 outcome, code = _ut.outcome_for_exit_code(rc)
                 if (
                     rc == 1 and _ut.is_failure(self._run.outcome)
@@ -140,7 +173,7 @@ class UpdateRun:
 
     def abort(self, exc: BaseException) -> None:
         try:
-            if self._run is not None:
+            if self._run is not None and _ut is not None:
                 outcome, error = _ut.classify_exception(exc)
                 self._run.finish(outcome, error=error)
         finally:

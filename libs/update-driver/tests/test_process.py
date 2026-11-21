@@ -1,5 +1,7 @@
 """Real process boundaries against fixture products, never a live installation."""
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import io
@@ -10,10 +12,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Callable, cast
 
 import pytest
 
 import agent_procutil
+from agent_procutil.daemon_broker import WindowsDaemonProcess
 import single_instance_lease
 import update_driver
 from single_instance_lease.operation import OperationLock
@@ -22,18 +26,19 @@ from update_driver import (
     InterruptedError, RequestSpec, SpawnError, TrustedRunner, drain, enqueue, ensure_worker,
     status, wait,
 )
+from update_driver.core import Request
 
 
-def environment():
+def environment() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
-        str(Path(package.__file__).resolve().parent.parent)
+        str(Path(cast(str, package.__file__)).resolve().parent.parent)
         for package in (update_driver, agent_procutil, single_instance_lease)
     )
     return env
 
 
-def runner(area, delay=".15", code="0"):
+def runner(area: Path, delay: str = ".15", code: str = "0") -> TrustedRunner:
     script = Path(__file__).with_name("fixture_runner.py").resolve()
     return TrustedRunner(
         (sys.executable, str(script), str(area / "state"), str(area / "effects"), delay, code),
@@ -41,7 +46,7 @@ def runner(area, delay=".15", code="0"):
     )
 
 
-def worker(area):
+def worker(area: Path) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
         [sys.executable, "-m", "update_driver", "worker", "--root", str(area / "state")],
         cwd=area, env=environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -49,7 +54,7 @@ def worker(area):
     )
 
 
-def collect(process):
+def collect(process: subprocess.Popen[bytes]) -> None:
     try:
         out, err = process.communicate(timeout=20)
     except BaseException:
@@ -59,7 +64,7 @@ def collect(process):
     assert process.returncode == 0, (out, err)
 
 
-def eventually(check, timeout=10):
+def eventually(check: Callable[[], bool], timeout: float = 10) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = check()
@@ -81,7 +86,7 @@ def test_executor_shim_disables_bytecode_without_mutating_source(
     procutil = packages / "agent_procutil"
     driver.mkdir(parents=True)
     procutil.mkdir()
-    for name in ("_runner.py", "participant.py"):
+    for name in ("_runner.py", "_sqlite.py", "participant.py"):
         shutil.copyfile(Path(core.__file__).with_name(name), driver / name)
     if reject_site:
         participant = driver / "participant.py"
@@ -133,7 +138,7 @@ def test_executor_shim_disables_bytecode_without_mutating_source(
     assert os.environ.get("PYTHONPYCACHEPREFIX") == previous_environment
 
 
-def test_two_process_workers_have_no_transaction_overlap(area):
+def test_two_process_workers_have_no_transaction_overlap(area: Path) -> None:
     root = area / "state"
     requests = [
         enqueue(RequestSpec("fixture", argv=(str(i),)), runner=runner(area), root=root)
@@ -153,7 +158,7 @@ def test_two_process_workers_have_no_transaction_overlap(area):
     assert all(wait(request.id, root=root, timeout=1).exit_code == 0 for request in requests)
 
 
-def test_concurrent_update_submitters_replace_one_waiter_without_touching_active_work(area):
+def test_concurrent_update_submitters_replace_one_waiter_without_touching_active_work(area: Path) -> None:
     root = area / "state"
     gate, started = area / "release-active", area / "active-started"
     program = (
@@ -175,7 +180,7 @@ def test_concurrent_update_submitters_replace_one_waiter_without_touching_active
         ), root=root,
     )
     owner = worker(area)
-    callers = []
+    callers: list[subprocess.Popen[bytes]] = []
     try:
         eventually(started.exists)
         submitter = (
@@ -199,7 +204,7 @@ def test_concurrent_update_submitters_replace_one_waiter_without_touching_active
         assert len(pending) == 1
         superseded = [row for row in rows if row.exit_code == 125]
         assert len(superseded) == 4
-        assert all(row.started_at is None and "superseded by update request" in row.error
+        assert all(row.started_at is None and "superseded by update request" in cast(str, row.error)
                    for row in superseded)
         gate.touch()
         collect(owner)
@@ -214,7 +219,7 @@ def test_concurrent_update_submitters_replace_one_waiter_without_touching_active
                 process.wait(timeout=5)
 
 
-def test_same_boot_native_timeout_retains_failure_but_allows_later_execution(area):
+def test_same_boot_native_timeout_retains_failure_but_allows_later_execution(area: Path) -> None:
     from update_driver import kernel_boot_identity, recovery_status
 
     root = area / "state"
@@ -242,7 +247,7 @@ def test_same_boot_native_timeout_retains_failure_but_allows_later_execution(are
     assert failed.state == "interrupted" and failed.exit_code is None
     assert failed.settlement_kind == "native_scope"
     assert failed.boot_id == failed.settled_boot_id == before
-    assert failed.settled_at is not None and "TimeoutExpired" in failed.error
+    assert failed.settled_at is not None and "TimeoutExpired" in cast(str, failed.error)
     assert recovery_status(root=root).refused == ()
     subsequent = enqueue(RequestSpec("fixture", source="next"), runner=runner(area), root=root)
     collect(worker(area))
@@ -251,7 +256,9 @@ def test_same_boot_native_timeout_retains_failure_but_allows_later_execution(are
     assert kernel_boot_identity() == before
 
 
-def test_each_queued_scope_is_applied_before_product_routing(area, monkeypatch):
+def test_each_queued_scope_is_applied_before_product_routing(
+    area: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import json
 
     root = area / "state"
@@ -286,7 +293,9 @@ def test_each_queued_scope_is_applied_before_product_routing(area, monkeypatch):
 
 
 @pytest.mark.parametrize("coalesce_running", [False, True])
-def test_real_active_request_respects_target_admission_and_streams(area, coalesce_running):
+def test_real_active_request_respects_target_admission_and_streams(
+    area: Path, coalesce_running: bool,
+) -> None:
     root = area / "state"
     first = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".7", code="23"), root=root)
     process = worker(area)
@@ -307,7 +316,7 @@ def test_real_active_request_respects_target_admission_and_streams(area, coalesc
     assert len((area / "effects").read_text().splitlines()) == (2 if coalesce_running else 4)
 
 
-def test_real_active_request_queues_distinct_arrival(area):
+def test_real_active_request_queues_distinct_arrival(area: Path) -> None:
     root = area / "state"
     first = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".7"), root=root)
     process = worker(area)
@@ -329,7 +338,7 @@ def test_real_active_request_queues_distinct_arrival(area):
                for i in range(0, 4, 2))
 
 
-def test_cross_process_enqueue_coalesces_pending(area):
+def test_cross_process_enqueue_coalesces_pending(area: Path) -> None:
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area), root=root)
     script = (
@@ -337,7 +346,7 @@ def test_cross_process_enqueue_coalesces_pending(area):
         "r=status(sys.argv[2],root=Path(sys.argv[1])); "
         "print(enqueue(r.spec,runner=r.runner,root=Path(sys.argv[1])).id)"
     )
-    processes = [
+    processes: list[subprocess.Popen[bytes]] = [
         subprocess.Popen([sys.executable, "-c", script, str(root), request.id],
                          env=environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          **agent_procutil.no_window_kwargs())
@@ -352,7 +361,7 @@ def test_cross_process_enqueue_coalesces_pending(area):
     assert len(status(root=root)) == 1
 
 
-def test_cross_process_enqueue_shares_running_request(area):
+def test_cross_process_enqueue_shares_running_request(area: Path) -> None:
     root = area / "state"
     started, release = area / "started", area / "release"
     command = (
@@ -374,7 +383,7 @@ def test_cross_process_enqueue_shares_running_request(area):
         root=root,
     )
     process = worker(area)
-    clients = []
+    clients: list[subprocess.Popen[bytes]] = []
     try:
         eventually(started.exists)
         script = (
@@ -405,7 +414,7 @@ def test_cross_process_enqueue_shares_running_request(area):
     assert wait(request.id, root=root, timeout=1).exit_code == 37
 
 
-def test_submitter_exit_does_not_own_worker_lifetime(area):
+def test_submitter_exit_does_not_own_worker_lifetime(area: Path) -> None:
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".5"), root=root)
     script = (
@@ -413,7 +422,7 @@ def test_submitter_exit_does_not_own_worker_lifetime(area):
         "p=ensure_worker((sys.executable,'-m','update_driver','worker','--root',sys.argv[1]),"
         "root=Path(sys.argv[1])); print(p.pid)"
     )
-    submitter = subprocess.run(
+    submitter: subprocess.CompletedProcess[bytes] = subprocess.run(
         [sys.executable, "-c", script, str(root)], env=environment(),
         capture_output=True, timeout=10, **agent_procutil.no_window_kwargs(),
     )
@@ -451,7 +460,7 @@ def test_submitter_exit_does_not_own_worker_lifetime(area):
             os.close(pidfd)
 
 
-def test_worker_death_leaves_conservative_fence(area):
+def test_worker_death_leaves_conservative_fence(area: Path) -> None:
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area, delay="1"), root=root)
     process = worker(area)
@@ -479,7 +488,7 @@ def test_worker_death_leaves_conservative_fence(area):
     assert (area / "effects").read_text().count("start ") == 1
 
 
-def test_distinct_product_runners_need_no_cross_import(area):
+def test_distinct_product_runners_need_no_cross_import(area: Path) -> None:
     root = area / "state"
     requests = [
         enqueue(RequestSpec(backend), runner=runner(area), root=root)
@@ -490,7 +499,7 @@ def test_distinct_product_runners_need_no_cross_import(area):
     assert [status(r.id, root=root).exit_code for r in requests] == [0, 0]
 
 
-def test_real_product_exit_cannot_hide_abandoned_execution_custody(area):
+def test_real_product_exit_cannot_hide_abandoned_execution_custody(area: Path) -> None:
     from update_driver import ParticipantError
 
     root = area / "state"
@@ -532,7 +541,7 @@ def test_real_product_exit_cannot_hide_abandoned_execution_custody(area):
         drain(root=root)
 
 
-def test_missing_worker_entrypoint_is_explicit(area):
+def test_missing_worker_entrypoint_is_explicit(area: Path) -> None:
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area), root=root)
     with pytest.raises(SpawnError, match="before queue startup"):
@@ -542,7 +551,7 @@ def test_missing_worker_entrypoint_is_explicit(area):
         )
     result = status(request.id, root=root)
     assert result.state == "pending" and result.exit_code is None
-    assert "worker exited" in result.error
+    assert "worker exited" in cast(str, result.error)
     assert not list(root.glob(".worker-started-*"))
     # A later genuine worker can recover pending work, not an ambiguous running transaction.
     launched = ensure_worker(
@@ -553,14 +562,17 @@ def test_missing_worker_entrypoint_is_explicit(area):
     assert launched.wait(timeout=10) == 0
 
 
-def test_enqueue_after_empty_scan_before_release_cannot_lose_wakeup(area, monkeypatch):
+def test_enqueue_after_empty_scan_before_release_cannot_lose_wakeup(
+    area: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from single_instance_lease.operation import OperationLock
 
     root = area / "state"
     original_release = OperationLock.release
-    submitted, workers = [], []
+    submitted: list[Request] = []
+    workers: list[subprocess.Popen[bytes] | WindowsDaemonProcess] = []
 
-    def release_with_late_submission(lock):
+    def release_with_late_submission(lock: OperationLock) -> None:
         # drain already observed an empty queue, but still owns kernel custody.
         if not submitted:
             request = enqueue(RequestSpec("fixture"), runner=runner(area), root=root)
@@ -587,7 +599,7 @@ def test_enqueue_after_empty_scan_before_release_cannot_lose_wakeup(area, monkey
         not sys.platform.startswith("linux"), reason="Linux waitid wrapper prerequisite",
     )),
 ])
-def test_failed_worker_admission_never_acknowledges_startup(area, failure):
+def test_failed_worker_admission_never_acknowledges_startup(area: Path, failure: str) -> None:
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area), root=root)
     reason = "boot_identity_unavailable" if failure == "boot" else "executor_unavailable"
@@ -624,7 +636,7 @@ def test_failed_worker_admission_never_acknowledges_startup(area, failure):
         wait(request.id, root=root)
 
 
-def test_wait_observes_exact_worker_death_between_ack_and_claim(area):
+def test_wait_observes_exact_worker_death_between_ack_and_claim(area: Path) -> None:
     from single_instance_lease.operation import OperationLock
 
     root = area / "state"
@@ -651,10 +663,10 @@ def test_wait_observes_exact_worker_death_between_ack_and_claim(area):
         wait(request.id, root=root, worker=launched)
     result = status(request.id, root=root)
     assert result.state == "pending" and result.exit_code is None
-    assert "worker exited before claiming request" in result.error
+    assert "worker exited before claiming request" in cast(str, result.error)
 
 
-def test_exited_redundant_worker_does_not_override_other_active_drainer(area):
+def test_exited_redundant_worker_does_not_override_other_active_drainer(area: Path) -> None:
     root = area / "state"
     first = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".8"), root=root)
     active = worker(area)

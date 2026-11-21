@@ -122,6 +122,12 @@ native spellings retain their original I/O paths; actual outside, sibling and
 relative tool roots remain refused. `tools/test_installer_build_tools_root.py`
 covers this boundary, alongside the real source-construction packets.
 
+Installed-health launch failures and timeouts propagate unchanged, including
+on immutable-slot reuse. `ChildTimeoutExpired` confirms its writers settled,
+not that the published content is unhealthy. Only a completed health probe's
+failure requests distinct-generation repair on reuse; timeout, cleanup and
+custody failures do not establish that repair is needed.
+
 The separate composed Vault consumer regression builds a private payload through
 the production materializer, then executes its copied remover and command
 recognizer without candidate-side canonical libraries. It preserves the original

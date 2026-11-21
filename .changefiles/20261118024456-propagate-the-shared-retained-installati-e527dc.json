@@ -1,0 +1,21 @@
+{
+  "comment": "Propagate the shared retained installation driver and process-owner corrections to their current consumers",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "dev"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "dev"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "dev"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "dev"
+    }
+  ]
+}

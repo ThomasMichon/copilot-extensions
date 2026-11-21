@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import re
+import subprocess
+from typing import TYPE_CHECKING
 
 from . import engine_client
 from .engine_progress import error_from_envelope
-from .update_orchestration import extract_project
+from .update_orchestration import PassthroughOptions, extract_project
+
+if TYPE_CHECKING:
+    from update_driver.authority import UpdateAuthority
+    from .update_events import UpdateRun
 
 
 class _NoProjectResolved(engine_client.EngineError):
     """The fixed diagnostic confirms that no project was selected."""
 
 
-def legacy_controller_error(project: str | None, proc) -> engine_client.EngineError | None:
+def legacy_controller_error(
+    project: str | None, proc: subprocess.CompletedProcess[str],
+) -> engine_client.EngineError | None:
     """Recognize only fixed downlevel diagnostics, never arbitrary stdout."""
     if proc.returncode != 1:
         return None
@@ -45,8 +53,9 @@ def legacy_controller_error(project: str | None, proc) -> engine_client.EngineEr
 
 
 def handoff(
-    arguments: list[str], *, observer: list[str] | None = None, authority=None,
-    delegated: bool = False,
+    arguments: list[str], *, observer: list[str] | None = None,
+    authority: UpdateAuthority | None = None,
+    delegated: bool = False, defer_automatic: bool = False,
 ) -> int | None:
     managed = authority is not None and authority.configured and authority.mode == "project"
     if authority is not None and authority.configured and authority.mode == "standalone":
@@ -67,6 +76,7 @@ def handoff(
         return None
     project, forwarded = extract_project(arguments)
     if managed:
+        assert authority is not None
         project = authority.project
     try:
         selected = engine_client.get_value(project, "update-controller")
@@ -82,7 +92,42 @@ def handoff(
         if managed:
             raise ValueError("selected project update controller is unavailable")
         return None
-    return engine_client.run_engine_passthrough(
-        project, ["update", *forwarded, *(observer or [])],
-        **({"headless": True} if observer and "--detach" in observer else {}),
-    )
+    run: UpdateRun | None = None
+    if any(
+        value == "--automatic-trigger" or value.startswith("--automatic-trigger=")
+        for value in forwarded
+    ):
+        from .automatic_updates_cli import guarded_update
+        from .update_events import UpdateRun
+
+        normalized: list[str] = []
+        trigger = "manual"
+        automatic_trigger: str | None = None
+
+        def admit(arguments: list[str], admitted_trigger: str, admitted_origin: str | None) -> int:
+            nonlocal trigger, automatic_trigger
+            normalized.extend(arguments)
+            trigger, automatic_trigger = admitted_trigger, admitted_origin
+            return 0
+
+        # Release admission custody before the engine can call Manager back.
+        admitted = guarded_update(forwarded, admit)
+        if admitted:
+            return admitted
+        if defer_automatic:
+            return None
+        forwarded = normalized
+        run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
+    try:
+        options: PassthroughOptions = {}
+        if observer and "--detach" in observer:
+            options["headless"] = True
+        code = engine_client.run_engine_passthrough(
+            project, ["update", *forwarded, *(observer or [])],
+            **options,
+        )
+        return run.finish(code) if run is not None else code
+    except BaseException as error:
+        if run is not None:
+            run.abort(error)
+        raise

@@ -16,9 +16,14 @@ import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    import tarfile
 
 
-def _safe_extract(tf, dest: Path) -> None:
+def _safe_extract(tf: tarfile.TarFile, dest: Path) -> None:
     """Extract a tar into ``dest``, refusing anything that would escape it.
 
     A hand-rolled path-only pre-check computed against ``getmembers()``
@@ -81,7 +86,9 @@ def _safe_extract(tf, dest: Path) -> None:
             tf.extract(member, dest)  # noqa: S202 - each member validated immediately above
 
 
-def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
+def _materialize_payload_pointers(
+    payload_dir: Path, slot: Path, *, on_file: Callable[[Path], None] | None = None,
+) -> None:
     """Expand any vendor-pointer lib copies under a freshly-copied
     ``slot/libs/*``, AND any `uv`-editable canonical-reference entry in
     ``slot/pyproject.toml`` (the mechanism that superseded the
@@ -149,10 +156,13 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
             "just the worktree-manager/ subtree"
         )
     try:
-        log = materializer.materialize_libs_dir(libs_dir, canonical_root=monorepo_root) if unresolved else []
+        observer = {"on_file": on_file} if on_file is not None else {}
+        log = materializer.materialize_libs_dir(
+            libs_dir, canonical_root=monorepo_root, **observer,
+        ) if unresolved else []
         log.extend(materializer.materialize_uv_editable_ref_into(
             source_consumer_dir=payload_dir, dest_consumer_dir=slot,
-            canonical_root=monorepo_root, dest_root=slot,
+            canonical_root=monorepo_root, dest_root=slot, **observer,
         ) if uv_refs else [])
     except Exception as e:
         # Normalize ANY materialization failure (a malformed pointer's
@@ -197,10 +207,17 @@ def _find_any_symlink(tree: Path) -> Path | None:
 def _copy_payload(
     payload_dir: Path, slot: Path, *, mark_complete: bool = True,
     on_progress: Callable[[], None] | None = None,
+    on_file: Callable[[Path, Path], None] | None = None,
 ) -> None:
+    """Optionally observe each completed write as (slot-relative path, staged file).
+
+    Writes may replace earlier observations; deleted paths are not a final roster.
+    Observer failures abort publication. No callback survives this call.
+    """
     try:
         _copy_payload_unsafe(
             payload_dir, slot, mark_complete=mark_complete, on_progress=on_progress,
+            on_file=on_file,
         )
     except RuntimeError:
         # Already our one normalized, self_install()-caught boundary type --
@@ -226,15 +243,18 @@ def _copy_payload(
 def _copy_payload_unsafe(
     payload_dir: Path, slot: Path, *, mark_complete: bool = True,
     on_progress: Callable[[], None] | None = None,
+    on_file: Callable[[Path, Path], None] | None = None,
 ) -> None:
     # Deferred to avoid a module-load-time circular import: self_install.py
     # imports this module for _copy_payload/_copy_payload_unsafe, so these
     # names are only resolvable once self_install.py has finished defining
     # them (guaranteed true by the time any CALL here actually happens).
-    from .self_install import _SLOT_KEY_FILES, _mark_slot_complete, _runtime_installer
+    from .self_install import (
+        _SLOT_COMPLETE_MARKER, _SLOT_KEY_FILES, _mark_slot_complete, _runtime_installer,
+    )
 
     if os.name == "nt":
-        native = _runtime_installer().engine._native_retained_path
+        native = cast(Callable[[], ModuleType], _runtime_installer)().engine._native_retained_path
         payload_dir, slot = Path(native(payload_dir)), Path(native(slot))
 
     if payload_dir.is_symlink():
@@ -275,6 +295,10 @@ def _copy_payload_unsafe(
     staging = slot.with_name(f"{slot.name}.staging.{os.getpid()}.{uuid.uuid4().hex}")
     if staging.exists():
         shutil.rmtree(staging, ignore_errors=True)
+    def produced(path: Path) -> None:
+        if on_file is not None:
+            on_file(path.relative_to(staging), path)
+
     try:
         ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
         # symlinks=True: a payload staged by self_update's tarball fetch may
@@ -283,15 +307,16 @@ def _copy_payload_unsafe(
         # symlinks=False would dereference it at this second hop, still
         # smuggling external content into the published slot one step later
         # and defeating _find_any_symlink's downstream rejection.
-        def copy(origin, destination):
+        def copy(origin: str, destination: str) -> str:
             result = shutil.copy2(origin, destination)
+            produced(Path(destination))
             if on_progress is not None:
                 on_progress()
             return result
 
         shutil.copytree(
             payload_dir, staging, ignore=ignore, symlinks=True,
-            copy_function=copy if on_progress is not None else shutil.copy2,
+            copy_function=copy if on_progress is not None or on_file is not None else shutil.copy2,
         )
         bad = _find_any_symlink(staging)
         if bad is not None:
@@ -300,7 +325,10 @@ def _copy_payload_unsafe(
                 "self-installed slot must contain only real files (a symlink "
                 "anywhere in it could resolve outside the slot at runtime)"
             )
-        _materialize_payload_pointers(payload_dir, staging)
+        if on_file is None:
+            _materialize_payload_pointers(payload_dir, staging)
+        else:
+            _materialize_payload_pointers(payload_dir, staging, on_file=produced)
         missing = [rel for rel in _SLOT_KEY_FILES if not (staging / rel).is_file()]
         if missing:
             raise RuntimeError(
@@ -312,6 +340,7 @@ def _copy_payload_unsafe(
         # ever publishes an already-proven-complete replacement.
         if mark_complete:
             _mark_slot_complete(staging)
+            produced(staging / _SLOT_COMPLETE_MARKER)
         _swap_in_staged_slot(staging, slot)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -361,7 +390,10 @@ def _clear_dir(d: Path) -> None:
                 pass
 
 
-def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180, _extract=None) -> None:
+def _fetch_via_tarball(
+    staging: Path, url: str, *, timeout: int = 180,
+    _extract: Callable[[tarfile.TarFile, Path], None] | None = None,
+) -> None:
     """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
 
     Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from .update_events import UpdateRun
 
 if TYPE_CHECKING:
     from .runtime_source import ResolvedSource
+
+
+class PassthroughOptions(TypedDict, total=False):
+    environment: dict[str, str]
+    engine_command: list[str]
+    headless: bool
 
 
 def preflight_runtime_source(run: UpdateRun | None = None, *, suite: bool = False) -> bool:
@@ -44,7 +50,10 @@ def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
     return project, out
 
 
-def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
+def execute_update(
+    rest: list[str], steps: Callable[..., int], *, trigger: str = "manual",
+    automatic_trigger: str | None = None,
+) -> int:
     """Admit a Manager update and preserve its targeted or suite transaction."""
     from .maintenance_policy import admit_update
 
@@ -53,7 +62,7 @@ def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
     if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
         from .installation_updates import run_targeted_update
 
-        return run_targeted_update(rest)
+        return run_targeted_update(rest, trigger=trigger, automatic_trigger=automatic_trigger)
     from .runtime_source import SourceAcquisitionError
     from .runtime_source_update import repair_selection
     from .update_bootstrap import prepare_update
@@ -70,7 +79,7 @@ def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
             prepared = prepare_update(rest, **source_arguments)
             if prepared.exit_code:
                 return prepared.exit_code
-            run = UpdateRun()
+            run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
             rc = steps(
                 prepared.arguments, run, fresh_manager=prepared.fresh_manager,
                 environment=prepared.environment, **source_arguments,
@@ -119,12 +128,13 @@ def run_update_steps(
             if fresh_manager else self_update(dry_run=False)
         )
         cutover = su.cutover if isinstance(su.cutover, dict) else None
+        cutover_result = cutover.get("result") if cutover else None
         cutover_failed = bool(
             cutover and (
                 cutover.get("action") == "error"
                 or (
-                    isinstance(cutover.get("result"), dict)
-                    and cutover["result"].get("ok") is False
+                    isinstance(cutover_result, dict)
+                    and cutover_result.get("ok") is False
                 )
             )
         )
@@ -145,10 +155,14 @@ def run_update_steps(
     manager_update_check.invalidate()
     run.say("Updating harness plugins + runtimes via agent-worktrees")
     try:
+        options: PassthroughOptions = {}
+        if environment is not None:
+            options["environment"] = environment
+        if prepared.engine_command is not None:
+            options["engine_command"] = prepared.engine_command
         rc = ec.run_engine_passthrough(
             project, ["update", "--no-manager", *prepared.arguments],
-            **({"environment": environment} if environment is not None else {}),
-            **({"engine_command": prepared.engine_command} if prepared.engine_command is not None else {}),
+            **options,
         )
     except ec.EngineError as error:
         run.say(str(error), state="failed")

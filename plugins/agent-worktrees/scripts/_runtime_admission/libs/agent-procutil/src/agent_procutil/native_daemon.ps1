@@ -20,6 +20,11 @@ namespace CopilotExtensions {
     public sealed class NativeDaemonSpawnException : Exception {
         public readonly bool CleanupConfirmed;
         public readonly NativeDaemonAdmission.Child RetainedChild;
+        public bool? ProcessCreated { get; set; }
+        public object InstanceReceipt { get; set; }
+        public string InstanceHelper { get; set; }
+        public bool AdmissionPossible { get; set; }
+        public bool ReservationSettled { get; set; }
         public NativeDaemonSpawnException(string message, Exception inner, bool settled)
             : this(message, inner, settled, null) { }
         public NativeDaemonSpawnException(string message, Exception inner, bool settled,
@@ -27,6 +32,7 @@ namespace CopilotExtensions {
             : base(message, inner) { CleanupConfirmed = settled; RetainedChild = retained; }
     }
     public static class NativeDaemonAdmission {
+        public const int FailedLaunchVersion = 1;
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct Startup {
             public uint Size;
@@ -52,6 +58,9 @@ namespace CopilotExtensions {
         private static extern bool TerminateProcess(IntPtr process, uint code);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetProcessTimes(
+            IntPtr process, out long creation, out long exit, out long kernel, out long user);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint ResumeThread(IntPtr thread);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -88,7 +97,24 @@ namespace CopilotExtensions {
         public sealed class Child : IDisposable {
             private IntPtr handle;
             public readonly uint Pid;
-            internal Child(IntPtr process, uint pid) { handle = process; Pid = pid; }
+            public readonly string Birth;
+            public object InstanceReceipt { get; set; }
+            public string InstanceHelper { get; set; }
+            public bool AdmissionPossible { get; set; }
+            public bool ReservationSettled { get; set; }
+            public IntPtr NativeHandle {
+                get {
+                    if (handle == IntPtr.Zero) throw new ObjectDisposedException("native daemon child");
+                    return handle;
+                }
+            }
+            internal Child(IntPtr process, uint pid) {
+                handle = process;
+                Pid = pid;
+                long creation, exit, kernel, user;
+                if (GetProcessTimes(process, out creation, out exit, out kernel, out user))
+                    Birth = "windows:" + creation.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
             public bool Stop() {
                 if (WaitForSingleObject(handle, 0) == 0) return true;
                 Check(TerminateProcess(handle, 125));
@@ -137,6 +163,7 @@ namespace CopilotExtensions {
             bool initialized = false;
             var child = new ProcessInfo();
             NativeDaemonSpawnException failure = null;
+            Child result = null;
             try {
                 // Query-only, noninheritable handles never become continuing Job owners.
                 if (!contained && scopes != null) {
@@ -192,7 +219,7 @@ namespace CopilotExtensions {
                     Check(CloseHandle(child.Thread));
                     child.Thread = IntPtr.Zero;
                 }
-                var result = new Child(child.Process, child.Pid);
+                result = new Child(child.Process, child.Pid);
                 child.Process = IntPtr.Zero;
                 return result;
             } catch (Exception error) {
@@ -208,11 +235,12 @@ namespace CopilotExtensions {
                     settled = false;
                 }
                 Child retained = null;
-                if (!settled && child.Process != IntPtr.Zero) {
+                if (child.Process != IntPtr.Zero) {
                     retained = new Child(child.Process, child.Pid);
                     child.Process = IntPtr.Zero;
                 }
                 failure = new NativeDaemonSpawnException("native daemon direct launch refused", error, settled, retained);
+                failure.ProcessCreated = child.Pid != 0;
                 throw failure;
             } finally {
                 bool closed = true;
@@ -224,8 +252,13 @@ namespace CopilotExtensions {
                 if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
                 if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
                 if (env != IntPtr.Zero) Marshal.FreeHGlobal(env);
-                if (!closed) throw new NativeDaemonSpawnException("native daemon handle close failed", failure, false,
-                    failure == null ? null : failure.RetainedChild);
+                if (!closed) {
+                    var closeFailure = new NativeDaemonSpawnException(
+                        "native daemon handle close failed", failure, false,
+                        failure == null ? result : failure.RetainedChild);
+                    closeFailure.ProcessCreated = child.Pid != 0;
+                    throw closeFailure;
+                }
             }
         }
 
@@ -260,6 +293,52 @@ function Read-NativeDaemonFrame {
     return ,$buffer
 }
 
+function Complete-NativeDaemonFailedLaunch {
+    param([Exception]$Failure, $Child, [Diagnostics.Process]$ObservedProcess)
+    if ($Failure) {
+        while ($Failure.InnerException -and
+            $Failure -isnot [CopilotExtensions.NativeDaemonSpawnException]) {
+            $Failure = $Failure.InnerException
+        }
+        $receipt = $Failure.InstanceReceipt
+        $instances = $Failure.InstanceHelper
+        $created = $Failure.ProcessCreated
+        $admission = $Failure.AdmissionPossible
+        if (-not $Child) { $Child = $Failure.RetainedChild }
+    } else {
+        if (-not $Child) { throw 'Failed-launch completion requires retained custody.' }
+        $receipt = $Child.InstanceReceipt
+        $instances = $Child.InstanceHelper
+        $created = $true
+        $admission = $Child.AdmissionPossible
+    }
+    if (-not $receipt -or -not $instances) {
+        throw 'Failed-launch receipt custody is unavailable.'
+    }
+    . $instances
+    if ($created -ceq $false) {
+        $settled = Complete-DaemonInstanceFailedLaunch -Receipt $receipt -CreationRefused
+    } elseif ($Child -and $Child.Birth) {
+        if ($ObservedProcess) {
+            $frame = Get-DaemonInstanceProcessFrame $ObservedProcess
+            if ($frame.pid -ne $Child.Pid -or $frame.birth -cne $Child.Birth) {
+                throw 'Independent failed-launch observation names a different process.'
+            }
+        } else {
+            $frame = @{
+                pid=[int]$Child.Pid; birth=$Child.Birth; handle=$Child.NativeHandle.ToInt64()
+            }
+        }
+        $settled = Complete-DaemonInstanceFailedLaunch -Receipt $receipt `
+            -ProcessFrame $frame -AdmissionPossible $admission
+    } else {
+        $settled = $false
+    }
+    if ($Failure) { $Failure.ReservationSettled = $settled }
+    if ($Child) { $Child.ReservationSettled = $settled }
+    return $settled
+}
+
 function Start-NativeDaemon {
     param(
         [Parameter(Mandatory)][string]$Script,
@@ -287,10 +366,21 @@ function Start-NativeDaemon {
     if (-not [IO.File]::Exists($shell)) { throw 'Native daemon admission cannot resolve its interpreter.' }
     $contained = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1'
     [CopilotExtensions.NativeDaemonAdmission]::ValidateOwnedJobScopes()
+    $nativeSupport = [CopilotExtensions.NativeDaemonAdmission].GetField('FailedLaunchVersion')
+    if ($null -eq $nativeSupport -or $nativeSupport.GetRawConstantValue() -cne 1) {
+        throw (New-Object CopilotExtensions.NativeDaemonSpawnException -ArgumentList `
+            'The loaded native helper lacks failed-launch receipt support.', $null, $true)
+    }
     $instances = Join-Path ([IO.Path]::GetDirectoryName($script:NativeDaemonSource)) 'daemon_instances.ps1'
     . $instances
+    $support = Invoke-DaemonInstanceRequest @{command='failed-launch-contract'}
+    if ($support.version -cne 1 -or $support.owner_bound -cne $true -or $support.pinned_exit -cne $true) {
+        throw 'Daemon instance helper lacks owner-bound failed-launch support; no reservation was made.'
+    }
     $receipt = New-DaemonInstanceReservation -Service ([IO.Path]::GetFileNameWithoutExtension($Script)) `
         -RuntimeRoot $WorkingDirectory -Source $Script -RegistryRoot $RegistryRoot
+    $server = $null
+    try {
     $Script = $receipt.source
     $channel = 'ce-native-daemon-' + [Guid]::NewGuid().ToString('N')
     $security = New-Object IO.Pipes.PipeSecurity
@@ -360,12 +450,28 @@ try {
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
     $commandArgs = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded"
+    } catch {
+        $reported = New-Object CopilotExtensions.NativeDaemonSpawnException -ArgumentList `
+            'Native daemon setup failed before creation.', $_.Exception, $true
+        $reported.ProcessCreated = $false
+        $reported.InstanceReceipt = $receipt
+        $reported.InstanceHelper = $instances
+        try {
+            $null = Complete-NativeDaemonFailedLaunch -Failure $reported
+        } catch {
+            $reported.Data['reservation_settlement_error'] = $_.Exception
+        }
+        if ($server) { $server.Dispose() }
+        throw $reported
+    }
     $launcher = $null
     $process = $null
     $connected = $null
     $adopted = $false
+    $startAttempted = $false
     try {
         $connected = $server.BeginWaitForConnection($null, $null)
+        $startAttempted = $true
         $launcher = [CopilotExtensions.NativeDaemonAdmission]::Start(
             $shell, $commandArgs, $WorkingDirectory, $LogPath, $contained
         )
@@ -389,6 +495,7 @@ try {
         $failure = $_.Exception
         $settled = $false
         $retained = $null
+        $created = if ($launcher) { $true } elseif (-not $startAttempted) { $false } else { $null }
         if (-not $launcher) {
             $settled = $true
             $cause = $failure
@@ -398,6 +505,7 @@ try {
             if ($cause) {
                 $settled = $cause.CleanupConfirmed
                 $retained = $cause.RetainedChild
+                $created = $cause.ProcessCreated
             }
         }
         $server.Dispose()
@@ -411,13 +519,43 @@ try {
                 $settled = $false
             }
         }
-        if (-not $settled -and $launcher) {
+        $trackingChild = if ($launcher) { $launcher } else { $retained }
+        $reported = New-Object CopilotExtensions.NativeDaemonSpawnException -ArgumentList `
+            'Native daemon admission failed; no foreground fallback is permitted.', $failure, $settled, $trackingChild
+        $reported.ProcessCreated = $created
+        $reported.InstanceReceipt = $receipt
+        $reported.InstanceHelper = $instances
+        $reported.AdmissionPossible = $adopted
+        if ($trackingChild) {
+            $trackingChild.InstanceReceipt = $receipt
+            $trackingChild.InstanceHelper = $instances
+            $trackingChild.AdmissionPossible = $adopted
+        }
+        if ($settled) {
+            try {
+                $null = Complete-NativeDaemonFailedLaunch -Failure $reported
+            } catch {
+                $failure = [AggregateException]::new(
+                    'native daemon reservation settlement failed', [Exception[]]@($failure, $_.Exception)
+                )
+            }
+        }
+        if ((-not $settled -or -not $reported.ReservationSettled) -and $launcher) {
             $retained = $launcher
             $launcher = $null
+        } elseif ($reported.ReservationSettled -and $retained) {
+            $retained.Dispose()
+            $retained = $null
         }
         if ($process) { $process.Dispose() }
-        throw (New-Object CopilotExtensions.NativeDaemonSpawnException -ArgumentList `
-            'Native daemon admission failed; no foreground fallback is permitted.', $failure, $settled, $retained)
+        $result = New-Object CopilotExtensions.NativeDaemonSpawnException -ArgumentList `
+            'Native daemon admission failed; no foreground fallback is permitted.', $failure, $settled, $retained
+        $result.ProcessCreated = $created
+        $result.InstanceReceipt = $receipt
+        $result.InstanceHelper = $instances
+        $result.AdmissionPossible = $adopted
+        $result.ReservationSettled = $reported.ReservationSettled
+        throw $result
     } finally {
         $server.Dispose()
         if ($connected) { $connected.AsyncWaitHandle.Dispose() }

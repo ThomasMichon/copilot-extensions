@@ -30,6 +30,9 @@ from .participant import ParticipantError, borrowed_custody, participant, partic
 from .boot import kernel_boot_identity
 from .foundation_state import FoundationOperation
 from .authority import UpdateAuthority
+from .disposition import (
+    DispositionError, FAILED_UNSTARTED_DISPOSITION_CAPABILITY, resolve_failed_unstarted,
+)
 from .recovery import (
     RecoveryError, RecoveryRefusal, RecoveryStatus, recover_after_restart,
     recover_for_repair, recover_foundation_after_restart, recovery_status,
@@ -48,4 +51,5 @@ __all__ = [
     "participant_environment",
     "kernel_boot_identity", "RecoveryError", "RecoveryRefusal", "RecoveryStatus",
     "recover_after_restart", "recover_for_repair", "recovery_status",
+    "DispositionError", "FAILED_UNSTARTED_DISPOSITION_CAPABILITY", "resolve_failed_unstarted",
 ]

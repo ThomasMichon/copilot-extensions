@@ -1,0 +1,9 @@
+{
+  "comment": "Keep legacy automatic update completion from publishing persistent user Python PATH",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

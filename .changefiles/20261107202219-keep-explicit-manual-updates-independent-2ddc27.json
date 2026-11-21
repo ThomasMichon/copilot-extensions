@@ -1,0 +1,9 @@
+{
+  "comment": "Keep explicit manual updates independent of unreadable or malformed automatic consent while retaining transaction serialization.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
