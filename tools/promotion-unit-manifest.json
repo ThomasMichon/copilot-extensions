@@ -3,6 +3,55 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_materializer_ancestor_units.py",
+      [
+        "test_ordinary_descendant_needs_no_path_resolution[materialize_installer_engine-False]",
+        "test_ordinary_descendant_needs_no_path_resolution[materialize_installer_engine-True]",
+        "test_ordinary_descendant_needs_no_path_resolution[materialize_main-False]",
+        "test_ordinary_descendant_needs_no_path_resolution[materialize_main-True]",
+        "test_ordinary_descendant_needs_no_path_resolution[nested_uv_editable_ref-False]",
+        "test_ordinary_descendant_needs_no_path_resolution[nested_uv_editable_ref-True]",
+        "test_ordinary_descendant_keeps_live_symlink_refusal[materialize_installer_engine-leaf]",
+        "test_ordinary_descendant_keeps_live_symlink_refusal[materialize_installer_engine-parent]",
+        "test_ordinary_descendant_keeps_live_symlink_refusal[materialize_main-leaf]",
+        "test_ordinary_descendant_keeps_live_symlink_refusal[materialize_main-parent]",
+        "test_ordinary_descendant_keeps_live_symlink_refusal[nested_uv_editable_ref-leaf]",
+        "test_ordinary_descendant_keeps_live_symlink_refusal[nested_uv_editable_ref-parent]",
+        "test_reparse_metadata_retains_resolved_ancestor_walk[materialize_installer_engine]",
+        "test_reparse_metadata_retains_resolved_ancestor_walk[materialize_main]",
+        "test_reparse_metadata_retains_resolved_ancestor_walk[nested_uv_editable_ref]",
+        "test_relative_path_retains_resolved_ancestor_walk[materialize_installer_engine]",
+        "test_relative_path_retains_resolved_ancestor_walk[materialize_main]",
+        "test_relative_path_retains_resolved_ancestor_walk[nested_uv_editable_ref]",
+        "test_nonordinary_path_retains_resolved_ancestor_walk[materialize_installer_engine-outside]",
+        "test_nonordinary_path_retains_resolved_ancestor_walk[materialize_installer_engine-dotdot]",
+        "test_nonordinary_path_retains_resolved_ancestor_walk[materialize_main-outside]",
+        "test_nonordinary_path_retains_resolved_ancestor_walk[materialize_main-dotdot]",
+        "test_nonordinary_path_retains_resolved_ancestor_walk[nested_uv_editable_ref-outside]",
+        "test_nonordinary_path_retains_resolved_ancestor_walk[nested_uv_editable_ref-dotdot]",
+        "test_ancestor_metadata_is_fresh_on_every_call[materialize_installer_engine]",
+        "test_ancestor_metadata_is_fresh_on_every_call[materialize_main]",
+        "test_ancestor_metadata_is_fresh_on_every_call[nested_uv_editable_ref]",
+        "test_metadata_permission_failure_is_not_accepted[materialize_installer_engine]",
+        "test_metadata_permission_failure_is_not_accepted[materialize_main]",
+        "test_metadata_permission_failure_is_not_accepted[nested_uv_editable_ref]"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_bootstrap_declaration_units.py",
+      [
+        "test_bootstrap_declaration_materializes_without_changing_canonical_source[False]",
+        "test_bootstrap_declaration_materializes_without_changing_canonical_source[True]",
+        "test_withdrawn_bootstrap_request_refuses_candidate_before_writes"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_materializer_serial_copy_units.py",
+      [
+        "test_plugin_copy_workers_preserve_tree_logs_and_standalone_dependency_order[False]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_installer_sync_fixture_units.py",
       [
         "test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical",
@@ -8532,6 +8581,11 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_materializer_ancestor_units.py": "2fd71a0ef515c18f04fb8e74e94d63a6ed3e266a99a86451e85177a868001a59",
+    "tools/test_materialize_installer_engine.py": "c5642438e2114b49e45151e7804616956b4ccf8cb08c9c37a339844f483d7c6b",
+    "tools/promotion_unit_tests/test_bootstrap_declaration_units.py": "02410b3924c049bc54b19f28cbe786eb03c5edd410ef30b7b99711ab89cf6f04",
+    "tools/test_bootstrap_python_materialization.py": "772875d1372c3665fac811d35734e4723731621381fda85182666be2e68965ed",
+    "tools/promotion_unit_tests/test_materializer_serial_copy_units.py": "daec8439eeb16da35d922e2b31141d76f6438dcdf1bb90f7abcb6f923f359d5d",
     "tools/promotion_unit_tests/test_installer_sync_fixture_units.py": "ea2bb3fc71aab60510df2f0c92ac43dc8569b269d51e12f634162b7a07b91656",
     "tools/test_sync_installer_engine.py": "d5886342146904a97301447c1dce62f2236fddf7ac99564b9839d2f140064dd5",
     "tools/sync-installer-engine.py": "38148669ae27d8503a72838716f1a1d4da223472730def4a35f968f61f436bda",
