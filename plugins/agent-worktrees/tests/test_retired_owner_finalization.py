@@ -338,3 +338,248 @@ def test_recovery_retries_a_freeze_after_original_custody_is_restored(
     assert _run(retired) == 0
     assert not retired.checkout.exists()
     assert tracking.load_record(retired.ledger).status == "finalized"
+
+
+@pytest.fixture
+def orphaned(retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    retired.parent.unlink()
+    retired.local_machine = tracking.load_record(retired.ledger).execution_machine
+    retired.data["owner_ref"] = f"{retired.local_machine}/example/retired-parent"
+    retired.ledger.write_text(yaml.safe_dump(retired.data), encoding="utf-8")
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **k: False)
+    return retired
+
+
+def _doctor(fixture: SimpleNamespace, *extra: str) -> tuple[int, dict]:
+    from agent_worktrees import __main__ as cli, maintenance_cli
+
+    args = cli.build_parser().parse_args([
+        "doctor", "--repair-orphaned-owner", fixture.checkout.name, "--json", *extra,
+    ])
+    with output.capture_json_output() as captured:
+        code = maintenance_cli.cmd_doctor(args)
+    return code, json.loads(captured.getvalue())
+
+
+def _repair_files(fixture: SimpleNamespace) -> list[Path]:
+    return sorted(fixture.ledger.parent.glob(f"{fixture.ledger.name}.orphaned-owner-*"))
+
+
+def test_orphaned_owner_repair_reports_fixes_then_plain_finalize_applies(
+    orphaned: SimpleNamespace, capsys,
+) -> None:
+    original = orphaned.ledger.read_bytes()
+    assert _run(orphaned, recover_retired_owner=None) == 1
+    assert "--repair-orphaned-owner" in capsys.readouterr().err
+    code, report = _doctor(orphaned)
+    assert report["error"] is None
+    assert (code, report["repairable"], report["repaired"]) == (0, True, False)
+    assert report["evidence"]["owner_ref"] == orphaned.data["owner_ref"]
+    assert orphaned.ledger.read_bytes() == original and not _repair_files(orphaned)
+
+    code, report = _doctor(orphaned, "--fix")
+    assert (code, report["repaired"]) == (0, True)
+    child = tracking.load_record(orphaned.ledger)
+    assert child.owner_ref is None and child.worktree_id == orphaned.checkout.name
+    backup, audit = (orphaned.ledger.parent / report["backup"], orphaned.ledger.parent / report["audit"])
+    assert backup.read_bytes() == original
+    assert json.loads(audit.read_text(encoding="utf-8"))["evidence"]["owner_ref"] == orphaned.data["owner_ref"]
+    assert orphaned.checkout.exists() and not orphaned.parent.exists()
+
+    assert _run(orphaned, recover_retired_owner=None) == 0
+    assert not orphaned.checkout.exists()
+
+
+@pytest.mark.parametrize(("fault", "reason"), [
+    ("archived-record", "parent tracking state is still present (retired-parent.yaml)"),
+    ("parent-lock", "parent tracking state is still present (retired-parent.lock)"),
+    ("parent-checkout", "parent checkout still exists"),
+    ("parent-branch", "parent branch worktree/retired-parent still exists"),
+    ("other-machine", "another machine or execution space"),
+    ("unresolvable-project", "owner project is not locally resolvable"),
+    ("live-terminal", "live terminal session"),
+    ("unknown-terminal", "terminal-session absence cannot be proven"),
+    ("live-controller-session", "controlling parent session is still live"),
+])
+def test_orphaned_owner_repair_refuses_unproven_absence_without_writes(
+    orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, fault: str, reason: str,
+) -> None:
+    if fault == "archived-record":
+        orphaned.parent.write_text(yaml.safe_dump(orphaned.parent_data), encoding="utf-8")
+    elif fault == "parent-lock":
+        orphaned.parent.with_suffix(".lock").write_text("held-by-writer", encoding="utf-8")
+    elif fault == "parent-checkout":
+        Path(orphaned.parent_data["worktree_path"]).mkdir()
+    elif fault == "parent-branch":
+        _git("branch", "worktree/retired-parent", cwd=orphaned.anchor)
+    elif fault in {"other-machine", "unresolvable-project"}:
+        orphaned.data["owner_ref"] = (
+            "other-host/example/retired-parent" if fault == "other-machine"
+            else f"{orphaned.local_machine}/missing-project/retired-parent"
+        )
+        orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
+    elif fault == "live-terminal":
+        monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **k: True)
+    elif fault == "unknown-terminal":
+        def unavailable(*args, **kwargs):
+            raise OSError("terminal multiplexer observation unavailable")
+
+        monkeypatch.setattr(sessions, "has_mux_session", unavailable)
+    else:
+        orphaned.data["parent_session"] = "11111111-2222-4333-8444-555555555555"
+        orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
+        monkeypatch.setattr(sessions, "_session_entry_lock_state", lambda *a: (4242, []))
+    before = orphaned.ledger.read_bytes()
+    for extra in ((), ("--fix",)):
+        code, report = _doctor(orphaned, *extra)
+        assert code == 1 and reason in report["error"] and not report["repaired"]
+    assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+    assert orphaned.checkout.exists()
+
+
+def _legacy_owner(fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, resolved) -> list:
+    from agent_worktrees import legacy_wsl_record_locality
+
+    fixture.data["owner_ref"] = "legacy-host-label/example/retired-parent"
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+    probes = []
+
+    def resolve(ref, config):
+        probes.append(ref)
+        return resolved(fixture)
+
+    monkeypatch.setattr(legacy_wsl_record_locality, "resolve_legacy_wsl_owner_ref", resolve)
+    return probes
+
+
+def test_orphaned_owner_repair_accepts_resolved_legacy_wsl_owner_label(
+    orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probes = _legacy_owner(orphaned, monkeypatch, lambda fixture: fixture.ledger)
+    code, report = _doctor(orphaned)
+    assert (code, report["error"], report["repairable"]) == (0, None, True)
+    assert report["evidence"]["owner_locality"] == "legacy alias of current execution space"
+    assert [(p.machine, p.project, p.worktree_id) for p in probes] == [
+        ("legacy-host-label", "example", orphaned.checkout.name),
+    ]
+    code, report = _doctor(orphaned, "--fix")
+    assert (code, report["repaired"]) == (0, True)
+    assert tracking.load_record(orphaned.ledger).owner_ref is None
+    assert _run(orphaned, recover_retired_owner=None) == 0
+
+
+@pytest.mark.parametrize("resolved", [
+    lambda fixture: None,
+    lambda fixture: fixture.ledger.parent / "some-other-record.yaml",
+], ids=["unresolved", "other-record"])
+def test_orphaned_owner_repair_refuses_unproven_legacy_owner_label(
+    orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, resolved,
+) -> None:
+    probes = _legacy_owner(orphaned, monkeypatch, resolved)
+    before = orphaned.ledger.read_bytes()
+    for extra in ((), ("--fix",)):
+        code, report = _doctor(orphaned, *extra)
+        assert code == 1 and "another machine or execution space" in report["error"]
+    assert probes and orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+
+
+def _shared_legacy_label(fixture: SimpleNamespace, owner_machine: str, **raw) -> None:
+    for key in ("machine_identity_version", "environment", "execution_machine"):
+        fixture.data.pop(key, None)
+    fixture.data.update(raw)
+    fixture.data["owner_ref"] = f"{owner_machine}/example/retired-parent"
+    fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
+
+
+def test_orphaned_owner_repair_accepts_owner_label_shared_with_local_child(
+    orphaned: SimpleNamespace,
+) -> None:
+    _shared_legacy_label(orphaned, orphaned.data["machine"].upper())
+    code, report = _doctor(orphaned)
+    assert (code, report["error"], report["repairable"]) == (0, None, True)
+    assert report["evidence"]["owner_locality"] == "legacy label shared with the proven-local child record"
+    code, report = _doctor(orphaned, "--fix")
+    assert (code, report["repaired"]) == (0, True)
+    assert tracking.load_record(orphaned.ledger).owner_ref is None
+    assert _run(orphaned, recover_retired_owner=None) == 0
+
+
+@pytest.mark.parametrize("fault", ["different-label", "foreign-execution-identity", "other-platform"])
+def test_orphaned_owner_repair_refuses_unshared_or_foreign_child_label(
+    orphaned: SimpleNamespace, fault: str,
+) -> None:
+    if fault == "different-label":
+        _shared_legacy_label(orphaned, "foreign-host")
+    elif fault == "foreign-execution-identity":
+        orphaned.data["owner_ref"] = f"{orphaned.data['machine']}/example/retired-parent"
+        orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
+    else:
+        other = "linux" if orphaned.data["platform"] != "linux" else "windows"
+        _shared_legacy_label(orphaned, orphaned.data["machine"], platform=other)
+    before = orphaned.ledger.read_bytes()
+    for extra in ((), ("--fix",)):
+        code, report = _doctor(orphaned, *extra)
+        assert code == 1 and not report["repaired"] and report["error"]
+        if fault != "other-platform":
+            assert "another machine or execution space" in report["error"]
+    assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+
+
+def test_orphaned_owner_repair_reports_but_keeps_unheld_lock_and_empty_sidecar(
+    orphaned: SimpleNamespace,
+) -> None:
+    lock = orphaned.parent.with_suffix(".lock")
+    lock.write_bytes(b"")
+    sidecar = orphaned.parent.with_suffix("")
+    (sidecar / "handoff" / "nested").mkdir(parents=True)
+    code, report = _doctor(orphaned)
+    assert (code, report["error"], report["repairable"]) == (0, None, True)
+    assert report["evidence"]["residual_parent_artifacts"] == [
+        "retired-parent/ (empty directories only)", "retired-parent.lock (empty, unheld)",
+    ]
+    code, report = _doctor(orphaned, "--fix")
+    assert (code, report["repaired"]) == (0, True)
+    assert lock.read_bytes() == b"" and (sidecar / "handoff" / "nested").is_dir()
+
+
+@pytest.mark.parametrize("fault", ["held-lock", "sidecar-file", "sidecar-link"])
+def test_orphaned_owner_repair_refuses_live_parent_residue(
+    orphaned: SimpleNamespace, fault: str,
+) -> None:
+    import threading
+
+    lock = orphaned.parent.with_suffix(".lock")
+    lock.write_bytes(b"")
+    sidecar = orphaned.parent.with_suffix("")
+    (sidecar / "handoff").mkdir(parents=True)
+    release, ready, holder = threading.Event(), threading.Event(), None
+    if fault == "held-lock":
+        def hold() -> None:
+            with tracking._RecordLock(orphaned.parent, require_sidecar=True):
+                ready.set()
+                release.wait(30)
+
+        holder = threading.Thread(target=hold)
+        holder.start()
+        assert ready.wait(30)
+        reason = "retired-parent.lock is currently held"
+    elif fault == "sidecar-file":
+        (sidecar / "handoff" / "brief.md").write_text("pending", encoding="utf-8")
+        reason = "(retired-parent/)"
+    else:
+        try:
+            (sidecar / "handoff" / "link").symlink_to(orphaned.checkout, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks unavailable")
+        reason = "(retired-parent/)"
+    before = orphaned.ledger.read_bytes()
+    try:
+        for extra in ((), ("--fix",)):
+            code, report = _doctor(orphaned, *extra)
+            assert code == 1 and reason in report["error"] and not report["repaired"]
+    finally:
+        release.set()
+        if holder is not None:
+            holder.join(30)
+    assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+    assert lock.exists() and sidecar.is_dir()

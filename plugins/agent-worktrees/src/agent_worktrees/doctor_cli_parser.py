@@ -59,6 +59,8 @@ def add_parser(sub) -> None:
     )
     from .tracking_yaml_repair import add_doctor_arguments
     add_doctor_arguments(sp)
+    from . import orphaned_owner_repair
+    orphaned_owner_repair.add_doctor_arguments(sp)
     sp.add_argument(
         "--repair-machine-record", metavar="WORKTREE_ID",
         help="Read-only compatibility notice for retired machine-label repair; "

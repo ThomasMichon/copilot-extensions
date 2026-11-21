@@ -359,6 +359,9 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if getattr(args, "repair_orphaned_owner", None) is not None:
+        from .orphaned_owner_repair import targeted_doctor
+        return targeted_doctor(args)
     if getattr(args, "recovery_report", None) is not None:
         from .recovery_doctor import targeted_report
         return targeted_report(args)
