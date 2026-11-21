@@ -74,7 +74,7 @@ def _finalized(path: Path, *claims: tracking_claims.ResourceClaim) -> tracking.W
         last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
         status="finalized", completed_at=None,
         sessions=[tracking.SessionEntry(session_id="sess-1", started_at="2026-06-01T10:00:00")],
-        resources=list(claims),
+        resources=list(claims), finalized_checkout={"head": "a" * 40, "branch": "worktree/wt"},
     )
 
 
@@ -112,6 +112,19 @@ def test_expired_idle_session_no_longer_keeps_finalized_active(
 
     active = {norm}
     session_lease.drop_expired_finalized([rec], {}, active, keep=lambda r: True)
+    assert active == {norm}
+
+
+def test_unstamped_legacy_finalized_never_expires_out_of_active(
+    state_dir: Path, tmp_path: Path,
+) -> None:
+    rec = _finalized_self(tmp_path / "wt")
+    rec.finalized_checkout = None
+    norm = sessions._normalize_path(rec.worktree_path)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    active = {norm}
+    session_lease.drop_expired_finalized(
+        [rec], {rec.worktree_path: ["sess-1"]}, active, keep=lambda r: False)
     assert active == {norm}
 
 

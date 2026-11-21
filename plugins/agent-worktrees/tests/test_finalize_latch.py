@@ -9,7 +9,7 @@ from typing import NoReturn
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import git_ops, tracking, tracking_claims, worktree_git_facts
+from agent_worktrees import git_ops, prune, tracking, tracking_claims, worktree_git_facts
 
 
 def _finalized(path: str = "/tmp/wt1") -> tracking.WorktreeRecord:
@@ -21,8 +21,19 @@ def _finalized(path: str = "/tmp/wt1") -> tracking.WorktreeRecord:
     )
 
 
-def _info(state: git_ops.WorktreeState, *, ahead: int = 0) -> git_ops.WorktreeStateInfo:
-    return git_ops.WorktreeStateInfo(state=state, ahead=ahead, behind=0, dirty=0)
+def _info(
+    state: git_ops.WorktreeState, *, ahead: int = 0, branch: str | None = "worktree/wt1",
+) -> git_ops.WorktreeStateInfo:
+    return git_ops.WorktreeStateInfo(
+        state=state, ahead=ahead, behind=0, dirty=0, current_branch=branch)
+
+
+def _attach(tmp_path: Path, tip: str) -> None:
+    """Point HEAD at the record's branch, whose tip is ``tip``."""
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/worktree/wt1\n", encoding="utf-8")
+    ref = tmp_path / ".git" / "refs" / "heads" / "worktree"
+    ref.mkdir(parents=True, exist_ok=True)
+    (ref / "wt1").write_text(tip + "\n", encoding="utf-8")
 
 
 def _latched(
@@ -64,8 +75,55 @@ def test_finalized_head_at_latch_or_landed_stays_completed(
     rec = _latched(monkeypatch, tmp_path, "a" * 40)
     out = m._apply_tracking_override(rec, _info(git_ops.WorktreeState.WIP, ahead=2))
     assert out.state == git_ops.WorktreeState.COMPLETED
-    rec = _latched(monkeypatch, tmp_path, "b" * 40)  # fast-forwarded to landed content
+    rec = _latched(monkeypatch, tmp_path, "a" * 40)
+    _attach(tmp_path, "b" * 40)  # branch fast-forwarded to landed content
     out = m._apply_tracking_override(rec, _info(git_ops.WorktreeState.UNUSED))
+    assert out.state == git_ops.WorktreeState.COMPLETED
+
+
+@pytest.mark.parametrize("state", [
+    git_ops.WorktreeState.ORPHAN,  # base ref missing: no merge base
+    git_ops.WorktreeState.UNKNOWN,  # base unresolvable: counts failed
+    git_ops.WorktreeState.UNUSED,
+])
+def test_moved_head_with_missing_base_is_not_completed_or_cleanable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: git_ops.WorktreeState,
+) -> None:
+    rec = _latched(monkeypatch, tmp_path, "a" * 40)
+    _attach(tmp_path, "b" * 40)
+    # Failed counts report ahead=0; that is not proof nothing is unlanded.
+    observed = _info(state)
+    if state == git_ops.WorktreeState.UNUSED:
+        observed = git_ops.WorktreeStateInfo(state=state, ahead=1, current_branch="worktree/wt1")
+    out = m._apply_tracking_override(rec, observed)
+    assert out.state == git_ops.WorktreeState.WIP
+    assert not prune.cleanup_disposition(rec, out).cleanable
+
+
+@pytest.mark.parametrize("state", [
+    git_ops.WorktreeState.COMPLETED, git_ops.WorktreeState.UNUSED,
+    git_ops.WorktreeState.ORPHAN, git_ops.WorktreeState.UNKNOWN,
+])
+def test_detached_head_off_latch_is_not_completed_or_cleanable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: git_ops.WorktreeState,
+) -> None:
+    # git counted the record's branch, not the detached commit, so even a
+    # COMPLETED branch verdict says nothing about HEAD's containment.
+    rec = _latched(monkeypatch, tmp_path, "b" * 40)
+    out = m._apply_tracking_override(rec, _info(state, branch=None))
+    assert out.state == git_ops.WorktreeState.WIP
+    assert not prune.cleanup_disposition(rec, out).cleanable
+    # A branch checkout whose counted branch differs from HEAD's ref is unproven too.
+    _attach(tmp_path, "b" * 40)
+    out = m._apply_tracking_override(rec, _info(state, branch="other"))
+    assert out.state == git_ops.WorktreeState.WIP
+
+
+def test_detached_head_at_latch_stays_completed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    rec = _latched(monkeypatch, tmp_path, "a" * 40)
+    out = m._apply_tracking_override(rec, _info(git_ops.WorktreeState.ORPHAN, branch=None))
     assert out.state == git_ops.WorktreeState.COMPLETED
 
 

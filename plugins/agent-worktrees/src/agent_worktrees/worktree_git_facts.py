@@ -28,49 +28,78 @@ def apply_tracking_override(
     the dirty-count check (ORPHAN can still contain uncommitted changes).
     """
     if record.status in ("finalized", "complete", "completed"):
+        if _reopened_past_finalized_head(record, info):
+            return _unlanded(info)
         if git_ops._windows_observation() and info.state == git_ops.WorktreeState.UNKNOWN:
             return info
         if (
             info.state != git_ops.WorktreeState.DIRTY
             and info.dirty == 0
             and info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE)
-            and not _moved_past_finalized_head(record, info)
         ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
 
 
-def _moved_past_finalized_head(
+def _unlanded(info: git_ops.WorktreeStateInfo) -> git_ops.WorktreeStateInfo:
+    """Keep a reopened checkout non-cleanable even when git cannot prove why.
+
+    ``finalized`` status alone is a cleanup shortcut, so an ORPHAN, UNKNOWN or
+    UNUSED observation of a checkout that left its latch is reported as WIP
+    (content not proven on the default branch) rather than left to it.
+    """
+    S = git_ops.WorktreeState
+    if info.state in (S.WIP, S.DIRTY, S.GONE, S.ACTIVE) or info.dirty:
+        return info
+    return dataclasses.replace(info, state=S.WIP)
+
+
+def _reopened_past_finalized_head(
     record: tracking.WorktreeRecord,
     info: git_ops.WorktreeStateInfo,
 ) -> bool:
-    """Finalize latches at its recorded HEAD; new unlanded commits reopen it.
+    """Finalize latches at its recorded HEAD; any other unproven HEAD reopens it.
 
     Only a ``finalized`` record carrying a ``finalized_checkout`` stamp is
-    judged (legacy records keep the old masking). HEAD equal to the stamp, or
-    with nothing ahead of upstream (landed or fast-forwarded content), stays
-    latched. HEAD is read from the checkout's git metadata files, so the
-    probe never starts a Git child after a caller's bounded observation
-    budget is spent. An unreadable or empty HEAD fails closed: the unmasked
-    classification is kept rather than masking possible unlanded work.
+    judged (legacy records keep the old masking). HEAD equal to the stamp stays
+    latched. A different HEAD stays latched only when git proved it contained
+    in the base: a branch checkout (HEAD names the very branch git counted)
+    classified COMPLETED or UNUSED, i.e. nothing unlanded ahead of upstream.
+    A missing/unresolvable base (ORPHAN/UNKNOWN), a detached HEAD, or an
+    unreadable/empty HEAD is unknown and fails closed. HEAD is read from the
+    checkout's git metadata files, so the probe never starts a Git child after
+    a caller's bounded observation budget is spent.
     """
     stamp = record.finalized_checkout
     if record.status != "finalized" or not isinstance(stamp, dict):
         return False
     recorded = stamp.get("head")
-    if not isinstance(recorded, str) or not recorded or info.ahead <= 0:
+    if not isinstance(recorded, str) or not recorded:
         return False
     try:
-        head = _read_head(record.worktree_path)
+        head, ref = _read_head_ref(record.worktree_path)
     except Exception:
-        head = None
-    return not head or head != recorded
+        return True
+    if not head:
+        return True
+    if head == recorded:
+        return False
+    S = git_ops.WorktreeState
+    counted = info.current_branch
+    attached = bool(counted) and ref == f"refs/heads/{counted}"
+    landed = info.state == S.COMPLETED or (info.state == S.UNUSED and info.ahead == 0)
+    return not (attached and landed)
 
 
 def _read_head(worktree_path: str | None) -> str | None:
     """Resolve a checkout's HEAD object id from files alone, or ``None``."""
+    return _read_head_ref(worktree_path)[0]
+
+
+def _read_head_ref(worktree_path: str | None) -> tuple[str | None, str | None]:
+    """HEAD object id and symbolic ref (``None`` when detached) from files alone."""
     if not worktree_path:
-        return None
+        return None, None
     root = Path(worktree_path)
     dot_git = root / ".git"
     if dot_git.is_dir():
@@ -79,28 +108,28 @@ def _read_head(worktree_path: str | None) -> str | None:
         try:
             pointer = dot_git.read_text(encoding="utf-8").strip()
         except (OSError, UnicodeDecodeError):
-            return None
+            return None, None
         if not pointer.startswith("gitdir:"):
-            return None
+            return None, None
         git_dir = Path(pointer[len("gitdir:"):].strip())
         if not git_dir.is_absolute():
             git_dir = root / git_dir
     try:
         content = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
-        return None
+        return None, None
     if not content.startswith("ref:"):
-        return content if _is_object_id(content) else None
+        return (content if _is_object_id(content) else None), None
     ref = content[len("ref:"):].strip()
     if not ref.startswith("refs/") or ".." in ref.split("/"):
-        return None
+        return None, None
     common = git_dir
     try:
         shared = (git_dir / "commondir").read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         shared = ""
     except (OSError, UnicodeDecodeError):
-        return None
+        return None, None
     if shared:
         common = Path(shared) if Path(shared).is_absolute() else git_dir / shared
     for base in dict.fromkeys((git_dir, common)):
@@ -109,17 +138,17 @@ def _read_head(worktree_path: str | None) -> str | None:
         except FileNotFoundError:
             continue
         except (OSError, UnicodeDecodeError):
-            return None
-        return value if _is_object_id(value) else None
+            return None, None
+        return (value if _is_object_id(value) else None), ref
     try:
         packed = (common / "packed-refs").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return None
+        return None, None
     for line in packed.splitlines():
         oid, _, name = line.partition(" ")
         if name.strip() == ref:
-            return oid if _is_object_id(oid) else None
-    return None
+            return (oid if _is_object_id(oid) else None), ref
+    return None, None
 
 
 def _is_object_id(value: str) -> bool:

@@ -175,6 +175,11 @@ def idle_finalized(
     )
 
 
+def _latched(record: tracking.WorktreeRecord) -> bool:
+    stamp = record.finalized_checkout
+    return isinstance(stamp, dict) and isinstance(stamp.get("head"), str) and bool(stamp["head"])
+
+
 def drop_expired_finalized(
     records: Iterable[tracking.WorktreeRecord],
     active_sessions: Mapping[str, Iterable[str]],
@@ -187,8 +192,10 @@ def drop_expired_finalized(
     Finalize is a latch: continued conversation, an idle open pane or a
     resumed session must not make a finalized checkout ACTIVE once its lease
     expired. ``keep`` preserves activity with no provable lease (hosted sessions,
-    workers, bridge or bound-live signals). Any probe failure leaves the path
-    active.
+    workers, bridge or bound-live signals). Only a stamped latch
+    (``finalized_checkout``) can expire: without it later commits cannot be
+    told from finalized content, so a legacy record stays active. Any probe
+    failure leaves the path active.
     """
     from . import sessions
 
@@ -196,7 +203,7 @@ def drop_expired_finalized(
     for path, sids in active_sessions.items():
         observed.setdefault(sessions._normalize_path(path), set()).update(sids or ())
     for rec in records:
-        if rec.status != "finalized" or not rec.worktree_path:
+        if rec.status != "finalized" or not rec.worktree_path or not _latched(rec):
             continue
         norm = sessions._normalize_path(rec.worktree_path)
         if norm not in active:
