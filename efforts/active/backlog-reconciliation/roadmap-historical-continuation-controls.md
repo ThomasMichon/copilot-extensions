@@ -227,6 +227,14 @@ resolving that particular collector's reference-only cause. It updates the
 existing row above, not the 131-row membership or 75 earlier retained bindings.
 It does not inspect a linked original, product implementation or whole home.
 
+The [current SSH-mesh study](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
+separately supplies #63's current whole receiver and all six discussions after
+the precise collector cause and identified embedded-source qualification.
+It preserves every received family, broad mesh scope, both-direction all-peer
+convergence and actual owners without changing this 131-row membership, the
+earlier 75 bindings or any source/native/activation gate. Partial prequalification
+display is retained as a deviation, not silently relabeled compliant.
+
 ## Owner and publication receipts
 
 | Issue | Retained boundary |

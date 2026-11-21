@@ -57,6 +57,15 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [current SSH-mesh contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
+qualifies #63's whole current receiver and discussions after specific
+reference-cause reconciliation, including separate embedded-source qualification.
+Broad provisioning, seven received families, target-live default Bridge discovery,
+critical transport survival and both-direction all-peer convergence remain
+distinct under their actual owners. Reported foundations are not fresh source
+proof or actuation authority. Actual #13951 delivery and the complete 11:04:10 PST
+900-open census leave the campaign 171 above fixed 729.
+
 The [fleet-authority current contract](journal/2026/11.21-fleet-authority-current-contract.md)
 reconciles #6617's precise reference-only refusal before a complete qualified
 original/all-discussion study. Five distinct original outcomes and their existing

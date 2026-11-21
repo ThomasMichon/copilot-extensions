@@ -3274,6 +3274,24 @@ of all 165 originals. The 48 residuals, current-head review, fresh full-packet
 CI and every broader native/installed/release/full-census/whole-flow/custody
 gate remain separate.
 
+Source #13950 merges at `2026-11-21T19:00:01Z` as
+`e73a6e85ee37973702bd82a816efab82dd4d4315`. Copilot approval `6007443290`
+names exact head `16414fba0eedd9d0e6076202df7eba15f23acec1`; complete review
+and thread pagination finds no outstanding finding. Required source CI
+`44938002302` and trusted metadata CI `44938002664` succeed. Actual unit job
+`136948779441` freshly executes all 6,809 cases with 35 deselections in
+124.72 pytest seconds and 141.969 packet seconds. Lookup takes 594 ms;
+no reuse or controlled whole-flow saving is credited. The source change also
+retains actual full AST-guard execution rather than packet-only omission.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. Scoped synchronization retains
+the published head and advances to the merge. After rereading the full canonical
+parent, only this finite fixture/output item is resolved. Continue qualification
+of the four serial cases in the mixed pointer-discovery matrix, preserving its
+two real-worker cases outside. Every broader gate and retained hold stays open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
