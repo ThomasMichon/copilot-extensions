@@ -54,7 +54,7 @@ def _claim_and_start(q: TaskQueue, task_id: str, *, wt: str, session: str, now: 
     .reconcile_liveness` treats this as the CLI-embodied/generic path (see
     ``test_reconcile_gone_cli_embodied_started_task_is_suspended`` below) --
     use :func:`_claim_and_start_headless` instead for the pre-existing
-    headless-body requeue/dead-letter tests.
+    headless supervisor-retirement tests.
     """
     q.claim_one(f"m/{wt}", machine="m", worktree=wt, task_id=task_id, now=now)
     q.start(task_id, f"m/{wt}", owner_session_id=session, now=now + 1)
@@ -69,7 +69,7 @@ def _claim_and_start_headless(
     ``local-body:<session>`` spawn reservation so
     :meth:`TaskQueue.reconcile_liveness` classifies it as a **headless** body
     (probed via ``headless_local_verdict``, never the worktree-keyed CLI
-    resolver) -- the "headless dead-session behavior stays UNCHANGED" case.
+    resolver).
     """
     reservation, _ = q.reserve_spawn(task_id, now=now)
     q.record_spawn(reservation.key, session_handle=f"local-body:{session}", now=now)
@@ -232,15 +232,15 @@ def test_reconcile_gone_cli_embodied_task_is_suspended_not_requeued(q: TaskQueue
     assert required(q.get(b.id)).status == Status.STARTED  # a live owner is never disturbed
 
 
-def test_reconcile_gone_reserved_headless_task_suspends_without_unassigning(q: TaskQueue) -> None:
+def test_reconcile_gone_reserved_headless_task_retains_started_owner(q: TaskQueue) -> None:
     t = q.create("headless", now=1000.0)
     _claim_and_start_headless(q, t.id, wt="wt", session="S1", now=1002.0)
 
     counts = q.reconcile_liveness(headless_local_verdict=lambda sid: "gone", now=5000.0)
     assert counts["checked"] == 1 and counts["gone"] == 1
-    assert counts["requeued"] == 0 and counts["suspended"] == 1
+    assert counts["requeued"] == counts["suspended"] == 0
     back = required(q.get(t.id))
-    assert back.status == Status.SUSPENDED
+    assert back.status == Status.STARTED and back.last_liveness == "gone"
     assert back.owner == "m/wt" and back.owner_session_id == "S1"
 
 
@@ -302,7 +302,7 @@ def test_attempt_cap_does_not_abandon_reserved_owner(q: TaskQueue) -> None:
             headless_local_verdict=lambda sid: "gone", max_attempts=1, now=1200.0 + i
         )
     task = required(q.get(t.id))
-    assert task.status == Status.SUSPENDED
+    assert task.status == Status.STARTED and task.last_liveness == "gone"
     assert task.owner == "m/wt" and task.owner_session_id == "S1"
     assert task.completed_at is None
 
@@ -394,14 +394,13 @@ def test_recover_expired_leases_shim_delegates(
 ) -> None:
     from agent_dispatch import spawn_factories
 
-    # Headless: the shim's "requeued" contract (`recover_expired_leases`'s
-    # docstring) is exercised on the path whose behavior is unchanged by the
-    # new CLI-embodied auto-suspend branch.
+    # The compatibility shim reports a count, not authority to retire the body.
     monkeypatch.setattr(spawn_factories, "_default_local_body_verdict", lambda *a, **k: "gone")
     t = q.create("x", now=1000.0)
     _claim_and_start_headless(q, t.id, wt="wt", session="S1", now=1001.0)
-    assert q.recover_expired_leases() == 0  # counts requeues, not suspensions
-    assert required(q.get(t.id)).status == Status.SUSPENDED
+    assert q.recover_expired_leases() == 0
+    observed = required(q.get(t.id))
+    assert observed.status == Status.STARTED and observed.last_liveness == "gone"
 
 
 # -- backlog_health (buildup, broken out by liveness) ------------------------

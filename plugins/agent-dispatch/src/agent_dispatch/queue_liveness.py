@@ -132,10 +132,9 @@ class LivenessMixin:
           An ordinary hosted task that already recorded its native owner is
           suspended with that ownership intact: a stopped process does not
           retire its conversation. Its unfinished claim or missing native
-          binding is retained for explicit reconciliation. Other **headless** bodies (a fleet/local
-          spawn-reservation owns them -- see
-          :meth:`_active_headless_handle`) keeps the pre-existing behavior
-          unchanged: requeue, or ``dead_letter`` past ``max_attempts``. A
+          binding is retained for explicit reconciliation. For a legacy fleet/local
+          headless reservation, GC records the verdict but leaves the task in its
+          current phase: supervisor recovery owns retirement and subsequent requeue. A
           **CLI-embodied** ``started`` task (no headless reservation owns it) is
           instead auto-transitioned to ``suspended`` -- it never silently
           requeues/dead-letters out from under a durable interactive worktree,
@@ -320,7 +319,7 @@ class LivenessMixin:
                 if restricted:
                     continue
                 retained = conn.execute(
-                    "SELECT driver FROM spawn_reservations WHERE task_id=?"
+                    "SELECT driver,session_handle FROM spawn_reservations WHERE task_id=?"
                     " AND state IN (?,?,?,?) ORDER BY attempt DESC LIMIT 1",
                     (task_id, SpawnState.RESERVING, SpawnState.SPAWNED,
                      SpawnState.COLD, SpawnState.RELEASING),
@@ -328,6 +327,12 @@ class LivenessMixin:
                 ordinary_native = (
                     retained is not None and retained["driver"] == "ordinary-bridge"
                 )
+                if retained is not None and retained["driver"] in (None, "cli", "agent-dispatch") and (
+                    _parse_local_body_handle(retained["session_handle"])
+                    or _parse_fleet_body_handle(retained["session_handle"])
+                ):
+                    # Suspending here would hide the still-owned task from recover_gone.
+                    continue
                 reserved = retains_assignment(conn, task_id)
                 if reserved and (not owner_session_id or status != Status.STARTED):
                     continue

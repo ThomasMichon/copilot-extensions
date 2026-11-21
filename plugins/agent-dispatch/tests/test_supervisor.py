@@ -7919,8 +7919,9 @@ def test_recover_gone_fleet_body_releases_for_reembody(
     assert required(q.latest_reservation(t.id)).attempt == 2
 
 
+@pytest.mark.parametrize("gc_first", [False, True])
 def test_recover_gone_fleet_body_started_requeues_then_reembodies(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, supervisor_http: DispatchClient, gc_first: bool
 ) -> None:
     """A fleet body that died *while holding the task started* is requeued (yield
     on the dead owner's behalf, preserving goal + progress_log) AND its reservation
@@ -7933,11 +7934,16 @@ def test_recover_gone_fleet_body_started_requeues_then_reembodies(
     )
     assert sup.poll_once() == [t.id]                 # spawn #1
     q.claim_one("fleet-o", task_id=t.id)             # body claimed + started it
-    q.start(t.id, "fleet-o")
+    started = q.start(t.id, "fleet-o", owner_session_id="original-native" if gc_first else None)
     assert required(q.get(t.id)).status == Status.STARTED
 
-    # recover_gone: GONE -> yield (requeue) + release reservation -> re-embody
+    before = required(q.latest_reservation(t.id))
+    if gc_first:
+        counts = q.reconcile_liveness(headless_fleet_verdict=lambda host, sid: "gone")
+        _assert_gc_left_recovery_to_supervisor(q, started, before, counts)
+
     assert sup.poll_once() == [t.id]
+    assert required(q.get_reservation(before.key)).state == SpawnState.FAILED
     assert spawn.calls == [t.id, t.id]
     assert required(q.latest_reservation(t.id)).attempt == 2
 
@@ -8120,8 +8126,9 @@ def test_recover_gone_local_body_releases_for_reembody(
     assert required(q.latest_reservation(t.id)).attempt == 2
 
 
+@pytest.mark.parametrize("gc_first", [False, True])
 def test_recover_gone_local_body_started_requeues_then_reembodies(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, supervisor_http: DispatchClient, gc_first: bool
 ) -> None:
     """A local body that died *while holding the task started* is requeued (yield
     on its behalf, preserving goal + progress_log) AND its reservation released --
@@ -8134,13 +8141,31 @@ def test_recover_gone_local_body_started_requeues_then_reembodies(
     )
     assert sup.poll_once() == [t.id]                 # spawn #1
     q.claim_one("local-o", task_id=t.id)             # body claimed + started it
-    q.start(t.id, "local-o")
+    started = q.start(t.id, "local-o", owner_session_id="original-native" if gc_first else None)
     assert required(q.get(t.id)).status == Status.STARTED
 
-    # recover_gone: GONE -> yield (requeue) + release reservation -> re-embody
+    before = required(q.latest_reservation(t.id))
+    if gc_first:
+        counts = q.reconcile_liveness(headless_local_verdict=lambda sid: "gone")
+        _assert_gc_left_recovery_to_supervisor(q, started, before, counts)
+
     assert sup.poll_once() == [t.id]
+    assert required(q.get_reservation(before.key)).state == SpawnState.FAILED
     assert spawn.calls == [t.id, t.id]
     assert required(q.latest_reservation(t.id)).attempt == 2
+
+
+def _assert_gc_left_recovery_to_supervisor(
+    q: OwnerResultQueue, started: Task, before: SpawnReservation, counts: dict[str, int],
+) -> None:
+    current = required(q.get(started.id))
+    assert counts["checked"] == counts["gone"] == 1
+    assert counts["suspended"] == counts["requeued"] == counts["dead_lettered"] == 0
+    assert current.last_liveness == "gone" and current.status == Status.STARTED
+    assert (current.owner, current.owner_session_id, current.generation) == (
+        started.owner, "original-native", started.generation,
+    )
+    assert before.state == SpawnState.SPAWNED and q.get_reservation(before.key) == before
 
 
 def test_productive_gone_local_body_does_not_burn_spawn_failure_budget(
