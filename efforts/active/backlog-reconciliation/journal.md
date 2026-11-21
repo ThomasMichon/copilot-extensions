@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Historical continuation controls and remaining integration](journal/2026/11.21-historical-continuation-controls.md)
+
 - [2026-11-21 - Historical owner and causal controls](journal/2026/11.21-historical-owner-and-causal-controls.md)
 
 - [2026-11-21 - Historical scoped controls and retained receiving](journal/2026/11.21-historical-scoped-controls.md)

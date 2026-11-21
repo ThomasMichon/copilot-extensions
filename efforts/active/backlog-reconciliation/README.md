@@ -1472,8 +1472,14 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 ### Phase 2 - Continuing reconciliation
 
 The [retained historical receipt register](roadmap-historical-retained-receipts.md)
-accounts for 161 of the selected 292 identities, leaving 131 correspondence
-decisions. Its [earlier journal](journal/2026/11.21-historical-retained-receipts.md)
+and [continuation controls](roadmap-historical-continuation-controls.md)
+account for all 292 selected identities: 161 preceding decisions plus 131
+specific retained controls/gaps, not 292 current technical/home assessments.
+Their 75 varied-strength authored/read bindings remain unchanged.
+The [continuation journal](journal/2026/11.21-historical-continuation-controls.md)
+records actual #13908 delivery and the still-open current-home, priority/owner
+and scoped-sequencing integration. The
+[earlier journal](journal/2026/11.21-historical-retained-receipts.md)
 records actual #13891 delivery, finite #2556/#13851 source distinctions and
 two later #4130 observations. Retained reads, controls and admission gaps
 are not new technical completion or current whole-home qualification;

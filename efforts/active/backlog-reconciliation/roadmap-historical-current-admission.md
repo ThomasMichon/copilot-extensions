@@ -11,8 +11,12 @@ Authored-delta follow-through:
 [retained correspondence and new delivery](journal/2026/11.21-historical-authored-deltas-and-delivery.md).
 The [retained-receipt continuation](roadmap-historical-retained-receipts.md)
 accounts for 161 selected identities: the prior 144 plus seventeen specific
-owner/causal controls, leaving 131. Its 75 varied-strength authored/read
-bindings do not grow with those seventeen scoped retentions.
+owner/causal controls. The [continuation register](roadmap-historical-continuation-controls.md)
+accounts for the remaining 131, completing the same 292-identity
+receipt/control/gap partition, not current whole-home qualification.
+Its [journal](journal/2026/11.21-historical-continuation-controls.md) records
+actual #13908 delivery. The 75 varied-strength authored/read bindings do not
+grow with either scoped continuation; actual gaps and all integration gates remain.
 The [continuation journal](journal/2026/11.21-historical-scoped-controls.md)
 retains actual #13904 delivery and distinguishes earlier complete studies,
 later withholding and current correspondence gaps.
