@@ -155,7 +155,8 @@ class GiteaProvider:
 
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         if not token:
-            raise ProviderError(
+            from .base import CreationRefused
+            raise CreationRefused(
                 "Gitea provider needs a token. Set 'pr.token_command' (e.g. a "
                 "vault fetch) or 'pr.token_env' in the repo config."
             )

@@ -102,6 +102,10 @@ class ProviderError(RuntimeError):
         self.transient = transient
 
 
+class CreationRefused(ProviderError):
+    """Creation was refused locally before its mutating transport was invoked."""
+
+
 @dataclass
 class PRScope:
     """Inputs for opening a pull request (built from create_pr's push step)."""

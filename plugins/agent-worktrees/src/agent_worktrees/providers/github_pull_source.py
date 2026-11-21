@@ -143,6 +143,26 @@ def find(
     return opened[0] if opened else candidates[0] if candidates else None
 
 
+def verify_created(
+    provider: GitHubProvider, scope: PRScope, receipt: PullResult, *, token: str | None,
+) -> PullResult:
+    try:
+        endpoint = provider.authority_endpoint(scope.api_base)
+        validate_url(receipt.url, receipt.number, scope.repo, endpoint)
+        assert receipt.number is not None
+        observed = provider.get_pull(scope.repo, receipt.number, api_base=scope.api_base, token=token)
+        validate_url(observed.url, observed.number, scope.repo, endpoint)
+        if (
+            observed.number != receipt.number or not matches(observed, scope.repo, scope.head, endpoint)
+            or observed.base_ref != scope.base or observed.state != "open" or observed.merged
+            or (scope.expected_head_sha and observed.head_sha != scope.expected_head_sha)
+        ):
+            raise ProviderError("Created PR source or target does not match the selected publication.")
+    except (ProviderError, OSError) as exc:
+        raise CreatedSourceMismatch(receipt) from exc
+    return observed
+
+
 def create(
     provider: GitHubProvider, scope: PRScope, *, token: str | None,
     run: Callable[..., CompletedProcess[str]],

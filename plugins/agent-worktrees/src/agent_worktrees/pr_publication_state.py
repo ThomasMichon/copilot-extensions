@@ -69,6 +69,8 @@ def persist_pull(
 ) -> str | None:
     from . import pr_ops, pr_publish, pr_unverified_creation
 
+    if type(pull.number) is not int or pull.number <= 0 or not pull.url:
+        raise ValueError("Provider creation has no verified pull-request identity; reconcile the retained attempt.")
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     with pr_publish.metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)

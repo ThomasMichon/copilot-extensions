@@ -103,8 +103,14 @@ class GitHubProvider:
 
     @pr_transport_fence.provider_creation
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
-        reject_copilot_mention(scope.title, what="PR title")
-        reject_copilot_mention(scope.body, what="PR description")
+        from .base import CreationRefused
+        from .github_pull_source import verify_created
+
+        try:
+            reject_copilot_mention(scope.title, what="PR title")
+            reject_copilot_mention(scope.body, what="PR description")
+        except ProviderError as exc:
+            raise CreationRefused(str(exc)) from exc
         if ":" in scope.head:
             from .github_pull_source import create
             return create(self, scope, token=token, run=run_cli)
@@ -132,7 +138,8 @@ class GitHubProvider:
         # gh prints the PR URL on stdout; derive the number from the trailing path.
         url = proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else ""
         number = self._number_from_url(url)
-        return PullResult(url=url, number=number, state="open")
+        receipt = PullResult(url=url, number=number, state="open")
+        return verify_created(self, scope, receipt, token=token)
 
     @staticmethod
     def _number_from_url(url: str) -> int | None:

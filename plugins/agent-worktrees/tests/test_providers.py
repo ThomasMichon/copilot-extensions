@@ -1368,7 +1368,12 @@ class TestGitHubProvider:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: _proc(stdout="https://github.com/o/r/pull/7\n"),
+            lambda args, **kw: _proc(stdout=(
+                "https://github.com/o/r/pull/7\n" if args[1:3] == ["pr", "create"] else json.dumps({
+                    "url": "https://github.com/o/r/pull/7", "number": 7, "state": "OPEN",
+                    "headRefName": "h", "baseRefName": "master", "headRepository": {"nameWithOwner": "o/r"},
+                })
+            )),
         )
         scope = PRScope(repo="o/r", head="h", base="master", title="T")
         res = github.GitHubProvider().create_pull(scope, token=None)
@@ -1408,7 +1413,12 @@ class TestGitHubProvider:
 
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: _proc(stdout="https://github.com/o/r/pull/7\n"),
+            lambda args, **kw: _proc(stdout=(
+                "https://github.com/o/r/pull/7\n" if args[1:3] == ["pr", "create"] else json.dumps({
+                    "url": "https://github.com/o/r/pull/7", "number": 7, "state": "OPEN",
+                    "headRefName": "h", "baseRefName": "master", "headRepository": {"nameWithOwner": "o/r"},
+                })
+            )),
         )
         scope = PRScope(
             repo="o/r", head="h", base="master",
