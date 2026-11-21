@@ -252,6 +252,24 @@ delivery from an SDK promise or a timer.
 
 ## Journal
 
+### 2026-11-21 - Degrade selected-launcher failures and reconcile upstream
+
+- Assessed the next clean review's Windows-launcher caveat against the actual
+  process owner. Job-assignment and suspended-resume failures raise
+  `RuntimeError`; daemon startup and both synchronous catalog owner reads now
+  report those inventories unavailable rather than aborting readiness or
+  discarding independent targets. No alternate launcher or replay was added.
+- Added controlled launcher-failure regressions for daemon startup, repository
+  enumeration and one failed project alongside a healthy independent project.
+  The expanded eight-file packet passed 214 cases; the five promotion units
+  and 13-plugin install-contract check passed.
+- Backed up the complete source before reconciling upstream. Only combined
+  producer metadata conflicted; canonical source archives remain consistent,
+  the regenerated producer retains contract revision 36, and all 33 owned
+  Python files are byte-identical to the pre-rebase source. All 33 changed
+  Python files passed whole-file strict typing on Linux and Windows.
+  Publication, current-head review and required CI remain completion gates.
+
 ### 2026-11-21 - Keep repository status out of agent topology errors
 
 - Addressed the next review's valid streaming regression: repository-inventory

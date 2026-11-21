@@ -610,6 +610,10 @@ distinct from failure.
 This status belongs only to workspace inventory, not fatal agent topology
 diagnostics. Configured and remote agents retain ordinary listing, streaming and
 initial-subscription behavior when the repository owner is unavailable.
+Windows Job-assignment or suspended-resume failures from the selected launcher
+also mark that inventory unavailable instead of aborting daemon readiness or
+catalog rendering. Other repositories and independently registered targets
+remain visible; no weaker launcher is retried.
 
 Standalone local ACP Hosts are observed through their existing daemon-instance
 registrations and birth-matched Host state. This does not attach a controller
