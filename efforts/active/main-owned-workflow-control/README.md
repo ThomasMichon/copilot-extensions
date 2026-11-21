@@ -891,7 +891,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13942 merges at `abcc2aa18809e690ad9af846a30eee047caa4040` after
   exact-head Copilot approval and complete required Linux CI with all 6,769
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land twenty-six original fixture-only local-source closure
+- [x] Qualify and land twenty-six original fixture-only local-source closure
   cases through eight exact test objects. Preserve all 77 preceding original
   materializer cases, all 62 remaining originals, original fixtures, expanded
   suffixes and assertions. Retain source closure, positive per-case production
@@ -900,6 +900,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   typing, current-head review and complete Linux source CI. Linked-source and
   aliased-parent native cases remain separate; this is not native, installed,
   release, full-census or whole-flow acceptance.
+  #13944 merges at `ee1c7951fa6b1db63e15d42fcadaddeba93b1939` after
+  exact-head Copilot approval and complete required Linux CI with all 6,795
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land three exact original invocation-boundary controls:
+  foreign-manifest refusal, escaping-output refusal and the materializer's
+  invocation-owner callback. Preserve all 103 preceding original cases and
+  all 59 residuals; bind copied canonical fixture data without executing it.
+  Require unchanged original objects, fixtures and assertions, positive
+  per-case production call coverage, zero prohibited effects, all preceding
+  node/hash/target/helper decisions, compact/flat-v1 contracts, the 300-second
+  limit, strict typing, current-head review and complete Linux source CI.
+  Native, installed, release, full-census and whole-flow gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
