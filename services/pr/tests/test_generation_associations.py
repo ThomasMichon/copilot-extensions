@@ -157,10 +157,12 @@ def test_unselected_native_feature_does_not_send_new_keywords_to_old_core(
 
     def old_store(*args: Any, **kwargs: Any) -> ReplayStore:
         assert "native_generation_associations" not in kwargs
+        assert "retained_active_reviews" not in kwargs
         return ReplayStore(*args, **kwargs)
 
     def old_workspace(*args: Any, **kwargs: Any) -> WorkspaceOperations:
         assert "generation_native_target" not in kwargs
+        assert "retained_active_reviews" not in kwargs
         return WorkspaceOperations(*args, **kwargs)
 
     monkeypatch.setattr(hosting, "ReplayStore", old_store)

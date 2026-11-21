@@ -1,5 +1,17 @@
 # Testing copilot-extensions
 
+The focused retained-active-review packet uses
+`agent-pull-requests/tests/test_retained_review_adoption.py` and
+`services/pr/tests/test_retained_active_reviews.py` through the existing plugin
+and standalone runners. Synthetic retained volumes exercise the actual
+transition CLI, fresh-process Native/tool inspection, asynchronous contract
+negotiation, before/after-replace interruption, same-operation retry, scope and
+capacity/deadline/lifecycle refusal, native-ID preservation, actual foreground
+Gateway response qualification with larger bodies/receipt reservations, and the permanent
+no-new-attempt fence across open/close/reopen. It requires no live provider,
+credential or installed-volume migration and does not select a production
+recovery receiver.
+
 The `consumer-telemetry-native.yml` finite Windows/Linux packet runs both the
 existing Bridge command/custody controls and Dispatch's
 `tests/test_consumer_telemetry_command.py` plus legacy telemetry suite through

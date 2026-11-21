@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from collections.abc import Callable
 from dataclasses import replace
 import hashlib
 import json
@@ -11,9 +12,11 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+from typing import cast
 import shlex
 import subprocess
 from types import SimpleNamespace
+from typing import TypedDict
 from urllib.parse import urlsplit
 
 from agent_procutil import no_window_kwargs
@@ -25,9 +28,21 @@ from fleet_manager.continuity_bootstrap import _state, bootstrap
 from fleet_manager import private_state
 from fleet_manager.gateway_service_server import STATE, start
 from fleet_manager.gateway_service_channel import TransportError
+from fleet_manager.gateway_legacy_interop import OperationLedgerFactory
 from fleet_manager.ledger import OperationLedger
 from gateway_service_transport_fixtures import Rig
 from test_gateway_enrollment import EnrollmentHarness, GRANT
+
+
+class _CallerArgs(TypedDict):
+    source: Path
+    state_root: Path
+    harness: str
+    machine: str
+    gateway_origin: str
+    principal: str
+    audience: str
+    resource: str
 
 
 def _prepared_engine_python() -> Path | None:
@@ -35,22 +50,33 @@ def _prepared_engine_python() -> Path | None:
     return Path(root) / "agent-worktrees" / "bin" / "python" if root else None
 
 
-def test_engine_consumer_uses_explicit_prepared_environment(tmp_path, monkeypatch):
+def _advance_revision(policy: object) -> None:
+    assert isinstance(policy, dict)
+    manifest = policy["manifest"]
+    assert isinstance(manifest, dict)
+    revision = manifest["revision"]
+    assert type(revision) is int
+    manifest["revision"] = revision + 1
+
+
+def test_engine_consumer_uses_explicit_prepared_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     prepared = tmp_path / "prepared"
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_VENV_ROOT", str(prepared))
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "unrelated-sandbox"))
     assert _prepared_engine_python() == prepared / "agent-worktrees" / "bin" / "python"
 
 
-def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment(tmp_path, monkeypatch):
-    async def scenario():
+def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
         rig = Rig(tmp_path)
         enrollment = EnrollmentHarness(tmp_path)
         now = rig.h.clock.value
         enrollment.h.clock.value = now
         enrollment.scope["expires_at"] = now + 600
         enrollment.delegation["grant_expires_at"] = now + 300
-        enrollment.document["policy"]["manifest"]["revision"] += 1
+        _advance_revision(enrollment.document["policy"])
         rig.h.document = enrollment.document
         projection_root = tmp_path / "projection"
         projection_root.mkdir(mode=0o700)
@@ -58,7 +84,7 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
         try:
             await rig.start(enrollment_journal=enrollment.ledger)
             enrollment.scope["destination"] = rig.origin
-            enrollment.document["policy"]["manifest"]["revision"] += 1
+            _advance_revision(enrollment.document["policy"])
             rig.save()
             await rig.state.reload()
             with os.fdopen(private_state.create_private_file(source), "wb") as stream:
@@ -68,7 +94,7 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
                     "audience": "example-gateway", "delegation": enrollment.delegation,
                     "grant": GRANT, "gateway_ca": rig.ca,
                 }))
-            arguments = dict(
+            arguments: _CallerArgs = dict(
                 source=source, harness="harness-a", state_root=state, machine="machine-a",
                 gateway_origin=rig.origin, principal="new-caller", audience="example-gateway",
                 resource="service-a",
@@ -81,18 +107,22 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
             }
             retained = state / "machine.json"
             before = retained.read_bytes(), retained.stat().st_mtime_ns, source.read_bytes()
-            for name, value in {
-                "harness": "other-harness", "machine": "other-machine",
-                "gateway_origin": "https://other.example", "principal": "other-caller",
-                "audience": "other-audience", "resource": "service-b",
-            }.items():
+            mismatches: tuple[_CallerArgs, ...] = (
+                {**arguments, "harness": "other-harness"},
+                {**arguments, "machine": "other-machine"},
+                {**arguments, "gateway_origin": "https://other.example"},
+                {**arguments, "principal": "other-caller"},
+                {**arguments, "audience": "other-audience"},
+                {**arguments, "resource": "service-b"},
+            )
+            for mismatch in mismatches:
                 with monkeypatch.context() as patch:
                     patch.setattr(
                         continuity_bootstrap, "_state",
                         lambda *_args, **_kwargs: pytest.fail("mismatched scope read private identity"),
                     )
                     with pytest.raises(TransportError):
-                        continuity_bootstrap.machine_caller(**(arguments | {name: value}))
+                        continuity_bootstrap.machine_caller(**mismatch)
             for _ in range(2):
                 caller = continuity_bootstrap.machine_caller(**arguments)
                 response = await caller.request(
@@ -134,7 +164,7 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
             )
             assert response.status == 200
             enrollment.document["delegations"] = []
-            enrollment.document["policy"]["manifest"]["revision"] += 1
+            _advance_revision(enrollment.document["policy"])
             rig.save()
             await rig.state.reload()
             response = await caller.request(
@@ -155,7 +185,9 @@ def test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reen
     asyncio.run(scenario())
 
 
-def test_provider_caller_does_not_recreate_a_concurrently_removed_identity(tmp_path, monkeypatch):
+def test_provider_caller_does_not_recreate_a_concurrently_removed_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import time
 
     enrollment = EnrollmentHarness(tmp_path)
@@ -175,10 +207,10 @@ def test_provider_caller_does_not_recreate_a_concurrently_removed_identity(tmp_p
     state, retained = tmp_path / "machine-state", tmp_path / "retained-owner-state"
     _state(state, projection, apply=True)
     before = (state / "machine.json").read_bytes()
-    exists = Path.exists
+    exists: Callable[..., bool] = Path.exists
     moved = False
 
-    def remove_after_check(path, **kwargs):
+    def remove_after_check(path: Path, **kwargs: bool) -> bool:
         nonlocal moved
         present = exists(path, **kwargs)
         if path == state and present and not moved:
@@ -187,17 +219,19 @@ def test_provider_caller_does_not_recreate_a_concurrently_removed_identity(tmp_p
         return present
 
     monkeypatch.setattr(Path, "exists", remove_after_check)
+    destination = enrollment.scope["destination"]
+    assert isinstance(destination, str)
     with pytest.raises((TransportError, OSError)):
         continuity_bootstrap.machine_caller(
             source, harness="harness-a", state_root=state, machine="machine-a",
-            gateway_origin=enrollment.scope["destination"], principal="new-caller",
+            gateway_origin=destination, principal="new-caller",
             audience="example-gateway", resource="service-a",
         )
     assert moved and not state.exists()
     assert (retained / "machine.json").read_bytes() == before
 
 
-@pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])
+@pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine", "migration"])
 def test_real_cli_first_touch_check_restart_and_same_private_key(
     tmp_path: Path, consumer: str,
     sdk_runtime: tuple[Path, list[str]] | None = None,
@@ -208,16 +242,22 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
         enrollment.h.clock.value = rig.h.clock.value
         enrollment.scope["expires_at"] = rig.h.clock.value + 600
         enrollment.delegation["grant_expires_at"] = rig.h.clock.value + 300
-        enrollment.document["policy"]["manifest"]["revision"] += 1
+        _advance_revision(enrollment.document["policy"])
         rig.h.document = enrollment.document
         projection_directory = tmp_path / "projection"
         projection_directory.mkdir(mode=0o700)
         source = projection_directory / "selected.json"
         state = tmp_path / "machine-state"
+        fixture_home = tmp_path / "home"
+        repository_url = "https://example.invalid/org/sample"
+        if consumer == "migration":
+            fixture_home.mkdir(mode=0o700)
+            identity = json.dumps([repository_url, "harness-a"], separators=(",", ":")).encode()
+            state = fixture_home / (".fleet-continuity-" + hashlib.sha256(identity).hexdigest())
         try:
             await rig.start(enrollment_journal=enrollment.ledger)
             enrollment.scope["destination"] = rig.origin
-            enrollment.document["policy"]["manifest"]["revision"] += 1
+            _advance_revision(enrollment.document["policy"])
             rig.save()
             await rig.state.reload()
             projection = {
@@ -232,21 +272,34 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
             ) == {"status": "needed", "stage": "enrollment"}
             assert not state.exists()
 
-            async def process(*arguments: str) -> tuple[int, bytes, bytes]:
+            async def process(*arguments: str, migrated: bool = False) -> tuple[int, bytes, bytes]:
                 package = Path(__file__).parents[1] / "src"
                 environment = dict(os.environ)
+                if consumer == "migration":
+                    environment.update(HOME=str(fixture_home), USERPROFILE=str(fixture_home))
                 environment["PYTHONPATH"] = str(package) + os.pathsep + environment.get("PYTHONPATH", "")
                 command = (
                     sdk_runtime[1] if sdk_runtime else
                     [sys.executable, "-m", "fleet_manager"])
                 child = await asyncio.create_subprocess_exec(
-                    *command, "bootstrap",
+                    *command, "continuity-reconnect" if migrated else "bootstrap",
                     "--source", str(source), "--harness", "harness-a",
-                    "--state-root", str(state), *arguments,
+                    *(["--repository", repository_url] if migrated else ["--state-root", str(state)]),
+                    *arguments,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     env=environment, **no_window_kwargs())
                 stdout, stderr = await asyncio.wait_for(child.communicate(), 20)
+                assert child.returncode is not None
                 return child.returncode, stdout, stderr
+
+            if consumer == "migration":
+                rc, body, diagnostic = await process(migrated=True)
+                assert rc != 0 and not body
+                assert b"existing enrollment did not reconnect" in diagnostic
+                assert not state.exists()
+                with sqlite3.connect(enrollment.ledger.path) as connection:
+                    for table in ("machine_enrollments", "operations"):
+                        assert connection.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
 
             if consumer == "manager-engine":
                 repository = Path(__file__).parents[2]
@@ -364,7 +417,7 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
             else:
                 status, stdout, stderr = await process("--apply")
             assert status == 0, (stdout, stderr)
-            if consumer == "fleet-cli":
+            if consumer != "manager-engine":
                 assert json.loads(stdout) == {"status": "ready", "stage": "connected"}
             else:
                 assert b"authenticated outbound Gateway access" in stdout
@@ -372,17 +425,42 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                 assert len(states) == 1
                 state = states[0]
             retained = (state / "machine.json").read_bytes()
+            if consumer == "migration":
+                def evidence() -> tuple[bytes, int, tuple[Path, ...], tuple[list[tuple[object, ...]], ...]]:
+                    with sqlite3.connect(enrollment.ledger.path) as connection:
+                        rows = tuple(connection.execute(f"SELECT * FROM {table}").fetchall()
+                                     for table in ("machine_enrollments", "operations"))
+                    return (hashlib.sha256((state / "machine.json").read_bytes()).digest(),
+                            (state / "machine.json").stat().st_mtime_ns, tuple(state.iterdir()), rows)
+
+                original = evidence()
+                assert all(len(table) == 1 for table in original[-1])
+                for migrated in (True, False):
+                    rc, body, _ = await process(migrated=migrated)
+                    assert rc == 0 and json.loads(body) == {"status": "ready", "stage": "connected"}
+                    assert evidence() == original
+                assert rig.serving is not None
+                await rig.serving.close()
+                rig.serving = None
+                for migrated in (True, False):
+                    rc, body, _ = await process(migrated=migrated)
+                    assert rc != 0 and not body
+                    assert evidence() == original
+                return
             assert GRANT.encode() not in retained
             if os.name != "nt":
                 assert (state / "machine.json").stat().st_mode & 0o077 == 0
             if sdk_runtime:
                 old_nonce = rig.state.authority.challenge()
+                assert rig.serving is not None
                 await rig.serving.close()
-                enrollment.ledger = OperationLedger(
+                enrollment.ledger = cast(OperationLedgerFactory, OperationLedger)(
                     enrollment.ledger.path, authority="authority-a",
                     installation="installation-a", enable_enrollment=True)
+                bound_port = urlsplit(rig.origin).port
+                assert bound_port is not None
                 rig.serving = await start(
-                    replace(rig.listener, port=urlsplit(rig.origin).port, origin=rig.origin),
+                    replace(rig.listener, port=bound_port, origin=rig.origin),
                     rig.policy, reload_interval=0.05, clock=rig.h.clock,
                     enrollment_journal=enrollment.ledger)
                 rig.state = rig.serving.app[STATE]
@@ -394,8 +472,10 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
             with sqlite3.connect(enrollment.ledger.path) as connection:
                 assert connection.execute("SELECT count(*) FROM machine_enrollments").fetchone() == (1,)
                 assert connection.execute("SELECT count(*) FROM operations").fetchone() == (1,)
-            projection["delegation"] = copy.deepcopy(projection["delegation"])
-            projection["delegation"]["scope"]["container"] = "changed-container"
+            changed_delegation = copy.deepcopy(projection["delegation"])
+            assert isinstance(changed_delegation, dict)
+            changed_delegation["scope"]["container"] = "changed-container"
+            projection["delegation"] = changed_delegation
             source.write_bytes(planning.canonical(projection))
             assert (await process("--apply"))[0] != 0
             assert (state / "machine.json").read_bytes() == retained
@@ -429,15 +509,14 @@ def test_replacement_after_path_validation_cannot_bypass_opened_file_custody(
     {"principal": "invalid principal"}, {"account": ""},
 ])
 def test_invalid_first_touch_intent_leaves_no_immutable_state(
-    tmp_path: Path, change: dict,
+    tmp_path: Path, change: dict[str, str | int],
 ) -> None:
     enrollment = EnrollmentHarness(tmp_path)
     scope = copy.deepcopy(enrollment.scope)
     scope.update(change)
     projection = {
         "provider": "local-projection-v1", "authority": "authority-a", "audience": "example-gateway",
-        "delegation": dict(enrollment.delegation, scope=scope)}
-    projection["delegation"]["grant_expires_at"] = 2**52
+        "delegation": dict(enrollment.delegation, scope=scope, grant_expires_at=2**52)}
     root = tmp_path / "invalid-machine"
     with pytest.raises(planning.PlanError):
         _state(root, projection, apply=True)

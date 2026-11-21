@@ -242,10 +242,11 @@ export class PendingInputNotice {
     return {
       additionalContext: this.incomplete
         ? "Agent-bridge's bounded pending-input observation is incomplete. " +
-          (this.pending.size ? "Known messages remain pending; END YOUR TURN for queued steering. " : "") +
+          (this.pending.size ? "Known messages remain pending; idle submission is not guaranteed. " : "") +
           "Original inbox receipts remain authoritative; do not acknowledge or replay uncertain input."
         : `Agent-bridge has ${this.pending.size} pending message(s) awaiting SDK submission. ` +
-          "END YOUR TURN now so queued steering can be submitted. Do not send an acknowledgement or replay input.",
+          "Idle submission is not guaranteed; do not end your turn solely for this notice. " +
+          "Do not send an acknowledgement or replay input.",
     };
   }
 }
@@ -266,10 +267,14 @@ export class MainTurn {
   }
 
   observe(event) {
-    if (isSubAgentEvent(event)) return;
+    if (isSubAgentEvent(event)) return false;
     const type = event?.type;
     if (MAIN_TURN_START.has(type)) this.running = true;
-    else if (MAIN_TURN_END.has(type)) this.running = false;
+    else if (MAIN_TURN_END.has(type)) {
+      this.running = false;
+      return true;
+    }
+    return false;
   }
 }
 
@@ -284,7 +289,7 @@ export class MainTurn {
 export function deliveryPlan(msg, { mainTurnRunning = true } = {}) {
   const options = buildDeliveredSendOptions(msg);
   if (msg?.delivery == null || msg.delivery === "steer") {
-    return { abortFirst: false, options: { ...options, mode: "immediate" } };
+    return { abortFirst: false, options: { ...options, mode: mainTurnRunning ? "immediate" : "enqueue" } };
   }
   if (msg?.delivery === "interrupt") {
     // Immediate (after the abort, when there is one), so it is not queued
@@ -573,7 +578,9 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
       }
       if (!await currentNative(msg) || !stillCurrent(msg)) continue;
       if (!consumption.has(msg.id)) {
-        await session.send(plan.options);
+        await session.send(deliveryPlan(msg, {
+          mainTurnRunning: mainTurn ? mainTurn.running : true,
+        }).options);
         onSubmitted(sid, msg.id);
         if (!consumption.has(msg.id)) inFlight.sent(msg);
       }

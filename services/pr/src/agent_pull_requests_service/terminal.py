@@ -61,6 +61,44 @@ def retained_cache_supported() -> bool:
         return False
 
 
+def active_review_core() -> None:
+    """Require the executing readers, not a package version or body-read profile."""
+    try:
+        from inspect import signature
+        from agent_pull_requests.retained_review_adoption import contract
+        from agent_pull_requests.review_recovery import recovery_contract
+        from agent_pull_requests.workspace_retained_review import contract as inspection_contract
+        from agent_pull_requests.watch_service import WatchService
+        from agent_pull_requests.watch_gateway import WatchGateway
+        from fleet_manager.gateway_service_handler import (
+            BoundedServiceResponse, HandlerBinding, ServiceRequest,
+        )
+        response_bytes = 1024 * 1024
+        signature(WatchService).bind_partial(response_limit=response_bytes)
+        signature(WatchGateway.handler_binding).bind(None, response_limit=response_bytes)
+        signature(HandlerBinding).bind("fleet", "gateway", None, response_limit=response_bytes)
+        signature(ServiceRequest).bind(None, "POST", "/", (), b"", response_limit=response_bytes)
+        if not callable(BoundedServiceResponse):
+            raise ValueError("bounded inspection response unavailable")
+        if contract() != {
+            "protocol": "agent-pull-requests.retained-active-review-adoption/v1",
+            "storage_extension": "retained_active_review_version:1",
+            "operations": "original_active_v1", "admission": "permanently_recovery_only",
+            "effects": "none",
+        } or recovery_contract() != {
+            "protocol": "agent-pull-requests.retained-active-review-recovery/v1",
+            "intent_versions": [1], "operations": ["inspect", "reconcile"], "effects": "none",
+        } or inspection_contract() != {
+            "protocol": "agent-pull-requests.retained-active-review-inspection/v1",
+            "operations": ["inspect"], "representation": "original_active_v1",
+            "storage_extension": "retained_active_review_version:1",
+            "effects": "none", "reconciliation": False, "max_response_bytes": 1024 * 1024,
+        }:
+            raise ValueError("unsupported original active review declaration")
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
+        raise ValueError("selected retained active review core unsupported") from None
+
+
 def adopt(
     store: ReplayStore, checkpoint: Callable[[], None], expires_at: int, *,
     retained_cache: Any = None, retained_targets: list[dict[str, Any]] | None = None,

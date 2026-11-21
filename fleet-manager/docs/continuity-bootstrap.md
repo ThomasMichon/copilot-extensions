@@ -248,6 +248,17 @@ selected-role setup.
 
 ## Normal selected SSH setup
 
+Before migrating an existing repository enrollment, query the selected Fleet
+executable's `capabilities`. `repository-continuity-reconnect-v1` advertises
+both `continuity-state-path` and `continuity-reconnect`. Both take the original
+`--repository` and `--harness`; reconnect also takes the original `--source`.
+The former only prints the path. The latter must authenticate the existing
+identity to report success; it cannot enroll or repair. An older executable,
+missing capability or failed reconnect is not permission to try enrollment,
+change the source or switch routes. Deploy the provider before changing a
+caller. The original state directory and legacy explicit-root call remain
+usable on reversal; this contract does not retire Worktrees setup.
+
 The additive `continuity-ssh-setup-v1` capability supplies the fixed
 `fleet-manager ssh-setup --request <private-file> --source <private-source>
 --harness <context> --state-root <original-state>` adapter. Without `--apply`
