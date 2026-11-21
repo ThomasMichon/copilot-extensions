@@ -25,6 +25,18 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 selected current publication-safety contributions
+
+The [two finite publication-safety proposals](roadmap-selected-publication-safety.md)
+reuse #2861's exact qualified hoister/test identities and #5904's unchanged
+three copies plus its qualified annotation-only canonical delta. Complete
+current contract metadata and current relevant vision support the retained
+P1 source predicates, original custodians and finite source/release/consumer
+exits. Actual whole-effort-home acceptance is not newly established.
+The [journal](journal/2026/11.21-current-publication-safety.md) records actual
+#13916 delivery and the complete 898-open census. Changed unread claim/
+finalize source is a separate next delta, not a refreshed #5842 defect claim.
+
 ## 2026-11-21 selected current framing contribution
 
 The [bounded framing proposal](roadmap-selected-framing-contribution.md)
