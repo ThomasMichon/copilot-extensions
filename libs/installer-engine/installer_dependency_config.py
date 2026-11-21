@@ -193,7 +193,8 @@ def require_system_config_provider(
     if not _WINDOWS:
         uv = _arguments.uv_launch_path(uv, environment, cwd, error_type=error_type)
     elif not Path(uv).is_absolute():
-        uv = select_uv_executable(os.path.abspath(uv), error_type=error_type)
+        uv = _arguments.uv_launch_path(uv, environment, None, error_type=error_type)
+        uv = select_uv_executable(uv, error_type=error_type)
     try:
         result = subprocess.run(
             [uv, "--version"], env=dict(environment), cwd=cwd, capture_output=True, text=True,

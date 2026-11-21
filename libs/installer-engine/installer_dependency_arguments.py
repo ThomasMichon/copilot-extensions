@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import json
 import re
-import shutil
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,17 +18,15 @@ _Pairs = Callable[[list[str]], Iterable[tuple[str, str]]]
 def uv_launch_path(
     uv: str, environment: Mapping[str, str], cwd: Path | None, *, error_type: _Error,
 ) -> str:
-    """Resolve POSIX exec search against the child's directory and captured PATH."""
+    """Resolve captured PATH entries against the actual OS launch directory."""
     base = Path.cwd() if cwd is None else cwd.absolute()
     if os.path.dirname(uv):
         return os.path.abspath(base / uv)
-    search = os.pathsep.join(
-        os.path.abspath(base / entry) for entry in os.get_exec_path(dict(environment))
-    )
-    selected = shutil.which(uv, path=search)
-    if selected is None:
-        raise error_type("Cannot qualify UV_NO_SYSTEM_CONFIG support: selected UV is unavailable")
-    return selected
+    for entry in os.get_exec_path(dict(environment)):
+        selected = os.path.abspath(base / entry / uv)
+        if os.path.isfile(selected) and os.access(selected, os.X_OK):
+            return selected
+    raise error_type("Cannot qualify UV_NO_SYSTEM_CONFIG support: selected UV is unavailable")
 
 
 def merge_config(high: Mapping[str, object], low: Mapping[str, object]) -> dict[str, object]:

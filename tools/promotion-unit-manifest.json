@@ -8569,7 +8569,15 @@
         "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.11.15]",
         "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.11.16]",
         "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.12.5]",
-        "test_reader_reports_safe_provider_requirement"
+        "test_reader_reports_safe_provider_requirement",
+        "test_system_flag_pins_windows_wrapper_from_captured_path"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_materialization_exclusions.py",
+      [
+        "test_generated_lockfiles_do_not_break_copy_equality[direct]",
+        "test_generated_lockfiles_do_not_break_copy_equality[nested]"
       ]
     ]
   ],
@@ -8623,7 +8631,7 @@
     "tools/promotion_unit_tests/test_vendored_libs_sync_guard_units.py": "bb844e943832859c4197fc38f8741ba67cb52742603b9d5e64168a1d1e0d6830",
     "tools/test_check_vendored_libs_sync.py": "58295d4650339313023977976c104c462f5f2df67d3afa40d951818b7eea67f9",
     "tools/check-vendored-libs-sync.py": "7c9d645446489d1b0785d349c4b4b3bf26ddbacfe7bbc9736a1fa231e7b708d2",
-    "tools/uv_editable_ref.py": "5742a4cfba48e84434a3a104cd1166974d8a17bba0f4293c5b992fc94d9be3d6",
+    "tools/uv_editable_ref.py": "05d0027cd855bd4b0c0d7690f4dd868f762751fe3c5cfec0ef2995dcf59ca08a",
     "tools/vendored_lib_inventory.py": "3a63eb67c0747f1375822e59837e6740b481cb6ae2ba8d49720356cef23a2f98",
     "tools/standalone_consumers.py": "bf56b7080cc6fe206fecbbf5cec79da572bb658d2a9a8575920c7509e55cc3ee",
     "tools/promotion_unit_tests/test_effort_vision_structure_guard_units.py": "ff279774e9786f755109644ab43956bafcf3b0ca7ca2b81834f64430db5d0edd",
@@ -8927,8 +8935,8 @@
     "libs/installation-context/_installation_context_source.py": "f377eb2bc2432742ba0b568ed0a45eddb22f371d6e3c45b661fc84e015705ad7",
     "libs/installation-context/_installation_context_worker.py": "9fa6e8b3babca28cea7502738db931afd9e15c96e6b6dc4842c4e1db8b91de05",
     "libs/installation-context/installation_context.py": "17b12e0dc590ead8b434db38a9d92c8f1fdde970346ccc58befd97a3696ba4fc",
-    "libs/installer-engine/installer_dependency_config.py": "a5f8ab7c759b92e8aeff1c1cecb912d1dce92b6632928566a2517277bac357f3",
-    "libs/installer-engine/installer_dependency_arguments.py": "cce7b90a1d09ba36ccebd7a60d64bd49c1ec898448374b2770bc69cdbab29e4c",
+    "libs/installer-engine/installer_dependency_config.py": "cd6f73a3c1ec7896399c4f4bc65ea44de99032736eb761a7baf2b77fe87a45f0",
+    "libs/installer-engine/installer_dependency_arguments.py": "d97c7143f771c6e521b8f64caeb27c3c6df565402abf7543713e14f625690ab9",
     "libs/installer-engine/installer_dependency_policy.py": "58bb3e9fb49cfba51fc8d7fad5f3ab6b70b2776be906a13726a8cfb492063184",
     "libs/installer-engine/installer_engine.py": "20b1e3e3c965874f2bda1554a742929e04e1ed7b2ac441b92b13c6f4d7246994",
     "libs/installer-engine/installer_provider_roots.py": "874d8c440eb6200378641a8b6d86f12e7187fad9d62bdd1a2df1daa2067539ab",
@@ -9115,14 +9123,14 @@
     "tools/launch_wrapper_assets_ref.py": "881412e885a63e41680f923fb9af33e8f188994b729434009a4e1861ed0d27be",
     "tools/materialize_installer_engine.py": "f2ee8f71e2129cd6f7644ffdfee35f8b235c90af2bce0ff9ee9849b32fe3b0fb",
     "tools/materialize_launch_wrapper_assets.py": "e7c1dcbb9ddf7095bfba8d11dc84ecac08b3e4883c5fd7967fbdb961e83559fc",
-    "tools/materialize_main.py": "9cc29330ef002cca28b4f5d3e052aeeb135a14712ec3ca5a2a0c18fae22905b0",
+    "tools/materialize_main.py": "182f1784457390a9ba7c8ce858e53cd4ffee06edb7ea30e8d8e560840a15140c",
     "tools/materialize_source_applications.py": "ba28bb5a3b1b017d755e729ad2c4ac083ad756f96f6b4d3c7f2170f34e578159",
     "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
     "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
     "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
     "tools/native_qualification_receiver.py": "9dfee379762b4bcfcc3577c087bf5167000c9672e7609f194e3a3e88aa54287c",
     "tools/native_test_paths.py": "655925954c152703ac8a5cc2d959cd22e798dc9a0f0f92325b4b755384105fb0",
-    "tools/nested_uv_editable_ref.py": "d9956d87d2a9082f91d795d5dd2b5660b34e4314f220db9e5af91aa55eacc7ed",
+    "tools/nested_uv_editable_ref.py": "2af5aee70b99acf0563c139755c7b71eb52e566e6ca4e27fda413a11bd777c3c",
     "tools/plugin_runtime_resources.py": "856235e5f0025eaffdbcee06531f773c80a6b093041e12833d8c86dd607b5f7a",
     "tools/plugin_test_containment.py": "b08aa6decc573156b8360b55375abc788399f42b8dd35e9e1e1275f82cba0950",
     "tools/plugin_test_containment_darwin.py": "451267248707ebf9479b7c8ebd31226dcb2c053fb820bd65b913179db188d5ba",
@@ -9650,7 +9658,8 @@
     "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d",
     "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47",
     "libs/installer-engine/installer_pip_index.py": "0dfe9c970c8a86e1eb7c46a555d2a0ca2fb6269890d03d1f7490b2bcb558d83b",
-    "tools/promotion_unit_tests/test_installer_pip_index.py": "66efdf2f83681702c7d95caec1194e118dd5da42b883e488a6e29a64bf154c59"
+    "tools/promotion_unit_tests/test_installer_pip_index.py": "9329a1eb463fafad3e69a1d56fb434be8451f0ffdd14697380f6a000b3be75c2",
+    "tools/promotion_unit_tests/test_materialization_exclusions.py": "cdd5ea44d568b7dc40be03097f0f663b291e8847b9b46e4f9733d26334475224"
   },
   "coverage_targets": [
     "tools/sync-installer-engine.py",

@@ -330,6 +330,36 @@ def test_reader_reports_safe_provider_requirement(
     assert output.err == "UV_NO_SYSTEM_CONFIG requires UV 0.11.16 or newer\n"
 
 
+def test_system_flag_pins_windows_wrapper_from_captured_path(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent, providers, child = (tmp_path / name for name in ("parent", "providers", "child"))
+    for directory in (parent, providers, child):
+        directory.mkdir()
+    wrapper = providers / "uv.cmd"
+    wrapper.write_text("@echo off\necho uv 0.11.16\n", encoding="utf-8")
+    wrapper.chmod(0o700)
+    (parent / "uv.cmd").write_text("wrong provider", encoding="utf-8")
+    monkeypatch.chdir(parent)
+    monkeypatch.setenv("PATHEXT", ".UNRELATED")
+    configuration = reader._dependency_policy()._configuration
+    monkeypatch.setattr(configuration, "_WINDOWS", True)
+    probes: list[list[str]] = []
+
+    def run(command: list[str], **_options: object) -> SimpleNamespace:
+        probes.append(command)
+        assert command == [str(wrapper), "--version"]
+        return SimpleNamespace(returncode=0, stdout="uv 0.11.16\n")
+
+    monkeypatch.setattr(configuration.subprocess, "run", run)
+    selected = configuration.require_system_config_provider(
+        "uv.cmd", {"UV_NO_SYSTEM_CONFIG": "1", "PATH": str(providers)},
+        cwd=child, error_type=ValueError,
+    )
+    assert selected == str(wrapper)
+    assert probes == [[str(wrapper), "--version"]]
+
+
 def test_system_uv_flag_rejects_invalid_values(reader: ModuleType, tmp_path: Path) -> None:
     policy = reader._dependency_policy()
     with pytest.raises(RuntimeError, match="UV_NO_SYSTEM_CONFIG"):
