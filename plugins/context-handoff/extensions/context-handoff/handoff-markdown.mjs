@@ -1,4 +1,5 @@
 import { AUTHORIZATION_EVIDENCE_DIRECTIVE } from "./cutover-seed.mjs";
+import { formatIntentOutline } from "./intent-outline.mjs";
 
 export const MAX_AUTHORIZATION_EVIDENCE_BYTES = 8192;
 
@@ -47,8 +48,7 @@ export function formatHandoffMarkdown(handoffData, scope) {
   if (scope) lines.push("## Continuation Scope", `> ${scope}`, "");
   if (handoffData.intentContinuity) {
     lines.push("## Canonical Goal and Intent Corpus",
-      JSON.stringify(handoffData.intentContinuity, null, 2),
-      "Re-read the current canonical Goal and all corpus pages; this snapshot is evidence, not authority.", "");
+      formatIntentOutline(handoffData.intentContinuity), "");
   }
   if (handoffData.firstUserPrompt) {
     lines.push("## Original Request", handoffData.firstUserPrompt, "");

@@ -6,6 +6,7 @@ import copy
 import logging
 import secrets
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -13,14 +14,18 @@ from . import activity, claim_history, claim_providers
 from . import resource_producer as producer, resource_relationship as relationship
 from . import tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError
-from .tracking_producer_write import _owned_record, _require_mutable_owner
+from .tracking_claims import ClaimRef, ResourceClaim, claim_handoff_reservation, format_claim_ref
+from .tracking_producer_write import _owned_record, _ProducerClaim, _require_mutable_owner
+
+Json = dict[str, Any]
 
 
-def _input(operation: str, payload: object) -> dict:
+def _input(operation: str, payload: object) -> Json:
     keys = {
         "reserve": ({"kind", "namespace", "request_id", "recovery"},),
         "inspect": ({"token"}, {"request_id"}, {"request_id", "allow_missing"}),
         "bind": ({"token", "identity"},),
+        "compare-and-bind": ({"token", "request_id", "identity"},),
         "close": ({"token"},),
     }
     if not isinstance(operation, str) or operation not in keys:
@@ -39,7 +44,14 @@ def _input(operation: str, payload: object) -> dict:
         or "expected_creation_nonce" not in payload
     ):
         raise ValueError("relationship expected_writer_identity requires an installed build and expected_creation_nonce")
-    if "expected_head" in payload:
+    if operation == "compare-and-bind":
+        if (
+            set(payload) != {"token", "request_id", "identity", "expected_head",
+                             "expected_creation_nonce", "expected_writer_identity"}
+            or not relationship.valid_head_pin(payload["expected_head"])
+        ):
+            raise ValueError("compare-and-bind requires exact head, nonce, writer and claim pins")
+    elif "expected_head" in payload:
         head = payload["expected_head"]
         if (
             operation != "inspect" or "expected_creation_nonce" not in payload
@@ -85,12 +97,12 @@ def _input(operation: str, payload: object) -> dict:
                 raise ValueError(f"reserve: invalid relationship {key}")
         if not isinstance(payload["recovery"], dict):
             raise ValueError("reserve: recovery must be a JSON object")
-    if operation == "bind" and not isinstance(payload["identity"], dict):
+    if operation in ("bind", "compare-and-bind") and not isinstance(payload["identity"], dict):
         raise ValueError("bind: identity must be a JSON object")
     return payload
 
 
-def _owner(args, path, payload, *, mutable):
+def _owner(args: Json, path: Path, payload: Json, *, mutable: bool) -> tuple[tracking.WorktreeRecord, ClaimRef]:
     if "expected_writer_identity" in payload and (
         relationship.writer_identity() != payload["expected_writer_identity"]
     ):
@@ -103,7 +115,7 @@ def _owner(args, path, payload, *, mutable):
     return record, owner
 
 
-def _incarnation(record, payload):
+def _incarnation(record: tracking.WorktreeRecord, payload: Json) -> Json:
     if "expected_creation_nonce" not in payload:
         return {}
     return {
@@ -113,7 +125,7 @@ def _incarnation(record, payload):
     }
 
 
-def _matches(record, payload):
+def _matches(record: tracking.WorktreeRecord, payload: Json) -> _ProducerClaim | None:
     field = "token" if "token" in payload else "request_id"
     matches = [
         claim for claim in record.resources
@@ -130,34 +142,37 @@ def _matches(record, payload):
         return None
     if len(matches) != 1:
         raise ValueError("relationship handle is missing or ambiguous in this owner's ledger")
-    claim = matches[0]
+    claim = cast(_ProducerClaim, matches[0])
     if not relationship.valid_metadata(claim.producer) or relationship.claim_ref(claim.producer) != claim.ref:
         raise ValueError("relationship metadata/ref is malformed; obligation retained")
     return claim
 
 
-def _checked_head(record, claim, payload):
+def _checked_head(record: tracking.WorktreeRecord, claim: _ProducerClaim, payload: Json) -> Json:
     if "expected_head" not in payload:
         return {}
     _require_mutable_owner(record)
     if (
         claim.producer["phase"] != "bound" or claim.state not in {"", "active"}
-        or tracking.claim_handoff_reservation(record, claim)
+        or claim_handoff_reservation(record, claim)
     ):
         raise ValueError("head inspection requires an active bound relationship without a handoff")
+    return _active_head(record, payload["expected_head"])
+
+
+def _active_head(record: tracking.WorktreeRecord, expected: Json) -> Json:
     head = record.resolved_head_session
     entry = record.session_entry(head) if head else None
     transition = record.replayed_head_transition
     if (
         transition is None or entry is None or entry.state != "active"
         or record.pending_handoffs
-        or head != payload["expected_head"]["session_id"]
-        or transition.revision != payload["expected_head"]["revision"]
+        or head != expected["session_id"] or transition.revision != expected["revision"]
     ):
         raise ValueError("relationship owner does not have the expected active head revision")
-    checked = {"session_id": head, "revision": transition.revision}
-    if "predecessor_session_id" in payload["expected_head"]:
-        predecessor_id = payload["expected_head"]["predecessor_session_id"]
+    checked: Json = {"session_id": head, "revision": transition.revision}
+    if "predecessor_session_id" in expected:
+        predecessor_id = expected["predecessor_session_id"]
         predecessor = record.session_entry(predecessor_id)
         if (
             predecessor is None or predecessor.state not in tracking._CONCLUDED_SESSION_STATES
@@ -168,13 +183,13 @@ def _checked_head(record, claim, payload):
     return {"head": checked}
 
 
-def _checked_conclusion(record, claim, payload):
+def _checked_conclusion(record: tracking.WorktreeRecord, claim: _ProducerClaim, payload: Json) -> Json:
     if "expected_conclusion" not in payload:
         return {}
     _require_mutable_owner(record)
     if (
         claim.producer["phase"] != "bound" or claim.state not in {"", "active"}
-        or tracking.claim_handoff_reservation(record, claim)
+        or claim_handoff_reservation(record, claim)
     ):
         raise ValueError("conclusion inspection requires an active bound relationship without a handoff")
     expected = payload["expected_conclusion"]
@@ -195,10 +210,10 @@ def _checked_conclusion(record, claim, payload):
     return {"conclusion": copy.deepcopy(expected)}
 
 
-def _response(record, claim, payload):
+def _response(record: tracking.WorktreeRecord, claim: _ProducerClaim, payload: Json) -> Json:
     return {
         "schema": relationship.SCHEMA, "version": relationship.VERSION, "ok": True,
-        "owner": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
+        "owner": format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
         **{key: claim.producer[key] for key in ("creator", "request_id", "token", "phase")},
         "ref": claim.ref, "producer": copy.deepcopy(claim.producer),
         **_incarnation(record, payload),
@@ -207,11 +222,11 @@ def _response(record, claim, payload):
     }
 
 
-def _reserve(record, owner, payload):
+def _reserve(record: tracking.WorktreeRecord, owner: ClaimRef, payload: Json) -> tuple[_ProducerClaim, bool]:
     from . import claims_cli, config as cfg
 
-    for claim in record.resources:
-        if claim.metadata_opaque or claim.has_producer and not producer.valid_metadata(claim.producer):
+    for existing_claim in record.resources:
+        if existing_claim.metadata_opaque or existing_claim.has_producer and not producer.valid_metadata(existing_claim.producer):
             raise ValueError("opaque or malformed claim storage prevents relationship reservation")
     existing = [
         claim for claim in record.resources
@@ -221,12 +236,14 @@ def _reserve(record, owner, payload):
     ]
     if existing:
         claim = _matches(record, {"request_id": payload["request_id"]})
+        assert claim is not None
         if (
             claim.kind != payload["kind"] or claim.producer["namespace"] != payload["namespace"]
             or producer.canonical_json(claim.producer["recovery"]) != producer.canonical_json(payload["recovery"])
         ):
             raise ValueError("relationship request_id conflicts with its original reservation")
         return claim, False
+    assert owner.project is not None
     readiness = claims_cli._coordination_readiness_for_owner_ref(
         owner.canonical(), cfg.load_project_config(owner.project),
     )
@@ -243,15 +260,15 @@ def _reserve(record, owner, payload):
         and claim.producer.get("token") == metadata["token"]
     ) for claim in record.resources):
         raise ValueError("relationship ref/token collision")
-    claim = tracking.ResourceClaim(
+    claim = cast(_ProducerClaim, ResourceClaim(
         kind=payload["kind"], ref=ref, created_at=tracking._now_iso(),
         producer=metadata, producer_present=True,
-    )
+    ))
     record.resources.append(claim)
     return claim, True
 
 
-def apply_resource_relationship(args: dict) -> dict:
+def apply_resource_relationship(args: Json) -> Json:
     """Execute one exact owner transaction, never a peer allocation/deletion."""
     try:
         fields = {"schema", "version", "operation", "input", "owner_ref", "yaml_path"}
@@ -270,10 +287,11 @@ def apply_resource_relationship(args: dict) -> dict:
             with tracking._RecordLock(path, require_sidecar=True):
                 record, _ = _owner(args, path, payload, mutable=False)
                 claim = _matches(record, payload)
+                assert claim is not None
                 if claim.producer["phase"] == "closed":
                     return _response(record, claim, payload)
                 _require_mutable_owner(record)
-                if tracking.claim_handoff_reservation(record, claim):
+                if claim_handoff_reservation(record, claim):
                     raise ValueError("relationship is reserved by a handoff")
                 probe_subject = claim.ref
             proof = claim_providers.resolve_claim_status(probe_subject)
@@ -294,17 +312,36 @@ def apply_resource_relationship(args: dict) -> dict:
                 if operation == "inspect" or operation == "close" and claim.producer["phase"] == "closed":
                     return _response(record, claim, payload)
                 _require_mutable_owner(record)
-                if tracking.claim_handoff_reservation(record, claim):
+                if claim_handoff_reservation(record, claim):
                     raise ValueError("relationship is reserved by a handoff")
-                if operation == "bind":
+                if operation in ("bind", "compare-and-bind"):
+                    marker = None
+                    if operation == "compare-and-bind":
+                        head = payload["expected_head"]
+                        marker = {"head": head, "creation_nonce": payload["expected_creation_nonce"],
+                                  "writer": payload["expected_writer_identity"]}
+                        if (
+                            _matches(record, {"request_id": payload["request_id"]}) is not claim
+                            or claim.state not in ("", "active")
+                        ):
+                            raise ValueError("compare-and-bind requires the expected active reservation")
+                        # The generic response must never echo an acceptance as a current head read.
+                        payload = {k: v for k, v in payload.items() if k != "expected_head"}
                     if claim.producer["phase"] == "bound":
                         if producer.canonical_json(claim.producer["identity"]) != producer.canonical_json(payload["identity"]):
                             raise ValueError("bound relationship identity is immutable")
+                        if marker is not None:
+                            if claim.producer.get("head_bind") != marker:
+                                raise ValueError("no matching prior head-qualified acceptance")
+                            return {**_response(record, claim, payload), "acceptance": "previously-bound"}
                         return _response(record, claim, payload)
                     if claim.producer["phase"] != "pending":
                         raise ValueError("retired relationship cannot be rebound")
+                    if marker is not None:
+                        _active_head(record, marker["head"])
                     claim.producer = {
                         **claim.producer, "phase": "bound", "identity": copy.deepcopy(payload["identity"]),
+                        **({"head_bind": copy.deepcopy(marker)} if marker is not None else {}),
                     }
                     claim.ref = relationship.claim_ref(claim.producer)
                     if any(other is not claim and other.ref == claim.ref for other in record.resources):
@@ -329,7 +366,10 @@ def apply_resource_relationship(args: dict) -> dict:
             kind=claim.kind, ref=claim.ref, worktree_id=record.worktree_id, machine=record.execution_machine,
             event="claimed" if operation == "reserve" else operation, project=record.repo,
         )
-        return _response(record, claim, payload)
+        response = _response(record, claim, payload)
+        if operation == "compare-and-bind":
+            response["acceptance"] = "bound-at-head"
+        return response
     except (ValueError, TypeError, KeyError, OSError, RuntimeError, ExecutionSpaceError, yaml.YAMLError, RecursionError) as exc:
         logging.getLogger(__name__).warning("Relationship transaction refused: %s", exc)
         return {
@@ -338,4 +378,4 @@ def apply_resource_relationship(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=6)
+tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=7)

@@ -10,6 +10,7 @@ import { IntentCorpus, classifyIntent } from "../extensions/context-handoff/inte
 import { registerIntentObservation } from "../extensions/context-handoff/intent-observation.mjs";
 import { readCanonicalGoal, resolveIntentCwd } from "../extensions/context-handoff/intent-goal.mjs";
 import { formatHandoffMarkdown } from "../extensions/context-handoff/handoff-markdown.mjs";
+import { formatIntentOutline, MAX_INTENT_OUTLINE_BYTES } from "../extensions/context-handoff/intent-outline.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "intent-continuity-"));
@@ -66,7 +67,9 @@ test("registered adapter persists before reset, pages exact text, and does not c
   assert.equal(c.sent.length, 1);
   assert.equal(c.sent[0].source, "system");
   assert.equal(c.sent[0].mode, "immediate");
-  assert.match(c.sent[0].prompt, /research each/u);
+  assert.match(c.sent[0].prompt, /Read only the sources the current next step needs/u);
+  assert.ok(Buffer.byteLength(c.sent[0].prompt, "utf8") < MAX_INTENT_OUTLINE_BYTES + 100);
+  assert.equal(c.sent[0].prompt.includes(long), false);
   const facts = await observation.facts();
   assert.equal(facts.corpus.count, 2);
   const fragments = [];
@@ -346,8 +349,15 @@ test("Goal lookup uses the bound effort home and refreshes source text, with exp
 
   };
   assert.equal(readCanonicalGoal(f.a, execute).goal, "Full mission.");
-  writeFileSync(effort, "# Work\n\n## Goal\n\nChanged objective.\n");
-  assert.equal(readCanonicalGoal(f.a, execute).goal, "Changed objective.");
+  writeFileSync(effort, "# Work\n\n## Goal\n\nChanged objective.\n\n" +
+    "## Scope Approvals\n\nDo not deploy.\n\n" +
+    "## Outstanding Background Flows & External State\n\nWatch the open PR.\n\n" +
+    "## Next Action\n\nRun the focused tests.\n");
+  const updated = readCanonicalGoal(f.a, execute);
+  assert.equal(updated.goal, "Changed objective.");
+  assert.deepEqual(updated.recovery, {
+    limits: "Do not deploy.", obligations: "Watch the open PR.", nextAction: "Run the focused tests.",
+  });
   writeFileSync(effort, "# Work\n\n## Guiding Intent\n\nLegacy mission.\n");
   assert.equal(readCanonicalGoal(f.a, execute).status, "legacy-guiding-intent");
   assert.equal(readCanonicalGoal(f.a, execute).goal, "Legacy mission.");
@@ -362,6 +372,70 @@ test("emergency handoff preserves the original prompt beyond 500 characters and 
   assert.ok(text.includes(original));
   assert.match(text, /Complete mission/u);
   assert.match(text, /snapshot/u);
+  assert.doesNotMatch(text, /all corpus pages/u);
+});
+
+test("recovery outline bounds worst-case UTF-8 fields without injecting source bodies", () => {
+  const huge = "😀\\\r\n".repeat(20000);
+  const outline = formatIntentOutline({
+    status: "cached-unqualified", pendingInputs: 4, sessionId: huge, checkpoint: huge,
+    goal: { goal: huge, path: huge, status: huge,
+      recovery: { limits: huge, obligations: huge, nextAction: huge } },
+    corpus: { id: huge, home: huge, count: 10000 },
+    page: { records: [{ origin: "operator", text: "PRIVATE SOURCE BODY" }] },
+  });
+  assert.ok(Buffer.byteLength(outline, "utf8") <= MAX_INTENT_OUTLINE_BYTES);
+  assert.ok(outline.startsWith("Goal (source excerpt): "));
+  assert.equal(outline.split("\n\n")[0].includes("\n"), false);
+  for (const label of ["Limits/holds:", "Live obligations:", "Next action:",
+    "- Effort:", "- Checkpoint:", "- Session:", "- Intent history:", "- Pinned snapshot:"]) {
+    assert.ok(outline.includes(label), label);
+  }
+  assert.ok(outline.includes("Capture: cached-unqualified"));
+  assert.ok(outline.includes("use explicit facts for the exact locator"));
+  assert.equal(outline.includes("PRIVATE SOURCE BODY"), false);
+  assert.doesNotMatch(outline, /read every|all corpus pages|before selecting substantive/iu);
+});
+
+test("recovery uses canonical goal and safety lines, leaving exact corpus history on demand", async (t) => {
+  const f = fixture(t), c = client(f.a);
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+    readGoal: () => ({ status: "goal", path: "effort.md", goal: "Complete the full delivery.",
+      recovery: { limits: "Hold deployment.", obligations: "Watch PR 42.", nextAction: "Run tests." } }),
+  });
+  t.after(() => observation.dispose());
+  const original = "OLD REQUEST BODY ".repeat(1000);
+  c.session.emit("user.message", message("one", original));
+  await observation.settle();
+  const prompt = c.sent.at(-1).prompt;
+  for (const text of ["Complete the full delivery.", "Hold deployment.", "Watch PR 42.", "Run tests.",
+    "effort.md", "Pinned snapshot", "Read only the sources"]) assert.ok(prompt.includes(text), text);
+  assert.equal(prompt.includes("OLD REQUEST BODY"), false);
+  const facts = await observation.facts();
+  const fragments = [];
+  let cursor = {};
+  do {
+    const page = observation.page(facts.corpus.id, cursor);
+    fragments.push(...page.records.map((record) => record.text));
+    cursor = page.next;
+  } while (cursor);
+  assert.equal(fragments.join(""), original);
+});
+
+test("source locators retain exact whitespace and multiline locators use explicit facts", () => {
+  const effort = " effort  notes.md ";
+  const history = "history\u00a0  directory";
+  const outline = formatIntentOutline({
+    goal: { path: effort },
+    checkpoint: "checkpoint\nnot-a-second-pointer",
+    corpus: { home: history, id: "snapshot", count: 1 },
+  });
+  assert.ok(outline.includes(`- Effort: ${effort} -- `));
+  assert.ok(outline.includes(`- Intent history: ${history} -- `));
+  assert.ok(outline.includes("- Checkpoint: (reference exceeds one-line budget; use explicit facts"));
+  assert.equal(outline.includes("not-a-second-pointer"), false);
+  assert.ok(Buffer.byteLength(outline, "utf8") <= MAX_INTENT_OUTLINE_BYTES);
 });
 
 test("the extension-free payload reader returns the exact pinned continuation page", (t) => {
@@ -432,7 +506,8 @@ test("stale bindings retain the original pointer and oversized legacy intent is 
   assert.equal(stale.path, join(f.b, "missing.md"));
   assert.equal(stale.bindingReason, "effort is missing");
   const path = join(f.b, "legacy.md");
-  writeFileSync(path, "# Work\n\n## Guiding Intent\n\n" + "\\\r\n😀".repeat(4000));
+  writeFileSync(path, "# Work\n\n## Guiding Intent\n\n" + "\\\r\n😀".repeat(4000) +
+    "\n\n## Scope Approvals\n\nHold deployment.\n");
   const active = (_bin, args) => args[0] === "effort-focus" ? JSON.stringify({
     active_effort: { active: true, state: "open", path: "legacy.md" },
   }) : JSON.stringify({ state_root: f.b, requires_external: false, bound: true });
@@ -440,6 +515,11 @@ test("stale bindings retain the original pointer and oversized legacy intent is 
   assert.equal(legacy.status, "legacy-guiding-intent-reference");
   assert.equal(legacy.goal, null);
   assert.equal(legacy.path, path);
+  assert.equal(legacy.recovery.limits, "Hold deployment.");
+  const outline = formatIntentOutline({ goal: legacy });
+  assert.ok(outline.startsWith("Goal (source excerpt):"));
+  assert.match(outline, /Hold deployment/u);
+  assert.ok(Buffer.byteLength(outline, "utf8") <= MAX_INTENT_OUTLINE_BYTES);
 });
 
 test("many short escaped steers respect the complete serialized page budget", (t) => {
