@@ -3,7 +3,7 @@
 - **Subject:** Discoverable worktree-scoped data and its lifetime beyond a checkout.
 - **Scope:** leaf; child of agent-worktrees
 - **Status:** Draft
-- **Last revised:** 2026-11-02
+- **Last revised:** 2026-11-20
 - **Reality docs:** [agent-worktrees](../../../../plugins/agent-worktrees/README.md),
   [efforts](../../../../plugins/efforts/README.md) and
   [agent-logger](../../../../plugins/agent-logger/README.md)
@@ -22,7 +22,9 @@ without becoming another live writer or acquiring agency authority.
 ## Concepts & Components
 
 - **Worktree data home** is a worktree-scoped namespace whose lifetime is
-  independent of the checkout and current execution session.
+  independent of the checkout and current execution session. Managed agendas
+  reside in the repository's external worktree data home, not its source
+  checkout footprint.
 - **Owner-published locator** resolves stable repository, worktree and domain
   identities to an admitted current location without a separate consumer map.
 - **Domain-owned state** includes an agenda and its accepted history, separate
@@ -60,6 +62,14 @@ Worktree data is collected once at its own identity and revision, with reference
 from contributing sessions. Later history and logging can retrieve it after
 checkout retirement without treating one arbitrarily selected session as its
 owner.
+
+### inspectable-placement-and-repair
+
+A report-first doctor identifies checkout-local legacy agendas, admitted
+external placements, busy writers, conflicts and interrupted moves. Explicit
+owner-mediated repair preserves complete accepted history and stable identity,
+switches the authoritative location once, and retires the old source only after
+verified preservation. Passive inspection never initializes or migrates data.
 
 ## Behaviors
 

@@ -3,7 +3,7 @@
 - **Subject:** safe, continuous reclamation of locally managed workspaces.
 - **Scope:** leaf; child of agent-worktrees.
 - **Status:** Active
-- **Last revised:** 2026-10-13
+- **Last revised:** 2026-11-20
 - **Reality docs:** agent-worktrees cleanup, GC and resident lifecycle surfaces.
 
 ## Purpose & Intent
@@ -28,6 +28,11 @@ An allocator remains accountable for its created resources and terminal
 settlement. Completing a task or ending a session is not independent permission
 to remove its worktree. Semantic conclusion of unfinished objectives remains
 separate from mechanical collection of already-proven disposable space.
+
+[Checkout dehydration](../checkout-hydration/README.md) is a distinct, reversible
+storage operation. It can release clean checkout content while preserving
+unfinished responsibility and the retained branch. It never uses terminal
+collection to infer completion or settle claims.
 
 ### Host-wide, authority-scoped coverage
 
@@ -68,6 +73,10 @@ measurable rather than inferred from the existence of a timer.
 ## Behaviors
 
 ### safety-is-revalidated-not-cached
+
+These are terminal collection guards, not the eligibility contract for
+reversible dehydration. Cataloged dehydrated worktrees retain their agency and
+branch protection; an absent checkout alone never makes them terminal candidates.
 
 Age, visibility, an empty diff or a cached cleanup verdict never establishes
 disposability alone. Live or unknown execution, unfinished objectives, dirty or
@@ -112,6 +121,7 @@ not shortened safety checks or indiscriminate parallel deletion.
 ## See Also
 
 - Parent: [agent-worktrees](../README.md).
+- [Checkout hydration](../checkout-hydration/README.md) - reversible storage without conclusion.
 - [Resident singleton](../status-monitor-singleton/README.md).
 - [Worktree stewardship](../../../agent-fabric/agentic-factory/worktree-stewardship/README.md).
 - [agent-dispatch](../../agent-dispatch/README.md) - allocator accountability.
