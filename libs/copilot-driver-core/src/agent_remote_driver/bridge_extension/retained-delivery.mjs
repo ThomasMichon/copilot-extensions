@@ -7,6 +7,8 @@ import { observePluginReadiness, readinessContextMatches } from "./plugin-readin
 const CONTRACT = "retained-inbox-v1";
 const PROTOCOL = 50;
 const RECHECK_MS = 30_000;
+const NATIVE_INPUT_LIMIT = 1_000;
+const NATIVE_HEADER_LIMIT = 4_096;
 const STAGES = new Set(["offered", "sending", "unknown", "sdk_accepted", "consumed", "rejected"]);
 const nonblank = (value) => typeof value === "string" && value.trim().length > 0;
 const positive = (value) => Number.isSafeInteger(value) && value > 0;
@@ -50,6 +52,12 @@ function retainedHeader(receipt) {
 
 const RUNTIME_DATETIME_PREFIX = /^<current_datetime>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})<\/current_datetime>\r?\n\r?\n/;
 
+function headerMessageId(header) {
+  const ids = [...header.matchAll(/(?:^| )msg-id="(\d+)"(?= |$)/g)];
+  const id = ids.length === 1 ? Number(ids[0][1]) : null;
+  return positive(id) ? id : null;
+}
+
 export function retainedConsumptionReason(event, receipt, sourceAllowed = (source) => source === "agent-bridge") {
   if (!receiptValid(receipt, receipt?.session_id)) return "invalid_receipt";
   if (receipt.handoff_started_at === null) return "handoff_not_started";
@@ -64,8 +72,7 @@ export function retainedConsumptionReason(event, receipt, sourceAllowed = (sourc
   const end = content.indexOf(">");
   if (end < 0) return "header_unterminated";
   const header = content.slice(0, end);
-  const ids = [...header.matchAll(/(?:^| )msg-id="(\d+)"(?= |$)/g)];
-  return ids.length === 1 && Number(ids[0][1]) === receipt.message_id
+  return headerMessageId(header) === receipt.message_id
     ? "matched" : "message_id_mismatch";
 }
 
@@ -104,6 +111,9 @@ export function createRetainedInbox({
   let retryAt = 0;
   let pendingReport = null;
   const pendingNative = { serial: null, history: null };
+  const nativeInputs = new Map();
+  let nativeInputOverflow = false;
+  const acceptsSource = sourceAllowed ?? ((source) => source === "agent-bridge");
   let lastLog = "";
   let lastLogAt = 0;
   const note = (message) => {
@@ -114,6 +124,11 @@ export function createRetainedInbox({
     }
   };
   const current = (sid) => !stopped && isCurrent(sid) && session?.sessionId === sid;
+  const forgetNativeInput = (sid, id) => {
+    for (const [key, input] of nativeInputs) {
+      if (input.sid === sid && input.id === id) nativeInputs.delete(key);
+    }
+  };
   const sendAllowed = (sid, allowSend) => allowSend && canSend() && current(sid);
   const base = (sid) => `/api/v1/live-sessions/${encodeURIComponent(sid)}/retained-inbox`;
   const original = (receipt, outcome) => ({
@@ -180,6 +195,7 @@ export function createRetainedInbox({
       throw new Error("original outcome reply is unavailable or inconsistent");
     }
     pendingReport = null;
+    if (result.stage === "consumed") forgetNativeInput(receipt.session_id, receipt.message_id);
     return result.stage;
   }
 
@@ -195,6 +211,7 @@ export function createRetainedInbox({
     if (retained.stage === outcome || retained.stage === "consumed"
         || (outcome === "unknown" && retained.stage === "sdk_accepted")) {
       pendingReport = null;
+      if (retained.stage === "consumed") forgetNativeInput(receipt.session_id, receipt.message_id);
       return;
     }
     await report(receipt, outcome);
@@ -220,7 +237,44 @@ export function createRetainedInbox({
       throw new Error("malformed original handoff recovery response");
     }
     const receipts = response.messages;
-    const attempts = receipts.filter((row) => row.handoff_started_at !== null && row.stage !== "consumed");
+    if (nativeInputOverflow) {
+      note("native input observation overflow; original receipts remain uncertain");
+      nativeInputOverflow = false;
+    }
+    const observed = new Set();
+    const settleInput = async (receipt) => {
+      if (receipt.stage === "consumed" || receipt.stage === "rejected") {
+        forgetNativeInput(sid, receipt.message_id);
+      } else if ([...nativeInputs.values()].some((input) => input.sid === sid
+          && input.id === receipt.message_id && retainedConsumption(input.event, receipt, sourceAllowed))) {
+        await nativeContext(sid);
+        onConsumed(sid, receipt.message_id);
+        await report(receipt, "consumed");
+        observed.add(receipt.message_id);
+      } else {
+        forgetNativeInput(sid, receipt.message_id);
+      }
+    };
+    for (const receipt of receipts) await settleInput(receipt);
+    const pageIds = new Set(receipts.map((receipt) => receipt.message_id));
+    const liveIds = [...new Set([...nativeInputs.values()]
+      .filter((input) => input.sid === sid && !pageIds.has(input.id)).map((input) => input.id))].slice(0, 100);
+    for (const id of liveIds) {
+      let receipt;
+      try {
+        receipt = await request("GET", `${base(sid)}/recovery/${id}`);
+      } catch (error) {
+        if (error?.status !== 404) throw error;
+        forgetNativeInput(sid, id);
+        continue;
+      }
+      if (!receiptValid(receipt, sid) || receipt.message_id !== id) {
+        throw new Error("live input original receipt unavailable or inconsistent");
+      }
+      await settleInput(receipt);
+    }
+    const attempts = receipts.filter((row) => row.handoff_started_at !== null
+      && row.stage !== "consumed" && !observed.has(row.message_id));
     for (const receipt of receipts) {
       if (receipt.stage === "sdk_accepted" || receipt.stage === "consumed") {
         onSubmitted(sid, receipt.message_id);
@@ -246,7 +300,8 @@ export function createRetainedInbox({
     }
     let held = response.next_after !== null;
     for (const receipt of receipts) {
-      if (receipt.stage === "consumed" || receipt.stage === "rejected") continue;
+      if (receipt.stage === "consumed" || receipt.stage === "rejected"
+          || observed.has(receipt.message_id)) continue;
       const failures = {};
       let matched = false;
       for (const event of events) {
@@ -290,6 +345,9 @@ export function createRetainedInbox({
     await retryReport();
     const workingDirectory = await nativeContext(sid);
     if (!context || context.sid !== sid || context.cwd !== workingDirectory) {
+      for (const [key, input] of nativeInputs) {
+        if (input.sid !== sid) nativeInputs.delete(key);
+      }
       const consumer = {
         session_id: sid, incarnation: incarnation(),
         ...(compatible ? {} : {
@@ -485,6 +543,31 @@ export function createRetainedInbox({
   }
 
   return {
+    observe(sid, event) {
+      if (!current(sid) || event?.type !== "user.message" || isSubAgentEvent(event)
+          || (event.sessionId !== undefined && event.sessionId !== sid)
+          || !acceptsSource(event?.data?.source) || !nonblank(event?.data?.turnId)) return;
+      const content = event?.data?.transformedContent ?? event?.data?.content;
+      if (typeof content !== "string") return;
+      const start = RUNTIME_DATETIME_PREFIX.exec(content)?.[0].length ?? 0;
+      if (!content.startsWith(`<agent-message retained-session="${escAttr(sid)}" `, start)) return;
+      const candidate = content.slice(start, start + NATIVE_HEADER_LIMIT + 1);
+      const end = candidate.indexOf(">");
+      if (end < 0 || end >= NATIVE_HEADER_LIMIT) return;
+      const id = headerMessageId(candidate.slice(0, end));
+      if (id === null) return;
+      // Retain correlation metadata only; the original matcher still owns proof.
+      const header = candidate.slice(0, end + 1);
+      const key = `${sid}:${id}:${header}`;
+      if (!nativeInputs.has(key) && nativeInputs.size >= NATIVE_INPUT_LIMIT) {
+        nativeInputs.delete(nativeInputs.keys().next().value);
+        nativeInputOverflow = true;
+      }
+      nativeInputs.set(key, { sid, id, event: {
+        type: "user.message", sessionId: sid,
+        data: { source: event.data.source, turnId: event.data.turnId, transformedContent: header },
+      } });
+    },
     consumerIncarnation(sid) {
       return current(sid) && context?.sid === sid ? context.consumer.incarnation : null;
     },
@@ -501,6 +584,6 @@ export function createRetainedInbox({
         busy = false;
       }
     },
-    close() { stopped = true; },
+    close() { stopped = true; nativeInputs.clear(); },
   };
 }

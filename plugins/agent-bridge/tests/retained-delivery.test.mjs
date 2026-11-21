@@ -42,7 +42,9 @@ function fixture() {
       result = { messages: page.map(f.receipt),
         next_after: pending.length > page.length ? page.at(-1).id : null };
     } else if (path.startsWith(`${prefix}/recovery/`)) {
-      result = f.receipt(f.rows.find((row) => row.id === Number(path.split("/").at(-1))));
+      const row = f.rows.find((row) => row.id === Number(path.split("/").at(-1)));
+      if (!row) throw Object.assign(new Error("original unavailable"), { status: 404 });
+      result = f.receipt(row);
     } else if (path === `${prefix}/negotiate`) {
       f.frontendReady = true;
       result = { contract, binding, expected_incarnation: f.current?.incarnation ?? null };
@@ -124,7 +126,7 @@ function fixture() {
   });
   f.event = (index = 0, changes = {}) => ({
     id: `native-event-${index}`, type: "user.message",
-    data: { source: "agent-bridge", content: f.sends[index].prompt },
+    data: { source: "agent-bridge", content: f.sends[index].prompt, turnId: `native-turn-${index}` },
     ...changes,
   });
   return f;
@@ -641,6 +643,9 @@ test("consumption requires original root attribution and all durable handoff fie
   const receipt = f.receipt(f.rows[0]);
   const good = f.event();
   assert.equal(retainedConsumption(good, receipt), true);
+  assert.equal(retainedConsumption({
+    ...good, data: { ...good.data, turnId: undefined },
+  }, receipt), true, "historical witnesses keep their supported older event shape");
   for (const bad of [
     { ...good, agentId: "child" },
     { ...good, sessionId: "other" },
@@ -822,6 +827,216 @@ for (const failure of ["rejected", "pending"]) {
     }
   });
 }
+
+for (const failure of ["rejected", "pending"]) {
+  test(`live root input settles its original receipt with unavailable history (${failure})`, async () => {
+    const f = fixture();
+    f.capabilities.compatible_native_inbox = 1;
+    f.add();
+    const consumer = f.consumer("native", {
+      receivingApi: "native-sdk-v1", nativeTimeoutMs: 5,
+    });
+    await consumer.tick(sid);
+    let release;
+    const history = new Promise((resolve) => { release = resolve; });
+    f.session.getEvents = () => {
+      f.historyReads++;
+      return failure === "pending" ? history : Promise.reject(new Error("history unavailable"));
+    };
+    try {
+      f.clock += 30_001;
+      await consumer.tick(sid);
+      assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+      const calls = f.calls.length;
+      consumer.observe?.(sid, f.event());
+      assert.equal(f.calls.length, calls, "the native callback must do no I/O");
+      await consumer.tick(sid, { allowSend: false });
+      assert.equal(f.rows[0].handoff_stage, "consumed");
+      assert.equal(f.historyReads, 1, "live evidence must not await another history read");
+      assert.equal(f.sends.length, 1);
+      assert.equal(f.calls.filter((call) => call.body?.outcome === "consumed").length, 1);
+    } finally {
+      release([]);
+      consumer.close();
+    }
+  });
+}
+
+test("live input beyond an older history page settles without skipping historical recovery", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  const consumer = f.consumer("native", { receivingApi: "native-sdk-v1" });
+  await consumer.tick(sid);
+  for (let id = 2; id <= 100; id++) {
+    Object.assign(f.add(id), {
+      handoff_id: `handoff-${id}`, handoff_stage: "sdk_accepted", consumer: clone(f.current),
+    });
+  }
+  f.add(101);
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  f.clock += 30_001;
+  await consumer.tick(sid);
+  consumer.observe?.(sid, f.event(1));
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[100].handoff_stage, "consumed");
+  assert.ok(f.rows.slice(0, 100).every((row) => row.handoff_stage === "sdk_accepted"));
+  assert.equal(f.sends.length, 2);
+  assert.ok(f.calls.some((call) => call.path.endsWith("/recovery/101")));
+  const pages = f.calls.filter((call) => call.path.includes("/recovery?"));
+  assert.ok(pages.every((call) => new URL(call.path, "http://localhost").searchParams.get("after") === "0"));
+  consumer.close();
+});
+
+test("live receipt evidence preserves exact matching and fresh native-context admission", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  const consumer = f.consumer("native", { receivingApi: "native-sdk-v1" });
+  await consumer.tick(sid);
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  const good = f.event();
+  for (const bad of [
+    { ...good, agentId: "nested" },
+    { ...good, data: { ...good.data, parentToolCallId: "nested" } },
+    { ...good, sessionId: "other-native" },
+    { ...good, data: { ...good.data, source: "user" } },
+    { ...good, data: { ...good.data, turnId: undefined, clientTurnId: "caller-chosen-not-a-witness" } },
+    { ...good, data: { ...good.data, content: good.data.content.replace("handoff-1", "other") } },
+    { ...good, data: { ...good.data, content: "quoted input:\n" + good.data.content } },
+    { ...good, data: { ...good.data,
+      content: good.data.content.replace('msg-id="1"', `padding="${"x".repeat(5000)}" msg-id="1"`) } },
+  ]) consumer.observe?.(sid, bad);
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  consumer.observe?.(sid, { ...good, data: {
+    ...good.data, content: "display only",
+    transformedContent: "<current_datetime>2026-01-02T03:04:05Z</current_datetime>\n\n" + good.data.content,
+  } });
+  f.snapshotSid = "different-native";
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  f.snapshotSid = sid;
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.equal(f.sends.length, 1);
+  consumer.close();
+});
+
+test("live input after receiver reload settles the original consumer and explicitly allowed source", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  const first = f.consumer("original-consumer", { receivingApi: "native-sdk-v1" });
+  await first.tick(sid);
+  const event = f.event();
+  event.data.source = "agent-remote-driver-11111111-2222-4333-8444-555555555555";
+  first.close();
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  const next = f.consumer("successor-consumer", {
+    receivingApi: "native-sdk-v1", sourceAllowed: isRemoteDriverSource,
+  });
+  next.observe?.(sid, event);
+  await next.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  const report = f.calls.find((call) => call.body?.outcome === "consumed");
+  assert.equal(report.body.consumer.incarnation, "original-consumer");
+  assert.equal(f.sends.length, 1);
+  next.close();
+});
+
+test("live input observed before a late SDK reply retains its exact original evidence", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  let release;
+  const accepted = new Promise((resolve) => { release = resolve; });
+  let consumer;
+  f.session.send = (options) => {
+    f.sends.push(options);
+    consumer.observe?.(sid, f.event());
+    return accepted;
+  };
+  consumer = f.consumer("native", { receivingApi: "native-sdk-v1", nativeTimeoutMs: 5 });
+  try {
+    await consumer.tick(sid);
+    assert.equal(f.rows[0].handoff_stage, "unknown");
+    release("late-sdk-acceptance");
+    await tick();
+    f.session.getEvents = async () => { throw new Error("history unavailable"); };
+    f.clock += 30_001;
+    await consumer.tick(sid, { allowSend: false });
+    assert.equal(f.rows[0].handoff_stage, "consumed");
+    assert.equal(f.sends.length, 1);
+    assert.equal(f.historyReads, 0);
+  } finally {
+    release("late-sdk-acceptance");
+    consumer.close();
+  }
+});
+
+test("a lost live-consumption reply recovers the original outcome without another send", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  const consumed = [];
+  const consumer = f.consumer("native", {
+    receivingApi: "native-sdk-v1", onConsumed: (_sid, id) => consumed.push(id),
+  });
+  await consumer.tick(sid);
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  f.after = async (_method, path, body) => {
+    if (path.endsWith("/outcome") && body.outcome === "consumed") {
+      f.after = null;
+      throw new Error("consumption reply lost");
+    }
+  };
+  consumer.observe?.(sid, f.event());
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.deepEqual(consumed, [1]);
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/recovery/1")).length, 1);
+  assert.equal(f.calls.filter((call) => call.body?.outcome === "consumed").length, 1);
+  assert.equal(f.sends.length, 1);
+  assert.deepEqual(consumed, [1]);
+  consumer.close();
+});
+
+test("bounded live evidence loss retains uncertainty rather than inventing consumption", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  f.add();
+  const consumer = f.consumer("native", { receivingApi: "native-sdk-v1" });
+  await consumer.tick(sid);
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  const original = f.event();
+  const calls = f.calls.length;
+  const logs = f.logs.length;
+  consumer.observe?.(sid, original);
+  for (let id = 2; id <= 1001; id++) {
+    consumer.observe?.(sid, { ...original, data: {
+      ...original.data, content: original.data.content.replace('msg-id="1"', `msg-id="${id}"`),
+    } });
+  }
+  assert.equal(f.calls.length, calls);
+  assert.equal(f.logs.length, logs, "overflow diagnostics must also stay off the native callback");
+  f.clock += 30_001;
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  assert.ok(f.logs.some((line) => line.includes("native input observation overflow")));
+  consumer.observe?.(sid, original);
+  await consumer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.equal(f.sends.length, 1);
+  consumer.close();
+});
 
 test("unavailable history keeps legacy original-recovery admission held", async () => {
   const f = fixture();

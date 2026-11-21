@@ -228,12 +228,35 @@ An ambiguous exception, missing SDK message ID or timeout records/retains
 until it settles rather than accumulating another native call every tick.
 
 The consumer reads pending original receipts even while muted, deregistered or
-after closure. Only actual root `user.message` history from that same SDK/native
+after closure. Only an actual root `user.message` from that same SDK/native
 context, with the explicit source and complete original envelope association,
 can record `consumed`. Sub-agent events, operator input, quoted envelopes,
 reused message IDs and missing attribution cannot settle it. The outcome uses
 the receipt's original consumer, including after an extension reload; it never
 substitutes the new process or incarnation.
+
+The existing live SDK subscription also supplies this original-input evidence
+when the root event includes the SDK's native consuming `turnId`. A caller's
+`clientTurnId` or a queued message without that native witness does not qualify.
+Older/unavailable live evidence keeps the existing historical recovery path;
+no new minimum provider version is inferred from a package number.
+Its callback retains only the native binding, message correlation and envelope
+header, not the message body. It performs no network, SDK, filesystem or log I/O.
+The existing off-loop recovery first matches those observations against the
+original receipts, rechecks native context and reports through the existing
+original-outcome owner before waiting for historical evidence. A failed or
+pending history read therefore need not conceal already observed live input.
+An unresolved input effect still retains its original serial fence.
+Observed originals beyond the current historical page use their existing
+exact-receipt lookup, bounded to 100 additional originals per recovery tick.
+This does not move the historical cursor or skip older unresolved receipts.
+
+The observation buffer holds at most 1,000 headers of at most 4,096
+characters each. Overflow discards the oldest observation and reports
+uncertainty off the native callback; it never invents consumption for the
+discarded evidence. Native-session changes discard other bindings, and shutdown
+clears the buffer. This is bounded in-memory evidence, not durable restart
+recovery, another inbox or a new consumption authority.
 
 An unbegun original offer can survive a receiver reload and be delivered using
 its original receipt identifier and envelope. Versioned final admission must
@@ -251,8 +274,9 @@ bounded slot; a rejected or timed-out read does not block compatible ordinary
 delivery after fresh native-context checks and final admission. The original
 receipts stay unresolved, and a timed-out history call is not repeated until
 its promise settles. Legacy recovery holds and unresolved input-effect fences
-remain enforced. Neither the bounded represented-event queue nor the legacy
-in-flight cache is consumption evidence. Lost outcome replies are read back
+remain enforced. Queue/cache presence and an SDK acknowledgement are not
+consumption evidence; the directly observed native input must match its
+original receipt. Lost outcome replies are read back
 from the original receipt, or the same outcome is reported again without
 another SDK effect. Missing historical evidence remains visibly outstanding;
 there is no SDK idempotency guarantee or inferred nonacceptance.
