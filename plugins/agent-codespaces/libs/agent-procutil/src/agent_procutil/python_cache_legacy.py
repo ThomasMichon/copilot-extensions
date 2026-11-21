@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import stat
+from typing import Any, Callable, ContextManager, cast
 
 from . import _daemon_instance_owner as private_owner
 from . import python_cache_catalog as catalog
@@ -33,8 +34,8 @@ class Budget(indexed.Budget):
     discovery: int = 100000
     names_bytes: int = 16 * 1024 * 1024
 
-    def validate(self):
-        super().validate()
+    def validate(self) -> None:
+        cast(Any, super()).validate()
         if any(type(value) is not int or value < 1 for value in (self.discovery, self.names_bytes)):
             raise ValueError("legacy inventory budgets must be finite and positive")
 
@@ -53,16 +54,17 @@ class _InventoryUnavailable(Exception):
 
 
 class _Pass(indexed._Pass):
-    def __init__(self, budget, report):
-        super().__init__(budget, report)
-        self.inventories = {}
+    def __init__(self, budget: Budget, report: Report) -> None:
+        cast(Any, super()).__init__(budget, report)
+        self.inventories: dict[tuple[str, tuple[int, int]], list[str]] = {}
+        self.preserve_association = False
 
-    def names(self, directory, *, namespace=False):
+    def names(self, directory: files.Entry, *, namespace: bool = False) -> list[str]:
         """Only a complete bounded census may supply a lexical continuation."""
         key = (str(directory.path), files.identity(directory.info))
         if key in self.inventories:
             return self.inventories[key]
-        self.check()
+        cast(Any, self).check()
         before = directory.path.lstat()
         names = []
         probes, encoded_bytes = 0, 0
@@ -72,7 +74,7 @@ class _Pass(indexed._Pass):
         try:
             with directory.names() as iterator:
                 while True:
-                    self.check()
+                    cast(Any, self).check()
                     if probes >= probe_limit:
                         self.report.retain("inventory-oversized")
                         self.report.exhausted = True
@@ -96,13 +98,13 @@ class _Pass(indexed._Pass):
                     self.report.names_bytes += size
                     encoded_bytes += size
                     names.append(entry.name)
-            self.check()
+            cast(Any, self).check()
             directory.verify()
             after = directory.path.lstat()
             if before.st_mtime_ns != after.st_mtime_ns or before.st_ctime_ns != after.st_ctime_ns:
                 raise ValueError("legacy inventory changed")
             names.sort()
-            self.check()
+            cast(Any, self).check()
         except indexed._Exhausted:
             if fresh and probes:
                 self.report.retain("inventory-time-unavailable")
@@ -113,33 +115,33 @@ class _Pass(indexed._Pass):
         return names
 
 
-def _mirror_parts(path):
+def _mirror_parts(path: Path) -> tuple[str, ...]:
     text = store.normalized(path)
     if os.name == "nt" and len(text) > 1 and text[1] == ":":
         text = text[2:]
     return Path(text.lstrip(os.sep + (os.altsep or ""))).parts
 
 
-def _name(value):
+def _name(value: Any) -> bool:
     return (
         isinstance(value, str) and value not in ("", ".", "..")
         and Path(value).name == value and ":" not in value and "\0" not in value
     )
 
 
-def _identity(value):
+def _identity(value: Any) -> bool:
     return (
         isinstance(value, list) and len(value) == 2
         and all(type(number) is int and number >= 0 for number in value)
     )
 
 
-def _cursor(value):
+def _cursor(value: Any) -> bool:
     """Comparison-only positions are never used as child paths."""
     return isinstance(value, str) and len(value) <= 1024
 
 
-def _namespace_cursor(database, report):
+def _namespace_cursor(database: Any, report: Any) -> str:
     row = database.execute(
         "SELECT CASE WHEN length(value) <= ? THEN value END FROM progress WHERE name = ?",
         (_MAX_CURSOR, _CURSOR_KEY),
@@ -152,7 +154,7 @@ def _namespace_cursor(database, report):
                 and type(record["version"]) is int and record["version"] == 1
                 and _cursor(record["after"])
             ):
-                return record["after"]
+                return cast(str, record["after"])
         except (ValueError, TypeError, RecursionError):
             pass
         report.retain("legacy-cursor-reset")
@@ -163,10 +165,10 @@ def _namespace_cursor(database, report):
     ).fetchone()
     if row is not None and not _cursor(row[0]):
         report.retain("legacy-cursor-reset")
-    return row[0] if row is not None and _cursor(row[0]) else ""
+    return cast(str, row[0]) if row is not None and _cursor(row[0]) else ""
 
 
-def _rotate(database, name):
+def _rotate(database: Any, name: str) -> None:
     encoded = json.dumps({"version": 1, "after": name}, ensure_ascii=True, separators=(",", ":"))
     if not _cursor(name) or len(encoded) > _MAX_CURSOR:
         raise ValueError("legacy namespace cursor is oversized")
@@ -175,7 +177,7 @@ def _rotate(database, name):
     )
 
 
-def _state(database, name):
+def _state(database: Any, name: str) -> Any:
     row = database.execute(
         "SELECT length(value), CASE WHEN length(value) <= ? THEN value END "
         "FROM progress WHERE name = ?", (_MAX_STATE, "legacy:" + name),
@@ -200,7 +202,7 @@ def _state(database, name):
     return state
 
 
-def _save(database, name, state):
+def _save(database: Any, name: str, state: Any) -> bool:
     refused = False
     while True:
         encoded = json.dumps(state, separators=(",", ":"))
@@ -218,7 +220,7 @@ def _save(database, name, state):
     return refused
 
 
-def _checked(entry):
+def _checked(entry: files.Entry) -> None:
     entry.check_budget()
     if stat.S_ISDIR(entry.info.st_mode):
         permissions.check(entry.path)
@@ -228,7 +230,9 @@ def _checked(entry):
     entry.verify()
 
 
-def _remove_bytecode(namespace, entry, root, slot, work):
+def _remove_bytecode(
+    namespace: files.Entry, entry: files.Entry, root: Path, slot: str, work: Any,
+) -> None:
     report = work.report
     size = entry.info.st_size
     name = os.path.normcase(entry.path.name)
@@ -279,7 +283,9 @@ def _remove_bytecode(namespace, entry, root, slot, work):
     report.bytes += size
 
 
-def _tree(namespace, versions, state, root, slot, work):
+def _tree(
+    namespace: files.Entry, versions: files.Entry, state: Any, root: Path, slot: str, work: Any,
+) -> None:
     while state["stack"]:
         work.check()
         with contextlib.ExitStack() as opened:
@@ -303,6 +309,10 @@ def _tree(namespace, versions, state, root, slot, work):
                 index = bisect_right(names, frame[2])
                 if index == len(names):
                     work.entry()
+                    if len(state["stack"]) == 1 and work.preserve_association:
+                        work.report.retain("legacy-association-retained")
+                        state["stack"].pop()
+                        continue
                     try:
                         parent.remove()
                     except OSError as error:
@@ -335,7 +345,9 @@ def _tree(namespace, versions, state, root, slot, work):
                 frame[2] = name
 
 
-def _namespace(namespace, root, state, work, retired):
+def _namespace(
+    namespace: files.Entry, root: Path, state: Any, work: Any, retired: Callable[[str], str],
+) -> Any:
     _checked(namespace)
     work.report.retain("legacy-whole-prefix-no-writer-custody")
     with contextlib.ExitStack() as opened:
@@ -390,12 +402,16 @@ def _namespace(namespace, root, state, work, retired):
                 work.state = state
 
 
-def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
+def collect(
+    root: Path, *, retirement: Callable[..., ContextManager[str]], budget: Budget | None = None,
+    preserve_association: bool = False,
+) -> Report:
     """Reclaim exact retired-source leaves, never whole unsealed namespaces."""
     budget = budget or Budget()
     budget.validate()
-    report = Report()
-    work = _Pass(budget, report)
+    report: Any = Report()
+    work: Any = _Pass(budget, report)
+    work.preserve_association = preserve_association
     if not Path(root).is_absolute():
         raise ValueError("legacy maintenance requires an absolute runtime root")
     root = store.native(Path(store.normalized(root)))
@@ -403,10 +419,10 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
     try:
         work.check()
         if not files.present(legacy):
-            return report
+            return cast(Report, report)
         with files.installation(legacy, private=False, check_budget=work.check) as anchor:
             census_report = Report()
-            census = _Pass(budget, census_report)
+            census: Any = _Pass(budget, census_report)
             census.deadline = work.deadline
             try:
                 names = census.names(anchor, namespace=True)
@@ -417,15 +433,16 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
                 for reason, count in census_report.reasons.items():
                     report.reasons[reason] = report.reasons.get(reason, 0) + count
             if not names:
-                return report
+                return cast(Report, report)
             location = store.installation_root(root, create=True, check_budget=work.check)
             work.check()
             with files.installation(location, check_budget=work.check), catalog.connection(
                 location, private_owner=private_owner, check_budget=work.check,
             ) as database, contextlib.ExitStack() as leases:
-                active_slot, active_reason = None, ""
+                active_slot: str | None = None
+                active_reason = ""
 
-                def retired(slot):
+                def retired(slot: str) -> str:
                     nonlocal active_slot, active_reason
                     if slot != active_slot:
                         active_slot, active_reason = None, ""
@@ -489,4 +506,4 @@ def collect(root: Path, *, retirement, budget: Budget | None = None) -> Report:
         report.retain("legacy-inventory-unavailable")
         report.error(error)
         report.pending = True
-    return report
+    return cast(Report, report)

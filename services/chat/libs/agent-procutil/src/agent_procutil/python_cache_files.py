@@ -4,7 +4,9 @@ from __future__ import annotations
 import contextlib
 import os
 import stat
+import sys
 from pathlib import Path
+from typing import Any, Callable, ContextManager, Iterator
 
 from . import python_cache_permissions as permissions
 
@@ -29,11 +31,12 @@ def ordinary(info: os.stat_result) -> bool:
     )
 
 
-def _windows_open(path: Path, *, delete: bool, read: bool = False):
+def _windows_open(path: Path, *, delete: bool, read: bool = False) -> tuple[Any, Any]:
     import ctypes
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    native: Any = ctypes
+    kernel = native.WinDLL("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -49,15 +52,15 @@ def _windows_open(path: Path, *, delete: bool, read: bool = False):
         0x02000000 | 0x00200000, None,
     )
     if handle in (None, wintypes.HANDLE(-1).value):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise native.WinError(native.get_last_error())
     return kernel, handle
 
 
 class Entry:
     def __init__(
-        self, path: Path, info: os.stat_result, *, fd=None, parent=None, windows=None,
-        check_budget=None,
-    ):
+        self, path: Path, info: os.stat_result, *, fd: Any = None, parent: Any = None,
+        windows: Any = None, check_budget: Callable[[], None] | None = None,
+    ) -> None:
         self.path, self.info = path, info
         self.fd, self.parent, self.windows = fd, parent, windows
         self.check_budget = check_budget or (lambda: None)
@@ -71,14 +74,17 @@ class Entry:
             raise ValueError("cache entry changed")
         return named
 
-    def names(self):
+    def names(self) -> ContextManager[Iterator[os.DirEntry[str]]]:
         self.check_budget()
         return os.scandir(self.path if self.windows else self.fd)
 
-    def read(self, limit: int) -> bytes:
+    def read(self, limit: int, *, prefix: bool = False) -> bytes:
         self.check_budget()
-        if not stat.S_ISREG(self.info.st_mode) or self.info.st_size > limit:
+        if not stat.S_ISREG(self.info.st_mode) or (
+            self.info.st_size > limit and not prefix
+        ) or prefix and not 0 < limit <= 4096:
             raise ValueError("cache metadata exceeds its byte budget")
+        requested = limit if prefix else limit + 1
         if self.windows:
             import ctypes
             from ctypes import wintypes
@@ -89,10 +95,11 @@ class Entry:
                 ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p,
             ]
             kernel.ReadFile.restype = wintypes.BOOL
-            buffer, count = ctypes.create_string_buffer(limit + 1), wintypes.DWORD()
+            buffer, count = ctypes.create_string_buffer(requested), wintypes.DWORD()
             self.check_budget()
-            if not kernel.ReadFile(handle, buffer, limit + 1, ctypes.byref(count), None):
-                raise ctypes.WinError(ctypes.get_last_error())
+            if not kernel.ReadFile(handle, buffer, requested, ctypes.byref(count), None):
+                native: Any = ctypes
+                raise native.WinError(native.get_last_error())
             if count.value > limit:
                 raise ValueError("cache metadata exceeds its byte budget")
             return buffer.raw[:count.value]
@@ -105,7 +112,7 @@ class Entry:
             if identity(os.fstat(stream.fileno())) != identity(self.info):
                 raise ValueError("cache metadata changed")
             self.check_budget()
-            data = stream.read(limit + 1)
+            data = stream.read(requested)
         if len(data) > limit:
             raise ValueError("cache metadata exceeds its byte budget")
         return data
@@ -125,7 +132,8 @@ class Entry:
             if not kernel.SetFileInformationByHandle(
                 handle, 4, ctypes.byref(disposition), ctypes.sizeof(disposition),
             ):
-                raise ctypes.WinError(ctypes.get_last_error())
+                native: Any = ctypes
+                raise native.WinError(native.get_last_error())
         elif stat.S_ISDIR(self.info.st_mode):
             os.rmdir(self.path.name, dir_fd=self.parent.fd)
         else:
@@ -133,14 +141,17 @@ class Entry:
 
 
 @contextlib.contextmanager
-def child(parent: Entry, name: str, *, expected=None, delete: bool = False, read: bool = False):
+def child(
+    parent: Entry, name: str, *, expected: tuple[int, int] | None = None,
+    delete: bool = False, read: bool = False,
+) -> Iterator[Entry]:
     parent.check_budget()
     if not name or name in (".", "..") or Path(name).name != name or ":" in name:
         raise ValueError("cache entry name is not ordinary")
     path = parent.path / name
     descriptor, windows = None, None
     try:
-        if os.name == "nt":
+        if sys.platform == "win32":
             windows = _windows_open(path, delete=delete, read=read)
             parent.check_budget()
             info = path.lstat()
@@ -167,7 +178,9 @@ def child(parent: Entry, name: str, *, expected=None, delete: bool = False, read
 
 
 @contextlib.contextmanager
-def installation(path: Path, *, check_budget=None, private: bool = True):
+def installation(
+    path: Path, *, check_budget: Callable[[], None] | None = None, private: bool = True,
+) -> Iterator[Entry]:
     """Keep ancestors anchored for the entire catalog transaction and pass."""
     check_budget = check_budget or (lambda: None)
     check_budget()
@@ -176,7 +189,7 @@ def installation(path: Path, *, check_budget=None, private: bool = True):
         raise ValueError("cache root is not an ordinary bounded absolute path")
     with contextlib.ExitStack() as stack:
         root = Path(path.anchor)
-        if os.name == "nt":
+        if sys.platform == "win32":
             windows = _windows_open(root, delete=False)
             stack.callback(windows[0].CloseHandle, windows[1])
             check_budget()

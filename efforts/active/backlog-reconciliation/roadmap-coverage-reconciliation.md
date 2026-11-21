@@ -8,6 +8,10 @@ Acceptance: [six-gate integration assessment](stabilization-roadmap.md#integrati
 Evidence and later continuations: [dated journal](journal/2026/11.21-outside-wave-coverage-reconciliation.md).
 Current continuation: [next 32 receipt and gap decisions](#next-32-receipt-and-gap-decisions)
 and [continuation journal](journal/2026/11.21-outside-wave-coverage-continuation.md).
+Fixed-cohort completion of identity accounting:
+[remaining 89 receipt/gap decisions](roadmap-coverage-final-cohort.md).
+All 153 identities are accounted for across the linked registers; unresolved
+research, source, interpretation and current-coverage duties remain open.
 
 ## Fixed cohort and observation boundary
 
@@ -151,10 +155,10 @@ actual containing copy in another issue.
 | #11298 | Existing completion; no new credit | The prior final check, acknowledgment and independent provider readback already verified CLOSED/COMPLETED through #11433. Preserve that audited outcome and its consumed final-check unit. Do not close or acknowledge again, count another retirement, release another owner's resources or infer parent completion. |
 | #11322 | Refusal-cause gap; no new text | Retain the actual whole-original attempt refused before model reading at the #10652/#10742 boundaries. No packet or alternate reconstruction was admitted; the issue remains open. Cause reconciliation, current admission and substantive outcome judgment are separate unresolved steps, not an automatic replay or permanent citation ban. |
 
-This slice has **fourteen research receipts**, including two explicit refresh
+This second slice has **fourteen research receipts**, including two explicit refresh
 limits, **one owner-control receipt**, **one already verified completion**,
 **six interpretation gaps**, **two provenance gaps** and **eight source/refusal
-gaps**. There are now **64 accounted continuation decisions** and **89
+gaps**. At that stage there were **64 accounted continuation decisions** and **89
 remaining cohort identities**. Accounted does not mean wholly researched,
 currently qualified, ranked, accepted or completed; all explicit gaps remain
 work rather than disappearing from coverage.
@@ -167,8 +171,8 @@ reacquired for this continuation.
 
 ## Continuing exit
 
-Continue matching the remaining 89 cohort identities to actual admitted later research,
-accepted receiving or a specific unresolved gap. Reconcile changed acceptance,
+The [remaining-cohort register](roadmap-coverage-final-cohort.md) accounts for
+those final 89 identities. Continue resolving the explicit gaps and changed acceptance,
 source and custody only where relevant; no whole-backlog source retrace is
 required by this register. The thirteen later identities remain a separate
 current-coverage continuation, including the three distinct contracts in the

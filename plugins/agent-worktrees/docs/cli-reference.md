@@ -1845,6 +1845,39 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### Python bytecode caches (`python-cache prune`)
 
+For qualified Windows whole-prefix relief, first check the executing runtime's
+contract, then supply **one absolute runtime root**:
+
+```powershell
+agent-worktrees python-cache collect --contract
+agent-worktrees python-cache collect --root '<absolute-runtime-root>' --drain --json
+agent-worktrees python-cache collect --root '<absolute-runtime-root>' --drain --apply --json
+agent-worktrees python-cache status --json
+```
+
+`collect` defaults to dry run and includes retired `installed-*` prefixes as
+well as unsealed prefixes. `--apply` obtains fresh process, filesystem and
+runtime-owner proof; a prior eligible count does not authorize or guarantee
+removal. There is no age-only override. Missing capability means the executing
+runtime needs an update; the command never loads a newer installer or source
+checkout as a substitute.
+
+`--drain` permits bounded repeated passes, not an unlimited operation.
+The default aggregate deadline is 1,800 seconds, with a 512-GiB removal cap.
+Without `--drain`, the defaults are 30 seconds and 4 GiB. `--max-seconds`
+(maximum 3,600), `--max-bytes`, `--max-entries` and `--max-namespaces` can reduce
+or tune supported budgets. `--details` includes per-prefix observations.
+Unmeasured prefixes and incomplete process visibility remain explicit holds.
+
+Normal update GC can schedule the same planner as a finite Windows worker.
+`status`, `doctor` and `python-cache status` report cached measurements,
+reasons, observation age and the exact inspection command without recursively
+scanning the cache. Before the first completed pass, size is **unknown**, not
+zero. The [shared contract](../../../libs/agent-procutil/README.md#qualified-whole-prefix-relief)
+describes custody, budget, interruption and process-visibility limits.
+
+The older `prune` command remains a separate compatibility interface:
+
 Current launchers use the [shared platform-cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract):
 completed version slots reuse private OS-user-cache bytecode; unsealed or
 older providers disable writes with `-B`. New launchers do not mint
@@ -2677,10 +2710,12 @@ directories there come from older launchers, especially unsealed, detached or
 `exec`-style invocations. Current launchers use the shared OS-cache policy and
 disable writes when installation evidence is unavailable, stopping that new
 per-invocation growth. This does not itself remove the old backlog.
-Run `agent-worktrees python-cache prune` (dry run) to
-size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
-process scan exists, add `--allow-age-only` once no affected runtime is
-running). See
+On Windows, use `python-cache collect --contract`, then the absolute-root
+dry-run command reported by `python-cache status` or `doctor`. Review measured
+and held bytes separately. Only an authorized `--apply` revalidates the
+qualified reclamation proof. Do not substitute age-only pruning for a failed
+proof. The older `prune` interface remains available with its separate policy.
+See
 [Python bytecode caches](#python-bytecode-caches-python-cache-prune).
 
 ### Handoff trace (Tier C)

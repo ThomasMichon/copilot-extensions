@@ -14,7 +14,7 @@ from agent_procutil import no_window_kwargs
 
 from . import config as cfg
 from . import installer as inst
-from . import output, reclaim, sessions, tracking, worktree_identity
+from . import output, reclaim, sessions, tracking, worktree_identity, python_cache_diagnostics
 from .tracking_controller_relations import backfill_legacy_controller_relations, derive_legacy_controller_relations
 from .tracking_lifecycle import repair_head_cache
 
@@ -598,6 +598,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         },
         "config_d": config_d_report.to_dict(),
         "daemon_health": daemon_health.doctor_report(apply=apply_daemon_health),
+        "python_cache": python_cache_diagnostics.report(),
     }
 
     if json_mode:
@@ -620,6 +621,7 @@ def _render_doctor_report(
 
     chk = "\u2713"
     print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
+    python_cache_diagnostics.render(report.get("python_cache"))
     if not report.get("project_health_available", True):
         print("  \u2022 Project health skipped: no active project context")
 

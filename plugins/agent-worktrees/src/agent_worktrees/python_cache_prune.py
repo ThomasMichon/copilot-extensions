@@ -21,14 +21,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
+import os as os
 import re
 import stat
-import sys
+import sys as sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
+from .python_cache_report import Candidate as Candidate, PruneReport as PruneReport
+from typing import Any
 
 DEFAULT_MIN_AGE_SECONDS = 3600.0
 _UNSEALED = re.compile(r"^unsealed-[A-Za-z0-9-]+$")
@@ -38,44 +40,6 @@ _REPARSE_POINT = 0x400
 
 # Test seam: invoked after the final inventory, immediately before removal.
 _before_remove: Callable[[str], None] | None = None
-
-
-@dataclass
-class Candidate:
-    path: str
-    status: str
-    bytes: int = 0
-    files: int = 0
-    reason: str = ""
-
-
-@dataclass
-class PruneReport:
-    cache_root: str
-    apply: bool
-    min_age_seconds: float
-    liveness: str = "unavailable"
-    age_only_allowed: bool = False
-    candidates: list[Candidate] = field(default_factory=list)
-
-    def summary(self) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for item in self.candidates:
-            counts[item.status] = counts.get(item.status, 0) + 1
-        reclaim = ("removed", "eligible")
-        counts["bytes"] = sum(c.bytes for c in self.candidates if c.status in reclaim)
-        return counts
-
-    def as_dict(self) -> dict:
-        return {
-            "cache_root": self.cache_root,
-            "apply": self.apply,
-            "min_age_seconds": self.min_age_seconds,
-            "liveness": self.liveness,
-            "age_only_allowed": self.age_only_allowed,
-            "summary": self.summary(),
-            "candidates": [asdict(c) for c in self.candidates],
-        }
 
 
 class _Unsafe(Exception):
@@ -199,27 +163,29 @@ def _remove_posix(directory: str, tree: dict[str, _Node]) -> None:
     os.rmdir(directory)
 
 
-def _open_guard(path: str):
+def _open_guard(path: str) -> Any:
     """Open *path* without FILE_SHARE_DELETE so it cannot be renamed or replaced."""
     import ctypes
     from ctypes import wintypes
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    native: Any = ctypes
+    kernel32 = native.WinDLL("kernel32", use_last_error=True)
     create = kernel32.CreateFileW
     create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
                        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
     create.restype = wintypes.HANDLE
     handle = create(path, 0x80, 0x1 | 0x2, None, 3, 0x02000000 | 0x00200000, None)
     if handle in (None, wintypes.HANDLE(-1).value):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise native.WinError(native.get_last_error())
     return handle
 
 
-def _close_guard(handle) -> None:
+def _close_guard(handle: Any) -> None:
     import ctypes
     from ctypes import wintypes
 
-    close = ctypes.WinDLL("kernel32").CloseHandle
+    native: Any = ctypes
+    close = native.WinDLL("kernel32").CloseHandle
     close.argtypes = [wintypes.HANDLE]
     close(handle)
 
@@ -355,6 +321,7 @@ def prune_unsealed(
         try:
             tree, count, total, newest = _inventory(candidate_path)
             item.bytes, item.files = total, count
+            item.measured = True
             if not current_time - newest >= min_age:
                 item.reason = "younger-than-grace-period"
                 continue
@@ -381,6 +348,7 @@ def prune_unsealed(
             except _Unsafe as exc:
                 item.status = "error"
                 item.reason = str(exc)
+                item.measured = False
                 continue
             item.status = "removed"
         except _Unsafe as exc:
@@ -388,6 +356,7 @@ def prune_unsealed(
         except OSError as exc:
             item.status = "error"
             item.reason = _error(exc)
+            item.measured = False
     return report
 
 
@@ -417,12 +386,17 @@ def default_cache_roots(home: str | os.PathLike[str] | None = None) -> list[Path
     return candidates
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: Any) -> None:
     parser = sub.add_parser(
         "python-cache",
         help="Inspect or prune per-invocation Python bytecode caches (unsealed-*)",
     )
     actions = parser.add_subparsers(dest="python_cache_action", required=True)
+    status_parser = actions.add_parser("status", help="Read cached legacy collection observations")
+    status_parser.add_argument("--json", action="store_true")
+    from . import python_cache_command
+
+    python_cache_command.add_parser(actions)
     prune = actions.add_parser(
         "prune",
         help="Report (dry run, default) or remove idle bytecode-only unsealed-* cache dirs",
@@ -455,6 +429,19 @@ def _human(size: int) -> str:
 
 
 def cmd_python_cache(args: argparse.Namespace) -> int:
+    if args.python_cache_action == "status":
+        from . import python_cache_diagnostics
+
+        value = python_cache_diagnostics.report()
+        if args.json:
+            print(json.dumps(value, sort_keys=True))
+        else:
+            python_cache_diagnostics.render(value)
+        return 0
+    if args.python_cache_action == "collect":
+        from . import python_cache_command
+
+        return python_cache_command.run(args)
     min_age_hours = float(args.min_age_hours)
     if not math.isfinite(min_age_hours) or min_age_hours < 0 or (args.apply and min_age_hours < 1):
         print(
@@ -488,8 +475,11 @@ def cmd_python_cache(args: argparse.Namespace) -> int:
         print(
             f"{report.cache_root}: {summary.get(verb, 0)} {verb} "
             f"({_human(summary['bytes'])}), {summary.get('skipped', 0)} skipped, "
-            f"{summary.get('error', 0)} error(s)"
+            f"{_human(summary['held_bytes'])} measured held, "
+            f"{summary['unmeasured']} unmeasured, {summary.get('error', 0)} error(s)"
         )
+        if report.candidates:
+            print(f"  Inspect: {report.inspection_command()}")
         for item in report.candidates:
             if item.status in ("error",) or item.reason not in quiet:
                 print(f"  {item.status}: {item.path} ({item.reason})")
