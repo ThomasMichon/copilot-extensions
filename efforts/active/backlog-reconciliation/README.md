@@ -1471,6 +1471,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [later-inflow register](roadmap-coverage-later-inflow.md) retains the
+thirteen identities outside the fixed 153 separately, with current complete
+metadata, actual prior whole-original studies and one newly read owner
+refinement. The [dated journal](journal/2026/11.21-current-inflow-and-admission-gaps.md)
+records actual #13878 delivery, the unchanged 02:52 PST 897-open census,
+explicit #13790 OPEN acceptance and documentary rather than runtime delivery
+for two merged references. All parent check states and six roadmap gates remain.
+The [historical-assignment metadata audit](roadmap-historical-current-admission.md)
+accounts for all 292 selected historical identities: 268 qualifying metadata
+records and 24 provenance gaps, including one additional enumeration gap.
+This does not complete their authored-contract delta or clear actual copies.
+
 The [remaining fixed-cohort coverage register](roadmap-coverage-final-cohort.md)
 accounts for numeric positions 65-153 using existing research/control receipts
 and explicit gaps. Together with the preceding register, all 153 original
