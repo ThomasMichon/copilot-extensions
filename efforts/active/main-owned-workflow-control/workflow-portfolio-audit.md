@@ -3455,6 +3455,45 @@ Fresh-install/native/installed external lanes are not exercised because no
 provisioning or runtime behavior changes. Native, release, full-census,
 comparable whole-flow and retained-custody gates remain open.
 
+### November 21 real archive byte-closure unit delivery
+
+The next adapter exports the three exact original determinism, zlib-
+independence and checkout-line-ending controls without changing assertions,
+fixtures, production code or the effect contract. It preserves all 6,878
+preceding nodes and source hashes. Actual archive construction reads all
+76 ordinary package Python members as data, excluding the existing
+`_build_native.py` exclusion; no archive member is imported or executed.
+Seventy-five members were already source-bound. Only `command_pipe.py` and
+the adapter need new bindings; the archive owner was already a coverage target.
+
+The effect-guarded development run passes all three originals in 1.797 seconds,
+with zero prohibited effects, 83 bound Python reads and positive per-case
+archive-builder call coverage. The compact-v2 manifest now has 6,881 nodes,
+1,085 sources, the same 444 coverage targets, 89 helper decisions and
+300-second bound, in 789,257 bytes. Flat-v1 normalization remains unchanged.
+Ruff and whole-file strict Linux/Windows typing pass. Real-link, native
+lifecycle and installed archive execution remain outside this source slice.
+
+Current-head Copilot approval `6007910176` covers
+`896bec53a53e77057dd362f6bdb257a57236afc0`; full review readback finds no
+comments or open threads. CI `44945350937`, unit job `136971332489`, guards
+`136971332233` and required aggregate `136972462958` succeed, as does trusted
+run `44945351169`. Actual logs show 6,881 fresh passes, 39 deselections,
+167.90 pytest seconds and 188.417 packet seconds; lookup takes 487 ms.
+No reuse hit or controlled whole-flow saving is inferred. Seven fresh verifier
+reads and a fresh review/veto/hold/head check pass before the managed merge
+without bypassing CI or dispatching a metadata refresh.
+
+Source #13962 merges at `2026-11-21T20:22:12Z` as
+`a7adc7b0eb0ae9c6ce94cdf74e6b8379139782e7`. Independent readback confirms merged
+state, no closing references and open parent #6237. Scoped source
+synchronization reconciles the merged tree; the full canonical parent is
+reread before resolving only this finite leaf. Continue the ordinary original
+UV-reference fixture controls, preserving all native-link residuals.
+Fresh-install/native/installed external lanes are not exercised because no
+provisioning or runtime behavior changes. Native, release, full-census,
+comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
