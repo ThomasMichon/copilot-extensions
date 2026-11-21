@@ -114,7 +114,7 @@ import re
 import sys
 import tokenize
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -151,6 +151,7 @@ _SAFE_HELPERS = (
     "no_window_kwargs", "detached_kwargs", "windowless_daemon_kwargs",
     "_process_tree_kwargs", "no_window_flags",
 )
+_DEFAULT_GENERIC_VISIT = ast.NodeVisitor.generic_visit
 
 
 
@@ -166,14 +167,14 @@ def _adopting_plugins() -> list[Path]:
     return out
 
 
-def _iter_py(src: Path):
+def _iter_py(src: Path) -> Iterator[Path]:
     for f in src.rglob("*.py"):
         if _SKIP_DIR_PARTS & set(f.relative_to(src).parts):
             continue
         yield f
 
 
-def _iter_declarative(src: Path):
+def _iter_declarative(src: Path) -> Iterator[Path]:
     for ext in ("*.json", "*.yaml", "*.yml"):
         for f in src.rglob(ext):
             if _SKIP_DIR_PARTS & set(f.relative_to(src).parts):
@@ -195,7 +196,7 @@ def _program_name(value: str) -> str | None:
 
 
 class _LaunchVisitor(ast.NodeVisitor):
-    """Reuse bound visitor dispatch methods within one file's analysis."""
+    """Reuse dispatch and avoid empty generic walks within one file's analysis."""
 
     def __init__(self) -> None:
         self._dispatch: dict[type[ast.AST], Callable[[ast.AST], None]] = {}
@@ -204,9 +205,20 @@ class _LaunchVisitor(ast.NodeVisitor):
         kind = type(node)
         visitor = self._dispatch.get(kind)
         if visitor is None:
-            visitor = getattr(self, "visit_" + kind.__name__, self.generic_visit)
-            self._dispatch[kind] = visitor
+            resolved: Callable[[ast.AST], None] = getattr(
+                self, "visit_" + kind.__name__, self.generic_visit,
+            )
+            if kind._fields == () and (
+                getattr(resolved, "__func__", None) is _DEFAULT_GENERIC_VISIT
+            ):
+                resolved = self._visit_fieldless
+            self._dispatch[kind] = resolved
+            visitor = resolved
         return visitor(node)
+
+    def _visit_fieldless(self, node: ast.AST) -> None:
+        if node._fields != ():
+            _DEFAULT_GENERIC_VISIT(self, node)
 
 
 class _SpawnFinder(_LaunchVisitor):
@@ -322,7 +334,7 @@ def _find_unsuppressed_spawns(f: Path) -> tuple[str, list[tuple[int, str]]]:
     return text, sorted(set(finder.hits))
 
 
-def _own_scope_nodes(node: ast.AST):
+def _own_scope_nodes(node: ast.AST) -> Iterator[ast.AST]:
     """``node``'s descendants, not descending into nested scopes (function,
     lambda and class bodies)."""
     pending = list(ast.iter_child_nodes(node))
@@ -943,8 +955,8 @@ def main() -> int:
     problems = verify()
     if problems:
         print("check-headless-launch: FAILED", file=sys.stderr)
-        for p in problems:
-            print(f"  - {p}", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
         print(
             "\nBackground launches must not allocate a new Windows console, and an "
             "agent-procutil-adopting plugin must not hand-roll process-creation "
