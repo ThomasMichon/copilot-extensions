@@ -17,12 +17,20 @@ class RetirementBlocker:
     reason: str
 
 
+def require_publication_settled(record: WorktreeRecord) -> None:
+    from . import pr_foreign_receipts, pr_unverified_creation
+
+    pr_foreign_receipts.require_settled(record)
+    if any(pr_unverified_creation.pending({}, pr) for pr in record.prs):
+        raise ValueError("PR creation outcome is unverified; reconcile it before finalization or cleanup.")
+
+
 def retains_artifact_metadata(record: WorktreeRecord) -> bool:
     """Keep retained-byte custody and uncertain publication history after retirement."""
-    from . import pr_creation_reconcile, pr_foreign_receipts
+    from . import pr_creation_reconcile, pr_foreign_receipts, pr_unverified_creation
 
     return pr_foreign_receipts.owner_receipts(record)[0] or any(
-        pr_creation_reconcile.requires_qualification(pr) for pr in record.prs
+        pr_creation_reconcile.requires_qualification(pr) or pr_unverified_creation.pending({}, pr) for pr in record.prs
     ) or any(
         claim.has_producer and isinstance(claim.producer, dict)
         and (
@@ -48,11 +56,13 @@ def record_paths(record: WorktreeRecord, tracking_path: Path) -> list[Path]:
 
 def pending_prs(record: WorktreeRecord, *, live_only: bool = False) -> list[PRRecord]:
     """Preserve each consumer's terminal-state policy and require held receipt proof."""
-    from . import pr_creation_reconcile, tracking
+    from . import pr_creation_reconcile, pr_unverified_creation, tracking
 
     pending = []
     for pr in record.prs:
-        if pr_creation_reconcile.requires_qualification(pr):
+        if pr_unverified_creation.pending({}, pr):
+            held = True
+        elif pr_creation_reconcile.requires_qualification(pr):
             held = not pr_creation_reconcile.qualified(record, pr)
         else:
             held = pr.state in tracking._PR_NON_TERMINAL if live_only else pr.state not in ("merged", "closed")

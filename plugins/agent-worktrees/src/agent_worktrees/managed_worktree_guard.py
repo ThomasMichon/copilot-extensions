@@ -26,7 +26,7 @@ def foreign_publication_guard(
     def guarded(
         rec: tracking.WorktreeRecord, repo: cfg.RepoConfig, tracking_path: Path, *, force: bool = False,
     ) -> tuple[bool, list[str]]:
-        from . import launch_seed_state, pr_foreign_receipts
+        from . import launch_seed_state, retirement_safety
         from .receiving_allocation import serialized_receipt
 
         path = tracking_path / f"{rec.worktree_id}.yaml"
@@ -39,7 +39,7 @@ def foreign_publication_guard(
                     or serialized_receipt(fresh) != serialized_receipt(rec)
                 ):
                     return False, ["managed removal owner changed"]
-                pr_foreign_receipts.require_settled(fresh)
+                retirement_safety.require_publication_settled(fresh)
                 return function(fresh, repo, tracking_path, force=force)
         except (OSError, ValueError, TimeoutError) as exc:
             return False, [str(exc)]

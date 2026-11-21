@@ -1504,8 +1504,8 @@ def validate_and_finalize(
                 require_record_mutation(record, config)
                 if record_guard is not None:
                     record_guard(record)
-                from . import pr_foreign_receipts
-                pr_foreign_receipts.require_settled(record)
+                from . import retirement_safety
+                retirement_safety.require_publication_settled(record)
                 try:
                     from . import claim_handoffs
                     source_ref = tracking_claims.format_claim_ref(

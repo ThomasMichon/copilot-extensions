@@ -63,18 +63,16 @@ def _capture(refspec: str, *, cwd: str | Path, timeout: float | None) -> Binding
 
 def destination(target: str, urls: tuple[str, ...], *, cwd: str, timeout: float) -> str:
     """Resolve a short destination using the original named source, before OID pinning."""
-    from . import git_acquisition_budget, git_ops
+    from . import git_remote_observation
 
     binding = current.get()
     if binding is None or target.startswith("refs/"):
         return target
     selected = set()
+    candidates = {target, "refs/" + target, "refs/tags/" + target, "refs/heads/" + target,
+                  "refs/remotes/" + target, "refs/remotes/" + target + "/HEAD"}
     for url in urls:
-        result = git_ops.git(
-            "ls-remote", "--refs", url, target, cwd=cwd, isolated_repository=True,
-            timeout=git_acquisition_budget.remaining_timeout(timeout), kill_tree=True,
-        )
-        refs = {line.split("\t")[1] for line in result.stdout.splitlines() if "\t" in line}
+        refs = git_remote_observation.refs(url, tuple(sorted(candidates)), cwd=cwd, timeout=timeout) & candidates
         if len(refs) > 1:
             raise ValueError("The short push destination is ambiguous; use its full ref.")
         if refs:
