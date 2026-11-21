@@ -11264,6 +11264,13 @@ directory identity and byte-change refusals, manifest round trips and invalid/
 cross-program import rejection. Four actual MyPy cases and the real toolkit
 declaration check stay outside the packet. No checker subprocess, environment
 preparation or lease operation is substituted into a claimed native result.
+The identifier Git-blob protocol adapter exports twelve original mocked cases
+through four exact test functions. It retains batch deduplication, object-count
+and byte bounds, malformed/truncated response rejection and Git-error
+propagation. All 54 remaining original cases stay outside this packet,
+including real Git/process fixtures and controls coupled to those fixtures.
+The original tests and scanner are unchanged; no Git command, live identifier
+sweep or real denylist read executes in the selected cases.
 Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
 while retaining the source map's existing layout so independent hash updates
 can merge cleanly.

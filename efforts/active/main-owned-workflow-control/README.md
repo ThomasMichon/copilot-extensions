@@ -672,12 +672,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   after fresh exact-head approval and complete required Linux CI following
   real Dev reconciliation. Broader native, every-release, workflow-count and
   full-census gates stay open.
-- [ ] Qualify and land ten original in-process independent-program typing
+- [x] Qualify and land ten original in-process independent-program typing
   controls through exact test objects and their original autouse scratch
   fixture. Retain four actual MyPy cases and the real toolkit-data case outside
   the packet; require closed sources, actual per-case production call coverage,
   unchanged preceding admission/helper/budget gates, current-head review and
-  complete Linux CI. Broader native, every-release and full-census gates stay open.
+  complete Linux CI. #13879 merges at
+  `87d01c5a1ad87b6961afa5fcd789fc6a209903d8` after exact-head Copilot approval
+  and complete required Linux CI with freshly executed packet evidence.
+  Broader native, every-release and full-census gates stay open.
+- [ ] Qualify and land twelve original mocked identifier Git-blob protocol
+  cases through four exact test objects. Preserve all 54 original residuals,
+  source closure, actual per-case production call coverage, preceding
+  admission/helper/budget gates, current-head review and complete Linux source
+  CI. No native Git/process or real identifier sweep is admitted or replaced;
+  broader native, every-release and full-census gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
