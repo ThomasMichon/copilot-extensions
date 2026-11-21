@@ -989,7 +989,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13961 merges at `eafd884203e894d828a54bdbbcd959a29d801e45` after
   exact-head Copilot approval and complete required Linux CI with all 6,878
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land the three unchanged original source-archive controls
+- [x] Qualify and land the three unchanged original source-archive controls
   for deterministic Python-only content, zlib independence and checkout line
   endings. Preserve every original function, fixture, assertion and preceding
   unit identity/hash/target/helper decision. Bind the complete 76-file ordinary
@@ -999,6 +999,20 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and the 300-second limit, strict typing, current-head review and complete
   Linux source CI. Byte-archive validation is not native lifecycle, installed
   archive execution, release, full-census, whole-flow or custody acceptance.
+  #13962 merges at `a7adc7b0eb0ae9c6ce94cdf74e6b8379139782e7` after
+  exact-head Copilot approval and complete required Linux CI with all 6,881
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land twenty-nine original ordinary/simulated UV-reference
+  cases by exporting the twenty-seven unchanged original functions, retaining
+  every fixture, assertion and parameter identity. Leave all five real-link
+  functions and their six cases outside; the original fallback/path
+  simulations are not native-link qualification. Require positive per-case
+  calls to the existing UV-reference coverage owner, zero prohibited effects,
+  closed Python reads, all preceding nodes/hashes/targets/helper decisions,
+  unchanged compact/flat-v1 contracts and the 300-second bound, strict typing,
+  current-head review and complete Linux source CI. This changes no helper,
+  installer or workflow behavior and settles no broader native, installed,
+  release, full-census, whole-flow or custody gate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

@@ -3,6 +3,40 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_uv_reference_fixture_units.py",
+      [
+        "test_symlink_scan_falls_back_without_native_symlink_support",
+        "test_uv_editable_relpath_is_always_forward_slashed",
+        "test_uv_editable_relpath_matches_plain_relpath_on_posix",
+        "test_rewrite_scoped_to_uv_sources_table_only",
+        "test_can_rewrite_uv_source_to_editable_true_when_present",
+        "test_can_rewrite_uv_source_to_editable_false_when_absent",
+        "test_can_rewrite_uv_source_to_editable_ignores_a_match_outside_the_table",
+        "test_lib_tree_matches_true_for_identical_trees",
+        "test_lib_tree_matches_false_when_any_piece_differs[readme]",
+        "test_lib_tree_matches_false_when_any_piece_differs[version]",
+        "test_lib_tree_matches_false_when_any_piece_differs[src]",
+        "test_lib_tree_matches_false_when_only_copy_has_tests",
+        "test_lib_tree_matches_ignores_only_relative_build_dir_names",
+        "test_lib_tree_matches_ignores_egg_info_artifacts",
+        "test_lib_tree_matches_ignores_dot_venv_artifacts",
+        "test_find_uv_editable_refs_editable_requires_exact_true",
+        "test_is_safe_lib_name",
+        "test_convert_to_uv_editable_refuses_an_unsafe_lib_name",
+        "test_find_uv_editable_refs_raises_manifest_unreadable_for_malformed_toml",
+        "test_find_uv_editable_refs_returns_empty_for_a_genuinely_absent_manifest",
+        "test_uv_editable_problems_surfaces_a_malformed_manifest",
+        "test_uv_editable_problems_rejects_an_unsafe_lib_name",
+        "test_find_uv_editable_refs_raises_manifest_unreadable_for_a_non_string_path",
+        "test_lib_tree_matches_false_for_an_unexpected_extra_file",
+        "test_find_uv_editable_refs_raises_manifest_unreadable_for_a_non_table_sources",
+        "test_find_uv_editable_refs_raises_manifest_unreadable_for_invalid_utf8",
+        "test_uv_editable_problems_rejects_a_canonical_lib_missing_src",
+        "test_uv_editable_problems_rejects_a_canonical_lib_missing_pyproject",
+        "test_convert_to_uv_editable_uses_the_injected_libs_dir_for_the_relpath"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_runtime_archive_closure_units.py",
       [
         "test_lifecycle_source_archive_is_deterministic_and_contains_only_python",
@@ -8600,6 +8634,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_uv_reference_fixture_units.py": "34ff0d430c9b2d9533cef8cb76964b5d8a002f727753577fb2a7d6e2a61963b5",
+    "tools/test_uv_editable_ref.py": "4764ce3cd16c9344dc83951d54facde5ae3dbe8c767400d10d7733afc6e574a7",
     "tools/promotion_unit_tests/test_runtime_archive_closure_units.py": "86c9d1c8e90649b5a3d5523fe5df4f2ed4710b1f27817083c651faddfd893ef1",
     "libs/agent-procutil/src/agent_procutil/command_pipe.py": "83ecb677ea2a47a233bf810b90d595401a030ca0138297aca4969a03316e60e6",
     "tools/promotion_unit_tests/test_runtime_sync_fixture_units.py": "acd3cbd20dca89c2881f6534cd5d2d49d8cfd9107ae31e21cb993b4b5d3d8553",
