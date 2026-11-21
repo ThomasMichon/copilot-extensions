@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 import json
 import os
+from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -11,6 +13,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 import pytest
 
@@ -19,8 +22,12 @@ from agent_machines import health_slots
 
 
 @contextmanager
-def listener(response, *, drip=False, count=1):
-    requests, failures = [], []
+def listener(
+    response: bytes, *, drip: bool = False, count: int = 1,
+    before_response: Callable[[], None] | None = None,
+) -> Iterator[tuple[int, list[bytes]]]:
+    requests: list[bytes] = []
+    failures: list[str] = []
     stopping = threading.Event()
     deadline = time.monotonic() + (8 if count == 1 else 45 * count + 5)
     with socket.socket() as server:
@@ -29,7 +36,7 @@ def listener(response, *, drip=False, count=1):
         server.settimeout(.1)
         port = server.getsockname()[1]
 
-        def serve():
+        def serve() -> None:
             try:
                 for _ in range(count):
                     while not stopping.is_set():
@@ -51,6 +58,8 @@ def listener(response, *, drip=False, count=1):
                                 raise AssertionError("bounded HTTP request unavailable")
                             request += chunk
                         requests.append(request)
+                        if before_response is not None:
+                            before_response()
                         if drip:
                             peer.sendall(response)
                             for _ in range(20):
@@ -75,12 +84,12 @@ def listener(response, *, drip=False, count=1):
             assert not failures, failures
 
 
-def test_listener_cancels_unrequested_cycles():
+def test_listener_cancels_unrequested_cycles() -> None:
     with listener(response(QUALIFYING_BODY), count=2) as (_port, requests):
         assert requests == []
 
 
-def test_listener_waits_across_a_bounded_first_run():
+def test_listener_waits_across_a_bounded_first_run() -> None:
     from agent_machines.health_observe import observe_bridge
 
     with listener(response(QUALIFYING_BODY), count=2) as (port, requests):
@@ -90,23 +99,23 @@ def test_listener_waits_across_a_bounded_first_run():
     assert len(requests) == 2
 
 
-def call(arguments):
+def call(arguments: list[str]) -> dict[str, Any]:
     child = subprocess.run(
         [sys.executable, "-I", "-m", "agent_machines", "health", *arguments],
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
     assert child.returncode == 0, child.stderr
-    return json.loads(child.stdout)
+    return cast(dict[str, Any], json.loads(child.stdout))
 
 
-def response(body):
+def response(body: bytes) -> bytes:
     return (
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
         + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
     )
 
 
-def roundtrip(tmp_path, monkeypatch, body):
+def roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
     monkeypatch.setenv("HTTP_PROXY", "http://192.0.2.1:1")
     monkeypatch.setenv("ALL_PROXY", "http://192.0.2.1:1")
     with listener(response(body)) as (port, requests):
@@ -168,7 +177,9 @@ def roundtrip(tmp_path, monkeypatch, body):
     assert {path.name: path.read_bytes() for path in store.iterdir()} == before
 
 
-def test_native_http_observation_to_normal_slot_and_age_qualified_reader(tmp_path, monkeypatch):
+def test_native_http_observation_to_normal_slot_and_age_qualified_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     roundtrip(tmp_path, monkeypatch, json.dumps({
         "status": "ok", "service": "agent-bridge", "protocol_version": 52,
         "min_protocol_version": 1, "live_host_count": 123,
@@ -177,7 +188,9 @@ def test_native_http_observation_to_normal_slot_and_age_qualified_reader(tmp_pat
     }).encode())
 
 
-def test_original_bridge_owner_response_to_native_local_health_consumer(tmp_path, monkeypatch):
+def test_original_bridge_owner_response_to_native_local_health_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     interpreter = os.environ.get("AGENT_MACHINES_TEST_BRIDGE_PYTHON")
     if not interpreter:
         pytest.skip("explicit source-bound Bridge test interpreter required")
@@ -221,7 +234,9 @@ QUALIFYING_BODY = b'{"service":"agent-bridge","status":"ok","min_protocol_versio
     (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
      + f"{len(QUALIFYING_BODY):x}\r\n".encode() + QUALIFYING_BODY + b"\r\n", False, "unavailable"),
 ], ids=["redirect", "wire-limit", "drip-deadline", "truncated-length", "huge-length", "truncated-chunks"])
-def test_native_http_refuses_redirect_overflow_and_continuous_trickle(wire, drip, reason):
+def test_native_http_refuses_redirect_overflow_and_continuous_trickle(
+    wire: bytes, drip: bool, reason: str,
+) -> None:
     with listener(wire, drip=drip) as (port, requests):
         result = call([
             "observe", "--bridge-port", str(port), "--publisher", "example", "--continuity", "generation",
@@ -232,7 +247,7 @@ def test_native_http_refuses_redirect_overflow_and_continuous_trickle(wire, drip
     }
 
 
-def test_native_observe_closed_stdout_preserves_exit_two():
+def test_native_observe_closed_stdout_preserves_exit_two() -> None:
     reader, writer = os.pipe()
     os.close(reader)
     try:
