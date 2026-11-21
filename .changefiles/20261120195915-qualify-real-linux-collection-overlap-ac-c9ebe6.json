@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify real Linux collection overlap, action child deadline and native settlement fences",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
