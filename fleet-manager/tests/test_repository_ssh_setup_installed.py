@@ -141,7 +141,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     from repository_ssh_cohort_fixture import (
         assert_installed_engine_origin, engine_cost_diagnostic,
         install_native_prerequisites,
-        manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
+        manager_activation_diagnostic, manager_installation_diagnostic,
+        manager_stack_diagnostic, native_setup_environment,
         original_engine_owner, source_application_command,
     )
 
@@ -216,9 +217,11 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             stack = text.partition("Timeout (")[2]
             if stack:
                 progress("Manager fixture stack:\nTimeout (" + stack)
+            progress(manager_installation_diagnostic(home / ".worktree-manager"))
             progress(manager_activation_diagnostic(home / ".worktree-manager"))
             raise
         if installed.returncode:
+            progress(manager_installation_diagnostic(home / ".worktree-manager"))
             progress(manager_activation_diagnostic(home / ".worktree-manager"))
         assert installed.returncode == 0, installed.stdout + installed.stderr
         progress(f"normal Manager application ready: {time.monotonic() - manager_started:.2f}s")

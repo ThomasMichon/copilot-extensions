@@ -2086,6 +2086,10 @@ The wrapper's real subprocess control verifies argument forwarding and stack
 delivery without constructing or modifying a prepared Source.
 Failed or timed-out activation also reports at most the final 16 KiB of the
 fixture Manager's passive-startup log; missing or linked logs remain explicit.
+It also reads at most 16 KiB from that Manager bootstrap request's installation
+log, selected through the isolated home's read-only queue. Other projects,
+invalid request identifiers and missing or linked files are not followed;
+the diagnostic never creates a queue or changes the installation result.
 The workflow forwards native lifecycle stdout/stderr explicitly through its
 headless Windows parent. A real nested-subprocess control exercises that
 workflow call, rather than only checking creation flags.

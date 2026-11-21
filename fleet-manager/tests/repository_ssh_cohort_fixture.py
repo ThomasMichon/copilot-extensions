@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import closing
 from functools import wraps
 import hashlib
 import importlib.metadata
@@ -12,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import sys
 import time
 from types import ModuleType
@@ -208,6 +210,32 @@ def manager_activation_diagnostic(root: Path) -> str:
     except OSError as error:
         return "Manager passive startup log unavailable: " + type(error).__name__
     return "Manager passive startup log:\n" + content.decode("utf-8", errors="replace")
+
+
+def manager_installation_diagnostic(root: Path) -> str:
+    queue = root.parent / ".copilot-extensions" / "update-driver"
+    database = queue / "queue.sqlite3"
+    if any(path.is_symlink() for path in (queue.parent, queue, database)):
+        return "Manager installation request log unavailable: linked path"
+    try:
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0.1)) as db:
+            row = db.execute(
+                "SELECT id FROM requests WHERE json_extract(spec,'$.backend')=? "
+                "AND json_extract(spec,'$.project')=? ORDER BY created_at DESC LIMIT 1",
+                ("manager-bootstrap", str(root.resolve())),
+            ).fetchone()
+        if row is None or not isinstance(row[0], str) or not re.fullmatch(r"[0-9a-f]{32}", row[0]):
+            return "Manager installation request log unavailable: no valid matching request"
+        log = queue / (row[0] + ".log")
+        if log.is_symlink():
+            return "Manager installation request log unavailable: linked path"
+        with log.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 16_384))
+            content = stream.read(16_384)
+    except (OSError, sqlite3.Error, ValueError) as error:
+        return "Manager installation request log unavailable: " + type(error).__name__
+    return "Manager installation request log:\n" + content.decode("utf-8", errors="replace")
 
 
 def source_build_diagnostic(

@@ -609,6 +609,48 @@ def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: P
     assert len(diagnostic.removeprefix("Manager passive startup log:\n")) == 16_384
 
 
+@pytest.mark.parametrize("identifier", ["a" * 32, "../outside"])
+def test_manager_installation_diagnostic_selects_only_its_bounded_request_log(
+    tmp_path: Path, identifier: str,
+) -> None:
+    from contextlib import closing
+    import sqlite3
+    from repository_ssh_cohort_fixture import manager_installation_diagnostic
+
+    root = tmp_path / "home" / ".worktree-manager"
+    queue = root.parent / ".copilot-extensions" / "update-driver"
+    queue.mkdir(parents=True)
+    database = queue / "queue.sqlite3"
+    with closing(sqlite3.connect(database)) as db:
+        db.execute("CREATE TABLE requests(id TEXT,spec TEXT,created_at REAL)")
+        for request_id, project, created_at in (
+            (identifier, root, 1), ("b" * 32, root.parent / "other", 2),
+        ):
+            db.execute("INSERT INTO requests VALUES(?,?,?)", (
+                request_id, json.dumps({"backend": "manager-bootstrap", "project": str(project.resolve())}),
+                created_at,
+            ))
+        db.commit()
+    before = database.read_bytes()
+    (queue / ("a" * 32 + ".log")).write_bytes(b"old-phase\n" + b"x" * 20_000 + b"\nactual-worker-phase\n")
+    (queue / ("b" * 32 + ".log")).write_text("unrelated-request\n")
+    diagnostic = manager_installation_diagnostic(root)
+    if identifier == "a" * 32:
+        assert diagnostic.endswith("\nactual-worker-phase\n")
+        assert len(diagnostic.removeprefix("Manager installation request log:\n")) == 16_384
+    else:
+        assert "unavailable" in diagnostic
+    assert "old-phase" not in diagnostic and "unrelated-request" not in diagnostic
+    assert database.read_bytes() == before
+
+
+def test_manager_installation_diagnostic_does_not_create_a_missing_queue(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import manager_installation_diagnostic
+
+    assert "unavailable" in manager_installation_diagnostic(tmp_path / ".worktree-manager")
+    assert not (tmp_path / ".copilot-extensions").exists()
+
+
 @pytest.mark.parametrize("fails", [False, True])
 def test_source_build_diagnostic_preserves_the_actual_builder_result(
     tmp_path: Path, fails: bool,
