@@ -184,12 +184,15 @@ or installing Python. Removal still requires the base outside the target runtime
 Selector results use ASCII-safe JSON so redirected legacy Python output can
 preserve non-ASCII installation paths.
 
-Captured calls may opt into `Invoke-Hidden -TimeoutMilliseconds N`, reserving
+Captured calls with a non-null `-ErrorOutput ([ref]$diagnostics)` may opt into
+`Invoke-Hidden -TimeoutMilliseconds N`, reserving
 `-CleanupMilliseconds` (3,000 by default) **inside** that invocation's budget.
 The caller supplies its remaining stage allowance, rather than restarting an
 installation clock. This mode includes asynchronous stdin delivery, child exit
 and both stream drains in the execution allowance; streaming modes retain
-their existing behavior and reject this option. On timeout or capture failure
+their existing behavior and reject this option. Bounded calls require captured
+diagnostics before launch: they never synchronously write stderr to the caller's
+possibly undrained pipe. On timeout or capture failure
 the helper attempts to stop its original direct child within the remaining
 allowance and throws, retaining `RootExitConfirmed` separately from
 `CleanupConfirmed = false`. It does not own or certify descendant cleanup.
