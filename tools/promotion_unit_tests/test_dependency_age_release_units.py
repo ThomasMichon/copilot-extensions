@@ -57,6 +57,12 @@ _SELECTED = (
     "test_npm_metadata_transport_bounded_and_fail_closed",
     "test_npm_ca_transport_skips_urllib_only_for_authoritative_public_url",
     "test_npm_selector_reuses_node_and_attributable_cli_without_cmd_spawn",
+    "test_plugin_contract_follows_only_invoked_canonical_preparation",
+    "test_local_file_urls_only_exempt_attributable_canonical_sources",
+    "test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals",
+    "test_unsupported_uv_resolution_input_shapes_fail_closed",
+    "test_cli_exit_status_without_network",
+    "test_native_policy_enforced_by_live_guard_without_network",
 )
 for _name in _SELECTED:
     globals()[_name] = getattr(_original, _name)
