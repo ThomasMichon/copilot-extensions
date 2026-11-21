@@ -1,24 +1,28 @@
 """Assert the disposable machine's installed CLI, never a host runtime."""
+from __future__ import annotations
 
 import hashlib
+import importlib
 from importlib.metadata import version
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+from typing import Any, cast
 
 if sys.flags.optimize:
     raise SystemExit("verification requires assertions (run without -O)")
 if len(sys.argv) != 3:
     raise SystemExit("usage: verify-install.py <installed-binstub> <snapshot>")
 
-import agent_procutil
-import budget_guidance
+agent_procutil = importlib.import_module("agent_procutil")
+budget_guidance = importlib.import_module("budget_guidance")
 
 
-def package_version(manifest_version):
+def package_version(manifest_version: str) -> str:
     number = r"(?:0|[1-9][0-9]*)"
     parts = re.fullmatch(rf"({number}\.{number}\.{number})(?:-dev({number}))?", manifest_version)
     if parts is None:
@@ -40,6 +44,8 @@ for malformed in ("1.2.3-dev04", "01.2.3", "1.2.3-dev"):
 
 bin_path, snapshot = map(Path, sys.argv[1:])
 prefix = Path(sys.prefix)
+assert budget_guidance.__file__ is not None
+assert agent_procutil.__file__ is not None
 assert Path(budget_guidance.__file__).is_relative_to(prefix)
 assert Path(agent_procutil.__file__).is_relative_to(prefix)
 expected = json.loads((snapshot / "plugin.json").read_text(encoding="utf-8"))["version"]
@@ -50,11 +56,13 @@ installed = Path(budget_guidance.__file__).parent / "quota.py"
 assert hashlib.sha256(original.read_bytes()).digest() == hashlib.sha256(installed.read_bytes()).digest()
 
 
-def status(*args):
+def status(
+    *args: str, cwd: Path | None = None, env: dict[str, str] | None = None,
+) -> dict[str, Any]:
     result = subprocess.run(
         [str(bin_path), "status", *args, "--json"],
         encoding="utf-8", errors="strict", capture_output=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)), cwd=cwd, env=env,
     )
     if result.returncode:
         raise AssertionError(
@@ -62,7 +70,7 @@ def status(*args):
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     try:
-        posture = json.loads(result.stdout)
+        posture = cast(dict[str, Any], json.loads(result.stdout))
     except json.JSONDecodeError as exc:
         raise AssertionError(
             f"installed CLI returned invalid JSON: {result.args!r}\n"
@@ -96,5 +104,15 @@ with tempfile.TemporaryDirectory(prefix="budget-static-") as temporary:
     assert posture["calculated"]["remaining"] == "680"
     assert posture["fields"]["allowance"]["selected"]["source"] == "manual-example"
     assert posture["economy_advice"]["availability"] == "available"
+    foreign = Path(temporary) / "unrelated-directory"
+    foreign.mkdir()
+    (foreign / config.name).write_text("not the caller configuration", encoding="utf-8")
+    for hint in ("UV_WORKING_DIR", "UV_WORKING_DIRECTORY"):
+        relative = status(
+            "--config", config.name, "--at", "2030-01-10T12:00:00Z",
+            cwd=config.parent, env={**os.environ, hint: str(foreign)},
+        )
+        assert relative["calculated"]["remaining"] == "680"
+        assert relative["fields"]["allowance"]["selected"]["source"] == "manual-example"
 
 print("installed source/version identity and offline posture verified")

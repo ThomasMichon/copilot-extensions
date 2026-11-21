@@ -5,6 +5,7 @@
   "payloadDir": "scripts/libs/payload-invocation",
   "files": [
     "generate.py",
+    "template_rendering.py",
     "bootstrap_python.py",
     "runtime_admission.py"
   ]

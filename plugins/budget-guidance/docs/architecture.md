@@ -39,17 +39,21 @@ account. Its inert budget reading withholds numeric values rather than turning
 an empty or historical billing report into a fresh forecast.
 
 The fast installer stamp copies the exact owning payload into an immutable
-versioned snapshot. Both compatibility and payload-local wrappers provision
-only from that recorded snapshot, serialize through the runtime root's
-`.provision.lock`, and re-resolve the runtime after acquiring the lock. They do
-not search other marketplace installations for a same-named plugin.
+versioned snapshot. Compatibility and payload-local wrappers are prepared-only:
+the existing resolver selects a complete generation, and uv launches that exact
+environment without discovery, synchronization or Python acquisition.
+Missing prerequisites report the explicit setup owner instead of provisioning
+on command use. Snapshot provisioning holds the existing install transaction
+lock, including prerequisite preparation before source helpers. The
+[command/setup contract](../README.md) owns the supported entrypoints.
+Wrappers do not search other marketplace installations for a same-named plugin.
 Session bootstrap also reads deployed and payload versions without ambient
 Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
 Snapshots also materialize the owning `agent-procutil` dependency; both installer
 paths pass its local source explicitly rather than resolving an index package.
 Both package build roots clear setuptools `build/` and root/src `*.egg-info`
-artifacts before and after every uv or pip attempt, including the fallback, so
+artifacts before and after every governed uv attempt, so
 partial build residue cannot shadow current source.
 The bootstrap and exact-session writer hooks are declared output-free and emit
 only `{}`. The writer reads inert configuration without reader grants or

@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the managed bootstrap and Invocation producer resources included by application setup",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
