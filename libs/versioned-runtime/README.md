@@ -179,6 +179,9 @@ Its `Environment` overrides apply only to the child: a null value removes an
 inherited variable, an empty string remains an empty value, and other values
 replace the child's copy. The original process environment is unchanged in
 captured, bounded and streaming modes.
+`CaptureEncoding` optionally selects the redirected stdout/stderr decoders for
+that process. UTF-8-producing helpers can request UTF-8 without changing the
+caller's console code page; omission preserves the existing decoding default.
 Source selection and deferred stamping support a host exposing only `py.exe`.
 Native driver ingress qualifies an existing Python 3.11+ physical base before
 any driver action: application commands, launcher-listed local or UNC paths,

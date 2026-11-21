@@ -12,12 +12,16 @@ import subprocess
 import shutil
 import sys
 import time
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_procutil import JobHandle
 
 
 def _record(path: Path) -> None:
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.GetConsoleWindow.restype = wintypes.HWND
-    user = ctypes.WinDLL("user32", use_last_error=True)
+    user = getattr(ctypes, "WinDLL")("user32", use_last_error=True)
     user.IsWindowVisible.argtypes = [wintypes.HWND]
     window = kernel.GetConsoleWindow()
     creation, exit_time, kernel_time, user_time = (wintypes.FILETIME() for _ in range(4))
@@ -74,36 +78,37 @@ def main() -> None:
         return
 
     from decimal import Decimal
+    from agent_procutil import spawn_sync_in_kill_on_close_job
     import budget_guidance.external_reader as reader_module
     from budget_guidance.external_reader import CommandReader, acquire_config
-    from budget_guidance.models import parse_config
+    from budget_guidance.models import StaticAdapter, parse_config
 
     results = []
-    spawn = reader_module.spawn_sync_in_kill_on_close_job
+    spawn = spawn_sync_in_kill_on_close_job
     read_output = reader_module._read_output
-    observations = {}
+    observations: dict[str, object] = {}
 
-    def observed_spawn(*args, **kwargs):
+    def observed_spawn(*args: Any, **kwargs: Any) -> tuple[subprocess.Popen[Any], JobHandle | None]:
         observations["spawn_started"] = time.monotonic()
         process, job = spawn(*args, **kwargs)
         observations["spawn_finished"] = time.monotonic()
         poll = process.poll
 
-        def observed_poll():
+        def observed_poll() -> int | None:
             code = poll()
             observations["last_poll_time"] = time.monotonic()
             observations["last_poll_code"] = code
             return code
 
-        process.poll = observed_poll
+        setattr(process, "poll", observed_poll)
         return process, job
 
-    def observed_output(*args):
+    def observed_output(*args: Any, **kwargs: Any) -> None:
         observations["output_started"] = time.monotonic()
-        read_output(*args)
+        read_output(*args, **kwargs)
         observations["output_finished"] = time.monotonic()
 
-    reader_module.spawn_sync_in_kill_on_close_job = observed_spawn
+    setattr(reader_module, "spawn_sync_in_kill_on_close_job", observed_spawn)
     reader_module._read_output = observed_output
     for cycle in range(3):
         observations = {}
@@ -123,7 +128,9 @@ def main() -> None:
             (console_python, __file__, "reader", str(current), console_python),
             current, timeout_seconds=1.5,
         )})
-        reading = acquired.adapters[0].reading
+        adapter = acquired.adapters[0]
+        assert isinstance(adapter, StaticAdapter)
+        reading = adapter.reading
         results.append({
             "availability": reading.availability, "error": reading.error,
             "consumption": str(reading.consumption) if reading.consumption is not None else None,
@@ -141,6 +148,7 @@ def main() -> None:
 
 def _cue_cycles(root: Path, console_python: str) -> None:
     from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+    from cue_fixture import managed_cue_environment, prepare_cue_assets
 
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     assert shell, "native session-cue witness requires PowerShell"
@@ -152,6 +160,7 @@ def _cue_cycles(root: Path, console_python: str) -> None:
         scripts.mkdir(parents=True)
         home = current / "home"
         home.mkdir()
+        prepare_cue_assets(scripts.parent)
         shutil.copy2(plugin / "scripts" / "write-session-guidance.ps1", scripts)
         actual_writer = plugin / "scripts" / "write_session_guidance.py"
         # Pin the actual console child before delegating to the unchanged writer.
@@ -192,7 +201,7 @@ def _cue_cycles(root: Path, console_python: str) -> None:
             }],
         }), encoding="utf-8")
         env = {
-            **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+            **managed_cue_environment(), "HOME": str(home), "USERPROFILE": str(home),
             "COPILOT_PLUGIN_ROOT": str(scripts.parent), "BUDGET_GUIDANCE_CONFIG": str(config),
             "PATH": str(Path(console_python).parent) + os.pathsep + os.environ.get("PATH", ""),
         }
