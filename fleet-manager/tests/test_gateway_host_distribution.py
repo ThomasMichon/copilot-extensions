@@ -857,7 +857,7 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
             exec(compile(code, "<native-cohort-workflow>", "exec"), {})
     else:
         exec(compile(code, "<native-cohort-workflow>", "exec"), {})
-    preparation_seconds = 240 if os.name == "nt" and not preparation_only else 180
+    preparation_seconds = 300 if os.name == "nt" and not preparation_only else 180
     assert calls == ["prepare", ("source", ["--source-commit", "a" * 40], {"wall_seconds": preparation_seconds}), "release", *(
         ["lifecycle"] if not preparation_only and prebuild_code == 0 else []
     ), "cleanup"]
