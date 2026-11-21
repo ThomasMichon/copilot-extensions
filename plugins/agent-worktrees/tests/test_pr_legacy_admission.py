@@ -62,15 +62,22 @@ def rewrite(root: Path, value: dict[str, object]) -> None:
     )
 
 
+@pytest.mark.parametrize("volume_supported", [False, True])
 def test_unsealed_installation_keeps_normal_authority_but_refuses_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, volume_supported: bool,
 ) -> None:
     root = tmp_path / "installation"
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
+    def volume(_root: Path) -> int:
+        if not volume_supported:
+            raise admission.LegacyAdmissionError("Fixture native volume provider is unavailable.")
+        return 3
+    monkeypatch.setattr(admission, "_native_volume_type", volume)
     with pr_authority.guard():
         assert (root / "pr-rewrite-authority.lock").is_file()
     before = tuple(root.iterdir())
-    with pytest.raises(admission.LegacyAdmissionError, match="not physically qualified"):
+    reason = "not physically qualified" if volume_supported else "native volume provider is unavailable"
+    with pytest.raises(admission.LegacyAdmissionError, match=reason):
         admission.require_guarded_quiescence()
     assert tuple(root.iterdir()) == before
 

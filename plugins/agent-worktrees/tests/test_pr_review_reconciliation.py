@@ -695,8 +695,9 @@ def test_ordinary_success_settles_the_hold_and_reuses_the_selected_provider_for_
     from agent_worktrees import pr_ops, providers
 
     config, caller, _owner, _workspace = native_source_owners
+    policy = replace(config.default_repo.pr, api_base="https://forge.example.test")
     target = tracking.PRRecord(pr_id="pending", branch="pr/topic", repo="upstream/target",
-                               provider=config.default_repo.pr.provider, state="creating")
+                               provider=policy.provider, state="creating")
     caller.prs = [target]
     tracking.save_record(caller)
     review_calls: list[bool] = []
@@ -705,7 +706,7 @@ def test_ordinary_success_settles_the_hold_and_reuses_the_selected_provider_for_
         assert kwargs["token"] == "selected-credential"
         if managed:
             assert tracking.load_record(caller.yaml_path).prs[0].creation["provider_outcome"] == "publishing"
-        return PullResult(number=7, url="https://forge.example.test/upstream/target/pull/7",
+        return PullResult(number=7, url=f"{scope.api_base}/{scope.repo}/pulls/7",
                           state="open", head_sha="a" * 40)
 
     backend = SimpleNamespace(create_pull=create)
@@ -723,8 +724,9 @@ def test_ordinary_success_settles_the_hold_and_reuses_the_selected_provider_for_
                               "remote": "origin", "base_sha": "b" * 40}
     pr_ops._open_via_provider(
         result, config, caller if managed else None, target, "Fix", "", caller.worktree_id,
-        "a" * 40, prcfg=config.default_repo.pr,
+        "a" * 40, prcfg=policy,
     )
+    assert not result.get("pr_open_error"), result.get("pr_open_error")
     assert result["success"] and result["pr_opened"] and result["number"] == 7, result
     assert result["self_merge_note"] == "Review eligibility inspected" and review_calls == [True]
     if managed:
