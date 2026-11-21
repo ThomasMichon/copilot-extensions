@@ -86,7 +86,7 @@ def heal_numberless_active_pr(
     if active is None or active.number is not None or not active.branch:
         return False
     from . import pr_creation_reconcile
-    if pr_creation_reconcile.requires_qualification(active):
+    if pr_creation_reconcile.requires_qualification(active) or active.creation.get("provider_outcome") == "unknown":
         return False
     prcfg = config.default_repo.pr
     provider_name = active.provider or prcfg.provider

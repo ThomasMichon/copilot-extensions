@@ -219,6 +219,7 @@ def test_github_foreign_fork_creation_uses_explicit_actual_source_repository(
     if workspace:
         workspace = str(_workspace)
         git(_workspace, "switch", "-c", "topic")
+        git(_workspace, "remote", "set-url", "origin", "https://github.com/owner/other-repo.git")
         git(_workspace, "remote", "set-url", "--push", "origin",
             "https://github.com/contributor/renamed-source.git")
 

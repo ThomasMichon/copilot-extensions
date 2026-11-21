@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 
 from . import config as cfg, git_ops, source_path_admission, tracking
+from .git_repository_environment import repository_identity_scope
 
 
 def update(path: Path, worktree_id: str, *, title: str | None, title_only: bool) -> None:
@@ -16,12 +17,14 @@ def update(path: Path, worktree_id: str, *, title: str | None, title_only: bool)
         return
     root = Path.cwd()
     if missing:
-        observed = git_ops.git("rev-parse", "--show-toplevel", cwd=root, check=False)
-        if observed.returncode or not observed.stdout.strip():
+        with repository_identity_scope():
+            observed = git_ops.git("rev-parse", "--show-toplevel", cwd=root, check=False)
+        top = observed.stdout.removesuffix("\n").removesuffix("\r")
+        if observed.returncode or not top:
             raise ValueError("Completion needs the exact Git checkout root before creating an owner.")
-        root = Path(observed.stdout.strip()).resolve()
+        root = Path(top).resolve()
     admission = source_path_admission.guard(root, timeout=0) if missing else nullcontext()
-    with admission, tracking._RecordLock(path, require_sidecar=True):
+    with admission, tracking._RecordLock(path, require_sidecar=True), repository_identity_scope():
         if path.exists():
             record = tracking.load_record(path)
         else:

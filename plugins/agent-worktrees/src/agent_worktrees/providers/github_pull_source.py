@@ -6,7 +6,7 @@ from collections.abc import Callable
 import json
 from subprocess import CompletedProcess
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from .base import PRScope, ProviderError, PullResult
 from .github_fork_source import _slug
@@ -31,14 +31,33 @@ def matches(pull: PullResult, source: str, branch: str, endpoint: str) -> bool:
     return bool(expected) and pull.head_ref == branch and _identity(pull.head_url, "").casefold() == expected.casefold()
 
 
-def _pull(data: Any) -> PullResult:
+def validate_url(raw_url: str, number: int | None, repository: str, endpoint: str) -> None:
+    """Require the returned URL to name the selected forge, target and number."""
+    if type(number) is not int or number <= 0:
+        raise ProviderError("GitHub did not return a valid pull-request identity.")
+    try:
+        url = urlsplit(raw_url)
+        valid_url = (
+            not any(character.isspace() or ord(character) < 32 for character in raw_url)
+            and url.scheme == "https" and url.netloc.casefold() == endpoint.casefold()
+            and not url.username and not url.password and not url.query and not url.fragment
+            and url.path.removesuffix("/").casefold() == f"/{_slug(repository)}/pull/{number}".casefold()
+        )
+    except ValueError:
+        valid_url = False
+    if not valid_url:
+        raise ProviderError("GitHub returned an unrelated or invalid pull-request URL.")
+
+
+def _pull(data: Any, repository: str, endpoint: str) -> PullResult:
     if not isinstance(data, dict) or type(data.get("number")) is not int or data["number"] <= 0:
         raise ProviderError("GitHub did not return a valid pull-request identity.")
+    validate_url(source_text(data, "html_url"), data["number"], repository, endpoint)
     head, base = source_object(data, "head"), source_object(data, "base")
-    repository = source_object(head, "repo")
+    source_repository = source_object(head, "repo")
     from ..pr_publish import _identity
-    slug = _slug(repository.get("full_name"))
-    if _identity(source_text(repository, "clone_url"), "").partition("/")[2].casefold() != slug.casefold():
+    slug = _slug(source_repository.get("full_name"))
+    if _identity(source_text(source_repository, "clone_url"), "").partition("/")[2].casefold() != slug.casefold():
         raise ProviderError("GitHub returned inconsistent source repository identities.")
     state = source_text(data, "state")
     if state not in ("open", "closed"):
@@ -46,7 +65,7 @@ def _pull(data: Any) -> PullResult:
     return PullResult(
         number=data["number"], url=source_text(data, "html_url"), state=state,
         merged=bool(data.get("merged_at")), head_sha=source_text(head, "sha"),
-        head_ref=source_text(head, "ref"), head_url=source_text(repository, "clone_url"),
+        head_ref=source_text(head, "ref"), head_url=source_text(source_repository, "clone_url"),
         base_ref=source_text(base, "ref"),
         draft=data.get("draft") if type(data.get("draft")) is bool else None,
     )
@@ -98,7 +117,7 @@ def find(
                 head = data.get("head")
                 if not isinstance(head, dict) or head.get("repo") is None:
                     continue
-            pull = _pull(data)
+            pull = _pull(data, repository, provider.authority_endpoint(api_base))
             if matches(pull, source, branch, provider.authority_endpoint(api_base)):
                 candidates.append(pull)
     opened = [pull for pull in candidates if pull.state == "open" and not pull.merged]
@@ -126,7 +145,7 @@ def create(
     receipt = PullResult(number=data["number"])
     try:
         receipt.url = source_text(data, "html_url")
-        pull = _pull(data)
+        pull = _pull(data, scope.repo, provider.authority_endpoint(scope.api_base))
         base = source_object(data, "base")
         if (
             not matches(pull, source, branch, provider.authority_endpoint(scope.api_base))
