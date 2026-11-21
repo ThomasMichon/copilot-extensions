@@ -56,8 +56,13 @@ research wave, not a claim that the remaining corpus has been ranked.
 The [retained historical receipt register](roadmap-historical-retained-receipts.md)
 accounts for 161 of the existing 292 identities without repeating unchanged
 original/source studies: the previous 144 plus seventeen specific owner/causal
-controls. The remaining 131 and current
-vision/effort-home integration remain open. Its
+controls. The [continuation register](roadmap-historical-continuation-controls.md)
+adds the remaining 131, accounting for all 292 receipt/control/gap decisions
+without growing the 75 varied-strength authored/read bindings.
+Current vision/effort-home, priority/owner and scoped-sequencing integration
+remain open. The [continuation journal](journal/2026/11.21-historical-continuation-controls.md)
+records actual #13908 delivery and precise retained-source corrections.
+The earlier register's
 [dated changed-evidence journal](journal/2026/11.21-historical-retained-receipts.md)
 retains #2556's finite source counterexample, #13851's bounded consumer
 delivery and two later #4130 observations without technical completion,
