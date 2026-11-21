@@ -4,13 +4,23 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn, Protocol, cast
 
 import pytest
 
-from agent_worktrees import _command_binding, _installation_context, installation_cli, installer
+from agent_worktrees import (
+    _command_binding, _installation_context as _installation_context_module,
+    config as cfg, installation_cli, installer, registry_paths, worktree_identity,
+)
 
 pytestmark = pytest.mark.guard
+
+
+class _FixtureContext(_command_binding.InstallationPrimitive, Protocol):
+    def _current_environment(self, **arguments: Any) -> Any: ...
+
+
+_installation_context = cast(_FixtureContext, _installation_context_module)
 
 
 @pytest.fixture
@@ -31,12 +41,13 @@ def owned_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
     }), encoding="utf-8")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / ".copilot"))
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(payload))
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(installer, "install_dir", lambda: runtime)
     monkeypatch.setattr(installer, "find_package_source", lambda *args: package)
-    monkeypatch.setattr(installer.registry_paths, "installation_context", lambda: None)
+    monkeypatch.setattr(registry_paths, "installation_context", lambda: None)
     original = _installation_context._current_environment
 
     def current_environment(**arguments: Any) -> Any:
@@ -78,7 +89,7 @@ def test_command_binding_python_publisher_preserves_foreign_owner(owned_install:
 
 
 def test_command_binding_python_publisher_reports_unavailable_source(
-    owned_install: tuple[Path, Path], capsys: pytest.CaptureFixture,
+    owned_install: tuple[Path, Path], capsys: pytest.CaptureFixture[str],
 ) -> None:
     home, runtime = owned_install
     (home / ".copilot/settings.json").write_text("{}", encoding="utf-8")
@@ -90,7 +101,7 @@ def test_command_binding_python_publisher_reports_unavailable_source(
 
 
 def test_command_binding_python_cli_reports_refusal_without_traceback(
-    owned_install: tuple[Path, Path], capsys: pytest.CaptureFixture,
+    owned_install: tuple[Path, Path], capsys: pytest.CaptureFixture[str],
 ) -> None:
     home, runtime = owned_install
     installer.write_deploy_manifest(home, "example-host")
@@ -109,13 +120,13 @@ def test_command_binding_python_cli_reports_refusal_without_traceback(
 
 
 def test_command_binding_python_install_admission_precedes_runtime_mutation(
-    owned_install: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    owned_install: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     home, runtime = owned_install
     monkeypatch.setattr(installer, "check_prereqs", lambda: [])
-    monkeypatch.setattr(installation_cli.worktree_identity, "_find_repo_dir", lambda: home)
-    monkeypatch.setattr(installation_cli.cfg, "project_name", lambda: "example")
-    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root, **k: home / "missing-machines.yaml")
+    monkeypatch.setattr(worktree_identity, "_find_repo_dir", lambda: home)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(cfg, "machines_yaml_path", lambda root, **k: home / "missing-machines.yaml")
     mutations = []
 
     def deploy(*args: Any) -> int:
@@ -144,18 +155,18 @@ def test_command_binding_python_install_admission_precedes_runtime_mutation(
 
 
 def test_command_binding_python_install_rejects_invalid_context_at_error_boundary(
-    owned_install: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    owned_install: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     home, runtime = owned_install
     monkeypatch.setattr(installer, "check_prereqs", lambda: [])
-    monkeypatch.setattr(installation_cli.worktree_identity, "_find_repo_dir", lambda: home)
-    monkeypatch.setattr(installation_cli.cfg, "project_name", lambda: "example")
-    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root, **k: home / "missing-machines.yaml")
+    monkeypatch.setattr(worktree_identity, "_find_repo_dir", lambda: home)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(cfg, "machines_yaml_path", lambda root, **k: home / "missing-machines.yaml")
 
-    def invalid_context():
+    def invalid_context() -> NoReturn:
         raise _installation_context.InstallationContextError("invalid fixture context")
 
-    monkeypatch.setattr(installer.registry_paths, "installation_context", invalid_context)
+    monkeypatch.setattr(registry_paths, "installation_context", invalid_context)
     monkeypatch.setattr(installation_cli, "_install_project", lambda *args: pytest.fail("Mutation admitted"))
     before = list(runtime.iterdir())
     assert installation_cli.cmd_install(argparse.Namespace(machine="example-host")) == 1

@@ -39,6 +39,7 @@ class InstallationPrimitive(Protocol):
     def probe_legacy_entrypoint(self, **arguments: Any) -> dict[str, Any]: ...
     def normalize_source(self, *args: Any, **arguments: Any) -> Any: ...
     def source_identity(self, *args: Any, **arguments: Any) -> dict[str, Any]: ...
+    def paths_equal(self, left: str | os.PathLike[str], right: str | os.PathLike[str]) -> bool: ...
 
 
 def _identity(value: Mapping[str, Any]) -> str:
@@ -66,6 +67,24 @@ def _legacy_receipt(
         "source": provenance["source"],
         "payloadRoot": provenance["payloadRoot"],
     }
+
+
+def _retained_legacy_receipt(
+    primitive: InstallationPrimitive, provenance: Mapping[str, Any],
+    mode: Mapping[str, Any], manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    retained = manifest.get("commandBinding")
+    lifecycle = manifest.get("commandLifecycle")
+    if retained is None and isinstance(lifecycle, dict):
+        retained = lifecycle.get("owner")
+    root = retained.get("runtimeRoot") if isinstance(retained, dict) else None
+    if (
+        isinstance(root, str) and root != mode["runtimeRoot"] and Path(root).is_absolute()
+        and primitive.paths_equal(root, mode["runtimeRoot"])
+    ):
+        # Preserve established identity across spellings of the same physical root.
+        mode = {**mode, "runtimeRoot": root}
+    return _legacy_receipt(provenance, mode)
 
 
 def publish_legacy_binding(
@@ -108,7 +127,7 @@ def publish_legacy_binding(
             "Cannot publish legacy command ownership: "
             f"status={mode['status']}, reason={mode['reason']}."
         )
-    receipt = _legacy_receipt(provenance, mode)
+    receipt = _retained_legacy_receipt(primitive, provenance, mode, incumbent)
     if reservation is not None and (
         not isinstance(reservation, dict)
         or type(reservation.get("version")) is not int
@@ -393,13 +412,14 @@ def resolve_command_binding(
                 return result
             receipt = manifest.get("commandBinding")
             lifecycle = manifest.get("commandLifecycle")
+            expected = _retained_legacy_receipt(primitive, provenance, mode, manifest)
             if lifecycle is not None and (
                 not isinstance(lifecycle, dict)
                 or type(lifecycle.get("version")) is not int
                 or lifecycle.get("version") != 1
                 or lifecycle.get("state") != "complete"
                 or lifecycle.get("owner") != {
-                    key: value for key, value in _legacy_receipt(provenance, mode).items()
+                    key: value for key, value in expected.items()
                     if key != "payloadRoot"
                 }
                 or set(lifecycle) != {"version", "state", "owner"}
@@ -412,7 +432,6 @@ def resolve_command_binding(
             if receipt is None:
                 result["reason"] = "legacy-ownership-missing"
                 return result
-            expected = _legacy_receipt(provenance, mode)
             if (
                 not isinstance(receipt, dict)
                 or type(receipt.get("version")) is not int

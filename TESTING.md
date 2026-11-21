@@ -1,5 +1,18 @@
 # Testing copilot-extensions
 
+Command-owner root-alias controls live in
+`libs/payload-invocation/tests/test_command_lifecycle.py`, covering in-process
+and inherited leases, unchanged installation identity through publication and
+readback, and malformed, foreign, dead-owner and edited-receipt refusal.
+Windows uses its real extended-root spelling; POSIX uses an equivalent parent
+path. The Worktrees native fixture's existing private command-owner control
+separately crosses an actual child process for plain/aliased roots and both
+success/failure outcomes. It requires no Copilot or mux execution.
+Seven actor-free `tools/promotion_unit_tests/test_command_owner_root_alias.py`
+cases retain the provider-verified alias boundary and source/identity/root
+refusals in the eligible packet. These source controls do not qualify the
+hosted attached-caller lifetime, application startup or installed rollout.
+
 The focused retained-active-review packet uses
 `agent-pull-requests/tests/test_retained_review_adoption.py` and
 `services/pr/tests/test_retained_active_reviews.py` through the existing plugin

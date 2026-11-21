@@ -266,6 +266,12 @@ Binding emitters use isolated Python, including the PowerShell launcher
 bootstrap and binding helper: neither the project working directory, inherited
 Python import paths, nor user-site startup hooks supply discovery code.
 Only the explicitly addressed payload helper supplies binding code.
+Legacy lifecycle tickets, reservations and completed receipts retain the
+original owner's root spelling when the installation primitive verifies an
+equivalent absolute physical path, including Windows extended paths. Reentry,
+publication and readback therefore keep the same installation identity.
+This does not admit a different root, source or owner: complete receipt equality
+and live host, PID, token, operation and lock checks remain independent gates.
 The PowerShell launcher admits its interpreter and runs that helper in the same
 process, avoiding a second Python startup. An unavailable launcher can fall
 back to a non-WindowsApps interpreter; an admitted helper's failure or empty
