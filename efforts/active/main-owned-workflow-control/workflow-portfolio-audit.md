@@ -3413,6 +3413,48 @@ install and live external lanes are not exercised because no provisioning/
 runtime behavior or activation changes. Native, installed, release,
 full-census, comparable whole-flow and retained-custody gates remain open.
 
+### November 21 runtime-sync fixture unit delivery
+
+The export-only adapter preserves six original function objects, the original
+`repository` fixture, every assertion and all expanded parameter suffixes.
+Only the ordinary package-archive destination is admitted; its redirected
+expansion, other native-link matrices, POSIX umask publication and real archive
+closure cases remain outside this slice. The fixture's original archive
+substitute stays intact, as do reads of two already-bound real Python dependency
+files. Temporary shell/PowerShell bytes and the archive dependency test's eight
+synthetic Python members are data, not native execution.
+
+The guarded development run passes six cases with one deselection in 2.140
+seconds, zero prohibited effects, nine bound Python source reads and positive
+per-case call coverage of the actual sync or archive owner. Source storage
+retains all 6,872 preceding nodes and hashes, adding three source bindings and
+two actual coverage owners: 6,878 nodes, 1,083 sources, 444 targets and the same
+89 helper decisions and 300-second limit. The compact-v2 file is 788,646 bytes;
+normalization still emits flat-v1 evidence. Ruff and whole-file strict Linux/
+Windows typing pass. No production, original test or effect contract changes.
+
+Current-head Copilot approval `6007861807` covers
+`7a03e49bd5890f724116664a07503189a872808c` with no comments or open threads.
+CI `44944259323`, unit job `136967970940`, guards `136967971114` and required
+aggregate `136969146947` succeed; trusted run `44944259512` also succeeds.
+Actual logs show all 6,878 cases freshly executed, 39 deselections, 174.08
+pytest seconds and 196.281 packet seconds; lookup takes 573 ms. This is not a
+reuse hit or controlled whole-flow speedup. Seven fresh verifier reads and a
+fresh review/veto/hold/head check pass before the managed merge without
+bypassing CI or dispatching a metadata refresh.
+
+Source #13961 merges at `2026-11-21T20:10:19Z` as
+`eafd884203e894d828a54bdbbcd959a29d801e45`. Independent readback confirms merged
+state, no closing references and open parent #6237. The source worktree is
+reconciled through scoped synchronization and the full canonical parent is
+reread before resolving only this finite leaf. Continue the three unchanged
+archive-closure controls, with every real Python input bound as read-only data.
+The same bounded owner check finds #1303/#3336 and both exact requests unchanged,
+with no newer comments or accepted seam; no shared workflow edit follows.
+Fresh-install/native/installed external lanes are not exercised because no
+provisioning or runtime behavior changes. Native, release, full-census,
+comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
