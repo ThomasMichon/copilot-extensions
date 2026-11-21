@@ -61,6 +61,8 @@ _SELECTED = (
     "test_local_file_urls_only_exempt_attributable_canonical_sources",
     "test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals",
     "test_unsupported_uv_resolution_input_shapes_fail_closed",
+    "test_cli_exit_status_without_network",
+    "test_native_policy_enforced_by_live_guard_without_network",
 )
 for _name in _SELECTED:
     globals()[_name] = getattr(_original, _name)
