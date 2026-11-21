@@ -8,6 +8,10 @@ Preceding decisions: [retained-receipt register](roadmap-historical-retained-rec
 Delivery and continuation: [dated journal](journal/2026/11.21-historical-continuation-controls.md).
 Correspondence follow-through:
 [specific retained receipts and source-delivery limits](journal/2026/11.21-specific-correspondence-and-source-delivery.md).
+Selected current repair contract:
+[repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md).
+Independent source-unit delivery:
+[materializer asset and local-source admissions](journal/2026/11.21-materializer-asset-and-source-units.md).
 
 ## Accounting and evidence boundary
 
@@ -72,6 +76,7 @@ cleanup, owner contact, claim transfer or issue disposition.
 | #6407 | Safe-YAML/exact conservative legacy-repair union and metadata/privacy/concurrency preservation remain. #6555 writer/locked atomic repair and #6421 creation/JSON/selector remainders are source-complete, not pending review/conflict. Released-runtime selective repair and real consumer acceptance remain unproved; no installed repair or backup release follows. |
 | #6409 | Credit #6414's historical source consolidation while retaining containing-release/affected-PR/native aggregate acceptance. Later #7269 intentionally retires native required-PR graphs; disabled weekly/manual inventory is not a passing replacement. Preserve fail-closed selectors, fork safety, coverage/aggregate reduction and existing #6237/#1303 custody without restoring the obsolete graph. |
 | #6443 | Credit the Gateway/Index source union and later account-source-lease claimant, not live provider/container adoption. Complete #6383 receiving retains service/CLI/persistence/image/refresh/controller and credential expiry/revocation/disconnect/unknown cases. #7778 supersedes agreement-first source veto, not actual overlap or custody. Fixed API, noninteractive cache, affinity, bounded concurrent reads and incarnation validation remain; no second issuer/store/transaction engine. |
+| #6464 | The particular earlier refusal was a numerical-reference intersection, prospectively reconciled before a fresh qualified complete original and all ten discussions. Preserve all five acceptance clauses: host-qualified declarations/receipts, default no-write plan versus exact selected apply, independent post-readiness, source/stale-input and bounded failure/unknown checks, and real installed-consumer/native proof. Credit reported ordinary-owner delivery without restoring obsolete no-executor/pending-WSL prose. Root-free-owner reports and narrower project-selection/readiness-context claims do not transfer the existing conductor, uninstall, serving or installer owners or establish current missing implementation. Actual linked-source/copy restrictions and old withheld packets remain. |
 | #6470 | Complete R/RV receiving retains named resources, current root/class/readiness, containment, supplier versus managed execution and supplier custody THROUGH actual paired-harness adoption. #6531/#6705 source/two-root proof is not that receipt. The newest-first enhancement does not change oldest-first defaults, priority/list ordering, atomic election or reservations. |
 | #6471 | Credit #6542's exact preview-first recovery, status audit, failure history, leases and allocation fences; it is not missing or business rearming. The original second-conclusion Git wait lacked causal PID/pipe/lock evidence; later passes are not a cause fix or #6185 lock proof. Integration/native/live-owner acceptance remains. |
 | #6486 | Complete original retains two same-provider publishers, serialization and recovery data. Old passes and later cross-references do not establish a causal repair or whole accepted transfer. Preserve the actual completion-marker boundary and owner, without calling the issue a flake or repeating source/native probes. |
@@ -167,7 +172,6 @@ neither releases a real restriction nor establishes copying by itself.
 | #5873 | The actual #7028 chain includes an independent unqualified source author. Commit-identity clarification does not clear that content. |
 | #6082 | The specific prior return was incomplete: an actual vendored-installer-engine-derived unit and its containing response remain opaque. The earlier five-row proposal did not establish whole coverage or authorize an installer amendment. Exposure followed by stopping is not whole-read acceptance; no part read, recount, hash, excision, alternate or proxy follows. |
 | #6109 | Actual vendored-installer-engine-derived content is a copy condition, not a mere citation. Its applicability remains unresolved; no whole original/source/alternate is admitted. |
-| #6464 | The precise older withholding cause is not established by this receipt. Recover the actual source/owner cause before affected text; neither infer copying from a reference nor clear an actual containing copy through another issue's correction. |
 | #7500 | The particular writer's source qualification is missing and its body was unread. This is neither a current complete original/home assessment nor an automatic whole-original ban; do not proxy the writer through another source. |
 
 ## Specific correspondence gaps

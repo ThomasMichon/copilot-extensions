@@ -410,6 +410,21 @@ the non-public approval conversation.
 
 ## Plan
 
+The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
+records three independently qualified merged-description reports: sixty
+additional original cases through 27 exact objects, with 103 of 165 mapped
+and 62 residual. Fixture-only source admission is not native, installed or
+whole-parent acceptance. Actual #13946 delivery and the complete 10:30:11 PST
+900-open census are recorded; all source/owner limits and the fixed target remain.
+
+The [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md)
+reconciles #6464's particular numerical-reference refusal and records a fresh
+qualified complete original/all-ten-discussion study. It preserves all five
+acceptance clauses, ordinary/active-core and actual-consumer distinctions,
+and the existing conductor, installer and serving owners. It is not a new
+implementation-absence finding or transfer. Actual #13943 delivery is recorded;
+the last complete census remains 900 open, 171 above the fixed target.
+
 The [current Python-prerequisite contract](journal/2026/11.21-current-python-prerequisite-contract.md)
 resolves #6888's specific reference-derived research stop through actual
 cause reconciliation and a qualified complete original/all-discussion read.
