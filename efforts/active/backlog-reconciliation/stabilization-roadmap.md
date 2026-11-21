@@ -53,6 +53,15 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [selected integrated execution waves](roadmap-execution-waves.md) compose
+the reviewed leaf evidence into original-owner entry, useful slices, scoped
+precedences and source/release/consumer exits. Exact 455-identity coverage
+classes and the three changed historical metadata gaps remain distinct from
+whole technical/home acceptance. The [journal](journal/2026/11.21-integrated-execution-waves.md)
+records actual #13931 delivery; review of this integration and assessment
+of the six conditions below remain separate from review of its inputs.
+No new hard edge, implementation assignment or automatic gate completion follows.
+
 The [cleanup and packet-delivery unit](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
 adds the actual default-False cleanup-result distinction and five bounded
 original-unit admissions, preserving existing native/opt-in credit and

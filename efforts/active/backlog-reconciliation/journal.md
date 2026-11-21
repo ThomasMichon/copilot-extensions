@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Integrated execution waves and explicit coverage gaps](journal/2026/11.21-integrated-execution-waves.md)
+
 - [2026-11-21 - Ordinary cleanup diagnostics and bounded packet deliveries](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
 
 - [2026-11-21 - Current force identity and independent keeper lanes](journal/2026/11.21-current-force-identity.md)

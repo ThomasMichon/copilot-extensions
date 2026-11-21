@@ -410,6 +410,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [integrated execution-wave proposal](roadmap-execution-waves.md) composes
+six reviewed P1 contributions and independent P2/qualification lanes with
+the exact current 455-identity coverage classes, specific refresh gaps,
+original custodians/home uncertainty and the existing 145 scoped relations.
+Its [journal](journal/2026/11.21-integrated-execution-waves.md) records actual
+#13931 delivery. This is a finite planning proposal, not implementation,
+whole-home transfer or automatic completion of the six roadmap gates.
+
 The [cleanup and packet-delivery unit](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
 records actual #13928 delivery, the distinct ordinary cleanup diagnostic and
 five bounded source-admission reports. It preserves current native/opt-in
@@ -5293,6 +5301,11 @@ closure credit, resource release or parent checkbox change follows.
   coverage, provisional decisions, priority rationale and wave exit criteria,
   with the [cross-wave sequencing proposal](roadmap-sequencing.md) through
   normal review before treating it as an execution plan.
+  The [selected integrated waves](roadmap-execution-waves.md) now name the
+  reviewed leaf contributions, original work homes and explicit gaps, parallel
+  work, scoped precedences and source/release/consumer exits. Their normal
+  review and an actual gate assessment remain distinct from review of the
+  component inputs; no implementation or automatic checkbox completion follows.
 
 ### Phase 3 - Threshold guidance
 
