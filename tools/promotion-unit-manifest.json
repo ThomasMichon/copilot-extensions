@@ -9772,7 +9772,7 @@
     "plugins/agent-worktrees/bin/agent-worktrees.cmd": "bc043eeb3330a39e0da4dd12330eb7fb33070eba29cc9ff0912d2015d6a69265",
     "plugins/agent-worktrees/bin/agent-worktrees-update-entry.sh": "086d5970f913760f4d9fe84113a2f225701e9bb04316689e9483bea5df892a01",
     "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1": "260336d5b775b4c86bcf74a939bdd32ce5c4691d79989dc43cbbdcb4f1d2ffc2",
-    "plugins/agent-worktrees/scripts/installation-context/json-query.awk": "825e73c0c863dc92484e6ea179ca1356d315b92479ad871ccaa3dd274802f550",
+    "plugins/agent-worktrees/scripts/installation-context/json-query.awk": "761b11358ba089705086b29cb44efaff22882b9604e5969892ac6eeb390e5175",
     "tools/fixtures/logger-pre-queue/agent-logger.ps1": "8ebb79777d5396882523e23e291653f6ae188a425ced8dc27c907d78f4c8b5d1",
     "tools/fixtures/logger-pre-queue/logger-auxiliary.ps1": "4aeed1f744424f6f5ab53bbe49982b8a6b1ada96130201d7a7a83467db44febf",
     "tools/promotion_unit_tests/test_original_wheel_input_controls.py": "88b153e5d110128545328e5cf36f148cc323f4ca56f2fcdff64c132d369d6819",
