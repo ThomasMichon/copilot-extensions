@@ -11336,12 +11336,52 @@ trees, never the actual checkout; shared build and installer-policy modules are
 imported, not invoked to build, query a registry or prepare an installation.
 The original unselected npm-toolchain skip marker still observes
 tool presence at import; no npm, UV, network or installer process executes.
-Keep `tools/promotion-unit-manifest.json` node and source-map entries unindented,
-one per line, and coverage-target entries indented four spaces. Independent
+Keep `tools/promotion-unit-manifest.json` node, coverage-target and source-map
+entries unindented, one per line. Independent
 source hash updates retain their own lines so they can merge cleanly.
+Source entries omit the optional space after the JSON colon.
 Its closed admission data is nearing the existing non-image file-size cap.
 Whitespace does not change the canonical manifest digest; do not raise the
 cap or remove admitted cases to accommodate formatting.
+
+### Unit-manifest storage compatibility
+
+The checked-in source inventory remains
+`copilot-extensions.promotion-units/v1`, with flat, ordered `nodes`.
+The admission reader additionally accepts the compact source-storage profile
+`copilot-extensions.promotion-units/v2`. It replaces only `nodes` with
+`node_groups`: an ordered list of `[test_file, [case_suffix, ...]]` pairs.
+Each full identity is `test_file + "::" + case_suffix`. Repeated nonadjacent
+file groups are allowed and their order is significant; grouping by a
+dictionary must not reorder interleaved selections.
+All other required fields remain `max_seconds`, `sources` and `coverage_targets`.
+Unknown fields, incomplete/empty groups, invalid UTF-8, duplicate full identities
+and every original path/source/target/budget violation refuse admission.
+Expanded identifier bytes are bounded by the existing 128 MiB
+`MAX_PACKET_FILE_BYTES` limit before each full identifier is constructed.
+The repository's separate 1 MiB source-file cap is unchanged.
+
+Admission normalizes v2 storage to the existing logical v1 manifest.
+For identical logical data, complete node order, source/target sets, limits
+and canonical manifest digest are identical. Raw source/packet file hashes
+still bind actual bytes: storage conversion cannot relabel a prior artifact
+or bypass source, recipe, execution or reuse validation. Candidate composition,
+proof profiles and the explicit Windows-native schema remain unchanged.
+
+This is a reader-first expansion, not writer activation or a workflow change.
+The actual prior reader still accepts v1 and refuses v2; keeping the repository
+inventory and emitted packets in v1 preserves that rollback path today.
+A later writer change must prove capable readers at each actual selected
+consumer, migrate raw node-list assertions, and retain an equivalent supported
+rollback or explicit pre-effect incompatibility. It must not infer support
+from a package version, drop tests to produce a fallback, weaken limits or
+activate an independently owned control path.
+
+Fourteen focused compact-format controls cover strict admission, bounded
+expansion, ordered normalization, actual source/packet loading and candidate
+composition. The existing real compatibility-CLI controls exercise both storage
+forms without running Git or release actors. These source results do not prove
+deployed reader adoption, installed/native qualification or full-census coverage.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
