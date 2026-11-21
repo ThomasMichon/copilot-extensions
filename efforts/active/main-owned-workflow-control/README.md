@@ -931,7 +931,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13950 merges at `e73a6e85ee37973702bd82a816efab82dd4d4315` after
   exact-head Copilot approval and complete required Linux CI with all 6,809
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land only the four original serial pointer-discovery cases
+- [x] Qualify and land only the four original serial pointer-discovery cases
   from the unchanged six-case matrix. Preserve exact original function
   identity, parameter values, suffixes, fixtures and assertions; retain both
   `parallel=True` real-worker cases outside. Require closed sources, actual
@@ -941,6 +941,20 @@ authorizes critical main-path acceptance or a bounded administrative change.
   CI. No native prefilter, token import or thread may be preloaded or replaced
   to qualify a case. All 44 residual originals and broader acceptance gates
   remain outside this finite item.
+  #13953 merges at `6ffd1d3094b966d03416a812dbf80dde9184589c` after
+  exact-head Copilot approval and complete required Linux CI with all 6,813
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land the 25 original synthetic installer-sync cases, exporting
+  their 22 unchanged test functions and exact `fake_repo` fixture. Preserve
+  original assertions, parameter identities and all 153 remaining originals
+  outside the packet. Require closed Python bindings, actual per-case sync
+  owner calls and zero prohibited effects; temporary shell/Python fixture
+  content is data, never real installer assets or executed installers. Retain
+  all 6,813 preceding nodes/hashes, 89 helper decisions, compact/flat-v1
+  contracts and the 300-second limit, with only the sync owner added as a
+  coverage target. Obtain strict typing, current-head review and complete
+  Linux source CI. This finite item changes no installer behavior and settles
+  no native, installed, release, full-census, whole-flow or custody gate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
