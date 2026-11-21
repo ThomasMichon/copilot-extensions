@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -307,7 +308,7 @@ def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_p
     if platform != "python" and (not shell or (platform == "posix" and os.name == "nt")):
         pytest.skip(f"{platform} interpreter unavailable")
     env = {
-        **(managed_cue_environment() if platform.startswith("powershell") else os.environ),
+        **(managed_cue_environment() if platform != "python" else os.environ),
         "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
     }
     root = tmp_path / "payload"
@@ -316,7 +317,7 @@ def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_p
             PLUGIN / name, root / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
     shutil.copy2(PLUGIN / "plugin.json", root / "plugin.json")
-    if platform.startswith("powershell"):
+    if platform != "python":
         prepare_cue_assets(root)
     env["COPILOT_PLUGIN_ROOT"] = str(root)
     env["BUDGET_GUIDANCE_CONFIG"] = str(tmp_path / "not-configured.json")
@@ -366,14 +367,10 @@ def test_writer_failure_envelope_is_single_and_redacted(tmp_path: Path) -> None:
 @pytest.mark.skipif(os.name == "nt", reason="POSIX one-shot writer deadline")
 @pytest.mark.parametrize("stall", ["import", "main"])
 def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path: Path, stall: str) -> None:
-    shell = shutil.which("bash")
-    if shell is None:
-        pytest.skip("Bash unavailable")
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("write_session_guidance.py", "write-session-guidance.sh"):
-        shutil.copy2(PLUGIN / "scripts" / name, scripts)
+    shutil.copy2(PLUGIN / "scripts/write_session_guidance.py", scripts)
     source = payload / "src/budget_guidance"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text("")
@@ -386,13 +383,12 @@ def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path: Path, 
     env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)}
     started = time.monotonic()
     result = subprocess.run(
-        [shell, str(scripts / "write-session-guidance.sh")], input="{}",
+        [sys.executable, "-I", "-S", str(scripts / "write_session_guidance.py")], input="{}",
         text=True, capture_output=True, env=env, timeout=8,
     )
     assert 5 <= time.monotonic() - started < 8
-    assert result.returncode == 0
-    assert result.stdout == "{}"
-    assert "session cue could not be written" in result.stderr
+    assert result.returncode == -getattr(signal, "SIGALRM")
+    assert result.stdout == ""
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX session wrapper")
@@ -408,4 +404,7 @@ def test_posix_wrapper_missing_writer_emits_one_empty_envelope(tmp_path: Path) -
     )
     assert result.returncode == 0
     assert result.stdout == "{}"
-    assert result.stderr.strip() == "budget-guidance: session cue writer or Python is unavailable"
+    assert result.stderr.strip() == (
+        "budget-guidance: managed cue prerequisites are unavailable; "
+        "run the owning scripts/install.sh install"
+    )

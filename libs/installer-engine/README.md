@@ -120,6 +120,13 @@ with settlement and relay inside the original one-second cleanup reserve.
 It neither discovers ambient Python nor acquires a missing prerequisite.
 Its isolated Python helper emits UTF-8, and the shared native capture requests
 matching per-process stream decoders without changing the caller's console.
+The same `bootstrap_uv_capture.py` owner supports a relative `--timeout` or an
+absolute `--deadline`, with a cleanup reserve inside that allowance. POSIX
+`--input-stdin` captures at most 65536 raw bytes before creating any child;
+its input deadline is charged to that same budget. Binary forwarding preserves
+the payload, and the existing process owner contains and settles the complete
+selection/worker operation. Existing Windows empty-input calls keep their
+absolute deadline and UTF-8 capture behavior.
 Budget's POSIX installer also uses that selected interpreter for the canonical
 `installer_pip_index.py` helper, never a PATH `pip` or `pip3`. Its
 `scripts/pip-index-config` file pointer lets already-installed source preparers

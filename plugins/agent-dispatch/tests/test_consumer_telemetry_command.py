@@ -239,7 +239,7 @@ def test_admission_rejects_canonical_collisions_and_excess_routes(tmp_path: Path
 def test_invalid_bound_policy_never_calls_legacy(value: Any) -> None:
     seen: list[dict[str, Any]] = []
     telemetry.set_telemetry_sink(seen.append)
-    consumer = consumer_telemetry.ConsumerTelemetry(value, authenticated=True)
+    consumer = consumer_telemetry.ConsumerTelemetry(value)
     try:
         consumer.start()
         telemetry.emit_for(SimpleNamespace(_consumer_telemetry=consumer), {
@@ -254,8 +254,9 @@ def test_invalid_bound_policy_never_calls_legacy(value: Any) -> None:
         telemetry.clear_telemetry_sink()
 
 
+@pytest.mark.parametrize("token", [None, "fixture-data"], ids=["local-no-token", "authenticated"])
 def test_ordinary_service_policy_interleaves_origins_and_service_receiver(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str | None,
 ) -> None:
     from agent_dispatch import server
 
@@ -264,34 +265,40 @@ def test_ordinary_service_policy_interleaves_origins_and_service_receiver(
     monkeypatch.setattr(server, "_owns_active_route", lambda: True)
     monkeypatch.setenv("FIXTURE_SECRET", "must-not-reach-child")
     monkeypatch.setenv("HARNESS_POLICY", "must-not-reach-child")
-    app = build_app(Config(db_path=str(tmp_path / "tasks.db"), token="fixture-data"))
+    app = build_app(Config(db_path=str(tmp_path / "tasks.db"), token=token))
+    headers = AUTH if token else {}
     consumer = app.state.consumer_telemetry
     assert consumer.status()["counters"] == {}
     elsewhere = tmp_path / "product checkout"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     with TestClient(app) as client:
-        assert client.post("/tasks", json={"title": "not admitted", "repo": REPO_A}).status_code == 401
-        a = client.post("/tasks", headers=AUTH, json={
+        assert consumer.refusal is None and consumer.owner is not None
+        if token:
+            assert client.post("/tasks", json={"title": "not admitted", "repo": REPO_A}).status_code == 401
+            assert client.post("/tasks", headers={"Authorization": "Bearer wrong"}, json={
+                "title": "not admitted", "repo": REPO_A,
+            }).status_code == 401
+        a = client.post("/tasks", headers=headers, json={
             "title": "private title", "repo": REPO_A, "proposed": True,
         })
-        b = client.post("/tasks", headers=AUTH, json={"title": "private title", "repo": REPO_B})
+        b = client.post("/tasks", headers=headers, json={"title": "private title", "repo": REPO_B})
         assert a.status_code == b.status_code == 200
         # A later declaration change does not retarget already admitted activity.
         (roots[0] / ".agent-telemetry" / "config.json").write_text(
             '{"schema_version":1,"mode":"disabled"}', encoding="utf-8",
         )
-        assert client.post(f"/tasks/{a.json()['id']}/approve", headers=AUTH).status_code == 200
-        assert client.post("/claim", headers=AUTH, json={
+        assert client.post(f"/tasks/{a.json()['id']}/approve", headers=headers).status_code == 200
+        assert client.post("/claim", headers=headers, json={
             "worker_id": "private-worker", "repo": REPO_B,
         }).status_code == 200
         # A real service-owned rejection has no admitted initiating task.
-        rejection = client.post("/producer-scopes/handoff", headers=AUTH, json={
+        rejection = client.post("/producer-scopes/handoff", headers=headers, json={
             "repo": REPO_A, "source": "private-source",
             "producer_id": "private-producer", "expected_generation": 0,
         })
         assert rejection.status_code == 503
-        health = client.get("/health", headers=AUTH).json()
+        health = client.get("/health", headers=headers).json()
         assert health["consumer_telemetry_contract"]["source_schemas"] == ["dispatch.lifecycle.v1"]
         wait_for(lambda: consumer.owner.stats()["pipe_writes"] == 5)
         wait_for(lambda: all(
@@ -386,22 +393,20 @@ def test_normal_file_loader_normalizes_once_without_admitting_a_different_repo(
     assert (root / "eof.json").exists()
 
 
-def test_unknown_origin_and_unauthenticated_owner_never_borrow_service_route(tmp_path: Path) -> None:
+def test_unknown_origin_never_borrows_service_route(tmp_path: Path) -> None:
     root = receiver(tmp_path / "service")
     policy = {"schema_version": 1, "service_root": str(root)}
-    for authenticated in (True, False):
-        consumer = consumer_telemetry.ConsumerTelemetry(policy, authenticated=authenticated)
-        try:
-            consumer.start()
-            consumer.emit(telemetry.task_lifecycle_event("task.created", {
-                "repo": REPO_A, "status": "queued",
-            }))
-            assert consumer.owner is None or consumer.owner.stats()["enqueued"] == 0
-            if authenticated:
-                assert consumer.owner is not None
-                assert consumer.owner.stats()["dropped_route"] == 1
-        finally:
-            consumer.close()
+    consumer = consumer_telemetry.ConsumerTelemetry(policy)
+    try:
+        consumer.start()
+        consumer.emit(telemetry.task_lifecycle_event("task.created", {
+            "repo": REPO_A, "status": "queued",
+        }))
+        assert consumer.owner is not None
+        assert consumer.owner.stats()["enqueued"] == 0
+        assert consumer.owner.stats()["dropped_route"] == 1
+    finally:
+        consumer.close()
     assert not (root / "readback.jsonl").exists()
 
 

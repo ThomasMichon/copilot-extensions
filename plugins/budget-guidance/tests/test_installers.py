@@ -532,11 +532,6 @@ def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, feed_policy: str,
 ) -> None:
     assert BASH
-    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "tools"))
-    registry = importlib.import_module("installer_engine_ref")
-    monkeypatch.setitem(registry.STANDALONE_NATIVE_EXTRA_FILES, "plugins/budget-guidance", (
-        "bootstrap-uv.ps1", "bootstrap-uv.sh",
-    ))
     fake_bin, env = _fake_uv_environment(tmp_path)
     for variable in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE", "UV_NO_CONFIG",
                      "PIP_INDEX_URL", "VIRTUAL_ENV", "CONDA_PREFIX"):
@@ -618,6 +613,22 @@ def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(
 
     assert result.returncode == 0, result.stdout
     assert (install_dir / "current-version").is_file()
+    if feed_policy == "pip-config":
+        manifest_path = install_dir / "deploy-manifest.json"
+        manifest_before = manifest_path.read_bytes()
+        cue_environment = {**env, "COPILOT_PLUGIN_ROOT": str(payload)}
+        cue_environment.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", None)
+        cue_environment["BUDGET_GUIDANCE_CONFIG"] = str(tmp_path / "missing-budget.json")
+        cue = subprocess.run(
+            [BASH, str(payload / "scripts/write-session-guidance.sh")],
+            input=json.dumps({"sessionId": "installed-seed", "cwd": str(tmp_path)}),
+            env=cue_environment, capture_output=True, text=True, timeout=9,
+            creationflags=NO_WINDOW,
+        )
+        assert cue.returncode == 0 and cue.stdout == "{}" and cue.stderr == ""
+        written = Path(env["HOME"]) / ".copilot/session-state/installed-seed/instructions/budget-guidance/session-guidance.instructions.md"
+        assert json.loads(written.read_text().split("\n", 1)[1])["error"] == "configuration not found"
+        assert manifest_path.read_bytes() == manifest_before
     assert not pip_log.exists(), "The installer launched an unrelated PATH pip"
     observations = index_log.read_text(encoding="utf-8").splitlines()
     assert observations and set(observations) == {"configured-index-observed"}

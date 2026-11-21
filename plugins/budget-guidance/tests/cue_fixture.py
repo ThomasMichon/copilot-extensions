@@ -24,6 +24,7 @@ def prepare_cue_assets(payload: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     for name, owner in (
         ("bootstrap-uv.ps1", "installer-engine"),
+        ("bootstrap-uv.sh", "installer-engine"),
         ("versioned_runtime_native.ps1", "versioned-runtime"),
         ("bootstrap_uv_capture.py", "installer-engine"),
         ("daemon_instance_runtime.pyz", "agent-procutil"),
@@ -33,6 +34,13 @@ def prepare_cue_assets(payload: Path) -> None:
             source = PLUGIN.parents[1] / "libs" / owner / name
         if source.resolve() != (scripts / name).resolve():
             shutil.copy2(source, scripts / name)
+    query = PLUGIN / "scripts/installation-context/json-query.awk"
+    if not query.is_file():
+        query = PLUGIN.parents[1] / "libs/installation-context/json-query.awk"
+    destination = scripts / "installation-context/json-query.awk"
+    destination.parent.mkdir(exist_ok=True)
+    if query.resolve() != destination.resolve():
+        shutil.copy2(query, destination)
     version = json.loads((PLUGIN / "payload-invocation.json").read_bytes())["bootstrapPython"]
     (scripts / "bootstrap-python-version.txt").write_text(f"cpython@{version}\n")
 
