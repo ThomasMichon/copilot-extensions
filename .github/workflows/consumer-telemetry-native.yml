@@ -20,6 +20,7 @@ on:
       - "plugins/agent-dispatch/src/agent_dispatch/**"
       - "plugins/agent-dispatch/pyproject.toml"
       - "plugins/agent-dispatch/tests/test_consumer_telemetry_command.py"
+      - "plugins/agent-dispatch/tests/test_idle_outbox_contention.py"
 
 permissions:
   contents: read
@@ -66,7 +67,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_consumer_telemetry_command.py `
-            -k "wall_cpu_tail or incompatible_reader" `
+            --test-file tests/test_idle_outbox_contention.py `
+            -k "wall_cpu_tail or incompatible_reader or test_idle_outbox_contention" `
             --allow-explicit-tiers --timeout 120 --plugin-timeout 600 `
             --junit-dir "$env:RUNNER_TEMP/dispatch-performance-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -128,7 +130,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_consumer_telemetry_command.py `
-            -k "wall_cpu_tail or incompatible_reader" `
+            --test-file tests/test_idle_outbox_contention.py `
+            -k "wall_cpu_tail or incompatible_reader or test_idle_outbox_contention" `
             --allow-explicit-tiers --timeout 120 --plugin-timeout 600 `
             --junit-dir "$env:RUNNER_TEMP/dispatch-performance-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

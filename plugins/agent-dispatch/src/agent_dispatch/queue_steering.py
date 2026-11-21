@@ -640,6 +640,13 @@ class QueueSteeringMixin:
         """Return only expired ``delivering`` rows to pending."""
         ts = self._now(now)
         with self._connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM wake_outbox WHERE status = 'delivering'"
+                " AND COALESCE(execution_send_state, '') NOT IN ('pending', 'unknown')"
+                " AND COALESCE(delivery_expires_at, updated_at + ?) <= ? LIMIT 1",
+                (max(0.01, lease_seconds), ts),
+            ).fetchone() is None:
+                return 0
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT * FROM wake_outbox WHERE status = 'delivering'"
@@ -701,6 +708,12 @@ class QueueSteeringMixin:
         """Atomically claim the oldest due current wake operation."""
         ts = self._now(now)
         with self._connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM wake_outbox"
+                " WHERE status = 'pending' AND not_before <= ? LIMIT 1",
+                (ts,),
+            ).fetchone() is None:
+                return None
             conn.execute("BEGIN IMMEDIATE")
             while True:
                 row = conn.execute(

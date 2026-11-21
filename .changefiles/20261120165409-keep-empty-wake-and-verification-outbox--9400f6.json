@@ -1,0 +1,9 @@
+{
+  "comment": "Keep empty wake and verification outbox polls read-only beside queue writers",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
