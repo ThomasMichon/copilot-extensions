@@ -292,8 +292,12 @@ def borrowed_lease(
         raise ValueError("Runtime lifecycle operation must be publish or teardown.")
     current = _CURRENT.get()
     if current is not None:
-        if Path(arguments["legacy_root"]) != Path(current.arguments["legacy_root"]):
+        if (
+            not Path(arguments["legacy_root"]).is_absolute()
+            or not primitive.paths_equal(arguments["legacy_root"], current.arguments["legacy_root"])
+        ):
             raise binding.CommandOwnershipConflict("Runtime lifecycle root changed.")
+        arguments = {**arguments, "legacy_root": current.arguments["legacy_root"]}
         if _owner(binding, primitive, arguments, operation=operation) != current.owner:
             raise binding.CommandOwnershipConflict("Runtime lifecycle source changed.")
         current.assert_owned()
@@ -303,17 +307,22 @@ def borrowed_lease(
     if raw is None:
         return None
     ticket = json.loads(raw)
-    lock = _lock(primitive, arguments)
     if (
         not isinstance(ticket, dict)
         or set(ticket) != {"token", "pid", "host", "root", "owner"}
-        or ticket["root"] != str(Path(arguments["legacy_root"]))
-        or ticket["host"] != lock.host
+        or not isinstance(ticket["root"], str)
+        or not Path(ticket["root"]).is_absolute()
+        or not Path(arguments["legacy_root"]).is_absolute()
+        or not primitive.paths_equal(ticket["root"], arguments["legacy_root"])
         or type(ticket["pid"]) is not int
         or ticket["pid"] < 1
         or not isinstance(ticket["token"], str)
         or len(ticket["token"]) != 32
     ):
+        raise binding.CommandOwnershipConflict("Invalid runtime lifecycle ticket.")
+    arguments = {**arguments, "legacy_root": Path(ticket["root"])}
+    lock = _lock(primitive, arguments)
+    if ticket["host"] != lock.host:
         raise binding.CommandOwnershipConflict("Invalid runtime lifecycle ticket.")
     owner = _owner(binding, primitive, arguments, operation=operation)
     if ticket["owner"] != owner:
