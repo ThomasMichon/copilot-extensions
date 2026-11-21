@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from .procutil import agent_bridge_launch_prefix as _agent_bridge_launch_prefix
 from .procutil import no_window_kwargs
 
-def parse_agents(out: str | None) -> list[dict] | None:
+def parse_agents(out: str | None) -> list[dict[str, object]] | None:
     """Extract agent records from ``agent-bridge --json agents`` stdout.
 
     ``agent-bridge`` may print a human preamble line before the JSON array, so we
@@ -59,7 +59,7 @@ def parse_agent_names(out: str | None) -> set[str] | None:
     }
 
 
-def registered_agents(*, timeout: float = 20.0) -> list[dict] | None:
+def registered_agents(*, timeout: float = 20.0) -> list[dict[str, object]] | None:
     """Best-effort agent records from the **local** agent-bridge.
 
     Returns ``None`` (indeterminate) whenever the registry can't be read -- the
@@ -124,9 +124,9 @@ _AGENT_SHOW_UNSUPPORTED = _Unsupported()
 def registered_agent(
     name: str,
     *,
-    timeout: float = 8.0,
+    timeout: float = 18.0,
     include_unaddressable: bool = False,
-) -> dict | _NotFound | _Unsupported | None:
+) -> dict[str, object] | _NotFound | _Unsupported | None:
     """Best-effort single-agent record via agent-bridge's fast ``agent-show``
     lookup -- a static/topology-only lookup that never enumerates namespace
     resolvers (CodeSpaces, containers), unlike :func:`registered_agents`.
@@ -194,7 +194,7 @@ def _resolve_agent_record(
     timeout: float,
     fallback_timeout: float = 20.0,
     include_unaddressable: bool = False,
-) -> dict | _NotFound | None:
+) -> dict[str, object] | _NotFound | None:
     """Resolve one agent's record, preferring the fast single-agent lookup
     and transparently falling back to the full listing when the fast path
     can't answer for this ``name``:
@@ -215,7 +215,7 @@ def _resolve_agent_record(
             timeout=timeout,
             include_unaddressable=include_unaddressable,
         )
-        if row is not _AGENT_SHOW_UNSUPPORTED:
+        if not isinstance(row, _Unsupported):
             return row
     rows = registered_agents(timeout=max(timeout, fallback_timeout))
     if rows is None:
@@ -257,7 +257,7 @@ def registered_agent_names(*, timeout: float = 20.0) -> set[str] | None:
 def registered_agent_project(
     agent: str,
     *,
-    timeout: float = 8.0,
+    timeout: float = 18.0,
     strict: bool = False,
 ) -> str | None:
     """Return a registered agent's explicit project, when available.
@@ -267,10 +267,10 @@ def registered_agent_project(
     transparently falls back to the full listing for a namespace-prefixed
     name or an agent-bridge CLI predating ``agent-show`` (see
     :func:`_resolve_agent_record`), so this remains correct for every caller,
-    not just the common plain-local-agent case. ``timeout`` defaults to 8s
-    (was 20s): the fast path has no namespace-enumeration latency to size
-    for; a fallback to the full listing uses a more generous timeout of its
-    own regardless.
+    not just the common plain-local-agent case. ``timeout`` defaults to 18s
+    to allow for fresh CLI module loading even without namespace enumeration.
+    Explicit caller limits are preserved; the full-list fallback retains
+    its separate, more generous budget.
     """
     row = _resolve_agent_record(
         agent, timeout=timeout, include_unaddressable=True
@@ -283,7 +283,7 @@ def registered_agent_project(
                 f"could not read the local agent registry while resolving {agent!r}"
             )
         return None
-    if row is _AGENT_NOT_FOUND:
+    if isinstance(row, _NotFound):
         return None
     project = row.get("project")
     return project if isinstance(project, str) and project else None
@@ -322,7 +322,7 @@ def preflight_headless_agent(
     accordingly (was 20s, sized for the full listing this no longer calls in
     the common case).
     """
-    checks: list[tuple[str, dict | _NotFound | None]] = []
+    checks: list[tuple[str, object]] = []
     if pool:
         from . import embody
 

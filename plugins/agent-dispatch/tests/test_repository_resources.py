@@ -6,17 +6,40 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
+from typing import Protocol, cast
 
 import pytest
+from dropin_registry import ScanAuthority
 
 from agent_dispatch import repository_resources as resources
+from agent_dispatch.client import DispatchClient
 from agent_dispatch.registrar import RegistrarError
+from agent_dispatch.registrar_pointer import Pointer
+from tests.test_effort_driver_loops import _config as _legacy_effort_config
+from tests.test_repository_issue_loops import _config as _legacy_issue_config
 
 
-def _registry(monkeypatch, root, *, name="tools", repo_class="worktree"):
-    calls = []
+class _IssueConfig(Protocol):
+    def __call__(self, **overrides: object) -> dict[str, object]: ...
 
-    def run(*args, **kwargs):
+
+class _EffortConfig(Protocol):
+    def __call__(self, tmp_path: Path, **overrides: object) -> dict[str, object]: ...
+
+
+# Describe the shared builders' unannotated override interfaces at this boundary.
+issue_config = cast(_IssueConfig, _legacy_issue_config)
+effort_config = cast(_EffortConfig, _legacy_effort_config)
+
+
+def _registry(
+    monkeypatch: pytest.MonkeyPatch, root: Path | str, *,
+    name: str = "tools", repo_class: str = "worktree",
+) -> list[tuple[tuple[str, ...], dict[str, object]]]:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, json.dumps({
             "registration": "ready", "name": name, "class": repo_class,
@@ -27,7 +50,7 @@ def _registry(monkeypatch, root, *, name="tools", repo_class="worktree"):
     return calls
 
 
-def test_same_named_resource_uses_changed_registered_root(tmp_path, monkeypatch):
+def test_same_named_resource_uses_changed_registered_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for directory in ("first", "second"):
         root = tmp_path / directory
         root.mkdir()
@@ -45,7 +68,7 @@ def test_same_named_resource_uses_changed_registered_root(tmp_path, monkeypatch)
     "repo:tools:folder/../worker.py", "repo:../tools:worker.py",
     "repo:tools:\\\\server\\share\\worker.py", "repo:tools:bad\0path",
 ])
-def test_invalid_resource_is_rejected_before_registry_probe(value, monkeypatch):
+def test_invalid_resource_is_rejected_before_registry_probe(value: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         resources, "run_agent_worktrees_capture",
         lambda *a, **k: pytest.fail("invalid resource probed registry"),
@@ -63,20 +86,24 @@ def test_invalid_resource_is_rejected_before_registry_probe(value, monkeypatch):
     subprocess.CompletedProcess([], 0,
                                 '{"registration":"ready","name":"tools","class":[]}', ""),
 ])
-def test_missing_old_or_invalid_owner_contract_fails_explicitly(response, monkeypatch):
+def test_missing_old_or_invalid_owner_contract_fails_explicitly(
+    response: subprocess.CompletedProcess[str] | None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(resources, "run_agent_worktrees_capture", lambda *a, **k: response)
     with pytest.raises(RegistrarError):
         resources.registered_repository_root("tools")
 
 
-def test_invalid_path_in_advertised_owner_contract_fails_explicitly(tmp_path, monkeypatch):
+def test_invalid_path_in_advertised_owner_contract_fails_explicitly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _registry(monkeypatch, str(tmp_path) + "\0bad")
     with pytest.raises(RegistrarError, match="unavailable"):
         resources.registered_repository_root("tools")
 
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
-def test_read_only_root_can_be_read_but_not_executed(tmp_path, monkeypatch, repo_class):
+def test_read_only_root_can_be_read_but_not_executed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_class: str,
+) -> None:
     _registry(monkeypatch, tmp_path, repo_class=repo_class)
     assert resources.registered_repository_root("tools") == tmp_path
     with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
@@ -85,18 +112,16 @@ def test_read_only_root_can_be_read_but_not_executed(tmp_path, monkeypatch, repo
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
 def test_read_only_pointer_cannot_execute_relative_executable_declarations(
-    tmp_path, monkeypatch, repo_class,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_class: str,
+) -> None:
     from agent_dispatch import registrar_discovery as discovery, repo_config
-    from agent_dispatch.registrar_pointer import Pointer
     from agent_dispatch.producers.emitter import run_tick
     from tests.test_producers_emitter import FakeClient
-    from tests.test_repository_issue_loops import _config
 
     directory = tmp_path / repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar"
     directory.mkdir(parents=True)
     (tmp_path / "backlog.py").write_text("print('[]')", encoding="utf-8")
-    (directory / "backlog.json").write_text(json.dumps(_config(
+    (directory / "backlog.json").write_text(json.dumps(issue_config(
         forge={"provider": "script", "producer_login": "fixture",
                "command": [sys.executable, "backlog.py"], "cwd": "."},
     )), encoding="utf-8")
@@ -109,18 +134,18 @@ def test_read_only_pointer_cannot_execute_relative_executable_declarations(
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
     with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
         run_tick(
-            FakeClient(), dict(source.spec), holder="fixture",
+            cast(DispatchClient, FakeClient()), dict(source.spec), holder="fixture",
             runner=lambda *a, **k: pytest.fail("read-only supplier reached subprocess"),
         )
 
 
-def test_missing_file_is_not_invented(tmp_path, monkeypatch):
+def test_missing_file_is_not_invented(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _registry(monkeypatch, tmp_path)
     with pytest.raises(RegistrarError, match="unavailable"):
         resources.resolve_repository_resource("repo:tools:missing.py")
 
 
-def test_named_file_cannot_be_used_as_execution_cwd_or_state_root(tmp_path, monkeypatch):
+def test_named_file_cannot_be_used_as_execution_cwd_or_state_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.effort_driver_loops import _resolve_state_root
 
     (tmp_path / "file.py").write_text("print('ok')", encoding="utf-8")
@@ -131,7 +156,7 @@ def test_named_file_cannot_be_used_as_execution_cwd_or_state_root(tmp_path, monk
         _resolve_state_root("repo:tools:file.py", cwd=None)
 
 
-def test_symlink_resource_cannot_escape_registered_root(tmp_path, monkeypatch):
+def test_symlink_resource_cannot_escape_registered_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "root"
     root.mkdir()
     outside = tmp_path / "outside.py"
@@ -145,15 +170,15 @@ def test_symlink_resource_cannot_escape_registered_root(tmp_path, monkeypatch):
         resources.resolve_repository_resource("repo:tools:escape.py")
 
 
-def test_one_invocation_uses_one_root_snapshot(tmp_path, monkeypatch):
+def test_one_invocation_uses_one_root_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     first = tmp_path / "first"
     second = tmp_path / "second"
     for root in (first, second):
         root.mkdir()
         (root / "worker.py").write_text("print('ok')", encoding="utf-8")
-    calls = []
+    calls: list[tuple[str, ...]] = []
 
-    def run(*args, **kwargs):
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         root = first if len(calls) == 1 else second
         return subprocess.CompletedProcess(args, 0, json.dumps({
@@ -170,7 +195,7 @@ def test_one_invocation_uses_one_root_snapshot(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_relative_executable_binds_to_the_explicit_directory(tmp_path, monkeypatch):
+def test_relative_executable_binds_to_the_explicit_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = tmp_path / "policy cwd"
     directory.mkdir()
     monkeypatch.chdir(tmp_path)
@@ -190,7 +215,7 @@ def test_relative_executable_binds_to_the_explicit_directory(tmp_path, monkeypat
     )
 
 
-def test_relative_executable_keeps_parent_components_for_native_resolution(tmp_path):
+def test_relative_executable_keeps_parent_components_for_native_resolution(tmp_path: Path) -> None:
     argv, cwd = resources.resolve_execution_resources(
         [os.path.join("nested", "..", "worker")], str(tmp_path), bind_relative_executable=True,
     )
@@ -198,7 +223,7 @@ def test_relative_executable_keeps_parent_components_for_native_resolution(tmp_p
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink/parent traversal semantics")
-def test_relative_executable_preserves_symlink_parent_traversal(tmp_path):
+def test_relative_executable_preserves_symlink_parent_traversal(tmp_path: Path) -> None:
     directory = tmp_path / "policy"
     other = tmp_path / "other"
     directory.mkdir()
@@ -219,7 +244,7 @@ def test_relative_executable_preserves_symlink_parent_traversal(tmp_path):
         assert subprocess.check_output(argv, cwd=cwd, text=True) == "intended"
 
 
-def test_relative_executable_keeps_named_cwd_admission(tmp_path, monkeypatch):
+def test_relative_executable_keeps_named_cwd_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _registry(monkeypatch, tmp_path)
     argv, cwd = resources.resolve_execution_resources(
         [f".{os.sep}worker"], "repo:tools:.", bind_relative_executable=True,
@@ -229,26 +254,49 @@ def test_relative_executable_keeps_named_cwd_admission(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
-def test_relative_executable_cannot_normalize_away_read_only_admission(tmp_path, monkeypatch, repo_class):
+def test_relative_executable_cannot_normalize_away_read_only_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_class: str,
+) -> None:
     _registry(monkeypatch, tmp_path, repo_class=repo_class)
     with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
         resources.resolve_execution_resources([f".{os.sep}worker"], "repo:tools:.")
 
 
-def test_distinct_repository_lookups_share_one_bounded_budget(tmp_path, monkeypatch):
+def test_distinct_repository_lookups_share_one_bounded_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "worker.py").write_text("print('ok')", encoding="utf-8")
     calls = _registry(monkeypatch, tmp_path)
-    times = iter([0, 0, 16])
+    times = iter([0, 0, 26])
     monkeypatch.setattr(resources, "monotonic", lambda: next(times))
-    with pytest.raises(RegistrarError, match="shared 15s budget"):
+    with pytest.raises(RegistrarError, match="shared 25s budget"):
         resources.resolve_execution_resources(
             ["repo:tools:worker.py", "repo:other:worker.py"], None,
         )
     assert len(calls) == 1
-    assert calls[0][1] == {"timeout": 15}
+    assert calls[0][1] == {"timeout": 25}
 
 
-def test_ordinary_argv_does_not_require_registry(monkeypatch):
+def test_slow_first_repository_leaves_only_remaining_shared_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "worker.py").write_text("print('ok')", encoding="utf-8")
+    calls: list[float] = []
+
+    def run(*args: str, timeout: float) -> subprocess.CompletedProcess[str]:
+        calls.append(timeout)
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "registration": "ready", "name": args[2], "class": "worktree",
+            "path": str(tmp_path),
+        }), "")
+
+    times = iter([0, 0, 20])
+    monkeypatch.setattr(resources, "monotonic", lambda: next(times))
+    monkeypatch.setattr(resources, "run_agent_worktrees_capture", run)
+    argv, _ = resources.resolve_execution_resources(
+        ["repo:tools:worker.py", "repo:other:worker.py"], None,
+    )
+    assert argv == [str(tmp_path / "worker.py")] * 2
+    assert calls == [25, 5]
+
+
+def test_ordinary_argv_does_not_require_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         resources, "run_agent_worktrees_capture",
         lambda *a, **k: pytest.fail("standalone argv probed registry"),
@@ -256,7 +304,7 @@ def test_ordinary_argv_does_not_require_registry(monkeypatch):
     assert resources.resolve_resource_argument("python") == "python"
 
 
-def test_named_pointer_persists_identity_only_and_follows_registered_move(tmp_path, monkeypatch):
+def test_named_pointer_persists_identity_only_and_follows_registered_move(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import registrar_discovery as discovery
 
     root = tmp_path / "first"
@@ -272,7 +320,7 @@ def test_named_pointer_persists_identity_only_and_follows_registered_move(tmp_pa
         "name": "tools", "kind": "repo", "owner": "repo:tools",
         "aliases": ["example.test/team/tools"], "repository": "tools",
     }]
-    assert discovery.Pointer.from_dict(stored[0]) == pointer
+    assert Pointer.from_dict(stored[0]) == pointer
     relocated = tmp_path / "second"
     relocated.mkdir()
     _registry(monkeypatch, relocated)
@@ -288,14 +336,12 @@ def test_named_pointer_persists_identity_only_and_follows_registered_move(tmp_pa
     {"name": "tools", "kind": "repo", "repository": "tools", "location": "/other"},
     {"name": "tools", "kind": "repo", "repository": "../tools"},
 ])
-def test_named_pointer_refuses_mixed_or_invalid_authority(data):
-    from agent_dispatch.registrar_discovery import Pointer
-
+def test_named_pointer_refuses_mixed_or_invalid_authority(data: dict[str, str]) -> None:
     with pytest.raises(RegistrarError):
         Pointer.from_dict(data)
 
 
-def test_evaluator_executes_unchanged_named_spec_in_two_registered_roots(tmp_path, monkeypatch):
+def test_evaluator_executes_unchanged_named_spec_in_two_registered_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.producers.evaluator import NoOp, load_evaluator
 
     spec = {
@@ -319,7 +365,7 @@ def test_evaluator_executes_unchanged_named_spec_in_two_registered_roots(tmp_pat
     assert json.dumps(spec, sort_keys=True) == original
 
 
-def test_emitter_retains_named_spec_and_executes_with_registered_cwd(tmp_path, monkeypatch):
+def test_emitter_retains_named_spec_and_executes_with_registered_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.producers.emitter import run_tick
     from tests.test_producers_emitter import FakeClient
 
@@ -338,17 +384,15 @@ def test_emitter_retains_named_spec_and_executes_with_registered_cwd(tmp_path, m
     }
     original = json.dumps(spec, sort_keys=True)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
-    result = run_tick(FakeClient(), spec, holder="test")
+    result = run_tick(cast(DispatchClient, FakeClient()), spec, holder="test")
     assert result["returncode"] == 0
     assert len(result["created"]) == 1
     assert json.dumps(spec, sort_keys=True) == original
 
 
-def test_loop_expansion_separates_registered_execution_repo_from_lane(tmp_path, monkeypatch):
+def test_loop_expansion_separates_registered_execution_repo_from_lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
     from agent_dispatch.effort_driver_loops import expand_effort_driver_loop
-    from tests.test_repository_issue_loops import _config as issue_config
-    from tests.test_effort_driver_loops import _config as effort_config
 
     _registry(monkeypatch, tmp_path)
     for data, expand in (
@@ -367,16 +411,13 @@ def test_loop_expansion_separates_registered_execution_repo_from_lane(tmp_path, 
 @pytest.mark.parametrize("kind", ["effort", "issue", "script"])
 @pytest.mark.parametrize("caller", ["expansion", "document", "discovery"])
 def test_loop_expansion_defers_host_resources_and_worker_identity(
-    tmp_path, monkeypatch, kind, caller,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, caller: str,
+) -> None:
     from agent_dispatch import registrar_discovery as discovery
     from agent_dispatch import repo_config
     from agent_dispatch.effort_driver_loops import expand_effort_driver_loop
     from agent_dispatch.registrar_document import expand_declaration_document
-    from agent_dispatch.registrar_pointer import Pointer
     from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
-    from tests.test_effort_driver_loops import _config as effort_config
-    from tests.test_repository_issue_loops import _config as issue_config
 
     monkeypatch.setattr(
         resources, "run_agent_worktrees_capture",
@@ -411,14 +452,14 @@ def test_loop_expansion_defers_host_resources_and_worker_identity(
         authority, declarations = discovery.discover_trusted([
             Pointer(name="fixture", kind="repo", location=str(tmp_path)),
         ])
-        assert authority is discovery.ScanAuthority.COMPLETE
+        assert authority is ScanAuthority.COMPLETE
     source, workers = declarations
     assert source.spec["cwd"] == "repo:tools:."
     assert source.spec[key] == data
     assert workers.repos == "example/project"
 
 
-def test_script_forge_named_fields_survive_cross_repo_inheritance(tmp_path, monkeypatch):
+def test_script_forge_named_fields_survive_cross_repo_inheritance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.script_provider import validate_script_forge_config
 
     script = tmp_path / "backlog.py"
@@ -429,6 +470,7 @@ def test_script_forge_named_fields_survive_cross_repo_inheritance(tmp_path, monk
         provider="script", repo_root=tmp_path,
         inherited_script_fields=frozenset({"command", "cwd"}),
     )
+    assert result is not None
     assert result["command"] == [sys.executable, str(script)]
     assert result["cwd"] == str(tmp_path)
     assert result["_declared_command"] == ["repo:tools:backlog.py"]
@@ -438,8 +480,8 @@ def test_script_forge_named_fields_survive_cross_repo_inheritance(tmp_path, monk
 @pytest.mark.parametrize("known_root", [False, True])
 @pytest.mark.parametrize("absolute_cwd", [False, True])
 def test_script_forge_relative_command_keeps_declaring_root_contract(
-    tmp_path, monkeypatch, known_root, absolute_cwd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known_root: bool, absolute_cwd: bool,
+) -> None:
     from agent_dispatch.script_provider import validate_script_forge_config
 
     root, daemon = tmp_path / "declaring", tmp_path / "daemon"
@@ -453,6 +495,7 @@ def test_script_forge_relative_command_keeps_declaring_root_contract(
     }
     if known_root:
         result = validate_script_forge_config(forge, provider="script", repo_root=root)
+        assert result is not None
         assert result["command"] == [sys.executable, str(root / "tools" / "poller.py")]
         assert result["cwd"] == str(root)
     else:
@@ -460,7 +503,7 @@ def test_script_forge_relative_command_keeps_declaring_root_contract(
             validate_script_forge_config(forge, provider="script", repo_root=None)
 
 
-def test_named_recipe_ref_keeps_nested_resource_identity(tmp_path, monkeypatch):
+def test_named_recipe_ref_keeps_nested_resource_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.registrar_recipes import resolve_extends
 
     recipe = tmp_path / "recipe.json"
@@ -479,7 +522,9 @@ def test_named_recipe_ref_keeps_nested_resource_identity(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("owner", ["existing-owner", None])
-def test_explicit_same_root_pointer_migration_preserves_provenance(tmp_path, monkeypatch, owner):
+def test_explicit_same_root_pointer_migration_preserves_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: str | None,
+) -> None:
     from agent_dispatch import registrar_discovery as discovery
 
     root = tmp_path / "checkout-name"
@@ -507,14 +552,16 @@ def test_explicit_same_root_pointer_migration_preserves_provenance(tmp_path, mon
     assert discovery.pointers_file(base).read_bytes() == before
 
 
-def _moving_registry(monkeypatch, tmp_path):
+def _moving_registry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> tuple[list[Path], list[tuple[tuple[str, ...], dict[str, object]]]]:
     roots = [tmp_path / name for name in ("first", "second")]
     for root in roots:
         root.mkdir()
         (root / "backlog.py").write_text("print('ok')", encoding="utf-8")
-    calls = []
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
-    def run(*args, **kwargs):
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, json.dumps({
             "registration": "ready", "name": "tools", "class": "worktree",
@@ -525,12 +572,11 @@ def _moving_registry(monkeypatch, tmp_path):
     return roots, calls
 
 
-def test_effort_validation_shares_execution_and_state_snapshot(tmp_path, monkeypatch):
+def test_effort_validation_shares_execution_and_state_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.effort_driver_loops import validate_config
-    from tests.test_effort_driver_loops import _config
 
     roots, calls = _moving_registry(monkeypatch, tmp_path)
-    config = validate_config(_config(
+    config = validate_config(effort_config(
         tmp_path, execution_repo="tools", state_root="repo:tools:.",
         effort_slugs=["unfinished"],
     ))
@@ -538,12 +584,11 @@ def test_effort_validation_shares_execution_and_state_snapshot(tmp_path, monkeyp
     assert len(calls) == 1
 
 
-def test_issue_validation_shares_execution_and_script_snapshot(tmp_path, monkeypatch):
+def test_issue_validation_shares_execution_and_script_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.repository_issue_loops import validate_config
-    from tests.test_repository_issue_loops import _config
 
     roots, calls = _moving_registry(monkeypatch, tmp_path)
-    config = validate_config(_config(
+    config = validate_config(issue_config(
         execution_repo="tools",
         forge={"provider": "script", "producer_login": "fixture",
                "command": ["repo:tools:backlog.py"], "cwd": "repo:tools:."},
@@ -553,7 +598,7 @@ def test_issue_validation_shares_execution_and_script_snapshot(tmp_path, monkeyp
     assert len(calls) == 1
 
 
-def test_standby_emitter_does_not_resolve_registered_cwd(tmp_path, monkeypatch):
+def test_standby_emitter_does_not_resolve_registered_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.producers.emitter import run_tick
     from tests.test_producers_emitter import FakeClient
 
@@ -563,26 +608,26 @@ def test_standby_emitter_does_not_resolve_registered_cwd(tmp_path, monkeypatch):
     )
     client = FakeClient()
     monkeypatch.setattr(client, "acquire_schedule_lease", lambda *a, **k: {"granted": False})
-    result = run_tick(client, {
+    result = run_tick(cast(DispatchClient, client), {
         "id": "standby", "interval_seconds": 60, "command": ["python"],
         "cwd": "repo:tools:.",
     }, holder="fixture")
     assert result["held"] is False
 
 
-def test_command_emitter_uses_one_snapshot_after_lease(tmp_path, monkeypatch):
+def test_command_emitter_uses_one_snapshot_after_lease(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.producers.emitter import run_tick
     from tests.test_producers_emitter import FakeClient
 
     roots, calls = _moving_registry(monkeypatch, tmp_path)
-    executed = []
+    executed: list[tuple[list[str], object]] = []
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         executed.append((argv, kwargs["cwd"]))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    result = run_tick(FakeClient(), {
+    result = run_tick(cast(DispatchClient, FakeClient()), {
         "id": "snapshot", "interval_seconds": 60,
         "command": ["{python}", "repo:tools:backlog.py"], "cwd": "repo:tools:.",
     }, holder="fixture", runner=runner)
@@ -591,7 +636,7 @@ def test_command_emitter_uses_one_snapshot_after_lease(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_named_recipe_reads_same_snapshot_as_nested_base(tmp_path, monkeypatch):
+def test_named_recipe_reads_same_snapshot_as_nested_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.registrar_recipes import resolve_extends
 
     roots, calls = _moving_registry(monkeypatch, tmp_path)
@@ -609,7 +654,7 @@ def test_named_recipe_reads_same_snapshot_as_nested_base(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_named_nested_recipe_chain_shares_registry_snapshot(tmp_path, monkeypatch):
+def test_named_nested_recipe_chain_shares_registry_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.registrar_recipes import resolve_extends
 
     roots, calls = _moving_registry(monkeypatch, tmp_path)
@@ -628,8 +673,8 @@ def test_named_nested_recipe_chain_shares_registry_snapshot(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
 def test_snapshot_allows_read_only_reads_but_refuses_cached_execution(
-    tmp_path, monkeypatch, repo_class,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_class: str,
+) -> None:
     calls = _registry(monkeypatch, tmp_path, repo_class=repo_class)
     snapshot = resources.RepositoryResourceSnapshot()
     assert snapshot.resolve("repo:tools:.", execution=False, directory=True) == str(tmp_path)
@@ -639,7 +684,9 @@ def test_snapshot_allows_read_only_reads_but_refuses_cached_execution(
 
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
-def test_effort_state_root_is_a_read_of_read_only_repo(tmp_path, monkeypatch, repo_class):
+def test_effort_state_root_is_a_read_of_read_only_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_class: str,
+) -> None:
     from agent_dispatch.effort_driver_loops import _resolve_state_root
 
     calls = _registry(monkeypatch, tmp_path, repo_class=repo_class)
@@ -652,8 +699,8 @@ def test_effort_state_root_is_a_read_of_read_only_repo(tmp_path, monkeypatch, re
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
 def test_named_recipe_relative_cwd_keeps_read_only_provenance(
-    tmp_path, monkeypatch, pending, repo_class,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pending: bool, repo_class: str,
+) -> None:
     from agent_dispatch.registrar_recipes import resolve_extends
 
     recipes = tmp_path / "recipes"
@@ -676,13 +723,13 @@ def test_named_recipe_relative_cwd_keeps_read_only_provenance(
 
 @pytest.mark.parametrize("kind", ["issue", "effort", "script"])
 @pytest.mark.parametrize("caller", ["validator", "registration", "declaration"])
-def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, kind, caller):
+def test_builtin_standby_performs_only_shape_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, caller: str,
+) -> None:
     from agent_dispatch.producers.emitter import load_spec, run_tick, validate_spec
     from agent_dispatch.registrar import load_declaration
     from agent_dispatch.registrations import validate_registration
     from tests.test_producers_emitter import FakeClient
-    from tests.test_repository_issue_loops import _config as issue_config
-    from tests.test_effort_driver_loops import _config as effort_config
 
     monkeypatch.setattr(
         resources, "run_agent_worktrees_capture",
@@ -690,7 +737,7 @@ def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, k
     )
     client = FakeClient()
     monkeypatch.setattr(client, "acquire_schedule_lease", lambda *a, **k: {"granted": False})
-    spec = {"id": "standby", "interval_seconds": 60, "cwd": "repo:tools:."}
+    spec: dict[str, object] = {"id": "standby", "interval_seconds": 60, "cwd": "repo:tools:."}
     if kind == "effort":
         spec["effort_driver_loop"] = effort_config(
             tmp_path, execution_repo="tools", state_root="repo:tools:.",
@@ -713,13 +760,12 @@ def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, k
         assert declaration.spec["id"] == "standby"
     path = tmp_path / "emitter.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
-    assert run_tick(client, load_spec(path), holder="fixture")["held"] is False
+    assert run_tick(cast(DispatchClient, client), load_spec(path), holder="fixture")["held"] is False
 
 
-def test_builtin_standby_still_refuses_malformed_script_config(tmp_path, monkeypatch):
+def test_builtin_standby_still_refuses_malformed_script_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.producers.emitter import EmitterError, run_tick
     from tests.test_producers_emitter import FakeClient
-    from tests.test_repository_issue_loops import _config
 
     monkeypatch.setattr(
         resources, "run_agent_worktrees_capture",
@@ -730,9 +776,9 @@ def test_builtin_standby_still_refuses_malformed_script_config(tmp_path, monkeyp
         client, "acquire_schedule_lease", lambda *a, **k: pytest.fail("invalid spec took lease"),
     )
     with pytest.raises(EmitterError, match="timeout_seconds"):
-        run_tick(client, {
+        run_tick(cast(DispatchClient, client), {
             "id": "standby", "interval_seconds": 60, "cwd": "repo:tools:.",
-            "repository_issue_loop": _config(
+            "repository_issue_loop": issue_config(
                 execution_repo="tools",
                 forge={"provider": "script", "producer_login": "fixture",
                        "command": ["repo:tools:backlog.py"], "timeout_seconds": -1},
@@ -743,8 +789,8 @@ def test_builtin_standby_still_refuses_malformed_script_config(tmp_path, monkeyp
 @pytest.mark.parametrize("field", ["command", "cwd", "side_load"])
 @pytest.mark.parametrize("caller", ["validator", "registration", "declaration", "loader"])
 def test_direct_emitter_resource_grammar_is_rejected_before_admission(
-    tmp_path, monkeypatch, field, caller,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, caller: str,
+) -> None:
     from agent_dispatch.producers.emitter import load_spec, validate_spec
     from agent_dispatch.registrar import load_declaration
     from agent_dispatch.registrations import validate_registration
@@ -776,7 +822,9 @@ def test_direct_emitter_resource_grammar_is_rejected_before_admission(
 
 @pytest.mark.parametrize("field", ["argv", "cwd"])
 @pytest.mark.parametrize("caller", ["registry", "loading", "registration", "declaration"])
-def test_evaluator_resource_grammar_is_rejected_before_admission(monkeypatch, field, caller):
+def test_evaluator_resource_grammar_is_rejected_before_admission(
+    monkeypatch: pytest.MonkeyPatch, field: str, caller: str,
+) -> None:
     from agent_dispatch.producers.evaluator import ScriptEvaluatorRegistry, load_evaluator
     from agent_dispatch.registrar import load_declaration
     from agent_dispatch.registrations import validate_registration
@@ -786,9 +834,10 @@ def test_evaluator_resource_grammar_is_rejected_before_admission(monkeypatch, fi
         lambda *a, **k: pytest.fail("shape validation attempted resource resolution"),
     )
     invalid = "repo:tools:../escape"
-    spec = {"scripts": {"verify": ["python"]}, "cwd": "repo:tools:."}
+    scripts = {"verify": ["python"]}
+    spec: dict[str, object] = {"scripts": scripts, "cwd": "repo:tools:."}
     if field == "argv":
-        spec["scripts"]["verify"] = [invalid]
+        scripts["verify"] = [invalid]
     else:
         spec["cwd"] = invalid
     registration = {
@@ -806,7 +855,7 @@ def test_evaluator_resource_grammar_is_rejected_before_admission(monkeypatch, fi
 
 
 @pytest.mark.parametrize("kind", ["emitter", "evaluator"])
-def test_valid_direct_resources_are_admitted_without_resolution(monkeypatch, kind):
+def test_valid_direct_resources_are_admitted_without_resolution(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     from agent_dispatch.registrar import load_declaration
     from agent_dispatch.registrations import validate_registration
 
@@ -832,15 +881,14 @@ def test_valid_direct_resources_are_admitted_without_resolution(monkeypatch, kin
     assert load_declaration({"name": "fixture", "kind": kind, "spec": spec}).kind == kind
 
 
-def test_field_provenance_and_merge_share_named_snapshot(tmp_path, monkeypatch):
+def test_field_provenance_and_merge_share_named_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch.registrar_document import expand_declaration_document
-    from tests.test_repository_issue_loops import _config
 
     roots, calls = _moving_registry(monkeypatch, tmp_path)
     leaf = tmp_path / "leaf"
     leaf.mkdir()
     for root in roots:
-        (root / "recipe.json").write_text(json.dumps(_config(
+        (root / "recipe.json").write_text(json.dumps(issue_config(
             forge={"provider": "script", "producer_login": "fixture",
                    "command": ["relative.py"], "cwd": "."},
         )), encoding="utf-8")
@@ -853,11 +901,12 @@ def test_field_provenance_and_merge_share_named_snapshot(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("cwd", [".", "working"])
 @pytest.mark.parametrize("caller", ["validator", "expansion", "document"])
-def test_shape_admission_refuses_inherited_relative_script_cwd(tmp_path, monkeypatch, cwd, caller):
+def test_shape_admission_refuses_inherited_relative_script_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cwd: str, caller: str,
+) -> None:
     from agent_dispatch.registrar_document import expand_declaration_document
     from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
     from agent_dispatch.script_provider import validate_script_forge_config
-    from tests.test_repository_issue_loops import _config
 
     forge = {
         "provider": "script", "producer_login": "fixture",
@@ -866,7 +915,7 @@ def test_shape_admission_refuses_inherited_relative_script_cwd(tmp_path, monkeyp
     if caller == "document":
         root = tmp_path / "tools"
         root.mkdir()
-        (root / "recipe.json").write_text(json.dumps(_config(forge=forge)), encoding="utf-8")
+        (root / "recipe.json").write_text(json.dumps(issue_config(forge=forge)), encoding="utf-8")
         _registry(monkeypatch, root)
     else:
         monkeypatch.setattr(
@@ -881,7 +930,7 @@ def test_shape_admission_refuses_inherited_relative_script_cwd(tmp_path, monkeyp
             )
         elif caller == "expansion":
             expand_repository_issue_loop(
-                _config(forge=forge), repo_root=tmp_path,
+                issue_config(forge=forge), repo_root=tmp_path,
                 inherited_script_fields=frozenset({"cwd"}),
             )
         else:
@@ -895,7 +944,9 @@ def test_shape_admission_refuses_inherited_relative_script_cwd(tmp_path, monkeyp
     ("repo:tools:.", frozenset({"cwd"})),
     (".", frozenset()),
 ])
-def test_shape_admission_preserves_valid_script_cwd_without_resolution(monkeypatch, cwd, inherited):
+def test_shape_admission_preserves_valid_script_cwd_without_resolution(
+    monkeypatch: pytest.MonkeyPatch, cwd: str, inherited: frozenset[str],
+) -> None:
     from agent_dispatch.script_provider import validate_script_forge_config
 
     monkeypatch.setattr(
@@ -906,13 +957,12 @@ def test_shape_admission_preserves_valid_script_cwd_without_resolution(monkeypat
         {"command": ["repo:tools:backlog.py"], "cwd": cwd},
         provider="script", inherited_script_fields=inherited, resolve_resources=False,
     )
+    assert result is not None
     assert result["cwd"] == cwd
     assert result["command"] == ["repo:tools:backlog.py"]
 
 
-def test_documented_named_evaluator_is_a_valid_registration():
-    from pathlib import Path
-
+def test_documented_named_evaluator_is_a_valid_registration() -> None:
     import yaml
 
     from agent_dispatch.registrar import load_declaration
@@ -922,4 +972,6 @@ def test_documented_named_evaluator_is_a_valid_registration():
     example = section.split("```yaml\n", 1)[1].split("```", 1)[0]
     declaration = load_declaration(yaml.safe_load(example))
     assert declaration.spec["evaluator_ref"] == "verify-work"
-    assert declaration.spec["evaluator_spec"]["cwd"] == "repo:tools:."
+    evaluator_spec = declaration.spec["evaluator_spec"]
+    assert isinstance(evaluator_spec, dict)
+    assert evaluator_spec["cwd"] == "repo:tools:."

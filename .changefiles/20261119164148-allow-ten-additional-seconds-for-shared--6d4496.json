@@ -1,0 +1,9 @@
+{
+  "comment": "Allow ten additional seconds for shared repository resolution and single-agent startup lookup.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
