@@ -25,6 +25,31 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 selected current handoff-atomicity contribution
+
+The [bounded handoff-atomicity proposal](roadmap-selected-handoff-atomicity.md)
+reads the complete current #4619 contract before source: accepted OA/OAV and
+OS3/OS4/OSV2 lanes are credited, not missing implementation. Its qualified
+core, actual note/cancel CLI and lifecycle-writer trace retains the separate
+BOTH-store arm boundary after successful final validation, without claiming
+a live rearm or cancelled-to-pending transition. Original owners, independent
+remaining custody lanes and finite exits survive. The
+[journal](journal/2026/11.21-current-handoff-atomicity.md) records actual
+#13922 delivery and separate #13851/#13909/#13902/#13893 source descriptions,
+none a new whole-program acceptance or fixture-debt closure.
+
+## 2026-11-21 selected current claim-custody contribution
+
+The [bounded claim-custody proposal](roadmap-selected-claim-custody.md)
+qualifies nine actual later file-changing publications and the current
+ordinary acceptance/finalization paths at `df851c3`. Source responsibility
+still settles before consumer/resource completion; newer nonterminal
+finalization rechecks remain credited. The successful-preflight fault,
+separate readiness/later-binding and operator-origin gates, original owners
+and whole-home gap survive. The [journal](journal/2026/11.21-current-claim-custody.md)
+records actual #13919 delivery. No product or native test, claim operation or
+new whole-program acceptance follows.
+
 ## 2026-11-21 selected current publication-safety contributions
 
 The [two finite publication-safety proposals](roadmap-selected-publication-safety.md)
@@ -34,8 +59,8 @@ current contract metadata and current relevant vision support the retained
 P1 source predicates, original custodians and finite source/release/consumer
 exits. Actual whole-effort-home acceptance is not newly established.
 The [journal](journal/2026/11.21-current-publication-safety.md) records actual
-#13916 delivery and the complete 898-open census. Changed unread claim/
-finalize source is a separate next delta, not a refreshed #5842 defect claim.
+#13916 delivery and the complete 898-open census. That publication did not
+refresh #5842; the separate, later source-delta contribution above does.
 
 ## 2026-11-21 selected current framing contribution
 

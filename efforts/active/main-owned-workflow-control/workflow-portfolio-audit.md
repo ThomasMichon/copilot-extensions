@@ -2696,6 +2696,136 @@ required Linux source CI remain outstanding. This development-only result
 does not qualify broader native, every-release, full-census or controlled
 whole-flow savings.
 
+Source #13917 merges at `2026-11-21T15:41:18Z` as
+`d3aa1214142b748ff772234867bd0a99084a5c9e`. Copilot approval `6006329531`
+at `15:38:01Z` names exact head
+`ba73a528ddf400ec776e9b7b8080f3a5653d53ea`; complete review and thread
+readback finds no active finding and no omitted page. Required source CI
+`44919982459` and trusted metadata CI `44919982509` both complete successfully.
+Actual unit job `136893687703` freshly executes all 6,640 cases with 35
+deselections in 158.17 pytest seconds and 178.255 packet seconds. Lookup takes
+493 ms and finds no qualified completed packet; no reuse saving is credited.
+The existing positively closed packet-only selector omits the AST scanner
+group, not the unit packet or required aggregate. This is observed omitted
+work, not an eliminated workflow invocation or controlled speedup.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite cohort is resolved. Scoped managed synchronization
+retains the published head and advances to the actual merge without conflict,
+reset, stash, peer edit or resource release. Broader native, every-release,
+full-census, accepted-owner and whole-flow gates remain open.
+
+### November 21 remaining guard census and original changefile cohort
+
+The remaining 28 version-bump cases retain actual Git/process contracts,
+including native symlink controls; they remain unchanged outside the packet.
+The trusted-CI originals read checked-in YAML/workflow inputs not admitted by
+the current source contract. Do not copy those inputs into surrogate Python
+fixtures, substitute a weaker assertion or expand admission merely to increase
+the count. Their separate workflow/consumer obligations remain open.
+
+The ten original local Git evidence cases are already exported by
+`test_local_git_evidence_control_units.py`; a second adapter would repeat
+the same original functions and parameterizations under different node names.
+They are not a new admission. Preserve that existing mapping and its 46
+outside-packet original cases without restoring the retired registry CI gate.
+
+The changefile adapter exports seven exact original test objects and the
+original autouse isolation fixture. Original assertions cover serial writes
+and reads, empty input, unreadable-file diagnostics, multiple paired intents,
+mismatched/invalid intent refusal and actual CLI list output. Writes stay
+inside fixture-owned temporary state. No Git child, registry capture or
+installed actor runs. The eighth original case requires real reader threads
+and stays unchanged outside this actor-free admission.
+
+Development collection proves exact object/fixture identity and matching
+original case names. Effect auditing passes all seven cases in 1.344 seconds,
+with positive call-phase coverage in the real changefile implementation for
+every case, zero prohibited effects and three source-bound Python reads.
+Focused Ruff and whole-file strict typing pass the new adapter on Linux and
+Windows without suppressions.
+
+The adapter and original suite bindings are new; the existing production
+implementation remains byte-identical and already source-bound.
+All 6,640 prior unit nodes retain their order and source hashes; 440 production
+coverage targets, 89 helper decisions and the 300-second limit are unchanged.
+The resulting 6,647-node, 1,055-source manifest retains compact-v2 storage at
+765,299 bytes and unchanged flat-v1 normalization/evidence.
+
+Current-head review and complete required Linux source CI remain outstanding.
+These units do not prove threaded behavior, broader native/every-release/full-census acceptance,
+workflow-count reduction, reuse savings or controlled whole-flow improvement.
+
+Source #13920 merges at `2026-11-21T16:10:19Z` as
+`02e34a3217bf60736bf6260512d967108b050b87`. The initially proposed ten-case
+Bridge export is removed because those exact originals were already mapped;
+no duplicate is credited. Copilot approval `6006443435` at `16:05:21Z`
+names corrected head `52da4c01faaba1fe5b8b451b72f4a6c0a39e360b`. Complete
+review and thread readback confirms the duplicate finding resolved, no active
+finding and no omitted thread page. Required source CI `44922423821` and
+trusted metadata CI `44922422105` both complete successfully.
+
+Actual unit job `136901157639` freshly executes all 6,647 cases with 35
+deselections in 125.27 pytest seconds and 143.515 packet seconds. Lookup takes
+413 ms and finds no qualified completed packet; no reuse saving is credited.
+The existing packet-only selector omits the AST scanner group, not the unit
+packet or required aggregate. This is observed omitted work, not an eliminated
+workflow invocation or controlled speedup.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent readback confirms merged state, empty closing
+references and open parent #6237; the full canonical parent is reread. Only
+this finite source cohort is resolved. Pull-forward initially refuses replaying
+the two already-squashed local commits; exact owned-file comparison proves
+their merged content, retains the published tip and every recovery ref, then
+replays no merged work onto the confirmed merge. Scoped managed synchronization
+completes without dropping the unrelated upstream documentation. No reset,
+stash, peer edit or resource release occurs.
+
+The scheduled owner check still finds #1303 and #3336 open with no new comments
+since `2026-11-21T15:05:00Z`; neither named reduction has acceptance. The prior
+keyed controller request remains terminally refused before admission, without
+a queued result, resend or replacement peer. Continue independent source work;
+broader native, release, full-census, accepted-owner and whole-flow gates remain
+open.
+
+### November 21 original version-stamping unit cohort
+
+The original accumulator suite has 46 expanded cases. The new adapter exports
+23 exact original test objects and the original `isolated` fixture, retaining
+37 original case identities and assertions. Pure version arithmetic and bump
+ordering remain distinct from fixture-owned pending intent consumption,
+plugin/catalog/TOML version writes, standalone/source-fallback stamping and
+the actual in-process CLI. Temporary JSON/TOML/Python writes and consumed
+changefiles stay inside the original redirected tree; no source fixture text,
+Git child, release publisher or installed actor executes.
+
+The eight real-Git `diff_repo` cases and the canonical checkout TOML read stay
+unchanged outside the packet. Their integration/data-input contracts are not
+replaced by these units. The original source was not previously bound and no
+existing packet adapter referenced this original suite; adding another alias
+for an already mapped original case would not advance the census.
+
+Development collection proves exact original function/fixture identity and
+matching expanded suffixes. Actual effect auditing passes all 37 cases in
+2.109 seconds, with positive call-phase coverage in the real accumulator for
+every case, zero prohibited effects and seven observed Python reads, all
+source-bound. Focused Ruff and whole-file strict typing pass the new adapter
+on Linux and Windows without suppressions.
+
+Only the adapter and original suite bindings are new. All 6,647 preceding
+nodes retain their order and source hashes; 440 production coverage targets,
+89 helper decisions and the 300-second limit stay unchanged. The resulting
+6,684-node, 1,057-source manifest retains compact-v2 storage at 767,819 bytes
+and flat-v1 normalization/evidence.
+
+Current-head review and complete required Linux source CI remain outstanding.
+Source arithmetic/stamping units do not prove real Git behavior, actual
+promotion, native lifecycle, every-release/full-census acceptance, reuse
+savings, workflow-count reduction or controlled whole-flow improvement.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

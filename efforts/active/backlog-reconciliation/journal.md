@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Current handoff atomicity and separate source deliveries](journal/2026/11.21-current-handoff-atomicity.md)
+
+- [2026-11-21 - Current claim custody and retained independent gates](journal/2026/11.21-current-claim-custody.md)
+
 - [2026-11-21 - Current publication safety and whole-queue refresh](journal/2026/11.21-current-publication-safety.md)
 
 - [2026-11-21 - Current framing contribution and historical register delivery](journal/2026/11.21-current-framing-contribution.md)
