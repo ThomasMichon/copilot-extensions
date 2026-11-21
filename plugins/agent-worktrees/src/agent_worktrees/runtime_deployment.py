@@ -11,11 +11,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 
 from packaging.version import Version
 
 
-def manifest_bytes(identity: dict, slot: Path, payload_hash: str) -> bytes:
+def manifest_bytes(identity: dict[str, Any], slot: Path, payload_hash: str) -> bytes:
     info = identity["build_info"]
     package_version = info["version"]
     if Version(package_version) != Version(identity["package_version"]):
