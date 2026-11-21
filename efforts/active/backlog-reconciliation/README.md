@@ -410,6 +410,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [seed-fixture fulfillment proposal](journal/2026/11.21-seed-fixture-fulfillment-and-adjacent-publication.md)
+compares #12879's whole current original/all-three-discussion contract with
+actual merged #12880 AND the separately claimed four-file #12981 publication.
+Existing exact-reviewed-head Linux/macOS jobs resolve a real earlier witness
+input difference; all six current fixture identities match their deliveries.
+Normal reviewed publication and the standing final-check unit remain before
+any acknowledgment or source disposition. Actual #13958 delivery and the
+complete 12:25:09 PST 900-open census are recorded with zero new closure credit.
+
 The [manual-resume and publication contracts](journal/2026/11.21-manual-resume-and-publication-contracts.md)
 reconcile two specific reference-only refusals before complete qualified
 current studies, including separate embedded-source qualification. Manual

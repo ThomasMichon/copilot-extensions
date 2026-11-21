@@ -57,6 +57,15 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [seed-fixture fulfillment proposal](journal/2026/11.21-seed-fixture-fulfillment-and-adjacent-publication.md)
+maps the whole current #12879 contract to two actual merged publications,
+including its separate adjacent claim rather than just the original two files.
+Successful native jobs at the reviewed source head and six current fixture
+bindings supply concrete completion evidence without another native run or a
+full-lane success claim. Reviewed publication and the standing final checks
+still precede any source acknowledgment/transition. Actual #13958 delivery and
+the complete 12:25:09 PST 900-open census leave the numerical campaign open.
+
 The [manual-resume and publication studies](journal/2026/11.21-manual-resume-and-publication-contracts.md)
 establish two complete current issue contracts after particular mechanical
 reference-stop reconciliation and separate identified-copy qualification.
