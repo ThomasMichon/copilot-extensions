@@ -17,6 +17,15 @@ or untracked files. Ignored content is explicitly disposable. Agents use
 agent-scratch for temporary material; declared build output, dependencies and
 instruction projections are reproduced through their normal owners.
 
+**Existing domain-data exception:** a checkout-local `.effort-agenda` can contain
+durable history, not reproducible output. Preserve the existing
+[retained-data hold](../../../plugins/agent-worktrees/docs/worktree-data.md#checkout-local-agenda-preservation)
+until its data owner preserves/rescues that history and explicitly retires the
+local source through the supported procedure. Empty, malformed, linked or
+unreadable homes retain the existing conservative hold. A branch, locator or
+copied snapshot cannot restore this history or discharge that hold. This is an
+existing ownership constraint, not a new per-build-artifact approval policy.
+
 This is not terminal cleanup, branch archival, a source backup, checkout
 relocation or a new scratch owner. Preserve existing behavior for unmanaged,
 reference, main-anchor and externally managed checkouts; they are outside
@@ -134,7 +143,8 @@ bisect or other per-worktree Git state that would not survive removal.
 
 A clean WIP, open PR or unresolved objective is not by itself a blocker:
 dehydration preserves responsibility. A resource that actively uses checkout
-files is a blocker. Do not reuse terminal finalization's "all work settled"
+files or the existing checkout-local durable-data hold is a blocker. Do not
+reuse terminal finalization's "all work settled"
 admission as the new dehydration gate.
 
 ## 6. Dehydrate transition
@@ -143,7 +153,8 @@ Proposed owner-mediated sequence _(agent-recommended)_:
 
 1. Acquire lifecycle/launch exclusion; resolve the exact managed checkout.
 2. Check configured policy and hold, process/lock state, branch identity, Git
-   operation state, live clean status and any required pair/consumer conditions.
+   operation state, live clean status, existing durable-data preservation holds
+   and any required pair/consumer conditions.
 3. Persist the complete relationship snapshot and removal intent in the catalog.
 4. Ask Git to remove this linked worktree from the repository anchor:
    `git worktree remove <path>`. Preserve the branch and all durable data.
@@ -160,6 +171,11 @@ Failures keep their operation identity and snapshot. A removal timeout or
 partially removed checkout is an unknown/interrupted stage, not successful
 dehydration or permission to launch. Reconcile actual path and Git membership
 before selecting the next step.
+
+The existing removal helper's retained-data guard remains in force, including
+before fallback or retry. Dehydration neither rescues an agenda itself nor
+interprets a successful copy or archive receipt as permission to erase its
+original source.
 
 ## 7. Rehydrate and ordinary entry
 
@@ -258,6 +274,10 @@ Use disposable real repositories and processes, never the operator's active
 checkout population. Cover committed WIP through Git GC, ignored artifacts,
 all dirty forms, branch switches, process and launch races, catalog-only roster
 rebuild, pairs, projection restoration and failures at every transition.
+Include ignored checkout-local agenda history: removal refuses before owner-led
+preservation and explicit local-source retirement, including empty/partial or
+unreadable homes and a copy-only attempt. A supported rescue preserves accepted
+history before a later eligible round trip; tests must not bypass the hold.
 
 Native Windows and Linux/WSL tests exercise two automatic stop/resume cycles,
 both mux and Bridge paths, unknown process evidence and actual process-lock

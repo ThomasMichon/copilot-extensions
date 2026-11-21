@@ -72,7 +72,10 @@ per-worktree holds share the same owner-mediated checks.
 Removal requires live Git evidence of no staged, modified or untracked content
 and confirmed absence of checkout users or competing entry. Ignored files are
 disposable; reproducible artifacts and projections return through their normal
-owners. Unknown evidence preserves the checkout.
+owners. Unknown evidence preserves the checkout. Existing checkout-local durable
+history retains the [worktree-data preservation boundary](../worktree-data/README.md#preserve-legacy-data-before-disposal):
+its owner preserves the history and explicitly retires the local source before
+disposal. Ignored status, a locator or a copy alone never discharges that hold.
 
 ### responsibility-survives-dehydration
 

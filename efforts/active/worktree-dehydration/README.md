@@ -82,6 +82,9 @@ provenance destinations. No public artifact links back to private material.
   dehydration catalog and account for it during periodic roster reconstruction.
 - **Proposed options, not final API decisions:** exact configuration keys, hold
   UX, CLI syntax and capability names remain design recommendations.
+- **Existing integration constraint:** retain the worktree-data owner's hold
+  for legacy checkout-local durable agenda history until supported preservation
+  and explicit source retirement. This does not add a per-build-artifact policy.
 - **Not assigned by this kickoff:** runtime implementation, automatic deletion
   on this host, shared-worktree cleanup, live migration, installation or rollout.
   Review of these documents does not grant those effects.
@@ -128,6 +131,7 @@ provenance destinations. No public artifact links back to private material.
 - [ ] Clean CONVO, unpushed WIP, MERGED and FINAL retain their identity and classification with `(D)`.
 - [ ] Staged, modified, untracked, detached/unexpected branch, unfinished Git operations and unknown evidence refuse.
 - [ ] Ignored build output is disposable; projections and declared checkout settings are restored before entry.
+- [ ] Ignored legacy `.effort-agenda` history blocks removal until its owner preserves it and explicitly retires the source; unknown/partial homes and copy-only evidence do not bypass the hold.
 - [ ] The retained local branch protects commits through Git GC; external branch movement is detected without reset.
 - [ ] Failure injection at each persisted transition is recoverable, including a failed final catalog removal.
 - [ ] Removing operational tracking in an isolated fixture permits catalog-based reconstruction without fabricated authority.
@@ -154,3 +158,5 @@ kickoff; the full capability remains future work under #13781.
 - Confirmed Git worktree removal preserves branches and inspected existing source
   seams without implementing or deleting any worktree.
 - Filed #13781, #13783, #13784 and #13785. Implementation remains unassigned.
+- Review identified the existing ignored checkout-local agenda-history hold;
+  retained that guard and added a preservation/refusal qualification case.
