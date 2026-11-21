@@ -2758,6 +2758,74 @@ Current-head review and complete required Linux source CI remain outstanding.
 These units do not prove threaded behavior, broader native/every-release/full-census acceptance,
 workflow-count reduction, reuse savings or controlled whole-flow improvement.
 
+Source #13920 merges at `2026-11-21T16:10:19Z` as
+`02e34a3217bf60736bf6260512d967108b050b87`. The initially proposed ten-case
+Bridge export is removed because those exact originals were already mapped;
+no duplicate is credited. Copilot approval `6006443435` at `16:05:21Z`
+names corrected head `52da4c01faaba1fe5b8b451b72f4a6c0a39e360b`. Complete
+review and thread readback confirms the duplicate finding resolved, no active
+finding and no omitted thread page. Required source CI `44922423821` and
+trusted metadata CI `44922422105` both complete successfully.
+
+Actual unit job `136901157639` freshly executes all 6,647 cases with 35
+deselections in 125.27 pytest seconds and 143.515 packet seconds. Lookup takes
+413 ms and finds no qualified completed packet; no reuse saving is credited.
+The existing packet-only selector omits the AST scanner group, not the unit
+packet or required aggregate. This is observed omitted work, not an eliminated
+workflow invocation or controlled speedup.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent readback confirms merged state, empty closing
+references and open parent #6237; the full canonical parent is reread. Only
+this finite source cohort is resolved. Pull-forward initially refuses replaying
+the two already-squashed local commits; exact owned-file comparison proves
+their merged content, retains the published tip and every recovery ref, then
+replays no merged work onto the confirmed merge. Scoped managed synchronization
+completes without dropping the unrelated upstream documentation. No reset,
+stash, peer edit or resource release occurs.
+
+The scheduled owner check still finds #1303 and #3336 open with no new comments
+since `2026-11-21T15:05:00Z`; neither named reduction has acceptance. The prior
+keyed controller request remains terminally refused before admission, without
+a queued result, resend or replacement peer. Continue independent source work;
+broader native, release, full-census, accepted-owner and whole-flow gates remain
+open.
+
+### November 21 original version-stamping unit cohort
+
+The original accumulator suite has 46 expanded cases. The new adapter exports
+23 exact original test objects and the original `isolated` fixture, retaining
+37 original case identities and assertions. Pure version arithmetic and bump
+ordering remain distinct from fixture-owned pending intent consumption,
+plugin/catalog/TOML version writes, standalone/source-fallback stamping and
+the actual in-process CLI. Temporary JSON/TOML/Python writes and consumed
+changefiles stay inside the original redirected tree; no source fixture text,
+Git child, release publisher or installed actor executes.
+
+The eight real-Git `diff_repo` cases and the canonical checkout TOML read stay
+unchanged outside the packet. Their integration/data-input contracts are not
+replaced by these units. The original source was not previously bound and no
+existing packet adapter referenced this original suite; adding another alias
+for an already mapped original case would not advance the census.
+
+Development collection proves exact original function/fixture identity and
+matching expanded suffixes. Actual effect auditing passes all 37 cases in
+2.109 seconds, with positive call-phase coverage in the real accumulator for
+every case, zero prohibited effects and seven observed Python reads, all
+source-bound. Focused Ruff and whole-file strict typing pass the new adapter
+on Linux and Windows without suppressions.
+
+Only the adapter and original suite bindings are new. All 6,647 preceding
+nodes retain their order and source hashes; 440 production coverage targets,
+89 helper decisions and the 300-second limit stay unchanged. The resulting
+6,684-node, 1,057-source manifest retains compact-v2 storage at 767,819 bytes
+and flat-v1 normalization/evidence.
+
+Current-head review and complete required Linux source CI remain outstanding.
+Source arithmetic/stamping units do not prove real Git behavior, actual
+promotion, native lifecycle, every-release/full-census acceptance, reuse
+savings, workflow-count reduction or controlled whole-flow improvement.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

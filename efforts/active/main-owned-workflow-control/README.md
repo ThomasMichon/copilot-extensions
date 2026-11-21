@@ -801,13 +801,23 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Copilot approval and complete required Linux CI with all 6,640 units freshly
   executed under the unchanged budget.
   Broader native, release, full-census and whole-flow gates remain separate.
-- [ ] Qualify and land seven original serial changefile cases and their
+- [x] Qualify and land seven original serial changefile cases and their
   original isolation fixture, preserving the real threaded residual and all existing
   unit identities, source bindings, coverage targets, helper decisions and
   limits. Require actual per-case production call coverage, effect auditing,
   strict typing, current-head review and complete Linux source CI. The ten
   original local Git evidence cases are already mapped; do not duplicate them
   or restore the retired registry CI gate.
+  #13920 merges at `02e34a3217bf60736bf6260512d967108b050b87` after
+  corrected-head Copilot approval and complete required Linux CI with all
+  6,647 units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land 37 original pure/fixture-owned version-stamping cases
+  through 23 exact test objects and the original isolation fixture. Preserve
+  the eight actual-Git cases and canonical checkout-data case outside the
+  packet, every preceding identity/hash/target/helper decision and the
+  300-second budget. Require source closure, positive per-case production
+  coverage, zero prohibited effects, strict typing, current-head review and
+  complete Linux source CI; this is not live promotion or full-census proof.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
