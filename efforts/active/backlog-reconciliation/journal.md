@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Finite source fulfillment and new inflow](journal/2026/11.20-source-fulfillment-and-new-inflow.md)
+
 - [2026-11-20 - Selected startup wave and current delivery boundaries](journal/2026/11.20-selected-startup-wave.md)
 
 - [2026-11-20 - Current roadmap integration gaps and retained routes](journal/2026/11.20-roadmap-integration-gaps.md)

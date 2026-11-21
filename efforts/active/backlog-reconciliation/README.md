@@ -410,6 +410,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source-fulfillment and inflow unit](journal/2026/11.20-source-fulfillment-and-new-inflow.md)
+resumes research after the independent queue-controls effort's reviewed
+closeout #13820. It proposes finite source completions for #13765 through
+#13768 and #13805 through #13809, subject to separate current qualification
+and tracker judgments. Eleven complete new contracts retain their original
+owners, literal acceptance and deliberate parent/subissue boundaries; compact
+recovery does not complete anchor scoping, and bounded managed-Python cohorts
+do not complete the ingress inventory. The complete 20:50 PT census is
+898 open, 169 above fixed 729, after fourteen arrivals and no departures.
+No issue effect, broader native delivery, ordinary whole-update success or
+resource release is inferred. All campaign and roadmap completion gates remain.
+
 The [current roadmap integration assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
 separates all six unfinished execution-plan gates from the reviewed historical
 research. The complete 15:09 PT inventory has 882 open: 292 retained historical
