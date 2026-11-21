@@ -1069,7 +1069,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13974 merges at `523be8d328ff8b750f610f417644683d0aea65a6` after
   exact-head Copilot approval and complete required Linux CI with all 7,056
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land eight original materialized-graph attribution cases
+- [x] Qualify and land eight original materialized-graph attribution cases
   through one exact unchanged function. Retain canonical/payload helper owners,
   sibling-library success and unowned/foreign/wrong-identity refusals. Keep the
   separate editable-requirement case outside after its native DLL effect is
@@ -1078,6 +1078,31 @@ authorizes critical main-path acceptance or a bounded administrative change.
   positive canonical-owner calls, zero prohibited effects, compact/flat-v1
   contracts and the 300-second bound. Require strict typing, current-head review
   and complete Linux source CI; broader parent acceptance stays open.
+  #13976 merges at `c8b72ab5a6951c8a5d16db79b1fbd3dc2651220a` after
+  exact-head Copilot approval and complete required Linux CI with all 7,064
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify and land forty-five original compile/cleanup controls through
+  thirteen exact unchanged functions and the original cleanup fixture. Retain
+  operation/projection, output-policy and include-remapping refusals plus
+  primary-error identity, chaining, diagnostic and success-cleanup witnesses.
+  Native compile/retention paths remain outside without replacement callbacks.
+  Require closed Python reads, positive per-case canonical-owner calls, zero
+  prohibited effects, unchanged preceding nodes/hashes/targets/helper decisions,
+  compact/flat-v1 contracts and the 300-second bound, strict typing,
+  current-head review and complete Linux source CI. Broader parent acceptance
+  remains open.
+  #13978 merges at `aa78f9f22d9f8ea8ac485e066e1b8998735382bb` after
+  exact-head Copilot approval and complete required Linux CI with all 7,109
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land twenty-nine original source-compile refusal cases through
+  six exact unchanged functions. Preserve effective editable-graph, omission,
+  unsafe/disabled/context-only mapping and inactive local/registry ambiguity
+  witnesses, all assertions, parameter identities and original callbacks.
+  Require closed Python reads, positive per-case canonical-owner calls, zero
+  prohibited effects, unchanged preceding nodes/hashes/targets/helper decisions,
+  compact/flat-v1 contracts and the 300-second bound, strict typing,
+  current-head review and complete Linux source CI. Add no native substitute;
+  broader parent acceptance remains open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
