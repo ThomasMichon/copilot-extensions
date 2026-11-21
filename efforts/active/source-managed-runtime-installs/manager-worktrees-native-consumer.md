@@ -268,6 +268,30 @@ finishing this fixture cannot finalize the parent worktrees.
 
 ## Journal
 
+### 2026-11-20 - Integrate the merged policy correction without a native retry
+
+The source contribution is reconciled onto Dev `77fbc8d0c7`, which contains
+#13449's actual squash merge, `7c07161dc0`. The original fixture commits and
+the selected foreground decision remain retained in a local backup. Replaying
+the three private commits required only resolving duplicate Goal wording in
+favor of the reviewed receiving proposal and its verbatim decision reference.
+The fixture implementation did not change during that reconciliation.
+
+The focused coordinator, authentic-source and CI-scope regression selection
+passes all 232 tests. The first run completed its cases but failed during
+pytest's shared temporary-directory cleanup with Windows error 448; it is a
+failed command, not a passing run. The same selection passes with a fresh
+pytest-owned base directory, leaving the shared path untouched. Pytest also
+reports one unknown `timeout` marker warning. Fatal F/E9 lint and whitespace
+checks pass.
+
+This is source integration and focused regression evidence only. The ten
+historical failed native attempts, original frozen runtime pair, execution
+budgets, source custody, review/required-CI gates and operational holds remain.
+Neither #13449's scoped historical disposition nor these local checks establish
+a cause or disposition for this fixture's separate native failure. No new
+hosted attempt, installed update, lifecycle acceptance or deployment ran.
+
 ### 2026-11-19 - Prepare full-history transport packs before installed effects
 
 The tenth hosted attempt, [run 44051940726](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44051940726),
