@@ -726,13 +726,25 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with freshly
   executed packet evidence. No npm, registry, installer or native-toolchain witness is replaced;
   broader native, every-release and full-census gates stay open.
-- [ ] Qualify and land the original fixture-only npm selector case through its
+- [x] Qualify and land the original fixture-only npm selector case through its
   exact test object, preserving the preceding 133 selections and all 69
   original residuals. Bind the real selector module and require positive
   call-phase coverage of both wrapper and selector, zero prohibited effects,
   unchanged preceding admission/helper/budget gates, current-head review and
   complete Linux source CI. Do not execute fixture scripts or the installer
   entrypoint, or replace native/whole-checkout qualification.
+  #13897 merges at `a2541fa0edb89a29321d0a8ca7a5e12e58b6c8b9` after
+  exact-head Copilot approval and complete required Linux CI with freshly
+  executed packet evidence. Broader parent gates stay open.
+- [ ] Qualify and land 47 additional original fixture-only dependency cases
+  through four exact test objects: the 32-case canonical-preparation branch
+  matrix and fifteen local-URL/resolution-input cases. Preserve the preceding
+  134 selections and all 22 remaining originals, including the mixed real-UV
+  parser case, outside the packet. Require source closure, positive per-case
+  call coverage, zero prohibited effects, unchanged preceding admission/
+  helper/budget gates, current-head review and complete Linux source CI.
+  Keep all entries under the existing cap using whitespace-only source-entry
+  indentation compaction; do not execute preparation text or weaken a gate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
