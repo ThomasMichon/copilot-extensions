@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Repair-conductor correspondence and retained acceptance](journal/2026/11.21-repair-conductor-correspondence.md)
+
 - [2026-11-21 - Current Python-prerequisite contract and source-form qualification](journal/2026/11.21-current-python-prerequisite-contract.md)
 
 - [2026-11-21 - Specific correspondence and bounded source delivery](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
