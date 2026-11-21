@@ -10,6 +10,11 @@ The [next continuation](journal/2026/11.21-historical-scoped-controls.md)
 records the additional 33 decisions and actual #13904 delivery.
 The [seventeen-control follow-through](journal/2026/11.21-historical-owner-and-causal-controls.md)
 retains the next specific studies/gaps and actual #13907 delivery.
+The [remaining 131 continuation controls](roadmap-historical-continuation-controls.md)
+complete receipt/control/gap accounting for the same 292 identities.
+Their [journal](journal/2026/11.21-historical-continuation-controls.md)
+records actual #13908 delivery; the 75 affirmative bindings and all
+current-home, priority/owner and sequencing gaps remain.
 
 ## Accounting boundary
 
@@ -29,7 +34,8 @@ the following disjoint continuation decisions.
 | Additional scoped controls and explicit gaps | 32 | Specific prior studies, receiving/owner conditions and unresolved correspondence or copy causes; not new complete current authored unions. |
 | Further scoped controls and explicit gaps | 17 | Complete earlier studies, finite acceptance/owner conditions and actual unresolved source/copy causes; no new exact current authored/read binding. |
 | Accounted identities | 161 | The previously published 144 plus this disjoint 17; not 161 new technical assessments. |
-| Remaining correspondence decisions | 131 | The rest of the same selected 292; existing research is not presumed absent. |
+| Further continuation controls and gaps | 131 | Published in the linked continuation register; not new affirmative authored/read bindings. |
+| Total accounted continuation identities | 292 | The 161 preceding decisions plus 131 disjoint controls/gaps; no current whole-home or technical-completion claim. |
 
 The 23 plus 51 give 74 retained authored/read correspondences, with different
 proof strengths. Temporal precedence is not body-byte equality; a reported
