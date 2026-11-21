@@ -132,7 +132,7 @@ def test_source_lookup_uses_supported_query_and_exact_repository_across_pages(
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("defect", ["none", "source", "branch", "base", "head", "labels"])
+@pytest.mark.parametrize("defect", ["none", "source", "branch", "base", "head", "labels", "url"])
 def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
     monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
@@ -147,6 +147,8 @@ def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
         payload["base"]["repo"]["full_name"] = "elsewhere/target"
     elif defect == "head":
         payload["head"]["sha"] = "b" * 40
+    elif defect == "url":
+        payload["html_url"] = 7
     calls: list[list[str]] = []
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -178,7 +180,8 @@ def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
     else:
         with pytest.raises(CreatedSourceMismatch) as error:
             provider.create_pull(scope)
-        assert error.value.pull.number == 7 and error.value.pull.url.endswith("/pull/7")
+        assert error.value.pull.number == 7
+        assert error.value.pull.url == ("" if defect == "url" else _pull()["html_url"])
         assert len(calls) == 1
 
 
@@ -186,7 +189,7 @@ def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
 def test_foreign_reuse_validates_source_before_lookup_and_claim(
     monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any, defect: str,
 ) -> None:
-    from agent_worktrees import pr_config, pr_foreign_create
+    from agent_worktrees import pr_config, pr_foreign_checks, pr_foreign_create
     from agent_worktrees.providers import base as providers
     from test_pr_foreign_create import _config, _foreign_resolution
 
@@ -220,6 +223,8 @@ def test_foreign_reuse_validates_source_before_lookup_and_claim(
 
     monkeypatch.setattr(providers, "get_provider", lambda *_: GitHub())
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    if defect == "head":
+        monkeypatch.setattr(pr_foreign_checks, "qualify", lambda *a, **k: {"head": "a" * 40})
     result = pr_foreign_create.create_foreign_pr_from_branch(
         wid, caller_config(), target_repo="owner/other-repo", from_branch="contributor:topic", title="Fix",
         source_repository="wrong/source" if defect == "source-input" else "contributor/renamed-source",

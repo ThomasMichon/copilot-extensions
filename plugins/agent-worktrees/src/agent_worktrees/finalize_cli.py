@@ -934,7 +934,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
 
     try:
         completion_tracking.update(
-            yaml_path, worktree_id, title=full_title, title_only=args.title_only,
+            yaml_path, worktree_id, title=args.title, title_only=args.title_only,
         )
     except (OSError, ValueError, TimeoutError) as error:
         output.err(str(error))

@@ -9829,9 +9829,11 @@
     "tools/promotion_unit_tests/test_installer_pip_index.py": "066327d880f3ae3d3a9a73a4993692a80642c8cb46037f0c6aebcee7f5d016e3",
     "tools/promotion_unit_tests/test_materialization_exclusions.py": "cdd5ea44d568b7dc40be03097f0f663b291e8847b9b46e4f9733d26334475224",
     "plugins/agent-worktrees/src/agent_worktrees/git_push_binding.py": "978c1c71775306eab81a1be1946c09e2a53dad0bbe0f9ba9cca1ae4ee53726e4",
-    "plugins/agent-worktrees/src/agent_worktrees/completion_tracking.py": "ceb6d27f02282693cc5d2e4f8376c6213a3fe46660dc4fff3da42e697bffdeed",
+    "plugins/agent-worktrees/src/agent_worktrees/completion_tracking.py": "e90cb9daa16103d1b5cd97aaa133804b0497a1453b828e358b5a0a418def8dd6",
     "plugins/agent-worktrees/src/agent_worktrees/source_owner_lookup.py": "36294015c33a45f84532776cdcc57814707e4794450913c4400b57b0214d78c5",
-    "plugins/agent-worktrees/src/agent_worktrees/source_path_admission.py": "fb33508316eb591bfb13ce5407bdd97a012297b78e0da604e1bfc1560500e0ed"
+    "plugins/agent-worktrees/src/agent_worktrees/source_path_admission.py": "fb33508316eb591bfb13ce5407bdd97a012297b78e0da604e1bfc1560500e0ed",
+    "plugins/agent-worktrees/src/agent_worktrees/providers/github_publication_labels.py": "e0afa70068d6772469978b99c4a0d5bf18b062731deb5bb7f10dc29072069d9c",
+    "plugins/agent-worktrees/src/agent_worktrees/pr_unverified_creation.py": "9a9ced3f1873e155a5b04882708a6783ff60b782636ae8c617cb3cc1f666727f"
   },
   "coverage_targets": [
     "tools/sync-versioned-runtime.py",
