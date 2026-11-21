@@ -55,8 +55,10 @@ def native_snapshot_plans(repo: Path) -> dict[Path, str]:
                     libraries.add(source)
                     rows.append(("tree", f"libs/{library}", f"libs/{library}"))
                     pending.append(source)
-        bootstrap_path = repo / "libs/payload-invocation/bootstrap_python.py"
-        spec = importlib.util.spec_from_file_location("_native_snapshot_request", bootstrap_path)
+        spec = importlib.util.spec_from_file_location(
+            "_native_snapshot_request",
+            Path(__file__).resolve().parents[1] / "libs/payload-invocation/bootstrap_python.py",
+        )
         assert spec and spec.loader
         bootstrap = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bootstrap)
