@@ -37,7 +37,7 @@ def test_managed_python_is_prepared_privately_before_downloads_are_disabled(
     ) -> subprocess.CompletedProcess[str]:
         calls.append((list(arguments), cwd, dict(env), deadline))
         assert directory.is_dir()
-        return subprocess.CompletedProcess(arguments, 0)
+        return subprocess.CompletedProcess(list(map(str, arguments)), 0)
 
     prepared = managed_python_environment(
         original,
@@ -76,7 +76,7 @@ def test_failed_preparation_cannot_return_a_ready_environment(
         deadline: float,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(arguments)
-        raise subprocess.CalledProcessError(2, arguments)
+        raise subprocess.CalledProcessError(2, list(map(str, arguments)))
 
     with pytest.raises(TimeoutError if expired else subprocess.CalledProcessError):
         managed_python_environment(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.daemon_instances import (
@@ -19,7 +20,7 @@ from agent_procutil.daemon_instances import (
 from agent_procutil.owned_process import run_caller_owned
 import pytest
 
-from test_native_seed_application import ROOT, _run
+from test_native_seed_application import ROOT, _BuilderExports, _run, _SandboxFactory
 
 _NATIVE_COPILOT = (
     os.name == "nt"
@@ -120,10 +121,7 @@ def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(
 @pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
 @pytest.mark.timeout(300)
 def test_manager_no_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
-    if TYPE_CHECKING:
-        from tools.plugin_test_containment import TestSandbox
-    else:
-        from plugin_test_containment import TestSandbox
+    TestSandbox = cast(_SandboxFactory, import_module("plugin_test_containment").TestSandbox)
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     with TestSandbox(prefix="m-", dir=sandbox) as directory:
@@ -135,10 +133,7 @@ def test_manager_no_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
 @pytest.mark.timeout(300)
 def test_manager_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
-    if TYPE_CHECKING:
-        from tools.plugin_test_containment import TestSandbox
-    else:
-        from plugin_test_containment import TestSandbox
+    TestSandbox = cast(_SandboxFactory, import_module("plugin_test_containment").TestSandbox)
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     with TestSandbox(prefix="m-", dir=sandbox) as directory:
@@ -199,7 +194,7 @@ def _qualify_manager_application(
             out_dir=artifacts, python=interpreter, toolchain=None,
         )
     engine = profiles.source_inputs.engine
-    project = builder.tomllib.loads((source / "pyproject.toml").read_text())["project"]
+    project = cast(_BuilderExports, builder).tomllib.loads((source / "pyproject.toml").read_text())["project"]
     source_hash = engine.runtime_source.assembly_hash(source)
     identity = engine.runtime_source.SourceIdentity(
         "worktree-manager", project["version"], "a" * 40, "b" * 40, source_hash,

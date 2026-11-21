@@ -101,13 +101,6 @@ class _ManagerEnvironment(Protocol):
     ) -> dict[str, str]: ...
 
 
-class _ManagerNative(Protocol):
-    def __call__(
-        self, directory: Path, control: str, *, script: Path, python: Path, root: Path,
-        environment: dict[str, str], picker_decision: bool,
-    ) -> None: ...
-
-
 class _ManagerApplication(Protocol):
     def __call__(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str, *,
@@ -387,11 +380,7 @@ def test_public_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
 def _qualify_public_application(
     monkeypatch: pytest.MonkeyPatch, caller: str, *, caller_jobs: bool = False,
 ) -> None:
-    if TYPE_CHECKING:
-        from tools.plugin_test_containment import TestSandbox
-    else:
-        from plugin_test_containment import TestSandbox
-
+    TestSandbox = import_module("plugin_test_containment").TestSandbox
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     if caller_jobs:
         # The outer owner settles residents before removing this sandbox.
@@ -444,12 +433,14 @@ def test_public_caller_packets_collect_exactly_the_declared_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packet: str,
 ) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    if TYPE_CHECKING:
-        from tools.windows_qualification_contract import NATIVE_PACKETS
-        from tools.windows_qualification_worker import native_command
-    else:
-        from windows_qualification_contract import NATIVE_PACKETS
-        from windows_qualification_worker import native_command
+    NATIVE_PACKETS = cast(
+        dict[str, tuple[str, str, str, str]],
+        import_module("windows_qualification_contract").NATIVE_PACKETS,
+    )
+    native_command = cast(
+        Callable[[Path, Path, str], list[str]],
+        import_module("windows_qualification_worker").native_command,
+    )
 
     command = native_command(ROOT, tmp_path, packet)
     selected = command[command.index("-k") + 1]
@@ -862,7 +853,7 @@ def test_manager_native_phase_propagates_owned_failures_without_inline_retry(
         subprocess.TimeoutExpired if failure == "timeout" else AssertionError,
         match="timed out" if failure == "timeout" else "native failed",
     ):
-        cast(_ManagerNative, fixture._run_manager_native)(
+        fixture._run_manager_native(
             tmp_path, "manager-no-mux", script=tmp_path / "launch-session.ps1",
             python=tmp_path / "python.exe", root=tmp_path / "manager",
             environment=environment, picker_decision=True,
