@@ -20,8 +20,7 @@ def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Pa
     resources: tuple[Path, ...] = (source_root / "libs" / "versioned-runtime",)
     if component == "worktree-manager":
         source = source_root / "fleet-manager" / "src" / "fleet_manager"
-        if source.is_dir():
-            resources += (source,)
+        resources += (source,)
     if component in {"worktree-manager", "fleet-manager", "services/pr", "services/chat", "services/ssh"}:
         resources += (source_root / "libs" / "installer-engine",)
     if component in {"fleet-manager", "services/pr", "services/ssh"}:

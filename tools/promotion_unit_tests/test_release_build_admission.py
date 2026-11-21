@@ -457,7 +457,12 @@ def test_application_resources_keep_provider_metadata_without_broadening_other_a
         _write(tmp_path / name, name.encode())
     (tmp_path / "scripts/runtime-source-tools/directory.py").mkdir()
     selected = module.application_resources(tmp_path, "worktree_manager")
-    assert selected == {"_runtime_assets/" + name: tmp_path / name for name in expected}
+    expected_mapping = {"_runtime_assets/" + name: tmp_path / name for name in expected}
+    for name in ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py"):
+        expected_mapping["_runtime_assets/scripts/runtime-source-tools/fleet_role_policy/" + name] = (
+            tmp_path / "../fleet-manager/src/fleet_manager" / name
+        )
+    assert selected == expected_mapping
     assert resources.application_resources(tmp_path, "worktree_manager") == {
         "worktree_manager/" + name: source for name, source in selected.items()
     }
