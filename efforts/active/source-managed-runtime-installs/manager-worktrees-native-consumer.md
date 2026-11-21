@@ -225,10 +225,12 @@ fixture correction retain the original review and native qualification gates.
   #12682 merged after exact-head approval and required CI; the
   [recorded source split](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6890789048)
   retains the declaration adapter with its existing owner.
-- [ ] Q2: Extend that owner's fixture only where needed to exercise installed
+- [x] Q2: Extend that owner's fixture only where needed to exercise installed
   Manager's real ordinary caller, its complete application packet and the
   existing Worktrees receiver. Do not mock a producer, fabricate an association,
   reuse the retired payload-only packet or add a new construction engine.
+  #12708 merged the fixture source; Q3-Q4 and the native validation below remain
+  unqualified.
 - [ ] Q3: Qualify fresh and existing fixture installations with the same
   incoming construction. Prove the selected required set is staged before its
   activation and that a failed stage suppresses activation.
@@ -239,7 +241,8 @@ fixture correction retain the original review and native qualification gates.
   and settle every fixture-owned process, registration and temporary artifact.
 - [ ] Q5: Land required source/test changes through normal review and CI,
   record exact native results and containing release separately, then reconcile
-  only the parent acceptance credit actually earned.
+  only the parent acceptance credit actually earned. The source portion merged
+  in #12708; containing-release and native acceptance remain open.
 
 ## Validation and stopping criterion
 
@@ -267,6 +270,33 @@ The parent remains Active until its complete Plan and Validation Plan close;
 finishing this fixture cannot finalize the parent worktrees.
 
 ## Journal
+
+### 2026-11-21 - Fixture source merged; native acceptance remains open
+
+#12708 merged as `84be9e9e87e57e5a68de081bcf8fe4e03e641d7b` from
+`6a03b1946987df0006edf29e6fc916cd4cd38523`. Required CI
+[44868091299](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44868091299)
+passed. The exact-head Copilot comment review reported no open code issues or
+discussion threads while explicitly retaining the missing hosted qualification.
+The normal Maintainer self-merge path was used; no failing check was bypassed.
+
+The final annotation-only correction matches the contained process wrapper's
+text, byte and uncaptured result types to its existing process owner. Whole-file
+strict Python 3.10 checking passes for all seven contribution files on Linux
+and Windows. Fatal lint passes; the 232 focused coordinator/source-scope tests
+and the earlier command's temporary-cleanup failure retain their recorded scope.
+Process execution, containment, timeouts and the frozen application pair did not
+change.
+
+This closes Q2's source extension only. Q3-Q5, VQ1-VQ6 and the parent W1/W2,
+P4bD and lifetime acceptance remain open. The ten historical hosted attempts
+remain failures; neither a source merge nor #13449's separate historical
+disposition qualifies the full-history transport correction. No eleventh
+attempt, containing release, installed update or deployment is claimed.
+The existing qualification owner retains that exact-source evidence gate and
+its original approval limits. The next active integration slice is the reviewed
+foreground receiver and its truthful cancellation/recovery evidence, not an
+implicit resumption of held native work.
 
 ### 2026-11-20 - Integrate the merged policy correction without a native retry
 
