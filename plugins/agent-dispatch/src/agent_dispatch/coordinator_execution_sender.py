@@ -5,15 +5,18 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from copy import copy
 from dataclasses import dataclass
 
 from . import coordinator_execution_runtime as runtime
 from .execution_scope_binding import resolve_execution_installation
+from .execution_send_destination import ExecutionDestination
 from .loop_governance import LoopGovernance
-from .queue import SpawnReservation, Task, TaskQueue
+from .queue import TaskQueue
+from .queue_common import Task
 from .queue_execution_custody import ExecutionSendIdentity, SendKind, execution_scope_qualified
 from .queue_execution_scopes import ExecutionScopeBinding
-from .queue_records import TaskError
+from .queue_records import SpawnReservation, TaskError
 
 
 @dataclass
@@ -36,6 +39,8 @@ class CoordinatorExecutionProvenance:
 
     def prepare(self) -> tuple[ExecutionScopeBinding, str] | None:
         # Historical qualification cannot disappear with a missing binding row.
+        if self.task.repo is None or self.task.source is None:
+            return None
         with self.queue._connect() as conn:
             qualified = execution_scope_qualified(conn, self.task.repo, self.task.source)
         if not qualified:
@@ -67,17 +72,24 @@ class CoordinatorExecutionProvenance:
         return binding, runtime_id
 
 
-class CoordinatorExecutionSender(CoordinatorExecutionProvenance):
+class CoordinatorExecutionSender:
     def __init__(
         self, queue: TaskQueue, task: Task, reservation: SpawnReservation, incarnation: str
     ) -> None:
-        super().__init__(queue, task, incarnation)
+        self.provenance = CoordinatorExecutionProvenance(queue, task, incarnation)
         self.reservation = reservation
+        self._destination: ExecutionDestination | None = None
+
+    def to(self, destination: ExecutionDestination) -> CoordinatorExecutionSender:
+        """Bind one transport call without copying its producer-generation fence."""
+        sender = copy(self)
+        sender._destination = destination
+        return sender
 
     @contextmanager
     def attempt(self, kind: SendKind) -> Iterator[ExecutionSendAttempt]:
         attempt = ExecutionSendAttempt()
-        prepared = self.prepare()
+        prepared = self.provenance.prepare()
         if prepared is None:
             yield attempt
             return
@@ -87,10 +99,11 @@ class CoordinatorExecutionSender(CoordinatorExecutionProvenance):
             "send:" + uuid.uuid4().hex,
             runtime_id,
             self.reservation.key,
-            self.task.generation,
+            self.provenance.task.generation,
             kind,
+            destination=self._destination,
         )
-        admitted = self.queue.admit_execution_send(
+        admitted = self.provenance.queue.admit_execution_send(
             identity,
             source=binding.source,
             expected_producer_generation=binding.producer_generation,
@@ -100,7 +113,7 @@ class CoordinatorExecutionSender(CoordinatorExecutionProvenance):
         try:
             yield attempt
         finally:
-            self.queue.settle_execution_send(
+            self.provenance.queue.settle_execution_send(
                 identity,
                 outcome="sent" if attempt.accepted else "unknown",
                 detail=(

@@ -41,6 +41,12 @@ class WakeSendAdmission:
 
 
 def _known_native_retry(row: sqlite3.Row, wake: Wake, task: Task) -> bool:
+    return _retryable_native_refusal(row, wake, task, observing_delivery=False)
+
+
+def _retryable_native_refusal(
+    row: sqlite3.Row, wake: Wake, task: Task, *, observing_delivery: bool
+) -> bool:
     if row["execution_send_state"] != "not_sent":
         return False
     try:
@@ -58,7 +64,10 @@ def _known_native_retry(row: sqlite3.Row, wake: Wake, task: Task) -> bool:
         and previous.get("owner_session_id") == wake.owner_session_id
         and isinstance(previous.get("delivery_token"), str)
         and bool(previous["delivery_token"])
-        and previous["delivery_token"] != wake.delivery_token
+        # A retry needs a new token. Readiness also sees the original token
+        # between recording a retryable refusal and returning it to pending.
+        and (previous["delivery_token"] != wake.delivery_token
+             or (observing_delivery and row["status"] == "delivering"))
         and refusal.get("schema") == "dispatch-native-prompt-refusal"
         and type(refusal.get("version")) is int and refusal["version"] == 1
         and (
@@ -266,6 +275,13 @@ class QueueExecutionWakesMixin:
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_unresolved_send"
+                f" ON {table}(execution_send_state,task_id)"
+                " WHERE execution_send_state IN ('pending', 'unknown')"
+            )
+        from .provisional_driver_work import migrate
+        migrate(conn)
         conn.commit()
 
     def defer_execution_wake(

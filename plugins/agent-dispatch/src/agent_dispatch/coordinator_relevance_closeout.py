@@ -20,7 +20,7 @@ from .task_closeout_authority import (
 from .task_relevance_contract import CLOSEOUT_PROTOCOL
 
 
-class CloseoutBody(BaseModel):
+class CloseoutBinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int = Field(strict=True, ge=1, le=1)
@@ -28,6 +28,9 @@ class CloseoutBody(BaseModel):
     worker_id: str = Field(min_length=1, max_length=4096)
     native_id: str = Field(min_length=1, max_length=4096)
     expected_generation: int = Field(strict=True, ge=0, le=2**63 - 1)
+
+
+class CloseoutBody(CloseoutBinding):
     finish_action: Literal["submit-finalized-review/v1", "abandon-finalized-source/v1"] | None = None
 
 
@@ -59,6 +62,28 @@ def register_closeout_routes(
         if request.headers.get("X-Dispatch-Closeout-Action") == SUBMIT:
             current.setdefault("finish_action", ABANDON)
         return envelope(current)
+
+    @app.get(f"{CLOSEOUT_PATH}/observe-provisional")
+    def preview_contract(task_id: str, request: Request) -> dict[str, Any]:
+        authorize(request, task_id)
+        return envelope({"provisional_observation_versions": [1]})
+
+    @app.post(f"{CLOSEOUT_PATH}/observe-provisional")
+    def preview(task_id: str, body: CloseoutBinding, request: Request) -> dict[str, Any]:
+        from .queue_relevance_readiness import observe_provisional
+
+        arguments = body.model_dump(exclude={"version"})
+        try:
+            with app.state.drain_gate.track_claim():
+                if app.state.drain_gate.draining:
+                    raise TaskError("provisional observation is inhibited while draining")
+                authorize(request, task_id, arguments)
+                return envelope(observe_provisional(
+                    queue, task_id, arguments,
+                    lambda: require_closeout_fencing(request, app.state.task_fencing_guard),
+                ))
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
 
     def mutate(task_id: str, body: CloseoutBody, request: Request, *, finish: bool) -> dict[str, Any]:
         arguments = body.model_dump(exclude={"version", "finish_action"})

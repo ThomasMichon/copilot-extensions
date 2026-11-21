@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .ordinary_agent_facts import identity
 from .queue_records import SpawnState, Status, TaskError
@@ -51,7 +51,7 @@ def reservation_native_identity(conn: Any, history: Any) -> str | None:
         if native and native != handle:
             raise TaskError("retained CLI native identity evidence conflicts")
         native = handle
-    return native
+    return cast(str | None, native)
 
 
 def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
@@ -108,21 +108,23 @@ def native_binding_evidence(
     retired: set[str] = set()
     handle_natives: dict[str, str] = {}
     histories = conn.execute(
-        "SELECT s.*,a.native_session_id FROM spawn_reservations s "
-        "LEFT JOIN acquisition_receipts a ON a.reservation_key=s.key "
-        "WHERE s.key IN ("
-        "SELECT key FROM spawn_reservations WHERE worktree=? "
-        "UNION SELECT key FROM spawn_reservations WHERE worktree IS NULL AND key=? "
-        "UNION SELECT key FROM spawn_reservations"
-        " WHERE worktree IS NULL AND allocation_reservation_key=?) "
-        "AND (s.task_id=? OR s.creation_key=? "
-        "OR s.key=? OR s.allocation_reservation_key=? OR ("
-        "s.exclusive_key=? AND s.session_handle IS NOT NULL AND EXISTS ("
-        "SELECT 1 FROM spawn_reservations carried WHERE carried.worktree=s.worktree "
-        "AND (carried.task_id=? OR carried.creation_key=?) "
-        "AND carried.session_handle=s.session_handle)))",
-        (row["worktree"], origin, origin, task.id, row["creation_key"], origin, origin, row["exclusive_key"],
-         task.id, row["creation_key"]),
+        "SELECT s.*,a.native_session_id FROM ("
+        "SELECT key FROM spawn_reservations WHERE task_id=:task "
+        "UNION SELECT key FROM spawn_reservations WHERE creation_key=:creation "
+        "UNION SELECT key FROM spawn_reservations WHERE key=:origin "
+        "UNION SELECT key FROM spawn_reservations WHERE allocation_reservation_key=:origin "
+        "UNION SELECT key FROM spawn_reservations WHERE exclusive_key=:exclusive"
+        " AND session_handle IS NOT NULL AND session_handle IN ("
+        " SELECT session_handle FROM spawn_reservations INDEXED BY idx_spawn_res_task"
+        " WHERE task_id=:task AND worktree=:tree"
+        " UNION SELECT session_handle FROM spawn_reservations INDEXED BY idx_spawn_session_creation"
+        " WHERE creation_key=:creation AND worktree=:tree)) candidates"
+        " CROSS JOIN spawn_reservations s ON s.key=candidates.key"
+        " LEFT JOIN acquisition_receipts a ON a.reservation_key=s.key"
+        " WHERE (s.worktree=:tree OR (s.worktree IS NULL"
+        " AND (s.key=:origin OR s.allocation_reservation_key=:origin)))",
+        {"tree": row["worktree"], "origin": origin, "task": task.id,
+         "creation": row["creation_key"], "exclusive": row["exclusive_key"]},
     ).fetchall() if row["worktree"] else [row]
     evidence: list[tuple[Any, str | None]] = []
     for history in histories:
@@ -198,7 +200,7 @@ def inherited_retirement(conn: Any, row: Any, task: Any) -> bool:
     return bool(evidence.retired) or evidence.qualified_empty
 
 
-def retained_start_generation(conn: Any, task: Any, info: dict) -> bool:
+def retained_start_generation(conn: Any, task: Any, info: dict[str, Any]) -> bool:
     """Later normal claims require the original native's real attachment history."""
     generation = info.get("task_generation")
     if type(generation) is not int or task.generation < generation:
@@ -219,7 +221,7 @@ def retained_start_generation(conn: Any, task: Any, info: dict) -> bool:
     )
 
 
-def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
+def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict[str, Any]:
     """Describe a same-native queued continuation; never authorize replacement."""
     from .bridge_remote import normalize_host
     from .ordinary_agent_facts import native_conflict

@@ -132,6 +132,64 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
     }
 
 
+def _observe_driver(task_id: str, original: dict[str, Any]) -> dict[str, Any]:
+    from .submission_readiness_observation import observe
+
+    allocation, request = original["allocation"], original["relationship"]["request"]
+    return observe(
+        {"workspace": request["workspace"], "task_id": task_id,
+         "owner_session_id": original["arguments"]["native_id"]},
+        {"task_id": task_id, "reservation_key": allocation["key"],
+         "attempt": allocation["attempt"], "driver": allocation["driver"],
+         "supervisor": allocation["reserved_by"],
+         "creator_machine": allocation["execution_machine"], "ownership": "created"},
+        original["relationship"]["receipt"]["ref"],
+    )
+
+
+def observe_provisional(
+    queue: TaskQueue, task_id: str, arguments: dict[str, Any], authority_guard: Callable[[], None],
+) -> dict[str, Any]:
+    """Point-in-time only: persisting closeout readiness would authorize claim release."""
+    from .queue_execution_handoff import closed_execution
+    from .provisional_driver_work import require_no_outstanding_driver_work
+
+    def snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
+        authority_guard()
+        state = _state(queue, conn, task_id, arguments)
+        task = queue._fetch(conn, task_id)
+        pending = conn.execute(
+            "SELECT 1 FROM task_relevance_closeouts WHERE task_id=?"
+            " AND readiness IS NULL AND acknowledgement IS NULL", (task_id,),
+        ).fetchone()
+        if (
+            task is None or task.status not in {Status.STARTED, Status.SUSPENDED, Status.SUBMITTED}
+            or (task.status == Status.SUBMITTED and (
+                task.owner is not None or not task.completed_by
+                or task.completed_by != arguments["worker_id"]
+            ))
+            or not task.require_verification or task.awaiting_steer
+            or state["relationship"]["state"] != "bound" or pending is None
+            or closed_execution(conn, task_id) is not None
+        ):
+            raise TaskError("provisional observation requires an unsettled, bound driver assignment")
+        require_no_outstanding_driver_work(queue, conn, task, state["reservation"], arguments["native_id"])
+        return state
+
+    with queue._connect() as conn:
+        conn.execute("BEGIN")
+        original = snapshot(conn)
+    _observe_driver(task_id, original)
+    with queue._connect() as conn:
+        conn.execute("BEGIN")
+        if snapshot(conn) != original:
+            raise TaskError("driver binding changed during provisional observation")
+    return {
+        "ready": True, "assignment_event_id": original["binding"]["assignment_event_id"],
+        "request_id": arguments["request_id"], "generation": arguments["expected_generation"],
+    }
+
+
 def prepare(
     queue: TaskQueue, task_id: str, *,
     authority_guard: Callable[[], None] | None = None, **arguments: str | int,
@@ -149,18 +207,7 @@ def prepare(
     if receipt is None:
         if original["relationship"]["state"] != "bound":
             raise TaskError("relevance closeout lacks its original bound claim")
-        from .submission_readiness_observation import observe
-
-        allocation, request = original["allocation"], original["relationship"]["request"]
-        observation = observe(
-            {"workspace": request["workspace"], "task_id": task_id,
-             "owner_session_id": arguments["native_id"]},
-            {"task_id": task_id, "reservation_key": allocation["key"],
-             "attempt": allocation["attempt"], "driver": allocation["driver"],
-             "supervisor": allocation["reserved_by"],
-             "creator_machine": allocation["execution_machine"], "ownership": "created"},
-            original["relationship"]["receipt"]["ref"],
-        )
+        observation = _observe_driver(task_id, original)
         receipt = {
             "task_id": task_id, "arguments": arguments, "binding": original["binding"],
             "observation": observation, "finalized": False, "process_retirement": False,

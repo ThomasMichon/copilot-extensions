@@ -19,6 +19,8 @@ CLOSEOUT_PATH = "/tasks/{task_id}/relevance-closeout"
 CLOSEOUT_ROUTES = frozenset(
     {
         ("GET", CLOSEOUT_PATH),
+        ("GET", f"{CLOSEOUT_PATH}/observe-provisional"),
+        ("POST", f"{CLOSEOUT_PATH}/observe-provisional"),
         ("POST", f"{CLOSEOUT_PATH}/prepare"),
         ("POST", f"{CLOSEOUT_PATH}/finish"),
     }

@@ -40,6 +40,76 @@ checks nor yields, declines, abandons first, unregisters or terminates a native.
 The existing session/conclusion owners retain their later responsibilities.
 It does not delete the checkout or directly release a reservation.
 
+### Inspect readiness without settling the driver
+
+`GET /tasks/{task_id}/relevance-closeout/observe-provisional` advertises
+`provisional_observation_versions: [1]` to the original owner when the receiver
+supports a read-only observation via `POST` to the same path.
+Use the existing closeout binding (`version`, `request_id`, `worker_id`, `native_id`,
+`expected_generation`), with no finish action or caller-supplied evidence. Do not
+substitute `/prepare` on an older receiver: that operation settles the claim.
+
+The observation asks the selected Worktrees owner whether the active driver is
+finalizable **except for its exact bound task claim**. Other unsettled or unknown
+obligations still block. Each call checks the original binding before and after
+the independent owner read. A driver that submitted before the source closeout
+can also inspect readiness: the recorded submitter, native session and generation
+must still match the captured assignment, even though its lease has ended.
+Dispatch checks its held assignments, detached waiters and wake/send records
+on both sides of the owner read. Each snapshot uses the
+[current driver lookup](pool-placement.md#current-driver-lookup-internal);
+both a match and an unknown binding block. A clear binding result does not
+supersede the independent transport checks or the Worktrees observation.
+Other work holding the same worker or native
+on the same host blocks even without a corresponding Worktrees claim.
+An unreleased pre-start placement targeting
+that tree on its selected machine blocks before the task has an owner or native.
+A bare legacy owner is not a hostname: a matching native without a qualified
+route cannot prove the drivers are independent. Suspension
+retains the assignment independently of any waiter or wake. A submitted task
+retaining its submitter and native return identity also blocks until that binding
+is discharged; a completed task's historical submitter is not a current assignment. A
+current pending delivery (including a qualified retry) also blocks; a stale
+unattempted wake or this observation's own pending closeout notification does
+not. A confirmed single-attempt delivery settles an unqualified wake; a later
+retry cannot establish what happened on an earlier ambiguous attempt.
+For owner and waiter wakes, a qualified workspace target and a native target
+are independent: a different native does not clear an unresolved wake for the
+same host and tree. A terminal send label without an attributable outbox
+envelope is not clearance.
+For each outbox, Dispatch records the first delivery attempt with a qualified
+send identity. A later `sent` or `not_sent` settles only that send. If accounting
+began after attempt one, readiness still refuses. A retry of an exact known
+refusal remains supported when accounting began on attempt one. On upgrade,
+an existing multi-attempt row with no recorded first ordinal is not assumed
+to have been qualified from the start. This evidence is for observation only:
+it does not authorize a retry or change an outbox outcome.
+
+Non-wake execution sends are also checked by destination, independently of
+task lineage, reservation status or subsequent workspace changes. A qualified
+sender freezes its selected route in the existing send identity before transport.
+A driver route binds the execution host and the known workspace/native selectors
+against the reservation in the admission transaction. Either same-host selector
+blocks until the owner settles the send. The container launcher instead records
+the selected venue and container directory; direct Bridge delivery records the
+addressed session. Neither proves a managed driver identity. An unresolved
+incomparable or legacy target therefore blocks observation, even across tasks;
+it is never reconstructed from the reservation's current contents. Settled sends
+do not block. No second send ledger or send permission is created.
+A successful response identifies the request,
+generation and assignment event; it does not persist a readiness receipt, submit,
+authorize release or send a wake. Previously settled and finalized drivers cannot
+use this operation to regain authority.
+
+A still-authorized task whose goal is to correct a specified result can already
+use ordinary guarded submission, rejection and resubmission in its original
+workspace. That is not a way to amend an obsolete task's goal. For the latter,
+an executing correction requires a distinct, owner-authorized revision objective
+bound to the inspected proposal, driver and generation. Neither a readiness
+observation nor evaluator feedback establishes that authority.
+
+### Finalized review submission
+
 For a started or suspended `pr-review` task with an independent evaluator,
 the original worker retains a submission proposal **before** settling the
 assignment. The receiver verifies the finalized workspace, the original
