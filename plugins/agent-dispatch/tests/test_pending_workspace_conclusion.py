@@ -49,6 +49,10 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
         assert result("host-a") is DriverMatch.UNKNOWN
         conn.execute("UPDATE tasks SET owner_session_id='different' WHERE id=?", (task.id,))
         assert result("host-c") is DriverMatch.MATCH
+        conn.execute("UPDATE spawn_reservations SET session_handle='fleet-body:host-b:s'")
+        assert result("host-c") is DriverMatch.UNKNOWN
+        conn.execute("UPDATE task_attachments SET machine='host-b'")
+        assert result("host-b") is DriverMatch.MATCH
         conn.execute("UPDATE acquisition_receipts SET session_id='different'")
         assert result("host-c") is DriverMatch.UNKNOWN
 

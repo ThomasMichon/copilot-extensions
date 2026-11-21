@@ -27,7 +27,7 @@ def install_index(conn: sqlite3.Connection) -> None:
     )
 
 
-def _local_native(row: sqlite3.Row, bridge: str) -> str | None:
+def _bridge_native(row: sqlite3.Row, bridge: str) -> str | None:
     natives: set[str] = set()
     if row["receipt_bridge"] is not None:
         if (row["receipt_bridge"], row["receipt_tree"], row["receipt_task"]) != (
@@ -64,15 +64,23 @@ def _hosts(conn: sqlite3.Connection, row: sqlite3.Row) -> set[str]:
         if not isinstance(recorded, str) or not recorded.strip():
             return set()
         hosts.add(normalize_host(recorded))
-    if session.startswith("fleet-body:") and session.split(":")[1]:
-        hosts.add(normalize_host(session.split(":")[1]))
+    bridge = None
+    if session.startswith("fleet-body:"):
+        from .spawn_factories import _parse_fleet_body_handle
+        fleet = _parse_fleet_body_handle(session)
+        if fleet is None:
+            return set()
+        address, bridge = fleet
+        hosts.add(normalize_host(address))
+    elif session.startswith("local-body:"):
+        bridge = session.removeprefix("local-body:")
     owner = row["owner"] or ""
     if row["worktree"] == owner.partition("/")[2] and (machine := machine_from_owner(owner)):
         hosts.add(normalize_host(machine))
     if session:
         native = session
-        if session.startswith("local-body:"):
-            native = _local_native(row, session.removeprefix("local-body:"))
+        if bridge is not None:
+            native = _bridge_native(row, bridge)
             if not native:
                 return set()
         if row["owner_session_id"] in (session, native):

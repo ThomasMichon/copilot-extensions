@@ -51,7 +51,7 @@ conclusion prompt for the recorded local body.
 The read uses a partial workspace index. It compares the reservation's route
 with the session-bound worker and indexed attachments for that task, session,
 and workspace. The creating host is a fallback, not proof against a retained
-worker on another host. A local Bridge handle is not a native session ID:
+worker on another host. Neither a local nor a fleet Bridge handle is a native session ID:
 the reservation's acquisition receipt or recorded agent identity must link
 them. Missing or conflicting links return `UNKNOWN`. Task prompts, results,
 and cards are not read.
