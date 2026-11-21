@@ -95,6 +95,13 @@ work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
 
+The [ordinary cleanup refinement](roadmap-selected-force-identity.md#ordinary-cleanup-diagnostic-current-receiving-boundary)
+keeps default-False result propagation independent of force-capable signaling
+and native monitor acceptance. The [five source admissions](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md#five-newly-qualified-source-descriptions)
+credit their original unit objects without making those source slices
+prerequisites for unrelated runtime work or substitutes for retained
+Git/threaded/native/every-release acceptance.
+
 The [current force-identity contribution](roadmap-selected-force-identity.md)
 retains #5006's P1 force-capable caller boundary and separately owned cleanup,
 causal-fixture and Darwin-monitor exits. Its target-safety/exit requirements

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Ordinary cleanup diagnostics and bounded packet deliveries](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+
 - [2026-11-21 - Current force identity and independent keeper lanes](journal/2026/11.21-current-force-identity.md)
 
 - [2026-11-21 - Current handoff atomicity and separate source deliveries](journal/2026/11.21-current-handoff-atomicity.md)

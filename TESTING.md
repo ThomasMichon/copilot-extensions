@@ -11446,6 +11446,13 @@ empty summaries, with positive production call coverage and source-bound
 imports. The 46 remaining original cases retain their Git/process contracts
 outside this packet; formatter coverage does not qualify promotion.
 
+Six original preview cases use four exact test objects and their original
+isolation fixture. They retain missing-plugin/CLI diagnostics, retired-pointer
+refusal and absent/stale/conflicting Invocation-output assertions, including
+source-tree immutability. Canonical producer and template inputs are bound;
+generated script text is not executed. Eleven originals that still reach the
+real Git-head child remain unchanged outside the packet.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:

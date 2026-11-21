@@ -53,6 +53,13 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [cleanup and packet-delivery unit](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+adds the actual default-False cleanup-result distinction and five bounded
+original-unit admissions, preserving existing native/opt-in credit and
+unadmitted Git/process/threaded/lifecycle duties. It records actual #13928
+delivery and the complete unchanged 899-open census, not whole-program
+acceptance or a new implementation assignment.
+
 The [current force-identity contribution](roadmap-selected-force-identity.md)
 qualifies #5006's actual force caller and shared termination API against
 current lifecycle intent. It preserves force/tree behavior and the keeper's
