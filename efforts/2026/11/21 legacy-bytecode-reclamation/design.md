@@ -9,7 +9,7 @@ historical cleanup. Cache data is disposable only after classification and
 current-use/retention proof. Names, modification age, a successful rename and
 the absence of a PID in an old record are not sufficient independently.
 
-Preserve [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+Preserve [authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement):
 incoming readiness and complete selection define update success. Backlog
 cleanup cannot veto that success or require an incumbent runtime's permission.
 Delayed work must still preserve the then-current selection and its users.

@@ -2,6 +2,18 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_batches_and_deduplicates_blobs",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_bounds_batch_bytes[sizes0-counts0]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_bounds_batch_bytes[sizes1-counts1]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa missing\\n]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tree 3\\nabc\\n]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb blob 3\\nabc\\n]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa blob 4\\nabc\\n]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa blob 3\\nab]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa blob 3\\nabc!]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_refuses_incomplete_or_malformed_batches[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa blob 3\\nabc\\nextra]",
+"tools/promotion_unit_tests/test_identifier_git_protocol_units.py::test_git_ref_loader_propagates_git_failure",
 "tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_independent_programs_refuse_source_change_between_programs[bytes]",
 "tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_independent_programs_refuse_source_change_between_programs[identity]",
 "tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_independent_programs_refuse_source_change_between_programs[directory]",
@@ -6403,6 +6415,7 @@
 "tools/promotion_unit_tests/test_bridge_session_inventory.py::test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
     ],
     "coverage_targets": [
+        "tools/check-no-internal-identifiers.py",
         "tools/application_footprint.py",
         "tools/check-module-size.py",
         "tools/check-large-files.py",
@@ -6839,6 +6852,9 @@
         "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_identifier_git_protocol_units.py": "ef063a19d9d58f39db2065129f5478df764b3dc7bfbb7876c6d74ddec1bbe6c4",
+        "tools/test_check_no_internal_identifiers.py": "3ae7cddea5248d019a43fe014d85fff60258ede94e2668ca8d15f7d495a08fde",
+        "tools/check-no-internal-identifiers.py": "6ef31ed80a855736b307e75bee986b57bf9401bcd7d9f5fa7b35dc7ff016c5e4",
         "tools/promotion_unit_tests/test_typecheck_program_control_units.py": "764de8ae05a9bd98ff547411db70995de5546603e823eecc492c981746ef9a8c",
         "tools/test_typecheck_programs.py": "2babe68f0c8613f13ec645f42873efe309cffe030e7f75f30634924a650905fb",
         "tools/test_typecheck.py": "9b94eb3673a9c1b79823e0418b594e7482d741209daa6cd7b2156f72a0e04531",
