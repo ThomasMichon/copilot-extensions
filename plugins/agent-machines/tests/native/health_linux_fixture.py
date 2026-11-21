@@ -177,5 +177,34 @@ class FiniteInstallation:
         }
 
 
+class StartupDelayInstallation(FiniteInstallation):
+    """Block only a fixture pre-start child under the unchanged manager deadline."""
+
+    def __init__(
+        self, installation: enrollment.Installation,
+        times: tuple[datetime, ...], expires: datetime, marker: Path,
+    ) -> None:
+        super().__init__(installation, times, expires)
+        self.marker = marker
+
+    def definition(
+        self, desired: dict[str, Any], owner: str, *, enabled: bool,
+    ) -> health_jobs.LinuxDefinition:
+        value = super().definition(desired, owner, enabled=enabled)
+        service = next(name for name in value["artifacts"] if name.endswith(".service"))
+        command = " ".join(
+            health_jobs._systemd(argument, executable=index == 0)
+            for index, argument in enumerate([
+                str(self.python), "-I", "-S", "-c",
+                "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(80)",
+                str(self.marker),
+            ])
+        )
+        value["artifacts"][service] = value["artifacts"][service].replace(
+            "Type=oneshot\n", "Type=oneshot\nExecStartPre=" + command + "\n",
+        )
+        return value
+
+
 def write_receipt(path: Path, value: dict[str, Any]) -> None:
     path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")

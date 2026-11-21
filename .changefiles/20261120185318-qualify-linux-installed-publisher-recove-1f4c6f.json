@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify Linux installed publisher recovery, late-start coalescing and native failures",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

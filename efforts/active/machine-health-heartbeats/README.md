@@ -69,11 +69,13 @@ The Linux retained finite-action foundation, native enrollment and pair-recovery
 source and bounded native fixture are merged. The real-user-manager packet now
 passes closed installed CLI execution, two finite calendar cycles,
 replacement/rollback and exact cleanup. Its first native run exposed an empty
-no-job readback value; the source fix and regression checks are ready for review.
-Next, clear that source gate, then qualify the remaining Linux interruption,
-late-start, overlap, deadline and storage-failure controls without provisioning
-or production enrollment. Receiver selection and broader carrier, preference
-and domain gates remain open.
+no-job readback value; #13794 merged the source fix and regression checks.
+The next opt-in packet now proves disabled-pair publisher-exit recovery,
+persistent late-start coalescing, actual unwritable-store staging refusal and
+the unchanged manager startup deadline; source review is next.
+Active-collection overlap, collector-child deadline and unknown native-client
+cleanup recovery remain open, without provisioning or production enrollment.
+Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
 
@@ -361,7 +363,34 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
 
+### 2026-11-21 - Native interruption, storage and late-start controls
+- Two real publisher-exit cases pass through fresh installed CLI processes after
+  the first unit file is durably published. Convergence completes the approved
+  disabled pair and retains its runtime reference; explicit removal clears the
+  partial pair and reference. Exact final cleanup settles both.
+- A real unwritable store with a requested loopback observation reports native
+  exit failure without modifying store bytes. The unchanged manager startup
+  deadline terminates a fixture-only pre-start child; no collection is falsely
+  reported and exact pair cleanup succeeds. Both cases pass.
+- A stopped persistent timer misses both finite absolute UTC triggers, then
+  resumes as exactly one collection and one observed hour. No per-trigger
+  replay or historical uptime is invented; cleanup releases the pair.
+- Initial fixture assertions incorrectly expected disabled recovery to roll
+  back, and an empty collection policy made the first storage control a no-op.
+  Corrected the expected consent-preserving state and required real observation
+  staging. These were test-preparation failures, not product regressions;
+  their evidence and successful exact cleanups remain distinct.
+- This is not active-collection overlap, a collector-child deadline or unknown
+  native-client cleanup recovery qualification. Those and actual hourly,
+  carrier and broader domain/preference acceptance remain open.
+
 ### 2026-11-21 - Real Linux installed packet qualified
+- Merged #13794 as `306bab03cd7c0fb33e7370d1e905f8566d5a6767` after
+  exact-head Copilot approval, no review findings and all required CI green.
+  The complete rebased execution packet passed both native cases in 78.55
+  seconds, or 83.93 seconds including runner preparation and cleanup. Refreshed
+  focused tests, strict Linux/Windows checks, lint and installation contracts
+  also passed. Source merge is not release availability or rollout.
 - The first native run failed at initial readback before unit creation:
   the real user manager reports no pending job as an empty `Job` property.
   The adapter incorrectly accepted only zero. Exact read-only reconciliation
