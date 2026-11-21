@@ -645,13 +645,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `2fcfa5c63009b5cf6ec5472716cb6ea051878fdc` after exact-head Copilot approval
   and complete required Linux CI with freshly executed packet evidence.
   Broader/native and full-census acceptance remain separate.
-- [ ] Qualify and land eighteen original vendored-library synchronization
+- [x] Qualify and land eighteen original vendored-library synchronization
   guard cases through exact test/fixture objects, preserving the original
   native symlink residual outside the packet. Require real per-case guard call
   coverage, closed source admission including existing shared helpers,
   unchanged preceding packet/helper/budget gates, then current-head source
-  review and complete Linux CI. Native installation/materialization,
-  every-release and full-census acceptance remain separate.
+  review and complete Linux CI. #13834 merges at
+  `cbcd81463e3768a243a514e2b2aa7ef2fe120f99` after exact-head Copilot approval
+  and complete required Linux CI with freshly executed packet evidence.
+  Native installation/materialization, every-release and full-census
+  acceptance remain separate.
+- [ ] Qualify and land thirty original large-file Git protocol and source-AST
+  subprocess-control cases through exact test objects. Preserve all fifty
+  original real Git/process residuals outside the packet, real per-case
+  production call coverage, source closure, preceding admission, helper gates
+  and the 300-second budget. Require current-head review and complete Linux CI;
+  broader native, every-release, workflow-count and full-census gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
