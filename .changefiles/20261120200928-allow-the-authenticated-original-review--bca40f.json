@@ -1,0 +1,9 @@
+{
+  "comment": "Allow the authenticated original review worker to submit after verified finalization of its assigned reservation without a historical relationship event.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
