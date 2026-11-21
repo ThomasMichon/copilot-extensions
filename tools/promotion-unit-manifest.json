@@ -3,6 +3,22 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_version_bump_guard_units.py",
+      [
+        "test_revision_diff_is_unambiguously_separated_from_paths",
+        "test_revision_blob_reads_are_unambiguously_separated_from_paths",
+        "test_diff_failure_is_not_reported_as_no_changes",
+        "test_nested_shared_dependencies_charge_every_consumer_form",
+        "test_nested_dependency_cycles_and_aliases_are_deterministic",
+        "test_invalid_nested_manifest_fails_closed[[broken]",
+        "test_invalid_nested_manifest_fails_closed[[tool.uv]\\nsources = \"not-a-table\"\\n]",
+        "test_invalid_nested_manifest_fails_closed[[tool.uv.sources]\\nleaf = { path = 1 }\\n]",
+        "test_invalid_nested_manifest_fails_closed[[tool.uv.sources]\\nleaf = { path = \"../../elsewhere/leaf\", editable = true }\\n]",
+        "test_symlinked_nested_manifest_fails_closed",
+        "test_packaged_groups_charge_standalone_consumer_for_every_canonical_root"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_packet.py",
       [
         "test_compact_source_and_packet_normalize_without_relabelling_proof"
@@ -8253,6 +8269,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_version_bump_guard_units.py": "53061beb6375227c19199245cd149d887590f321225f67fd2fe1b98071bacd36",
+    "tools/test_check_version_bump.py": "af1f39d99aa3a19b21ed34f0af769213d19dc4a7ecfeb67e122fb463c8428f9a",
     "tools/promotion_unit_tests/test_dependency_age_release_units.py": "89e7ddec666215751fac9a0bf84194d77567c776905ae3b80a4503090209d89a",
     "tools/test_dependency_age.py": "b019c533b68d607844044ca7647308ff37e0d746ddbb04e6c0a689157f0f6dc5",
     "tools/promotion_unit_tests/test_identifier_git_protocol_units.py": "ef063a19d9d58f39db2065129f5478df764b3dc7bfbb7876c6d74ddec1bbe6c4",

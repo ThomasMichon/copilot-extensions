@@ -2645,6 +2645,57 @@ Current-head review and complete required Linux source CI remain outstanding;
 the writer leaf and full parent remain open until their own gates pass.
 No native, every-release, full-census or controlled-saving claim is made.
 
+Source #13915 merges at `2026-11-21T15:27:02Z` as
+`835e608e2280e03f901ade84d866b19792233053`. Copilot approval `6006272733`
+at `15:24:04Z` names exact head
+`8ab3fcacbbde6c61fab9886cace8c13f85f063ae`; complete review and thread
+readback finds no active finding and no omitted page. Source CI `44918701509`
+and trusted metadata CI `44918701699` both complete successfully.
+Actual unit job `136889778798` freshly executes all 6,629 cases with 35
+deselections in 158.85 pytest seconds and 179.116 packet seconds, retaining
+the 300-second limit and flat-v1 output. Lookup takes 423 ms and finds no
+qualified completed packet. This is actual converted-inventory execution,
+not a reuse hit or observed saving.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite writer milestone is resolved. Scoped managed
+synchronization retains the published head and advances the source worktree
+to the actual merge without conflict, reset, stash, peer edit or resource
+release. Broader census, release, lifecycle, owner-acceptance and whole-flow
+measurement gates remain open.
+
+### November 21 original version-bump guard unit cohort
+
+The shared version-bump diff engine still serves changefile/release consumers;
+its standalone version-enforcement role is not reintroduced to required CI.
+The packet exports eight exact original test objects and the original
+`guard_module` fixture, retaining all eleven parameterized case identities
+and assertions. Three controls substitute only the Git boundary while exercising
+actual revision/blob protocol and CLI failure output. The fixture-only cohort
+retains transitive consumers, dependency cycles/aliases, malformed nested
+manifests, simulated symlink refusal and grouped packaged-root charging.
+The remaining 28 original cases, including actual Git/process contracts,
+are neither changed nor admitted by this slice.
+
+Development collection proves exact original function/fixture identity and
+matching parameterized suffixes. Actual effect auditing passes all eleven
+cases in 1.5 seconds, with positive call-phase coverage in the real guard for
+every case, zero prohibited effects and eight observed Python reads, all
+hash-bound. No fixture command, Git subprocess, constructor or installed actor
+executes. Whole-file strict typing passes the new adapter on Linux and Windows;
+focused Ruff passes without suppressions.
+
+Admission retains all 6,629 previous nodes in order, every existing source
+digest, all 440 production targets and all 89 helper decisions. Eleven nodes
+and two source bindings produce 6,640 nodes and 1,053 sources under the
+unchanged 300-second limit. Compact source storage stays v2 at 764,648 bytes;
+normalization and evidence remain flat v1. Current-head review and complete
+required Linux source CI remain outstanding. This development-only result
+does not qualify broader native, every-release, full-census or controlled
+whole-flow savings.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
