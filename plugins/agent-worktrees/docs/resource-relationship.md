@@ -193,6 +193,37 @@ their later transactions. Coverage derived from this observation is valid only
 for the same native head revision. Later handoff, conclusion or drift invalidates
 coverage without proving the retained relationship vacant or retired.
 
+### Compare-and-bind at a native head
+
+Negotiate `compare_and_bind: 1` and the distinct `compare-and-bind` operation
+on the executing `resource-relationship capabilities` response. The CLI uses
+the registered direct writer (`resource_relationship` handler v7); do not use
+`--resident-only`, retry as ordinary `bind`, or emulate it with two calls.
+
+On the existing explicit owner, provide exactly `request_id`, `token`,
+`identity`, `expected_creation_nonce`, `expected_writer_identity`, and
+`expected_head: {session_id, revision}`. The request ID and token must select
+the same active pending claim. Under its existing sidecar lock the owner checks
+the current executing build, workspace nonce, mutable record, tracked active
+session and exact head-transition revision, with no pending handoff or claim
+transfer. It writes the bound identity and the accepted head, nonce and writer
+(`producer.head_bind`) in the **same record save**. The first receipt says
+`acceptance: bound-at-head`. It describes that instant, not a lease.
+
+After a lost reply, retry only the same request and pins. If no save occurred,
+all fresh checks still apply. If the matching bound record survived, the result
+is `acceptance: previously-bound`, without a new write, even if the native head
+has since changed. Neither result returns a current `head` observation. A
+different guard or identity, an ordinary earlier bind without this marker, a
+closed claim, or a replaced owner/build cannot upgrade or renew acceptance.
+The authoritative receipt is the owner record, not the activity log or the
+callback reference (whose encoding is unchanged).
+
+This qualifies neither a historical serializer nor the entire present writer
+cohort. Older validators can refuse a claim with the new protected metadata;
+qualify participating writers before opting in. It grants no Dispatch adoption,
+task execution, workspace finalization, or physical release.
+
 ### Qualified executing-session writes
 
 The executing CLI advertises `retained_session_writes: 1` alongside its existing

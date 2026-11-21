@@ -7005,7 +7005,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/resource_producer.py": "d6905f4dc5bc9159bc7c4e7651d5ac1867363713563f86d98827f37d8e331333",
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py": "20d84978f25d02b42c60468e850e2a48725d2cae0c8e38e47c2a42616e2cec3b",
         "tools/promotion_unit_tests/test_user_output_delivery.py": "419bf1f5f01f4308e31766323c39abfdb9dc99cb09bdb7318bb71c16d714eaeb",
-        "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "eadce92faa32dbfd05f692e9672636f4f65a365e22bd6f507f62d3aa22b3fb82",
+        "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "76ed095bf61adc98344403d84eef482bfda9fbbdb449843c8ce7e7b63137787e",
         "plugins/agent-worktrees/src/agent_worktrees/source_probes.py": "6d3a171db77782d50137e61ede48df22bab040eb0f5c3c18391675a11306a9a8",
         "plugins/agent-worktrees/src/agent_worktrees/state_root.py": "1abb11d2c7e81671f6605ca3237f2eef15285339f29fb0312920fead5a716785",
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3",

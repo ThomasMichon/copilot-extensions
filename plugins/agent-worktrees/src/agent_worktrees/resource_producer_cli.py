@@ -13,7 +13,7 @@ from .tracking_claims import format_claim_ref, parse_claim_ref
 
 def add_relationship_parser(sub: _SubParsersAction[ArgumentParser]) -> None:
     relationship = sub.add_parser("resource-relationship", help="Reserve/bind/inspect/verify-retire a retained relationship; JSON stdin/stdout")
-    relationship.add_argument("operation", choices=("capabilities", "reserve", "bind", "inspect", "close"))
+    relationship.add_argument("operation", choices=("capabilities", "reserve", "bind", "compare-and-bind", "inspect", "close"))
     relationship.add_argument("--json", action="store_true", required=True)
     relationship.add_argument("--owner-ref", help="Qualified local worktree owner; required except for capabilities")
     relationship.add_argument("--resident-only", action="store_true", help="Inspect the selected resident without bootstrap or direct fallback; requires expected_creation_nonce")
