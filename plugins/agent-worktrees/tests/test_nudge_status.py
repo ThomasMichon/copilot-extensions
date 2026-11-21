@@ -7,6 +7,8 @@ fabricated ``home`` (tracking yaml + sidecar), never the real ~/.agent-worktrees
 
 from __future__ import annotations
 
+from typing import Any
+
 import importlib.util
 from pathlib import Path
 
@@ -15,8 +17,9 @@ import pytest
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py"
 
 
-def _load():
+def _load() -> Any:
     spec = importlib.util.spec_from_file_location("nudge_status", _SCRIPT)
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -28,12 +31,12 @@ _WID = "examplehost-20260101-000000-abcd"
 
 
 @pytest.mark.parametrize("error,expected", [(5, False), (87, True), (6, False)])
-def test_worker_probe_does_not_mistake_access_denial_for_exit(monkeypatch, error, expected):
+def test_worker_probe_does_not_mistake_access_denial_for_exit(monkeypatch: pytest.MonkeyPatch, error: int, expected: bool) -> None:
     import ctypes
     from types import SimpleNamespace
 
     class Api:
-        def __call__(self, *args):
+        def __call__(self, *args: Any) -> Any:
             return 0
 
     kernel = SimpleNamespace(OpenProcess=Api(), WaitForSingleObject=Api(), CloseHandle=Api())
@@ -44,15 +47,15 @@ def test_worker_probe_does_not_mistake_access_denial_for_exit(monkeypatch, error
     assert nudge._worker_definitely_gone({"pid": 123, "start_time": "fixture"}) is expected
 
 
-def test_worker_probe_retains_a_genuinely_live_owner():
+def test_worker_probe_retains_a_genuinely_live_owner() -> None:
     import os
     from agent_worktrees import local_cache_worker
 
     assert not nudge._worker_definitely_gone(local_cache_worker._owner(os.getpid()))
 
 
-def _make_home(tmp_path: Path, *, project="dotfiles", state="active",
-               note_at="2026-01-01T00:00:00+00:00") -> tuple[Path, str]:
+def _make_home(tmp_path: Path, *, project: str="dotfiles", state: str="active",
+               note_at: str | None="2026-01-01T00:00:00+00:00") -> tuple[Path, str]:
     """Create a fake home with one tracked worktree; return (home, cwd)."""
     tdir = tmp_path / f".{project}" / "worktrees"
     tdir.mkdir(parents=True)
@@ -65,18 +68,18 @@ def _make_home(tmp_path: Path, *, project="dotfiles", state="active",
     return tmp_path, cwd
 
 
-def _payload(cwd):
+def _payload(cwd: str) -> dict[str, str]:
     return {"toolName": "view", "cwd": cwd}
 
 
-def test_no_nudge_before_threshold(tmp_path):
+def test_no_nudge_before_threshold(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "5", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
     for i in range(4):
         assert nudge.decide(_payload(cwd), env=env, home=home, now=1000.0 + i) is None
 
 
-def test_nudge_at_call_threshold_then_cooldown(tmp_path):
+def test_nudge_at_call_threshold_then_cooldown(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "3", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
     outs = [nudge.decide(_payload(cwd), env=env, home=home, now=1000.0 + i)
@@ -88,7 +91,7 @@ def test_nudge_at_call_threshold_then_cooldown(tmp_path):
     assert "--title" in outs[2]  # summary_and_title scope
 
 
-def test_time_threshold_triggers(tmp_path):
+def test_time_threshold_triggers(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "999", "AGENT_WORKTREES_NUDGE_MINUTES": "20"}
     assert nudge.decide(_payload(cwd), env=env, home=home, now=1000.0) is None
@@ -96,7 +99,7 @@ def test_time_threshold_triggers(tmp_path):
     assert nudge.decide(_payload(cwd), env=env, home=home, now=1000.0 + 21 * 60) is not None
 
 
-def test_reset_when_disposition_written(tmp_path):
+def test_reset_when_disposition_written(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path, note_at="2026-01-01T00:00:00+00:00")
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "3", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
     nudge.decide(_payload(cwd), env=env, home=home, now=1000.0)
@@ -113,7 +116,7 @@ def test_reset_when_disposition_written(tmp_path):
     assert nudge.decide(_payload(cwd), env=env, home=home, now=1004.0) is not None
 
 
-def test_terminal_state_clears_sidecar_and_is_silent(tmp_path):
+def test_terminal_state_clears_sidecar_and_is_silent(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path, state="active")
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "1", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
     assert nudge.decide(_payload(cwd), env=env, home=home, now=1000.0) is not None
@@ -126,21 +129,21 @@ def test_terminal_state_clears_sidecar_and_is_silent(tmp_path):
     assert not sidecar.exists()
 
 
-def test_untracked_cwd_is_silent(tmp_path):
+def test_untracked_cwd_is_silent(tmp_path: Path) -> None:
     home, _ = _make_home(tmp_path)
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "1"}
     outside = str(tmp_path / "not" / "a" / "worktree")
     assert nudge.decide({"cwd": outside}, env=env, home=home, now=1000.0) is None
 
 
-def test_kill_switch(tmp_path):
+def test_kill_switch(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     for off in ("off", "0", "false", "no"):
         env = {"AGENT_WORKTREES_NUDGE": off, "AGENT_WORKTREES_NUDGE_CALLS": "1"}
         assert nudge.decide(_payload(cwd), env=env, home=home, now=1000.0) is None
 
 
-def test_expired_deadline_does_not_commit_sidecar(tmp_path):
+def test_expired_deadline_does_not_commit_sidecar(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "1"}
     assert nudge.decide(
@@ -151,7 +154,7 @@ def test_expired_deadline_does_not_commit_sidecar(tmp_path):
 
 
 @pytest.mark.parametrize("scope_key", ["summary", "title"])
-def test_nudge_mentions_both_summary_and_title(tmp_path, scope_key):
+def test_nudge_mentions_both_summary_and_title(tmp_path: Path, scope_key: str) -> None:
     home, cwd = _make_home(tmp_path)
     env = {"AGENT_WORKTREES_NUDGE_CALLS": "1", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
     text = nudge.decide(_payload(cwd), env=env, home=home, now=1000.0)
@@ -162,7 +165,7 @@ def test_nudge_mentions_both_summary_and_title(tmp_path, scope_key):
 _AGENDA_ENV = {"AGENT_WORKTREES_NUDGE_CALLS": "3", "AGENT_WORKTREES_NUDGE_MINUTES": "999"}
 
 
-def _publish_policy(home, policy, *, version=1):
+def _publish_policy(home: Path, policy: str | None, *, version: int=1) -> Path:
     import json
 
     path = home / ".agent-worktrees" / "nudge-state" / f"{_WID}{nudge.AGENDA_POLICY_SUFFIX}"
@@ -171,7 +174,7 @@ def _publish_policy(home, policy, *, version=1):
     return path
 
 
-def _agenda_runs(home, cwd, policy, calls=6, env=_AGENDA_ENV):
+def _agenda_runs(home: Path, cwd: str, policy: str | None, calls: int=6, env: dict[str, str]=_AGENDA_ENV) -> list[str | None]:
     if policy is not None:
         _publish_policy(home, policy)
     return [
@@ -180,23 +183,24 @@ def _agenda_runs(home, cwd, policy, calls=6, env=_AGENDA_ENV):
     ]
 
 
-def _has_agenda(out):
-    return bool(out) and "driving-effort-agendas" in out
+def _has_agenda(out: str | None) -> bool:
+    return out is not None and "driving-effort-agendas" in out
 
 
-def test_agenda_nudge_silent_when_policy_off(tmp_path):
+def test_agenda_nudge_silent_when_policy_off(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "off"))
 
 
-def test_agenda_nudge_throttled_when_expected_and_lane_missing(tmp_path):
+def test_agenda_nudge_throttled_when_expected_and_lane_missing(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     outs = _agenda_runs(home, cwd, "expected")
     assert [i for i, o in enumerate(outs) if _has_agenda(o)] == [2, 5]
+    assert outs[2] is not None
     assert "agendas.default: expected" in outs[2]
 
 
-def test_agenda_nudge_reads_policy_published_under_agent_home(tmp_path):
+def test_agenda_nudge_reads_policy_published_under_agent_home(tmp_path: Path) -> None:
     agent_home, cwd = _make_home(tmp_path)
     real_home = tmp_path / "real-home"
     real_home.mkdir()
@@ -209,7 +213,7 @@ def test_agenda_nudge_reads_policy_published_under_agent_home(tmp_path):
     assert not (real_home / ".agent-worktrees").exists()
 
 
-def test_forwarded_env_replaces_resident_switches_with_session_values():
+def test_forwarded_env_replaces_resident_switches_with_session_values() -> None:
     base = {"AGENT_HOME": "/sandbox", "AGENT_WORKTREES_NUDGE": "off"}
     payload = {"_agentWorktrees": {"environment": {"AGENT_WORKTREES_AGENDA_NUDGE": "off", "PATH": "x"}}}
 
@@ -219,7 +223,7 @@ def test_forwarded_env_replaces_resident_switches_with_session_values():
     assert nudge.forwarded_env({}, base) is None
 
 
-def test_session_agenda_opt_out_reaches_resident_decision(tmp_path):
+def test_session_agenda_opt_out_reaches_resident_decision(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     _publish_policy(home, "expected")
     payload = {**_payload(cwd), "_agentWorktrees": {"environment": {"AGENT_WORKTREES_AGENDA_NUDGE": "off"}}}
@@ -230,8 +234,9 @@ def test_session_agenda_opt_out_reaches_resident_decision(tmp_path):
     assert not any(_has_agenda(o) for o in outs)
 
 
-def test_hook_client_forwards_exactly_the_nudge_switches():
+def test_hook_client_forwards_exactly_the_nudge_switches() -> None:
     spec = importlib.util.spec_from_file_location("hook_client_keys", _SCRIPT.with_name("hook_client.py"))
+    assert spec is not None and spec.loader is not None
     client = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(client)
 
@@ -240,7 +245,7 @@ def test_hook_client_forwards_exactly_the_nudge_switches():
     assert all(f"'{key}'" in resident_ps for key in nudge.NUDGE_ENV_KEYS)
 
 
-def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path):
+def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     wt = tmp_path / "wt"
     (wt / ".effort-agenda" / "main").mkdir(parents=True)
@@ -251,24 +256,30 @@ def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path):
     assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "expected"))
 
 
-def test_agenda_nudge_silent_when_descriptor_has_agendas_placement(tmp_path):
+@pytest.mark.parametrize("layout", ["legacy", "current"])
+def test_agenda_nudge_silent_when_descriptor_has_agendas_placement(tmp_path: Path, layout: str) -> None:
     import json
 
     home, cwd = _make_home(tmp_path)
-    descriptor = home / ".dotfiles" / "worktree-state" / _WID / "descriptor.json"
+    root = home / ".dotfiles"
+    directory = (
+        root / "worktree-state" / _WID if layout == "legacy"
+        else root / "worktrees" / _WID / "worktree-data"
+    )
+    descriptor = directory / "descriptor.json"
     descriptor.parent.mkdir(parents=True)
     descriptor.write_text(json.dumps({"placements": [{"domain": "agendas"}]}), "utf-8")
     assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "expected"))
 
 
-def test_agenda_nudge_kill_switch(tmp_path):
+def test_agenda_nudge_kill_switch(tmp_path: Path) -> None:
     home, cwd = _make_home(tmp_path)
     env = {**_AGENDA_ENV, "AGENT_WORKTREES_AGENDA_NUDGE": "off"}
     assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, "expected", env=env))
 
 
 @pytest.mark.parametrize("record", [None, "malformed", "wrong-version", "oversized"])
-def test_agenda_nudge_fails_quiet_without_a_valid_published_record(tmp_path, record):
+def test_agenda_nudge_fails_quiet_without_a_valid_published_record(tmp_path: Path, record: Any) -> None:
     home, cwd = _make_home(tmp_path)
     if record == "wrong-version":
         _publish_policy(home, "expected", version=2)
@@ -278,7 +289,7 @@ def test_agenda_nudge_fails_quiet_without_a_valid_published_record(tmp_path, rec
     assert not any(_has_agenda(o) for o in _agenda_runs(home, cwd, None))
 
 
-def test_agenda_nudge_never_resolves_configuration(tmp_path, monkeypatch):
+def test_agenda_nudge_never_resolves_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A slow or failing resolver can never stall the hook or monitor path."""
     import time as _time
 
@@ -286,7 +297,7 @@ def test_agenda_nudge_never_resolves_configuration(tmp_path, monkeypatch):
 
     calls = []
 
-    def slow(*args, **kwargs):
+    def slow(*args: Any, **kwargs: Any) -> Any:
         calls.append(args)
         _time.sleep(30)
         raise AssertionError("configuration resolution must not run in the hook path")
@@ -303,7 +314,7 @@ def test_agenda_nudge_never_resolves_configuration(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("published", [True, False])
-def test_isolated_fallback_interpreter_delivers_published_agenda(tmp_path, published):
+def test_isolated_fallback_interpreter_delivers_published_agenda(tmp_path: Path, published: bool) -> None:
     """The deployed copy runs under bare system Python without the plugin runtime."""
     import json
     import os

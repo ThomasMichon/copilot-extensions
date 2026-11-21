@@ -39,6 +39,16 @@ inspection and a separate repair path are the proposed interaction.
 
 ## Supersession and recommendations
 
+### Execution assignment after the reviewed design
+
+> Drive the PR, then make the fixes to the worktrees so that cleaning finalized worktrees won't clear the agendas. We'll want to ensure that the Agendas tool matches the expected storage location
+
+The design PR #13788 was already merged. This assigns the agenda storage,
+preservation and consumer-alignment prerequisite, including its doctor and
+normal source delivery. Earlier planning-only scope remains historical evidence;
+it no longer blocks this assigned source work. Live operator data migration,
+automatic dehydration and rollout are not inferred.
+
 - The nearby catalog replaces both a marker inside the checkout and the
   assistant's earlier proposal for a marker permanently present while hydrated.
 - The retained local branch replaces the assistant's suggested mandatory extra
