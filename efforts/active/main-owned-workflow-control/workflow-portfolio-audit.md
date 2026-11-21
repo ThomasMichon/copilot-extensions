@@ -3539,6 +3539,84 @@ Fresh-install/native/installed external lanes are not exercised because no
 provisioning or runtime behavior changes. Native, release, full-census,
 comparable whole-flow and retained-custody gates remain open.
 
+### November 21 original UV-executable fixture qualification
+
+The adapter exports seven exact unchanged original functions as twelve cases,
+preserving all assertions, parameter suffixes and original injected callbacks.
+All nine ctypes, real-link and Windows native-retention cases remain outside.
+The first thirteen-case proposal correctly refuses the real Windows ACL path
+on `ctypes.dlopen`; its original case is excluded without native substitution,
+library preloading or a policy waiver. Guarded execution of the reduced cohort
+passes twelve cases in 1.594 seconds with zero prohibited effects, twelve bound
+Python reads and positive per-case call-phase configuration/projection owner
+coverage. Only the adapter, original test module and unchanged support-test
+module need new bindings; no coverage target or contract changes.
+The candidate retains all preceding 6,962 nodes/hashes, 445 targets, 89 helper
+decisions and the 300-second bound, becoming 6,974 nodes and 1,093 sources in
+797,695 compact-v2 bytes. Flat-v1 normalization, Ruff and whole-file strict
+Linux/Windows typing pass.
+
+Copilot approval `6008077367` covers exact head
+`3d1892de0a02cb466d44f800cf7e0306a2b5332a`, with no comments or open threads.
+CI `44948323995` unit job `136980468877` freshly passes all 6,974 cases with
+39 deselections, 133.07 pytest seconds and 151.439 packet seconds. Evidence
+reports `mode=executed`, origin run `44948323995` attempt one and packet digest
+`98c5b3f3292d20b8425dca980c8e42cba604ee064e6fd06b920216ce1d5e1e45`.
+This is not a reuse hit or controlled whole-flow saving. Required aggregate
+`136981358655`, guards, trusted run `44948324290`, complete review/thread
+readback, seven fresh verifier reads and final veto/hold/head checks pass before
+managed merge. No CI bypass, native retry or manual metadata refresh occurs.
+
+Source #13968 merges at `2026-11-21T20:58:06Z` as
+`028ed693902466b4244b50a57281fe04f88a738d`. Independent readback confirms merged
+state, no closing references and open parent #6237. Scoped synchronization
+reconciles the merged tree; the full canonical parent is reread before
+resolving only this finite leaf. Continue the original retention-budget and
+configuration controls, preserving all native/ambient residuals.
+Fresh-install/native/installed external lanes are not exercised because no
+provisioning or runtime behavior changes. Native, release, full-census,
+comparable whole-flow and retained-custody gates remain open.
+
+### November 21 original retention-control qualification
+
+The adapter exports four exact unchanged original functions as sixteen cases:
+remaining execution budget after retention, invalid exclusion refusal,
+temporary-path canonicalization and conservative fractional cutoffs. Original
+assertions, parameters and callbacks remain intact. Two copied-configuration
+cases stay outside because executing copied files does not establish the
+existing canonical-owner call-coverage contract; no gate is widened.
+All 275 original-module cases are collected for identity comparison. Guarded
+development execution passes the sixteen selections in 1.468 seconds with
+zero prohibited effects, seven bound Python reads and positive per-case
+policy/configuration/argument owner calls. The original alias case passes
+without a new provider, ACL substitute or preload.
+Only the adapter needs a new binding. All preceding 6,974 nodes/hashes,
+445 targets, 89 helper decisions and the 300-second bound remain, yielding
+6,990 nodes and 1,094 sources in 799,279 compact-v2 bytes with unchanged
+flat-v1 identity. Ruff and whole-file strict Linux/Windows typing pass.
+
+Copilot approval `6008183697` covers exact head
+`2a45d90f5765480601a8c7833d846298ea0293c8`, with no comments or open threads.
+CI `44949662786` unit job `136984568450` freshly passes all 6,990 cases with
+39 deselections, 96.03 pytest seconds and 111.089 packet seconds. Lookup takes
+522 ms; evidence reports `mode=executed`, origin run `44949662786` attempt one
+and packet digest
+`55f2245cad55a7c175093310986a6056ac5390256e02038598ce46151f04ce0b`.
+This is not a reuse hit or controlled whole-flow saving. Required aggregate
+`136985332943`, guards, trusted run `44949662976`, full review/thread readback,
+seven fresh verifier reads and final veto/hold/head checks precede managed
+merge. No CI bypass, native retry or manual metadata refresh occurs.
+
+Source #13969 merges at `2026-11-21T21:09:44Z` as
+`964effefec309524633d0d55c8e4e45dcebcc14e`. Independent readback confirms merged
+state, no closing references and open parent #6237. Scoped synchronization
+reconciles the merged tree; the complete canonical parent is reread before
+resolving only this finite leaf. Continue the thirteen original cutoff-
+projection functions, preserving unchanged production and original tests.
+Fresh-install/native/installed external lanes are not exercised because no
+provisioning/runtime behavior changes. Native, release, full-census, comparable
+whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
