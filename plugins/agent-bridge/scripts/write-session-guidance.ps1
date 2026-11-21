@@ -13,23 +13,15 @@ $root = if ($env:COPILOT_PLUGIN_ROOT) {
     Split-Path -Parent $PSScriptRoot
 }
 $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
-$python = $null
-foreach ($candidate in @('python3', 'python', 'py')) {
-    $found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '\\WindowsApps\\' } |
-        Select-Object -First 1
-    if ($found) {
-        $python = $found
-        break
-    }
-}
-if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
     [Console]::Out.Write('{}')
     exit 0
 }
 $env:PYTHONPATH = ''
 try {
-    & $python.Source $script
+    . (Join-Path (Join-Path $root 'scripts') 'resolve-bootstrap-python.ps1')
+    $python = Resolve-PayloadBootstrapPython -ErrorAction Stop
+    & $python -I -S -B $script
     if ($LASTEXITCODE -ne 0) {
         [Console]::Out.Write('{}')
     }
