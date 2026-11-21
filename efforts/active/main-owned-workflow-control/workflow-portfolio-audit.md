@@ -2153,6 +2153,64 @@ Complete current-head review and Linux source CI remain required. This is
 not registry, installed/native, every-release, full-census, workflow-count or
 whole-flow qualification; existing owners and custody remain.
 
+Source #13889 merges at `2026-11-21T11:58:53Z` as
+`ffb9f8b130b9c49a2217410863c1599202e483f8`. Copilot approval `6005038123`
+targets exact published head `f1044cb705cf73dc6f75fb7947cf6b923426448c`;
+complete review/thread reads contain no active findings or omitted pages.
+Complete required source CI `44901258268` and trusted metadata CI
+`44901258495` pass. Unit job `136837447176` freshly qualifies the complete
+packet from `11:54:16Z` to `11:56:12Z`, then uploads its evidence. The actual
+log reports 6,495 passed and 35 deselected in 88.52 pytest seconds, with a
+103.657-second complete packet under the unchanged budget. Lookup takes
+526 ms before fresh execution, not a reuse hit or controlled latency result.
+Seven fresh live scoped verifier reads precede the managed Maintainer merge;
+no failing CI is bypassed. Closing references are empty and parent #6237 stays
+open. The full canonical parent is reread and only this finite admission item
+is resolved. Continue retained source census and accepted reductions; broader
+native, every-release, full-census, whole-flow and custody acceptance remain open.
+
+### November 21 fixture source-attribution unit admission
+
+Thirteen more exact original functions add 42 fixture-only cases to the
+dependency-age adapter: 126 of the unchanged original suite's 203 cases are
+selected, with 77 remaining originals unchanged outside the packet.
+No assertion, fixture, scanner or policy is rewritten.
+
+The added cases retain exact runner/plugin/canonical identity, explicit
+application declarations and their version/extra/containment boundaries,
+declared-project inventory without core-root expansion, library-exemption
+refusal, selected core source mappings and both-platform parent evidence.
+Other cases retain source-contract revocation, every evidence read, one AST
+parse for identical text within an invocation, changed/unreadable/malformed
+input refusal, independent Python proof after npm metadata failure and
+dynamic/unsupported declaration refusal. Preparation scripts remain text:
+neither they nor the actual checkout, build tools or installers execute.
+
+The real collector verifies all exact original test objects and parameter IDs,
+including the preceding 84 selections. Actual `UnitRun` execution passes all
+42 additions in 4.171 development seconds with zero prohibited effects,
+production call-phase coverage for every case and the same fourteen already
+hash-bound Python reads. The existing parameter-strategy warning remains visible.
+
+Initial admission adds 42 nodes and updates only the existing adapter digest, preserving
+every preceding node, target and source entry: 6,537 nodes, 1,044 sources and
+436 targets. The profile, all 88 release-helper decisions and 300-second
+packet budget remain unchanged. The manifest is 1,046,504 bytes, leaving
+2,072 bytes below the unchanged 1 MiB cap; existing node/source-map layout
+is retained. Complete current-head review and Linux source CI remain required.
+This is not installed/native, every-release, full-census, workflow-count or
+whole-flow qualification; existing owners and custody remain.
+
+Managed publication then incorporates a separately merged 13-case cohort:
+6,550 nodes, 1,048 sources, 437 targets and 89 helper decisions. No original
+node, target or source entry is dropped. All fourteen Python inputs from the
+focused observation remain byte-identical. The combined manifest initially
+exceeds the unchanged cap by 233 bytes. Reducing only coverage-target list
+indentation from eight spaces to four restores 1,515 bytes of headroom:
+1,047,061 bytes, with byte-for-byte identical parsed JSON and unchanged node/
+source-map layout. No cap, deadline, eligibility or helper rule is weakened.
+The corrected head requires fresh review and complete current-head source CI.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

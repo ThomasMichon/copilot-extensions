@@ -39,6 +39,19 @@ _SELECTED = (
     "test_legacy_uv_dev_declarations_and_npm_audit",
     "test_vendored_path_source_requires_canonical_external_closure",
     "test_includes_cycle_and_escape_are_rejected",
+    "test_plugin_source_contract_requires_exact_runner_and_canonical_identity",
+    "test_explicit_application_source_requires_canonical_attributable_input",
+    "test_declared_project_inventory_audits_dependencies_and_policy_without_core_roots",
+    "test_declared_library_cannot_gain_application_source_audit_exemptions",
+    "test_standalone_source_contract_revoked_if_paths_or_registration_disappear",
+    "test_audit_parses_each_identical_source_contract_once",
+    "test_source_evidence_is_reread_within_one_audit",
+    "test_later_audit_observes_source_contract_revocation",
+    "test_standalone_source_contract_follows_only_selected_core_mapping",
+    "test_engine_source_contract_requires_both_platforms_and_canonical_parent",
+    "test_unowned_project_copy_is_not_an_attributable_vendor",
+    "test_python_proof_independent_of_npm_metadata_failure",
+    "test_dynamic_and_unsupported_requirements_fail_closed",
 )
 for _name in _SELECTED:
     globals()[_name] = getattr(_original, _name)
