@@ -320,6 +320,8 @@ class TaskQueue(
             self._migrate_task_relevance(conn)
             self._migrate_relevance_evaluations(conn)
             self._migrate_pool_catalog(conn)
+            from .current_driver_schema import migrate as migrate_current_drivers
+            migrate_current_drivers(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)
             from .queue_assignment_cohort import migrate_allocation_cohorts
