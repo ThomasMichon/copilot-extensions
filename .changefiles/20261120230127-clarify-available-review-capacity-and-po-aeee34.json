@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify available review capacity and policy-qualified ambiguous coverage",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

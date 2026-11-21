@@ -25,6 +25,21 @@ an approved PR waiting only on consent or a check, before starting fresh full
 reviews. A zero actionable queue in continuous mode means idle and observing,
 not complete.
 
+Report complete census size, exclusions, actionable PRs, retained follow-ups
+and holds separately. A cold `review_actions` list is only one intake signal,
+not the complete census; an open-PR count is not an actionable-work count.
+Reconcile current head/base, discussion and qualified native review coverage
+before declaring a PR covered or the actionable queue empty.
+
+Distinguish the operator's minimum available lanes from reviewers actually
+running: available means existing authorized capacity can accept independent
+eligible work now, not a count of retained handles, configured slots or blocked
+admissions. Report available, running and shortfall with its concrete work,
+capacity or adapter reason. Refill promptly on genuine eligible work, including
+retained follow-ups, without waiting for another cold action or optional status
+work. Do not start dummy reviews or new resources to satisfy the number; retain
+the minimum and report the shortage rather than silently lowering it.
+
 Prioritize returned-result acceptance and eligible lane refill before optional
 dashboard work. Reuse applicable retained source and findings when their
 revision, completeness and scope remain valid; reacquire invalidated inputs,
