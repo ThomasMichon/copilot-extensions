@@ -241,11 +241,21 @@ AND its public-gate condition, bounded claim and broader union. Keep #13734's
 separate carrier gap. These descriptions renew no implementation, native,
 runtime, deployment or resource authority for this research campaign.
 
-The specific #63 provenance recovery also remains incomplete: its earlier
-guard referred through #9048 to #8669, but actual copied-content applicability
-has not been established. Current authorship and numerical references alone
-do not clear that case; this is not a permanent ban on numerical citations.
-No protected original, source or containing copy was acquired.
+The later [current SSH-mesh study](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
+reconciles #63's particular earlier collector, which produced a
+numerical-reference intersection rather than a copied-content finding.
+Fresh complete current metadata qualifies the original and all six discussions;
+the identified embedded #67/#7206 originals are separately qualified, with
+#7206's particular reference-only propagation reconciled as well. A partial
+display preceded that embedded-source qualification and remains an exposure
+deviation, not retrospective compliance. Actual #9048/#8669 and other
+source/copy restrictions and old withheld packets remain.
+
+This fourth selected current issue study preserves broad mesh provisioning,
+all directly received tracking obligations, default target-live discovery,
+management-transport survival and later bidirectional all-peer convergence.
+It is not a current implementation/home comparison or an addition to the 75
+earlier retained bindings. The 292-identity partition remains unchanged.
 
 ## Continuing exit
 
