@@ -109,3 +109,9 @@ The helper uses the complete export's native directory durability barriers and
 this is not hardware power-loss proof. It starts no service, publisher, archive
 transport or background scan. Local rescue is not remote archival, release
 qualification or permission to delete the old checkout or retained evidence.
+
+For a supported checkout-local source that must release its checkout hold,
+use Worktrees' [targeted agenda doctor](../../../../agent-worktrees/docs/worktree-data.md#targeted-agenda-doctor).
+It composes this rescue with complete-history verification and explicit
+retirement of the fenced original beside its export. This rescue command
+alone continues to retain the original source in place.

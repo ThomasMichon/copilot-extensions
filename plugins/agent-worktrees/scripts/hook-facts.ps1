@@ -602,7 +602,13 @@ function Get-PostToolAgendaLaneState {
     # Mirrors nudge_status.agenda_lane_state with local, read-only evidence.
     param([string]$ProjectRoot, [string]$Worktree, [string]$Workspace)
     try {
-        $descriptor = [IO.Path]::Combine($ProjectRoot, 'worktree-state', $Worktree, 'descriptor.json')
+        $candidates = @(
+            [IO.Path]::Combine($ProjectRoot, 'worktrees', $Worktree, 'worktree-data', 'descriptor.json'),
+            [IO.Path]::Combine($ProjectRoot, 'worktree-state', $Worktree, 'descriptor.json')
+        )
+        $present = @($candidates | Where-Object { [IO.File]::Exists($_) })
+        if ($present.Count -gt 1) { return 'unknown' }
+        $descriptor = if ($present.Count) { $present[0] } else { $candidates[0] }
         if ([IO.File]::Exists($descriptor)) {
             $value = Read-PostToolBoundedJson $descriptor 1048576
             if ($null -eq $value) { return 'unknown' }

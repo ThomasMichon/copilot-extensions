@@ -1,0 +1,13 @@
+{
+  "comment": "Keep managed agendas under the external worktree data home and provide report-first lossless legacy-source retirement.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

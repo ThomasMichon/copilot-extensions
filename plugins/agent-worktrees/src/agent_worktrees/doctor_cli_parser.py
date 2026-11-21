@@ -49,6 +49,10 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
         "(identity-bound duplicate/stale generation reap). Default: report only.",
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
+    sp.add_argument("--agenda", metavar="WORKTREE_ID", help="Inspect one legacy agenda; --fix explicitly preserves and retires it.")
+    for name in ("source-home", "export-home", "lane", "store-id", "operation-id"):
+        sp.add_argument(f"--agenda-{name}")
+    sp.add_argument("--agenda-expected-revision", type=int)
     sp.add_argument(
         "--recovery-report", metavar="REQUEST_JSON",
         help="Report only exact recovery inputs from a bounded request file; "

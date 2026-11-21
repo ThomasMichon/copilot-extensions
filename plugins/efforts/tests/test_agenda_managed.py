@@ -10,11 +10,15 @@ import sqlite3
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from test_agenda_v2_core import CAPS, SKILL, STORE, board, context, current, proof, v2
+FIXTURE = importlib.import_module("test_agenda_v2_core")
+CAPS, SKILL, STORE, board, context, current, proof, v2 = (
+    getattr(FIXTURE, name)
+    for name in ("CAPS", "SKILL", "STORE", "board", "context", "current", "proof", "v2")
+)
 
 MANAGED = importlib.import_module("agenda_managed")
 OWNER_CALL = MANAGED._owner
@@ -27,10 +31,10 @@ pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem")
 
 
 def initialization() -> dict[str, Any]:
-    return v2({
+    return cast(dict[str, Any], v2({
         "operation": "init", "worktree": WORKTREE, "board": board(),
         "baseline_context": context({"content": "initial"}), "resource_caps": CAPS,
-    }, 0, "managed-initialization")
+    }, 0, "managed-initialization"))
 
 
 @pytest.fixture
@@ -57,10 +61,10 @@ def owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def initialize(request: dict[str, Any] | None = None) -> dict[str, Any]:
-    return MANAGED.initialize(
+    return cast(dict[str, Any], MANAGED.initialize(
         sys.executable, PROJECT, WORKTREE, NONCE, "main", STORE_ID,
         initialization() if request is None else request, session="fixture-session",
-    )
+    ))
 
 
 def test_selected_placement_and_agenda_share_identity_across_exact_retry(owner: Path) -> None:
@@ -106,7 +110,7 @@ def test_invalid_initialization_never_allocates(
     monkeypatch.setattr(MANAGED, "_owner", lambda *args: pytest.fail("invalid request reached owner"))
     with pytest.raises(MANAGED.AgendaError):
         initialize(request)
-    assert not list(owner.rglob("worktree-state"))
+    assert list(owner.iterdir()) == []
 
 
 def test_chosen_identity_is_part_of_the_store_retry_fence(tmp_path: Path) -> None:
@@ -131,7 +135,7 @@ def test_request_is_detached_before_the_placement_process_wait(
 
     def changed_input(*args: Any) -> dict[str, Any]:
         request["change"]["worktree"] = "changed-during-owner-wait"
-        return native(*args)
+        return cast(dict[str, Any], native(*args))
 
     monkeypatch.setattr(MANAGED, "_owner", changed_input)
     result = initialize(request)
@@ -191,7 +195,7 @@ print(json.dumps({"accepted":accepted,"result":result}))
                 [sys.executable, "-B", "-c", child, str(SKILL / "scripts"), str(home),
                  str(request_path), str(ready[index]), str(release[index])],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
             ))
         deadline = time.monotonic() + 10
         while not all(path.exists() for path in ready):
@@ -241,7 +245,7 @@ os._exit(0)
     seeded = subprocess.run(
         [sys.executable, "-B", "-c", seed, str(foreign / STORE.DATABASE)],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     assert seeded.returncode == 0, seeded.stderr
 
@@ -261,7 +265,7 @@ os._exit(0)
         db = native(*args, **kwargs)
         if when == "after-open":
             rebind()
-        return db
+        return cast(sqlite3.Connection, db)
 
     monkeypatch.setattr(sqlite3, "connect", connect)
     with pytest.raises(MANAGED.AgendaError, match="state home changed during open"):
@@ -277,7 +281,7 @@ def test_changed_owner_binding_never_initializes_the_domain_store(
     native = MANAGED._owner
 
     def changed_reply(*args: Any) -> dict[str, Any]:
-        reply = native(*args)
+        reply: dict[str, Any] = native(*args)
         if "data" in reply:
             if fault == "store":
                 reply["data"]["store_id"] = "b" * 32
@@ -317,7 +321,7 @@ def test_missing_provider_refuses_without_fallback_or_new_store(
     ))
     with pytest.raises(MANAGED.AgendaError, match="old provider"):
         initialize()
-    assert not list(owner.rglob("worktree-state")) and not list(owner.rglob("agenda.sqlite3"))
+    assert list(owner.iterdir()) == []
 
 
 def test_payload_capability_and_strict_parser_do_not_allocate(

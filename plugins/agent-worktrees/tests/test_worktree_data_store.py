@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import stat
 from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from agent_worktrees.worktree_data_contract import (
     MAX_DESCRIPTOR_BYTES,
     MAX_PLACEMENTS,
     WorktreeDataError,
+    decode_descriptor,
 )
 
 PROJECT = "sample-project"
@@ -76,7 +78,7 @@ def _allocate(**changes: Any) -> store.WorktreeDataPlacement:
 
 
 def _descriptor(root: Path) -> Path:
-    return root / "worktree-state" / WORKTREE / "descriptor.json"
+    return root / "worktrees" / WORKTREE / "worktree-data" / "descriptor.json"
 
 
 def _change(root: Path, change: Any) -> None:
@@ -116,6 +118,108 @@ def test_allocate_retry_and_store_only_discovery(owner: Path) -> None:
     assert asdict(result)["scope"]["repository"] == PROJECT
     with pytest.raises(FrozenInstanceError):
         placement.lane = "other"  # type: ignore[misc]
+
+
+def test_existing_external_legacy_home_is_reused_and_dual_roots_refuse(owner: Path) -> None:
+    placement = _allocate()
+    current = owner / "worktrees" / WORKTREE / "worktree-data"
+    legacy = owner / "worktree-state" / WORKTREE
+    (legacy / "descriptor.json").unlink()
+    legacy.rmdir()
+    current.rename(legacy)
+    retained = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
+    assert retained is not None
+    assert retained.placements[0].state_home == str(legacy / "agendas" / "main")
+    assert _allocate() == retained.placements[0]
+    current.mkdir()
+    with pytest.raises(WorktreeDataError):
+        store.read_worktree_data(PROJECT, WORKTREE)
+    assert Path(placement.state_home).parent.parent == current
+
+
+def test_rollback_provider_refuses_read_and_duplicate_allocation(
+    owner: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.worktree_data_inventory import read_project_worktree_data
+
+    placement = _allocate()
+    assert read_project_worktree_data(PROJECT).worktrees[0].placements == (placement,)
+    before = _snapshot(owner)
+    monkeypatch.setattr(
+        store, "_data_directory", lambda root, worktree: root / "worktree-state" / worktree,
+    )
+    with pytest.raises(WorktreeDataError, match="unsupported worktree-data schema"):
+        store.read_worktree_data(PROJECT, WORKTREE)
+    with pytest.raises(WorktreeDataError, match="unsupported worktree-data schema"):
+        _allocate()
+    assert _snapshot(owner) == before
+
+
+@pytest.mark.parametrize("damage", ["missing-marker", "wrong-nonce", "missing-current"])
+def test_refusal_marker_incomplete_or_conflicting_state_holds(owner: Path, damage: str) -> None:
+    _allocate()
+    marker = owner / "worktree-state" / WORKTREE / "descriptor.json"
+    if damage == "missing-marker":
+        marker.unlink()
+    elif damage == "wrong-nonce":
+        value = json.loads(marker.read_text())
+        value["creation_nonce"] = "foreign"
+        marker.write_text(json.dumps(value))
+    else:
+        _descriptor(owner).unlink()
+    before = _snapshot(owner)
+    operations: tuple[Callable[[], object], ...] = (
+        lambda: store.read_worktree_data(PROJECT, WORKTREE), _allocate,
+    )
+    for operation in operations:
+        with pytest.raises(WorktreeDataError):
+            operation()
+    assert _snapshot(owner) == before
+
+
+def test_refusal_marker_publication_precedes_new_home_and_holds_on_interruption(
+    owner: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def interrupted(path: Path, raw: bytes) -> None:
+        assert path == owner / "worktree-state" / WORKTREE / "descriptor.json"
+        with pytest.raises(WorktreeDataError, match="unsupported worktree-data schema"):
+            decode_descriptor(raw)
+        assert not _descriptor(owner).parent.exists()
+        raise OSError("fixture marker publication interrupted")
+
+    monkeypatch.setattr(store, "_publish_descriptor", interrupted)
+    with pytest.raises(WorktreeDataError, match="allocation did not complete"):
+        _allocate()
+    before = _snapshot(owner)
+    with pytest.raises(WorktreeDataError):
+        _allocate()
+    assert not _descriptor(owner).parent.exists()
+    assert _snapshot(owner) == before
+
+
+def test_launch_sidecars_coexist_without_becoming_domain_registrations(owner: Path) -> None:
+    from agent_worktrees.worktree_data_inventory import read_project_worktree_data
+
+    state = owner / "worktrees" / WORKTREE
+    state.mkdir()
+    seed = state / "launch-seed.json"
+    seed.write_text('{"retained":"launch evidence"}', encoding="utf-8")
+    assert read_project_worktree_data(PROJECT).worktrees == ()
+    placement = _allocate()
+    assert Path(placement.state_home).is_relative_to(state / "worktree-data")
+    assert seed.read_text(encoding="utf-8") == '{"retained":"launch evidence"}'
+    assert read_project_worktree_data(PROJECT).worktrees[0].placements == (placement,)
+
+
+def test_allocator_refuses_a_project_data_root_inside_the_checkout(owner: Path) -> None:
+    record = _record(owner, worktree_path=str(owner.parent))
+    with tracking._RecordLock(record, require_sidecar=True):
+        pass
+    before = _snapshot(owner)
+    with pytest.raises(WorktreeDataError) as failed:
+        _allocate()
+    assert failed.value.code == "unsafe-placement"
+    assert _snapshot(owner) == before
 
 
 def test_inventory_and_store_selection_do_not_require_lane(owner: Path) -> None:
@@ -166,6 +270,7 @@ def test_empty_project_inventory_is_passive_and_owner_qualified(
 
     before = _snapshot(owner)
     result = read_project_worktree_data(PROJECT)
+    assert result.scope is not None
     assert result.worktrees == () and result.scope.project == PROJECT
     absent = read_project_worktree_data("absent-project")
     assert absent.worktrees == () and absent.scope is None
@@ -225,9 +330,9 @@ def test_project_inventory_refuses_incomplete_or_foreign_members(
     from agent_worktrees.worktree_data_inventory import read_project_worktree_data
 
     _allocate()
-    base = owner / "worktree-state"
+    base = owner / "worktrees"
     if damage == "partial":
-        (base / "interrupted").mkdir()
+        (base / "interrupted" / "worktree-data").mkdir(parents=True)
     elif damage == "alias":
         if os.name == "nt":
             pytest.skip("native reparse fixture requires separate privilege qualification")
@@ -237,7 +342,7 @@ def test_project_inventory_refuses_incomplete_or_foreign_members(
     elif damage == "foreign":
         _change(owner, lambda document: document["scope"].update(repository="foreign"))
     else:
-        (base / "not portable").mkdir()
+        (base / "not portable" / "worktree-data").mkdir(parents=True)
     with pytest.raises(WorktreeDataError):
         read_project_worktree_data(PROJECT)
 
@@ -269,34 +374,41 @@ def test_project_inventory_enumerates_only_registration_directories(
     scans = []
     real_scan = os.scandir
 
-    def counted(path):
+    def counted(path: Path) -> Any:
         scans.append(Path(path))
         return real_scan(path)
 
     monkeypatch.setattr(os, "scandir", counted)
     assert len(inventory.read_project_worktree_data(PROJECT).worktrees) == 3
-    base = owner / "worktree-state"
-    assert sorted(scans) == sorted([
-        base, *(base / worktree for worktree in worktrees),
-        *(base / worktree / "agendas" for worktree in worktrees),
-    ])
+    base = owner / "worktrees"
+    assert set(scans) == {
+        base, owner / "worktree-state",
+        *(owner / "worktree-state" / worktree for worktree in worktrees),
+        *(base / worktree / "worktree-data" for worktree in worktrees),
+        *(base / worktree / "worktree-data" / "agendas" for worktree in worktrees),
+    }
 
 
-@pytest.mark.parametrize("change", ["descriptor", "membership", "canonical", "remote", "base"])
+@pytest.mark.parametrize(
+    "change", ["descriptor", "membership", "canonical", "remote", "base", "sidecar"],
+)
 def test_project_inventory_rejects_changes_during_owner_read(
     owner: Path, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:
     from agent_worktrees import worktree_data_inventory as inventory
 
     _allocate()
+    if change == "sidecar":
+        _record(owner, path_worktree_id="sidecar", worktree_id="sidecar")
+        (owner / "worktrees" / "sidecar").mkdir()
     real_read = store.read_worktree_data
 
-    def changing_read(*args, **kwargs):
+    def changing_read(*args: Any, **kwargs: Any) -> Any:
         result = real_read(*args, **kwargs)
         if change == "descriptor":
             _change(owner, lambda document: document.update(creation_nonce="changed"))
         elif change == "membership":
-            (owner / "worktree-state" / "new-registration").mkdir()
+            (owner / "worktrees" / "new-registration" / "worktree-data").mkdir(parents=True)
         elif change == "canonical":
             _record(owner, creation_nonce="changed")
         elif change == "remote":
@@ -304,8 +416,10 @@ def test_project_inventory_rejects_changes_during_owner_read(
                 project_state, "_normalized_repository_remote",
                 lambda *_a: "network:example.invalid/changed",
             )
+        elif change == "sidecar":
+            _allocate(worktree_id="sidecar", store_id="d" * 32)
         else:
-            base = owner / "worktree-state"
+            base = owner / "worktrees"
             base.rename(owner / "retained-original")
             base.mkdir()
         return result
@@ -319,7 +433,8 @@ def test_project_inventory_rejects_changes_during_owner_read(
 def test_retired_checkout_and_missing_canonical_record_retain_discovery(owner: Path) -> None:
     placement = _allocate()
     _record(owner, status="archived", reaped_at="2030-01-02T00:00:00")
-    assert store.read_worktree_data(PROJECT, WORKTREE).canonical_record == "matching"
+    initial = store.read_worktree_data(PROJECT, WORKTREE)
+    assert initial is not None and initial.canonical_record == "matching"
     (owner / "worktrees" / f"{WORKTREE}.yaml").unlink()
     before = _snapshot(owner)
     result = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE, creation_nonce=NONCE)
@@ -362,7 +477,7 @@ def test_absent_reads_do_not_create_directories_or_record_locks(
         {"store_id": "../other"},
     ],
 )
-def test_invalid_or_noncanonical_allocation_is_effect_free(owner: Path, changes: dict) -> None:
+def test_invalid_or_noncanonical_allocation_is_effect_free(owner: Path, changes: dict[str, Any]) -> None:
     before = _snapshot(owner)
     with pytest.raises(WorktreeDataError):
         _allocate(**changes)
@@ -371,7 +486,7 @@ def test_invalid_or_noncanonical_allocation_is_effect_free(owner: Path, changes:
     assert {
         key: (value[0], value[2]) for key, value in after.items() if not key.endswith(".lock")
     } == {key: (value[0], value[2]) for key, value in before.items()}
-    assert not (owner / "worktree-state").exists()
+    assert not (owner / "worktrees" / WORKTREE / "worktree-data").exists()
 
 
 @pytest.mark.parametrize(
@@ -382,7 +497,7 @@ def test_invalid_or_noncanonical_allocation_is_effect_free(owner: Path, changes:
         {"creation_nonce": "other-nonce"},
     ],
 )
-def test_allocation_conflicts_never_make_another_copy(owner: Path, changes: dict) -> None:
+def test_allocation_conflicts_never_make_another_copy(owner: Path, changes: dict[str, Any]) -> None:
     _allocate()
     before = _snapshot(owner)
     with pytest.raises(WorktreeDataError) as failure:
@@ -401,7 +516,7 @@ def test_allocation_conflicts_never_make_another_copy(owner: Path, changes: dict
 )
 def test_current_record_mismatch_refuses_retained_descriptor(
     owner: Path,
-    changes: dict,
+    changes: dict[str, Any],
 ) -> None:
     _allocate()
     _record(owner, **changes)
@@ -418,11 +533,11 @@ def test_initial_allocation_refuses_another_registered_repository(
 ) -> None:
     _record(owner, repo="other-project")
     looked_up = []
-    monkeypatch.setattr(
-        project_state,
-        "_normalized_repository_remote",
-        lambda repository: looked_up.append(repository) or f"network:example.invalid/{repository}",
-    )
+    def remote(repository: str) -> str:
+        looked_up.append(repository)
+        return f"network:example.invalid/{repository}"
+
+    monkeypatch.setattr(project_state, "_normalized_repository_remote", remote)
     before = _snapshot(owner)
     with pytest.raises(WorktreeDataError) as failure:
         _allocate()
@@ -463,7 +578,7 @@ def test_allocation_flushes_new_directory_links_and_descriptor_before_success(
     owner: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    events = []
+    events: list[tuple[Any, ...]] = []
     real_sync = os.fsync
     real_replace = tracking._replace_with_retry
 
@@ -477,18 +592,19 @@ def test_allocation_flushes_new_directory_links_and_descriptor_before_success(
         metadata = Path(source).stat()
         assert ("file", metadata.st_dev, metadata.st_ino) in events
         assert json.loads(Path(source).read_bytes())["worktree_id"] == WORKTREE
-        events.append(("replace",))
+        events.append(("replace", str(target)))
         real_replace(source, target)
 
     monkeypatch.setattr(os, "fsync", synced)
     monkeypatch.setattr(tracking, "_replace_with_retry", published)
     _allocate()
-    publication = events.index(("replace",))
+    publication = events.index(("replace", str(_descriptor(owner))))
     directories = [
-        owner / "worktree-state",
-        owner / "worktree-state" / WORKTREE,
-        owner / "worktree-state" / WORKTREE / "agendas",
-        owner / "worktree-state" / WORKTREE / "agendas" / "main",
+        owner / "worktrees",
+        owner / "worktrees" / WORKTREE,
+        owner / "worktrees" / WORKTREE / "worktree-data",
+        owner / "worktrees" / WORKTREE / "worktree-data" / "agendas",
+        owner / "worktrees" / WORKTREE / "worktree-data" / "agendas" / "main",
     ]
     for path in directories:
         child, parent = path.stat(), path.parent.stat()
@@ -538,7 +654,8 @@ def test_publication_directory_flush_failure_cannot_succeed_on_unflushed_retry(
 
     def published(source: str, target: str) -> None:
         real_replace(source, target)
-        replaced.append(target)
+        if Path(target) == _descriptor(owner):
+            replaced.append(target)
 
     def synced(fd: int) -> None:
         metadata = os.fstat(fd)
@@ -606,10 +723,10 @@ def test_windows_directory_barrier_uses_owned_write_handle_and_closes_it(
     calls = []
 
     class Function:
-        def __init__(self, name: str, result: int) -> None:
+        def __init__(self, name: str, result: int | None) -> None:
             self.name, self.result = name, result
 
-        def __call__(self, *arguments: Any) -> int:
+        def __call__(self, *arguments: Any) -> int | None:
             calls.append((self.name, arguments))
             return self.result
 
@@ -645,7 +762,7 @@ def test_windows_publication_adapter_preserves_durability_and_retry_fences(
     from zdd import routing_persistence
 
     events = []
-    replaced = []
+    replaced: list[Path] = []
     fail = [failure]
     real_sync, real_open = os.fsync, os.open
     retry_open_flags = []
@@ -664,7 +781,7 @@ def test_windows_publication_adapter_preserves_durability_and_retry_fences(
     def flushed(path: Path) -> None:
         if replaced and fail[0] == "directory-after-replace":
             raise OSError("synthetic native post-publication barrier failure")
-        fd = real_open(path, os.O_RDONLY | os.O_DIRECTORY)
+        fd = real_open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY"))
         try:
             os.fsync(fd)
         finally:
@@ -673,10 +790,11 @@ def test_windows_publication_adapter_preserves_durability_and_retry_fences(
     def published(source: Path, target: Path) -> None:
         metadata = source.stat()
         assert ("file", metadata.st_dev, metadata.st_ino) in events
-        if fail[0] == "replace":
+        if target == _descriptor(owner) and fail[0] == "replace":
             raise OSError("synthetic native write-through failure")
         os.replace(source, target)
-        replaced.append(target)
+        if target == _descriptor(owner):
+            replaced.append(target)
 
     def opened(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
         if Path(path) == _descriptor(owner):
@@ -837,7 +955,7 @@ def test_requested_generation_and_incarnation_are_fences(owner: Path) -> None:
             store.read_worktree_data(PROJECT, WORKTREE, **arguments)
 
 
-@pytest.mark.parametrize("location", ["worktree-state", WORKTREE, "agendas", "main", "descriptor"])
+@pytest.mark.parametrize("location", ["worktrees", WORKTREE, "agendas", "main", "descriptor"])
 def test_child_symlink_alias_refuses(
     owner: Path,
     tmp_path: Path,
@@ -846,7 +964,7 @@ def test_child_symlink_alias_refuses(
     placement = _allocate()
     directory = _descriptor(owner).parent
     path = {
-        "worktree-state": owner / "worktree-state",
+        "worktrees": owner / "worktrees",
         WORKTREE: directory,
         "agendas": directory / "agendas",
         "main": Path(placement.state_home),
@@ -899,7 +1017,7 @@ def test_initial_aliased_owner_returns_canonical_home_with_domain_content_and_re
         pytest.skip(f"symlink creation unavailable: {error}")
     monkeypatch.setattr(cfg, "project_dir", lambda _project: alias)
     placement = _allocate()
-    expected = owner.resolve(strict=True) / "worktree-state" / WORKTREE / "agendas" / "main"
+    expected = owner.resolve(strict=True) / "worktrees" / WORKTREE / "worktree-data" / "agendas" / "main"
     assert placement.state_home == str(expected)
     domain_member = expected / "agenda.sqlite3"
     domain_member.write_bytes(b"opaque domain-owned contents")
@@ -998,14 +1116,18 @@ def test_interrupted_publication_preserves_unadmitted_home(
     owner: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail(_path: Path, _content: bytes) -> None:
-        raise OSError("synthetic publication interruption")
+    publish = store._publish_descriptor
+
+    def fail(path: Path, content: bytes) -> None:
+        if path == _descriptor(owner):
+            raise OSError("synthetic publication interruption")
+        publish(path, content)
 
     monkeypatch.setattr(store, "_publish_descriptor", fail)
     with pytest.raises(WorktreeDataError) as failure:
         _allocate()
     assert failure.value.code == "allocation-failed"
-    assert (owner / "worktree-state" / WORKTREE / "agendas" / "main").is_dir()
+    assert (owner / "worktrees" / WORKTREE / "worktree-data" / "agendas" / "main").is_dir()
     before = _snapshot(owner)
     with pytest.raises(WorktreeDataError) as repeated:
         _allocate()
@@ -1031,7 +1153,8 @@ def test_placement_inventory_limit_refuses_before_new_home(owner: Path) -> None:
         _allocate(lane="one-too-many", store_id="f" * 32)
     assert failure.value.code == "descriptor-limit"
     assert _snapshot(owner) == before
-    assert len(store.read_worktree_data(PROJECT, WORKTREE).placements) == MAX_PLACEMENTS
+    result = store.read_worktree_data(PROJECT, WORKTREE)
+    assert result is not None and len(result.placements) == MAX_PLACEMENTS
 
 
 def test_lock_failure_refuses_without_inprocess_fallback(
@@ -1046,7 +1169,7 @@ def test_lock_failure_refuses_without_inprocess_fallback(
     with pytest.raises(WorktreeDataError) as failure:
         _allocate()
     assert failure.value.code == "owner-busy"
-    assert not (owner / "worktree-state").exists()
+    assert not (owner / "worktrees" / WORKTREE / "worktree-data").exists()
 
 
 def test_actual_project_state_resolver_keeps_installation_cells_separate(
@@ -1079,12 +1202,15 @@ def test_actual_project_state_resolver_keeps_installation_cells_separate(
     selected = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
     assert selected is not None and selected.scope.marketplace_id == "sample-marketplace"
     assert Path(placement.state_home).is_relative_to(first)
-    assert not (owner / "worktree-state").exists()
+    assert not (owner / "worktrees" / WORKTREE / "worktree-data").exists()
     original = _descriptor(first).read_bytes()
     context["cellRoot"] = str(tmp_path / "cell-two")
     second = admitted_fixture_root()
-    (second / "worktree-state" / WORKTREE / "agendas" / "main").mkdir(parents=True)
+    (second / "worktrees" / WORKTREE / "worktree-data" / "agendas" / "main").mkdir(parents=True)
     _descriptor(second).write_bytes(original)
+    marker = second / "worktree-state" / WORKTREE / "descriptor.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes((first / "worktree-state" / WORKTREE / "descriptor.json").read_bytes())
     before = _snapshot(second)
     with pytest.raises(WorktreeDataError) as failure:
         store.read_worktree_data(PROJECT, WORKTREE)
@@ -1141,8 +1267,8 @@ def test_selected_project_root_is_rechecked_after_actual_lock_acquisition(
     with pytest.raises(WorktreeDataError) as failure:
         _allocate()
     assert failure.value.code == "identity-conflict"
-    assert not (owner / "worktree-state").exists()
-    assert not (other / "worktree-state").exists()
+    assert not (owner / "worktrees" / WORKTREE / "worktree-data").exists()
+    assert not (other / "worktrees" / WORKTREE / "worktree-data").exists()
 
 
 def test_interrupted_additional_lane_is_not_hidden_by_prior_registration(
@@ -1200,9 +1326,12 @@ def _concurrent_allocate(
     from agent_worktrees import registry_paths as child_registry
     from agent_worktrees.worktree_data_store import allocate_worktree_data
 
-    child_cfg.project_dir = lambda _project: Path(root)
-    child_state._normalized_repository_remote = lambda repository: (
-        f"network:example.invalid/{repository}"
+    def child_root(name: str | None = None) -> Path:
+        return Path(root)
+
+    child_cfg.project_dir = child_root
+    child_state._normalized_repository_remote = lambda project: (
+        f"network:example.invalid/{project}"
     )
     child_registry.installation_context = lambda: None
     ready.put(True)
@@ -1255,7 +1384,7 @@ def test_real_process_allocation_serializes_one_admitted_location(
             assert answers == [STORE, STORE]
         inventory = store.read_worktree_data(PROJECT, WORKTREE)
         assert inventory is not None and len(inventory.placements) == 1
-        assert len(list((owner / "worktree-state" / WORKTREE / "agendas").iterdir())) == 1
+        assert len(list((owner / "worktrees" / WORKTREE / "worktree-data" / "agendas").iterdir())) == 1
     finally:
         go.set()
         for process in processes:
@@ -1277,9 +1406,12 @@ def _allocate_across_shared_base(
     release_creator: Any,
     results: Any,
 ) -> None:
-    cfg.project_dir = lambda _project: Path(root)
-    project_state._normalized_repository_remote = lambda repository: (
-        f"network:example.invalid/{repository}"
+    def child_root(name: str | None = None) -> Path:
+        return Path(root)
+
+    cfg.project_dir = child_root
+    project_state._normalized_repository_remote = lambda project: (
+        f"network:example.invalid/{project}"
     )
     registry_paths.installation_context = lambda: None
     owner = Path(root)
@@ -1288,8 +1420,8 @@ def _allocate_across_shared_base(
     published = False
     root_after_publication = False
 
-    def require(path: Path) -> None:
-        real_require(path)
+    def require(root: Path) -> None:
+        real_require(root)
         if role == "caller":
             preflight_done.set()
             if not creator_paused.wait(15):
@@ -1297,7 +1429,7 @@ def _allocate_across_shared_base(
 
     def sync(path: Path) -> None:
         nonlocal root_after_publication
-        if role == "creator" and path == owner / "worktree-state":
+        if role == "creator" and path == owner / "worktrees" / worktree:
             creator_paused.set()
             if not release_creator.wait(15):
                 raise TimeoutError("shared-base creator was not released")

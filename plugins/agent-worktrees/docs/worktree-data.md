@@ -88,6 +88,23 @@ by the provider capability.
 
 ## Explicit allocation
 
+New data homes are under the existing owner's
+`~/.<project>/worktrees/<full-id>/worktree-data/agendas/<lane>/` namespace
+(or its installation-cell equivalent). The `worktree-data` child separates
+durable domain data from launch-recovery sidecars. Consumers use the returned
+`state_home`, not this illustrative path. Existing external `worktree-state`
+registrations remain readable and are reused on exact allocation retries.
+Two real stores for the same worktree are a conflict, not a choice
+of a newer-looking writer. Before publishing a new current home, allocation
+durably writes a refusal descriptor in the legacy home. Older providers reject
+its unsupported schema instead of reporting absent data or allocating a second
+store after rollback. The current provider accepts only the exact marker
+identity and derives the current path itself; the marker cannot redirect reads.
+A missing, partial or conflicting marker/current pair refuses discovery and
+allocation. Exact retries reflush both registrations. No existing store is moved implicitly. Allocation
+refuses a data home that resolves inside its actual checkout, including through
+an admitted project-root alias.
+
 `worktree-data-allocate` is a separate mutation for a new empty home. It requires
 the canonical full worktree identity and creation nonce. This source slice
 admits only the `agendas` domain and a 32-lowercase-hex store identity; arbitrary
@@ -179,12 +196,73 @@ The current exporter supports context-qualified store format 2, not legacy manua
 JSON or older store formats. Unsupported or incomplete rescue leaves the source
 and containing checkout retained.
 
-This slice provides no automatic relocation, descriptor rebinding, writer switch,
-source deletion or restore command. Only the data owner may reconcile a supported
-rescue and explicitly retire its original source under the applicable permission
-and retention gates. Arbitrary custom checkout-local homes remain the adopter's
+There is no automatic relocation or source deletion. The targeted doctor below
+composes the supported owner rescue and explicit source retirement under the
+applicable permission and retention gates. Arbitrary custom checkout-local homes remain the adopter's
 explicit preservation responsibility; the ignored-data hold is not a complete
 domain inventory or proof of a supported writer cutover.
+
+### Targeted agenda doctor
+
+Use the selected installation's actual parser support for `doctor --agenda`
+and its selected efforts payload's `agenda-placement-doctor-v1`, not package
+versions. Unsupported providers refuse without installation or fallback.
+The targeted scope does not run other doctor passes, launch an agent or
+change worktree/session ownership.
+
+```text
+agent-worktrees --project PROJECT doctor --agenda FULL_ID \
+  --agenda-source-home <checkout-local-lane> --json
+agent-worktrees --project PROJECT doctor --agenda FULL_ID \
+  --agenda-source-home <same-checkout-local-lane> --fix \
+  --agenda-export-home <existing-empty-recovery-directory-outside-checkout> \
+  --agenda-lane main --agenda-store-id <inspected-store-id> \
+  --agenda-expected-revision <inspected-revision> \
+  --agenda-operation-id <stable-operation-id> --json
+```
+
+Report mode reads the named source, admitted placement metadata and each exact
+published external store through the selected efforts reader. External stores
+are reported as `external-correct`, `external-missing` or `external-corrupt`;
+an absent checkout-local source does not establish external-store health.
+The reader checks the stored worktree and store ID without initialization.
+Healthy status also requires the bounded complete-export validator to accept
+the schema, contiguous accepted-operation ledger and immutable records.
+Absent, legacy-local and interrupted source states are distinct; unsupported,
+unknown/busy, conflicting or unreadable evidence refuses. It never quiesces a
+writer. Repair requires a confirmed cold local canonical worktree and holds
+the normal lifecycle and launch-admission fences. Quiesce independent agenda
+writers and publishers before repair; these fences do not control arbitrary
+external processes.
+
+Repair exports and verifies the complete format-2 store, then uses the
+[efforts rescue owner](../../efforts/skills/driving-effort-agendas/references/agenda-rescue.md)
+to fence the source before activating its exact managed destination.
+All existing rescue restrictions apply, including absolute canonical effort
+references and refusal of old manual/format-1 lanes. Unknown source files
+retain the checkout. After verifying the destination's complete accepted
+history prefix and filesystem identities, the doctor renames the fenced
+original beside the export as `<export-directory>.retired-source`.
+It deletes no database or history. Rename across filesystems refuses, leaving
+the source protected; select a recovery directory on the source filesystem.
+An empty checkout-local `.effort-agenda` container is removed only after its
+selected direct lane has been retired and no other entries remain.
+
+Retain the export, retired source and destination after any unknown result.
+If the first export has no published manifest and contains partial files, the
+doctor refuses without fencing the source or deleting the partial export.
+While the exact selected source remains unfenced at the expected revision,
+select a different existing empty export directory and retry. A partial export
+is diagnostic evidence, not an accepted snapshot to overwrite or adopt.
+
+Once an export is published and cutover starts, retry the exact same identities
+and paths. A missing published export after source fencing requires restoring
+that exact verified export, not selecting a fresh destination. Recovery verifies the preserved
+source and export even after the rename, reflushes directory barriers, and
+accepts later destination work without rolling it back. A changed operation,
+store, incarnation, revision, export, destination or source identity refuses.
+Only a successful source retirement clears this particular legacy-data hold;
+normal cleanup still applies all independent process, Git and ownership gates.
 
 The [reviewed lifetime and archival design](../../../efforts/active/mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
 retains the independent efforts, Manager, logger, rescue and operational

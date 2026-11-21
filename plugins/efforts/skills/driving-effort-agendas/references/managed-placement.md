@@ -27,6 +27,11 @@ declaration and parser, then explicitly requests the new empty placement.
 Missing or old providers refuse without installation, host startup, filesystem
 search or a checkout-local fallback. No independently installed package is
 imported into the efforts process.
+Capability reads have a 30-second process budget, including cold interpreter
+startup. Durable allocation has a
+120-second budget because it flushes the descriptor and directory ancestry.
+A timeout is an unknown mutation result, not proof that no placement exists;
+retain the same identities for recovery.
 
 The allocator returns a home beneath its canonical admitted project root.
 Supported root aliases therefore work without relaxing efforts' rejection of
