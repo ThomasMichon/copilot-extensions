@@ -24,13 +24,13 @@ drains both output streams concurrently, and uses the shared native bootstrap
 selector to inspect the payload's declared uv-managed Python. PATH `python`,
 `python3` and `py`, registry discovery, and foreign virtual environments are not
 fallbacks. Explicit setup prepares missing uv/interpreter prerequisites; this
-hook cannot download or provision them. Windows setup records its selected
+hook cannot download or provision them. Setup records its selected
 bootstrap interpreter in the existing deployment manifest. The cue uses that
 prepared stdlib execution base (or the existing explicit
 `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON` handoff) before asking uv to select the
 writer. An older installation without that selection needs explicit setup;
 there is no cold PATH-Python fallback. A custom installation can supply
-`-InstallRoot` to the PowerShell entry.
+`-InstallRoot` to the PowerShell entry or `--install-root` to the POSIX entry.
 Selection, asynchronous stdin delivery, stream capture and the writer's exit
 share one five-second work deadline plus a one-second cleanup reserve. The
 original PowerShell caller uses the prepared shared process-helper capsule to
@@ -38,15 +38,23 @@ contain uv and its cold-cache interpreter query in a strict Job. Query
 completion, timeout and stream settlement precede return from that owner.
 The selected writer remains a direct, child-free process of the original
 PowerShell caller; no `uv run` or venv redirector is inserted before it.
-The POSIX wrapper still requires an available Python 3.10+ command; its managed
-selection migration remains separate from the Windows entry.
+The POSIX wrapper reads that ordinary, bounded deployment manifest using the
+co-shipped native JSON reader, including its legacy deployment-BOM compatibility.
+It preserves decoded path bytes and rejects NUL/newline metadata instead of
+silently changing the selected executable. No PATH Python or additional JSON
+tool is needed to reach the prepared stdlib capture owner.
+That owner admits one contained shell operation for native uv inspection and
+the selected writer. Bounded incoming stdin, selection, writer input/output
+and settlement share the same five-second work budget and one-second reserve.
+uv inspection receives null stdin; only the writer receives the hook payload.
 The POSIX wrapper uses the suite's canonical EXIT trap to emit one empty JSON
 envelope on both success and failure, making its output-free behavior
 recognizable by the existing session-context contract scanner.
 The isolated POSIX writer arms its own five-second real-time process alarm
-before resolving or importing payload source;
-it does not depend solely on the host's outer hook timeout or a platform-specific
-`timeout` executable. It starts no child processes of its own.
+before resolving or importing payload source. It remains independently bounded
+when run directly; inside the hook it cannot renew the capture owner's remaining
+allowance. Neither entry relies solely on the host's outer hook timeout or a
+platform-specific `timeout` executable. The pure writer starts no children.
 Missing writer/interpreter or write failures log a fixed, redacted diagnostic
 without blocking startup.
 

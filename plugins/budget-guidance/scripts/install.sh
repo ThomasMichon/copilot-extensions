@@ -934,6 +934,8 @@ SOURCE_FIELDS=""
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS=",${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2}"
 fi
+BOOTSTRAP_JSON="$("$PYTHON_CMD" -I -S -B -c \
+    'import json,sys; print(json.dumps(sys.argv[1]))' "$PYTHON_CMD")" || exit 1
 cat > "$TMP" << EOF
 {
   "schema_version": 3,
@@ -951,6 +953,7 @@ cat > "$TMP" << EOF
     "dirty": $DIRTY
   },
   "venv": "$VENV_DIR",
+  "bootstrap_python": $BOOTSTRAP_JSON,
   "runtime": "python"$SOURCE_FIELDS
 }
 EOF

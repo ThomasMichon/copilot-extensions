@@ -14,10 +14,10 @@ AWK = shutil.which("awk")
 pytestmark = pytest.mark.skipif(AWK is None, reason="awk is unavailable")
 
 
-def _query(document: bytes) -> subprocess.CompletedProcess[bytes]:
+def _query(document: bytes, *, mode: str = "hex") -> subprocess.CompletedProcess[bytes]:
     assert AWK is not None
     return subprocess.run(
-        [AWK, "-f", str(READER), "-v", "mode=hex", "-v", "query_path=value"],
+        [AWK, "-f", str(READER), "-v", f"mode={mode}", "-v", "query_path=value"],
         input=document,
         capture_output=True,
         env={**os.environ, "LC_ALL": "C"},
@@ -53,3 +53,32 @@ def test_hex_query_still_refuses_duplicate_keys() -> None:
     result = _query(b'{"value":"first","value":"second"}')
     assert result.returncode == 2
     assert b"duplicate" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("ensure_ascii", [False, True])
+@pytest.mark.parametrize("value", ['/managed quote"back\\slash/\u00e9\U0001f600/bin/python', "line\n"])
+def test_string_query_preserves_decoded_bytes(ensure_ascii: bool, value: str) -> None:
+    result = _query(json.dumps({"value": value}, ensure_ascii=ensure_ascii).encode(), mode="string")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == value.encode()
+
+
+@pytest.mark.parametrize("value", [None, 42, False, [], {}, "/managed/\x00/python"])
+def test_string_query_refuses_nonstrings_and_nul_before_shell_capture(value: object) -> None:
+    result = _query(json.dumps({"value": value}).encode(), mode="string")
+    assert result.returncode == 2
+    assert result.stdout == b""
+
+
+@pytest.mark.parametrize("mode,prefix,status", [
+    ("deployment-string", b"\xef\xbb\xbf", 0),
+    ("string", b"\xef\xbb\xbf", 2),
+    ("deployment-string", b"\xef\xbb\xbf\xef\xbb\xbf", 2),
+])
+def test_deployment_string_bom_compatibility_is_not_protocol_relaxation(
+    mode: str, prefix: bytes, status: int,
+) -> None:
+    value = "/managed/\u00e9/bin/python"
+    result = _query(prefix + json.dumps({"value": value}).encode(), mode=mode)
+    assert result.returncode == status
+    assert result.stdout == (value.encode() if status == 0 else b"")
