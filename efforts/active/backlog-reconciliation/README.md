@@ -410,6 +410,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current SSH-mesh contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
+reconciles #63's specific reference-only refusal and separately qualifies the
+identified embedded originals before further affected reading. The complete
+current receiver/all-six-discussion study preserves broad provisioning and
+seven received tracking families, target-live default discovery, management-
+transport survival and all-peer convergence in both directions. Existing owners
+and native/release/actuation boundaries remain. Actual #13951 delivery and the
+complete 11:04:10 PST 900-open census are recorded; no issue retirement follows.
+
 The [fleet-authority current contract](journal/2026/11.21-fleet-authority-current-contract.md)
 reconciles #6617's particular numerical-reference refusal before a fresh
 qualified complete original/all-eight-discussion study. All five authority,
