@@ -58,6 +58,56 @@
       ]
     ],
     [
+      "tools/promotion_unit_tests/test_installer_pip_index.py",
+      [
+        "test_index_uses_pip_file_precedence",
+        "test_existing_explicit_config_disables_user_files",
+        "test_explicit_index_avoids_config_reads[UV_DEFAULT_INDEX]",
+        "test_explicit_index_avoids_config_reads[UV_INDEX_URL]",
+        "test_explicit_index_avoids_config_reads[PIP_INDEX_URL]",
+        "test_null_config_disables_all_files",
+        "test_invalid_config_fails_without_exposing_values",
+        "test_empty_xdg_config_dirs_uses_unix_default[unset]",
+        "test_empty_xdg_config_dirs_uses_unix_default[empty]",
+        "test_macos_pip_paths_and_precedence[native]",
+        "test_macos_pip_paths_and_precedence[xdg]",
+        "test_macos_pip_paths_and_precedence[xdg-missing]",
+        "test_later_file_defaults_replace_earlier_global_options[index-url]",
+        "test_later_file_defaults_replace_earlier_global_options[index_url]",
+        "test_uv_config_default_precedes_pip_environment[explicit]",
+        "test_uv_config_default_precedes_pip_environment[discovered]",
+        "test_uv_config_default_precedes_pip_environment[project]",
+        "test_aliases_in_one_section_keep_the_last_normalized_value[underscore-first]",
+        "test_aliases_in_one_section_keep_the_last_normalized_value[dash-first]",
+        "test_uv_default_after_empty_system_directory_still_precedes_pip",
+        "test_effective_named_uv_default_respects_configuration_precedence[project]",
+        "test_effective_named_uv_default_respects_configuration_precedence[environment]",
+        "test_effective_named_uv_default_respects_configuration_precedence[distinct]",
+        "test_system_uv_flag_preserves_user_and_project_retention_inputs[unset]",
+        "test_system_uv_flag_preserves_user_and_project_retention_inputs[false]",
+        "test_system_uv_flag_preserves_user_and_project_retention_inputs[true]",
+        "test_system_uv_flag_preserves_user_and_project_retention_inputs[boolish]",
+        "test_system_uv_flag_rejects_invalid_values",
+        "test_system_uv_flag_keeps_windows_user_configuration",
+        "test_whitespace_pip_environment_refuses_instead_of_falling_back[spaces]",
+        "test_whitespace_pip_environment_refuses_instead_of_falling_back[tabs]",
+        "test_install_guard_accepts_only_complete_resolved_owner_policy_calls",
+        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.8.0]",
+        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.11.15]",
+        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.11.16]",
+        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.12.5]",
+        "test_reader_reports_safe_provider_requirement",
+        "test_system_flag_pins_windows_wrapper_from_captured_path"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_materialization_exclusions.py",
+      [
+        "test_generated_lockfiles_do_not_break_copy_equality[direct]",
+        "test_generated_lockfiles_do_not_break_copy_equality[nested]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_materializer_invocation_boundary_units.py",
       [
         "test_invocation_promotion_refuses_foreign_manifest_before_writes",
@@ -8528,56 +8578,6 @@
         "test_managed_listing_reader_preserves_arrays_and_isolates_qualified_catalog_rows",
         "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[False]",
         "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
-      ]
-    ],
-    [
-      "tools/promotion_unit_tests/test_installer_pip_index.py",
-      [
-        "test_index_uses_pip_file_precedence",
-        "test_existing_explicit_config_disables_user_files",
-        "test_explicit_index_avoids_config_reads[UV_DEFAULT_INDEX]",
-        "test_explicit_index_avoids_config_reads[UV_INDEX_URL]",
-        "test_explicit_index_avoids_config_reads[PIP_INDEX_URL]",
-        "test_null_config_disables_all_files",
-        "test_invalid_config_fails_without_exposing_values",
-        "test_empty_xdg_config_dirs_uses_unix_default[unset]",
-        "test_empty_xdg_config_dirs_uses_unix_default[empty]",
-        "test_macos_pip_paths_and_precedence[native]",
-        "test_macos_pip_paths_and_precedence[xdg]",
-        "test_macos_pip_paths_and_precedence[xdg-missing]",
-        "test_later_file_defaults_replace_earlier_global_options[index-url]",
-        "test_later_file_defaults_replace_earlier_global_options[index_url]",
-        "test_uv_config_default_precedes_pip_environment[explicit]",
-        "test_uv_config_default_precedes_pip_environment[discovered]",
-        "test_uv_config_default_precedes_pip_environment[project]",
-        "test_aliases_in_one_section_keep_the_last_normalized_value[underscore-first]",
-        "test_aliases_in_one_section_keep_the_last_normalized_value[dash-first]",
-        "test_uv_default_after_empty_system_directory_still_precedes_pip",
-        "test_effective_named_uv_default_respects_configuration_precedence[project]",
-        "test_effective_named_uv_default_respects_configuration_precedence[environment]",
-        "test_effective_named_uv_default_respects_configuration_precedence[distinct]",
-        "test_system_uv_flag_preserves_user_and_project_retention_inputs[unset]",
-        "test_system_uv_flag_preserves_user_and_project_retention_inputs[false]",
-        "test_system_uv_flag_preserves_user_and_project_retention_inputs[true]",
-        "test_system_uv_flag_preserves_user_and_project_retention_inputs[boolish]",
-        "test_system_uv_flag_rejects_invalid_values",
-        "test_system_uv_flag_keeps_windows_user_configuration",
-        "test_whitespace_pip_environment_refuses_instead_of_falling_back[spaces]",
-        "test_whitespace_pip_environment_refuses_instead_of_falling_back[tabs]",
-        "test_install_guard_accepts_only_complete_resolved_owner_policy_calls",
-        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.8.0]",
-        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.11.15]",
-        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.11.16]",
-        "test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention[0.12.5]",
-        "test_reader_reports_safe_provider_requirement",
-        "test_system_flag_pins_windows_wrapper_from_captured_path"
-      ]
-    ],
-    [
-      "tools/promotion_unit_tests/test_materialization_exclusions.py",
-      [
-        "test_generated_lockfiles_do_not_break_copy_equality[direct]",
-        "test_generated_lockfiles_do_not_break_copy_equality[nested]"
       ]
     ]
   ],
