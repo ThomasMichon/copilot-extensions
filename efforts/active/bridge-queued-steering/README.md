@@ -252,6 +252,23 @@ delivery from an SDK promise or a timer.
 
 ## Journal
 
+### 2026-11-21 - Require positive POSIX group settlement
+
+- The first exact-head Linux run passed 140 cases and failed all four pinned
+  descendant controls. The executor's default path signaled the group and
+  waited for its already-exited root, without requesting group-exit
+  confirmation; the tests correctly rejected that as completed cleanup.
+- The caller now supplies the existing settlement callback, which requests
+  positive native group confirmation while the root remains unreaped.
+  Successful results require that callback's observation. The pinned-process
+  assertions and time bounds are unchanged; no CI retry or waiver substitutes
+  for the corrected source.
+- Updated local controls require the callback and preserve the original
+  unconfirmed-cleanup receipt; seven passed with four native POSIX cases
+  correctly skipped on Windows. Both changed Python files passed whole-file
+  strict typing on Linux and Windows. A fresh exact-head Linux result remains
+  owed before resolving the finding or merging.
+
 ### 2026-11-21 - Retain POSIX descendant custody after root exit
 
 - Addressed the next review's valid exited-parent cleanup gap. POSIX passive

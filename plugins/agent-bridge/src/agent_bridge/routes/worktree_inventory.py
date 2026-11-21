@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import threading
 from typing import cast
 
 from agent_procutil import no_window_kwargs, spawn_in_kill_on_close_job
@@ -14,7 +15,11 @@ from agent_procutil.owned_process import OwnedCleanupError, run_owned
 async def _read_posix(
     argv: list[str], *, timeout: float, env: dict[str, str],
 ) -> tuple[str | None, str]:
-    worker = asyncio.create_task(asyncio.to_thread(run_owned, argv, timeout=timeout, env=env))
+    # This callback requests confirmed group retirement, not only signal delivery.
+    settled = threading.Event()
+    worker = asyncio.create_task(asyncio.to_thread(
+        run_owned, argv, timeout=timeout, env=env, on_settled=settled.set,
+    ))
     try:
         result = await asyncio.shield(worker)
     except asyncio.CancelledError:
@@ -37,6 +42,8 @@ async def _read_posix(
         return None, "worktree_owner_timeout"
     except (OSError, ValueError, RuntimeError) as error:
         return None, type(error).__name__
+    if not settled.is_set():
+        return None, "worktree_owner_cleanup_unconfirmed"
     return (
         cast(str, result.stdout) if result.returncode == 0 else None,
         cast(str, result.stderr),

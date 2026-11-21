@@ -24,18 +24,22 @@ from agent_bridge.routes import worktree_inventory
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["ok", "timeout", "launch-failed", "nonzero"])
+@pytest.mark.parametrize("outcome", ["ok", "timeout", "launch-failed", "nonzero", "unconfirmed"])
 async def test_posix_inventory_uses_the_existing_finite_native_owner(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
     calls: list[Any] = []
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        notify = kwargs.pop("on_settled")
+        assert callable(notify)
         calls.append((argv, kwargs))
-        if outcome == "timeout":
-            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         if outcome == "launch-failed":
             raise RuntimeError("native custody unavailable")
+        if outcome != "unconfirmed":
+            notify()
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return subprocess.CompletedProcess(argv, 1 if outcome == "nonzero" else 0, "[]", "diagnostic")
 
     monkeypatch.setattr(worktree_inventory, "os", SimpleNamespace(name="posix"))
@@ -52,6 +56,7 @@ async def test_posix_inventory_uses_the_existing_finite_native_owner(
         "nonzero": (None, "diagnostic"),
         "timeout": (None, "worktree_owner_timeout"),
         "launch-failed": (None, "RuntimeError"),
+        "unconfirmed": (None, "worktree_owner_cleanup_unconfirmed"),
     }[outcome]
 
 
@@ -69,6 +74,7 @@ async def test_posix_cancellation_joins_the_owner_and_preserves_unconfirmed_clea
             assert release.wait(5)
             if cleanup_uncertain:
                 raise receipt
+            kwargs["on_settled"]()
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         finally:
             finished.set()
