@@ -28,6 +28,16 @@ qualification; existing actual source/copy and ownership conditions remain.
 
 ## Selection and observation boundary
 
+The later [integrated-wave comparison](roadmap-execution-waves.md#counted-coverage-not-technical-completion)
+uses the unchanged 292-identity historical partition at the complete
+08:50:30 PST census. Of these, 289 match the audit in the named census
+fields; #6007, #6237 and #7028 have changed `updatedAt` values. Fresh paired
+metadata preserves their actual provenance gaps and #6237's incomplete
+discussion enumeration. Unchanged original/edit fields and an unchanged
+observed prefix are not whole authored-union permission or text equality.
+The [dated journal](journal/2026/11.21-integrated-execution-waves.md) records
+the exact counts without rereading new discussion text or any held source.
+
 The complete 2026-11-21 10:52:42 UTC (02:52:42 PST) census has 292
 creator-eligible open identities in the historical 682-assignment set.
 They are separate from 151 open fixed-cohort identities, thirteen later

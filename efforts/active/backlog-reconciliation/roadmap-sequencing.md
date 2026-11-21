@@ -11,6 +11,14 @@ wave completes assignment coverage of the frozen 12:11 UTC eligible census;
 provisional decisions and later inflow can change this selection. This is
 neither a complete implementation decision nor an implementation charter.
 
+**Later planning acceptance:** the
+[condition-by-condition assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+accepts the [selected execution-wave integration](roadmap-execution-waves.md)
+after actual #13934 review and an exact public-register/current-census identity
+join. The historical observations below are retained, not newly asserted
+current. Planning acceptance preserves their explicit gaps, original owners,
+145 scoped relationships and independent technical/consumer outcomes.
+
 The [first-wave proposal](roadmap-wave-1.md) and
 [second-wave proposal](roadmap-wave-2.md) and
 [third-wave proposal](roadmap-wave-3.md) and
@@ -29,6 +37,14 @@ historical proposal. The remaining 89 cohort identities and thirteen later
 identities stay separate; no implementation assignment follows.
 
 ## Select by evidence class before scheduling
+
+The [selected integrated execution waves](roadmap-execution-waves.md) now
+compose six recently qualified P1 contributions and separate P2/qualification
+work. They reuse the exact current coverage classes and explicitly retain
+home, acceptance and metadata gaps. Their local precedences do not add
+cross-issue hard edges to the 145 historical rows or appoint implementers.
+The [dated journal](journal/2026/11.21-integrated-execution-waves.md) records
+actual #13931 delivery and the three changed historical metadata boundaries.
 
 The [later-inflow register](roadmap-coverage-later-inflow.md) preserves the
 independent dehydration subissues, native fixture debts, caller inventory,
