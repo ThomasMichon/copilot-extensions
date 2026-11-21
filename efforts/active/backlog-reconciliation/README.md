@@ -1471,6 +1471,13 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [orphan-owner and new-delivery comparison](journal/2026/11.21-orphan-owner-and-new-delivery-boundaries.md)
+proposes finite #13778 source completion through #13817 while retaining normal
+finalization and every actual resource owner. Thirteen new delivery descriptions,
+the changed #13504 discussion and nine older metadata continuations distinguish
+source, release, consumer and native outcomes. The complete 897-open census is
+168 above fixed 729; all campaign check states remain unchanged.
+
 The [constructor-retention completion record](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
 records #13648's actual reviewed merge and parent return, acknowledged whole
 #10799 source fulfillment through #10810, and seven distinct retained
