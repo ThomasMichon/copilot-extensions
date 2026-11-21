@@ -73,11 +73,15 @@ no-job readback value; #13794 merged the source fix and regression checks.
 The next opt-in packet now proves disabled-pair publisher-exit recovery,
 persistent late-start coalescing, actual unwritable-store staging refusal and
 the unchanged manager startup deadline; #13803 merged that qualification.
-The next three-case packet proves a second start during actual collection,
+The three-case packet merged in #13815 proves a second start during actual collection,
 the installed action's own child deadline and fresh-CLI fencing until the
 original owner settles a faulted native-client acknowledgement. Actual
 native-client death remains unqualified; acknowledgement injection is not
 process-death evidence. No provisioning or production enrollment is included.
+Continue source-only domain-probe design through the existing observation
+owners while the remaining native-death and adoption gates stay explicit.
+The [owner-bounded probe amendment](domain-probes.md) proposes one outbound
+SSH owner -> local slot -> age-qualified report flow; review precedes code.
 Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
@@ -310,6 +314,8 @@ authority does not broaden the already-approved finite fixture-unit scope.
   local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
+- [ ] Review the [owner-bounded domain-probe amendment](domain-probes.md)
+  before expanding the SSH provider or collection policy.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
   existing owners and no remediation or new resident process.
 - [x] Add independently enrolled Windows native execution through Agent Machines
@@ -341,6 +347,8 @@ authority does not broaden the already-approved finite fixture-unit scope.
   report cost and bound storage, scan work, runtime and scheduled overlap.
 - [ ] Outages: exercise the [design controls](design.md#outage-derived-controls),
   including a live process with an unresponsive SSH path and an impaired carrier.
+- [ ] Domain probes: prove the [SSH provider and complete consumer controls](domain-probes.md#dependency-ordered-delivery-and-validation),
+  including no mutation, shared deadlines, mixed versions and preserved proof age.
 - [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
   one-shot, scheduling, launch-mechanism and cleanup qualification before
   enrollment; record opportunistic visual coverage separately without an
@@ -367,6 +375,16 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 ## Journal
 
 ### 2026-11-21 - Actual overlap, child deadline and settlement acknowledgement
+- Merged #13815 as `133e3217ba9ab9ba8453e5eb6896aa6ac2ffd69b` after
+  exact-head Copilot approval with no findings and all provider checks green.
+  The rebased three-case packet passed in 76.17 seconds, or 82.95 seconds
+  including preparation and exact cleanup, after upstream retained-helper
+  changes. Twelve affected helper controls and both strict platform targets
+  also passed again.
+- A superseded direct source-attribution failure was reconciled using the
+  documented PR-scoped metadata workflow. Its replacement passed before merge;
+  no source push, CI bypass or review bypass beyond normal Maintainer
+  self-merge authority was used. The umbrella issue remains open.
 - Three focused native cases pass in 75.38 seconds, or 82.61 seconds including
   runner preparation and exact cleanup. The previous seven settled cases were
   not rerun without changed behavior. Twenty-two portable/listener controls
