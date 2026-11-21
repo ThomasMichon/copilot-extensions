@@ -210,6 +210,15 @@ implementation programme or universal acknowledgment. Reuse unchanged admitted
 evidence; actual source/copy restrictions, owner/resource custody and the
 parent's fixed checkpoint remain independent.
 
+The later [selected startup-wave proposal](roadmap-startup-wave.md) applies
+that method to two unchanged, current source findings and retains two pending
+author-delivery lanes. It adds finite priority, entry, scoped sequencing and
+exit decisions, not whole-current coverage or completion of these six gates.
+Its [dated journal](journal/2026/11.20-selected-startup-wave.md) records the
+new complete 884-open inventory, six partial merged-delivery credits and
+retained whole-contract gaps; the 882-issue assessment above remains its
+original observation rather than being silently rewritten.
+
 Completion of this roadmap does not complete the parent's numerical target,
 any implementation effort, or a rollout. Those retain their own completion
 gates and owners.
