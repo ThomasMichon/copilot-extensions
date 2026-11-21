@@ -51,6 +51,37 @@ route; a legacy caller cannot finish this case as abandonment on a new
 receiver. Roll out the receiver before the caller. Existing acknowledged
 legacy abandonments are not rewritten.
 
+### A review worker with an original reservation but no relationship event
+
+The same command and submission action support `original-reservation/v1` on
+the worker's **existing task-scoped credential**. This applies when the
+accepted closeout recorded `original_relationship_unavailable` or retained
+the original owner tuple but no binding. It does not apply when a
+relationship is pending, closed, inconsistent, or awaiting reconciliation.
+The authenticated task, worker, native and generation must still match the
+retained pool assignment and its original spawned reservation. The receiver
+joins the assignment and original reservation's pool binding in one snapshot;
+it does not reapply today's pool catalog, filters, or launch admission. A
+withdrawn pool can stop new work without blocking its assigned worker's
+closeout. A released assignment or changed generation is not eligible. For an ordinary
+Bridge worker the stored agent, Bridge handle, native and assigned workspace
+must agree. A generic fleet credential is not a substitute.
+
+Preparation reads the assigned workspace from its local Worktrees owner. It
+matches the recorded Dispatch attempt and native head and pins the creation
+nonce and head revision in the readiness receipt. This permits the worker to
+**attempt** normal own-workspace finalization; it is not evidence that the
+checkout is finalized. No assignment event or task claim is invented,
+adopted or settled. The client reports `task_relationship: not-required`.
+
+Finish independently reads the actual finalized checkout and matches it to
+the preparation, then rechecks the task and reservation under the Dispatch
+write lock. Acknowledgement, submission and the evaluator request commit
+together. The assignment remains retained through evaluation; replay of the
+committed request does not re-finalize or submit again. Uncertain finalization,
+changed credentials, conflicting reservations and changed workspace evidence
+retain custody. This path does not cool the native, free a slot or issue a wake.
+
 Never-claimed work without resources can instead be abandoned when the
 source explicitly confirms closure. An allocated workspace or pending
 launch is not resource-free merely because no worker has affirmed start.

@@ -49,6 +49,7 @@ def pool_placement_contract() -> dict[str, object]:
         "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
+        "ordinary_allocation_nonce_versions": [1],
         "ordinary_writer_requirement_versions": [1],
         "ordinary_control_adoption_versions": [1],
         "ordinary_control_delivery_versions": [1],
@@ -660,6 +661,11 @@ def require_pool_start(
         or task.owner not in (None, worker_id)
     ):
         raise TaskError("pool start requires the current reservation, worker and native incarnation")
+    from .ordinary_pool_allocation import original_owned
+    if not declining and not row["agent_info"] and original_owned(
+        dict(row), row["driver"], row["worktree_ownership"],
+    ):
+        raise TaskError("ordinary pool start requires its published agent allocation")
     require_pool_workspace(conn, task, row["worktree"], row["execution_machine"], driver=row["driver"])
     from .ordinary_native_bindings import native_bindings, reservation_native_identity
     if reservation_native_identity(conn, row) != native_id:

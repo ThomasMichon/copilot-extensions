@@ -314,8 +314,11 @@ def start(
     if execution_machine is not None:
         from .client_pool_placement import _validate_contract
         try:
-            _validate_contract(client.pool_placement_contract(), driver="ordinary-bridge")
+            contract = _validate_contract(client.pool_placement_contract(), driver="ordinary-bridge")
             if not info:
+                from .ordinary_pool_allocation import original_owned, require_support
+                if original_owned(reservation, "ordinary-bridge", reservation.get("worktree_ownership") or "created"):
+                    require_support(contract)
                 from .ordinary_assignment import current_task
                 current_task(client, task)
         except (DispatchError, TaskError, ValueError, AttributeError) as exc:
@@ -459,6 +462,7 @@ def start(
                 not isinstance(stored.get("execution_machine"), str)
                 or normalize_host(stored["execution_machine"]) != normalize_host(execution_machine)
             )
+            or owned_creation and stored.get("creation_nonce") != invocation["binding"]["creation_nonce"]
         ):
             raise CreatedAgentUnrecorded("ordinary invocation storage/read-back capability is unproven")
         info["startup_invocation"] = invocation

@@ -1674,6 +1674,150 @@ on Dev. The manifest is 1,024,599 bytes with identical decoded admission to
 the current-base union. The cap, all 88 helper decisions and the 300-second
 budget remain enforced. This is not a new schema or eligibility exception.
 
+Source #13814 merges at `2026-11-21T04:31:32Z` as
+`cfd97a8ba7ca632ed771164d92f18275ee5da010`. Final approval `6002791220`
+targets exact head `4de6887b736345a6e7864c8f1babf692355b6849`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44865853693` and trusted metadata CI `44865854246` pass after the
+description's source marker is repaired through `attribution-prepare`.
+That repair changes no source head. Unit job `136729216136` freshly qualifies
+the packet from `04:24:12Z` to `04:27:26Z`, then uploads its evidence. A
+provider-lookup-budget warning correctly falls back to fresh execution; it is
+not credited as a reuse hit or as attribution of an earlier lookup failure.
+Seven live scoped reads through the source merge-time verifier precede the
+normal managed Maintainer merge. No failing CI is bypassed.
+
+Closing references are empty and parent #6237 remains open. The upstream
+merge retains all 89 owned nodes, eighteen added source digests, six exact
+adapter blobs and every coverage target; all prior replay heads remain in
+recovery refs. The full canonical parent is reread after merge and only this
+bounded admission item is resolved. Continue the retained source census and
+separately accepted workflow reductions; broader integration, native,
+every-release, whole-flow and retained-custody acceptance remain open.
+
+### November 21 Picker inbox guard-unit admission
+
+The original Picker inbox-discipline suite collects 32 cases in 31 test
+functions. Its adapter exports the exact original functions and `repo`
+fixture; collection compares every parameter identity and function/fixture
+object. All original assertions, fixture behavior and production code remain
+unchanged. The inputs are synthetic Python text in temporary fixture trees.
+The guard performs real AST analysis of aliases, closures, branch joins,
+tuple/walrus bindings, suppression comments, syntax errors and file listing.
+The two argument-handling cases call the actual entry point in-process;
+thread and Picker expressions in fixture text are not executed.
+
+All 32 pass the actual `UnitRun` effect auditor with zero prohibited effects,
+and every case records call-phase coverage in the real guard. The only
+repository Python reads are the adapter, original test module and production
+guard. Focused development execution takes 2.844 seconds, not a canonical
+complete-packet timing. The adapter passes whole-file strict typing on Linux
+and Windows targets and fatal Ruff checks.
+
+Positive admission adds 32 nodes, three source hashes and one target:
+6,286 nodes, 1,001 sources and 421 targets. Every current-base node, digest and
+target remains; profile, 300-second budget and all 88 release-helper
+decisions are unchanged. Existing node-only compaction and source-map layout
+are preserved under the unchanged file-size cap. Normal current-head review
+and full Linux source CI remain required. This is a bounded census increment,
+not fewer workflow invocations, native Picker behavior, every-release
+observation or full-census acceptance. #13598 and the workflow, native/
+candidate and retained-custody owners remain separate and unchanged.
+
+Source #13826 merges at `2026-11-21T04:54:21Z` as
+`082cc04be63bc7d255a39eff3cd6e4428acfffa2`. Copilot approval `6002925775`
+targets exact published head `e2b6b6718ff017db34afea5c381f65a2cc17db84`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44867950529` and trusted metadata CI `44867950786` pass.
+Unit job `136735766588` freshly qualifies the complete packet from
+`04:49:55Z` to `04:51:53Z`, then uploads its evidence. Seven live scoped reads
+through the source merge-time verifier precede the normal managed Maintainer
+merge; no failing CI is bypassed. Closing references are empty and parent
+#6237 remains open. After rereading the full canonical parent, only this
+bounded admission item is resolved. Continue the retained census and separately
+accepted workflow reductions; broader integration, native, every-release,
+whole-flow and retained-custody acceptance remain open.
+
+### November 21 temporary-document guard-unit admission
+
+The effort/vision structure and marketplace-isolation suites collect 26
+original cases. Two thin adapters export 24 exact original functions and
+parameter identities: seven structure cases and seventeen isolation cases.
+The actual rewritten-history Git test and whole-checkout capability inventory
+remain unchanged outside the packet. No original assertion, fixture or
+production guard changes.
+
+Selected cases create temporary fixture trees and exercise actual document
+schema checks, lexical/AST detection, path selection and in-process argument
+handling. Shell, PowerShell and JavaScript snippets are parsed as data, not
+launched. All 24 pass the real `UnitRun` effect auditor with zero prohibited
+effects and actual call-phase coverage in each case's own production guard.
+Each selection opens only its adapter, original suite and guard. Focused
+development observations take 1.032 and 1.641 seconds, not canonical packet
+or native timing.
+
+Positive admission adds 24 nodes, six source hashes and two coverage targets:
+6,310 nodes, 1,007 sources and 423 targets. Every preceding node, source digest
+and target remains. Profile, 300-second budget, all 88 release-helper
+decisions, node-only compaction and the file-size cap are unchanged. The
+manifest is 1,033,116 bytes. Both adapters pass whole-file strict typing on
+Linux and Windows targets and fatal Ruff checks. Complete current-head
+review and Linux source CI remain required. This is a bounded census
+increment, not fewer workflow invocations, a full-checkout inventory pass,
+native execution, every-release or whole-campaign acceptance. Existing
+workflow, native/candidate, #13598 and retained-custody gates remain open.
+
+Source #13829 merges at `2026-11-21T05:06:21Z` as
+`2fcfa5c63009b5cf6ec5472716cb6ea051878fdc`. Copilot approval `6002966108`
+targets exact published head `36f44287a827ed7b4aca822e5331011a651a097f`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44868828120` and trusted metadata CI `44868828264` pass.
+Unit job `136738514320` freshly qualifies the complete packet from
+`05:01:25Z` to `05:03:24Z`, then uploads its evidence. Seven live scoped reads
+through the source merge-time verifier precede the normal managed Maintainer
+merge; no failing CI is bypassed. Closing references are empty and parent
+#6237 remains open. The full canonical parent is reread after merge and only
+this finite admission item is resolved. Continue the retained census and
+separately accepted workflow reductions; broader integration, native,
+every-release, whole-flow and retained-custody acceptance remain open.
+
+### November 21 vendored-library guard-unit admission
+
+The original vendored-library synchronization suite collects nineteen cases.
+A thin adapter exports eighteen exact original cases and their `fake_repo`
+fixture. Collection verifies every parameter identity and test/fixture object.
+The native symlink case remains unchanged outside the packet; neither its
+fixture nor its refusal assertions are replaced by an in-memory imitation.
+All original tests and production helpers remain unchanged.
+
+Selected cases create temporary library/consumer trees and exercise actual
+TOML parsing, editable-reference inventory, artifact-only exclusion, source-byte
+and version comparisons, pointer peers, same-consumer collisions and in-process
+list/CLI diagnostics. No install, materialization, source rewrite or native
+process executes. All eighteen pass the actual `UnitRun` effect auditor with
+zero prohibited effects and their own production-guard call-phase coverage.
+Repository Python reads are the adapter, original test module, guard and the
+already hash-bound editable-reference, artifact-inventory and standalone-
+consumer helpers. Focused audited development execution takes 2.531 seconds;
+this is not a canonical complete-packet timing.
+
+Positive admission adds eighteen nodes, three source hashes and one target:
+6,328 nodes, 1,010 sources and 424 targets. Every preceding node, source digest
+and target remains. Profile, 300-second budget, all 88 release-helper
+decisions, node-only compaction and the file-size cap are unchanged. The
+manifest is 1,036,181 bytes. The adapter passes whole-file strict typing on
+Linux and Windows targets and fatal Ruff checks. Complete current-head review
+and Linux source CI remain required. This is a bounded census increment, not
+fewer workflow invocations, native symlink/installation qualification,
+every-release or full-census acceptance. Existing workflow, native/candidate,
+#13598 and retained-custody gates remain open.
+
+The separately inspected trusted-CI suite reads original repository YAML
+fixtures and live workflow declarations. Those are not admitted Python or
+declared build-data inputs under the current unit source contract. It remains
+unchanged and outside this admission; no fixture rewrite, new data exception
+or inferred eligibility is used to export it.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

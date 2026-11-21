@@ -235,7 +235,7 @@ def test_adapter_later_phase_refuses_before_native_work(tmp_path: Path, monkeypa
 def test_native_stage_failure_always_settles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed: str | None, mode: str,
 ) -> None:
-    calls = []
+    calls: list[str] = []
 
     def run(argv: list[str], *, timeout: float) -> int:
         stage = next((name for name in ("prepare", "exercise", "settle")
@@ -263,7 +263,7 @@ def test_native_stage_failure_always_settles(
 def test_preparation_timeout_still_settles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
-    calls = []
+    calls: list[str] = []
 
     def run(argv: list[str], *, timeout: float) -> int:
         calls.append("settle" if "--settle" in argv else "prepare")
@@ -279,7 +279,7 @@ def test_preparation_timeout_still_settles(
 def test_serial_baseline_preparation_can_finish_before_its_outer_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = []
+    calls: list[str] = []
 
     def run(argv: list[str], *, timeout: float) -> int:
         stage = next((name for name in ("prepare", "exercise", "settle")
@@ -321,6 +321,7 @@ def test_process_observer_stops_and_retains_evidence_on_every_body_outcome(
     report = tmp_path / "repair-process-trace.json"
 
     def run(argv: list[str], *, timeout: float) -> int:
+        assert argv[0] == "controlled-pwsh"
         assert argv[-1] == "controlled-observer"
         ready.write_text("ready", encoding="utf-8")
         deadline = time.monotonic() + 5
@@ -330,6 +331,9 @@ def test_process_observer_stops_and_retains_evidence_on_every_body_outcome(
         report.write_text('{"stop_observed":true}', encoding="utf-8")
         return 0
 
+    monkeypatch.setattr(runner.shutil, "which", lambda executable: (
+        "controlled-pwsh" if executable == "pwsh" else None
+    ))
     monkeypatch.setattr(runner, "_run", run)
     with pytest.raises(ValueError, match="body") if body_error else nullcontext():
         with runner._observe_processes(tmp_path, "repair", lambda *args: "controlled-observer"):
@@ -343,11 +347,29 @@ def test_process_observer_stops_and_retains_evidence_on_every_body_outcome(
 def test_process_observer_failure_cannot_enter_qualification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(runner.shutil, "which", lambda executable: (
+        "controlled-pwsh" if executable == "pwsh" else None
+    ))
     monkeypatch.setattr(runner, "_run", lambda *args, **kwargs: 3)
     with pytest.raises(RuntimeError, match="observer"):
         with runner._observe_processes(tmp_path, "normal", lambda *args: "controlled-observer"):
             pytest.fail("Failed process observation cannot qualify a native run")
     assert (tmp_path / "normal-process-trace.stop").exists()
+
+
+def test_process_observer_missing_executable_refuses_before_any_observer_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner.shutil, "which", lambda executable: None)
+    monkeypatch.setattr(runner, "_run", lambda *args, **kwargs: pytest.fail(
+        "Missing PowerShell must refuse before starting a process",
+    ))
+    with pytest.raises(FileNotFoundError, match="requires PowerShell 7"):
+        with runner._observe_processes(tmp_path, "normal", lambda *args: pytest.fail(
+            "Missing PowerShell must refuse before constructing the observer",
+        )):
+            pytest.fail("Missing PowerShell cannot qualify a native run")
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_process_observer_report_is_retained_by_the_actual_native_job() -> None:
@@ -357,7 +379,7 @@ def test_process_observer_report_is_retained_by_the_actual_native_job() -> None:
     upload = next(step for step in workflow["jobs"]["manager-suite-windows"]["steps"]
                   if step.get("uses") == "actions/upload-artifact@v4")
     paths = upload["with"]["path"].splitlines()
-    for mode in ("normal", "repair", "fresh"):
+    for mode in ("normal", "repair", "fresh", "source"):
         report = Path(".v") / f"{mode}-process-trace.json"
         assert any(report.match(pattern.strip()) for pattern in paths), str(report)
 

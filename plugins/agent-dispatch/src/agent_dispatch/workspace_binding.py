@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from .client import DispatchError
 from .bridge_remote import normalize_host
 
+if TYPE_CHECKING:
+    from .supervisor import Supervisor
 
-def _prepared_facts_match(recorded: dict, facts: dict) -> bool:
+Facts = dict[str, Any]
+
+
+def _prepared_facts_match(recorded: Facts, facts: Facts) -> bool:
     for key, value in facts.items():
         actual = recorded.get(key)
         if key == "execution_machine" and isinstance(actual, str) and isinstance(value, str):
@@ -20,7 +26,7 @@ def _prepared_facts_match(recorded: dict, facts: dict) -> bool:
     return True
 
 
-def workspace_identity(row: dict, worktree: str) -> dict:
+def workspace_identity(row: Facts, worktree: str) -> Facts:
     value = {"worktree": worktree, "path": row.get("path"), "project": row.get("repo")}
     if "creation_nonce" in row:
         value["creation_nonce"] = row["creation_nonce"]
@@ -28,8 +34,8 @@ def workspace_identity(row: dict, worktree: str) -> dict:
 
 
 def prepared_result(
-    handle: dict, *, project: str | None, ownership: str, created: bool,
-) -> dict:
+    handle: Facts, *, project: str | None, ownership: str, created: bool,
+) -> Facts:
     result = {
         "worktree": handle["worktree"], "path": handle.get("path"), "project": handle.get("project"),
         "requested_project": project, "created": created, "replaced": False, "ownership": ownership,
@@ -39,13 +45,13 @@ def prepared_result(
     return result
 
 
-def hold(message: str) -> None:
+def hold(message: str) -> NoReturn:
     from .spawn_factories import SpawnPreparationRetained
 
     raise SpawnPreparationRetained(message)
 
 
-def allocation_project(reservation: dict, selected: str | None) -> str | None:
+def allocation_project(reservation: Facts, selected: str | None) -> str | None:
     """Recorded provenance wins over mutable routing; legacy reuse fails closed."""
     if not {"allocation_project", "worktree_path"} <= reservation.keys():
         hold("coordinator cannot retain workspace provenance; upgrade before allocation")
@@ -57,7 +63,7 @@ def allocation_project(reservation: dict, selected: str | None) -> str | None:
             hold("carried workspace has no allocation provenance; retained for repair")
     return reservation.get("allocation_project") or selected
 
-def allocation_provenance(task_id: str, reservation: dict) -> tuple[str, str, int]:
+def allocation_provenance(task_id: str, reservation: Facts) -> tuple[str, str, int]:
     """Original allocation provenance is independent of the current task generation."""
     original = reservation.get("allocation_reservation_key")
     if original is None:
@@ -75,7 +81,7 @@ def allocation_provenance(task_id: str, reservation: dict) -> tuple[str, str, in
 
 
 def bind_allocation(
-    client, reservation: dict, project: str | None, *, cohort_transport: str | None = None,
+    client: Any, reservation: Facts, project: str | None, *, cohort_transport: str | None = None,
 ) -> None:
     """No lost owner response may restore mutable routing as allocation authority."""
     if not project or not reservation.get("creation_key") or not hasattr(client, "record_spawn_allocation"):
@@ -98,7 +104,7 @@ def bind_allocation(
         reservation["allocation_cohort_transport"] = cohort_transport
 
 
-def prepare_workspace(owner, task: dict, reservation: dict) -> dict:
+def prepare_workspace(owner: Supervisor, task: Facts, reservation: Facts) -> Facts:
     """Prepare and record workspace provenance before acquisition, including CLI pool claims."""
     from . import embody
     from .session_acquisition import spawn_snapshot
@@ -127,9 +133,9 @@ def prepare_workspace(owner, task: dict, reservation: dict) -> dict:
 
 
 def record_prepared(
-    client, reservation: dict, prepared: dict, *, driver: str,
+    client: Any, reservation: Facts, prepared: Facts, *, driver: str,
     creating_host: str | None = None,
-    worktree_writer_requirement: dict | None = None,
+    worktree_writer_requirement: Facts | None = None,
     timeout: float | None = None,
 ) -> None:
     """Persist even incomplete owner results, then refuse unsafe acquisition."""
@@ -139,10 +145,14 @@ def record_prepared(
         "worktree": worktree, "worktree_ownership": ownership,
         "allocation_project": prepared.get("project"), "worktree_path": prepared.get("path"),
     }
-    if reservation.get("task_relationship_required") is True:
+    from .ordinary_pool_allocation import original_owned
+    pool_nonce = reservation.get("reservation_pool_bound") is True and original_owned(
+        reservation, driver, ownership,
+    )
+    if reservation.get("task_relationship_required") is True or pool_nonce and "creation_nonce" in prepared:
         nonce = prepared.get("creation_nonce")
         if not isinstance(nonce, str) or not nonce:
-            hold("governed workspace owner did not retain its original creation nonce")
+            hold("workspace owner did not retain its original creation nonce")
         facts["creation_nonce"] = nonce
     if "execution_machine" in reservation and creating_host is not None:
         facts["execution_machine"] = creating_host
@@ -161,7 +171,8 @@ def record_prepared(
                 allocation_project=facts["allocation_project"], worktree_path=facts["worktree_path"],
                 creating_host=creating_host if ownership == "created" else None, driver=driver,
                 **({"execution_machine": creating_host} if "execution_machine" in facts else {}),
-                **({"creation_nonce": facts["creation_nonce"]} if "creation_nonce" in facts else {}),
+                **({"pool_creation_nonce" if pool_nonce else "creation_nonce": facts["creation_nonce"]}
+                   if "creation_nonce" in facts else {}),
                 **({"worktree_writer_requirement": worktree_writer_requirement}
                    if worktree_writer_requirement is not None else {}),
                 **({"timeout": timeout}
@@ -181,7 +192,7 @@ def record_prepared(
         hold(f"workspace {worktree} owner returned conflicting path; retained for repair")
 
 
-def retain_pending_creation(result: subprocess.CompletedProcess) -> None:
+def retain_pending_creation(result: subprocess.CompletedProcess[str]) -> None:
     """Keep the ground owner's typed pending outcome outside the failure budget."""
     if result.returncode != 3:
         return
@@ -195,7 +206,7 @@ def retain_pending_creation(result: subprocess.CompletedProcess) -> None:
 
         raise SpawnPreparationPending(data.get("error") or "ground creation is pending; replay the same key")
 
-def defer_pending_creation(client, key: str, error: RuntimeError) -> bool:
+def defer_pending_creation(client: Any, key: str, error: RuntimeError) -> bool:
     from .spawn_factories import SpawnPreparationPending
     import logging
 
@@ -209,7 +220,7 @@ def defer_pending_creation(client, key: str, error: RuntimeError) -> bool:
     return True
 
 
-def parse_created_workspace(result: subprocess.CompletedProcess, *, creation_key: str | None) -> dict:
+def parse_created_workspace(result: subprocess.CompletedProcess[str], *, creation_key: str | None) -> Facts:
     from .embody import EmbodyUnavailable
 
     if result.returncode != 0:
@@ -238,7 +249,7 @@ def parse_created_workspace(result: subprocess.CompletedProcess, *, creation_key
     return handle
 
 
-def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
+def parse_handle(result: subprocess.CompletedProcess[str]) -> dict[str, str | None]:
     """Best-effort extract the session/worktree handle from ``embody --json``.
 
     Returns ``{"session": ..., "worktree": ...}`` (values may be ``None``). Used
