@@ -6477,7 +6477,7 @@
         "fleet-manager/src/fleet_manager/machine_identity.py": "f188c0dc0a4d8c9a00267dd44dfed20f6844ae8676676e231f44cc74d7083dd9",
         "fleet-manager/src/fleet_manager/observations.py": "78febd64ed7408a7ec5c677763b053c0bc152f6038f7a58f49c3bbd5fb552a46",
         "fleet-manager/src/fleet_manager/operations.py": "bfdb591ecea896a07c8895ff394b99393ea256de9608c81ff51e352f5ba46719",
-        "fleet-manager/src/fleet_manager/planning.py": "2f5f85665490121a1a8ffdd9c8d5f0bbdf08fadbeb858dd86035f138f6a6f4f5",
+        "fleet-manager/src/fleet_manager/planning.py": "ca60f53d0eda2da0d15d4ef2381ae84a25ee74f3c7f84361a4896825a2c77439",
         "fleet-manager/src/fleet_manager/private_state.py": "6b5f6145c9add2758f3b638eecaab5481644e6b57efd00f8841fdb11071ac65c",
         "fleet-manager/src/fleet_manager/release.py": "9ceddc9b3efd1df5c9f8dabaf18ff3c7b24f469fcd464198fbddee6f7bb70a9e",
         "fleet-manager/src/fleet_manager/release_auth.py": "ed2ba53fdc3e988af3bfb56bf7e4eb9578cbc6107118ea327dbda1281ab648bc",

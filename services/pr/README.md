@@ -374,9 +374,35 @@ associations. Removing it or selecting a strict older reader also refuses the
 expanded envelope without rewriting it. This profile authorizes no installed migration, native
 watch reassignment, unknown-effect recovery, provider access or service stop.
 
+#### Original native-target capture
+
+A fresh baseline may additionally select
+`workspaces.native_generation_associations: true`. It requires
+`generation_associations: true` and the executing-core declaration
+`agent-pull-requests.workspace-native-generation-associations/v1`.
+The original v1 selection and default publication remain unchanged.
+
+The host captures its admitted native account/repository/PR, full workspace
+scope, service binding and journal epoch/absence before native discovery or
+acquisition. This request-local capture creates no observation or storage write.
+Publication rejects an intervening closure, reopen, newly created conversation
+or mismatched capture before recording a new observation or touching the cache.
+The existing guarded publication then reserves original target/epoch metadata
+in generation-association storage version 2, confirming it only after cache
+publication. Original pending CAS and uncertain-result reconciliation remain
+with the same owner.
+
+Only fresh provisioning selects this version; adding the flag to a v1 volume
+does not migrate it. Removing the flag or choosing an older strict reader
+refuses expanded storage unchanged. The retained transition below separately
+declares support for combining this profile with `terminal_reads`; the fresh
+writer alone is insufficient. It does not backfill targets, change watch
+receipts or deadlines, or create terminal admissions. Existing count/byte
+limits and pending/confirmed metadata custody remain intact.
+
 #### Recorded-generation terminal transition
 
-For an existing volume provisioned with the association writer, retaining
+For an existing volume provisioned with the v1 association writer, retaining
 `generation_associations: true` and selecting `terminal_reads: true` enables
 the recorded-cache variant of the existing `adopt-terminal` command. The
 executing core must separately declare
@@ -406,6 +432,72 @@ remain fenced. Retry of a complete adoption validates current terminal-owned
 generations without importing them into the old baseline association history.
 Removing either selection or rolling back to a strict older reader refuses
 the expanded envelope unchanged.
+
+For an existing volume originally provisioned with the native-target writer,
+also retain `native_generation_associations: true`. The executing core must
+declare `agent-pull-requests.recorded-native-cache-adoption/v1` independently of
+the writer and workspace-only reader. This selects
+`recorded_terminal_cache_version: 2`, not an upgrade of a v1 association volume.
+Fresh provisioning still refuses the combined selection.
+
+The same transition validates every historical target association, including
+noncurrent entries, against the selected full scopes and native targets.
+It imports generation bindings and native admissions together, using only
+confirmed complete open first-epoch associations with actual validated retained
+cache objects. The admission cursor is an original association cursor, not the
+current journal high-water mark. Every actually waiting coalesced native target
+must have such evidence. Unmatched old targets, pending publication, conflicting
+history, ambiguous scopes or changed configuration refuse before adoption;
+today's target B cannot justify an old wait for target A.
+
+Original watch receipts, predicates, deadlines, frozen events and ACK positions
+are unchanged. Native capture after adoption carries the imported epoch before
+IO; a sample captured without it, or across close/reopen, refuses unchanged.
+Fresh native observations keep their complete native snapshot and triggering
+head. No observation, successful watch event, cache rewrite or delivery
+settlement is created by importing admissions. Installed migration and
+unsupported operation representations remain separate, unqualified outcomes.
+
+#### Original active-operation inspection
+
+The recorded-generation transition can additionally select
+`workspaces.retained_active_reviews: true`. This requires `terminal_reads` and
+`generation_associations`; either original association version
+is supported. The executing core must separately declare
+`agent-pull-requests.retained-active-review-adoption/v1`, the original
+active-operation recovery library and the
+[negotiated inspection receiver](../../plugins/agent-pull-requests/docs/workspace-tools.md#original-active-operation-inspection).
+Unselected hosts do not pass new constructor options to prior cores.
+
+The existing `adopt-terminal --config <absolute-config>` command validates
+original v1 operation scopes, the complete cache/replay layout and all eventual
+extension capacity before its first commit. Prepared intents, selections,
+comment mappings and existing compact recovery operations refuse unchanged.
+Successful adoption adds `retained_active_review_version: 1` and marks each
+imported operation `recovery_only: true` in the same ReplayStore envelope.
+Intent, source/generation/revision bindings, attempt identities, native receipts,
+unattempted actions and original receipt reservations are unchanged.
+Older or unselected readers refuse the expanded envelope without rewriting it.
+
+Imported operations remain permanently recovery-only even in an open first
+epoch, after native admissions are imported, and after close/reopen. They
+cannot be resubmitted or acquire another attempt. The selected host offers
+scoped `inspect` through a separately negotiated read-only capability, not a
+new operation in the base terminal body-reading contract. Native and Gateway
+clients, including `pr_workspace_inspect`, retain the original inspection
+result. Partial adoption remains readable through the original library
+inspector; explicit retry validates the same persisted state and completes
+missing compatible extensions under its new invocation budget.
+The host qualifies a one-MiB response budget through its actual existing
+Gateway service binding; an unqualified smaller binding omits the optional
+inspection capability instead of advertising an unusable reader. Other
+workspace operations retain their existing response bounds.
+
+This observer configures no protected reconciliation factory and advertises
+`reconciliation: false`. Its observation credential cannot confirm a native
+effect. Actual readback remains with the separately supplied protected owner;
+no adoption-created deadline, receipt, acquisition, send, ACK or compact record
+is produced. Ordinary provisioning and service startup remain non-migrating.
 
 ## Optional preparation-only hosting
 

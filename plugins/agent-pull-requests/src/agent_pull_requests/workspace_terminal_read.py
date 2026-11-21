@@ -67,7 +67,9 @@ def adopted_version(workspace: WorkspaceOperations, *, expires_at: int,
             "terminal_retention", "terminal_recovery", "terminal_cache_retirement",
         )):
             raise ReplayStoreInvalid("terminal workspace read requires explicit storage adoption")
-        if workspace.store.recorded_terminal_cache and document.get("recorded_terminal_cache_version") != 1:
+        if workspace.store.recorded_terminal_cache and document.get("recorded_terminal_cache_version") != (
+            2 if workspace.store.native_generation_associations else 1
+        ):
             raise ReplayStoreInvalid("recorded terminal cache requires explicit storage adoption")
         return cast(int, document["version"])
 
@@ -85,11 +87,14 @@ def capabilities(workspace: WorkspaceOperations, *, expires_at: int,
     version = adopted_version(workspace, expires_at=expires_at, checkpoint=checkpoint)
     from .workspace_terminal_mapping import FIELD, available, contract as mapping_contract
     mapping = available(workspace, expires_at=expires_at, checkpoint=checkpoint)
+    from . import workspace_retained_review as retained_review
+    recovery = retained_review.available(workspace, expires_at=expires_at, checkpoint=checkpoint)
     return {
         "protocol": PROTOCOL, "operations": list(OPERATIONS),
         "generation_versions": [1], "owner_store_versions": [version],
         "terminal_read_contract": contract(),
         **({FIELD: mapping_contract()} if mapping else {}),
+        **({retained_review.FIELD: retained_review.contract()} if recovery else {}),
         "conversation_contract": conversation_contract(version),
         "conversation_acquisition": "workspace-projection/v1",
         "max_generation_bytes": MAX_GENERATION_BYTES, "chunk_bytes": CHUNK_BYTES,
@@ -110,7 +115,11 @@ def serve(workspace: WorkspaceOperations, operation: str, payload: Document, *,
         mapping = operation == "retained-comment" and selection == MAPPING_SELECTION and available(
             workspace, expires_at=expires_at, checkpoint=checkpoint,
         )
-        if not mapping and (
+        from . import workspace_retained_review as retained_review
+        recovery = operation == "inspect" and selection == retained_review.SELECTION and retained_review.available(
+            workspace, expires_at=expires_at, checkpoint=checkpoint,
+        )
+        if not mapping and not recovery and (
             operation not in OPERATIONS or operation != "capabilities" and selection != SELECTION
         ):
             raise WorkspaceUnavailable("terminal workspace read capability required")

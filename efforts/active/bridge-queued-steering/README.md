@@ -8,6 +8,13 @@ model-facing submission receipt, and a timed post-tool content fallback that
 cannot duplicate a later SDK delivery. Drive the source fix through tests,
 review and merge in the layer that actually owns delivery.
 
+The immediate assigned source slice is P13734-1/2: restore prompt idle-inbox
+submission through the existing SDK owner, including resume/re-registration,
+and remove unsupported end-turn promises from the post-tool hint. Complete
+focused tests, normal review and required CI without bypass, then return to
+the continuing Driver objective. This priority does not grant rollout or
+complete the broader receipt/fallback campaign.
+
 - **Slug:** `bridge-queued-steering`
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs targeting `dev`
@@ -32,7 +39,8 @@ second queue, observer service or prompt-per-message acknowledgement loop.
 
 ## Coordination
 
-The proposed finite #13734 idle-transition and truthful-hint slice belongs to
+The finite #13734 idle-transition and truthful-hint slice, accepted in #13740,
+belongs to
 this existing Driver delivery owner and Phase 2, not a second inbox or
 implementation appointment. Preserve the broader #6394 publisher decision,
 its bounded queued-steering claim, and the independent routing, registration,
@@ -42,10 +50,10 @@ The source's later, possibly separate resumed-headless carrier handshake
 failure remains at OPEN #13734 under the existing carrier/client-routing
 owners; these five rows do not receive or complete that distinct observation.
 
-Normal review must deliver every P13734/V13734/G13734 clause and the dated
-Journal/intake route. Keep #13734 OPEN during proposal; permitted current
-whole receiving/source/custody readback and a separate source judgment follow
-actual complete reviewed slice delivery. Keep the whole source OPEN while
+Reviewed #13740 delivered the five planned P13734/V13734/G13734 clauses and
+dated Journal/intake route. Current complete slice and source/discussion
+readback accepted only that idle/hint scope; the separate carrier observation
+remains unreceived. Keep the whole source OPEN while
 its separate carrier observation lacks complete accepted handling; an idle
 slice merge is not whole-source receiving. All five new technical rows remain
 unchecked. Existing Goal, Request, Scope Approvals, checked source-notification

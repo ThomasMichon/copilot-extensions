@@ -1,5 +1,17 @@
 # Testing copilot-extensions
 
+The focused retained-active-review packet uses
+`agent-pull-requests/tests/test_retained_review_adoption.py` and
+`services/pr/tests/test_retained_active_reviews.py` through the existing plugin
+and standalone runners. Synthetic retained volumes exercise the actual
+transition CLI, fresh-process Native/tool inspection, asynchronous contract
+negotiation, before/after-replace interruption, same-operation retry, scope and
+capacity/deadline/lifecycle refusal, native-ID preservation, actual foreground
+Gateway response qualification with larger bodies/receipt reservations, and the permanent
+no-new-attempt fence across open/close/reopen. It requires no live provider,
+credential or installed-volume migration and does not select a production
+recovery receiver.
+
 The `consumer-telemetry-native.yml` finite Windows/Linux packet runs both the
 existing Bridge command/custody controls and Dispatch's
 `tests/test_consumer_telemetry_command.py` plus legacy telemetry suite through
@@ -8,6 +20,15 @@ health/control-authority regressions. Dispatch's real configured HTTP mutations 
 independent fsynced receiver files for two origins and an explicit service
 route. This source evidence is not release, installed-service qualification or
 completion of the wider consumer-telemetry U3/U4 work.
+
+The same native packet selects
+`agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
+`wall_cpu_tail` / incompatible-reader controls. JUnit properties named
+`consumer_telemetry_performance` and `consumer_telemetry_http_performance`
+retain the finite measurements. See
+[`docs/patterns/consumer-telemetry-qualification.md`](docs/patterns/consumer-telemetry-qualification.md)
+for boundaries, reproduction, accounting and explicit gaps. Test success does
+not establish an overhead service-level objective or release/rollout.
 
 The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
@@ -6725,6 +6746,27 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+`plugins/agent-pull-requests/tests/test_review_recovery.py` exercises original
+v1 active-operation inspection and protected native readback after terminal
+closure/reopen. The actual store and existing synthetic protected transport
+cover original-attempt preservation, unavailable attribution, unsupported
+actions, authority/material withdrawal at receipt commit, finite invocation
+budgets, native-ID conflicts and before/after-replace readback. Actual initial
+inspection and final readback lock contention must expire at the same original
+monotonic deadline, including the no-unknown fast path. Admission,
+new attempts and senders are trapped. Prepared/compact representations keep
+their refusals. This library packet does not qualify retained adoption,
+negotiated workspace serving, a live provider or installed recovery.
+
+`plugins/agent-pull-requests/tests/test_generation_native_targets.py` qualifies
+original target capture before the actual synthetic native exporter capability
+and read calls, publication interruption/readback, scope/epoch refusal and
+original CAS/capacity preservation. The standalone
+`services/pr/tests/test_generation_associations.py` covers v1/v2 provisioning,
+load/sync, fresh-process body reconstruction and explicit old-core/reader
+refusal. These are fresh-writer controls, not active-native adoption or installed
+migration acceptance.
+
 `services/pr/tests/test_recorded_terminal_cache.py` belongs to this existing
 explicit process lane. It provisions the selected baseline through the actual
 CLI, transitions current/noncurrent recorded generations, reconstructs all
@@ -6734,6 +6776,13 @@ owner without changing original cache, replay or association bytes.
 `plugins/agent-pull-requests/tests/test_recorded_terminal_cache.py` supplies the
 focused core contracts, including body-only admission and original-reader
 refusals. Neither packet qualifies installed migration or a live provider.
+The same process lane now includes the separately selected original-native
+transition: coalesced active waits, frozen events, current/noncurrent bytes,
+all adoption boundaries, competing lifecycle owners, fresh native payloads and
+old-sample refusal across adoption or close/reopen. The focused
+`test_recorded_native_cache.py` core packet adds historical target conflicts,
+unmatched old waits, shared native/full-scope identities and original capacity
+and deadline controls. Required unit-only CI is unchanged.
 
 The existing `pr_service=true` manual selector retains two disposable jobs
 (Linux and Windows), each capped at 10 minutes. Its source-pinned standalone

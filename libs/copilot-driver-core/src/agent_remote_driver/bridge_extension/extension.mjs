@@ -102,6 +102,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     seenEventIds: new Set(), // event ids already enqueued -- dedup the CLI's redelivery
     seenEventOrder: [], // FIFO of ids bounding seenEventIds (evict oldest past cap)
     inboxPoll: null, // delivery inbox poll interval handle
+    inboxWake: null,
+    inboxAgain: false,
+    closing: false,
     deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
     delivering: false, // guard against overlapping inbox drains
     inFlight: new InFlightMessages(), // delivered but not yet recorded by the CLI
@@ -247,7 +250,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
         return register();
       }).catch(() => {});
     }
-    return register();
+    const ok = await register();
+    if (ok) scheduleInboxPoll();
+    return ok;
   }
 
   const register = serializedRegister(
@@ -270,7 +275,10 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
         return false; // bridge down/unreachable -> the next heartbeat retries
       }
     },
-    (id) => extLog(`registered live session ${id} with local bridge`),
+    (id) => {
+      extLog(`registered live session ${id} with local bridge`);
+      scheduleInboxPoll();
+    },
     { ready: metadataReady, prepare: () => refreshRegistrationMetadata(state, resolveCurrentMachine) },
   );
 
@@ -357,11 +365,25 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // is proven" warns about in docs/delegation-contract.md. Tagging every
   // delivery as an explicit `agent-` source keeps it on its own,
   // correctly-arbitrated lane.
+  function scheduleInboxPoll() {
+    if (state.closing || state.inboxWake !== null) return;
+    state.inboxWake = setTimeout(() => {
+      state.inboxWake = null;
+      pollInbox().catch(() => {});
+    }, 0);
+    state.inboxWake.unref?.();
+  }
+
   async function pollInbox() {
-    if (state.delivering) return;
+    if (state.closing) return;
+    if (state.delivering) {
+      state.inboxAgain = true;
+      return;
+    }
     if (!state.sessionId || !state.base || !state.token) return;
     if (!RETAINED_INBOX && (!state.deliveryEnabled || !state.registered)) return;
     state.delivering = true;
+    state.inboxAgain = false;
     const sid = state.sessionId;
     try {
       if (RETAINED_INBOX) {
@@ -378,6 +400,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       });
     } finally {
       state.delivering = false;
+      if (state.inboxAgain) scheduleInboxPoll();
     }
   }
 
@@ -499,10 +522,13 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     ],
   });
 
+  adoptSessionId(state, session.sessionId);
+
   if (RETAINED_INBOX) {
     retainedInbox = createRetainedInbox({
       session, request: retainedBridgeRequest,
       receivingApi: "native-sdk-v1",
+      mainTurn: state.mainTurn,
       replayHistory,
       cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
       canSend: () => state.deliveryEnabled && state.registered, log: extLog,
@@ -536,13 +562,14 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       state.lastEventAt = Date.now();
       state.inFlight.observe(event);
       state.pendingInput.observe(event, state.nativeSessionId);
-      state.mainTurn.observe(event);
-      if (!isSubAgentEvent(event) && adoptSessionId(state, event?.sessionId)) {
+      const idle = state.mainTurn.observe(event);
+      if (!isSubAgentEvent(event) && adoptSessionId(state, session.sessionId || event?.sessionId)) {
         for (const entry of state.readinessTasks.values()) entry.controller.abort();
         // A late id, or a resume that renamed this conversation: register it
         // off the event loop (the bridge folds a renamed placeholder into it).
         setTimeout(() => register().catch(() => {}), 0);
       }
+      if (idle) scheduleInboxPoll();
       state.questions.observe(event, state.nativeSessionId);
       state.deliveryAttention.observe(event, state.nativeSessionId);
       // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
@@ -639,6 +666,11 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // --- Best-effort deregister on exit (staleness reaping is the real backstop) ---
   function shutdown() {
     try {
+      state.closing = true;
+      if (state.inboxWake !== null) {
+        clearTimeout(state.inboxWake);
+        state.inboxWake = null;
+      }
       retainedInbox?.close();
       if (state.heartbeat) {
         clearInterval(state.heartbeat);

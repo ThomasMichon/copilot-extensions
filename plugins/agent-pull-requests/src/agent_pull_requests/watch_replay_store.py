@@ -40,6 +40,7 @@ class _ReviewIntentAPI(Protocol):
     def validate_operations(
         self, operations: object, *, receipt_bytes: int, review_bytes: int,
         versions: tuple[int, ...] = (1,), selections: bool = False, mappings: bool = False,
+        retained_active: bool = False,
     ) -> None: ...
 
 
@@ -119,7 +120,18 @@ class ReplayStore:
         repository_activity: bool = False,
         workspace_generation_associations: bool = False,
         recorded_terminal_cache: bool = False,
+        native_generation_associations: bool = False,
+        retained_active_reviews: bool = False,
     ) -> None:
+        if type(retained_active_reviews) is not bool or retained_active_reviews and not recorded_terminal_cache:
+            raise ValueError("retained active reviews require the recorded terminal reader")
+        self.retained_active_reviews = retained_active_reviews
+        if type(native_generation_associations) is not bool or native_generation_associations and (
+            not workspace_generation_associations
+            or terminal_retention != recorded_terminal_cache
+        ):
+            raise ValueError("native generation associations require a selected fresh baseline")
+        self.native_generation_associations = native_generation_associations
         if type(recorded_terminal_cache) is not bool or recorded_terminal_cache and (
             not workspace_generation_associations or not terminal_retention
             or not terminal_recovery or not terminal_cache_retirement or terminal_comment_mapping
@@ -294,11 +306,23 @@ class ReplayStore:
         retirement = "terminal_cache_retirement_version" in document
         associations = "generation_associations_version" in document
         recorded = "recorded_terminal_cache_version" in document
+        retained_reviews = "retained_active_review_version" in document
+        if retained_reviews:
+            if (
+                not self.retained_active_reviews or not recorded or not terminal
+                or prepared or selections or mappings
+                or type(document["retained_active_review_version"]) is not int
+                or document["retained_active_review_version"] != 1
+            ):
+                raise ReplayStoreInvalid("retained active review reader unavailable for adopted owner")
+            names.add("retained_active_review_version")
         if recorded:
             if (
                 not self.recorded_terminal_cache or not associations or not terminal
                 or type(document["recorded_terminal_cache_version"]) is not int
-                or document["recorded_terminal_cache_version"] != 1
+                or document["recorded_terminal_cache_version"] != (
+                    2 if self.native_generation_associations else 1
+                )
             ):
                 raise ReplayStoreInvalid("recorded terminal cache reader unavailable for adopted owner")
             names.add("recorded_terminal_cache_version")
@@ -306,6 +330,9 @@ class ReplayStore:
             if (
                 not self.workspace_generation_associations or prepared or version != 3
                 or terminal and not recorded
+                or document["generation_associations_version"] != (
+                    2 if self.native_generation_associations else 1
+                )
             ):
                 raise ReplayStoreInvalid("generation association reader unavailable for adopted owner")
             names.update(("generation_associations_version", "generation_associations"))
@@ -418,6 +445,7 @@ class ReplayStore:
             versions=(1, 2) if prepared else (1,),
             selections=selections,
             mappings=mappings,
+            retained_active=retained_reviews,
         )
         if version in (3, 4, 5, 6):
             from .conversation_journal import ConversationJournal
@@ -615,6 +643,24 @@ class ReplayStore:
         return self._review_transaction(
             inspect,
             expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
+    def inspect_retained_review(
+        self, operation_id: str, scope: Document, *, expires_at: int,
+        checkpoint: Checkpoint | None = None,
+    ) -> Document:
+        """Read an original v1 operation without live execution admission."""
+        def inspect(document: Document) -> Document:
+            operation = self._review_operation(document, operation_id, scope)
+            if (
+                operation["intent"]["version"] != 1
+                or "selection" in operation or "comment_observations" in operation
+            ):
+                raise ReplayStoreInvalid("retained inspection requires an original v1 operation")
+            return operation
+
+        return self._review_transaction(
+            inspect, expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
     def review_intent_versions(

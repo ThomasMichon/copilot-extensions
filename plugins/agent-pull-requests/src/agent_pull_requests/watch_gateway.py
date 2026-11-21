@@ -275,7 +275,7 @@ class WatchGateway:
         if self._checkpoint is not None:
             self._checkpoint()
 
-    async def _handle_workspace(self, request: ServiceRequest) -> ServiceResponse:
+    async def _handle_workspace(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
         from .workspace_operations import OPERATIONS
         is_attention = request.target.startswith("/v1/attention/")
         prefix = "/v1/attention/" if is_attention else "/v2/review/"
@@ -328,7 +328,7 @@ class WatchGateway:
     async def _execute_workspace(
         self, workspace: Any, operation: str, payload: dict[str, Any], request: ServiceRequest,
         target: str, expected: ReplayBinding, *, selection: object = None,
-    ) -> ServiceResponse:
+    ) -> ServiceResponse | BoundedServiceResponse:
         from .attention_read import AttentionUnavailable, MAX_BATCH_BYTES
         from .generation_cache import CacheInvalid
         from .owner_read import OwnerReadResponseTooLarge
@@ -373,10 +373,24 @@ class WatchGateway:
                 **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()
+            from .workspace_retained_review import FIELD, RESPONSE_BYTES, SELECTION
+            if not attention and operation == "capabilities" and request.response_limit < RESPONSE_BYTES:
+                value.pop(FIELD, None)
             value = dict(value, binding=expected.document())
             limit = MAX_BATCH_BYTES if request.target.startswith("/v1/attention/") else BODY_BYTES
-            if len(json.dumps(value, allow_nan=False).encode("utf-8")) > limit:
+            if not attention and operation == "inspect":
+                if selection == SELECTION:
+                    if request.response_limit < RESPONSE_BYTES:
+                        return _response(503, {"error": "workspace_response_limit"})
+                    limit = RESPONSE_BYTES
+            data = json.dumps(value, allow_nan=False).encode("utf-8")
+            if len(data) > limit:
                 return _response(503, {"error": "workspace_response_limit"})
+            if limit > BODY_BYTES:
+                from fleet_manager.gateway_service_handler import BoundedServiceResponse
+                return BoundedServiceResponse(
+                    200, (("content-type", "application/json"), ("cache-control", "no-store")), data,
+                )
             return _response(200, value)
         except RequestDisconnected:
             return _response(503, {"error": "workspace_request_disconnected"})

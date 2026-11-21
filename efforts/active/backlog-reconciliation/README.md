@@ -410,6 +410,21 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current roadmap integration assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
+separates all six unfinished execution-plan gates from the reviewed historical
+research. The complete 15:09 PT inventory has 882 open: 292 retained historical
+assignments, 153 other creator-eligible identities and 437 excluded metadata-only
+records. A [finite research queue](roadmap-sequencing.md#finite-integration-research-queue)
+reconciles existing later coverage before new studies, refreshes selected
+priority/receiver deltas and composes only actual scoped prerequisites.
+#5512's already accepted NOT_PLANNED route continues in the unchanged Draft
+singleton effort; eight original shortlist trackers and four receiving routes
+remain, without technical completion or new disposition credit.
+The [dated journal](journal/2026/11.20-roadmap-integration-gaps.md) also follows
+through reviewed #13740's accepted idle-only slice, five unchecked technical
+rows and OPEN #13734's unreceived carrier observation. The campaign remains
+Active, 153 above fixed 729; all Plan/Validation and source/custody gates remain.
+
 The [idle-steering and existing-keeper unit](journal/2026/11.20-idle-steering-and-existing-keepers.md)
 proposes the finite #13734 idle/hint slice in the existing Active Queued
 Steering owner: supported idle submission without another unrelated turn,
@@ -5082,6 +5097,11 @@ closure credit, resource release or parent checkbox change follows.
   acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [selected startup wave](roadmap-startup-wave.md) adds evidence-ranked
+  #12657/#12691 contributions with original homes, parallel local precedences
+  and finite source/release/consumer exits. It retains actual home uncertainty
+  and pending author PRs rather than appointing implementers; broader current
+  selection and all roadmap integration gates remain open.
   The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
   directs two historical selected slices to their audited OPEN receivers:
   #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
