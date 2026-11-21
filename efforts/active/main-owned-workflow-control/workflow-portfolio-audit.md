@@ -3328,6 +3328,44 @@ Continue the synthetic installer-sync unit closure rather than widening the
 refused real-asset contract. Native, installed, release, full-census,
 comparable whole-flow and retained-custody gates remain open.
 
+### November 21 synthetic installer-sync unit delivery
+
+The adapter exports 22 exact original functions and the unchanged `fake_repo`
+fixture from `test_sync_installer_engine.py`: 25 expanded cases out of 178.
+All 153 residuals remain outside. Original assertions and parameter identities
+are preserved; temporary shell/Python text is data, never real installer assets
+or executed installers. No production, original test, workflow, plugin payload
+or source/data/effect-admission contract changes.
+
+Effect-guarded development execution passes all 25 cases in 5.797 seconds,
+with zero prohibited effects, seven explicitly bound Python files opened and
+actual sync-owner call coverage for every case. The compact manifest admits
+6,838 nodes, 1,075 source hashes and 442 targets in 783,650 bytes. All 6,813
+preceding nodes/hashes, 89 helper decisions, compact/flat-v1 contracts and
+the 300-second bound remain. Only the adapter, original test module and sync
+owner are newly bound; that owner is the only new target. Ruff and whole-file
+strict Linux/Windows typing pass.
+
+Source #13956 merges at `2026-11-21T19:30:39Z` as
+`dbfe919961bb50c22aec72f71a3f556652357d54`. Copilot approval `6007678035`
+targets exact head `215e84fa6124e1e114ef7cf163837321d8e51a9c`; complete
+review/comments/thread pagination finds no outstanding finding. Required
+source CI `44940820192` and trusted metadata CI `44940819611` succeed.
+Actual unit job `136957392262` freshly executes all 6,838 cases, with 37
+deselections, in 98.76 pytest seconds and 114.462 packet seconds. Lookup takes
+504 ms; the result explicitly reports fresh execution, not reuse.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. Scoped synchronization retains
+the published head and advances to the merge. After rereading the full canonical
+parent, only this finite installer-sync item is resolved. Continue the synthetic
+ancestor controls under the same source-only gates. Simple consumer coverage is
+the unchanged fixture calling the real sync/verify owner; clean-room/live
+external lanes are not exercised because no provisioning/runtime behavior or
+activation changes. Native, installed, release, full-census, comparable
+whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

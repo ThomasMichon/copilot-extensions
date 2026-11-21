@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [manual-resume and publication contracts](journal/2026/11.21-manual-resume-and-publication-contracts.md)
+reconcile two specific reference-only refusals before complete qualified
+current studies, including separate embedded-source qualification. Manual
+claims retain no automatic wake, original headed-session lineage and actual
+pickup; roster recovery retains its refresh alternative, fresh producer
+generation and separate owner receipt/Manager convergence. Unchanged complete
+#6507/#6620 judgments are reused; actual source/copy and owner gates remain.
+Actual #13954 delivery and the complete 11:33:38 PST 900-open census are
+recorded without issue retirement, technical credit or runtime effects.
+
 The [current SSH-mesh contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
 reconciles #63's specific reference-only refusal and separately qualifies the
 identified embedded originals before further affected reading. The complete
