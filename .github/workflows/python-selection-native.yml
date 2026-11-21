@@ -21,6 +21,13 @@ on:
       - libs/payload-invocation/templates/posix-shim.tmpl
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
+      - libs/installer-engine/bootstrap-capture.cs
+      - libs/installer-engine/bootstrap-capture.exe
+      - libs/installer-engine/bootstrap-capture.ps1
+      - tools/build-bootstrap-capture.py
+      - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
+      - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
+      - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
       - libs/installation-context/tests/test_managed_python_transport.py
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
@@ -88,6 +95,38 @@ jobs:
           --junit-dir qualification-evidence/budget-lock
           --allow-explicit-tiers
           -k "contend_before_snapshot_publication and prerequisites and not bash"
+      - name: Require actual command, installer and lock controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':17,'budget-lock':4};
+          assert all(case.find(tag) is None for cases in groups.values() for case in cases
+          for tag in ('error','failure','skipped'));
+          print('29 command, 17 installer/snapshot and four prerequisite-lock controls passed without skips')"
+  budget-uv-lifecycle:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare the addressed interpreter without publishing Python commands
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
+          uv python install --no-bin --no-registry cpython@3.13.12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify prepared-only managed uninstall on both PowerShell engines
         run: >-
           python tools/run-plugin-tests.py budget-guidance
@@ -107,15 +146,15 @@ jobs:
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --junit-dir qualification-evidence/budget-cue
           --allow-explicit-tiers -k "(powershell_writer or powershell_selector or legacy_reconcile_record) and not bash"
-      - name: Require actual command, installer, lock and uninstall controls
+      - name: Require actual uninstall, provider and guidance controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall','budget-provider','budget-cue')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':17,'budget-lock':4,'budget-uninstall':16,'budget-provider':2,'budget-cue':26};
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-uninstall','budget-provider','budget-cue')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-uninstall':16,'budget-provider':2,'budget-cue':26};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, 17 installer/snapshot, four prerequisite-lock, 16 uninstall, two native provider and 26 managed cue/legacy-owner controls passed without skips')"
+          print('16 uninstall, two native provider and 26 managed cue/legacy-owner controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -209,3 +248,19 @@ jobs:
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four native child-environment controls passed without skips')"
+      - name: Require the packaged pre-interpreter host to match its reviewed source
+        run: python tools/build-bootstrap-capture.py --check
+      - name: Qualify original-caller bootstrap selector custody
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_capture_native.py
+          --junit-dir qualification-evidence/bootstrap-custody
+          --allow-explicit-tiers
+      - name: Require all nine original-caller, replacement and negative controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/bootstrap-custody').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==9;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          print('Nine native bootstrap custody and replacement controls passed without skips')"

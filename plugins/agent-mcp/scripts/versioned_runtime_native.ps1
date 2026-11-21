@@ -170,9 +170,19 @@ function Enter-NativeInstallerDriver {
         [string]$WheelProfile,
         [string]$WheelDirectory,
         [string]$WheelPython,
-        [string]$WheelUv
+        [string]$WheelUv,
+        [string]$BootstrapPython
     )
+    if ($BootstrapPython -and (
+        $Action -notin @('install', 'update', 'provision') -or
+        -not [IO.Path]::IsPathRooted($BootstrapPython) -or
+        -not [IO.File]::Exists($BootstrapPython) -or
+        $BootstrapPython -match '[\\/]WindowsApps[\\/]'
+    )) {
+        throw 'Explicit bootstrap Python requires an existing absolute interpreter for install, update or provision.'
+    }
     $python = if ($WheelProfile) { $WheelPython }
+        elseif ($BootstrapPython) { $BootstrapPython }
         else { Resolve-NativeBootstrapPython -Action $Action -Root $Root }
     if (-not $python) { throw 'Native install and uninstall require an existing Python 3.11+ bootstrap interpreter; removal requires it outside the runtime' }
     $arguments = @('-I', '-S', '-B', '-X', 'utf8',
