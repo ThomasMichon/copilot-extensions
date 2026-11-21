@@ -16,15 +16,22 @@ No repository-owned hook configuration can grant executable authority.
 ## Delivery and attribution
 
 The owning payload's stdlib-only Python writer imports its own pure posture
-source. It requires an available Python 3.10+ interpreter; it does not install
-one or depend on a stale installed runtime. Bash and PowerShell wrappers resolve
+source. It does not install an interpreter or depend on a stale installed
+runtime. Bash and PowerShell wrappers resolve
 the plugin root through the runtime's documented root variables and emit exactly
 `{}`. The PowerShell wrapper suppresses console allocation at process creation,
-drains both output streams concurrently, and enforces one five-second deadline
-across asynchronous stdin delivery and the owned writer's exit.
-On Windows it resolves a virtual environment's bounded `pyvenv.cfg` to the
-base console interpreter and refuses `py.exe` launchers, so cancellation targets
-the actual one-shot writer rather than leaving a redirector's child running.
+drains both output streams concurrently, and uses the shared native bootstrap
+selector to inspect the payload's declared uv-managed Python. PATH `python`,
+`python3` and `py`, registry discovery, and foreign virtual environments are not
+fallbacks. Explicit setup prepares missing uv/interpreter prerequisites; this
+hook cannot download or provision them.
+Selection, asynchronous stdin delivery, stream capture and the writer's exit
+share one five-second work deadline plus a one-second cleanup reserve. The
+original PowerShell caller uses the existing direct-process capture owner for
+uv inspection and the selected base interpreter. It does not insert `uv run`
+or a venv redirector between that caller and its child-free writer.
+The POSIX wrapper still requires an available Python 3.10+ command; its managed
+selection migration remains separate from the Windows entry.
 The POSIX wrapper uses the suite's canonical EXIT trap to emit one empty JSON
 envelope on both success and failure, making its output-free behavior
 recognizable by the existing session-context contract scanner.
