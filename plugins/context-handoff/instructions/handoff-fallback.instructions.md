@@ -40,6 +40,11 @@ effects, never infer permission from the baton. Never drop an open flow/state --
 
 ## Consuming a brief + recording head
 
+Start from one short goal paragraph, short limits/holds and live-obligation
+lines, one next action, and a compact source outline. Read effort, journal,
+checkpoint, session history and PR pointers only as the next step needs them;
+do not require a full context reload. Preserve the existing completion gate.
+
 Prefer `/consume-handoff`; a claimed-handoff names the claimant --
 state that id, never "nothing to do." Disconnect isn't an answer:
 retry once, then CLI. Verify: spot-check history before "nothing

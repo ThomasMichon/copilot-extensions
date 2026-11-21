@@ -5,8 +5,9 @@ Context window monitoring and session handoff for GitHub Copilot CLI.
 ## Durable Goal and steer continuity
 
 The extension preserves root operator prompts and peer-origin steers in a local,
-worktree-scoped corpus and supplies current Goal plus paged historical evidence
-at reconstruction boundaries. Historical text never becomes new authority.
+worktree-scoped corpus and supplies a bounded Goal and source outline at
+reconstruction boundaries. Exact historical evidence is available on demand
+through pinned pages. Historical text never becomes new authority.
 See [durable intent continuity](docs/intent-continuity.md) for filtering,
 persistence, paging, privacy and explicit native-host/model-reading limits.
 
