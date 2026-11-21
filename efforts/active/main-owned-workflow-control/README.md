@@ -1119,7 +1119,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13982 merges at `74c15737c1b64389412dc969a11a352540cacf1e` after
   exact-head Copilot approval and complete required Linux CI with all 7,149
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land seventy-seven original archive-reader cases through
+- [x] Qualify and land seventy-seven original archive-reader cases through
   thirty-two exact unchanged functions and the original fixtures. Retain
   metadata/digest, member/path/RECORD, ZIP64/compression, mutation and deadline
   witnesses. Keep the separate stress, subprocess, external-symlink-fixture,
@@ -1129,6 +1129,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   targets/helper decisions, compact/flat-v1 identity and the 300-second bound,
   strict typing, current-head review and complete Linux source CI. Broader
   parent acceptance remains open.
+  #13984 merges at `27daa8b46dc852b202703af59e78761c1f49ba76` after
+  exact-head Copilot approval and complete required Linux CI with all 7,226
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land 704 original source-derived command ownership cases
+  through 31 exact unchanged functions, plus three focused hash-bound-data
+  controls. Preserve writer-body, newline/BOM, peer, root/module/publisher,
+  customization, legacy and malformed-source witnesses without launching any
+  native program. Bind the 46 actual checked-in command/writer/manifest inputs
+  as data only, retaining changed-byte, executable-source and target refusals.
+  Keep the separate process-global import assertion outside this mixed packet.
+  Require closed Python reads, positive per-case actual-owner calls, zero
+  prohibited effects, unchanged preceding nodes and unrelated hashes, 89 helper
+  decisions, compact/flat-v1 identity, the 300-second bound, strict typing,
+  current-head review and complete Linux source CI. Add the actual command
+  parser to coverage targets; native, cleanup and broader parent gates remain.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

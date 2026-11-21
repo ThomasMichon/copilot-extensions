@@ -3843,6 +3843,43 @@ Fresh-install/native/installed external lanes are not exercised because no
 installation or runtime behavior changes. Full-census, every-release, comparable
 whole-flow, native, installed and retained-custody gates remain open.
 
+### November 21 original archive-reader qualification
+
+The adapter exports 32 exact original functions and the original fixtures as
+77 cases, retaining all original parameter identities and assertions.
+The original collection has 104 cases. Separate stress, subprocess,
+external-symlink-fixture, timestamp-dependent IDs and machine-environment
+discovery remain outside: 27 cases, without replacement witnesses, frozen
+clocks, preloads or effect exceptions. The initial wider collection correctly
+refuses unstable IDs; the next candidate correctly refuses the original
+environment-discovery socket call.
+
+Guarded development execution passes 77 in 3.328 seconds with zero prohibited
+effects, nine bound Python reads and positive per-case actual archive-owner
+calls. Ruff and whole-file strict Linux/Windows typing pass. All preceding
+7,149 nodes/hashes, 446 targets, 89 helper decisions and the 300-second bound
+remain. The 7,226-node packet has 1,109 sources in 824,826 compact-v2 bytes
+with unchanged flat-v1 logical compatibility.
+
+Copilot approval `6008677226` covers exact head
+`954ce7e0d6eee98761ab80e990f2f4f9280074eb`, without comments or open threads.
+CI `44958216728` unit job `137010961449` freshly passes all 7,226 cases with
+39 deselections, 121.34 pytest seconds and 137.198 packet seconds. Evidence
+reports `mode=executed`, origin run `44958216728` attempt one and digest
+`e56f9ef75f3815fb915031ddef3c22fb0b7832c22341df9e70b3344ba96b5c26`.
+Required aggregate `137011793582`, guards, trusted `44958216826`, complete
+review/thread pagination, seven fresh verifier reads and final veto/hold/head
+checks precede the managed merge, without CI bypass, manual metadata refresh
+or rerun.
+
+Source #13984 merges at `2026-11-21T22:49:04Z` as
+`27daa8b46dc852b202703af59e78761c1f49ba76`. Independent readback confirms merged
+state, no closing references and open parent #6237. The actual parent Goal,
+current Plan and Validation Plan are reread before resolving only this leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. Full-census, every-release,
+comparable whole-flow, native, installed and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

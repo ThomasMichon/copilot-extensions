@@ -168,7 +168,13 @@ def test_noncanonical_or_git_source_is_refused(path: str) -> None:
     "fleet-manager/containers/gateway/Dockerfile",
     "fleet-manager/containers/gateway/Dockerfile.dockerignore",
     "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl",
-], ids=["catalog", "gateway-recipe", "gateway-ignore", "bundled-wheel"])
+    "plugins/agent-worktrees/bin/agent-worktrees",
+    "libs/installer-engine/installer-engine.ps1",
+    "plugins/agent-bridge/plugin.json",
+], ids=[
+    "catalog", "gateway-recipe", "gateway-ignore", "bundled-wheel",
+    "native-command-text", "native-writer-text", "command-metadata",
+])
 def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path: Path, name: str) -> None:
     data = manifest()
     content = b"def emitted() -> str:\n    return 'catalog'\n"
