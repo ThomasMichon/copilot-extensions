@@ -187,7 +187,7 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
             predecessor.custody = None
         return recovered
 
-    predecessor = SimpleNamespace(custody=pin, recover=recover)
+    predecessor = SimpleNamespace(custody=pin, recover=recover, exited=lambda: False)
     monkeypatch.setattr(controller, "predecessor", predecessor)
     transfers = []
 
@@ -235,6 +235,40 @@ def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
     finally:
         if controller.has_writer:
             controller.writer.release()
+
+
+@pytest.mark.parametrize("original_exited", [False, True])
+@pytest.mark.parametrize("writer_busy", [False, True])
+def test_writer_admission_uses_original_exit_not_custodian_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, original_exited: bool,
+    writer_busy: bool,
+) -> None:
+    from agent_vault import service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "selected", lambda: True)
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(pid=os.getpid()))
+    controller = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
+    controller.hooks_started = True
+    controller.aliases_after_exit = True
+    custody = object()
+    controller.predecessor = SimpleNamespace(
+        custody=custody, recover=lambda: False, exited=lambda: original_exited,
+    )
+    incumbent = controller_factory(SimpleNamespace(), SimpleNamespace(), [], [])
+    if writer_busy:
+        incumbent.writer.acquire()
+    try:
+        asyncio.run(controller.tick())
+        assert controller.has_writer is (original_exited and not writer_busy)
+        assert controller.predecessor.custody is custody
+        assert asyncio.run(controller._recover_predecessors()) is False
+    finally:
+        if controller.has_writer:
+            controller.writer.release()
+        if writer_busy:
+            incumbent.writer.release()
 
 
 @pytest.mark.parametrize("change", ("selection", "endpoint", "installation"))

@@ -4,9 +4,61 @@ import json
 import os
 import stat
 import sys
+import ctypes
+from types import SimpleNamespace
 import pytest
 
 from zdd import routing
+from zdd import routing_persistence
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows file sharing")
+def test_route_reader_does_not_veto_atomic_publication(tmp_path):
+    path = tmp_path / "active.json"
+    old = {"active": {"bind": "127.0.0.1", "port": 9281, "pid": 111}}
+    new = {"active": {"bind": "127.0.0.1", "port": 9290, "pid": 222}}
+    path.write_text(json.dumps(old), encoding="utf-8")
+    with routing_persistence.open_reader(path) as reader:
+        routing._atomic_write(path, new)
+        assert json.load(reader) == old
+        assert routing.read_table(tmp_path)["active"] == new["active"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows replacement flush")
+def test_reader_compatible_replacement_retains_uncertain_flush_outcome(tmp_path, monkeypatch):
+    path = tmp_path / "active.json"
+    path.write_text('{"active":"old"}', encoding="utf-8")
+    real_fsync = os.fsync
+    flushes = []
+
+    def fsync(descriptor):
+        flushes.append(descriptor)
+        if len(flushes) == 2:
+            raise OSError("replacement flush unavailable")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(routing_persistence.os, "fsync", fsync)
+    with routing_persistence.open_reader(path) as reader:
+        with pytest.raises(routing_persistence.PublicationCommitUncertain):
+            routing_persistence.write(path, {"active": "new"})
+        assert json.load(reader) == {"active": "old"}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"active": "new"}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native error codes")
+@pytest.mark.parametrize("winerror", [1175, 1176, 1177])
+def test_partial_native_replacement_is_not_reported_as_unchanged_route(tmp_path, winerror):
+    class Fail:
+        def __init__(self, error):
+            self.error = error
+
+        def __call__(self, *_):
+            ctypes.set_last_error(self.error)
+            return 0
+
+    kernel = SimpleNamespace(MoveFileExW=Fail(5), ReplaceFileW=Fail(winerror))
+    with pytest.raises(routing_persistence.PublicationCommitUncertain):
+        routing_persistence.windows_replace(tmp_path / "source", tmp_path / "target", kernel)
 
 
 @pytest.mark.parametrize("platform,directory_flushes", [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Callable
 
@@ -16,6 +17,7 @@ from .rendezvous import Endpoint
 from .service_handoff import peer_identity
 
 GRACE_SECONDS = 30.0
+log = logging.getLogger(__name__)
 _CUSTODY = (
     "instance_id", "pid", "birth", "service", "purpose", "lifecycle", "owner",
     "owner_pid", "owner_birth", "run_id", "source", "source_member",
@@ -121,26 +123,38 @@ class Predecessor:
         """Revalidate selection and central-role custody at the native mutation."""
         if self.custody is not None:
             return "refused-native-resume"
+        phase = "original-exit"
         try:
             if self.exited():
                 return "exited"
+            phase = "owner-selection"
             if not current() or not self._owned(inspect_instances(self.registry_root)):
                 return "refused-owner-or-selection"
+            phase = "custodian-start"
             self.custody = RetirementCustody(self.root)
             self.custody.__enter__()
+            phase = "native-pin"
             with self.custody.pin(self.pid, self.record["birth"]) as process:
                 if process.exited():
                     result = "exited"
                 else:
+                    phase = "native-pause"
                     process.pause()
+                    phase = "paused-owner-census"
                     if not current() or not self._owned(inspect_instances(self.registry_root)):
                         result = "refused-owner-or-selection"
                     elif _has_children(self.pid):
                         result = "refused-live-workers"
                     else:
+                        phase = "native-termination"
                         process.terminate()
                         result = "cold-retired"
-        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused):
+                phase = "native-pin-close"
+        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused) as error:
+            log.warning(
+                "Vault predecessor retirement refused: phase=%s error_type=%s winerror=%s",
+                phase, type(error).__name__, getattr(error, "winerror", None),
+            )
             result = "refused-native-retirement"
         finally:
             settled = self.recover()

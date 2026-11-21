@@ -444,7 +444,7 @@ class ServiceGeneration:
         )
 
     async def tick(self) -> None:
-        recovery_settled = await self._recover_predecessors()
+        recovery_settled = await self._recover_predecessors(for_admission=True)
         if self.retiring is not None:
             await self._retire()
             return
@@ -511,7 +511,7 @@ class ServiceGeneration:
         if not self.aliases_after_exit:
             self.aliases_after_exit = await self._legacy_aliases()
 
-    async def _recover_predecessors(self) -> bool:
+    async def _recover_predecessors(self, *, for_admission: bool = False) -> bool:
         settled = True
         for target, status in (
             (self.predecessor, "predecessor_retirement"),
@@ -520,7 +520,7 @@ class ServiceGeneration:
             if target is not None and getattr(target, "custody", None) is not None:
                 if await settle_owned(asyncio.to_thread(target.recover)):
                     setattr(self, status, "refused-native-retirement")
-                else:
+                elif not for_admission or not target.exited():
                     settled = False
         return settled
 

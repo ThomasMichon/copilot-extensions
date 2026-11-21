@@ -230,7 +230,8 @@ def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> d
     """Read the table; strict ownership callers distinguish absence from damage."""
     path = routing_table_path(config_dir)
     try:
-        raw = path.read_text(encoding="utf-8")
+        with routing_persistence.open_reader(path) as reader:
+            raw = reader.read()
     except FileNotFoundError:
         return None
     except OSError:
