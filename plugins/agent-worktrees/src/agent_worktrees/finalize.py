@@ -1481,8 +1481,7 @@ def validate_and_finalize(
             )
             return False
 
-    # After content validation, recheck fresh authority and claims under the
-    # record lock before freezing to finalizing, which blocks new claims.
+    # Recheck fresh authority and claims before freezing new claims.
     try:
         active_handoffs = claim_handoffs.active_bundle_ids_for_source(source_ref)
     except Exception as exc:
@@ -1505,6 +1504,8 @@ def validate_and_finalize(
                 require_record_mutation(record, config)
                 if record_guard is not None:
                     record_guard(record)
+                from . import pr_foreign_receipts
+                pr_foreign_receipts.require_settled(record)
                 try:
                     from . import claim_handoffs
                     source_ref = tracking_claims.format_claim_ref(
@@ -1572,7 +1573,6 @@ def validate_and_finalize(
             )
             return False
 
-    # Acquire lock for cleanup
     lock = FinalizeLock(lock_path)
     try:
         lock.acquire()

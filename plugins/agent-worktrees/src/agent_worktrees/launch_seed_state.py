@@ -32,10 +32,14 @@ _removal_transaction: ContextVar[tuple[int, int, Path] | None] = ContextVar("see
 @contextmanager
 def removal_transaction(path: Path, *, record_paths: list[Path] | None = None) -> Iterator[None]:
     """Own launch admission before the record lock through local teardown."""
+    identity = (os.getpid(), threading.get_ident(), path.resolve())
+    if not record_paths and _removal_transaction.get() == identity:
+        yield
+        return
     with launch_admission.guard(path, timeout=2), ExitStack() as lifetime:
         for owner_path in sorted({path, *(record_paths or ())}, key=str):
             lifetime.enter_context(tracking._RecordLock(owner_path, require_sidecar=True))
-        token = _removal_transaction.set((os.getpid(), threading.get_ident(), path.resolve()))
+        token = _removal_transaction.set(identity)
         try:
             yield
         finally:

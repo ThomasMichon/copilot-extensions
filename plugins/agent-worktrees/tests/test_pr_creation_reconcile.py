@@ -1078,8 +1078,9 @@ def test_managed_removal_keeps_an_unrelated_launch_lease(
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("direct", [False, True])
 def test_managed_removal_keeps_its_record_transaction_with_a_live_monitor(
-    pr_repo: tuple[cfg.Config, str, Path, Path], monkeypatch: pytest.MonkeyPatch,
+    pr_repo: tuple[cfg.Config, str, Path, Path], monkeypatch: pytest.MonkeyPatch, direct: bool,
 ) -> None:
     from agent_worktrees import launch_seed_state, locks, managed_worktree_guard as managed
     from agent_worktrees import reap_cli, sessions, status_monitor_runtime, tracking_write
@@ -1112,11 +1113,17 @@ def test_managed_removal_keeps_its_record_transaction_with_a_live_monitor(
         seed = launch_seed_state.stage(path, kind="resume", text="Disposable managed prompt")
         assert seed is not None
         before_remove = list(received)
-        result = managed.perform(
-            wid, path, config, force=True, remove_fn=reap_cli._remove_managed_worktree,
-            tracking_path=path.parent,
-        )
-        assert result.ok and result.removed and not result.warnings, result
+        if direct:
+            removed, warnings = reap_cli._remove_managed_worktree(
+                tracking.load_record(path), config.default_repo, path.parent, force=True,
+            )
+            assert removed and not warnings, warnings
+        else:
+            result = managed.perform(
+                wid, path, config, force=True, remove_fn=reap_cli._remove_managed_worktree,
+                tracking_path=path.parent,
+            )
+            assert result.ok and result.removed and not result.warnings, result
         assert not wt.exists() and not path.exists()
         assert not launch_seed_state.state_path(path).exists()
         assert received == before_remove, "An owned record transaction delegated its nested write"

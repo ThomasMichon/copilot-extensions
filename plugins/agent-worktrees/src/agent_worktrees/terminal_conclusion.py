@@ -175,6 +175,9 @@ def _preservation_reason(
         return "outstanding-obligations"
     if pending_prs(record, live_only=True):
         return "open-pull-request"
+    from . import pr_foreign_receipts
+    if pr_foreign_receipts.owner_receipts(record)[1]:
+        return "unknown-foreign-publication"
     return None
 
 
@@ -205,6 +208,9 @@ def _sibling_preservation_reason(
         return "pair-sibling-outstanding-obligations"
     if pending_prs(sibling, live_only=True):
         return "pair-sibling-open-pull-request"
+    from . import pr_foreign_receipts
+    if pr_foreign_receipts.owner_receipts(sibling)[1]:
+        return "pair-sibling-unknown-foreign-publication"
     if sibling.resolved_head_session is not None:
         # A tracked, still-resumable lifecycle head is independent of live
         # -process detection (`_session_is_live`): an ENDED session can

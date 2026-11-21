@@ -240,6 +240,7 @@ _repo_for_record = cast(
 )
 
 
+@managed_worktree_guard.foreign_publication_guard
 def _remove_managed_worktree(
     rec: tracking.WorktreeRecord,
     repo: cfg.RepoConfig,
@@ -663,6 +664,7 @@ def sweep_managed_worktrees(
                             ref, allow_remote=False,
                         ),
                     )
+                    from . import pr_foreign_receipts
                     if (
                         latest.worktree_id != yaml_path.stem
                         or latest.worktree_id != current.worktree_id
@@ -676,6 +678,7 @@ def sweep_managed_worktrees(
                         or latest.worktree_path != current.worktree_path
                         or latest.branch != current.branch
                         or latest.has_live_pr()
+                        or pr_foreign_receipts.owner_receipts(latest)[1]
                     ):
                         result["skipped"].append(
                             {

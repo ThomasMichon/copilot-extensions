@@ -298,7 +298,16 @@ def create_foreign_pr_from_branch(
             creation_attempted = True
             pull = provider.create_pull(scope, token=token)
             if attempt is not None:
-                attempt.finish(pull, verified=True)
+                attempt.finish(pull, verified=False)
+    except providers.CreationRefused as e:
+        refusal: dict[str, Any] = {"error": str(e), "repo": target_repo, "publication_state": "not-started"}
+        if attempt is not None and creation_attempted:
+            try:
+                attempt.refused()
+            except (providers.ProviderError, OSError, ValueError, TimeoutError) as exc:
+                refusal.update(pr_foreign_receipts.failure(str(e)))
+                refusal["pr_receipt_tracking_error"] = str(exc)
+        return refusal
     except (providers.ProviderError, OSError, ValueError) as e:
         failure: dict[str, Any] = {"error": str(e), "repo": target_repo}
         if creation_attempted:
@@ -356,12 +365,7 @@ def create_foreign_pr_from_branch(
         # lock and does real I/O, and holding this worktree's record lock
         # across that risks starving a concurrent `require_sidecar=True`
         # updater into a timeout.
-        with tracking._RecordLock(rec_path, require_sidecar=True):
-            record = tracking.load_record(rec_path) if rec_path.exists() else None
-            if record is None:
-                raise FileNotFoundError(f"no tracking record for {worktree_id!r}")
-            if attempt is not None:
-                attempt.require_owner(record)
+        with pr_foreign_receipts.claim_owner(attempt, rec_path, pull, reused=reused) as record:
             target_pr = tracking.PRRecord(
                 repo=target_repo, number=pull.number, url=pull.url,
                 state=normalized_state,
@@ -398,6 +402,8 @@ def create_foreign_pr_from_branch(
         # failing (there is nothing left to roll back). Degrade to a
         # warning with a concrete manual recovery command instead.
         result["claimed"] = False
+        if attempt is not None:
+            result.update(pr_foreign_receipts.failure(str(e), pull))
         result["claim_warning"] = (
             f"PR opened ({pull.url}), but claiming it onto worktree "
             f"{worktree_id!r} failed: {e}. Run `agent-worktrees claims "

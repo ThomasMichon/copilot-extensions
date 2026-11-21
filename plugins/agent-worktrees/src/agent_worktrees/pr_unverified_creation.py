@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import config as cfg, pr_publication_state, pr_publish, record_machine_identity, tracking
-from .providers.base import PRProvider, PRScope, PullResult
+from .providers.base import CreationRefused, PRProvider, PRScope, PullResult
 from .providers.github_pull_source import CreatedSourceMismatch
 from .receiving_allocation import serialized_receipt
 
@@ -78,6 +78,18 @@ def create(
         return None
     try:
         return provider, token, provider.create_pull(scope, token=token)
+    except CreationRefused as exc:
+        try:
+            if record is not None:
+                _update(config, record, target, {"provider_outcome": "refused"})
+        except (OSError, ValueError, TimeoutError) as persistence_error:
+            retain(result, config, record, target, persistence_error)
+        else:
+            result.update(
+                success=False, error=str(exc), pr_open_error=str(exc), pr_opened=False,
+                draft=False, publication_state="not-started",
+            )
+        return None
     except (providers.ProviderError, OSError) as exc:
         if not retain(result, config, record, target, exc):
             result.update(pr_open_error=str(exc), pr_opened=False, draft=False)

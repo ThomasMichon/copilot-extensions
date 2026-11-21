@@ -156,6 +156,10 @@ object with another branch's destination. Transport retains that binding and
 the original hook ref. Public GitHub's documented SSH-over-443 clone alias
 shares the same physical push/provider head fence as its HTTPS repository;
 unrelated hosts and ports do not.
+An explicit short destination preserves native Git's branch/tag selection:
+the captured remote refs are resolved using the original named source
+before pinning its object. Ambiguous or disagreeing destinations require a
+fully qualified target rather than silently publishing a tag as a branch.
 Successful named-remote tracking refresh uses that
 object, the unchanged fetch/push mapping and a local compare-and-swap; it does
 not add a second remote observation while holding the head fence. This also
