@@ -11,6 +11,7 @@ _ENVIRONMENT = re.compile(r"[A-Z][A-Z0-9_]*")
 _CLEAR = (
     "UV_PROJECT", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
     "UV_WORKING_DIR", "UV_FROZEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+    "UV_PYTHON", "UV_PYTHON_PREFERENCE", "UV_MANAGED_PYTHON", "UV_NO_MANAGED_PYTHON",
 )
 _FLAGS = "run --locked --no-dev --no-editable --link-mode hardlink"
 
@@ -62,11 +63,10 @@ def slot_binstubs(
         ("install", None),
     ):
         script = "install.py" if command == "install" else name + ".py"
-        selected_flags = flags
+        selected_flags = flags + " --managed-python"
         ps_prepare = cmd_prepare = sh_prepare = sh_preflight = ""
-        if source_project:
-            selected_flags += " --managed-python"
-            if command == "install":
+        if command == "install":
+            if source_project:
                 ps_prepare = (
                     "if (-not (Test-Path -LiteralPath (Join-Path $slot 'uv.lock'))) {\n"
                     "    & uv lock --managed-python --project $slot\n"
@@ -84,28 +84,32 @@ def slot_binstubs(
                     '    "$installer_uv" lock --managed-python --project "$slot" || exit\n'
                     "fi\n"
                 )
-            else:
-                selected_flags += " --no-sync --no-python-downloads"
-                ps_prepare = (
-                    "foreach ($file in @('uv.lock', '.venv\\pyvenv.cfg', '.venv\\Scripts\\python.exe')) {\n"
-                    "    if (-not (Test-Path -LiteralPath (Join-Path $slot $file) -PathType Leaf)) {\n"
-                    "        throw 'Application is not staged; run bin/setup --stage'\n"
-                    "    }\n"
-                    "}\n"
-                )
-                cmd_prepare = (
-                    "for %%F in (uv.lock .venv\\pyvenv.cfg .venv\\Scripts\\python.exe) do (\r\n"
-                    '    if not exist "%SLOT%\\%%F" (\r\n'
-                    "        >&2 echo Application is not staged; run bin\\setup --stage\r\n"
-                    "        exit /b 1\r\n    )\r\n)\r\n"
-                )
-                sh_preflight = (
-                    'if [ ! -f "$slot/uv.lock" ] || [ ! -f "$slot/.venv/pyvenv.cfg" ] || {\n'
-                    '    [ ! -f "$slot/.venv/bin/python" ] && [ ! -f "$slot/.venv/Scripts/python.exe" ];\n'
-                    "}; then\n"
-                    "    echo 'Application is not staged; run bin/setup --stage' >&2\n"
-                    "    exit 1\nfi\n"
-                )
+        else:
+            selected_flags += " --no-sync --no-python-downloads"
+            ps_prepare = (
+                "foreach ($file in @('uv.lock', '.venv/pyvenv.cfg')) {\n"
+                "    if (-not (Test-Path -LiteralPath (Join-Path $slot $file) -PathType Leaf)) {\n"
+                "        throw ('Application is not staged; run the installer with --stage: ' + (Join-Path $slot 'install.ps1'))\n"
+                "    }\n"
+                "}\n"
+                "if (-not ((Test-Path -LiteralPath (Join-Path $slot '.venv/Scripts/python.exe') -PathType Leaf) -or\n"
+                "          (Test-Path -LiteralPath (Join-Path $slot '.venv/bin/python') -PathType Leaf))) {\n"
+                "    throw ('Application is not staged; run the installer with --stage: ' + (Join-Path $slot 'install.ps1'))\n"
+                "}\n"
+            )
+            cmd_prepare = (
+                "for %%F in (uv.lock .venv\\pyvenv.cfg .venv\\Scripts\\python.exe) do (\r\n"
+                '    if not exist "%SLOT%\\%%F" (\r\n'
+                '        >&2 echo Application is not staged; run the installer with --stage: "%SLOT%\\install.cmd"\r\n'
+                "        exit /b 1\r\n    )\r\n)\r\n"
+            )
+            sh_preflight = (
+                'if [ ! -f "$slot/uv.lock" ] || [ ! -f "$slot/.venv/pyvenv.cfg" ] || {\n'
+                '    [ ! -f "$slot/.venv/bin/python" ] && [ ! -f "$slot/.venv/Scripts/python.exe" ];\n'
+                "}; then\n"
+                "    printf 'Application is not staged; run the installer with --stage: %s\\n' \"$slot/install.sh\" >&2\n"
+                "    exit 1\nfi\n"
+            )
         ps_target = target or f"-I -X utf8 -B (Join-Path $slot '{script}')"
         cmd_target = target or f'-I -X utf8 -B "%SLOT%\\{script}"'
         sh_target = target or f'-I -X utf8 -B "$slot/{script}"'

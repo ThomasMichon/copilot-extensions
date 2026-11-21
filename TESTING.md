@@ -2290,6 +2290,16 @@ observes the finished files rather than restamping their inventory identities.
 `tools/test_runtime_application_binstubs.py` covers these boundaries and checks
 the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
+Its ordinary wheel-application front-door controls also require explicit
+staging before run, reject an unprepared environment without creating one,
+and execute the prepared command with poisoned PATH/Python selectors and a
+foreign active venv. The actual uv-managed base, selected slot, argument/exit
+forwarding and unchanged lock are checked without Python downloads. Missing
+managed test interpreters are prepared once by explicit test setup into a private
+session-owned uv root, with bin/registry publication disabled. Application
+setup and ordinary run then disable downloads; acquisition or lookup failures
+never select an ambient interpreter. This fixture prerequisite is separate from
+the application's ordinary-launch boundary.
 Worktrees' optional `tests/test_runtime_input_verifier.py` packet uses real
 native children and invocation-local inherited pipes for successful checks,
 revocation, cancellation, owner disconnection, identity mismatch and expired
