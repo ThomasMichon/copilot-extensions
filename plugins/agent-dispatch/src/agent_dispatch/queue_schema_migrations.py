@@ -829,3 +829,27 @@ def run_queue_schema_migrations(
     )
     from .acquisition_receipts import ensure
     ensure(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS gone_owner_requeues(key TEXT PRIMARY KEY,task_id TEXT NOT NULL,"
+                 "supervisor TEXT NOT NULL,observation TEXT NOT NULL)")
+    conn.execute("CREATE INDEX IF NOT EXISTS gone_owner_lane ON gone_owner_requeues(supervisor)")
+    conn.execute("CREATE INDEX IF NOT EXISTS gone_owner_task ON gone_owner_requeues(task_id)")
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS script_body_original_handle BEFORE UPDATE OF session_handle"
+        " ON spawn_reservations WHEN OLD.session_handle IS NOT NULL"
+        " AND OLD.session_handle IS NOT NEW.session_handle"
+        " AND OLD.state IN ('reserving','spawned','cold','releasing')"
+        " AND (OLD.session_handle GLOB 'script-body:*' OR NEW.session_handle GLOB 'script-body:*')"
+        " BEGIN SELECT RAISE(ABORT,'original script process handle cannot be replaced'); END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS claimed_script_requires_exit BEFORE UPDATE OF state"
+        " ON spawn_reservations WHEN OLD.state='spawned' AND OLD.session_handle GLOB 'script-body:*'"
+        " AND NEW.state IS NOT OLD.state"
+        " AND EXISTS (SELECT 1 FROM tasks t WHERE t.id=OLD.task_id AND t.status IN ('claimed','started')"
+        " AND t.owner IS NOT NULL) AND NOT (NEW.state='settled' AND NEW.conversation_retired=1"
+        " AND NEW.release_requested=1 AND NEW.conclusion_state IS 'complete'"
+        " AND CASE WHEN json_valid(NEW.conclusion_detail) THEN"
+        " json_extract(NEW.conclusion_detail,'$.script_exit_v1.reservation_key') IS OLD.key"
+        " ELSE 0 END)"
+        " BEGIN SELECT RAISE(ABORT,'owned script retirement requires verified process exit'); END"
+    )

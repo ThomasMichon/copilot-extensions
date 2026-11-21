@@ -678,7 +678,7 @@ def _remote_unavailable(*_args: object, **_kwargs: object) -> NoReturn:
         (0, '{"status": "stopped"}', "", "gone"),
         (0, '{"status": "completed"}', "", "gone"),
         (0, '{"status": "running", "liveness": "dead"}', "", "gone"),  # liveness wins
-        (1, "", "[FAIL] Session x not found", "gone"),   # absent -> gone
+        (1, "", "[FAIL] Session x not found", "unknown"),  # CLI also renders route 404s this way
         (1, "", "ssh: connect: Connection refused", "unknown"),  # transport -> unknown
         (0, "not json", "", "unknown"),
         (0, '{"status": "mystery"}', "", "unknown"),     # unrecognized -> unknown
@@ -804,10 +804,13 @@ def test_carrier_end_and_activity_normalize_host_without_ssh(monkeypatch: pytest
     assert [call[1] for call in calls] == ["host-b", "host-b"]
 
 
-def test_carrier_not_found_is_gone_without_ssh_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("code", "verdict"), [("session_not_found", "gone"), ("route_not_found", "unknown")])
+def test_carrier_not_found_requires_session_specific_result(
+    monkeypatch: pytest.MonkeyPatch, code: str, verdict: str,
+) -> None:
     def missing(*_args: object, **_kwargs: object) -> NoReturn:
         raise bridge_remote.RemoteBridgeOperationError(
-            "missing", status=404, code="session_not_found"
+            "missing", status=404, code=code
         )
 
     monkeypatch.setattr(
@@ -820,7 +823,7 @@ def test_carrier_not_found_is_gone_without_ssh_fallback(monkeypatch: pytest.Monk
         "which",
         lambda _name: pytest.fail("carrier operation errors must not fall back"),
     )
-    assert embody.fleet_body_verdict("Host-B", "sid-1") == "gone"
+    assert embody.fleet_body_verdict("Host-B", "sid-1") == verdict
 
 
 @pytest.mark.parametrize(
@@ -1020,7 +1023,7 @@ def test_no_capacity_gate_preserves_local_behavior(q: BaseTaskQueue, client: Que
         (0, '{"status": "stopped"}', "", "gone"),
         (0, '{"status": "ended"}', "", "gone"),         # `agent-bridge end` -> gone
         (0, '{"status": "running", "liveness": "dead"}', "", "gone"),  # liveness wins
-        (1, "", "[FAIL] Session x not found", "gone"),   # absent -> gone
+        (1, "", "[FAIL] Session x not found", "unknown"),  # not proof of process exit
         (1, "", "connection refused", "unknown"),        # transport -> unknown
         (0, "not json", "", "unknown"),
         (0, '{"status": "mystery"}', "", "unknown"),     # unrecognized -> unknown

@@ -302,6 +302,12 @@ class LivenessMixin:
                 )
                 if verdict != self.LIVENESS_GONE:
                     continue
+                if conn.execute(
+                    "SELECT 1 FROM gone_owner_requeues WHERE task_id=? AND json_extract(observation,'$.generation')=?"
+                    " AND json_extract(observation,'$.status')=? AND json_extract(observation,'$.native') IS ?",
+                    (task_id, generation, status, owner_session_id),
+                ).fetchone():
+                    continue  # The observed incarnation already has its own retirement disposition.
                 restricted = conn.execute(
                     "SELECT 1 FROM spawn_reservations s JOIN tasks t ON t.id=s.task_id "
                     "WHERE s.task_id=? AND t.generation=? AND s.driver='restricted-bridge' "

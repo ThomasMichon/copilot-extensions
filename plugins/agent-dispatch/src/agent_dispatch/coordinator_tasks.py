@@ -184,15 +184,8 @@ def register_task_routes(
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
         if event_type in ("task.submitted", "task.completed", "task.abandoned"):
-            # A shared terminal-transition hook: every caller that reaches a
-            # genuine (not idempotent-retry) completion or an abandon funnels
-            # through this same _guard, whether over HTTP (the CLI's own
-            # transport) or an in-process call from an MCP tool
-            # (mcp_http.py's dispatch_complete/dispatch_abandon, which call
-            # queue.complete_with_outcome/abandon directly, not through this
-            # route) -- so this alone does not cover MCP; mcp_http.py wires
-            # the same release call itself, right after its own equivalent
-            # mutation succeeds.
+            # Only genuine terminal transitions release handoff custody. MCP
+            # invokes the same hook after its equivalent queue mutation.
             from . import handoff_claim_release
 
             handoff_claim_release.release_if_handoff(
@@ -204,6 +197,10 @@ def register_task_routes(
 
     from .coordinator_relevance_closeout import register_closeout_routes
     register_closeout_routes(app, queue, guard=_guard)
+    from .script_failure_closeout import register as register_script_closeout
+    register_script_closeout(app, queue, _guard, _make_control_auth(control_token, _emit_producer_event))
+    from .gone_owner_recovery import register as register_gone_recovery
+    register_gone_recovery(app, queue, _make_control_auth(control_token, _emit_producer_event))
 
     @app.get("/producer-scopes/status")
     def producer_scope_status(repo: str, source: str) -> dict[str, Any]:
