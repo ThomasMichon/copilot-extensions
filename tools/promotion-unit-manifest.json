@@ -3,6 +3,21 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_bridge_contract_guard_units.py",
+      [
+        "test_provenance_batch_refuses_delimiters_before_any_object_read[source\\ninjected]",
+        "test_provenance_batch_refuses_delimiters_before_any_object_read[source\\rinjected]",
+        "test_provenance_batch_refuses_delimiters_before_any_object_read[source\\x00injected]",
+        "test_provenance_commit_validation_is_local_only[False]",
+        "test_provenance_commit_validation_is_local_only[True]",
+        "test_local_git_probe_is_bounded_headless_and_fail_closed",
+        "test_repeated_local_evidence_is_read_once_per_validation",
+        "test_local_only_guard_refuses_unsupported_git_before_object_reads[2.44.9]",
+        "test_local_only_guard_refuses_unsupported_git_before_object_reads[2.45.0]",
+        "test_local_only_guard_refuses_unsupported_git_before_object_reads[2.55.0.windows.5]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_version_bump_guard_units.py",
       [
         "test_revision_diff_is_unambiguously_separated_from_paths",
@@ -8269,6 +8284,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_bridge_contract_guard_units.py": "b3c36d65a83e13481aa5e83f063d9268c14af0f71b2345697c8f6e699231633c",
     "tools/promotion_unit_tests/test_version_bump_guard_units.py": "53061beb6375227c19199245cd149d887590f321225f67fd2fe1b98071bacd36",
     "tools/test_check_version_bump.py": "af1f39d99aa3a19b21ed34f0af769213d19dc4a7ecfeb67e122fb463c8428f9a",
     "tools/promotion_unit_tests/test_dependency_age_release_units.py": "89e7ddec666215751fac9a0bf84194d77567c776905ae3b80a4503090209d89a",

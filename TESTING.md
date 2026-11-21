@@ -11421,6 +11421,16 @@ changefile/release consumers. The 28 other original cases remain outside this
 slice, including actual Git/process contracts. Their source and assertions are
 unchanged; unit admission does not replace release, native or full-census proof.
 
+The bridge-contract guard packet exports ten original cases through five exact
+test objects. Delimiter refusal, local-only availability, timeout/headless
+options, repeated-evidence caching and Git-version admission exercise the real
+Git-evidence helper with the process boundary mocked. No Git child, registry
+capture or fixture command runs. All observed Python reads are source-bound,
+and every case requires positive production call-phase coverage. The 46 other
+original cases remain unchanged outside this packet slice; their real process
+and repository-data contracts are not replaced. This admission does not restore
+the retired bridge registry CI gate or qualify native Git behavior.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:

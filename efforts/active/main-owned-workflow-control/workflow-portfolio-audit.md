@@ -2696,6 +2696,64 @@ required Linux source CI remain outstanding. This development-only result
 does not qualify broader native, every-release, full-census or controlled
 whole-flow savings.
 
+Source #13917 merges at `2026-11-21T15:41:18Z` as
+`d3aa1214142b748ff772234867bd0a99084a5c9e`. Copilot approval `6006329531`
+at `15:38:01Z` names exact head
+`ba73a528ddf400ec776e9b7b8080f3a5653d53ea`; complete review and thread
+readback finds no active finding and no omitted page. Required source CI
+`44919982459` and trusted metadata CI `44919982509` both complete successfully.
+Actual unit job `136893687703` freshly executes all 6,640 cases with 35
+deselections in 158.17 pytest seconds and 178.255 packet seconds. Lookup takes
+493 ms and finds no qualified completed packet; no reuse saving is credited.
+The existing positively closed packet-only selector omits the AST scanner
+group, not the unit packet or required aggregate. This is observed omitted
+work, not an eliminated workflow invocation or controlled speedup.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite cohort is resolved. Scoped managed synchronization
+retains the published head and advances to the actual merge without conflict,
+reset, stash, peer edit or resource release. Broader native, every-release,
+full-census, accepted-owner and whole-flow gates remain open.
+
+### November 21 remaining guard census and bridge-contract unit cohort
+
+The remaining 28 version-bump cases retain actual Git/process contracts,
+including native symlink controls; they remain unchanged outside the packet.
+The trusted-CI originals read checked-in YAML/workflow inputs not admitted by
+the current source contract. Do not copy those inputs into surrogate Python
+fixtures, substitute a weaker assertion or expand admission merely to increase
+the count. Their separate workflow/consumer obligations remain open.
+
+The bridge-contract adapter exports five exact original test objects, retaining
+ten original expanded identities and assertions. Three delimiter controls
+refuse before any object read. The other seven exercise actual local-only
+commit availability, bounded/headless timeout propagation, cached repeated
+evidence and supported/unsupported Git-version handling with the process
+boundary mocked. No real Git child, registry capture or installed actor runs.
+The 46 other original cases remain outside this admission, not silently
+classified as unit-safe or deleted.
+
+Development collection proves exact object identity and matching original
+parameter suffixes. Effect auditing passes all ten cases in 1.672 seconds,
+with positive call-phase coverage in the real Git-evidence helper for every
+case, zero prohibited effects and six observed Python reads, all hash-bound.
+Focused Ruff and whole-file strict typing pass the new adapter on Linux and
+Windows without suppressions.
+
+Only the adapter source binding is new; the original suite, checker and
+transitive production readers are already bound and remain byte-identical.
+All 6,640 prior unit nodes retain their order and source hashes; 440 production
+coverage targets, 89 helper decisions and the 300-second limit are unchanged.
+The resulting 6,650-node, 1,054-source manifest retains compact-v2 storage at
+765,702 bytes and unchanged flat-v1 normalization/evidence.
+
+Current-head review and complete required Linux source CI remain outstanding.
+The retired bridge registry CI gate is not restored. These units do not prove
+real Git behavior, broader native/every-release/full-census acceptance,
+workflow-count reduction, reuse savings or controlled whole-flow improvement.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
