@@ -958,7 +958,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13956 merges at `dbfe919961bb50c22aec72f71a3f556652357d54` after
   exact-head Copilot approval and complete required Linux CI with all 6,838
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land all thirty original synthetic ancestor-metadata cases,
+- [x] Qualify and land all thirty original synthetic ancestor-metadata cases,
   three original bootstrap-declaration fixture cases and only the original
   `eligible=False` serial plugin-copy case. Preserve exact test/fixture objects,
   all assertions, parameters and existing exclusions; retain the isolated
@@ -969,6 +969,23 @@ authorizes critical main-path acceptance or a bounded administrative change.
   current-head review and complete Linux source CI. Original metadata
   simulations are not native-link qualification. Broader native, installed,
   release, full-census, whole-flow and custody gates remain separate.
+  #13957 merges at `edb955910d6b64ac57260d9e1a527182fced8e57` after
+  exact-head Copilot approval, complete required Linux CI with all 6,872 units
+  freshly executed and one explicitly authorized scoped metadata refresh.
+  Broader parent gates stay open.
+- [ ] Qualify and land six original runtime-sync fixture cases through exact
+  original functions and the unchanged `repository` fixture, retaining all
+  assertions and parameter identities. Admit only the ordinary archive
+  destination; real links, POSIX umask publication and real source-archive
+  closure matrices stay outside this slice. Preserve the fixture's original
+  archive substitute and the two already-bound real Python dependency reads;
+  synthetic archive members are data, not native execution. Require positive
+  per-case calls to the sync or archive owner, zero prohibited effects, closed
+  sources, all preceding nodes/hashes/helpers, compact/flat-v1 contracts and
+  the 300-second bound. Add only the two actual coverage owners, obtain strict
+  typing, current-head review and complete Linux source CI. This changes no
+  installer behavior and settles no broader native, installed, release,
+  full-census, whole-flow or custody gate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
