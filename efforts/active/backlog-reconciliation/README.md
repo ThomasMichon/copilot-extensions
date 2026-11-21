@@ -5097,6 +5097,11 @@ closure credit, resource release or parent checkbox change follows.
   acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [selected startup wave](roadmap-startup-wave.md) adds evidence-ranked
+  #12657/#12691 contributions with original homes, parallel local precedences
+  and finite source/release/consumer exits. It retains actual home uncertainty
+  and pending author PRs rather than appointing implementers; broader current
+  selection and all roadmap integration gates remain open.
   The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
   directs two historical selected slices to their audited OPEN receivers:
   #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
