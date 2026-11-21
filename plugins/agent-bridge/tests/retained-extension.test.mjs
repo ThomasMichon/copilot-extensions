@@ -18,6 +18,7 @@ async function load(selected, version = 50, {
   historyReplay = false,
   historyResponse = { replay_accepted: true, ingested: 1 },
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
+  tokenInitiallyMissing = false,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const deferred = [];
@@ -29,6 +30,10 @@ async function load(selected, version = 50, {
   let consumer;
   let joined;
   let eventPosts = 0;
+  let bridgeReady = !tokenInitiallyMissing;
+  const endpointState = {
+    base: "http://127.0.0.1:9280", token: bridgeReady ? "synthetic-secret" : null,
+  };
   const session = {
     sessionId: "native-a", on: (handler) => handlers.push(handler),
     log: async (message) => logs.push(message),
@@ -178,7 +183,8 @@ async function load(selected, version = 50, {
     },
     "./announce.mjs": { firstLoadThisSession: () => false },
     "./bridge-endpoint.mjs": { makeBridgeEndpoint: () => ({
-      ep: { base: "http://127.0.0.1:9280", token: "synthetic-secret" }, call,
+      ep: endpointState, call,
+      refresh: () => { endpointState.token = bridgeReady ? "synthetic-secret" : null; },
     }) },
     "./metadata.mjs": {
       processIdentity: () => ({ pid: 102, process_started_at: 1 }),
@@ -227,6 +233,7 @@ async function load(selected, version = 50, {
   return {
     calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
     closed: () => closed, runDeferred, registeredSessions,
+    publishBridge: () => { bridgeReady = true; },
     rename: (sid) => { session.sessionId = sid; nativeId = sid; },
   };
 }
@@ -315,6 +322,42 @@ test("heartbeat re-registration rearms idle inbox delivery after the Bridge lose
   assert.equal(f.sends[0].mode, "enqueue");
   assert.match(f.sends[0].prompt, /msg-id="21"/);
 });
+
+test("idle resume re-registers the SDK identity even without any subsequent session event", async () => {
+  const messages = [];
+  const f = await load(undefined, 51, { autoPoll: false, initialSessionId: null, inboxMessages: messages });
+  await f.runDeferred();
+  assert.equal(f.registeredSessions.has("native-a"), true);
+  f.rename("resumed-without-events");
+  messages.push({
+    id: 25, sender: "peer", body: "pending resume", delivery: "steer",
+    exact_session: true, original_session_id: "resumed-without-events",
+  });
+  f.timers.find((timer) => timer.ms === 30_000).fn();
+  await settle();
+  await f.runDeferred();
+  assert.equal(f.registeredSessions.has("resumed-without-events"), true);
+  assert.equal(messages.length, 0);
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /msg-id="25"/);
+  assert.equal(f.sends[0].mode, "enqueue");
+});
+
+for (const selected of [undefined, "1"]) {
+  test(`${selected ? "retained" : "legacy"} receiver loaded before Bridge auth recovers without a reload or new turn`, async () => {
+    const f = await load(selected, 51, { autoPoll: false, tokenInitiallyMissing: true });
+    await f.runDeferred();
+    assert.equal(f.registeredSessions.size, 0);
+    assert.equal(f.sends.length, 0);
+    f.publishBridge();
+    f.timers.find((timer) => timer.ms === 30_000).fn();
+    await settle();
+    await f.runDeferred();
+    assert.equal(f.registeredSessions.has("native-a"), true);
+    assert.equal(f.sends.length, 1);
+    assert.equal(f.sends[0].mode, "enqueue");
+  });
+}
 
 test("idle wakes coalesce, ignore sub-agents and preserve inbox order across idle arrivals", async () => {
   const messages = [];

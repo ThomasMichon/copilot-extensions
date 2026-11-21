@@ -7,12 +7,13 @@ import json
 import logging
 import math
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from ..agent_registry import AgentResolver
+    from ..agent_registry_common import AgentConfig
 
 log = logging.getLogger("agent-bridge")
 
@@ -26,9 +27,12 @@ _Row = TypeVar("_Row")
 class ObservedRows(list[_Row]):
     """Compatible rows retaining the source's observation time."""
 
-    def __init__(self, rows: list[_Row], observed: float | None) -> None:
+    def __init__(
+        self, rows: list[_Row], observed: float | None, valid_until: float | None = None,
+    ) -> None:
         super().__init__(rows)
         self.observed = observed
+        self.valid_until = valid_until
 
 
 class DiscoveryReadError(ValueError):
@@ -51,11 +55,19 @@ def is_classify_unsupported(stderr: str) -> bool:
 
 def validate_inventory(raw: str, *, fresh: bool = False) -> float | None:
     """Reject failed/partial/unknown envelopes before replacing good rows."""
+    return inventory_window(raw, fresh=fresh)[0]
+
+
+def inventory_window(
+    raw: str, *, fresh: bool = False, read_started: float | None = None,
+) -> tuple[float | None, float | None]:
+    """Retain the source's absolute observation window without renewing it."""
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
         raise DiscoveryReadError("source-malformed") from None
     observed = time.monotonic()
+    valid_until = None
     if isinstance(data, dict):
         version = data.get("version", 1)
         if type(version) is not int:
@@ -82,16 +94,37 @@ def validate_inventory(raw: str, *, fresh: bool = False) -> float | None:
             ):
                 raise DiscoveryReadError("source-incomplete")
             timestamp = projection.get("observed_at")
-            if type(timestamp) not in (int, float) or not math.isfinite(timestamp):
+            if type(timestamp) not in (int, float) or not math.isfinite(cast(float, timestamp)):
                 raise DiscoveryReadError("source-malformed")
-            age = time.time() - timestamp
-            if timestamp < 0 or age < -1 or age >= FRESH_SECONDS:
+            timestamp_value = cast(float, timestamp)
+            age = time.time() - timestamp_value
+            source_age = max(0.0, age)
+            bound = FRESH_SECONDS
+            freshness = projection.get("freshness")
+            if freshness is not None:
+                if (
+                    not isinstance(freshness, dict)
+                    or type(freshness.get("bound_s")) not in (int, float)
+                    or not math.isfinite(freshness["bound_s"])
+                    or freshness["bound_s"] <= 0
+                    or type(freshness.get("refreshed_age_s")) not in (int, float)
+                    or not math.isfinite(freshness["refreshed_age_s"])
+                    or freshness["refreshed_age_s"] < 0
+                ):
+                    raise DiscoveryReadError("source-malformed")
+                bound = freshness["bound_s"]
+                read_elapsed = 0.0 if read_started is None else max(0.0, observed - read_started)
+                source_age = max(source_age, freshness["refreshed_age_s"] + read_elapsed)
+                if source_age >= bound:
+                    raise DiscoveryReadError("source-stale")
+            if timestamp_value < 0 or age < -1 or age >= bound:
                 raise DiscoveryReadError("source-stale")
             if fresh:
                 # Current-roster-v1 dispatch ignores --fresh; it acknowledges
                 # a projection read, not a requested source-owner refresh.
                 raise DiscoveryReadError("source-refresh-unsupported")
-            observed = time.monotonic() - max(0.0, age)
+            observed -= source_age
+            valid_until = observed + bound
         data = data.get("worktrees")
     if not isinstance(data, list) or any(
         not isinstance(row, dict)
@@ -100,7 +133,7 @@ def validate_inventory(raw: str, *, fresh: bool = False) -> float | None:
         for row in data
     ):
         raise DiscoveryReadError("source-malformed")
-    return observed
+    return observed, valid_until
 
 
 @dataclass
@@ -108,6 +141,14 @@ class SourceEvidence:
     generation: int = 0
     updated: float | None = None
     diagnostic: str | None = None
+    valid_until: float | None = None
+
+
+def worktree_sources(resolver: AgentResolver | None) -> dict[str, AgentConfig]:
+    """Read inventory contributions without granting their names agent authority."""
+    if resolver is None:
+        return {}
+    return {**resolver.agents, **(getattr(resolver, "inventory_sources", None) or {})}
 
 
 class WorktreeRefreshOwner:
@@ -138,11 +179,11 @@ class WorktreeRefreshOwner:
         *unsupported: set[str],
     ) -> dict[str, list[_Row]]:
         eligible = [
-            (name, cfg) for name, cfg in (resolver.agents if resolver is not None else {}).items()
+            (name, cfg) for name, cfg in worktree_sources(resolver).items()
             if cfg.project and cfg.worktree_discovery
         ]
         token = (id(resolver), tuple(
-            (name, cfg.project, cfg.host, cfg.ssh_user, cfg.provider, cfg.ssh_environment)
+            (name, cfg.project, cfg.host, cfg.ssh_user, cfg.provider, cfg.ssh_environment, cfg.cwd)
             for name, cfg in eligible
         ))
         kept = set()
@@ -190,10 +231,11 @@ class WorktreeRefreshOwner:
         )
 
     def ensure(
-        self, operation: Callable[[int], Awaitable[None]], *, live: bool = False,
+        self, operation: Callable[[int], Coroutine[Any, Any, None]], *, live: bool = False,
     ) -> asyncio.Task[None] | None:
         if self.closed or not self.available:
             return None
+        previous: asyncio.Task[None] | None
         if self._live_task is not None and not self._live_task.done():
             previous, epoch, requested_live = (
                 self._live_task, self._queued_epoch, self._queued_live,
@@ -228,7 +270,7 @@ class WorktreeRefreshOwner:
         return self._admit(operation, epoch=self.epoch, live=live)
 
     def _admit(
-        self, operation: Callable[[int], Awaitable[None]], *, epoch: int, live: bool,
+        self, operation: Callable[[int], Coroutine[Any, Any, None]], *, epoch: int, live: bool,
     ) -> asyncio.Task[None]:
         started = time.monotonic()
         self.last_attempt = started
@@ -274,13 +316,16 @@ class WorktreeRefreshOwner:
             return False
         return not self.initialized or any(
             source.updated is None or source.diagnostic is not None
-            or now - source.updated >= max_age
+            or (
+                now >= source.valid_until if source.valid_until is not None
+                else now - source.updated >= max_age
+            )
             for source in self.sources.values()
         )
 
     def warm(
-        self, operation: Callable[[int], Awaitable[None]],
-        backfill: Callable[[], Awaitable[None]], wrappers: set[asyncio.Task[None]],
+        self, operation: Callable[[int], Coroutine[Any, Any, None]],
+        backfill: Callable[[], Coroutine[Any, Any, None]], wrappers: set[asyncio.Task[None]],
     ) -> asyncio.Task[None] | None:
         joined = self.current_pending
         task = self.ensure(operation)
@@ -306,6 +351,7 @@ class WorktreeRefreshOwner:
     def published(
         self, epoch: int, errors: dict[str, str | None],
         *, observed: dict[str, float] | None = None,
+        valid_until: dict[str, float] | None = None,
     ) -> None:
         if not self.current(epoch):
             return
@@ -317,7 +363,37 @@ class WorktreeRefreshOwner:
             if error is None:
                 source.generation = self.generation
                 source.updated = (observed or {}).get(name, now)
+                source.valid_until = (valid_until or {}).get(name)
         self.initialized = True
+
+    def update_results(
+        self, epoch: int, rows: dict[str, list[_Row]], names: list[str],
+        results: list[list[_Row] | BaseException],
+    ) -> dict[str, list[_Row]]:
+        """Publish one completed source batch under its existing epoch."""
+        if not self.current(epoch):
+            return rows
+        updated = dict(rows)
+        errors: dict[str, str | None] = {}
+        observations: dict[str, float] = {}
+        windows: dict[str, float] = {}
+        for name, result in zip(names, results, strict=True):
+            if isinstance(result, BaseException):
+                log.warning("Worktree discovery failed for %s: %s", name, result)
+                errors[name] = (
+                    str(result) if isinstance(result, DiscoveryReadError) else "source-read-failed"
+                )
+                continue
+            updated[name] = result
+            errors[name] = None
+            observed = getattr(result, "observed", None)
+            if observed is not None:
+                observations[name] = observed
+            valid_until = getattr(result, "valid_until", None)
+            if valid_until is not None:
+                windows[name] = valid_until
+        self.published(epoch, errors, observed=observations, valid_until=windows)
+        return updated
 
     async def wait(self, task: asyncio.Task[None] | None) -> dict[str, Any]:
         started = time.monotonic()
@@ -362,7 +438,10 @@ class WorktreeRefreshOwner:
                 "age_seconds": age,
                 "freshness": (
                     "unknown" if age is None
-                    else "stale" if source.diagnostic or age >= max_age or self.closed
+                    else "stale" if source.diagnostic or self.closed or (
+                        now >= source.valid_until if source.valid_until is not None
+                        else age >= max_age
+                    )
                     else "fresh"
                 ),
                 "completeness": (

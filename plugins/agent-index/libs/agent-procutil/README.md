@@ -1565,6 +1565,12 @@ paths, protected work and unknown launch outcomes hold. A guard may declare
 individual already-created lifecycle files using `add_artifact`; cleanup does
 not recursively delete runtime roots, source, installed code, undeclared logs,
 or retained evidence. Canonical lock files remain to prevent split custody.
+For read-only discovery, `daemon_observation.publish_file_observation(receipt,
+name, path)` records an existing file's canonical locator only when the running
+record belongs to the current process. The bounded observation namespace neither
+changes `runtime_root` nor declares a lifecycle artifact, renews a lease or grants
+cleanup authority. `observe_instances` retains the ordinary inspection API and
+adds exact process-birth observations without signaling or cleanup.
 An existing code/config directory may be a borrowed, read-only metadata anchor,
 including a root-owned container payload. Recording its identity does not confer
 ownership or deletion authority. Registry entries and individually declared

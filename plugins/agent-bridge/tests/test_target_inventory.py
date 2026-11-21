@@ -210,3 +210,40 @@ async def test_failed_inventory_is_visible_without_losing_other_sources(
     assert result["sources"]["worktrees"]["error"] == "owner_unavailable"
     assert len(result["targets"]) == 1 and result["targets"][0]["kind"] == "worktree"
     assert not bound.manager.list_sessions()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("managed", [True, False])
+async def test_launch_produced_host_record_without_cwd_is_counted_once(
+    metadata_boundary: Any, monkeypatch: pytest.MonkeyPatch, managed: bool,
+) -> None:
+    from agent_bridge.session_host import registered_inventory
+
+    bound = metadata_boundary
+    if managed:
+        target = replace(bound.request.app.state.resolver.resolve("example"), worktree_id=bound.entry.id)
+        session = bound.manager.import_native_session(target, "native-original", agent_name="example")
+        session.status = SessionStatus.IDLE
+        sid = session.session_id
+    else:
+        sid = "indexed-host"
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: f"birth-{pid}")
+    spawned = SimpleNamespace(
+        local_port=9000, host_pid=123, child_pid=124, protocol_version=1,
+        state_file=bound.entry.path + "-host.json", nonce="a" * 64, boundary="local",
+    )
+    record = bound.manager._register_host_launch(spawned, sid)
+    assert "cwd" not in record.extra
+    monkeypatch.setattr(bound.manager, "_rec_host_alive", lambda record: True)
+    monkeypatch.setattr(registered_inventory, "registered_hosts", lambda: ([{
+        "kind": "session_host", "handle": sid, "sources": ["daemon-instance"],
+        "registration": {
+            "session_id": sid, "host_pid": 123, "host_process_start_time": "birth-123",
+            "cwd": bound.entry.path, "boundary": "local",
+        },
+    }], {"availability": "available"}))
+    result = await worktree_native_resume.list_targets(bound.request)
+    hosts = [item for item in result["targets"] if item["kind"] != "worktree"]
+    assert len(hosts) == 1
+    assert hosts[0]["kind"] == ("managed" if managed else "session_host")
+    assert "session_host" in hosts[0]["sources"] and "daemon-instance" in hosts[0]["sources"]

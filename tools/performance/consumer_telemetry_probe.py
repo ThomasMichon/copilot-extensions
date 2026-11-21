@@ -40,6 +40,7 @@ RECEIVER = r'''
 import json, os, sys, time
 from pathlib import Path
 mode = sys.argv[1]
+expected = int(sys.argv[2]) if len(sys.argv) > 2 else None
 if mode == "failed":
     raise SystemExit(7)
 if mode == "nonreading":
@@ -65,6 +66,10 @@ with Path("readback.jsonl").open("wb") as output:
             raise OSError("fixture fsync refusal after readable write")
         os.fsync(output.fileno())
         count += 1
+        if expected is not None and count == expected:
+            witness = Path("settled.pending")
+            witness.write_text(json.dumps({"records": count, "fsync_per_record": True}), encoding="utf-8")
+            os.replace(witness, "settled.json")
 Path("receiver-cost.json").write_text(json.dumps({
     "records": count, "cpu_ns": time.process_time_ns() - cpu,
     "wall_ns": time.perf_counter_ns() - wall,

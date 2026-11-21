@@ -2,8 +2,15 @@
 
 [Configuration reference](docs/configuration.md)
 
-`targets --json` lists the union of registered sessions and discovered
-workspaces without launching a conversation. Workspace-handle operations can
+`sessions` lists the union of managed sessions, extension registrations,
+Session Hosts and workspaces, including local registered repositories that do
+not expose an agent. `--json sessions` preserves the legacy managed-record array;
+`--json sessions --all-sources` selects the typed catalog envelope.
+`sessions --owned-only` selects the managed-only text view. The HTTP sessions
+API is unchanged. Source availability
+and cold workspaces are not proof of a functioning native receiver.
+`targets --json` provides the service's target inventory without local
+completion. Neither listing launches a conversation. Workspace-handle operations can
 hydrate missing Bridge metadata from the authoritative head; dormant raw sends
 require explicit resume. See
 [target discovery and hydration](docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup).

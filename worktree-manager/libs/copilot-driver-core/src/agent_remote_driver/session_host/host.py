@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 import secrets
 import time
 from collections.abc import Callable
@@ -199,6 +200,19 @@ class SessionHost:
     @property
     def closing(self) -> bool:
         return self._closing
+
+    @property
+    def instance_id(self) -> str | None:
+        """The existing daemon registration that admitted this Host."""
+        return self._instance_guard.receipt.instance_id if self._instance_guard is not None else None
+
+    def publish_state_file(self, path: str | os.PathLike[str]) -> None:
+        """Publish the state locator through this Host's existing process registration."""
+        from agent_procutil.daemon_observation import publish_file_observation
+
+        if self._instance_guard is None:
+            raise RuntimeError("Host is not admitted")
+        publish_file_observation(self._instance_guard.receipt, "session_host_state", Path(path))
 
     # -- child reader ------------------------------------------------------
     async def _reader_loop(self) -> None:

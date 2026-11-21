@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import logging
+from importlib import import_module
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 from agent_procutil._daemon_instance_identity import identity_state, path_identity
 from agent_procutil.daemon_instances import inspect_instances
@@ -16,6 +18,7 @@ from .rendezvous import Endpoint
 from .service_handoff import peer_identity
 
 GRACE_SECONDS = 30.0
+log = logging.getLogger(__name__)
 _CUSTODY = (
     "instance_id", "pid", "birth", "service", "purpose", "lifecycle", "owner",
     "owner_pid", "owner_birth", "run_id", "source", "source_member",
@@ -121,26 +124,38 @@ class Predecessor:
         """Revalidate selection and central-role custody at the native mutation."""
         if self.custody is not None:
             return "refused-native-resume"
+        phase = "original-exit"
         try:
             if self.exited():
                 return "exited"
+            phase = "owner-selection"
             if not current() or not self._owned(inspect_instances(self.registry_root)):
                 return "refused-owner-or-selection"
+            phase = "custodian-start"
             self.custody = RetirementCustody(self.root)
-            self.custody.__enter__()
+            cast(Callable[[], object], self.custody.__enter__)()
+            phase = "native-pin"
             with self.custody.pin(self.pid, self.record["birth"]) as process:
                 if process.exited():
                     result = "exited"
                 else:
+                    phase = "native-pause"
                     process.pause()
+                    phase = "paused-owner-census"
                     if not current() or not self._owned(inspect_instances(self.registry_root)):
                         result = "refused-owner-or-selection"
                     elif _has_children(self.pid):
                         result = "refused-live-workers"
                     else:
+                        phase = "native-termination"
                         process.terminate()
                         result = "cold-retired"
-        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused):
+                phase = "native-pin-close"
+        except (OSError, ValueError, KeyError, RuntimeError, RetirementRefused) as error:
+            log.warning(
+                "Vault predecessor retirement refused: phase=%s error_type=%s winerror=%s",
+                phase, type(error).__name__, getattr(error, "winerror", None),
+            )
             result = "refused-native-retirement"
         finally:
             settled = self.recover()
@@ -160,7 +175,7 @@ class Predecessor:
 def _has_children(pid: int) -> bool:
     """The pinned, paused parent cannot launch another credential subprocess."""
     try:
-        import psutil
+        psutil = import_module("psutil")
     except ImportError as error:
         raise RetirementRefused("native worker census unavailable") from error
     try:
@@ -184,7 +199,7 @@ def _console_host_path() -> Path | None:
     import ctypes
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.GetSystemDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
     kernel.GetSystemDirectoryW.restype = wintypes.UINT
     directory = ctypes.create_unicode_buffer(32768)

@@ -41,6 +41,13 @@ def _cmd_gc(args: argparse.Namespace) -> None:
 
 
 def _cmd_sessions(args: argparse.Namespace) -> None:
+    if not getattr(args, "owned_only", False) and (
+        not args.json or getattr(args, "all_sources", False)
+    ):
+        from .target_resolution_cli import command
+
+        command(args, include_local=True, ensure=True)
+        return
     core = _core()
     client = core._get_client()
     sessions = client.list_sessions(status=args.status)
@@ -344,8 +351,17 @@ def register_session_maintenance_commands(sub: argparse._SubParsersAction[Any]) 
     targets_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     targets_p.set_defaults(func=targets_command)
 
-    sessions_p = sub.add_parser("sessions", help="List sessions")
+    sessions_p = sub.add_parser("sessions", help="List sessions, Session Hosts and every discovered worktree")
     sessions_p.add_argument("--status", help="Filter by status")
+    session_mode = sessions_p.add_mutually_exclusive_group()
+    session_mode.add_argument(
+        "--owned-only", action="store_true",
+        help="Use the legacy ACP-owned session listing and JSON array",
+    )
+    session_mode.add_argument(
+        "--all-sources", action="store_true",
+        help="Include every source in JSON output using the typed catalog envelope",
+    )
     sessions_p.set_defaults(func=_cmd_sessions)
 
     peek_p = sub.add_parser(

@@ -39,6 +39,7 @@ from typing import Any
 
 from . import bridge_remote, remote_dispatch
 from .bridge_owner import LocalOwnerSessionClient
+from .bridge_listing import managed_rows
 from .procutil import (
     agent_bridge_launch_prefix,
     run_agent_worktrees_capture,
@@ -173,11 +174,11 @@ def _run_capture(
 #: this cache each one would separately hit the shared coordinator's directory
 #: endpoint even though the satellite roster cannot change mid-batch.
 _SATELLITE_CACHE_TTL_S = 5.0
-_satellite_cache: dict[str, dict] | None = None
+_satellite_cache: dict[str, dict[str, Any]] | None = None
 _satellite_cache_at: float = 0.0
 
 
-def _satellite_roster() -> dict[str, dict]:
+def _satellite_roster() -> dict[str, dict[str, Any]]:
     """Normalized-machine -> live directory entry, for every ``role=satellite``
     entry on the shared/hosted federation directory (see the
     ``satellite-agent-exposure`` effort's Design item D).
@@ -193,7 +194,7 @@ def _satellite_roster() -> dict[str, dict]:
     now = time.time()
     if _satellite_cache is not None and (now - _satellite_cache_at) < _SATELLITE_CACHE_TTL_S:
         return _satellite_cache
-    roster: dict[str, dict] = {}
+    roster: dict[str, dict[str, Any]] = {}
     try:
         from . import config
         from .federation_runner import hosted_rendezvous
@@ -213,7 +214,7 @@ def _satellite_roster() -> dict[str, dict]:
     return roster
 
 
-def _satellite_entry_for(machine: str) -> dict | None:
+def _satellite_entry_for(machine: str) -> dict[str, Any] | None:
     """The live directory entry for ``machine`` if it is currently registered
     as ``role=satellite``, else ``None``."""
     return _satellite_roster().get(bridge_remote.normalize_host(machine))
@@ -288,7 +289,7 @@ def list_local_body_sessions(
     """List local headless sessions; observation failures degrade to no rows.
 
     ``ensure_daemon`` (default ``True``, preserving prior behavior): the
-    underlying ``agent-bridge --json sessions`` CLI command boots the local
+    underlying managed-only session CLI command boots the local
     daemon on demand if it isn't already running (its own ``_get_client()``
     default). Pass ``ensure_daemon=False`` for a genuinely passive,
     unattended probe (e.g. a periodic background tick) that must never start
@@ -309,10 +310,8 @@ def list_local_body_sessions(
     if proc.returncode != 0 or not proc.stdout.strip():
         return []
     try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
+        data = managed_rows(json.loads(proc.stdout))
+    except ValueError:
         return []
     return [row for row in data if isinstance(row, dict)]
 
@@ -737,9 +736,9 @@ def enrich_task(
     if local is _UNSET:
         is_remote = remote_dispatch.is_peer_machine(machine)
     else:
-        is_remote = (
-            bool(machine)
-            and bool(local)
+        is_remote = bool(
+            machine
+            and local
             and machine.strip().casefold() != str(local).strip().casefold()
         )
     if is_remote:

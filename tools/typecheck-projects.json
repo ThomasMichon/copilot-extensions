@@ -534,7 +534,9 @@
         "fleet-manager/tests",
         "plugins/agent-vault",
         "plugins/agent-vault/scripts",
-        "libs/agent-procutil/src"
+        "libs/agent-procutil/src",
+        "libs/single-instance-lease/src",
+        "libs/zdd/src"
       ],
       "program_roots": [
         {
