@@ -10,10 +10,10 @@ Public-safe operator request, verbatim:
 - **Repo:** copilot-extensions
 - **Branch(es):** dependency-ordered PRs against `dev`
 - **Created:** 2026-11-20
-- **Status:** Active
-- **Vision:** [regenerable bytecode reclamation](../../../visions/installer/README.md#regenerable-bytecode-reclamation) and [authoritative replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+- **Status:** Done
+- **Vision:** [regenerable bytecode reclamation](../../../../visions/installer/README.md#regenerable-bytecode-reclamation) and [authoritative replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #12886
-- **Parent:** [Derived Disk Hygiene](../derived-disk-hygiene/README.md), bytecode follow-on
+- **Parent:** [Derived Disk Hygiene](../../../active/derived-disk-hygiene/README.md), bytecode follow-on
 
 ## Guiding Intent
 
@@ -108,33 +108,33 @@ An approved design or dry run does not grant those effects.
 
 ### Phase 4 - Validate and deliver
 
-- [ ] Pass targeted unit, native Windows, collector/installer integration,
+- [x] Pass targeted unit, native Windows, collector/installer integration,
   type/lint, generation and install-contract gates.
-- [ ] Repeat read-only real-host assessment with the qualified implementation;
+- [x] Repeat read-only real-host assessment with the qualified implementation;
   report actual eligible bytes separately from age-only or unmeasured estimates.
-- [ ] Steward implementation PRs through current-head Copilot review, green
+- [x] Steward implementation PRs through current-head Copilot review, green
   required checks and merge; report release and rollout separately.
-- [ ] Resolve every phase/validation item, reconcile the parent and archive
+- [x] Resolve every phase/validation item, reconcile the parent and archive
   before releasing the effort and finalizing its source workspace.
 
 ## Validation Plan
 
-- [ ] Dry run never mutates cache contents; summary counts held bytes by reason.
-- [ ] Selected/retained/rollback/construction and live-prefix references refuse.
-- [ ] Unknown owner, process access failure, PID reuse, new references, changed
+- [x] Dry run never mutates cache contents; summary counts held bytes by reason.
+- [x] Selected/retained/rollback/construction and live-prefix references refuse.
+- [x] Unknown owner, process access failure, PID reuse, new references, changed
   namespace identity and concurrent writers retain work without false success.
-- [ ] Reparse points, symlinks, hard links and non-bytecode evidence survive.
-- [ ] Unsealed and retired installed prefixes can actually empty in native
+- [x] Reparse points, symlinks, hard links and non-bytecode evidence survive.
+- [x] Unsealed and retired installed prefixes can actually empty in native
   Windows fixtures; proof is not limited to mocked source-qualified leaves.
-- [ ] Large-volume fixtures cross multiple byte/time/entry budgets and restart
+- [x] Large-volume fixtures cross multiple byte/time/entry budgets and restart
   boundaries with fair progress and a measured aggregate drain rate.
-- [ ] Catch-up ownership survives the admitted caller boundary, or records a
+- [x] Catch-up ownership survives the admitted caller boundary, or records a
   truthful interrupted result; cancellation and unknown effects are not replayed.
-- [ ] Metadata/status work does not recursively rescan a multi-million-file
+- [x] Metadata/status work does not recursively rescan a multi-million-file
   cache on normal reads; incomplete measurements never become zero-byte claims.
-- [ ] Existing new-cache selection, POSIX protection, automatic-update policy,
+- [x] Existing new-cache selection, POSIX protection, automatic-update policy,
   incoming installation readiness and service/session custody remain intact.
-- [ ] No real cache deletion, installed rollout or relief on a remote host is
+- [x] No real cache deletion, installed rollout or relief on a remote host is
   inferred from source tests, merge or release.
 
 ## Proposal
@@ -143,6 +143,30 @@ See [design.md](design.md). Its gates deliberately do not promise eligible
 bytes until the installed ownership and live-reference proof passes.
 
 ## Journal
+
+### 2026-11-21 - Source completion and archive
+
+- #13865 merged into `dev` as `190d12cfcfbe1a71bfc5bad52763e513370010e4`.
+  Current-head Copilot review `6004739492` confirmed the three code findings
+  resolved. Its remaining low-severity impact-assessment omission was corrected
+  in the PR description and its thread resolved. No review finding remains open.
+- Required CI passed on the exact source head, including the eligible-unit
+  packet, guards/lint, source attribution and PR gate. The mixed-Python native
+  lane passed. Run `44896048102` also passed both Linux and Windows-publication
+  qualification, including the retained-client handover case that timed out on
+  the preceding head. No required check was bypassed.
+- The source and native fixture gates above complete this bounded effort.
+  The local pinned-checker preparation and unrelated Windows doctor-fixture
+  failures remain explicitly recorded below; they did not waive required CI
+  or authorize unrelated source repairs. The ordinary provider checks passed.
+- The qualified read-only assessment proved zero eligible bytes, not a safe
+  host drain. Process-owner visibility remained incomplete. No real cache was
+  deleted, no candidate installed and no process terminated. Release promotion,
+  authorized installation and any host relief remain separate operations.
+- Reconciled the parent follow-on and effort index, then moved this record and
+  its reviewed design to the dated archive. The source worktree releases its
+  effort binding and finalizes only after this closeout clears review and CI.
+  The parent's other tracks and installed-observation gates remain open.
 
 ### 2026-11-21 - Review corrections
 

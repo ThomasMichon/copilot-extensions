@@ -2003,6 +2003,52 @@ CI remain required. This bounded census increment is not native qualification,
 every-release observation, workflow-count reduction or full-census completion.
 Existing workflow/native owners and retained custody remain.
 
+Source #13879 merges at `2026-11-21T10:55:50Z` as
+`87d01c5a1ad87b6961afa5fcd789fc6a209903d8`. Copilot approval `6004751859`
+targets exact published head `67e7694b26db22609cebcaf7f6541bb1f6e50905`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44896217183` and trusted metadata CI `44896213679` pass.
+Unit job `136822325439` freshly qualifies the complete packet from
+`10:51:04Z` to `10:53:46Z`, then uploads its evidence. Seven fresh live scoped
+reads through the source merge-time verifier precede the normal managed
+Maintainer merge; no failing CI is bypassed. Closing references are empty and
+parent #6237 stays open. The full canonical parent is reread and only this
+finite admission item is resolved. Continue the retained census and separately
+accepted workflow reductions; broader native, every-release, full-census,
+whole-flow and retained-custody acceptance remain open.
+
+### November 21 identifier Git-blob protocol unit admission
+
+The original identifier guard suite collects 66 cases. Four exact original
+functions provide twelve mocked Git-blob protocol controls; their adapter
+copies no assertions and changes neither the original tests nor the scanner.
+Collection verifies every function object and parameter identity. All 54
+remaining originals stay outside the packet, including real Git/process
+fixtures, native timeout/cleanup cases and controls that require the real Git
+fixture. A mock is not substituted for any original native witness.
+
+Selected cases retain deduplication of shared blobs, the 32-object and
+eight-MiB batch bounds, explicit handling of oversized single blobs,
+malformed/truncated/mismatched/trailing-response refusal and Git failure
+propagation. All twelve pass the actual `UnitRun` effect auditor with zero
+prohibited effects and their own production call-phase coverage. The complete
+observed Python read closure is exactly the adapter, original test module and
+scanner; every file is hash-bound. No Git command, live sweep, helper process
+or real denylist read executes. Focused audited execution takes 2.625
+development seconds, not full-packet timing. The existing parameter-strategy
+warning remains visible; no marker, eligibility rule or deadline is changed.
+
+Positive admission adds twelve nodes, three source hashes and one production
+coverage target, preserving every current Dev node, digest and target:
+6,411 nodes, 1,042 sources and 435 targets. All 88 release-helper decisions,
+the profile and 300-second packet budget remain unchanged. The manifest is
+1,028,599 bytes under the existing cap, with unchanged unindented node entries
+and source-map layout. Whole-file strict typing passes Linux and Windows
+targets, and fatal Ruff checks pass. Complete current-head review and Linux
+source CI remain required. This bounded census increment is not native,
+every-release, full-census, workflow-count or whole-flow qualification.
+Existing shared workflow owners and every retained custody hold remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
