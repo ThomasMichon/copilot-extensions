@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Current inflow and admission gaps](journal/2026/11.21-current-inflow-and-admission-gaps.md)
+
 - [2026-11-21 - Remaining fixed-cohort coverage](journal/2026/11.21-remaining-fixed-cohort-coverage.md)
 
 - [2026-11-21 - Outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
