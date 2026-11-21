@@ -36,7 +36,7 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
         assert result("host-a") is DriverMatch.UNKNOWN
         conn.execute(
             "INSERT INTO acquisition_receipts VALUES ('retry',?,0,'tree','s','native-id',"
-            "'created','delivery')", (task.id,),
+            "'acp','delivery')", (task.id,),
         )
         conn.set_authorizer(observe)
         assert result("host-a") is DriverMatch.MATCH
@@ -66,7 +66,7 @@ def test_plain_writer_pending_retry_until_owner_records_completion(tmp_path: Pat
         )
         writer.execute(
             "INSERT INTO acquisition_receipts VALUES ('retry',?,0,'tree','bridge-id','native-id',"
-            "'created','delivery')", (task.id,),
+            "'acp','delivery')", (task.id,),
         )
         writer.commit()
 
