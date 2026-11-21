@@ -7766,7 +7766,7 @@
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_goal.py": "6f449490473c8382737939de8a7a90a85ecb5d42c032e02bb84f9f8ae08e86d2",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_history.py": "39922b30e087c7b187b1ec480f824cd213060e0143eebbf2c6bd15bd2f26161a",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_history_contract.py": "b6d6fda729b414a45ec6fc6470f16d934c0757b0864385c05c5cc281eda64264",
-        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_managed.py": "016f277446dba561b562ba55abfae62f915ea3a9d91653cc973a4c381ec2bb2b",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_managed.py": "8ed2da24df21b27fd6c29d94a412854d6832692c36986474d9d6e650dfd74011",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_migration.py": "c99ac4ffad4d092e744d4c9a94585a608771990b8809ed2bebaf40a4079aaf47",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_operations.py": "4147405c3d621a1efaf71ba9331c704c497b0a93fe506f7d3020c7528941df97",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_publish.py": "5d79d21b05ca13fa9616826315338deb794adf420a6ea185f95465a67f12151f",

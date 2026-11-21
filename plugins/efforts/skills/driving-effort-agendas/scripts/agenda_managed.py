@@ -44,10 +44,11 @@ def _owner(provider_python: str, project: str, command: list[str]) -> dict[str, 
     _text(project, "selected placement project")
     try:
         status = asyncio.run(_invoke(
-            [str(interpreter), "-I", "-B", "-c", PROVIDER, project, *command], b"", timeout=7,
+            [str(interpreter), "-I", "-B", "-c", PROVIDER, project, *command], b"",
+            timeout=120 if command[0] == "worktree-data-allocate" else 30,
         ))
     except (OSError, ValueError, TimeoutError) as exc:
-        raise AgendaError(f"placement owner unavailable: {exc}") from exc
+        raise AgendaError(f"placement owner unavailable during {command[0]}: {exc}") from exc
     if status["state"] != "delivered":
         raise AgendaError(f"placement owner refused: {status['error']['message']}")
     reply = cast(dict[str, Any], status["reply"])

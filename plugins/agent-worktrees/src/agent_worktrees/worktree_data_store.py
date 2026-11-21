@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import tempfile
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 from . import config as cfg
 from . import project_state, record_io, registry_paths, tracking
@@ -28,6 +30,7 @@ from .worktree_data_contract import (
     lane_identity,
     segment,
     store_identity,
+    _unique_members,
 )
 
 __all__ = [
@@ -40,7 +43,9 @@ __all__ = [
     "read_worktree_data",
 ]
 
-_HOME = "worktree-state"
+_HOME = "worktrees"
+_LEGACY_HOME = "worktree-state"
+_DATA = "worktree-data"
 _DESCRIPTOR = "descriptor.json"
 _WINDOWS = os.name == "nt"
 
@@ -162,7 +167,7 @@ def _same_directory(path: Path, previous: os.stat_result) -> None:
         raise WorktreeDataError("identity-conflict", "project-data owner changed during operation")
 
 
-def _read_descriptor(path: Path) -> DataDescriptor:
+def _read_descriptor_bytes(path: Path) -> bytes:
     before = _regular(path)
     assert before is not None
     if before.st_size > MAX_DESCRIPTOR_BYTES:
@@ -178,7 +183,34 @@ def _read_descriptor(path: Path) -> DataDescriptor:
         ):
             raise WorktreeDataError("unsafe-path", "descriptor changed during read")
         raw = handle.read(MAX_DESCRIPTOR_BYTES + 1)
-    return decode_descriptor(raw)
+    if len(raw) > MAX_DESCRIPTOR_BYTES:
+        raise WorktreeDataError("descriptor-limit", "descriptor exceeds byte limit")
+    return raw
+
+
+def _read_descriptor(path: Path) -> DataDescriptor:
+    return decode_descriptor(_read_descriptor_bytes(path))
+
+
+def _refusal(descriptor: DataDescriptor) -> dict[str, Any]:
+    return {
+        "schema": "copilot-extensions.worktree-data-current-home",
+        "version": 1,
+        "scope": asdict(descriptor.scope),
+        "worktree_id": descriptor.worktree_id,
+        "creation_nonce": descriptor.creation_nonce,
+    }
+
+
+def _check_refusal(directory: Path, descriptor: DataDescriptor) -> None:
+    _members(directory, {_DESCRIPTOR}, 1)
+    value = json.loads(
+        _read_descriptor_bytes(directory / _DESCRIPTOR),
+        object_pairs_hook=_unique_members,
+    )
+    expected = _refusal(descriptor)
+    if json.dumps(value, sort_keys=True) != json.dumps(expected, sort_keys=True):
+        raise WorktreeDataError("identity-conflict", "legacy refusal marker does not match")
 
 
 def _members(path: Path, expected: set[str], limit: int) -> None:
@@ -201,6 +233,25 @@ def _validate_homes(directory: Path, descriptor: DataDescriptor) -> None:
         _directory(agendas / entry.lane)
 
 
+def _data_directory(root: Path, worktree_id: str) -> Path:
+    current = root / _HOME / worktree_id / _DATA
+    legacy = root / _LEGACY_HOME / worktree_id
+    present = []
+    for path in (current, legacy):
+        if _directory(path.parent, optional=True) is not None and (
+            _directory(path, optional=True) is not None
+        ):
+            present.append(path)
+    if current in present:
+        if legacy not in present:
+            raise WorktreeDataError(
+                "partial-registration", "current worktree data lacks its legacy refusal marker"
+            )
+        _check_refusal(legacy, _read_descriptor(current / _DESCRIPTOR))
+        return current
+    return present[0] if present else current
+
+
 def _load(
     project: str,
     worktree_id: str,
@@ -208,10 +259,7 @@ def _load(
     segment(worktree_id, "worktree_id")
     root, root_metadata = _project_root(project)
     record = _canonical_record(root, worktree_id, project)
-    base = root / _HOME
-    if _directory(base, optional=True) is None:
-        return root, root_metadata, record, None
-    directory = base / worktree_id
+    directory = _data_directory(root, worktree_id)
     if _directory(directory, optional=True) is None:
         return root, root_metadata, record, None
     descriptor = _read_descriptor(directory / _DESCRIPTOR)
@@ -259,7 +307,7 @@ def _placement(
         entry.lane,
         entry.store_id,
         entry.placement_generation,
-        str(root / _HOME / descriptor.worktree_id / entry.relative_home),
+        str(_data_directory(root, descriptor.worktree_id) / entry.relative_home),
     )
 
 
@@ -346,7 +394,7 @@ def _windows_flush_directory(path: Path) -> None:
     import ctypes
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR,
         wintypes.DWORD,
@@ -365,10 +413,10 @@ def _windows_flush_directory(path: Path) -> None:
     # BACKUP_SEMANTICS. This opens the owned directory, never an elevated volume.
     handle = kernel.CreateFileW(str(path), 0x40000000, 0x7, None, 3, 0x02000000, None)
     if handle == wintypes.HANDLE(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     try:
         if not kernel.FlushFileBuffers(handle):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     finally:
         kernel.CloseHandle(handle)
 
@@ -408,7 +456,7 @@ def _publish_descriptor(path: Path, raw: bytes) -> None:
 
 
 def _sync_registered_home(root: Path, descriptor: DataDescriptor) -> None:
-    directory = root / _HOME / descriptor.worktree_id
+    directory = _data_directory(root, descriptor.worktree_id)
     path = directory / _DESCRIPTOR
     _regular(path)
     flags = os.O_RDWR if _WINDOWS else os.O_RDONLY
@@ -420,8 +468,15 @@ def _sync_registered_home(root: Path, descriptor: DataDescriptor) -> None:
     # A previous caller may have failed after rename, before acknowledging it.
     for entry in descriptor.placements:
         _sync_directory(directory / entry.relative_home)
-    for parent in (directory / "agendas", directory, directory.parent, root):
+    for parent in (directory / "agendas", directory, directory.parent, directory.parent.parent, root):
         _sync_directory(parent)
+    if directory == root / _HOME / descriptor.worktree_id / _DATA:
+        legacy = root / _LEGACY_HOME / descriptor.worktree_id
+        _check_refusal(legacy, descriptor)
+        with (legacy / _DESCRIPTOR).open("r+b" if _WINDOWS else "rb") as stream:
+            os.fsync(stream.fileno())
+        for parent in (legacy, legacy.parent, root):
+            _sync_directory(parent)
 
 
 def allocate_worktree_data(
@@ -471,6 +526,13 @@ def allocate_worktree_data(
                 raise WorktreeDataError(
                     "identity-conflict", "allocation incarnation does not match"
                 )
+            directory = _data_directory(root, worktree_id)
+            if record.worktree_path and directory.resolve().is_relative_to(
+                Path(record.worktree_path).resolve()
+            ):
+                raise WorktreeDataError(
+                    "unsafe-placement", "durable worktree data cannot be inside its checkout"
+                )
             scope = _scope(project, record.repo, root_metadata)
             if descriptor is None:
                 descriptor = DataDescriptor(scope, worktree_id, creation_nonce, ())
@@ -487,13 +549,29 @@ def allocate_worktree_data(
             entry = PlacementRegistration(domain, lane, store_id, 1, f"{domain}/{lane}")
             updated = replace(descriptor, placements=(*descriptor.placements, entry))
             raw = encode_descriptor(updated)
-            base = root / _HOME
+            if not descriptor.placements and directory == root / _HOME / worktree_id / _DATA:
+                legacy = root / _LEGACY_HOME / worktree_id
+                if _directory(legacy.parent, optional=True) is None:
+                    try:
+                        _mkdir(legacy.parent)
+                    except FileExistsError:
+                        _directory(legacy.parent)
+                _mkdir(legacy)
+                _publish_descriptor(
+                    legacy / _DESCRIPTOR,
+                    (json.dumps(_refusal(updated), sort_keys=True) + "\n").encode(),
+                )
+            base = directory.parent
+            if _directory(base.parent, optional=True) is None:
+                try:
+                    _mkdir(base.parent)
+                except FileExistsError:
+                    _directory(base.parent)
             if _directory(base, optional=True) is None:
                 try:
                     _mkdir(base)
                 except FileExistsError:
                     _directory(base)
-            directory = base / worktree_id
             if not descriptor.placements:
                 _mkdir(directory)
                 _mkdir(directory / domain)
