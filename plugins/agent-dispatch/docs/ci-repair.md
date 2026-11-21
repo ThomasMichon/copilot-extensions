@@ -114,6 +114,27 @@ actual launch/worker identity through authoritative venue evidence and echo
 the exact transition on admission; self-asserted IDs or fake handles must be
 refused. These coordinator probes are bounded and do not retry.
 
+### Observing an unqualified launch
+
+After launch admission succeeds, a coordinator without a registered execution
+scope commits one `pending` observation on the reservation immediately before
+calling Bridge. It freezes the task generation and the actual container venue
+and workspace passed to Bridge. A refusal before this point writes no attempt.
+Concurrent admission or a changed task, reservation or lane cannot replace the
+observation. It neither qualifies the producer nor permits replay.
+
+Only the originating attempt can record `accepted` with its returned staging
+handle, or `unknown` when the call does not establish acceptance. A lost
+coordinator or unavailable settlement store can leave `pending` indefinitely:
+neither `pending` nor `unknown` establishes absence. `accepted` records the
+launch reply, not subsequent delivery, liveness, or release. Recording a reply
+does not redirect a worker or ask it to stop.
+
+The internal `ci_launch_observation.observe(conn, reservation_key)` read returns
+no row for unobserved attempts (including older writers); there is no historical
+backfill. It does not interpret a container path as a managed worktree. Comparing
+these identities requires evidence from the venue owner, not a path match.
+
 The [portable container template](../../agent-containers/templates/ci-repair/README.md)
 is network-disconnected and carries no identity. No auth adapter, live policy,
 workspace materialization, worker activation or deployment is implied by

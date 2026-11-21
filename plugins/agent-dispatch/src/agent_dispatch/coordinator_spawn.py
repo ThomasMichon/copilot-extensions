@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from collections.abc import Callable, Iterable
 import logging
 import sqlite3
 import subprocess
-from typing import Literal
+from typing import Any, Literal, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
-from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
-from .queue_records import WorkerAdmissionInhibited
+from .queue import TaskQueue
+from .queue_records import SpawnReservation, TaskError, WorkerAdmissionInhibited
+from .routing_provenance import RoutingAssignment
 from .queue_pool_placement import (
     ConfiguredPoolPlacementRequired, POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION,
     pool_placement_contract,
 )
+
+
+Json = dict[str, Any]
 
 
 class ReserveSpawnBody(BaseModel):
@@ -87,10 +92,10 @@ class RoutingBillingRefBody(BaseModel):
 class RecordSpawnBody(BaseModel):
     session_handle: str | None = None
     worktree: str | None = None
-    session_info: dict | None = None
+    session_info: Json | None = None
     startup_complete: bool | None = Field(default=None, strict=True)
     startup_revision: int | None = Field(default=None, ge=1, strict=True)
-    ordinary_redrive: dict | None = None
+    ordinary_redrive: Json | None = None
 
 class FenceSpawnStartupBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -114,13 +119,13 @@ class RecordSpawnWorktreeBody(BaseModel):
     allocation_project: str | None = None
     worktree_path: str | None = None
     creation_nonce: str | None = Field(default=None, min_length=1)
-    worktree_writer_requirement: dict | None = None
+    worktree_writer_requirement: Json | None = None
 
 
 class RecordSpawnAllocationBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project: str = Field(min_length=1)
-    worktree_writer_requirement: dict | None = None
+    worktree_writer_requirement: Json | None = None
     cohort_transport: Literal["baseline", "cohort-v1"] | None = None
 
 
@@ -221,7 +226,9 @@ class FenceHistoryBody(BaseModel):
     expected_preview: str | None = None
 
 
-def _reservation_dict(res: SpawnReservation) -> dict:
+def _reservation_dict(res: SpawnReservation | None) -> Json:
+    if res is None:
+        raise HTTPException(404, detail="no such reservation")
     return asdict(res)
 
 
@@ -242,13 +249,13 @@ def register_spawn_routes(
         logging.getLogger("agent-dispatch").warning("%s: %s", event, detail)
     control_auth = _make_control_auth(control_token, rejected)
     from .coordinator_cleanup_recovery import register as register_cleanup_recovery
-    register_cleanup_recovery(app, queue, bus, control_auth)
+    cast(Callable[..., None], register_cleanup_recovery)(app, queue, bus, control_auth)
 
     @app.post(
         "/spawn-reservations/tasks/{task_id}/authorize-fresh",
         dependencies=[Depends(control_auth)],
     )
-    def authorize_fresh(task_id: str, body: AuthorizeFreshBody) -> dict:
+    def authorize_fresh(task_id: str, body: AuthorizeFreshBody) -> Json:
         try:
             from .acquisition_receipts import verify_recovery_bridge
             verify_recovery_bridge()
@@ -259,7 +266,7 @@ def register_spawn_routes(
             raise HTTPException(503, detail="recovery bridge readiness unavailable") from exc
 
     @app.post("/spawn-reservations/history/fence", dependencies=[Depends(control_auth)])
-    def fence_history(body: FenceHistoryBody) -> dict:
+    def fence_history(body: FenceHistoryBody) -> Json:
         try:
             if body.apply:
                 from .acquisition_receipts import verify_recovery_bridge
@@ -271,7 +278,7 @@ def register_spawn_routes(
             raise HTTPException(503, detail="recovery bridge readiness unavailable") from exc
 
     @app.post("/spawn-reservations/history/adopt", dependencies=[Depends(control_auth)])
-    def adopt_legacy_capacity(body: AdoptLegacyCapacityBody) -> dict:
+    def adopt_legacy_capacity(body: AdoptLegacyCapacityBody) -> Json:
         try:
             return queue.adopt_legacy_capacity(**body.model_dump())
         except TaskError as exc:
@@ -281,7 +288,7 @@ def register_spawn_routes(
         if queue.get(task_id) is None:
             raise HTTPException(status_code=404, detail="no such task")
 
-    def _reservation_guard(op) -> dict:
+    def _reservation_guard(op: Callable[[], SpawnReservation]) -> Json:
         try:
             return _reservation_dict(op())
         except TaskError as exc:
@@ -289,7 +296,7 @@ def register_spawn_routes(
             status = 404 if msg.startswith("no such reservation") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
 
-    def _routing_guard(op) -> tuple[RoutingAssignment, bool]:
+    def _routing_guard(op: Callable[[], tuple[RoutingAssignment, bool]]) -> tuple[RoutingAssignment, bool]:
         try:
             return op()
         except TaskError as exc:
@@ -307,17 +314,17 @@ def register_spawn_routes(
     register_pool_startup(app, queue, bus, pool_control)
 
     @app.get("/pool-placements/contract", dependencies=[Depends(pool_control)])
-    def placement_contract() -> dict:
+    def placement_contract() -> Json:
         return pool_placement_contract()
 
     @app.get("/tasks/{task_id}/pool-start/contract")
-    def task_start_contract(task_id: str) -> dict:
+    def task_start_contract(task_id: str) -> Json:
         if queue.get(task_id) is None:
             raise HTTPException(status_code=404, detail="no such task")
         return {"pool_placement": pool_placement_contract()}
 
     @app.post("/pool-placements", dependencies=[Depends(pool_control)])
-    def place_pool_task(body: PoolPlacementBody, request: Request) -> dict:
+    def place_pool_task(body: PoolPlacementBody, request: Request) -> Json:
         gate = request.app.state.drain_gate
         with gate.track_claim():
             if gate.draining:
@@ -349,7 +356,7 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations")
     @app.post("/spawn-reservations/revisions")
-    def reserve_spawn(body: ReserveSpawnBody, request: Request) -> dict:
+    def reserve_spawn(body: ReserveSpawnBody, request: Request) -> Json:
         if request.url.path.endswith("/revisions") and body.allocation_revision is None:
             raise HTTPException(status_code=422, detail="explicit allocation revision is required")
         _require_task(body.task_id)
@@ -375,10 +382,11 @@ def register_spawn_routes(
         if reserved and task and task.source == "ci-repair":
             # CI bodies launch inside the trusted coordinator, never the
             # caller-selected supervisor factory. Return no launch permission.
+            from .ci_launch_observation import ObservationConflict
             from .ci_repair_spawn import make_ci_repair_spawn
             from .coordinator_execution_sender import CoordinatorExecutionSender
-            sender = CoordinatorExecutionSender(queue, task, reservation, incarnation)
-            registration = queue.get_registration(task.origin_ref)
+            registration = queue.get_registration(task.origin_ref) if task.origin_ref else None
+            sender = CoordinatorExecutionSender(queue, task, reservation, incarnation, registration)
             spec = registration.spec if registration else {}
             try:
                 if not registration or registration.status != "active":
@@ -390,6 +398,12 @@ def register_spawn_routes(
                     execution_sender=sender,
                 )
                 ok, handle = spawn(asdict(task))
+            except ObservationConflict as exc:
+                return {
+                    "reserved": False,
+                    "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                    "coordinator_launch": {"ok": False, "retryable": False, "error": str(exc)},
+                }
             except (TaskError, ValueError, KeyError, OSError) as exc:
                 ok, handle = False, {"error": str(exc)}
             if ok:
@@ -461,7 +475,7 @@ def register_spawn_routes(
         return {"reserved": reserved, "reservation": result}
 
     @app.post("/spawn-reservations/{key}/routing-assignment")
-    def record_routing_assignment(key: str, body: RoutingAssignmentBody) -> dict:
+    def record_routing_assignment(key: str, body: RoutingAssignmentBody) -> Json:
         assignment, created = _routing_guard(
             lambda: queue.record_routing_assignment(key, body.model_dump())
         )
@@ -474,7 +488,7 @@ def register_spawn_routes(
     def transition_routing_assignment(
         assignment_id: str,
         body: RoutingTransitionBody,
-    ) -> dict:
+    ) -> Json:
         assignment, changed = _routing_guard(
             lambda: queue.transition_routing_assignment(
                 assignment_id,
@@ -494,7 +508,7 @@ def register_spawn_routes(
     def record_routing_billing_ref(
         assignment_id: str,
         body: RoutingBillingRefBody,
-    ) -> dict:
+    ) -> Json:
         try:
             created = queue.record_routing_billing_ref(
                 assignment_id,
@@ -520,7 +534,7 @@ def register_spawn_routes(
     def list_routing_assignments(
         task_id: str | None = None,
         limit: int = 100,
-    ) -> list[dict]:
+    ) -> list[Json]:
         return [
             asdict(assignment)
             for assignment in queue.list_routing_assignments(
@@ -530,26 +544,27 @@ def register_spawn_routes(
         ]
 
     @app.get("/routing-assignments/{assignment_id}/events")
-    def get_routing_assignment_events(assignment_id: str) -> list[dict]:
+    def get_routing_assignment_events(assignment_id: str) -> list[Json]:
         try:
             return queue.routing_assignment_events(assignment_id)
         except TaskError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/routing-assignments/{assignment_id}")
-    def get_routing_assignment(assignment_id: str) -> dict:
+    def get_routing_assignment(assignment_id: str) -> Json:
         assignment = queue.get_routing_assignment(assignment_id)
         if assignment is None:
             raise HTTPException(status_code=404, detail="no such routing assignment")
         return asdict(assignment)
 
     @app.post("/spawn-reservations/{key}/spawned")
-    def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+    def record_spawn(key: str, body: RecordSpawnBody) -> Json:
         if body.ordinary_redrive is not None and body.session_info is not None:
             raise HTTPException(status_code=409, detail="redrive cannot replace original startup evidence")
-        if body.session_info is not None:
+        session_info = body.session_info
+        if session_info is not None:
             from .ordinary_bridge import record_session_info
-            _reservation_guard(lambda: record_session_info(queue, key, body.session_info))
+            _reservation_guard(lambda: record_session_info(queue, key, session_info))
         reservation = queue.get_reservation(key)
         task = queue.get(reservation.task_id) if reservation else None
         if task and task.source == "ci-repair":
@@ -571,7 +586,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/startup-fence")
-    def fence_spawn_startup(key: str, body: FenceSpawnStartupBody) -> dict:
+    def fence_spawn_startup(key: str, body: FenceSpawnStartupBody) -> Json:
         result = _reservation_guard(
             lambda: queue.fence_spawn_startup(key, startup_revision=body.startup_revision)
         )
@@ -579,7 +594,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/claim-cooling")
-    def claim_spawn_cooling(key: str, body: ClaimSpawnCoolingBody) -> dict:
+    def claim_spawn_cooling(key: str, body: ClaimSpawnCoolingBody) -> Json:
         result = _reservation_guard(lambda: queue.claim_spawn_cooling(
             key, startup_revision=body.startup_revision,
             session_handle=body.session_handle, state=body.state,
@@ -594,7 +609,7 @@ def register_spawn_routes(
         app, queue, bus, control_token, authenticated_ingress=restricted_ingress_authenticated,
     )
     @app.post("/spawn-reservations/{key}/allocation")
-    def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> dict:
+    def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> Json:
         result = _reservation_guard(lambda: queue.record_spawn_allocation(
             key, body.project, worktree_writer_requirement=body.worktree_writer_requirement,
             cohort_transport=body.cohort_transport,
@@ -603,7 +618,12 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/worktree")
-    def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> dict:
+    def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> Json:
+        optional: Json = {}
+        if body.creation_nonce is not None:
+            optional["creation_nonce"] = body.creation_nonce
+        if body.worktree_writer_requirement is not None:
+            optional["worktree_writer_requirement"] = body.worktree_writer_requirement
         result = _reservation_guard(
             lambda: queue.record_spawn_worktree(
                 key,
@@ -614,16 +634,14 @@ def register_spawn_routes(
                 driver=body.driver,
                 allocation_project=body.allocation_project,
                 worktree_path=body.worktree_path,
-                **({"creation_nonce": body.creation_nonce} if body.creation_nonce is not None else {}),
-                **({"worktree_writer_requirement": body.worktree_writer_requirement}
-                   if body.worktree_writer_requirement is not None else {}),
+                **optional,
             )
         )
         bus.publish({"type": "spawn.worktree_recorded", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/release")
-    def request_spawn_release(key: str, body: RequestSpawnReleaseBody) -> dict:
+    def request_spawn_release(key: str, body: RequestSpawnReleaseBody) -> Json:
         result = _reservation_guard(
             lambda: queue.request_spawn_release(key, **body.model_dump())
         )
@@ -631,7 +649,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/retire")
-    def retire_spawn(key: str, body: RetireSpawnBody) -> dict:
+    def retire_spawn(key: str, body: RetireSpawnBody) -> Json:
         result = _reservation_guard(
             lambda: queue.retire_spawn(
                 key,
@@ -645,7 +663,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/fail")
-    def fail_spawn(key: str, body: FailSpawnBody) -> dict:
+    def fail_spawn(key: str, body: FailSpawnBody) -> Json:
         result = _reservation_guard(
             lambda: queue.fail_spawn(
                 key,
@@ -662,7 +680,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/defer")
-    def defer_spawn(key: str, body: DeferSpawnBody) -> dict:
+    def defer_spawn(key: str, body: DeferSpawnBody) -> Json:
         result = _reservation_guard(lambda: queue.defer_spawn(
             key, detail=body.detail,
             **({"expected_generation": body.expected_generation}
@@ -673,7 +691,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/cold")
-    def record_cold(key: str, body: RecordColdBody = RecordColdBody()) -> dict:
+    def record_cold(key: str, body: RecordColdBody = RecordColdBody()) -> Json:
         result = _reservation_guard(
             lambda: queue.record_cold(
                 key, release_exclusive=body.release_exclusive,
@@ -685,7 +703,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/settle")
-    def settle_spawn(key: str, body: ReservationDetailBody) -> dict:
+    def settle_spawn(key: str, body: ReservationDetailBody) -> Json:
         result = _reservation_guard(
             lambda: queue.settle_spawn(
                 key,
@@ -700,7 +718,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion")
-    def record_spawn_conclusion(key: str, body: RecordConclusionBody) -> dict:
+    def record_spawn_conclusion(key: str, body: RecordConclusionBody) -> Json:
         if not body.conclusion_state or body.conclusion_detail is None:
             raise HTTPException(
                 status_code=400,
@@ -720,7 +738,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/claim")
-    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody | None = None) -> dict:
+    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody | None = None) -> Json:
         body = body if body is not None else ClaimConclusionBody()
         try:
             reservation, claimed, claim_token = (
@@ -739,7 +757,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/rearm-claim-held")
-    def rearm_claim_held_conclusion(key: str, body: RearmClaimHeldConclusionBody) -> dict:
+    def rearm_claim_held_conclusion(key: str, body: RearmClaimHeldConclusionBody) -> Json:
         result = _reservation_guard(
             lambda: queue.rearm_claim_held_conclusion(
                 key,
@@ -754,7 +772,7 @@ def register_spawn_routes(
     def validate_spawn_conclusion_claim(
         key: str,
         body: ValidateConclusionClaimBody,
-    ) -> dict:
+    ) -> Json:
         result = _reservation_guard(
             lambda: queue.validate_spawn_conclusion_claim(
                 key,
@@ -765,7 +783,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/tasks/{task_id}/rearm")
-    def rearm_spawn(task_id: str, body: RearmSpawnBody) -> dict:
+    def rearm_spawn(task_id: str, body: RearmSpawnBody) -> Json:
         try:
             result = queue.rearm_spawn(
                 task_id,
@@ -797,7 +815,7 @@ def register_spawn_routes(
         task_status: str | None = None,
         latest_only: bool = False,
         limit: int = 200,
-    ) -> list[dict]:
+    ) -> list[Json]:
         instance = None
         if any(value is not None for value in (pool_registration_id, pool_machine, pool_env)):
             from .pool_instances import PoolDefinitionError, pool_instance_identity
@@ -822,7 +840,7 @@ def register_spawn_routes(
             response.headers["X-Dispatch-Pool-Accountability"] = "pool-accountable/v1"
         return [
             {**_reservation_dict(r), **({"pool_accountable": True} if pool_accountable else {})}
-            for r in queue.list_reservations(
+            for r in cast(Iterable[SpawnReservation], queue.list_reservations(
                 task_id=task_id,
                 state=states,
                 repo=repo,
@@ -835,11 +853,11 @@ def register_spawn_routes(
                 task_status=task_statuses,
                 latest_only=latest_only,
                 limit=limit,
-            )
+            ))
         ]
 
     @app.get("/spawn-reservations/{key}")
-    def get_reservation(key: str) -> dict:
+    def get_reservation(key: str) -> Json:
         reservation = queue.get_reservation(key)
         if reservation is None:
             raise HTTPException(status_code=404, detail="no such reservation")
