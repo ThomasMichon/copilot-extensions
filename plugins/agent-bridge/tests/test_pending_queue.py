@@ -395,3 +395,102 @@ def test_strict_cli_bounds_before_client_creation(tail: list[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         parser.parse_args(["pending-queue", "native", "--worktree-id", "worktree", *tail])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("turn_state", ["running", "idle"])
+def test_resumed_receiver_keeps_original_unknown_handoff_and_rejects_old_incarnation(
+    queue_api: QueueAPI,
+    turn_state: str,
+) -> None:
+    _, api, db = queue_api
+    old = _enroll(db)
+    mid = db.enqueue_live_message("native", "sender", "original", time.time())
+    offer = compatible_inbox.poll(db, old, now=time.time(), limit=1)[0]
+    assert compatible_inbox.begin(db, old, mid, offer["handoff"]["id"], now=time.time())
+    db.record_live_message_handoff(
+        old,
+        mid,
+        offer["handoff"]["id"],
+        outcome="unknown",
+        now=time.time(),
+        compatible_consumer=True,
+    )
+    resumed = InboxConsumer("native", "resumed-receiver")
+    compatible_inbox.enroll(
+        db,
+        resumed,
+        expected_incarnation=old.incarnation,
+        now=time.time(),
+    )
+    db.execute_write(
+        "UPDATE live_sessions SET turn_state=? WHERE session_id='native'",
+        (turn_state,),
+    )
+    before = [dict(row) for row in db.execute_read("SELECT * FROM live_messages")]
+    view = api.get(PATH, params=PARAMS).json()
+    assert view["target"]["consumer_incarnation"] == resumed.incarnation
+    assert view["target"]["turn_state"] == turn_state
+    assert view["messages"][0]["stage"] == "unknown"
+    assert (
+        api.post(
+            PATH + "/reconcile",
+            json={**PARAMS, "consumer_incarnation": old.incarnation},
+        ).status_code
+        == 409
+    )
+    reconciled = api.post(
+        PATH + "/reconcile",
+        json={**PARAMS, "consumer_incarnation": resumed.incarnation},
+    )
+    assert reconciled.status_code == 200, reconciled.text
+    assert reconciled.json()["reconciled"]["prepared_message_ids"] == []
+    assert compatible_inbox.poll(db, resumed, now=time.time(), limit=1) == []
+    assert [dict(row) for row in db.execute_read("SELECT * FROM live_messages")] == before
+
+
+def test_worktree_successor_cannot_retarget_an_exact_original_queue(queue_api: QueueAPI) -> None:
+    _, api, db = queue_api
+    _enroll(db)
+    mid, reason = db.enqueue_live_message_if_fresh(
+        "native",
+        sender="sender",
+        body="exact original",
+        now=time.time(),
+        expected_session_id="native",
+        enrolled_inbox=True,
+        exact_session=True,
+    )
+    assert mid is not None and reason is None
+    db.register_live_session(
+        "successor",
+        machine=None,
+        cwd=None,
+        worktree_id="worktree",
+        repo=None,
+        branch=None,
+        pid=124,
+        process_started_at=101,
+        role=None,
+        now=time.time() + 1,
+    )
+    old = api.get(PATH, params=PARAMS)
+    assert old.status_code in {200, 404, 409}
+    if old.status_code == 200:
+        assert old.json()["target"]["session_id"] == "native"
+        assert old.json()["target"]["freshness"] == "stale-or-retired"
+    assert (
+        api.post(
+            PATH + "/reconcile",
+            json={**PARAMS, "consumer_incarnation": "receiver"},
+        ).status_code
+        == 409
+    )
+    current = api.get(PATH.replace("native", "successor"), params=PARAMS)
+    assert current.status_code == 200, current.text
+    assert current.json()["target"]["session_id"] == "successor"
+    assert current.json()["messages"] == []
+    original = db.execute_read(
+        "SELECT session_id,body,delivered_at FROM live_messages WHERE id=?", (mid,)
+    )[0]
+    assert original["session_id"] == "native" and original["body"] == "exact original"
+    assert original["delivered_at"] is None
