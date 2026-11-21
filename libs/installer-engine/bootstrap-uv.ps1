@@ -1,3 +1,36 @@
+function Invoke-UvBootstrapCapturedProcess {
+    param(
+        [Parameter(Mandatory)][string]$BootstrapPython,
+        [Parameter(Mandatory)][string]$ProcessHelper,
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgList,
+        [hashtable]$Environment,
+        [Parameter(Mandatory)][ref]$ErrorOutput,
+        [ValidateRange(1001, 2147483647)][int]$TimeoutMilliseconds
+    )
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    foreach ($path in @($BootstrapPython, $ProcessHelper)) {
+        if (-not [IO.Path]::IsPathRooted($path) -or -not [IO.File]::Exists($path)) {
+            throw 'Prepared tree capture requires existing absolute helper paths.'
+        }
+    }
+    # QPC is Python's monotonic clock on Windows, not a renewed child timeout.
+    # The original one-second reserve covers nested settlement, relay and the
+    # direct capture owner's final emergency retirement.
+    $deadline = ([Diagnostics.Stopwatch]::GetTimestamp() /
+        [double][Diagnostics.Stopwatch]::Frequency) +
+        (($TimeoutMilliseconds - $clock.ElapsedMilliseconds) / 1000.0) - 0.5
+    $arguments = @('-I', '-S', '-B', '-X', 'utf8', $ProcessHelper,
+        '--deadline', $deadline.ToString('R', [Globalization.CultureInfo]::InvariantCulture),
+        '--parent-pid', [string]$PID,
+        '--', $FilePath) + $ArgList
+    $remaining = [int]($TimeoutMilliseconds - $clock.ElapsedMilliseconds)
+    if ($remaining -le 250) { throw 'Prepared tree capture deadline expired before launch.' }
+    Invoke-Hidden -FilePath $BootstrapPython -ArgList $arguments -Environment $Environment `
+        -InputText '' -ErrorOutput $ErrorOutput -TimeoutMilliseconds $remaining -CleanupMilliseconds 250 `
+        -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+}
+
 function Get-UvBootstrapEnvironment {
     return @{
         UV_PYTHON = $null; UV_PYTHON_PREFERENCE = $null
