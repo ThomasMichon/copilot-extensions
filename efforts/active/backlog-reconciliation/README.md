@@ -1471,6 +1471,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [outside-wave coverage register](roadmap-coverage-reconciliation.md)
+accounts for the first 32 identities in the existing finite 153-issue
+reconciliation lane, retaining research, freshness, provenance and interpretation
+gaps rather than starting their investigations again. The
+[dated journal](journal/2026/11.21-outside-wave-coverage-reconciliation.md)
+records actual #13868 delivery, three completed metadata-enumeration repairs
+and distinct #13775/#13781/#13866 continuations. The remaining 121 cohort
+identities and thirteen later outside-wave identities stay separate; all
+campaign check states and six roadmap gates remain unchanged.
+
 The [relationship and Dispatch receiving update](journal/2026/11.21-relationship-and-dispatch-receiving.md)
 records actual #13863 delivery and acknowledged #13778 completion, then
 distinguishes four new member-authored source reports from production caller,
