@@ -42,6 +42,9 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
         assert result("host-a") is DriverMatch.MATCH
         assert columns <= {"id", "owner", "owner_session_id", "completed_by"}
         conn.set_authorizer(None)
+        conn.execute("UPDATE tasks SET completed_by='host-c/other-tree' WHERE id=?", (task.id,))
+        assert result("host-b") is DriverMatch.UNKNOWN
+        conn.execute("UPDATE tasks SET completed_by='host-a/tree' WHERE id=?", (task.id,))
         conn.execute(
             "INSERT INTO task_attachments(task_id,session_id,worktree_id,machine,attached_at)"
             " VALUES (?,'native-id','tree','host-c',1)", (task.id,),

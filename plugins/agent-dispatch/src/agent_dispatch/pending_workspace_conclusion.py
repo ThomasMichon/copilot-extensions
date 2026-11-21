@@ -84,7 +84,10 @@ def _hosts(conn: sqlite3.Connection, row: sqlite3.Row) -> set[str]:
             if not native:
                 return set()
         if row["owner_session_id"] in (session, native):
-            if machine := machine_from_owner(row["completed_by"] or owner):
+            worker = row["completed_by"] or owner
+            if worker and worker.partition("/")[2] != row["worktree"]:
+                return set()
+            if machine := machine_from_owner(worker):
                 hosts.add(normalize_host(machine))
         attachments = conn.execute(
             "SELECT machine FROM task_attachments "
