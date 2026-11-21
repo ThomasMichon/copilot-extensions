@@ -412,7 +412,9 @@ the non-public approval conversation.
 
 The [native-timeout disposition continuation](journal/2026/11.21-native-timeout-disposition-boundaries.md)
 qualifies thirteen new #11175 discussions while reusing its unchanged
-original and ten earlier discussions. Exact historical dispositions, one
+current body and ten earlier discussions. Its unavailable original-edit
+diff and partial historical requirement union remain explicit. Exact
+historical dispositions, one
 PR-scoped class policy, diagnostic nonreproduction and new failures remain
 distinct; eight current PR states do not establish whole-request fulfillment.
 Six finite retained-delivery judgments and unchanged #11494 ownership are
