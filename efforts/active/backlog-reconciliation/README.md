@@ -410,6 +410,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current force-identity contribution](roadmap-selected-force-identity.md)
+retains #5006's independent keeper lanes and credits delivered birth/caller
+foundations. Its qualified force/API distinction supports a finite proposal,
+not implementation or a predecessor-cleanup veto on incoming installation.
+The [journal](journal/2026/11.21-current-force-identity.md) records actual
+#13925 delivery and the complete 899-open census; all parent gates remain.
+
 The [passive-roster and delivery-frontier unit](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md)
 records #13833's reviewed merge/parent return and two separately acknowledged
 source-request completions. It proposes #11298's finite passive-provider

@@ -95,6 +95,12 @@ work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
 
+The [current force-identity contribution](roadmap-selected-force-identity.md)
+retains #5006's P1 force-capable caller boundary and separately owned cleanup,
+causal-fixture and Darwin-monitor exits. Its target-safety/exit requirements
+do not make predecessor cleanup an incoming-installation veto or add an edge
+to whole installer, singleton, handoff or claim programs.
+
 The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
 removes accepted OA/OAV and task-closeout source lanes from #4619's missing-work
 selection while retaining their actual evidence tiers. Its BOTH-store

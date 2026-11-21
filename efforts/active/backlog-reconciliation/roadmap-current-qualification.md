@@ -25,6 +25,16 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 selected current force-identity contribution
+
+The [bounded force-identity proposal](roadmap-selected-force-identity.md)
+reads the entire current #5006 contract before its qualified source/API delta.
+The still-bare force fallback and shared SIGTERM-only primitive require a
+force-preserving contribution, not a weaker substitution. Original owners,
+four independent keeper lanes and incoming-installation completion survive.
+The [journal](journal/2026/11.21-current-force-identity.md) records actual
+#13925 delivery and the 899-open census, not technical completion.
+
 ## 2026-11-21 selected current handoff-atomicity contribution
 
 The [bounded handoff-atomicity proposal](roadmap-selected-handoff-atomicity.md)
