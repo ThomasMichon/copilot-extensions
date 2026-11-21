@@ -2539,6 +2539,19 @@ Exact-base whole-file typing passes again on both platforms. No reset, stash,
 lock/ref repair, peer edit or resource release is used.
 The eventual published head still requires full source CI and current review.
 
+Source PR #13905 opens at `ebe38055d7208eed0e3c92b31450aa1e48ee6380`.
+Actual published-base verification retains every entry from
+`926e1e831cacf900580bee2ca50fd4a30c4f48bc` plus the fourteen controls;
+all eight observed Python reads remain byte-identical.
+Copilot approval `6005850205` names that exact head, but source CI
+`44912578154` fails the required changefile-presence step and aggregate.
+The unit job succeeds; this is not complete required CI or merge readiness.
+The guard correctly identifies `promotion_unit_contract.py` in Worktree
+Manager's declared packaged helper footprint. The omitted patch intent is
+added through the standard changefile tool, without a version hand-edit,
+runtime deployment, CI bypass or manual rerun. Fresh source CI and review
+are required after publishing that correction.
+
 A later writer migration must establish support at the actual selected
 consumers and reconcile raw node-list assertions before use. Source merge,
 released/selected reader adoption and writer/control activation remain separate.

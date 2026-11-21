@@ -11369,6 +11369,9 @@ or bypass source, recipe, execution or reuse validation. Candidate composition,
 proof profiles and the explicit Windows-native schema remain unchanged.
 
 This is a reader-first expansion, not writer activation or a workflow change.
+The shared admission module also ships in Worktree Manager's declared
+`runtime-source-tools` footprint; a source merge or patch release intent is not
+proof that an installed consumer has selected the capable reader.
 The actual prior reader still accepts v1 and refuses v2; keeping the repository
 inventory and emitted packets in v1 preserves that rollback path today.
 A later writer change must prove capable readers at each actual selected
