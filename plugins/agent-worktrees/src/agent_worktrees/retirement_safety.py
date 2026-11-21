@@ -19,9 +19,11 @@ class RetirementBlocker:
 
 def retains_artifact_metadata(record: WorktreeRecord) -> bool:
     """Keep retained-byte custody and uncertain publication history after retirement."""
-    from . import pr_creation_reconcile
+    from . import pr_creation_reconcile, pr_foreign_receipts
 
-    return any(pr_creation_reconcile.requires_qualification(pr) for pr in record.prs) or any(
+    return pr_foreign_receipts.owner_receipts(record)[0] or any(
+        pr_creation_reconcile.requires_qualification(pr) for pr in record.prs
+    ) or any(
         claim.has_producer and isinstance(claim.producer, dict)
         and (
             claim.producer.get("lifetime") == "artifact-owned"
@@ -61,6 +63,10 @@ def pending_prs(record: WorktreeRecord, *, live_only: bool = False) -> list[PRRe
 
 def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
     """Require terminal or freshly fenced PR disposition and released ownership."""
+    from . import pr_foreign_receipts
+
+    if pr_foreign_receipts.owner_receipts(record)[1]:
+        return RetirementBlocker("unknown-publication", "Foreign PR creation is pending or unconfirmed; retain its owner")
     pending = pending_prs(record)
     if pending:
         numbers = ", ".join(
