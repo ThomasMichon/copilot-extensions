@@ -87,6 +87,41 @@ def _pull(number: int = 7, source: str = "contributor/renamed-source") -> dict[s
     }
 
 
+@pytest.mark.parametrize("operation", ["lookup", "create"])
+@pytest.mark.parametrize("port", [443, 8443])
+def test_provider_pull_url_compares_effective_https_authority(
+    monkeypatch: pytest.MonkeyPatch, operation: str, port: int,
+) -> None:
+    payload = _pull()
+
+    def run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        data: object = [[payload]] if operation == "lookup" else payload
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(github, "run_cli", run)
+    provider = github.GitHubProvider()
+
+    def invoke() -> PullResult | None:
+        endpoint = f"https://forge.example.test:{port}"
+        if operation == "lookup":
+            return provider.find_pull_by_source(
+                "upstream/target", "contributor/renamed-source", "topic", api_base=endpoint,
+            )
+        return provider.create_pull(PRScope(
+            repo="upstream/target", head="contributor:topic", base="dev",
+            title="Fix", body="", api_base=endpoint,
+            head_identity=("forge.example.test" + (f":{port}" if port != 443 else "")
+                           + "/contributor/renamed-source"),
+        ))
+
+    if port == 443:
+        result = invoke()
+        assert result and result.number == 7
+    else:
+        with pytest.raises(ProviderError):
+            invoke()
+
+
 @pytest.mark.parametrize("qualified", [False, True])
 @pytest.mark.parametrize("duplicate", [False, True])
 def test_source_lookup_uses_supported_query_and_exact_repository_across_pages(

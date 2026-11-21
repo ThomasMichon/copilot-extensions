@@ -7,9 +7,10 @@ from datetime import datetime, timedelta
 import json
 
 from . import config as cfg, tracking
+from .providers.base import PullResult
 
 
-def authority(pr: tracking.PRRecord) -> tuple:
+def authority(pr: tracking.PRRecord) -> tuple[object, ...]:
     return tuple(getattr(pr, name) for name in (
         "branch", "repo", "provider", "number", "url", "state",
         "base_sha", "head_sha", "patch_id", "remote", "head_repo",
@@ -62,18 +63,27 @@ def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord
             raise ValueError("Tracked PR authority changed before publication; reload it before retrying.")
 
 
-def persist_pull(config, record, target, pull, *, head_sha: str, marker_published: bool, session: str):
-    from . import pr_ops, pr_publish
+def persist_pull(
+    config: cfg.Config, record: tracking.WorktreeRecord, target: tracking.PRRecord, pull: PullResult,
+    *, head_sha: str, marker_published: bool, session: str,
+) -> str | None:
+    from . import pr_ops, pr_publish, pr_unverified_creation
 
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     with pr_publish.metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
+        pr_unverified_creation.require_owner(fresh, record)
         current = pr_publish._publication_pr(fresh, target)
-        if not matches(current, target):
+        if current is None or not matches(current, target):
             raise ValueError("Provider PR opened, but tracking authority changed; reconcile the provider identity.")
         current.url = pull.url
         current.number = pull.number
         current.state = pull.state or current.state
+        if current.creation.get("provider_outcome") == "publishing":
+            current.creation.update(
+                provider_outcome="verified", provider_number=str(pull.number) if pull.number is not None else "",
+                provider_url=pull.url,
+            )
         current.pr_revision += 1
         if marker_published:
             current.attribution_head = head_sha
@@ -87,7 +97,10 @@ def persist_pull(config, record, target, pull, *, head_sha: str, marker_publishe
         return claimed_ref
 
 
-def provisional_lease(pr, remote: str, branch: str, cwd: str, *, record=None, prcfg=None) -> str | None:
+def provisional_lease(
+    pr: tracking.PRRecord | None, remote: str, branch: str, cwd: str, *,
+    record: tracking.WorktreeRecord | None = None, prcfg: cfg.PRConfig | None = None,
+) -> str | None:
     """Create an absent ref or resume only a prepared, exact first push."""
     from . import pr_creation_state, pr_publish
 
@@ -120,7 +133,7 @@ def unpublished_retry(
     pr: tracking.PRRecord | None, branch: str, provider: str, repo: str,
 ) -> bool:
     """Match a never-published attempt without borrowing another destination."""
-    if unpublished(pr) and pr.branch == branch and (pr.provider, pr.repo) != (provider, repo):
+    if pr is not None and unpublished(pr) and pr.branch == branch and (pr.provider, pr.repo) != (provider, repo):
         raise ValueError("Unpublished PR destination changed; select a distinct head before retrying.")
     return bool(
         unpublished(pr) and pr is not None

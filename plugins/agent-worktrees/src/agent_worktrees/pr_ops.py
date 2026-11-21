@@ -1267,25 +1267,20 @@ def _open_via_provider(
     scope.expected_head_sha = head_sha
     if draft:
         scope.draft = True
-    try:
-        if record is not None:
-            pr_publication_state.require_current(record, target_pr)
-        provider = providers.get_provider(prcfg.provider)
-        token = providers.account_token_for_slug(scope.repo, prcfg)
-        pull = provider.create_pull(scope, token=token)
-    except (providers.ProviderError, OSError) as e:
-        if pr_unverified_creation.retain(result, config, record, target_pr, e):
-            return
-        result["pr_open_error"] = str(e)
-        result["pr_opened"] = False
-        result["draft"] = False  # nothing opened -> no draft was created
+    created = pr_unverified_creation.create(result, config, record, target_pr, prcfg, scope)
+    if created is None:
         return
+    provider, token, pull = created
 
     if record is not None:
-        claimed_ref = pr_publication_state.persist_pull(
-            config, record, target_pr, pull,
-            head_sha=head_sha, marker_published=marker_published, session=session,
-        )
+        try:
+            claimed_ref = pr_publication_state.persist_pull(
+                config, record, target_pr, pull,
+                head_sha=head_sha, marker_published=marker_published, session=session,
+            )
+        except (OSError, ValueError, TimeoutError) as exc:
+            pr_unverified_creation.retain(result, config, record, target_pr, exc, pull=pull)
+            return
         if claimed_ref:
             claim_history.record_pr_event(
                 claimed_ref, worktree_id=record.worktree_id,

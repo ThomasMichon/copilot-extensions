@@ -13,7 +13,7 @@ from typing import Any, cast
 import pytest
 import yaml
 
-from agent_worktrees import config as cfg, tracking
+from agent_worktrees import config as cfg, tracking, tracking_lifecycle
 from agent_worktrees.providers import github
 from agent_worktrees.providers.base import PRScope, ProviderError, PullResult
 from test_parallel_publication import git
@@ -506,3 +506,292 @@ def test_ordinary_creation_retains_unknown_receipt_without_claiming_or_recreatin
         assert current.prs[0].number is None and current.prs[0].state == "creating"
         assert current.resources == before
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("other_project", [False, True])
+@pytest.mark.parametrize("retry_new", [False, True])
+def test_foreign_pending_source_excludes_other_owners_and_bases(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any, tmp_path: Path,
+    other_project: bool, retry_new: bool,
+) -> None:
+    from agent_worktrees import installer, pr_config, pr_foreign_create
+    from agent_worktrees.providers import base as providers
+    from test_pr_foreign_create import _config, _foreign_resolution
+
+    ledger, wid = _tracking_setup
+    other = tmp_path / "other-tracking" if other_project else ledger
+    other.mkdir(exist_ok=True)
+    second_id = "another-owner"
+    tracking_lifecycle.create_new_record(
+        second_id, "worktree/another", str(tmp_path / "another"),
+        "another-project" if other_project else "caller-repo", "test", "linux", other,
+    )
+    project = "another-project" if other_project else "caller-repo"
+    registry = tmp_path / "projects.yaml"
+    registry.write_text(yaml.safe_dump({"projects": {"caller-repo": {}, project: {}}}), encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
+    active_project = "caller-repo"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: (
+        other if (name or active_project) == "another-project" else ledger
+    ))
+    resolution = cast(Callable[..., pr_config.ForeignRepoResolution], _foreign_resolution)(provider="github")
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    calls: list[PRScope] = []
+
+    class GitHub(github.GitHubProvider):
+        def find_pull_by_source(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
+            calls.append(scope)
+            raise ProviderError("Transport ended without a provider result")
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: GitHub())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    config = cast(Callable[..., cfg.Config], _config)()
+    options: dict[str, Any] = dict(
+        target_repo="owner/other-repo", from_branch="contributor:topic",
+        source_repository="contributor/source", title="Fix",
+    )
+    first = pr_foreign_create.create_foreign_pr_from_branch(wid, config, **options)
+    active_project = project
+    second = pr_foreign_create.create_foreign_pr_from_branch(
+        second_id, cast(Callable[..., cfg.Config], _config)(project),
+        base="different-base", new=retry_new, **options,
+    )
+    assert first["publication_state"] == second["publication_state"] == "unknown"
+    assert not second.get("claimed") and len(calls) == 1
+    assert not list(other.glob(f"{second_id}.foreign-pr-receipts/*.json"))
+
+
+def test_foreign_pending_default_port_alias_blocks_a_legacy_receipt_key(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any,
+) -> None:
+    from agent_worktrees import pr_config, pr_foreign_create
+    from agent_worktrees.providers import base as providers
+    from test_pr_foreign_create import _config, _foreign_resolution
+    import hashlib
+
+    ledger, wid = _tracking_setup
+    resolution = cast(Callable[..., pr_config.ForeignRepoResolution], _foreign_resolution)(provider="github")
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    calls: list[PRScope] = []
+
+    class GitHub(github.GitHubProvider):
+        def find_pull_by_source(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
+            calls.append(scope)
+            raise ProviderError("Unknown provider outcome")
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: GitHub())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    config = cast(Callable[..., cfg.Config], _config)()
+    options: dict[str, Any] = dict(target_repo="owner/other-repo", from_branch="contributor:topic",
+                                   source_repository="contributor/source", title="Fix")
+    pr_foreign_create.create_foreign_pr_from_branch(wid, config, **options)
+    path = next(ledger.glob("*.foreign-pr-receipts/*.json"))
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["binding"]["endpoint"] = "github.com:443"
+    legacy_key = hashlib.sha256(json.dumps(value["binding"], sort_keys=True).encode()).hexdigest()
+    legacy_path = path.with_name(legacy_key + ".json")
+    path.rename(legacy_path)
+    legacy_path.write_text(json.dumps(value), encoding="utf-8")
+    before = legacy_path.read_bytes()
+    result = pr_foreign_create.create_foreign_pr_from_branch(wid, config, new=True, **options)
+    assert result["publication_state"] == "unknown" and len(calls) == 1, result
+    assert legacy_path.read_bytes() == before and not path.exists()
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_foreign_receipts_protect_owner_retirement_and_retained_metadata(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any, verified: bool,
+) -> None:
+    from agent_worktrees import pr_foreign_receipts, retirement_safety
+    from test_pr_foreign_create import _config
+
+    ledger, wid = _tracking_setup
+    record = tracking.load_record(ledger / f"{wid}.yaml")
+    attempt = pr_foreign_receipts.Attempt(
+        cast(Callable[..., cfg.Config], _config)(), record.yaml_path, record,
+        provider="github", endpoint="github.com", target="owner/other-repo",
+        source="contributor/source", branch="topic",
+    )
+    attempt.reserve("dev", None)
+    for finish in (False, True):
+        if finish:
+            attempt.finish(PullResult(number=7, url="https://github.com/owner/other-repo/pull/7"),
+                           verified=verified)
+        fresh = tracking.load_record(record.yaml_path)
+        assert retirement_safety.retains_artifact_metadata(fresh)
+        blocker = retirement_safety.retirement_blocker(fresh)
+        if verified and finish:
+            assert blocker is None
+            assert tracking.retire_record(fresh, ledger)
+            assert record.yaml_path.is_file() and attempt.path.is_file()
+        else:
+            assert blocker is not None and blocker.bucket == "unknown-publication"
+            before = record.yaml_path.read_bytes()
+            with pytest.raises(ValueError, match="Foreign PR"):
+                tracking.retire_record(fresh, ledger)
+            assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("stage", ["reservation", "unverified", "verified", "transport"])
+def test_ordinary_prepost_hold_survives_failed_provider_receipt_persistence(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    from agent_worktrees import pr_ops, providers
+    from agent_worktrees.providers.github_pull_source import CreatedSourceMismatch
+
+    config, caller, _owner, _workspace = native_source_owners
+    target = tracking.PRRecord(pr_id="pending", branch="pr/topic", repo="upstream/target",
+                               provider=config.default_repo.pr.provider, state="creating")
+    caller.prs = [target]
+    tracking.save_record(caller)
+    atomic_write = tracking._atomic_write
+    unavailable = stage == "reservation"
+    calls: list[PRScope] = []
+
+    def write(path: Path, content: str | bytes) -> None:
+        if path == caller.yaml_path and unavailable:
+            raise OSError("Fixture owner receipt persistence unavailable")
+        atomic_write(path, content)
+
+    def create(scope: PRScope, **_kwargs: Any) -> PullResult:
+        nonlocal unavailable
+        calls.append(scope)
+        unavailable = True
+        pull = PullResult(number=7, url="https://forge.example.test/upstream/target/pull/7", state="open")
+        if stage == "unverified":
+            raise CreatedSourceMismatch(pull)
+        if stage == "transport":
+            raise ProviderError("Unknown transport result")
+        return pull
+
+    monkeypatch.setattr(tracking, "_atomic_write", write)
+    monkeypatch.setattr(providers, "get_provider", lambda *_: SimpleNamespace(create_pull=create))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    for _ in range(2):
+        loaded = tracking.load_record(caller.yaml_path)
+        result: dict[str, Any] = {"success": True, "repo": target.repo, "branch": target.branch,
+                                  "remote": "origin", "base_sha": "b" * 40}
+        pr_ops._open_via_provider(
+            result, config, loaded, loaded.prs[0], "Fix", "", caller.worktree_id, "a" * 40,
+            prcfg=config.default_repo.pr, draft=True,
+        )
+        assert not result.get("claimed") and result.get("pr_open_error"), result
+    assert len(calls) == (0 if stage == "reservation" else 1)
+    if stage != "reservation":
+        retained = tracking.load_record(caller.yaml_path).prs[0]
+        assert retained.number is None and retained.creation["provider_outcome"] in ("publishing", "unknown")
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_ordinary_success_settles_the_hold_and_reuses_the_selected_provider_for_review(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch, managed: bool,
+) -> None:
+    from agent_worktrees import pr_ops, providers
+
+    config, caller, _owner, _workspace = native_source_owners
+    target = tracking.PRRecord(pr_id="pending", branch="pr/topic", repo="upstream/target",
+                               provider=config.default_repo.pr.provider, state="creating")
+    caller.prs = [target]
+    tracking.save_record(caller)
+    review_calls: list[bool] = []
+
+    def create(scope: PRScope, **kwargs: Any) -> PullResult:
+        assert kwargs["token"] == "selected-credential"
+        if managed:
+            assert tracking.load_record(caller.yaml_path).prs[0].creation["provider_outcome"] == "publishing"
+        return PullResult(number=7, url="https://forge.example.test/upstream/target/pull/7",
+                          state="open", head_sha="a" * 40)
+
+    backend = SimpleNamespace(create_pull=create)
+
+    def review(flow: Any, selected: Any, repo: str, number: int | None, **kwargs: Any) -> str:
+        assert selected is backend and repo == "upstream/target" and number == 7
+        assert kwargs["token"] == "selected-credential" and kwargs["expected_head_sha"] == "a" * 40
+        review_calls.append(True)
+        return "Review eligibility inspected"
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: "selected-credential")
+    monkeypatch.setattr(pr_ops, "self_merge_bypass_note", review)
+    result: dict[str, Any] = {"success": True, "repo": target.repo, "branch": target.branch,
+                              "remote": "origin", "base_sha": "b" * 40}
+    pr_ops._open_via_provider(
+        result, config, caller if managed else None, target, "Fix", "", caller.worktree_id,
+        "a" * 40, prcfg=config.default_repo.pr,
+    )
+    assert result["success"] and result["pr_opened"] and result["number"] == 7, result
+    assert result["self_merge_note"] == "Review eligibility inspected" and review_calls == [True]
+    if managed:
+        fresh = tracking.load_record(caller.yaml_path)
+        assert fresh.prs[0].number == 7 and fresh.prs[0].creation["provider_outcome"] == "verified"
+        assert any(claim.kind == "pr" and claim.is_live for claim in fresh.resources)
+
+
+def test_foreign_reservation_is_atomic_across_real_project_processes(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import sys
+    import time
+    from agent_procutil.owned_process import run_caller_owned
+
+    for project in ("first", "second"):
+        ledger = tmp_path / project / "worktrees"
+        ledger.mkdir(parents=True)
+        tracking_lifecycle.create_new_record(
+            project, "worktree/" + project, str(tmp_path / project / "checkout"),
+            project, "test", "linux", ledger,
+        )
+    (tmp_path / "projects.yaml").write_text(
+        yaml.safe_dump({"projects": {"first": {}, "second": {}}}), encoding="utf-8",
+    )
+    code = """
+import sys, time
+from pathlib import Path
+from machine_transport import detect_platform
+from agent_worktrees import config as cfg, installer, pr_foreign_receipts, tracking
+root, project = Path(sys.argv[1]), sys.argv[2]
+cfg.install_dir = lambda: root / 'installation'
+cfg.tracking_dir = lambda name=None: root / (name or project) / 'worktrees'
+installer.projects_yaml_path = lambda: root / 'projects.yaml'
+config = cfg.Config(srcroot=str(root), machine='test', platform=detect_platform(),
+repo_name=project, repos={project: cfg.RepoConfig(
+    anchor=str(root / project / 'anchor'), worktree_root=str(root / project / 'worktrees'),
+)})
+record = tracking.load_record(cfg.tracking_dir() / (project + '.yaml'))
+attempt = pr_foreign_receipts.Attempt(
+    config, record.yaml_path, record, provider='github', endpoint='github.com',
+    target='upstream/target', source='contributor/source', branch='topic',
+)
+assert attempt.pending() is None
+(root / (project + '.ready')).write_text('ready')
+deadline = time.monotonic() + 10
+while not (root / 'go').exists():
+    assert time.monotonic() < deadline
+    time.sleep(0.01)
+print('reserved' if attempt.reserve(project + '-base', None) is None else 'blocked')
+"""
+
+    def run(project: str) -> subprocess.CompletedProcess[str]:
+        return run_caller_owned(
+            [sys.executable, "-c", code, str(tmp_path), project], timeout=15,
+            max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(run, project) for project in ("first", "second")]
+        try:
+            deadline = time.monotonic() + 10
+            while not all((tmp_path / (project + ".ready")).exists() for project in ("first", "second")):
+                assert time.monotonic() < deadline, "Both real publishers must reach pre-reservation admission"
+                time.sleep(0.01)
+            (tmp_path / "go").write_text("go", encoding="utf-8")
+        finally:
+            results = [job.result(timeout=20) for job in jobs]
+    assert all(result.returncode == 0 for result in results), [result.stderr for result in results]
+    assert sorted(result.stdout.strip() for result in results) == ["blocked", "reserved"]
+    assert len(list(tmp_path.glob("*/worktrees/*.foreign-pr-receipts/*.json"))) == 1

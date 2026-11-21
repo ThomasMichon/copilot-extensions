@@ -31,6 +31,23 @@ def matches(pull: PullResult, source: str, branch: str, endpoint: str) -> bool:
     return bool(expected) and pull.head_ref == branch and _identity(pull.head_url, "").casefold() == expected.casefold()
 
 
+def endpoint_identity(endpoint: str) -> str:
+    """Share the HTTPS authority across explicit and implicit default ports."""
+    try:
+        parsed = urlsplit("https://" + endpoint)
+        if (
+            not parsed.hostname or parsed.username or parsed.password
+            or parsed.path or parsed.query or parsed.fragment
+        ):
+            raise ValueError
+        host = parsed.hostname.casefold()
+        if ":" in host:
+            host = "[" + host + "]"
+        return host if parsed.port in (None, 443) else host + ":" + str(parsed.port)
+    except ValueError as exc:
+        raise ProviderError("GitHub returned an invalid HTTPS authority.") from exc
+
+
 def validate_url(raw_url: str, number: int | None, repository: str, endpoint: str) -> None:
     """Require the returned URL to name the selected forge, target and number."""
     if type(number) is not int or number <= 0:
@@ -39,7 +56,7 @@ def validate_url(raw_url: str, number: int | None, repository: str, endpoint: st
         url = urlsplit(raw_url)
         valid_url = (
             not any(character.isspace() or ord(character) < 32 for character in raw_url)
-            and url.scheme == "https" and url.netloc.casefold() == endpoint.casefold()
+            and url.scheme == "https" and endpoint_identity(url.netloc) == endpoint_identity(endpoint)
             and not url.username and not url.password and not url.query and not url.fragment
             and url.path.removesuffix("/").casefold() == f"/{_slug(repository)}/pull/{number}".casefold()
         )

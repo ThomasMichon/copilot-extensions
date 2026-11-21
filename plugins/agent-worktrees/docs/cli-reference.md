@@ -1115,15 +1115,26 @@ Foreign GitHub creation reserves an owner- and revision-fenced attempt in
 the calling project's tracking directory before the provider call.
 `<worktree-id>.foreign-pr-receipts/` retains these attempts separately from
 the caller's checkout PR list and claims. An uncertain attempt blocks another
-create for the same target/source branch, including `--new`; failed receipt
+create for the same target/source branch across adopted projects and calling
+owners, including a different base or `--new`. Explicit HTTPS port 443 and
+the default authority share this identity, including retained older receipt keys;
+nondefault ports remain distinct. Failed receipt
 persistence leaves the earlier reservation blocking rather than permitting
 a replay. Do not edit or remove that evidence to retry. Plain errors include
 the known unverified number and URL as well as the unknown outcome.
+Pending attempts prevent native owner retirement; verified receipt history
+still retains the owner's metadata after normal retirement.
 The same receipt rule applies to ordinary fork `create-pr`: a malformed URL
 does not discard a valid number, and an unverified receipt is not claimed
-or automatically recreated. The command reports failure with the known receipt
+or automatically recreated. Ordinary managed creation persists its hold before
+the provider call and settles it in the same write as a verified PR association.
+Transport uncertainty or a failed completion write leaves the hold in place;
+if the initial reservation cannot persist, no provider call occurs.
+The command reports failure with any known receipt
 and unknown outcome, not a successful authoritative `pr` handle. Branch-only
-numberless healing cannot replace a retained unverified provider identity.
+numberless healing cannot replace a pending or retained unverified provider identity.
+These participating-client fences do not supply historical publisher exclusion
+or settle remote effects accepted before their admission.
 
 ### Owner rewrite of a private PR branch
 
