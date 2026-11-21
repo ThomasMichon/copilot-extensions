@@ -39,6 +39,23 @@ and a string audit reason before any database access; it does not coerce IDs.
 Inspect reservation conclusion progress afterward; the existing supervisor
 claims a tokenized, expiring cleanup lease before executing the retry.
 
+### Read pending conclusions without claiming a retry
+
+`pending_workspace_conclusion(conn, machine=..., worktree=...)` in
+`agent_dispatch.pending_workspace_conclusion` reads the reservation owner’s
+`pending` conclusion markers in the caller's SQLite snapshot. A completed task,
+a settled process slot, a future retry time or a cleanup claim already in flight
+does not discharge that marker. The supervisor may still send a same-owner
+conclusion prompt for the recorded local body.
+
+The read uses a partial workspace index and the reservation owner's host evidence.
+A matching host returns `MATCH`; missing or conflicting host evidence returns
+`UNKNOWN` unless a match is found. If more than 32 pending candidates for that
+tree would need examination, absence is not established. `CLEAR` is specific
+to pending work on this workspace; it says nothing about native-only work or
+other cleanup and execution gates. The read does not claim, validate, resume,
+or schedule a retry.
+
 ## Fences and retained evidence
 
 Recovery requires an already-recorded `release_requested` obligation, in addition
