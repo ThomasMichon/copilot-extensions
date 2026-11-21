@@ -315,7 +315,13 @@ function Invoke-Hidden {
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     if ($Environment) {
-        foreach ($name in $Environment.Keys) { $psi.EnvironmentVariables[$name] = $Environment[$name] }
+        foreach ($name in $Environment.Keys) {
+            if ($null -eq $Environment[$name]) {
+                $psi.EnvironmentVariables.Remove($name)
+            } else {
+                $psi.EnvironmentVariables[$name] = $Environment[$name]
+            }
+        }
     }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true

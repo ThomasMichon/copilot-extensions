@@ -175,6 +175,10 @@ Its shared `Invoke-Hidden` captures both native streams concurrently without
 allocating a console, preserves exit status, and can return stderr separately
 for precise refusal diagnostics. Its PowerShell 5.1 argument encoding preserves
 empty/quoted arguments without unnecessarily quoting Python launcher selectors.
+Its `Environment` overrides apply only to the child: a null value removes an
+inherited variable, an empty string remains an empty value, and other values
+replace the child's copy. The original process environment is unchanged in
+captured, bounded and streaming modes.
 Source selection and deferred stamping support a host exposing only `py.exe`.
 Native driver ingress qualifies an existing Python 3.11+ physical base before
 any driver action: application commands, launcher-listed local or UNC paths,
