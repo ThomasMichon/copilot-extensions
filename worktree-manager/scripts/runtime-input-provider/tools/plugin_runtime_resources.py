@@ -18,12 +18,12 @@ def application_resources(source: Path, package: str) -> dict[str, Path]:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id in (
-                    "APPLICATION_RESOURCES", "APPLICATION_METADATA_RESOURCES",
+                    "APPLICATION_RESOURCES", "APPLICATION_METADATA_RESOURCES", "APPLICATION_SOURCE_FALLBACKS",
                 ):
                     if target.id in declarations:
                         raise PromotionArtifactError("duplicate trusted application resource declaration")
                     declarations[target.id] = ast.literal_eval(node.value)
-    if set(declarations) != {"APPLICATION_RESOURCES", "APPLICATION_METADATA_RESOURCES"}:
+    if set(declarations) != {"APPLICATION_RESOURCES", "APPLICATION_METADATA_RESOURCES", "APPLICATION_SOURCE_FALLBACKS"}:
         raise PromotionArtifactError("invalid trusted application resource declaration")
     patterns = declarations["APPLICATION_RESOURCES"][package]
     resources = {
@@ -38,10 +38,13 @@ def application_resources(source: Path, package: str) -> dict[str, Path]:
         for pattern in declarations["APPLICATION_METADATA_RESOURCES"].get(package, ())
         for path in source.glob(pattern) if path.is_file()
     })
+    for destination, relative, names in declarations["APPLICATION_SOURCE_FALLBACKS"].get(package, ()):
+        for name in names:
+            resources.setdefault(f"{package}/_runtime_assets/{destination}/{name}", source / relative / name)
     return resources
 
 
-def build_inputs(source: Path, *, root: Path | None) -> tuple[dict, dict[str, Path]]:
+def build_inputs(source: Path, *, root: Path | None) -> tuple[dict[str, object], dict[str, Path]]:
     """Admit only the registered hook; no candidate build code runs here."""
     if root is not None and source.absolute() == (
         root / "plugins" / "agent-worktrees"

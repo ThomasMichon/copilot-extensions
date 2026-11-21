@@ -67,6 +67,23 @@ remain active. Installer readiness and background service deadlines are unchange
 
 ## Prepared application installation
 
+To see why a target does or does not need Fleet Manager, run this with
+the Manager installation's Python:
+
+```powershell
+python -m worktree_manager.fleet_demand --knowledge-root C:\path\to\knowledge --target machine-a
+```
+
+The source is `.copilot-extensions/fleet-manager/config.json` under that
+knowledge root. `extensions.role_bindings.bindings.<role>.target` assigns
+the role to a machine; `roles.<role>.kind` identifies a service role. One or
+more matching service roles mean `install_required: true`. The JSON report
+names the config, target and matching roles. The provider host, current
+machine and Worktrees plugin list do not select Fleet. There is no second
+enable flag to keep in sync. A valid config with no match reports `false`;
+a missing or invalid config exits nonzero without an install decision.
+The command reports desired installation, not whether a service is running.
+
 To inspect what a particular worktree needs, invoke
 `python -m worktree_manager.repository_suite_roster` with the staged Manager's
 Python. `--worktree` selects the checkout with the composed plugin settings;

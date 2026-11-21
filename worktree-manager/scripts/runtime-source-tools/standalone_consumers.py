@@ -17,7 +17,10 @@ def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Pa
         return ()
     if component not in STANDALONE_CONSUMERS:
         raise ValueError(f"unknown standalone component: {component}")
-    resources = (source_root / "libs" / "versioned-runtime",)
+    resources: tuple[Path, ...] = (source_root / "libs" / "versioned-runtime",)
+    if component == "worktree-manager":
+        source = source_root / "fleet-manager" / "src" / "fleet_manager"
+        resources += (source,)
     if component in {"worktree-manager", "fleet-manager", "services/pr", "services/chat", "services/ssh"}:
         resources += (source_root / "libs" / "installer-engine",)
     if component in {"fleet-manager", "services/pr", "services/ssh"}:
@@ -39,7 +42,7 @@ def local_dependency_source(project: Path, dependency: str, *, source_root: Path
     from seasoned_uv import DependencyPolicyError
     from installer_dependency_policy import _contained, _toml
 
-    def identity(name):
+    def identity(name: str) -> str:
         return re.sub(r"[-_.]+", "-", name).lower()
 
     try:

@@ -54,6 +54,12 @@ APPLICATION_METADATA_RESOURCES = {
         "scripts/runtime-source-tools/**/*.lock",
     ),
 }
+APPLICATION_SOURCE_FALLBACKS = {
+    "worktree_manager": (
+        ("scripts/runtime-source-tools/fleet_role_policy", "../fleet-manager/src/fleet_manager",
+         ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py")),
+    ),
+}
 
 
 def application_resources(
@@ -75,6 +81,9 @@ def application_resources(
         for path in project.glob(pattern) if path.is_file()
     })
     if sources:
+        for destination, source, names in APPLICATION_SOURCE_FALLBACKS.get(package, ()):
+            for name in names:
+                sources.setdefault(f"{destination}/{name}", project / source / name)
         return {"_runtime_assets/" + name: path for name, path in sources.items()}
     if not included.is_dir():
         raise RuntimeError("application runtime resources are missing")
