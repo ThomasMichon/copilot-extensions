@@ -626,6 +626,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     """Never-wedge reclaim sweep over local ledgers (resource-obligation Ph4)."""
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
+    from . import session_lease
     from . import sweep as sweep_mod
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
 
@@ -637,7 +638,10 @@ def _claims_sweep(args: argparse.Namespace) -> int:
         rec_path = tdir / f"{rec.worktree_id}.yaml"
         verdicts: dict[str, tuple[bool | None, bool | None]] = {}
         for claim in rec.resources:
-            if not claim.is_unsettled or tracking_claims.claim_handoff_reservation(rec, claim):
+            if (
+                not claim.is_unsettled
+                and not session_lease.expired_finalized_self_claim(rec, claim)
+            ) or tracking_claims.claim_handoff_reservation(rec, claim):
                 continue
             try:
                 gone = gone_of(claim)
@@ -687,7 +691,11 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                             # provably-merged hand-back (RELEASED), never
                             # an involuntary reclaim -- only a non-pr kind
                             # is genuinely `abandoned` here.
-                            note="merged" if c.state == obligations.RELEASED else "abandoned",
+                            note=(
+                                "abandoned" if c.state != obligations.RELEASED
+                                else "lease-expired" if c.kind == "session"
+                                else "merged"
+                            ),
                             project=rec.repo,  # THIS record's own project (sweep spans projects)
                         )
         else:

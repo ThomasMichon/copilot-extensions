@@ -10,8 +10,11 @@ from typing import cast
 
 import pytest
 
+import agent_worktrees.__main__ as m
+from agent_worktrees import cleanup_reap, git_ops, local_cache_worker, prune, reclaim
 from agent_worktrees import config as cfg
-from agent_worktrees import session_lease, sessions, sweep, tracking, tracking_claims
+from agent_worktrees import retirement_safety, session_lease, sessions, sweep, tracking
+from agent_worktrees import tracking_claims
 
 
 @pytest.fixture
@@ -127,3 +130,93 @@ def test_session_claim_live_process_with_fresh_or_missing_lease_is_not_gone(
     for stamp in (time.time(), None):
         monkeypatch.setattr(session_lease, "last_activity", lambda sid, stamp=stamp: stamp)
         assert sweep.session_claim_gone(claim, config) is False
+
+
+def _scan(rec: tracking.WorktreeRecord, monkeypatch: pytest.MonkeyPatch, bridge: set[str]) -> set[str]:
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: set())
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: bridge)
+    monkeypatch.setattr(local_cache_worker, "is_active", lambda path: False)
+    ctx = sessions.SessionContext(active_sessions={
+        sessions._normalize_path(rec.worktree_path): ["sess-1"]})
+    return m._build_active_paths([rec], ctx)
+
+
+def test_unregistered_bridge_session_keeps_finalized_active_despite_expired_lease(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    norm = sessions._normalize_path(rec.worktree_path)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    _touch(state_dir, "bridge-sess", 5)
+    assert _scan(rec, monkeypatch, {"wt"}) == {norm}
+    assert _scan(rec, monkeypatch, set()) == set()
+
+
+def test_fresh_bound_live_hint_keeps_finalized_active_despite_expired_lease(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    monkeypatch.setattr(m, "_fresh_bound_live_hint", lambda r: True)
+    assert _scan(rec, monkeypatch, set()) == {sessions._normalize_path(rec.worktree_path)}
+
+
+def test_expired_self_claim_is_admitted_only_on_positive_expiry(
+    state_dir: Path, tmp_path: Path,
+) -> None:
+    claim = _claim("at-rest")
+    rec = _finalized(tmp_path / "wt", claim)
+    assert not session_lease.expired_finalized_self_claim(rec, claim)  # unknown activity
+    _touch(state_dir, "sess-1", 60)
+    assert not session_lease.expired_finalized_self_claim(rec, claim)  # fresh
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    assert session_lease.expired_finalized_self_claim(rec, claim)
+    foreign = tracking_claims.ResourceClaim(kind="session", ref="m/p/other#sess-1", state="at-rest")
+    worktree = tracking_claims.ResourceClaim(kind="worktree", ref="m/p/wt", state="at-rest")
+    assert not session_lease.expired_finalized_self_claim(rec, foreign)
+    assert not session_lease.expired_finalized_self_claim(rec, worktree)
+    rec.status = "active"
+    assert not session_lease.expired_finalized_self_claim(rec, claim)
+
+
+def test_expired_finalized_session_claim_no_longer_blocks_cleanup(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tdir = tmp_path / "tracking"
+    tdir.mkdir()
+    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec.checkout_managed = False
+    tracking.save_record(rec, tdir / "wt.yaml")
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    _touch(state_dir, "sess-1", 60)
+    assert not prune.cleanup_disposition(rec, info).cleanable
+    assert retirement_safety.retirement_blocker(rec) is not None
+
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    assert prune.cleanup_disposition(rec, info).cleanable
+    assert retirement_safety.retirement_blocker(rec) is None
+    released: list[list[str]] = []
+    real_retire = tracking.retire_record
+
+    def _retire(record: tracking.WorktreeRecord, path: Path) -> bool:
+        released.append([c.state for c in tracking.load_record(path / "wt.yaml").resources])
+        return real_retire(record, path)
+
+    monkeypatch.setattr(tracking, "retire_record", _retire)
+    repo = cast(cfg.RepoConfig, types.SimpleNamespace(anchor=str(tmp_path), default_branch="dev"))
+    failures, warnings = cleanup_reap.reap_worktree(rec, info, repo, tdir)
+    assert (failures, warnings) == (0, [])
+    assert released == [["released"]]
+
+
+def test_sweep_releases_only_positively_expired_finalized_session_claims(
+    state_dir: Path, tmp_path: Path,
+) -> None:
+    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    _touch(state_dir, "sess-1", 60)
+    assert tracking_claims.sweep_abandoned_obligations(
+        rec, gone_of=lambda c: True, safe_of=lambda c: True, save=False) == []
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    swept = tracking_claims.sweep_abandoned_obligations(
+        rec, gone_of=lambda c: True, safe_of=lambda c: True, save=False)
+    assert [c.state for c in swept] == ["released"]

@@ -49,7 +49,10 @@ def _moved_past_finalized_head(
     Only a ``finalized`` record carrying a ``finalized_checkout`` stamp is
     judged (legacy records keep the old masking). HEAD equal to the stamp, or
     with nothing ahead of upstream (landed or fast-forwarded content), stays
-    latched. An unreadable HEAD keeps the pre-latch behavior.
+    latched. HEAD is read from the checkout's git metadata files, so the
+    probe never starts a Git child after a caller's bounded observation
+    budget is spent. An unreadable or empty HEAD fails closed: the unmasked
+    classification is kept rather than masking possible unlanded work.
     """
     stamp = record.finalized_checkout
     if record.status != "finalized" or not isinstance(stamp, dict):
@@ -58,13 +61,69 @@ def _moved_past_finalized_head(
     if not isinstance(recorded, str) or not recorded or info.ahead <= 0:
         return False
     try:
-        head = git_ops.git(
-            "rev-parse", "HEAD", cwd=record.worktree_path, timeout=5,
-            isolated_repository=True,
-        ).stdout.strip()
+        head = _read_head(record.worktree_path)
     except Exception:
-        return False
-    return bool(head) and head != recorded
+        head = None
+    return not head or head != recorded
+
+
+def _read_head(worktree_path: str | None) -> str | None:
+    """Resolve a checkout's HEAD object id from files alone, or ``None``."""
+    if not worktree_path:
+        return None
+    root = Path(worktree_path)
+    dot_git = root / ".git"
+    if dot_git.is_dir():
+        git_dir = dot_git
+    else:
+        try:
+            pointer = dot_git.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            return None
+        if not pointer.startswith("gitdir:"):
+            return None
+        git_dir = Path(pointer[len("gitdir:"):].strip())
+        if not git_dir.is_absolute():
+            git_dir = root / git_dir
+    try:
+        content = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not content.startswith("ref:"):
+        return content if _is_object_id(content) else None
+    ref = content[len("ref:"):].strip()
+    if not ref.startswith("refs/") or ".." in ref.split("/"):
+        return None
+    common = git_dir
+    try:
+        shared = (git_dir / "commondir").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        shared = ""
+    except (OSError, UnicodeDecodeError):
+        return None
+    if shared:
+        common = Path(shared) if Path(shared).is_absolute() else git_dir / shared
+    for base in dict.fromkeys((git_dir, common)):
+        try:
+            value = (base / ref).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeDecodeError):
+            return None
+        return value if _is_object_id(value) else None
+    try:
+        packed = (common / "packed-refs").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in packed.splitlines():
+        oid, _, name = line.partition(" ")
+        if name.strip() == ref:
+            return oid if _is_object_id(oid) else None
+    return None
+
+
+def _is_object_id(value: str) -> bool:
+    return len(value) in (40, 64) and all(c in "0123456789abcdef" for c in value)
 
 
 def compute(

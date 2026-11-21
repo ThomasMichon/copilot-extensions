@@ -88,6 +88,44 @@ def lease_expired(
     return session_expired(parsed.session, ttl_for(record, claim.state), now=now)
 
 
+def expired_finalized_self_claim(
+    record: tracking.WorktreeRecord,
+    claim: tracking_claims.ResourceClaim,
+    *,
+    now: float | None = None,
+) -> bool:
+    """True for a finalized record's own at-rest session claim whose lease expired.
+
+    Such a claim no longer blocks cleanup or retirement. Only positive
+    expiry evidence counts; non-finalized records, other kinds, other
+    owners and unknown activity always keep the claim held.
+    """
+    if record.status != "finalized" or claim.kind != "session" or claim.has_producer:
+        return False
+    if not claim.is_live or claim.is_unsettled:
+        return False
+    parsed = tracking_claims.parse_claim_ref(claim.ref)
+    if parsed is None or not parsed.session or parsed.worktree_id != record.worktree_id:
+        return False
+    return lease_expired(record, claim, now=now) is True
+
+
+def release_expired_finalized(
+    record: tracking.WorktreeRecord, *, now: float | None = None,
+) -> list[tracking_claims.ResourceClaim]:
+    """Settle expired finalized self session claims as released, in memory.
+
+    Callers persist the record under its tracking lock.
+    """
+    released = [
+        claim for claim in record.resources
+        if expired_finalized_self_claim(record, claim, now=now)
+    ]
+    for claim in released:
+        claim.state = obligations.RELEASED
+    return released
+
+
 def idle_finalized(
     record: tracking.WorktreeRecord,
     session_ids: Iterable[str] = (),
@@ -132,8 +170,9 @@ def drop_expired_finalized(
 
     Finalize is a latch: continued conversation, an idle open pane or a
     resumed session must not make a finalized checkout ACTIVE once its lease
-    expired. ``keep`` preserves non-session activity (hosted sessions,
-    workers). Any probe failure leaves the path active.
+    expired. ``keep`` preserves activity with no provable lease (hosted sessions,
+    workers, bridge or bound-live signals). Any probe failure leaves the path
+    active.
     """
     from . import sessions
 
