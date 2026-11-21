@@ -703,6 +703,18 @@ preparation and 1200-second aggregate, native pins, Worktrees-only feed and
 sanitization are unchanged. Actual protected controller support is required
 before staging or submission.
 
+The Worktrees and Manager application fixtures prepare the runner's exact
+CPython version in a private `UV_PYTHON_INSTALL_DIR` using
+`uv python install --no-bin --no-registry` before invoking generated application
+entries. Preparation consumes the existing construction deadline. Application
+execution still disables interpreter downloads and retains the production
+`--managed-python` requirement; a physical `UV_PYTHON` is not a substitute.
+The controlled preparation and real offline managed-selector checks live in
+`agent-worktrees/tests/native/test_application_python_fixture.py`. They need
+no Copilot, mux or caller-Job admission and do not qualify the hosted caller flow.
+Both application fixtures also select their private `COPILOT_HOME`; an inherited
+test-runner home must not redirect the copied command owner's source resolution.
+
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
 `tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
@@ -11271,6 +11283,18 @@ propagation. All 54 remaining original cases stay outside this packet,
 including real Git/process fixtures and controls coupled to those fixtures.
 The original tests and scanner are unchanged; no Git command, live identifier
 sweep or real denylist read executes in the selected cases.
+The dependency release-age adapter exports 84 original in-process cases through
+26 exact test functions. It retains inclusive timestamp bounds, newest-
+file/yank refusal, Python floor and satisfiability rules, controlled npm
+metadata and UV cutoff/override rejection. Synthetic manifest trees additionally
+exercise scoped OTLP prerelease seasoning, declaration inventory, local-source
+attribution and canonical closure, sanitized metadata errors, cache reuse,
+unfiltered host markers and requirements include refusal. All 119 remaining
+original cases stay outside this packet. Inventory operates only on fixture-owned
+trees, never the actual checkout; shared build and installer-policy modules are
+imported, not invoked to build, query a registry or prepare an installation.
+The original unselected npm-toolchain skip marker still observes
+tool presence at import; no npm, UV, network or installer process executes.
 Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
 while retaining the source map's existing layout so independent hash updates
 can merge cleanly.

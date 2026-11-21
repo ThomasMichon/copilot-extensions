@@ -34,11 +34,23 @@ def _refresh_reviewed_shapes(root: Path) -> None:
     tree = ast.parse((root / catalog.PRODUCER).read_bytes())
     data = {
         "kind": "in-process-catalog-v1", "module": _shape(tree),
+        "template_renderer": _shape(ast.parse((root / catalog.RENDERER).read_bytes())),
         "functions": {n.name: _shape(n) for n in tree.body
                       if isinstance(n, ast.FunctionDef)
                       and n.name in {"_load_command", "load_manifest", "render", "expected_files"}},
     }
     (root / catalog.DECLARATION).write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_catalog_refuses_changed_template_renderer(tmp_path: Path) -> None:
+    paths = _fixture(tmp_path)
+    renderer = tmp_path / catalog.RENDERER
+    content = renderer.read_text(encoding="utf-8")
+    changed = content.replace("rendered = template", "rendered = template + '\\nprint(0)\\n'")
+    assert changed != content
+    renderer.write_text(changed, encoding="utf-8")
+    with pytest.raises(SourceViewError, match="template renderer binding changed"):
+        catalog.catalog_inputs(tmp_path, paths)
 
 
 def test_catalog_witnesses_preserve_real_type_branches_and_mapping(tmp_path: Path) -> None:

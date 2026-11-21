@@ -77,8 +77,13 @@ terminator) without Python or TOML, qualifies the first PATH `uv` application
 downloads. Missing uv or a
 not-yet-prepared interpreter is an explicit unavailable result. `Prepare` is a
 separate, explicit setup operation: it requests `uv python install --no-bin
---no-registry` before the same acquisition-free lookup. No production caller
-opts in yet.
+--no-registry` before the same acquisition-free lookup. Budget Guidance's
+explicit installer is the first production caller. It caches the selection
+for that installer process before entering the existing construction owner.
+The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
+boundary in a subshell without requiring Python, including selection-hint
+isolation. Both providers are declared assets of that consumer; raw development
+mirrors are not packaged qualification.
 
 The required `InvokeCaptured` callback accepts `FilePath` and `ArgList` and
 returns exactly one object with integer `ExitCode` and string `Stdout` and
@@ -87,9 +92,14 @@ the provider introduces no launcher, Job escape or timeout implementation.
 The additive `IsolateSelection` option requires that callback to also declare
 and apply `Environment`: null-valued entries remove inherited child variables.
 It isolates Python selection and active-environment hints for each uv child,
-without changing the original caller or its configured uv storage, mirrors,
+including both uv working-directory overrides, without changing the original
+caller or its configured uv storage, mirrors,
 cache and download policy. Older callbacks remain supported without the option;
 requesting isolation with one refuses before any child executes.
+`Get-UvBootstrapEnvironment` and the POSIX
+`invoke_uv_bootstrap_environment` expose that same child-only boundary to
+environment construction and the existing dependency-policy helper. Preparing
+the interpreter alone does not sanitize a later `uv venv` or package step.
 The existing Versioned Runtime `Invoke-Hidden` implements these child-only
 null/removal semantics for bounded and ordinary capture.
 Process-start/custody failures propagate. OS-policy refusal never selects

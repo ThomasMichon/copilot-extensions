@@ -40,7 +40,7 @@ _install_budget_guidance_package() {
     _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
     if [[ "$HAVE_UV" -eq 1 ]]; then
         local uv_rc=0
-        "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
+        invoke_uv_bootstrap_environment "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
             --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "${dependencies[@]}" "$PLUGIN_DIR" --quiet || uv_rc=$?
         for dependency in "${dependencies[@]}"; do _remove_budget_build_artifacts "$dependency" || return 1; done
         _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
@@ -137,7 +137,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -282,6 +282,7 @@ if [[ -z "$SRC_VERSION" ]]; then
 fi
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
+BUDGET_BOOTSTRAP_PYTHON=""
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # Marker-only: retire the `.venv` symlink (uniform-runtime-resolution, #765).
@@ -323,28 +324,12 @@ _versioned_activate() {
 # === end install-contract:v3 versioned-venv ===
 
 _bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1 &&
-            "$__c" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
-            command -v "$__c"; return 0
-        fi
-    done
-    if command -v uv >/dev/null 2>&1; then
-        local base
-        base="$(uv python find 3.11 2>/dev/null)" ||
-            base="$(uv run --no-project --python 3.11 python -I -c 'import sys; print(sys.executable)')" ||
-            return 1
-        [[ -x "$base" ]] || return 1
-        printf '%s\n' "$base"
+    if [[ -n "${BUDGET_BOOTSTRAP_PYTHON:-}" ]]; then
+        printf '%s\n' "$BUDGET_BOOTSTRAP_PYTHON"
         return 0
     fi
-    return 1
+    . "$SCRIPT_DIR/bootstrap-uv.sh"
+    resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt"
 }
 
 _source_runtime_identity() {
@@ -478,23 +463,17 @@ _git_info() {
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
 _ensure_uv() {
     command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
+    local tooldir="$LOCAL_BIN"
     if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
     _step "uv not found -- vendoring a standalone uv into $tooldir"
     mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
+    local url="https://astral.sh/uv/install.sh" script="$INSTALL_DIR/tool/uv-install.sh" got=""
+    mkdir -p "$(dirname "$script")"
     if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
     if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
     if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
+        env UV_INSTALL_DIR="$tooldir" sh "$script" >/dev/null 2>&1 || true
     fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
     if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
     return 1
 }
@@ -514,10 +493,8 @@ _ensure_uv_index() {
     fi
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
-# Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
-# venv's `python -m budget_guidance`; otherwise it provisions on first use -- announcing
-# (a human line + a machine-readable ::agent-provisioning:: signal so a caller can
-# extend its timeout), lock-serialized, fail-fast.
+# Deploy the prepared-only binstub. The existing resolver selects the runtime;
+# missing preparation reports the owning explicit provision action.
 # Co-deploy the canonical marker-only resolver so the binstub (and any launcher)
 # resolves the interpreter the ONE uniform way (uniform-runtime-resolution, #765).
 deploy_resolver() {
@@ -532,13 +509,20 @@ deploy_binstub() {
     deploy_resolver
     cat > "$STUB" << 'STUBEOF'
 #!/usr/bin/env bash
-# budget-guidance binstub -- self-provisioning (install-on-first-use).
+# budget-guidance binstub -- prepared runtime only.
 # Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
 # (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
 # version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
+# a PATH python. Missing setup is reported without changing the installation.
+set -u
 export PYTHONUTF8=1
+unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE
+_uv="$(command -v uv 2>/dev/null || true)"
+case "$_uv" in /*) [ -x "$_uv" ] || _uv='' ;; *) _uv='' ;; esac
+if [ -z "$_uv" ]; then
+    printf 'budget-guidance: uv is unavailable; prepare the command prerequisites.\n' >&2
+    exit 127
+fi
 _name="budget-guidance"
 _root="$HOME/.$_name"
 _resolver="$_root/bin/resolve-runtime.sh"
@@ -550,41 +534,15 @@ _resolve() {
     fi
 }
 _resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m budget_guidance "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_snapshot="$(cat "$_root/payload-dir" 2>/dev/null || true)"
-_install="$_snapshot/scripts/install.sh"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: owning snapshot installer unavailable: $_install" >&2
-    exit 127
+if [ -z "$AGENT_RT_PY" ]; then
+    printf 'budget-guidance: runtime is not prepared; run the owning scripts/install.sh install.\n' >&2
+    exit 1
 fi
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m budget_guidance "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m budget_guidance "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
+exec "$_uv" run --no-project --no-config --no-env-file --no-python-downloads --managed-python \
+    --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"
 STUBEOF
     chmod +x "$STUB"
-    _ok "Binstub: $STUB (self-provisioning)"
+    _ok "Binstub: $STUB (prepared uv runtime)"
 }
 
 __install_lock_link=""
@@ -661,9 +619,6 @@ _enter_install_lock() {
     return 0
 }
 
-if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
-    _initialize_source_runtime || exit 1
-fi
 if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision || "$ACTION" == uninstall ]]; then
     _enter_install_lock || {
         _fail "Could not acquire the install transaction lock within $(_install_lock_timeout)s -- refusing to proceed unlocked"
@@ -673,7 +628,13 @@ if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACT
     trap '_exit_install_lock; exit 130' INT
     trap '_exit_install_lock; exit 143' TERM
 fi
+if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == provision ]]; then
+    . "$SCRIPT_DIR/bootstrap-uv.sh"
+    _ensure_uv || { _fail 'uv prerequisite setup failed'; exit 1; }
+    BUDGET_BOOTSTRAP_PYTHON="$(resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt" Prepare)" || exit 1
+fi
 if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
+    _initialize_source_runtime || exit 1
     _source_runtime_unchanged || exit 1
 fi
 
@@ -684,7 +645,7 @@ case "$ACTION" in
         ;;
 esac
 # Cheap 'stamp': snapshot the exact owning payload, then splat the binstub and
-# defer the venv build to first use. The wrapper provisions only from this
+# defer the venv build to explicit provision. Preparation uses this
 # immutable versioned snapshot and never searches other marketplace payloads.
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
@@ -749,7 +710,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     fi
     _ok "Snapshot: $snap_dir"
     deploy_binstub
-    _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    _ok "Stamped: run the snapshot scripts/install.sh provision before command use; retain the same --install-dir."
     exit 0
 fi
 
@@ -797,22 +758,7 @@ _ensure_uv_index
 HAVE_UV=0
 if _ensure_uv; then HAVE_UV=1; fi
 
-PYTHON_CMD=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        if "$candidate" --version 2>&1 | grep -qi python; then
-            PYTHON_CMD="$candidate"
-            break
-        fi
-    fi
-done
-if [[ "$HAVE_UV" -eq 0 && -z "$PYTHON_CMD" ]]; then
-    _fail 'Neither standalone uv nor Python 3.10+ is available'
-    exit 1
-fi
-if [[ -n "$PYTHON_CMD" ]]; then
-    _ok "Python fallback: $PYTHON_CMD"
-fi
+PYTHON_CMD="$(_bootstrap_python)" || exit 1
 
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
@@ -830,21 +776,13 @@ _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 _versioned_slot_clean || exit 1
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        _step 'Creating Python 3.10+ venv via uv...'
-        _versioned_slot_clean
-        uv venv "$VENV_DIR" --python 3.10 --allow-existing >/dev/null 2>&1 || {
-            if [[ -z "$PYTHON_CMD" ]]; then
-                _fail 'uv could not obtain a compatible Python interpreter'
-                exit 1
-            fi
-            _step 'uv venv failed -- falling back to python -m venv'
-            "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-        }
-    else
-        _step 'Creating venv via python -m venv...'
-        "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-    fi
+    _step 'Creating managed Python venv via uv...'
+    _versioned_slot_clean
+    invoke_uv_bootstrap_environment "$(command -v uv)" venv "$VENV_DIR" --python "$PYTHON_CMD" --managed-python \
+        --no-python-downloads --allow-existing >/dev/null 2>&1 || {
+        _fail 'uv could not construct the declared managed Python environment'
+        exit 1
+    }
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _fail "Venv creation failed -- $VENV_PYTHON not found"
         exit 1

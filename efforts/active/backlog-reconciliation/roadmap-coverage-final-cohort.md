@@ -102,7 +102,7 @@ reconstruct held text, repeat an unchanged trace or infer missing research.
 | #13122 | Research receipt; refresh limit | Retain complete mechanical reconciliation of the original 151 paths. The two helper divergences are a prior current-Dev observation, not a freshly reasserted source counterexample. Source or release progress does not alone establish the whole path/consumer contract; preserve the owning implementation and required qualification rather than replay the old audit. |
 | #13159 | Research receipt | Retain the reported Windows App Execution Alias failure's actual owned-launch distinction: an ordinary version query and verified direct executable do not qualify the alias launch. Preserve resolution-or-safe-diagnostic before spawn, headlessness, deadline, resource/Job cleanup and alias/direct native controls. Do not infer administrator failure, global PATH/registry authority or an uncontained fallback. |
 | #13204 | Research receipt | Retain the recorded reviewed alignment and all twelve finite clauses of the unadopted allocation-intent alternative. Same-pool claimed state without headroom differs from standing placement intent; the actual Dispatch intent owner retains that choice. No new plan, control/source mutation, native action or tracker disposition follows. |
-| #13221 | Delivery-comparison gap | Retain the actual Windows least-privilege exit-evidence alternative, or once-per-owner reporting with a documented safe-retirement path. The original supplied no permanent live-token condition or claimed implementation at its receipt. A qualified merged-description comparison remains the specific next completion discriminator, not another native run, initial guess or new ownership barrier. |
+| #13221 | Delivery/fulfillment gap | Retain the actual Windows least-privilege exit-evidence alternative, or once-per-owner reporting with a documented safe-retirement path. The qualified #13362 description comparison is complete: it is a campaign outcome journal that preserves separate #13221 custody, not that implementation. No whole fulfillment, missing-implementation proof, new permanent-token condition, native run or ownership barrier is inferred. |
 | #13279 | Draft/review-hold control | Retain the actual draft/review hold on #13297: MUST NOT MERGE. Candidate metadata is not fulfillment and does not authorize implementation, enabling, takeover or reading a held parent/copy. Preserve the original owner and source-specific boundary without inventing a blanket legacy-program prerequisite. |
 | #13369 | Research receipt | Retain the other contributor's unfinished two-test-file request. A complete planned receiver does not fulfill those tests or settle its five unchecked technical rows. Preserve actual fixture/native/source custodians; no acknowledgment, closure, duplicate fold or competing implementation follows. |
 | #13378 | Research receipt | Retain the other contributor's six-case managed-pass-or-justified-host-tier alternative and five unchecked technical rows. Accepted planning is not test delivery or whole fulfillment. Preserve original fixture/host authority without a duplicate fold, native run, assertion weakening or ownership transfer. |
@@ -124,11 +124,11 @@ reconstruct held text, repeat an unchanged trace or infer missing research.
 This slice has sixty research receipts, nine research receipts with refresh
 limits, three control receipts, one external departure, two interpretation
 gaps, nine source/refusal gaps, three provenance gaps, one unavailable-history
-gap and one delivery-comparison gap: 89 decisions.
+gap and one delivery/fulfillment gap: 89 decisions.
 
 Across both registers, 153 identities have continuation decisions: 110
 research receipts, four controls, twelve interpretation gaps, six provenance
-gaps, eighteen source/refusal/unavailable gaps, one delivery-comparison gap
+gaps, eighteen source/refusal/unavailable gaps, one delivery/fulfillment gap
 and two already counted departures. Sixteen research rows additionally
 retain refresh limits. These classes are not 153 technical completions.
 
@@ -143,3 +143,8 @@ changed-contract gaps among the 292 historical assignments. Preserve the
 explicit gaps above when selecting consequential next work. Full coverage,
 the evidence-cited shortlist, existing-effort map, scoped graph, bounded
 execution waves and reviewed resulting plan retain their six open gates.
+
+The [later-inflow register](roadmap-coverage-later-inflow.md) records those
+thirteen separately and the [dated comparison](journal/2026/11.21-current-inflow-and-admission-gaps.md)
+completes the pending description lookup for #13221 without claiming implementation
+or changing the fixed cohort's identity counts.

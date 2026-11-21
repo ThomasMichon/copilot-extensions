@@ -69,6 +69,7 @@ STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-machines": ("runtime_launcher.py",),
     "plugins/agent-worktrees": ("bootstrap-uv.ps1",),
+    "plugins/budget-guidance": ("bootstrap-uv.ps1", "bootstrap-uv.sh"),
 }
 
 

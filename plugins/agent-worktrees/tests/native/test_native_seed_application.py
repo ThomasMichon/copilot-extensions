@@ -101,13 +101,6 @@ class _ManagerEnvironment(Protocol):
     ) -> dict[str, str]: ...
 
 
-class _ManagerNative(Protocol):
-    def __call__(
-        self, directory: Path, control: str, *, script: Path, python: Path, root: Path,
-        environment: dict[str, str], picker_decision: bool,
-    ) -> None: ...
-
-
 class _ManagerApplication(Protocol):
     def __call__(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str, *,
@@ -387,11 +380,7 @@ def test_public_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
 def _qualify_public_application(
     monkeypatch: pytest.MonkeyPatch, caller: str, *, caller_jobs: bool = False,
 ) -> None:
-    if TYPE_CHECKING:
-        from tools.plugin_test_containment import TestSandbox
-    else:
-        from plugin_test_containment import TestSandbox
-
+    TestSandbox = import_module("plugin_test_containment").TestSandbox
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     if caller_jobs:
         # The outer owner settles residents before removing this sandbox.
@@ -444,12 +433,14 @@ def test_public_caller_packets_collect_exactly_the_declared_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packet: str,
 ) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    if TYPE_CHECKING:
-        from tools.windows_qualification_contract import NATIVE_PACKETS
-        from tools.windows_qualification_worker import native_command
-    else:
-        from windows_qualification_contract import NATIVE_PACKETS
-        from windows_qualification_worker import native_command
+    NATIVE_PACKETS = cast(
+        dict[str, tuple[str, str, str, str]],
+        import_module("windows_qualification_contract").NATIVE_PACKETS,
+    )
+    native_command = cast(
+        Callable[[Path, Path, str], list[str]],
+        import_module("windows_qualification_worker").native_command,
+    )
 
     command = native_command(ROOT, tmp_path, packet)
     selected = command[command.index("-k") + 1]
@@ -818,12 +809,14 @@ def test_manager_install_retains_only_the_selected_runner_lifecycle(
     _manager_install_environment = cast(_ManagerEnvironment, environment_fixture)
 
     monkeypatch.setenv(TEST_CONTEXT_ENV, "unselected ambient context")
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "unselected-copilot-home"))
     arguments = tmp_path / "home", tmp_path / "manager", tmp_path, sys.executable
     selected = {TEST_CONTEXT_ENV: "selected runner context"}
     environment = _manager_install_environment(
         *arguments, caller_jobs=True, worktrees_environment=selected,
     )
     assert environment[TEST_CONTEXT_ENV] == selected[TEST_CONTEXT_ENV]
+    assert environment["COPILOT_HOME"] == str(arguments[0] / ".copilot")
     assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
     assert TEST_CONTEXT_ENV not in _manager_install_environment(
         *arguments, caller_jobs=False, worktrees_environment=selected,
@@ -860,7 +853,7 @@ def test_manager_native_phase_propagates_owned_failures_without_inline_retry(
         subprocess.TimeoutExpired if failure == "timeout" else AssertionError,
         match="timed out" if failure == "timeout" else "native failed",
     ):
-        cast(_ManagerNative, fixture._run_manager_native)(
+        fixture._run_manager_native(
             tmp_path, "manager-no-mux", script=tmp_path / "launch-session.ps1",
             python=tmp_path / "python.exe", root=tmp_path / "manager",
             environment=environment, picker_decision=True,
@@ -1056,6 +1049,7 @@ def _owned_application_command(
     }), encoding="utf-8")
     environment.update(
         COPILOT_PLUGIN_ROOT=str(owner), COPILOT_PLUGIN_STAGED_FROM=str(owner),
+        COPILOT_HOME=str(home / ".copilot"),
         COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(caller),
     )
     return [
@@ -1076,6 +1070,7 @@ def test_application_fixture_installs_through_its_private_command_owner(
     home.mkdir()
     caller.mkdir()
     root = home / ".agent-worktrees"
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "unselected-copilot-home"))
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
@@ -1106,6 +1101,7 @@ def test_application_fixture_installs_through_its_private_command_owner(
         [sys.executable, "-I", "-B", "-c", probe, root, str(exit_code)],
         interpreter=sys.executable, deadline=deadline,
     )
+    assert environment["COPILOT_HOME"] == str(home / ".copilot")
     result = run_caller_owned(
         command, cwd=caller, env=environment, timeout=max(0.01, deadline - time.monotonic()),
         max_stdout_bytes=8192, max_stderr_bytes=8192,
@@ -1200,6 +1196,12 @@ def _qualify_native_application(
     if caller_jobs:
         environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED")
         environment[TEST_CONTEXT_ENV] = os.environ[TEST_CONTEXT_ENV]
+    from application_python_fixture import managed_python_environment
+
+    environment = managed_python_environment(
+        environment, directory=tmp_path / "managed-python", uv=uv,
+        deadline=deadline, run=_run,
+    )
     assert environment.get("PYTEST_CURRENT_TEST")
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]

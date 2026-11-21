@@ -83,8 +83,8 @@ try {
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     if (-not (Test-Path $Manifest)) {
         # Not provisioned yet -- do the cheap FIRST install ('stamp') so the
-        # binstub is on PATH this session; the self-provisioning binstub then
-        # builds the venv on first use (#1393). Fires only when the installer
+        # binstub is on PATH this session; explicit snapshot provision builds
+        # the runtime before command use. Fires only when the installer
         # (init.ps1 or install.ps1) declares a 'stamp' action; else a safe no-op.
         $stampInst = @("$PluginDir\scripts\init.ps1", "$PluginDir\scripts\install.ps1") |
             Where-Object { (Test-Path $_) -and (Select-String -Path $_ -Pattern "'stamp'" -Quiet) } |

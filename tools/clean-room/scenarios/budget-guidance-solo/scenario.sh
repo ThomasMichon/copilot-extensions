@@ -54,17 +54,27 @@ from pathlib import Path
 source, fresh = map(Path, sys.argv[1:])
 sys.path.insert(0, str(source / "tools"))
 from launch_wrapper_assets_ref import load_manifest_groups
+from materialize_main import (
+    materialize_installer_engine_ref_into, materialize_payload_invocation_into,
+    materialize_uv_editable_ref_into,
+)
 
 ignore = shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist")
 plugin = source / "plugins/budget-guidance"
 candidate = fresh / "plugins/budget-guidance"
 shutil.copytree(plugin, candidate, ignore=ignore)
-shutil.copytree(source / "libs/agent-procutil", fresh / "libs/agent-procutil", ignore=ignore)
 for assets in load_manifest_groups(plugin, manifest_name="packaged-assets.json"):
     destination = assets.payload_dir(plugin_dir=candidate)
     destination.mkdir(parents=True, exist_ok=True)
     for name in assets.files:
         shutil.copyfile(assets.canonical_dir(repo_root=source) / name, destination / name)
+for materialize in (
+    materialize_uv_editable_ref_into,
+    materialize_installer_engine_ref_into, materialize_payload_invocation_into,
+):
+    results = materialize(source_consumer_dir=plugin, dest_consumer_dir=candidate, canonical_root=source)
+    if any(line.startswith("SKIP ") for line in results):
+        raise RuntimeError(results)
 PY
 then
     jam "path-binstub" "candidate copy failed" "inspect copy-candidate.log"
@@ -99,19 +109,35 @@ from pathlib import Path
 
 fresh = Path(sys.argv[1])
 shutil.rmtree(fresh / "plugins")
-shutil.rmtree(fresh / "libs")
+if (fresh / "libs").exists():
+    shutil.rmtree(fresh / "libs")
 PY
 then
     jam "path-binstub" "original candidate copy could not be removed" "inspect remove-original-copy.log"
     cr_finalize
 fi
 
-phase 2 "first-use provision after removing the original copy"
-if ! capture "first-use" -- timeout 300 "$BIN" --version; then
-    jam "toolchain-uv" "fresh first-use provisioning failed" "inspect first-use.log and the explicit dependency feed"
+phase 2 "explicit snapshot preparation after removing the original copy"
+if capture "unprepared-command" -- timeout 30 "$BIN" --version; then
+    jam "path-binstub" "unprepared command unexpectedly succeeded" "ordinary launch must not install a runtime"
     cr_finalize
 fi
-pass "first-use version command succeeded without the original source"
+if [ -d "$RUNTIME" ]; then
+    jam "path-binstub" "ordinary launch created a runtime" "inspect unprepared-command.log"
+    cr_finalize
+fi
+if ! capture "explicit-provision" -- env UV_PYTHON=must-not-be-selected \
+    UV_PYTHON_PREFERENCE=only-system UV_MANAGED_PYTHON=1 UV_NO_MANAGED_PYTHON=1 \
+    VIRTUAL_ENV=/unrelated CONDA_PREFIX=/unrelated \
+    timeout 300 bash "$SNAPSHOT/scripts/install.sh" provision; then
+    jam "toolchain-uv" "explicit snapshot preparation failed" "inspect explicit-provision.log and the dependency feed"
+    cr_finalize
+fi
+if ! capture "prepared-command" -- timeout 30 "$BIN" --version; then
+    jam "path-binstub" "prepared command failed" "inspect prepared-command.log"
+    cr_finalize
+fi
+pass "explicit snapshot setup and prepared command succeeded without the original source"
 
 phase 3 "installed identity and offline posture"
 if capture "optimized-verifier-refusal" -- timeout 30 "$RUNTIME/bin/python" -I -O \

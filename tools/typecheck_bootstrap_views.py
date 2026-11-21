@@ -32,7 +32,7 @@ _SELECTOR_TRANSPORT = (
     (
         "function Select-PythonCache([string]$Python) {\n    $selector = @'\n",
         "\n'@\n    try {\n"
-        '        $selected = & $Python -I -B -X utf8 -c $selector $_runtimeRoot\n'
+        '        $selected = & @@CACHE_PYTHON_POWERSHELL@@ -I -B -X utf8 -c $selector $_runtimeRoot\n'
         "        if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) {\n"
         "            $cacheArguments = ConvertFrom-Json -InputObject ([string]$selected)\n"
         "            if ($cacheArguments.Count -eq 1 -and $cacheArguments[0] -ceq '-B') { return '-B' }\n"
@@ -51,7 +51,7 @@ _SELECTOR_TRANSPORT = (
         '            *.exe) _selector_root="$(cygpath -aw "$_runtime_root")" || _selector_root="" ;;\n'
         "        esac\n"
         '        if [ -n "$_selector_root" ]; then\n'
-        '            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -c \'',
+        '            _selected_cache="$(@@RUNTIME_PYTHON_POSIX@@ -I -B -X utf8 -c \'',
         '\' "$_selector_root" 2>/dev/null)" || _selected_cache=""\n'
         '            case "$_selected_cache" in\n'
         "                '-X\npycache_prefix='*)\n"

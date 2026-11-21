@@ -11,13 +11,20 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_installers import BASE_PYTHON, NO_WINDOW, _fake_uv_environment
 from test_source_install_transactions import SCRIPTS, _function, _host, _payload, _setup
 
 
 def _native_environment(root: Path) -> dict[str, str]:
-    home = root / "home"
-    home.mkdir()
-    paths = [str(Path(sys.executable).parent)]
+    fake_bin, fixture_environment = _fake_uv_environment(root)
+    home = Path(fixture_environment["HOME"])
+    if os.name == "nt":
+        (fake_bin / "uv").unlink()
+        (fake_bin / "uv.cmd").write_text(
+            f'@echo off\n"{BASE_PYTHON}" "{fixture_environment["TEST_UV_DRIVER"]}" %*\n'
+            "exit /b %errorlevel%\n",
+        )
+    paths = [str(fake_bin), str(Path(sys.executable).parent)]
     if os.name == "nt":
         paths.extend(os.environ.get("PATH", "").split(os.pathsep))
     else:
@@ -28,7 +35,7 @@ def _native_environment(root: Path) -> dict[str, str]:
                 paths.append(str(Path(executable).parent))
         paths.extend(os.defpath.split(os.pathsep))
     env = {
-        **os.environ,
+        **fixture_environment,
         "HOME": str(home),
         "USERPROFILE": str(home),
         "PATH": os.pathsep.join(dict.fromkeys(paths)),
@@ -90,10 +97,12 @@ def test_all_budget_mutating_actions_share_the_install_transaction_gate() -> Non
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("source_contender", [False, True])
+@pytest.mark.parametrize("contender_action", ["stamp", "install"], ids=["snapshot", "prerequisites"])
 def test_source_and_source_free_writers_contend_before_snapshot_publication(
     tmp_path: Path,
     shell: str,
     source_contender: bool,
+    contender_action: str,
 ) -> None:
     if shell == "bash" and os.name == "nt":
         pytest.skip("Full POSIX transaction requires real PID symlink and flock authority")
@@ -104,6 +113,8 @@ def test_source_and_source_free_writers_contend_before_snapshot_publication(
     else:
         (contender_payload / "runtime-source.json").unlink()
     env = _native_environment(tmp_path)
+    preparation = tmp_path / "uv-preparation"
+    env["TEST_UV_PREPARATION"] = str(preparation)
     root = tmp_path / "install"
     root.mkdir()
     previous = {"payload-dir": b"previous-payload", "stamped-version": b"previous-version"}
@@ -155,7 +166,7 @@ try {
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     ) as holder:
         try:
             assert holder.stdout is not None
@@ -163,19 +174,29 @@ try {
             if ready.strip() != "READY":
                 assert holder.stderr is not None
                 pytest.fail(f"Lock-holder initialization failed: {ready}{holder.stderr.read()}")
+            if contender_action == "install":
+                driver = Path(env["TEST_UV_DRIVER"])
+                driver_source = driver.read_text(encoding="utf-8")
+                marker = 'if args[:2] == ["python", "install"]:\n'
+                assert driver_source.count(marker) == 1
+                driver.write_text(driver_source.replace(
+                    marker, marker + '    from pathlib import Path\n'
+                    '    Path(os.environ["TEST_UV_PREPARATION"]).write_text("prepared")\n',
+                ), encoding="utf-8")
             contender = subprocess.run(  # noqa: S603 - isolated native installer fixture
-                _native_command(shell, contender_payload, root, "stamp"),
+                _native_command(shell, contender_payload, root, contender_action),
                 cwd=tmp_path,
                 env=env,
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=NO_WINDOW,
             )
             detail = contender.stdout + contender.stderr
             assert contender.returncode != 0, detail
             assert "refusing to proceed unlocked" in detail, detail
+            assert not preparation.exists(), "A lock contender prepared prerequisites before admission"
             for name, content in previous.items():
                 assert (root / name).read_bytes() == content
             assert not (root / "snapshots").exists()
@@ -190,7 +211,7 @@ try {
         text=True,
         timeout=30,
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert retry.returncode == 0, retry.stdout + retry.stderr
     assert (root / "payload-dir").read_bytes() != previous["payload-dir"]
@@ -235,7 +256,7 @@ def test_source_free_uninstall_preserves_transaction_and_staging_authority(
         text=True,
         timeout=30,
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert lock.stat().st_ino == identity
     if ownership == "owned":

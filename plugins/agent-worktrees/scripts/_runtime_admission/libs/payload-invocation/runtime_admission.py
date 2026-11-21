@@ -25,6 +25,7 @@ _RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk
 _RESOURCES = (
     "libs/payload-invocation/generate.py",
     "libs/payload-invocation/bootstrap_python.py",
+    "libs/payload-invocation/template_rendering.py",
     "libs/payload-invocation/runtime_admission.py",
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",

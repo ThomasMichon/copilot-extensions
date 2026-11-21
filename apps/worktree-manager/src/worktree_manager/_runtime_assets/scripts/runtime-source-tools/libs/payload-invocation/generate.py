@@ -4,7 +4,6 @@ from __future__ import annotations
 import ast
 import sys
 import argparse
-import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
@@ -274,6 +273,13 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
     runtime_admission = data.setdefault("runtimeAdmissionToolkit", False)
     if not isinstance(runtime_admission, bool):
         raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
+    python_launcher = data.setdefault("pythonLauncher", "direct")
+    if python_launcher not in ("direct", "uv"):
+        raise ValueError(f"{path}: pythonLauncher must be direct or uv")
+    if python_launcher == "uv" and (
+        "bootstrapPython" not in data or any(normalized_dispatcher.values())
+    ):
+        raise ValueError(f"{path}: uv Python launch requires a bootstrap declaration and simple shims")
     if runtime_admission and installation_context != "required":
         raise ValueError(f"{path}: runtimeAdmissionToolkit requires installation context")
     if installer_lifecycle and (
@@ -751,19 +757,16 @@ def render(
             separators=(",", ":"),
         ),
     }
-    rendered = template
-    for key, value in values.items():
-        rendered = rendered.replace(f"@@{key}@@", value)
-    digest_placeholder = "@@CATALOG_FILE_SHA256@@"
-    if digest_placeholder in rendered:
-        unsigned = rendered.replace(digest_placeholder, "")
-        rendered = rendered.replace(
-            digest_placeholder,
-            hashlib.sha256(unsigned.encode("utf-8")).hexdigest(),
-        )
-    remaining = sorted(set(re.findall(r"@@[A-Z_]+@@", rendered)))
-    if remaining:
-        raise ValueError(f"unresolved template fields: {', '.join(remaining)}")
+    spec = spec_from_file_location("_payload_template_rendering", Path(__file__).with_name("template_rendering.py"))
+    assert spec and spec.loader
+    launcher = module_from_spec(spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(launcher)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    rendered: str = launcher.render(template, values, data["pythonLauncher"] == "uv")
     return rendered
 
 
