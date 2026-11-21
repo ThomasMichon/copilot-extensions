@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Historical scoped controls and retained receiving](journal/2026/11.21-historical-scoped-controls.md)
+
 - [2026-11-21 - Historical retained receipts and changed evidence](journal/2026/11.21-historical-retained-receipts.md)
 
 - [2026-11-21 - Historical authored deltas and finite delivery](journal/2026/11.21-historical-authored-deltas-and-delivery.md)

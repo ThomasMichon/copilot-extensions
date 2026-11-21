@@ -466,6 +466,16 @@ its completion is not a prerequisite for independent Dev qualification work.
 
 ## Plan
 
+**2026-11-21 - Compact manifest representation (operator-selected behavior):**
+
+The operator selected `compact-versioned-manifest` rather than sharding,
+further v1 minification as the long-term approach, or switching away from unit
+census work. Implement reader-first support through normal source review while
+retaining every existing limit and admission. This selects a source approach,
+not writer activation, native execution, rollout or a transfer of existing
+CI/release control. Ordered file groups and normalization to the existing
+logical manifest are the agent-recommended realization.
+
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).
 The campaign driver owns implementation/review; the repository owner alone
 authorizes critical main-path acceptance or a bounded administrative change.
@@ -749,7 +759,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with freshly
   executed packet evidence. Toolchain-binding timeout leaves that artifact
   unqualified for future reuse; broader parent gates stay open.
-- [ ] Qualify and land three additional original in-process dependency cases
+- [x] Qualify and land three additional original in-process dependency cases
   through two exact test objects: two mocked CLI outcomes and one fixture-only
   weakened-policy refusal. Preserve the preceding 181 selections and all 19
   artifact/native/checkout residuals. Bind the real CLI module as source and
@@ -757,6 +767,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   zero prohibited effects, unchanged preceding admission/helper/budget gates,
   current-head review and complete Linux source CI. A test name is not native
   qualification, and no existing witness or cap may be weakened.
+  #13900 merges at `6174ac7d9588c33b6162f6e0be22ae5eb55fedbf` after
+  exact-head Copilot approval and complete required Linux CI with freshly
+  executed packet evidence. Broader parent gates stay open.
+- [ ] Land reader-first compact source-manifest support with ordered file groups
+  and normalization to the unchanged flat logical v1 identity. Preserve every
+  preceding selection/hash/target, required assurance and budget; retain v1
+  storage and emitted packets. Qualify strict malformed/duplicate/overflow
+  refusal, actual source/packet loading, candidate composition and compatibility
+  CLI consumers, including old-reader v1 acceptance/v2 refusal. Complete affected
+  whole-file strict typing, current-head review and required Linux source CI.
+- [ ] Migrate the source manifest writer only after the actual selected readers
+  support the new storage contract, raw node-list consumers are reconciled and
+  supported rollback or pre-effect refusal is proven. Preserve every original
+  unit identity and limit; source reader support alone does not activate a
+  separately owned control or qualify full-census/every-release acceptance.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

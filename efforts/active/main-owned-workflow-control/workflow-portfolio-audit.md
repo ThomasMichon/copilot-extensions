@@ -2438,6 +2438,126 @@ case. They are neither silently waived nor replaced by mocks.
 This is not installed/native, every-release, full-census, workflow-count
 or whole-flow qualification. Existing owners and custody remain.
 
+Source #13900 merges at `2026-11-21T13:18:58Z` as
+`6174ac7d9588c33b6162f6e0be22ae5eb55fedbf`. Copilot approval
+`6005391385` at `13:16:11Z` names exact head
+`4963549a3a3f9e1a7be11bbd96af0af1b436866b`. Complete review/thread reads
+confirm no active finding and no omitted page. The published packet is
+independently checked against its actual current base: every prior entry
+survives and all fifteen observed Python reads remain byte-identical.
+
+Required source CI `44907758362` and trusted metadata CI `44907758553`
+both complete successfully. Unit job `136856870042` freshly qualifies the
+packet from `13:13:40Z` to `13:16:59Z`, then uploads evidence. Its actual
+log reports 6,608 passed and 35 deselected in 160.89 pytest seconds and
+181.035 packet seconds, under the unchanged 300-second budget. Lookup takes
+572 ms before fresh execution because no qualified completed packet exists.
+This natural successful toolchain binding does not diagnose or erase the
+preceding binding timeout, qualify its non-reusable artifact or prove a
+controlled saving.
+
+Seven fresh scoped verifier reads precede the managed Maintainer merge,
+without bypassing failing CI. Closing references are empty and parent #6237
+stays open. The full canonical parent is reread and only this finite three-case
+leaf is resolved. Pull-forward first refuses a shared remote-tracking-ref
+fetch race without changing the clean owned head. After read-only inspection
+shows the ref already at the actual merge, a scoped managed retry retains
+the published head and succeeds. No lock/ref repair, reset, peer edit or
+resource release is used. Broader native, every-release, full-census,
+whole-flow and custody acceptance remain open.
+
+### November 21 reader-first compact unit-manifest contract
+
+After the preceding deliveries leave 298 bytes below the unchanged 1 MiB
+source-file cap, the operator selects `compact-versioned-manifest`.
+The source realization serves the standing vision's coverage-preserving reuse
+and gated reversible migration, following the version-skew-safe contract pattern.
+It does not change workflow, candidate, release or runtime authority.
+
+The new source-storage profile `copilot-extensions.promotion-units/v2` replaces
+only flat `nodes` with ordered `node_groups` pairs of test file and case suffixes.
+Nonadjacent repeated file groups preserve arbitrary original ordering.
+Admission normalizes them to the unchanged flat logical v1 manifest and reuses
+all original validation. Invalid/empty groups, invalid UTF-8, unknown fields,
+duplicate full identities and original path/source/target/budget violations
+refuse. Expansion is bounded by the existing 128 MiB packet-file byte limit.
+Neither that limit nor the repository's 1 MiB cap is raised.
+
+For the identical logical inventory, normalized digest semantics are unchanged;
+raw source and packet digests still bind real bytes. Candidate derivation,
+packet verification and receipts keep their existing logical profile and
+assurance. The compatibility guard now uses the same strict admission path.
+An actual prior source reader accepts v1 and refuses v2; the new reader accepts
+both and preserves all 6,608 baseline identities and their order.
+The in-memory baseline example has 320 ordered groups and occupies 761,258 bytes
+at two-space indentation rather than 1,048,278 bytes. This is a representation
+measurement, not writer activation or a pipeline performance result.
+
+Fourteen new controls and the two existing compatibility-CLI controls pass
+actual focused effect qualification together in 1.985 development seconds:
+zero prohibited effects and genuine admission call coverage for all sixteen.
+All eight Python reads observed during the active interval are already
+hash-bound. The affected existing suites pass before the strict migration.
+That gate initially exposes 221 errors across four touched legacy test files.
+Explicit fixture/JSON/callback types, canonical symbol ownership and checked
+module specs address the whole-file debt without suppressions. The automated
+annotation pass verifies the complete runtime AST is unchanged; original
+identities, parameterization and assertions remain. Whole-file strict typing
+for all six changed Python files passes on Linux and Windows, as does focused
+Ruff. The final complete affected suites pass all 240 cases.
+When the shared upstream ref advances, a direct comparison incorrectly includes
+unrelated peer projects and requests their unprepared environments. No such
+environment is prepared: the actual common-base comparison confirms six owned
+physical files, which pass the unchanged strict ratchet on both platforms.
+Current-head source CI remains required after managed publication.
+
+Admission adds only fourteen reader controls and refreshes the six changed
+source digests: 6,622 nodes, 1,050 sources, 439 targets and all 89 helper decisions.
+The profile and 300-second packet budget remain. Removing target-entry
+indentation only retains one independent entry per line and leaves the v1
+manifest initially at 1,048,193 bytes, 383 bytes below the unchanged cap. Source storage
+and emitted packets are not converted to v2 in this reader-first slice.
+Complete current-head review and Linux source CI remain required.
+
+Read-only publication preflight then discovers seven newly merged peer cases.
+Retaining them would exceed the cap by 664 bytes at that layout. Removing
+only the optional source-map colon space retains every independent source line
+and identical parsed data: the local inventory is 1,047,143 bytes, and the
+projected complete peer cohort is 1,048,189 bytes with 387 bytes of headroom.
+This remains v1 whitespace compaction, not v2 writer activation, case removal
+or a limit waiver.
+
+Managed publication initially refuses a genuine manifest conflict before
+opening a PR and auto-aborts with the owned branch unchanged. An explicit
+backup retains the complete local work. Manual rebase finds only that manifest
+conflict; none of the six owned Python files overlaps the peer changes.
+Three-way data reconciliation preserves every original and peer entry plus
+the fourteen controls. The actual rebased cohort has 6,629 nodes, 1,051 sources,
+440 targets, all 89 helper decisions and the unchanged profile/budget.
+All eight Python reads from focused observation remain byte-identical.
+Exact-base whole-file typing passes again on both platforms. No reset, stash,
+lock/ref repair, peer edit or resource release is used.
+The eventual published head still requires full source CI and current review.
+
+Source PR #13905 opens at `ebe38055d7208eed0e3c92b31450aa1e48ee6380`.
+Actual published-base verification retains every entry from
+`926e1e831cacf900580bee2ca50fd4a30c4f48bc` plus the fourteen controls;
+all eight observed Python reads remain byte-identical.
+Copilot approval `6005850205` names that exact head, but source CI
+`44912578154` fails the required changefile-presence step and aggregate.
+The unit job succeeds; this is not complete required CI or merge readiness.
+The guard correctly identifies `promotion_unit_contract.py` in Worktree
+Manager's declared packaged helper footprint. The omitted patch intent is
+added through the standard changefile tool, without a version hand-edit,
+runtime deployment, CI bypass or manual rerun. Fresh source CI and review
+are required after publishing that correction.
+
+A later writer migration must establish support at the actual selected
+consumers and reconcile raw node-list assertions before use. Source merge,
+released/selected reader adoption and writer/control activation remain separate.
+No native grant, live probe, timeout waiver, source-census completion or
+owner/custody release follows from this contract expansion.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

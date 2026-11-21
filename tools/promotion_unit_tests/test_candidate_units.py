@@ -3,19 +3,23 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from promotion_candidate_units import CANDIDATE_PROFILE, candidate_manifest, derive_manifest
-from promotion_unit_contract import PROFILE, UnitEvidenceError, admit_manifest, manifest_digest, windows_native_manifest
+from promotion_candidate_units import candidate_manifest, derive_manifest
+from promotion_unit_contract import CANDIDATE_PROFILE, COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, manifest_digest, windows_native_manifest
 
 DEV, TREE = "a" * 40, "b" * 40
 TEST = "tools/promotion_unit_tests/test_example.py"
 TARGET = "services/chat/src/example/__init__.py"
 NODE = TEST + "::test_example"
+JsonObject = dict[str, Any]
 
 
-def inputs():
+def inputs() -> tuple[JsonObject, dict[str, bytes], dict[str, bytes], dict[str, str]]:
     development = {
         TEST: b"def test_example(): assert True\n",
         TARGET: b'__version__ = "0.1.0-dev1"\ndef value(): return 1\n',
@@ -29,14 +33,14 @@ def inputs():
     return template, development, candidate, {name: name for name in development}
 
 
-def derive(template, development, candidate, origins):
+def derive(template: JsonObject, development: dict[str, bytes], candidate: dict[str, bytes], origins: dict[str, str]) -> JsonObject:
     return candidate_manifest(
         template, dev_sha=DEV, candidate_tree=TREE, development_sources=development,
         candidate_sources=candidate, origins=origins,
     )
 
 
-def test_candidate_manifest_admits_actual_stamp_not_raw_source_relabeling():
+def test_candidate_manifest_admits_actual_stamp_not_raw_source_relabeling() -> None:
     template, development, candidate, origins = inputs()
     manifest = derive(template, development, candidate, origins)
     assert manifest["profile"] == CANDIDATE_PROFILE
@@ -51,8 +55,19 @@ def test_candidate_manifest_admits_actual_stamp_not_raw_source_relabeling():
         derive(windows_native_manifest(template, platform="win32"), development, candidate, origins)
 
 
+def test_compact_template_keeps_candidate_selection_origins_and_digest() -> None:
+    template, development, candidate, origins = inputs()
+    expected = derive(template, development, candidate, origins)
+    compact = {**template, "profile": COMPACT_PROFILE, "node_groups": [[TEST, ["test_example"]]]}
+    del compact["nodes"]
+    actual = derive(json.loads(json.dumps(compact)), development, candidate, origins)
+    assert actual == expected
+    assert actual["composition"]["source_manifest_sha256"] == manifest_digest(template)
+    assert template["profile"] == PROFILE
+
+
 @pytest.mark.parametrize("change", ["dev-bytes", "missing-source", "extra-source", "wrong-origin", "bad-copy"])
-def test_candidate_manifest_refuses_unadmitted_closure(change):
+def test_candidate_manifest_refuses_unadmitted_closure(change: str) -> None:
     template, development, candidate, origins = inputs()
     if change == "dev-bytes":
         development[TARGET] += b"# drift\n"
@@ -70,14 +85,14 @@ def test_candidate_manifest_refuses_unadmitted_closure(change):
 
 
 @pytest.mark.parametrize("field", ["dev_sha", "candidate_tree", "source_manifest_sha256", "origins", "development_sources"])
-def test_candidate_composition_fields_are_not_optional_or_self_declared(field):
+def test_candidate_composition_fields_are_not_optional_or_self_declared(field: str) -> None:
     manifest = derive(*inputs())
     del manifest["composition"][field]
     with pytest.raises(UnitEvidenceError):
         admit_manifest(manifest)
 
 
-def test_candidate_copy_keeps_origin_and_does_not_add_test_nodes():
+def test_candidate_copy_keeps_origin_and_does_not_add_test_nodes() -> None:
     template, development, candidate, origins = inputs()
     copy_path = "plugins/example/libs/chat/src/example/__init__.py"
     candidate[copy_path] = candidate[TARGET]
@@ -88,7 +103,7 @@ def test_candidate_copy_keeps_origin_and_does_not_add_test_nodes():
     assert manifest["composition"]["origins"][copy_path] == TARGET
 
 
-def test_declared_materialized_vendor_copy_extends_only_the_admitted_closure(tmp_path):
+def test_declared_materialized_vendor_copy_extends_only_the_admitted_closure(tmp_path: Path) -> None:
     development_root, candidate_root = tmp_path / "dev", tmp_path / "candidate"
     source = "libs/example/src/example.py"
     copy_path = "plugins/consumer/libs/example/src/example.py"
@@ -117,7 +132,7 @@ def test_declared_materialized_vendor_copy_extends_only_the_admitted_closure(tmp
     assert manifest["nodes"] == [NODE]
 
 
-def test_candidate_selection_cannot_change_the_original_budget():
+def test_candidate_selection_cannot_change_the_original_budget() -> None:
     template, development, candidate, origins = inputs()
     before = copy.deepcopy(template)
     derive(template, development, candidate, origins)

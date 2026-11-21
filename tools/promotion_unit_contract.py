@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, NoReturn
 
 PROFILE = "copilot-extensions.promotion-units/v1"
+COMPACT_PROFILE = "copilot-extensions.promotion-units/v2"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
 WINDOWS_NATIVE_PROFILE = "copilot-extensions.windows-native-units/v1"
 MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
@@ -106,7 +107,46 @@ def relative_file(value: object) -> str:
     return value
 
 
+def _expand_compact_manifest(data: dict[str, Any]) -> dict[str, Any]:
+    if set(data) != {
+        "profile", "node_groups", "sources", "coverage_targets", "max_seconds",
+    }:
+        raise UnitEvidenceError("invalid compact unit manifest fields")
+    groups = data["node_groups"]
+    if not isinstance(groups, list) or not groups:
+        raise UnitEvidenceError("compact unit node groups must be explicit")
+    nodes: list[str] = []
+    expanded_bytes = 0
+    for group in groups:
+        if (
+            not isinstance(group, list) or len(group) != 2
+            or not isinstance(group[1], list) or not group[1]
+        ):
+            raise UnitEvidenceError("compact unit group must contain a source and cases")
+        path = relative_file(group[0])
+        try:
+            prefix_bytes = len(path.encode("utf-8")) + 2
+        except UnicodeEncodeError as error:
+            raise UnitEvidenceError("compact unit nodes must be valid UTF-8") from error
+        for case in group[1]:
+            if not isinstance(case, str) or not case:
+                raise UnitEvidenceError("compact unit cases must be nonempty strings")
+            try:
+                expanded_bytes += prefix_bytes + len(case.encode("utf-8"))
+            except UnicodeEncodeError as error:
+                raise UnitEvidenceError("compact unit nodes must be valid UTF-8") from error
+            if expanded_bytes > MAX_PACKET_FILE_BYTES:
+                raise UnitEvidenceError("compact unit nodes exceed the expanded byte bound")
+            nodes.append(path + "::" + case)
+    return {
+        "profile": PROFILE, "max_seconds": data["max_seconds"], "nodes": nodes,
+        "coverage_targets": data["coverage_targets"], "sources": data["sources"],
+    }
+
+
 def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict[str, Any]:
+    if isinstance(data, dict) and data.get("profile") == COMPACT_PROFILE:
+        data = _expand_compact_manifest(data)
     candidate = isinstance(data, dict) and data.get("profile") == CANDIDATE_PROFILE
     fields = {
         "profile", "nodes", "sources", "coverage_targets", "max_seconds",
