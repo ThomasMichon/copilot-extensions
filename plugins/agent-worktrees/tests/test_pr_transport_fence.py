@@ -296,14 +296,18 @@ def test_qualified_foreign_creation_carries_its_source_into_provider_admission(
     resolution = pr_config.ForeignRepoResolution(target, "upstream/repo", same_as_active=False)
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *a: resolution)
     captured: list[PRScope] = []
+    lookups: list[tuple[str, str, str]] = []
 
     def create(scope: PRScope, **kwargs: Any) -> PullResult:
         captured.append(scope)
         return PullResult(number=7, url="https://github.com/upstream/repo/pull/7")
 
+    def find(repository: str, source: str, branch: str, **kwargs: Any) -> None:
+        lookups.append((repository, source, branch))
+
     provider = SimpleNamespace(
         authority_endpoint=lambda base: "github.com", create_pull=create,
-        find_pull_by_head=lambda *a, **k: None,
+        find_pull_by_source=find,
     )
     monkeypatch.setattr(base, "get_provider", lambda *a: provider)
     monkeypatch.setattr(base, "account_token_for_slug", lambda *a: None)
@@ -314,6 +318,7 @@ def test_qualified_foreign_creation_carries_its_source_into_provider_admission(
         title="Change", source_workspace=str(workspace), expected_head="a" * 40,
     )
     assert result.get("pr_opened") and result.get("claimed"), result
+    assert lookups == [("upstream/repo", "upstream/repo", "topic")]
     assert len(captured) == 1
     assert captured[0].head_identity == "github.com/upstream/repo"
     assert captured[0].expected_head_sha == "a" * 40
