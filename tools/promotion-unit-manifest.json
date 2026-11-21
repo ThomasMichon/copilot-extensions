@@ -7727,7 +7727,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",
-        "tools/typecheck-projects.json": "95b828787ad18cd96f2198f84a510e4f8be613653b24299f7f1d6ad7905280a6",
+        "tools/typecheck-projects.json": "ffaea44b32cfb39ca8cb34ca37e1596de6ae0bc534a37d1dc472bd25532527e9",
         "tools/promotion_unit_tests/test_typecheck_new_code.py": "8afc494eb31cb1f3bd57c88c9827e3a8e74a41619724ea0a78fcc9558c3975a6",
         "tools/typecheck_new_code.py": "91cf4b7e6947266c9196a7b9f9b9d00cb1ceaa9ef7fc85df5bdb3a863fac4f0d",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py": "7b56c5bf4fcd0e1ebde93376396e29bd53cfc2ad2cd2a58f52d9a1baf442effb",
