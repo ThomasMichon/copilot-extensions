@@ -1,0 +1,9 @@
+{
+  "comment": "Pass the verified installed scheduling helper to PowerShell with an ordinary Windows path.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
