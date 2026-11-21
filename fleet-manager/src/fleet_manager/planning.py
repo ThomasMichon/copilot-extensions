@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Collection
 import hashlib
 import json
 import math
@@ -19,22 +20,22 @@ class PlanError(ValueError):
     """Invalid local input; diagnostics intentionally exclude supplied values."""
 
 
-def identifier(value, name):
+def identifier(value: object, name: str) -> None:
     if not isinstance(value, str) or not IDENTIFIER.fullmatch(value):
         raise PlanError(f"{name} must be a bounded identifier")
 
 
-def integer(value, name, *, minimum=0, maximum=2**63 - 1):
+def integer(value: object, name: str, *, minimum: int = 0, maximum: int = 2**63 - 1) -> None:
     if type(value) is not int or not minimum <= value <= maximum:
         raise PlanError(f"{name} must be an integer between {minimum} and {maximum}")
 
 
-def boolean(value, name):
+def boolean(value: object, name: str) -> None:
     if type(value) is not bool:
         raise PlanError(f"{name} must be boolean")
 
 
-def record(value, schema, required, optional=()):
+def record(value: object, schema: str, required: Collection[str], optional: Collection[str] = ()) -> None:
     if not isinstance(value, dict):
         raise PlanError("input must be an object")
     fields = {"schema", "version", *required}
@@ -44,7 +45,7 @@ def record(value, schema, required, optional=()):
         raise PlanError("unsupported input schema/version")
 
 
-def _tree(value, depth=0, *, output=False):
+def _tree(value: object, depth: int = 0, *, output: bool = False) -> None:
     label = "plan output" if output else "input"
     if depth > (15 if output else 12):
         raise PlanError(f"{label} exceeds nesting limit")
@@ -69,7 +70,7 @@ def _tree(value, depth=0, *, output=False):
         raise PlanError(f"{label} contains nonfinite number")
 
 
-def canonical(value, *, output=False):
+def canonical(value: object, *, output: bool = False) -> bytes:
     label = "plan output" if output else "input"
     try:
         _tree(value, output=output)
@@ -83,11 +84,11 @@ def canonical(value, *, output=False):
     return raw
 
 
-def digest(value, *, output=False):
+def digest(value: object, *, output: bool = False) -> str:
     return hashlib.sha256(canonical(value, output=output)).hexdigest()
 
 
-def _pairs(pairs):
+def _pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result = {}
     for key, value in pairs:
         if key in result:
@@ -96,7 +97,7 @@ def _pairs(pairs):
     return result
 
 
-def decode(raw):
+def decode(raw: bytes) -> object:
     if not isinstance(raw, bytes) or len(raw) > MAX_BYTES:
         raise PlanError("input exceeds byte limit")
     try:
@@ -107,7 +108,7 @@ def decode(raw):
     return value
 
 
-def _roles(value):
+def _roles(value: object) -> None:
     if not isinstance(value, dict) or len(value) > MAX_ITEMS:
         raise PlanError("roles must be a bounded object")
     for name, role in value.items():
@@ -116,10 +117,11 @@ def _roles(value):
             raise PlanError("role declaration must be an object")
 
 
-def configuration_capacity(config, *, fleet_id):
+def configuration_capacity(config: object, *, fleet_id: str) -> dict[str, int]:
     """Validate the shared adopter contract without altering custom declarations."""
     record(config, "fleet-manager.config", {"fleet_id", "revision", "capacity", "roles"},
            {"template", "extensions"})
+    assert isinstance(config, dict)
     if config["fleet_id"] != fleet_id:
         raise PlanError("adopter fleet identity mismatch")
     identifier(config["revision"], "config revision")
@@ -138,7 +140,9 @@ def configuration_capacity(config, *, fleet_id):
     return capacity
 
 
-def plan(template, config, live, *, fleet_id, machine_limit, now):
+def plan(
+    template: object, config: object, live: object, *, fleet_id: str, machine_limit: int, now: float,
+) -> dict[str, object]:
     """Return proposals only; never mutate input, create hosts, or retire resources."""
     identifier(fleet_id, "fleet id")
     integer(machine_limit, "machine limit", minimum=1, maximum=MAX_ITEMS)
@@ -147,6 +151,7 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
     for value in (template, config, live):
         canonical(value)
     record(template, "fleet-manager.template", {"id", "revision", "execution_hosts", "roles"})
+    assert isinstance(template, dict)
     identifier(template["id"], "template id")
     identifier(template["revision"], "template revision")
     integer(template["execution_hosts"], "execution host recommendation", maximum=MAX_ITEMS)
@@ -161,12 +166,14 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
 
     if config is not None:
         capacity = configuration_capacity(config, fleet_id=fleet_id)
+        assert isinstance(config, dict)
     else:
         capacity = {"machine_limit": machine_limit, "execution_hosts": template["execution_hosts"]}
 
     record(live, "fleet-manager.inventory",
            {"provider", "revision", "fleet_id", "observed_at", "expires_at",
             "complete", "creation_allowed", "quota_remaining", "hosts"})
+    assert isinstance(live, dict)
     identifier(live["provider"], "provider id")
     identifier(live["revision"], "inventory revision")
     if live["fleet_id"] != fleet_id:
@@ -272,7 +279,9 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
     return result
 
 
-def verify_plan(saved, template, config, live, *, fleet_id, machine_limit, now):
+def verify_plan(
+    saved: object, template: object, config: object, live: object, *, fleet_id: str, machine_limit: int, now: float,
+) -> dict[str, object]:
     """Validate all planning assumptions before a future, separately authorized apply."""
     if not isinstance(saved, dict) or "plan_digest" not in saved:
         raise PlanError("invalid saved plan")
@@ -281,6 +290,7 @@ def verify_plan(saved, template, config, live, *, fleet_id, machine_limit, now):
     if digest(body, output=True) != saved["plan_digest"]:
         raise PlanError("saved plan integrity mismatch")
     current = plan(template, config, live, fleet_id=fleet_id, machine_limit=machine_limit, now=now)
+    assert isinstance(live, dict)
     if current["plan_digest"] != saved["plan_digest"] or live["expires_at"] <= now:
         raise PlanError("plan assumptions changed or expired")
     if saved["blockers"]:

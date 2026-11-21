@@ -53,6 +53,11 @@ class WorkspaceRetention:
         ):
             yield None
             return
+        if operation == "inspect":
+            from .workspace_retained_review import available
+            if available(self.workspace, expires_at=expires_at, checkpoint=checkpoint):
+                yield None
+                return
         scope = _scope({**self.workspace.scope, "number": payload.get("number")})
         identity = _digest(scope)
         with self._condition:

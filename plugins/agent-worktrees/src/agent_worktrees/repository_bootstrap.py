@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from agent_procutil import no_window_kwargs
 
 from . import repos, repository_setup as protocol
+from .repos_registry_reader import RepositoryResolutionError
 from .git_ops import repository_identity_env
 from .repos_registry_transaction import registry_lock
 
@@ -157,7 +158,6 @@ def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
         "-c", f"credential.{url}.username={account}",
         "-c", f"credential.{url}.provider=github",
         "-c", "credential.gitHubAccountFiltering=true",
-        "-c", "credential.useHttpPath=true",
         "-c", "http.extraHeader=",
         "-c", f"http.{url}.extraHeader=",
     ]
@@ -340,7 +340,7 @@ def command(argv: list[str]) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
-        return int(error.code)
+        return int(error.code or 0)
     try:
         canonical = protocol.https_url(args.repository)
         name, path = _selection(canonical, args.target, ask=args.apply)
@@ -378,7 +378,7 @@ def command(argv: list[str]) -> int:
             result = run_continuity(selected, args.context, apply=args.apply)
         print(f"Repository setup: {result.status}: {result.message}", flush=True)
         return 0 if result.status == "ready" else 1
-    except (protocol.SetupError, OSError, subprocess.TimeoutExpired, repos.RepositoryResolutionError) as error:
+    except (protocol.SetupError, OSError, subprocess.TimeoutExpired, RepositoryResolutionError) as error:
         print(f"Repository setup refused/failed: {error}", file=sys.stderr, flush=True)
         return 1
     except (KeyboardInterrupt, EOFError):

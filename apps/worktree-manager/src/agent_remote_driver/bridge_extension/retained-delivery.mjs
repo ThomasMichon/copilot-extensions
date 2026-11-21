@@ -1,7 +1,7 @@
 // Opt-in retained inbox consumer. SQLite owns attempts and outcomes; this
 // module owns only the one SDK invocation authorized by a true /begin reply.
 import { randomUUID } from "node:crypto";
-import { buildDeliveredSendOptions, escAttr, isSubAgentEvent } from "./delivery.mjs";
+import { buildDeliveredSendOptions, deliveryPlan, escAttr, isSubAgentEvent } from "./delivery.mjs";
 import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
 
 const CONTRACT = "retained-inbox-v1";
@@ -85,6 +85,7 @@ export function createRetainedInbox({
   receivingApi,
   validateSendContext,
   replayHistory,
+  mainTurn,
 }) {
   if (receivingApi !== undefined && receivingApi !== "native-sdk-v1") {
     throw new Error("unsupported native receiving API");
@@ -437,7 +438,6 @@ export function createRetainedInbox({
     await readiness();
     const options = buildDeliveredSendOptions(startup ? { ...msg, kind: "prompt" } : msg);
     options.prompt = options.prompt.replace(/^<agent-message /, retainedHeader(receipt));
-    if (msg.delivery === "steer") options.mode = "immediate";
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
     const grant = await currentRequest(sid, "begin", {
@@ -454,6 +454,10 @@ export function createRetainedInbox({
       if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed after final admission");
       await nativeCall(async () => {
         if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed at SDK invocation");
+        const mode = deliveryPlan(msg, {
+          mainTurnRunning: mainTurn ? mainTurn.running : true,
+        }).options.mode;
+        if (mode !== undefined) options.mode = mode;
         const messageId = await session.send(options);
         if (!nonblank(messageId)) throw new Error("SDK acceptance reply unavailable");
         // A late reply still settles submission attention, not the original receipt.

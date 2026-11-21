@@ -43,14 +43,16 @@ public SDK before the final send; duplicate/missing roots remain unsupported.
 The extension registers the public SDK's `onPostToolUse` and
 `onPostToolUseFailure` callbacks. Its existing off-loop inbox and original
 receipt reads populate a bounded in-memory set of pending message IDs before
-an SDK send can block. Root callbacks for the registered native session can
-then tell the agent to end its turn for queued steering. The callback performs
+an SDK send can block. Root callbacks for the registered native session report
+the pending input without instructing the agent to end its turn: an idle
+transition alone cannot guarantee submission through an unavailable SDK or
+an outstanding native effect. The callback performs
 no network, subprocess, file or history work and never awaits the drain.
 Nested/foreign callbacks, intentional `/peer` mute and unavailable current
 registration produce no notice. A repeated notice is coalesced for 30 seconds.
 No hook acknowledgement, peer reply or new delivery queue is required.
 
-Successful SDK submission clears its own ID from this yield notice, including
+Successful SDK submission clears its own ID from this notice, including
 an accepted original receipt recovered after reconnect. The notice tracks work
 still awaiting submission, not submitted input awaiting model consumption.
 A native root input observation, or the retained consumer's existing exact
@@ -65,11 +67,20 @@ evicting known IDs or claiming the inbox is empty. Unknown overflow is not a
 reason to replay input; it does not itself demand an end-turn after all known
 pending IDs have cleared.
 
-This is best-effort steering from this extension's observed facts, not a fresh
-authoritative inbox read on every tool call. It cannot wake an idle receiver
-without a tool boundary, repair a hung SDK or certify callback support from a
-package version. The selected runtime must actually accept and invoke the
-public hooks; native hook-policy refusal is not bypassed. The model-free source
+The existing inbox owner schedules a coalesced, off-loop drain after a root
+`assistant.idle` or `session.idle` event and after successful registration or
+heartbeat re-registration. It adopts the joined SDK session's current ID,
+including on resume when ordinary session events omit that ID. The existing
+two-second poll remains the backstop for arrivals while already idle.
+Idle steering uses the SDK's `enqueue` mode to start a new turn; active-turn
+steering retains `immediate` mode. Intentional mute, current-native checks and
+outstanding-send fences still apply. Shutdown cancels deferred wakes.
+
+The notice is best-effort information from this extension's observed facts,
+not a fresh authoritative inbox read on every tool call. It does not itself
+wake the receiver, repair a hung SDK or certify callback support from a package
+version. The selected runtime must actually accept and invoke the public
+hooks; native hook-policy refusal is not bypassed. The model-free source
 controls do not qualify that native lane or an installed reload.
 
 No hook return, prompt-submitted callback or send reply is treated as model

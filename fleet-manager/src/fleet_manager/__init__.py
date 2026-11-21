@@ -1,6 +1,6 @@
 """Non-mutating fleet planning; no provider, server or credential side effects."""
 
-__version__ = "0.1.173-dev1"
+__version__ = "0.1.174-dev1"
 
 from .planning import PlanError, plan, verify_plan
 

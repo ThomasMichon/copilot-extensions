@@ -171,6 +171,11 @@ def require_live(
         return None
     scope = _scope(scope)
     if operation_id is not None and any(
+        operation["intent"]["operation_id"] == operation_id and operation.get("recovery_only") is True
+        for operation in document["reviews"]
+    ):
+        raise TerminalAdmissionClosed("imported original operation is permanently recovery-only")
+    if operation_id is not None and any(
         row["operation_id"] == operation_id
         for row in document.get("terminal_recovery", {}).get("operations", [])
     ):
@@ -444,6 +449,7 @@ class TerminalRetentionStore:
                     recorded_native_targets=(
                         self.owner.recorded_terminal_cache and self.owner.native_generation_associations
                     ),
+                    retained_active_reviews=self.owner.retained_active_reviews,
                 )
                 from .terminal_recovery import PROTOCOL as RECOVERY
                 from .terminal_cache_retirement import PROTOCOL as CACHE

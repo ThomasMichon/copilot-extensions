@@ -38,6 +38,7 @@ class _TerminalOptions(TypedDict, total=False):
     terminal_mapping_reads: bool
     retention_target_deadline: bool
     retention_target: Callable[..., ObservationTarget]
+    retained_active_reviews: bool
 
 class _GenerationOptions(TypedDict, total=False):
     generation_native_target: tuple[str, str]
@@ -112,6 +113,7 @@ class WorkspaceConfig:
     terminal_mapping_reads: bool = False
     generation_associations: bool = False
     generation_native_targets: tuple[WatchScopeBinding, ...] = ()
+    retained_active_reviews: bool = False
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -151,6 +153,9 @@ class WorkspaceConfig:
                 }
                 if self.terminal_mapping_reads:
                     terminal_options[(binding.principal, binding.target)]["terminal_mapping_reads"] = True
+                if self.retained_active_reviews:
+                    terminal.active_review_core()
+                    terminal_options[(binding.principal, binding.target)]["retained_active_reviews"] = True
         preparations = {
             (principal, target): config.select(
                 dict(reader.scope), checkpoint, seconds,
@@ -220,6 +225,9 @@ class HostConfig:
             terminal.core()
             from .terminal_policy import TerminalReplayStore
             mapping_options: dict[str, Any] = {}
+            if self.workspaces.retained_active_reviews:
+                terminal.active_review_core()
+                mapping_options["retained_active_reviews"] = True
             if self.workspaces.terminal_mapping_reads:
                 terminal.mapping_core()
                 if _mapping_store() is None:
@@ -313,6 +321,7 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
     selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"}, {
         "terminal_reads", "terminal_mapping_reads", "generation_associations",
         "native_generation_associations",
+        "retained_active_reviews",
     })
     terminal_reads = selected.get("terminal_reads", False)
     if type(terminal_reads) is not bool:
@@ -330,6 +339,13 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         not generation_associations
     ):
         raise ValueError("native_generation_associations requires a selected fresh baseline")
+    retained_active_reviews = selected.get("retained_active_reviews", False)
+    if type(retained_active_reviews) is not bool or retained_active_reviews and (
+        not terminal_reads or not generation_associations or terminal_mapping_reads
+    ):
+        raise ValueError("retained_active_reviews requires the recorded terminal reader without mappings")
+    if retained_active_reviews:
+        terminal.active_review_core()
     if generation_associations:
         from .generation_associations import core, recorded_core
         if terminal_reads:
@@ -403,6 +419,7 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         tuple(b for b in bindings if any(
             (p, t) == (b.principal, b.target) for p, t, _ in readers
         )) if native_associations else (),
+        retained_active_reviews,
     )
 
 
