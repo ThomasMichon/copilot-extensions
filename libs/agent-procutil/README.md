@@ -389,6 +389,58 @@ prefix is still `pending`, even after its eligible retired leaves are gone;
 base/unknown bytecode is not claimed reclaimed. Repeated successful updates
 resume eligible work, not a promise to empty every historical prefix.
 
+### Qualified whole-prefix relief
+
+The separate `python_cache_prefixes.collect_prefixes` planner covers old
+`unsealed-<32 hex>` and `installed-<64 hex>` trees under one runtime root.
+It can reclaim base-interpreter bytecode as part of a complete prefix.
+It requires native process-reference proof **and** runtime-owner custody;
+it does not weaken the older source-qualified collector's refusal.
+
+The Windows observer binds process owners to creation identities, retains
+process handles, and reads interpreter arguments and environments with bounded
+native reads. It rechecks references before effects. Unknown owners, opaque
+relevant processes, a changed identity or exhausted observation budget hold the
+prefix. Observation never signals a process or requests elevation.
+
+The runtime owner holds construction, retention and selector guards for every
+associated slot. Selected, rollback, retained, live or still-present slots
+refuse reclamation. The content inventory requires ordinary, non-linked,
+bytecode-only entries. The seven-day grace period covers native namespace
+birth and the newest bytecode-file timestamp, not directory timestamps changed
+by cleanup. Automatic Windows leaf maintenance retains empty version-directory
+stubs, so it can still reclaim retired leaves under a live shared prefix
+without erasing the association needed for later whole-prefix collection.
+A private continuation
+records native prefix birth, slot association and the original content-age cutoff
+after admission, so a partially
+removed tree can resume without treating its own changed timestamps as new
+content. Fresh bytecode does not inherit that age exception. Each resumed effect obtains fresh reference and runtime proof; the
+continuation is not deletion authority.
+
+Normal runtime GC can start a Windows catch-up worker through the selected
+runtime's retention launcher and the existing finite-worker owner. A kernel
+maintenance guard serializes effects. One worker has a 30-minute aggregate
+deadline and 512-GiB removal cap; each pass has 30-second, 512-namespace,
+262,144-entry and 4-GiB caps. These are maximum work budgets, not a drain-time
+guarantee. A full held cycle stops. Cursor/progress state permits later passes
+to continue; a namespace too large for a whole inventory or removal budget
+remains held. No permanent reaper service or per-session detached shell is added.
+
+Cached observations distinguish measured, snapshot-eligible, held, removed and
+unmeasured bytes/prefixes, with reasons and observation age. An in-progress
+observation is not a claim that its worker is still alive. Ordinary diagnostics
+read bounded metadata, not the cache tree. Runtime GC reports the exact dry-run
+command during updates; maintenance failures do not veto runtime selection.
+Neither merge nor a dry run authorizes cleanup or installs a new runtime.
+
+The explicit Windows `tests/test_python_cache_volume.py` fixture records logical
+bytes, pass count, elapsed time and logical drain rate in JUnit suite properties.
+Run it through the plugin test owner with `--test-timeout 120` and a fresh
+`--junit-dir` owned by the task. This longer item budget applies only to the
+selected backlog fixture. Its process/runtime proofs are scoped controls; the
+rate is not a fleet performance guarantee or a host cleanup authorization.
+
 ## Windows bootstrap and shell admission
 
 ### Opt-in pre-resume observation admission
