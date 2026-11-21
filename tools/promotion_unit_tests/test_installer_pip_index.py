@@ -10,7 +10,8 @@ import pytest
 
 
 @pytest.fixture
-def reader() -> ModuleType:
+def reader(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.delenv("UV_NO_SYSTEM_CONFIG", raising=False)
     source = Path(__file__).resolve().parents[2] / "libs/installer-engine/installer_pip_index.py"
     spec = importlib.util.spec_from_file_location("installer_pip_index", source)
     assert spec and spec.loader

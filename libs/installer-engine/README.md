@@ -121,6 +121,11 @@ Its first-session stamp remains Python- and uv-free. The installer consumes
 `installer-source-assets.tsv`, inert copy/request data projected by
 `tools/sync-installer-engine.py --only-source-snapshot-plans` from the existing
 SDK inventory, reader alias and Invocation bootstrap-request producer.
+Library entries use the source composer's existing artifact exclusions and
+enumerate ordinary files rather than recursively copying a developer's library
+directory. Stamping refuses a link at any declared source/destination path
+component, so later-added caches are not copied and checkout links cannot
+become dangling snapshot dependencies.
 This embeds the reader, policy family and deferred interpreter request before
 publishing the snapshot; explicit provision can then run after the checkout is
 removed. Source and materialized verification check that the plan still matches

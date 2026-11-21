@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -644,6 +645,11 @@ def test_real_uv_system_config_disable_is_preserved_in_retained_settings(
 ) -> None:
     uv = shutil.which("uv")
     assert uv, "The retained-settings control requires uv"
+    version = subprocess.run([uv, "--version"], capture_output=True, text=True, timeout=30)
+    parsed = re.match(r"^uv ([0-9]+)\.([0-9]+)\.([0-9]+)(?:\s|$)", version.stdout)
+    assert version.returncode == 0 and parsed, version.stdout + version.stderr
+    if tuple(map(int, parsed.group(1, 2, 3))) < (0, 11, 16):
+        pytest.skip("Selected uv predates UV_NO_SYSTEM_CONFIG; older-provider refusal is tested separately")
     project = tmp_path / "project"
     project.mkdir()
     (project / "uv.toml").write_text("", encoding="utf-8")
@@ -718,11 +724,14 @@ def test_posix_cleanroom_snapshot_provisions_without_index_environment(tmp_path:
 
 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX checkout reference coverage")
-@pytest.mark.parametrize("operation", ["install", "stamp", "missing-reader"])
+@pytest.mark.parametrize("operation", [
+    "install", "stamp", "stamp-artifacts", "stamp-linked-file", "stamp-linked-parent", "missing-reader",
+])
 def test_posix_checkout_reader_reference_and_stamped_closure(
     tmp_path: Path, operation: str,
 ) -> None:
     assert BASH
+    is_stamp = operation.startswith("stamp")
     _, env = _fake_uv_environment(tmp_path)
     for variable in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "PIP_INDEX_URL", "VIRTUAL_ENV", "CONDA_PREFIX"):
         env.pop(variable, None)
@@ -747,7 +756,7 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
     catalog["plugins"] = [entry for entry in catalog["plugins"] if entry["name"] == "budget-guidance"]
     roster.write_text(json.dumps(catalog), encoding="utf-8")
     payload = checkout / "plugins/budget-guidance"
-    if operation != "stamp":
+    if not is_stamp:
         staged = tmp_path / "bootstrap-ready"
         shutil.copytree(payload, staged)
         previous = sys.path.copy()
@@ -772,7 +781,7 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
         (payload / "scripts/pip-index-config").unlink()
     root = Path(env["HOME"]) / ".budget-guidance"
     stamp_env = env
-    if operation == "stamp":
+    if is_stamp:
         native_bin = tmp_path / "native-bin"
         native_bin.mkdir()
         for name in ("dirname", "basename", "sed", "head", "tr", "grep", "mkdir", "rm",
@@ -783,22 +792,53 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
         stamp_env = {**env, "PATH": str(native_bin)}
         assert not (payload / "scripts/bootstrap-uv.sh").exists()
         assert not (payload / "scripts/bootstrap-python-version.txt").exists()
+    if operation == "stamp-artifacts":
+        for library in ("agent-procutil", "zdd"):
+            source = checkout / "libs" / library
+            for name in (".venv", "build", "dist", "__pycache__", "stale.egg-info",
+                         ".pytest_cache", ".ruff_cache", ".test-runs"):
+                artifact = source / name / "excluded"
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text("must not enter the snapshot", encoding="utf-8")
+            (source / "stale.pyc").write_bytes(b"excluded bytecode")
+    elif operation == "stamp-linked-file":
+        source = checkout / "libs/agent-procutil/src/agent_procutil/__init__.py"
+        target = checkout / "linked-source.py"
+        source.rename(target)
+        source.symlink_to(target)
+    elif operation == "stamp-linked-parent":
+        source = checkout / "libs/agent-procutil/src/agent_procutil"
+        target = checkout / "linked-package"
+        source.rename(target)
+        source.symlink_to(target, target_is_directory=True)
     result = subprocess.run(
-        [BASH, str(payload / "scripts/install.sh"), "install" if operation == "missing-reader" else operation],
+        [BASH, str(payload / "scripts/install.sh"), "stamp" if is_stamp else "install"],
         cwd=tmp_path, env=stamp_env, capture_output=True, text=True, timeout=120,
     )
+    if operation.startswith("stamp-linked-"):
+        assert result.returncode != 0
+        assert "Linked source snapshot asset refused" in result.stdout + result.stderr
+        assert not (root / "payload-dir").exists()
+        assert not (root / "current-version").exists()
+        return
     if operation == "missing-reader":
         assert result.returncode != 0
         assert "index reader is not prepared" in result.stdout + result.stderr
         assert not (root / "current-version").exists()
         return
     assert result.returncode == 0, result.stdout + result.stderr
-    if operation == "stamp":
+    if is_stamp:
         snapshot = Path((root / "payload-dir").read_text().strip())
         assert not (root / "current-version").exists()
         assert (Path(env["HOME"]) / ".local/bin/budget-guidance").is_file()
         assert (snapshot / "scripts/bootstrap-python-version.txt").read_text() == "cpython@3.13.12\n"
         assert (snapshot / "scripts/bootstrap-uv.sh").is_file()
+        for path in (snapshot / "libs").rglob("*"):
+            assert not path.is_symlink()
+            assert not any(part in {
+                ".venv", "build", "dist", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
+            } or part.endswith(".egg-info") for part in path.relative_to(snapshot / "libs").parts)
+            assert path.suffix not in {".pyc", ".pyo"}
         assert (snapshot / "scripts/pip-index-config").read_bytes() == (
             checkout / "libs/installer-engine/installer_pip_index.py"
         ).read_bytes()

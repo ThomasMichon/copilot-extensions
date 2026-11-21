@@ -669,10 +669,6 @@ def _retain_uv_install(
         {"native_target": True} if native_target else {})
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
-    uv = _select_uv_executable(uv)
-    _configuration.require_system_config_provider(
-        uv, environment, deadline=deadline, error_type=DependencyPolicyError,
-    )
     if _operation in ("compile", "source-compile"):
         arguments = _compile_arguments(
             arguments, environment, cwd, trusted_source_roots, _operation,
@@ -683,6 +679,7 @@ def _retain_uv_install(
         **cast(dict[str, Any], {"non_editable": True} if non_editable else {}),
     )
     check_time()
+    uv = _select_uv_executable(uv)
     resources = []
     for resource in retained_resource_roots:
         if not Path(resource).is_absolute():

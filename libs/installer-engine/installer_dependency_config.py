@@ -531,6 +531,15 @@ def retain_local_exclusions(
     names = tuple(re.sub(r"[-_.]+", "-", name).lower() for name in excluded_local_packages)
     if len(set(names)) != len(names):
         raise error_type("excluded local packages contain duplicate names")
+    environment = retained_options.get("env")
+    environment = captured_environment(
+        os.environ if environment is None else environment, windows=_WINDOWS, error_type=error_type,
+    )
+    retained_options["env"] = environment
+    uv = select_uv_executable(uv, error_type=error_type)
+    require_system_config_provider(
+        uv, environment, deadline=retained_options.get("deadline"), error_type=error_type,
+    )
     if not names:
         with retain(uv, arguments, **retained_options) as transaction:
             yield transaction

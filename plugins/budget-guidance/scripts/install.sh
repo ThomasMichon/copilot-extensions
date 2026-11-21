@@ -353,7 +353,8 @@ _budget_pip_index_helper() {
 }
 
 _materialize_budget_source_snapshot() {
-    local snapshot="$1" helper root operation source target extra
+    local snapshot="$1" helper root operation source target extra base relative component
+    local -a components
     helper="$(_budget_pip_index_helper)" || return 1
     [[ "$helper" != "$SCRIPT_DIR/pip-index-config" ]] || return 0
     root="$(cd "$PLUGIN_DIR/../.." && pwd)" || return 1
@@ -364,19 +365,26 @@ _materialize_budget_source_snapshot() {
     [[ ! -L "$root/libs" && ! -L "$root/libs/installer-engine" &&
         ! -L "$snapshot/scripts" && ! -L "$snapshot/libs" ]] || return 1
     while IFS=$'\t' read -r operation source target extra; do
-        [[ -z "$extra" && "$target" =~ ^(scripts|libs)/[A-Za-z0-9_.-]+$ &&
-            ! -L "$snapshot/$target" ]] || return 1
+        [[ -z "$extra" && "$target" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
+            ! "$target" =~ (^|/)\.\.?(/|$) ]] || return 1
+        for base in "$root" "$snapshot"; do
+            relative="$source"
+            [[ "$base" != "$snapshot" ]] || relative="$target"
+            [[ "$operation" != request || "$base" != "$root" ]] || continue
+            [[ "$relative" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
+                ! "$relative" =~ (^|/)\.\.?(/|$) ]] || return 1
+            IFS=/ read -ra components <<< "$relative"
+            for component in "${components[@]}"; do
+                base="$base/$component"
+                [[ ! -L "$base" ]] || { _fail 'Linked source snapshot asset refused'; return 1; }
+            done
+        done
         case "$operation" in
             copy)
-                [[ "$target" == scripts/* && "$source" =~ ^libs/installer-engine/[A-Za-z0-9_.-]+$ &&
-                    -f "$root/$source" && ! -L "$root/$source" ]] || return 1
-                cp "$root/$source" "$snapshot/$target" || return 1
-                ;;
-            tree)
-                [[ "$source" == "$target" && "$source" =~ ^libs/[A-Za-z0-9_-]+$ &&
-                    -d "$root/$source" && ! -L "$root/$source" ]] || return 1
-                mkdir -p "$snapshot/$target" || return 1
-                cp -a "$root/$source/." "$snapshot/$target/" || return 1
+                [[ -f "$root/$source" && ( "$source" == "$target" ||
+                    ( "$target" == scripts/* && "$source" == libs/installer-engine/* ) ) ]] || return 1
+                mkdir -p "$(dirname "$snapshot/$target")" || return 1
+                cp -p "$root/$source" "$snapshot/$target" || return 1
                 ;;
             request)
                 [[ "$target" == scripts/bootstrap-python-version.txt &&

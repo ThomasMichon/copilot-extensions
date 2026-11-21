@@ -53,7 +53,25 @@ def native_snapshot_plans(repo: Path) -> dict[Path, str]:
                 source = canonical.resolve()
                 if source not in libraries:
                     libraries.add(source)
-                    rows.append(("tree", f"libs/{library}", f"libs/{library}"))
+                    from materialize_main import _ignore
+
+                    directories = [source]
+                    while directories:
+                        directory = directories.pop()
+                        entries = sorted(directory.iterdir())
+                        ignored = _ignore(str(directory), [path.name for path in entries])
+                        for path in entries:
+                            if path.name in ignored:
+                                continue
+                            if path.is_symlink():
+                                raise ValueError("native source plan refuses nested library links")
+                            if path.is_dir():
+                                directories.append(path)
+                            elif path.is_file():
+                                relative = path.relative_to(repo).as_posix()
+                                rows.append(("copy", relative, relative))
+                            else:
+                                raise ValueError("native source plan requires ordinary library files")
                     pending.append(source)
         spec = importlib.util.spec_from_file_location(
             "_native_snapshot_request",
