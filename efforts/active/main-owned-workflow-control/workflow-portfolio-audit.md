@@ -3797,6 +3797,52 @@ refuses an unattributable bytecode path during the original extended-path
 runtime load. No test callback, fixture, preload or effect contract is changed
 to admit it; no passing qualification or native acceptance is inferred.
 
+### November 21 original bundled-artifact qualification
+
+The adapter exports the exact unchanged original function and its original
+canonical/Manager fixture as ten cases. The original 275-case collection
+matches those identities and parameter suffixes. The actual four Manager
+policy dependencies and checked-in wheel are hash-bound. The wheel joins only
+the explicit build-data inventory, never executable unit source or coverage
+targets. The existing data-input regression adds one case proving changed
+bytes, unreviewed suffixes, executable-source and target refusals. No original
+callback, fixture, assertion or effect guard changes.
+
+Guarded development execution passes eleven in 2.609 seconds with zero
+prohibited effects, twelve bound Python reads and actual per-case calls to the
+correct policy copy or manifest contract. All 78 contract controls, Ruff and
+whole-file strict Linux/Windows typing pass. All preceding 7,138 nodes,
+unrelated hashes, 89 helper decisions and the 300-second bound remain; the
+actual Manager policy target joins the retained targets. The result has
+7,149 nodes, 1,107 sources and 446 targets in 819,111 compact-v2 bytes with
+unchanged flat-v1 logical compatibility.
+
+Required CI correctly rejects the initial missing Worktree Manager changefile:
+the source-unit contract belongs to that packaged consumer's input footprint.
+The normal source fix supplies its patch entry. A subsequent authored-body edit
+temporarily removes attribution; the canonical managed preparation restores
+the real source marker, and ordinary automatic metadata processing supplies the
+current passing result. No manual workflow dispatch, rerun or CI bypass is
+used. These repair-triggered runs are not claimed as consolidation savings.
+
+Copilot approval `6008598803` covers final head
+`1b9c76b1c0b03b4434599cff0759e3d20981e8d7`, without comments or open threads.
+Final CI `44956588533` unit job `137006920484` freshly passes all 7,149 cases
+with 39 deselections, 135.33 pytest seconds and 152.731 packet seconds. Evidence
+reports `mode=executed`, origin run `44956588533` attempt one and digest
+`f25d5b100bdf0729dda617e858a34ca2ad0688cbec33e60c0f6dbf78d8c3fc2c`.
+Required aggregate `137008042506`, guards, trusted `44956588847` and current
+attribution `137007320473`, complete review/thread pagination, seven fresh
+verifier reads and final veto/hold/head checks precede the managed merge.
+
+Source #13982 merges at `2026-11-21T22:34:53Z` as
+`74c15737c1b64389412dc969a11a352540cacf1e`. Independent readback confirms merged
+state, no closing references and open parent #6237. The actual parent Goal,
+current Plan and Validation Plan are reread before resolving only this leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. Full-census, every-release, comparable
+whole-flow, native, installed and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
