@@ -13,6 +13,20 @@ cases retain the provider-verified alias boundary and source/identity/root
 refusals in the eligible packet. These source controls do not qualify the
 hosted attached-caller lifetime, application startup or installed rollout.
 
+The Worktrees native application-input controls in
+`tests/native/test_native_seed_application.py` select with
+`-k "native_application_materializes or native_application_refuses"` through the
+contained plugin runner and `--allow-explicit-tiers`. They poison only copied
+SDK mirrors, exercise the canonical source preparer, and check both the wheel
+input boundary and an actual setuptools-built application wheel, including
+packaged command scripts and the fixture generation marker. The wheel control
+uses the declared test backend in an owned child without feed resolution.
+Manifest mismatch and expired-deadline controls must stop before wheel building.
+These checks do not install a profile, launch Copilot or mux, or qualify native
+caller lifetime; those remain separate explicitly admitted selections.
+Use `--test-timeout 240 --timeout 420 --plugin-timeout 420` for this bounded
+artifact packet.
+
 The focused retained-active-review packet uses
 `agent-pull-requests/tests/test_retained_review_adoption.py` and
 `services/pr/tests/test_retained_active_reviews.py` through the existing plugin

@@ -16,6 +16,7 @@ import sys
 import time
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
+from zipfile import ZipFile
 
 import agent_procutil as pu
 from agent_procutil import no_window_kwargs
@@ -958,17 +959,121 @@ def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(
         }
 
 
+@pytest.mark.parametrize("build_wheel", [False, True])
+def test_native_application_materializes_canonical_sdk_before_building(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build_wheel: bool,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder
+    else:
+        import build_python_artifacts as builder
+
+    original_copy = _copy_application_inputs
+    deadline = time.monotonic() + 180
+    generation = 37
+    modules = {
+        Path(directory) / (prefix + name): ROOT / "libs" / "payload-invocation" / name
+        for directory, prefix in (("scripts", ""), ("src/agent_worktrees", "_"))
+        for name in ("command_binding.py", "command_lifecycle.py")
+    }
+
+    def copy_with_stale_mirrors(source: Path, destination: Path) -> None:
+        original_copy(source, destination)
+        for relative in modules:
+            (destination / relative).write_text("STALE_SDK = True\n", encoding="utf-8")
+
+    class BuildBoundaryReached(Exception):
+        pass
+
+    def inspect_build(
+        *, source_dir: Path, identity: dict[str, Any], dependencies: list[tuple[str, Path]],
+        out_dir: Path, python: str | None, toolchain: builder.ToolchainLock | None,
+    ) -> None:
+        for relative, canonical in modules.items():
+            assert (source_dir / relative).read_bytes() == canonical.read_bytes(), str(relative)
+        entry = source_dir / "src" / "agent_worktrees" / "__init__.py"
+        assert f"_fixture_application_generation = {generation}" in entry.read_text(encoding="utf-8")
+        if build_wheel:
+            result = run_caller_owned(
+                [sys.executable, "-I", "-B", "-c",
+                 "import setuptools.build_meta as backend;"
+                 "backend.build_wheel(__import__('sys').argv[1], {'--global-option': ['--quiet']})",
+                 str(out_dir)],
+                cwd=source_dir, env=dict(os.environ, UV_OFFLINE="1"),
+                timeout=max(0.01, deadline - time.monotonic()),
+                max_stdout_bytes=1048576, max_stderr_bytes=65536,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            wheels = list(out_dir.glob("*.whl"))
+            assert len(wheels) == 1
+            wheel = wheels[0]
+            with ZipFile(wheel) as built:
+                for relative, canonical in modules.items():
+                    packaged = (
+                        Path("agent_worktrees") / "_runtime_assets" / relative
+                        if relative.parts[0] == "scripts" else Path(*relative.parts[1:])
+                    )
+                    assert built.read(packaged.as_posix()) == canonical.read_bytes()
+                assert built.read("agent_worktrees/__init__.py") == entry.read_bytes()
+        raise BuildBoundaryReached
+
+    monkeypatch.setattr(sys.modules[__name__], "_copy_application_inputs", copy_with_stale_mirrors)
+    monkeypatch.setattr(builder, "build_source_artifacts", inspect_build)
+    with pytest.raises(BuildBoundaryReached):
+        _prepare_native_application(
+            tmp_path / "inputs", tmp_path / "profile", monkeypatch=monkeypatch,
+            uv="unused", interpreter=sys.executable, deadline=deadline,
+            generation=generation,
+        )
+
+
+@pytest.mark.parametrize("damage", ["manifest", "deadline"])
+def test_native_application_refuses_unprepared_inputs_before_building(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder, prepare_runtime_source as preparation
+    else:
+        import build_python_artifacts as builder
+        import prepare_runtime_source as preparation
+
+    original_copy = _copy_application_inputs
+
+    def copy_with_invalid_manifest(source: Path, destination: Path) -> None:
+        original_copy(source, destination)
+        if damage == "manifest":
+            manifest = destination / "payload-invocation.json"
+            manifest.write_bytes(manifest.read_bytes() + b"\n")
+
+    def reject_build(**kwargs: object) -> None:
+        pytest.fail("Unprepared application inputs reached the wheel builder")
+
+    monkeypatch.setattr(sys.modules[__name__], "_copy_application_inputs", copy_with_invalid_manifest)
+    monkeypatch.setattr(builder, "build_source_artifacts", reject_build)
+    with pytest.raises(
+        preparation.SourcePreparationError,
+        match="Invocation manifest differs" if damage == "manifest" else "deadline exceeded",
+    ):
+        _prepare_native_application(
+            tmp_path / "inputs", tmp_path / "profile", monkeypatch=monkeypatch,
+            uv="unused", interpreter=sys.executable,
+            deadline=time.monotonic() + (60 if damage == "manifest" else -1), generation=1,
+        )
+
+
 def _prepare_native_application(
     inputs: Path, profile: Path, *, monkeypatch: pytest.MonkeyPatch, uv: str,
     interpreter: str, deadline: float, generation: int,
 ) -> Path:
     started = time.monotonic()
     if TYPE_CHECKING:
-        from tools import build_python_artifacts as builder, materialize_main as materializer
+        from tools import build_python_artifacts as builder, prepare_runtime_source as preparation
         from tools import local_install_profile as profiles
     else:
         import build_python_artifacts as builder
-        import materialize_main as materializer
+        import prepare_runtime_source as preparation
         import local_install_profile as profiles
 
     source, artifacts = inputs / "plugins" / "agent-worktrees", inputs / "wheels"
@@ -980,9 +1085,7 @@ def _prepare_native_application(
         entry.read_text(encoding="utf-8") + f"\n_fixture_application_generation = {generation}\n",
         encoding="utf-8",
     )
-    materializer.materialize_uv_editable_ref_into(
-        source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
-    )
+    preparation.materialize_consumer(ROOT, SOURCE, source, deadline=deadline)
     dependencies = builder.resolve_vendored_libs(source)
     for _, directory in dependencies:
         tests = directory / "tests"
