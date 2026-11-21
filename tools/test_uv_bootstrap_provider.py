@@ -28,7 +28,7 @@ def host(request: pytest.FixtureRequest) -> str:
 def _run(
     host: str, tmp_path: Path, responses: list[dict[str, Any]], *,
     request: bytes = b"cpython@3.11.11\n", operation: str = "Inspect",
-    uv: bool = True,
+    uv: bool = True, isolate: bool = True, callback_environment: bool = True,
 ) -> dict[str, Any]:
     request_file = tmp_path / "bootstrap-python-version.txt"
     request_file.write_bytes(request)
@@ -40,8 +40,7 @@ def _run(
         if response.get("Stdout") == "PYTHON":
             response["Stdout"] = str(python) + "\n"
     script = tmp_path / "provider-test.ps1"
-    script.write_text(
-        r"""
+    source = r"""
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -56,8 +55,20 @@ function Get-Command {
     if ($env:HAS_UV -eq '1') { [pscustomobject]@{Source = $env:FIXTURE_UV} }
 }
 $invoke = {
-    param($FilePath, $ArgList)
+    param($FilePath, $ArgList, $Environment)
     if ($FilePath -cne $env:FIXTURE_UV) { throw 'Wrong uv application.' }
+    if ($env:ISOLATE -ceq '1') {
+        $keys = @(
+            'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_MANAGED_PYTHON',
+            'UV_NO_MANAGED_PYTHON', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'VIRTUAL_ENV'
+        )
+        if ((@($Environment.Keys | Sort-Object) -join ',') -cne ($keys -join ',') -or
+            @($keys | Where-Object { $null -ne $Environment[$_] }).Count -ne 0) {
+            throw 'Every uv stage requires the complete null-valued selector override map.'
+        }
+    } elseif ($PSBoundParameters.ContainsKey('Environment') -or $args.Count -ne 0) {
+        throw 'A legacy capture callback received new override arguments.'
+    }
     $script:calls.Add(@($ArgList))
     $response = $responses[$script:calls.Count - 1]
     if ($response.PSObject.Properties['Throw']) { throw $response.Throw }
@@ -65,20 +76,24 @@ $invoke = {
 }
 try {
     $selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE `
-        -InvokeCaptured $invoke -Operation $env:OPERATION
+        -InvokeCaptured $invoke -Operation $env:OPERATION -IsolateSelection
     @{Selected = $selected; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
 } catch {
     @{Error = $_.Exception.Message; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
 }
-""",
-        encoding="utf-8-sig",
-    )
+"""
+    if not callback_environment:
+        source = source.replace("param($FilePath, $ArgList, $Environment)", "param($FilePath, $ArgList)")
+    if not isolate:
+        source = source.replace(" -IsolateSelection", "")
+    script.write_text(source, encoding="utf-8-sig")
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
         capture_output=True, text=True, encoding="utf-8", timeout=30,
         env={
             **os.environ, "PROVIDER": str(PROVIDER), "REQUEST_FILE": str(request_file),
             "FIXTURE_UV": str(uv_file), "HAS_UV": "1" if uv else "0",
+            "ISOLATE": "1" if isolate else "0",
             "RESPONSES": json.dumps(responses), "OPERATION": operation,
         },
         **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
@@ -140,6 +155,21 @@ def test_unprepared_lookup_never_acquires(host: str, tmp_path: Path, exit_code: 
 def test_missing_uv_does_not_discover_python(host: str, tmp_path: Path) -> None:
     result = _run(host, tmp_path, [], uv=False)
     assert result["Selected"]["Reason"] == "uv-not-on-path"
+    assert result["Calls"] == []
+
+
+def test_legacy_capture_contract_remains_usable_without_selection_isolation(host: str, tmp_path: Path) -> None:
+    result = _run(
+        host, tmp_path, [_result("uv 0.8.1\n"), _result("PYTHON")],
+        isolate=False, callback_environment=False,
+    )
+    assert result["Selected"]["Reason"] == "uv-managed-python"
+    assert result["Calls"] == [["--version"], FIND]
+
+
+def test_selection_isolation_refuses_an_older_callback_before_execution(host: str, tmp_path: Path) -> None:
+    result = _run(host, tmp_path, [], callback_environment=False)
+    assert "must accept child Environment overrides" in result["Error"]
     assert result["Calls"] == []
 
 
@@ -212,13 +242,14 @@ $env:PATH = $env:UV_ONLY_PATH
 $env:UV_PYTHON = $null
 $script:calls = [Collections.Generic.List[object]]::new()
 $invoke = {
-    param($FilePath, $ArgList)
+    param($FilePath, $ArgList, $Environment)
     $script:calls.Add(@($ArgList))
     $errors = ''
-    $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -ErrorOutput ([ref]$errors)
+    $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+        -ErrorOutput ([ref]$errors) -Environment $Environment
     [pscustomobject]@{ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $errors}
 }
-$selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE -InvokeCaptured $invoke
+$selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE -InvokeCaptured $invoke -IsolateSelection
 @{Selected = $selected; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
 """,
         encoding="utf-8-sig",

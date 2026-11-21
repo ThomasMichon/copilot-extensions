@@ -87,6 +87,37 @@ if ($LASTEXITCODE -ne 0 -or $nativeError -cne 'diagnostic') {{ throw 'native cap
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("bounded", [False, True])
+def test_native_capture_environment_removal_is_child_scoped(
+    tmp_path: Path, host: str, bounded: bool,
+) -> None:
+    code = (
+        "import json,os; print(json.dumps({key:os.environ.get(key) for key in "
+        "('NATIVE_REMOVED','NATIVE_EMPTY','NATIVE_REPLACED')}))"
+    )
+    script = f"""
+$env:NATIVE_REMOVED = 'original'
+$env:NATIVE_EMPTY = 'original'
+$env:NATIVE_REPLACED = 'original'
+$nativeError = ''
+$output = Invoke-Hidden -FilePath {_quote(sys.executable)} `
+    -ArgList @('-I', '-c', {_quote(code)}) -ErrorOutput ([ref]$nativeError) `
+    -Environment @{{NATIVE_REMOVED=$null; NATIVE_EMPTY=''; NATIVE_REPLACED='child'}} `
+    {'-TimeoutMilliseconds 10000 -CleanupMilliseconds 1000' if bounded else ''}
+if ($LASTEXITCODE -ne 0 -or $nativeError -or
+    $env:NATIVE_REMOVED -cne 'original' -or $env:NATIVE_EMPTY -cne 'original' -or
+    $env:NATIVE_REPLACED -cne 'original') {{ throw 'Caller environment changed' }}
+[Console]::Out.Write($output)
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr
+    assert json.loads(result.stdout) == {
+        "NATIVE_REMOVED": None, "NATIVE_EMPTY": "", "NATIVE_REPLACED": "child",
+    }
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
 @pytest.mark.parametrize("stream_errors", [False, True])
 def test_native_capture_supplies_stdin_and_drains_both_streams(
     tmp_path: Path, host: str, stream_errors: bool,
