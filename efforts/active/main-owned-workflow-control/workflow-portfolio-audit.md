@@ -2939,6 +2939,73 @@ reuse saving, native acceptance, runtime update or resource settlement is
 credited. Broader full-census/every-release, accepted-owner, native/lifecycle
 and comparable whole-flow gates remain open.
 
+Source #13930 merges at `2026-11-21T16:51:55Z` as
+`8faa88c9973499a27675a36ba20a7ff3de1d5014`. Copilot approval `6006687993`
+at `16:49:13Z` names exact head
+`263226a1bb4f54a4e479602ab57ecc971fee5676`; complete review and thread
+readback finds no finding or omitted page. Required source CI `44926436759`
+and trusted metadata CI `44926436968` succeed. Actual unit job `136913442860`
+freshly executes all 6,692 cases with 35 deselections in 98.79 pytest seconds
+and 115.086 packet seconds. Lookup takes 440 ms and finds no qualified completed
+packet; no reuse saving is credited. The existing packet-only selector omits
+the AST scanner group, not a workflow invocation or the required unit aggregate.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite source leaf is resolved. Scoped managed
+synchronization retains the published head and advances to the actual merge
+without conflict, reset, stash, peer edit or resource release. Continue the
+remaining original-source census; broader acceptance and retained custody
+remain unchanged.
+
+### November 21 original materializer pointer source admission
+
+The original `test_materialize_main.py` collects 165 expanded cases. This
+bounded file-pointer/snapshot slice exports twelve exact original test
+objects, preserving thirteen expanded cases, their parameter suffixes,
+built-in fixtures and assertions. It exercises canonical expansion,
+missing/absolute/traversing-source refusal, contained path resolution,
+non-pointer filtering and extracted-root escape refusal. Fixture-owned build
+and in-process CLI cases retain byte/output checks, stale-output removal and
+source immutability without executing copied Python text.
+
+The multi-plugin case is deliberately not selected: its ordinary pointer scan
+is small, but its downstream editable-reference materializer starts real worker
+threads for multiple plugins. Reader/prefilter matrices, native Git and
+symlink witnesses remain unchanged outside the packet too. All 152 other
+original cases remain unadmitted by this slice; neither their full census nor
+their execution is claimed complete.
+
+The initial sixteen-case selection passes Windows development qualification,
+but actual Linux source CI `44928002055`, unit job `136918238373`, refuses
+the first Windows-token case with `ctypes.dlopen`: importing `ctypes` performs
+a native load before the original function applies its mocks. Eight preceding
+cases pass; this is a genuine failed attempt, not a Linux qualification.
+All three token-selection cases therefore remain original, unchanged native-
+import residuals. No preload, mock, fixture or effect-guard exception is added
+to admit them. The corrected selection removes only those three new nodes;
+all 6,692 previously accepted nodes remain unchanged.
+
+Development collection proves exact original object identity and matching
+expanded suffixes. All thirteen pass actual effect auditing in 1.906 seconds
+with positive materializer-production call-phase coverage, zero prohibited
+effects and eighteen source-bound Python reads. Only the adapter and original
+suite bindings are new; the production target and other imports are already
+bound. All 6,692 preceding nodes retain their order and source hashes; 441
+coverage targets, 89 helper decisions and the 300-second bound remain.
+The 6,705-node, 1,064-source manifest retains compact-v2 storage at 770,310
+bytes and flat-v1 normalization/evidence.
+
+Focused Ruff and whole-file strict typing pass the new adapter on Linux and
+Windows without suppressions. Current-head review and complete required Linux
+source CI remain delivery gates. Production, installer and workflow behavior are unchanged; a fresh-
+install lane is inapplicable. The live source Actions lane validates the packet,
+not actual installed materialization or publication. No workflow invocation,
+reuse saving, native acceptance, runtime update or resource settlement is
+credited. Broader full-census/every-release, accepted-owner, native/lifecycle
+and comparable whole-flow gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
