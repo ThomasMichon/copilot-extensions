@@ -11440,6 +11440,12 @@ fixture script runs. Source closure and positive production call coverage are
 required per case. Eight real-Git originals and the canonical checkout TOML
 read remain unchanged outside the packet; their witnesses are not replaced.
 
+Two original release-message cases are exported as exact test objects without
+the suite's Git fixture. They exercise the real formatter's populated and
+empty summaries, with positive production call coverage and source-bound
+imports. The 46 remaining original cases retain their Git/process contracts
+outside this packet; formatter coverage does not qualify promotion.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:
