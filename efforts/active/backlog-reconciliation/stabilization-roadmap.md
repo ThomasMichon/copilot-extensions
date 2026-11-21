@@ -5,8 +5,12 @@ proposal](roadmap-wave-1.md) and the reviewed [second disjoint 200-issue
 proposal](roadmap-wave-2.md), plus the reviewed [third-wave
 proposal](roadmap-wave-3.md) in #9396. The [fourth-wave
 proposal](roadmap-wave-4.md) adds the remaining 82 identities in the frozen
-eligible census and was reviewed and merged in #9399. Provisional decisions,
-later inflow and full execution sequencing remain open.
+eligible census and was reviewed and merged in #9399. The later
+[planning assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+accepts the reviewed selected execution-wave integration in #13934 with
+explicit gaps. Continuing inflow, original technical programs and the
+numerical campaign remain open; the earlier observations below retain
+their original scope.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
 
@@ -273,18 +277,20 @@ and the 292 historical assignments at its pinned census. Three pagination-only
 admission gaps are resolved by complete metadata, without clearing actual
 source/copy restrictions or checking any of the six gates below.
 
-The [current integration assessment](#2026-11-20-integration-assessment)
-distinguishes delivered historical research from the remaining current-plan
-acceptance. These six gates remain unchecked; the assessment does not turn
-metadata coverage or a reviewed planning slice into an execution charter.
+The [earlier integration assessment](#2026-11-20-integration-assessment)
+distinguishes historical research from the then-remaining current-plan duties.
+The later [six-condition assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+uses the exact 455-identity correspondence and actual #13934 integrated-plan
+review to resolve these planning deliverables with explicit gaps retained.
+Neither metadata coverage nor planning review is an implementation charter.
 
-- [ ] Full current issue coverage, with counted exclusions and refresh gaps.
-- [ ] Evidence-cited high-priority shortlist; no title-only rankings.
-- [ ] Canonical existing-effort map with retained owners and acceptance.
-- [ ] Directed prerequisite graph with parallel work and unresolved cycles.
-- [ ] Bounded execution waves, each with entry conditions, useful slices and
+- [x] Full current issue coverage, with counted exclusions and refresh gaps.
+- [x] Evidence-cited high-priority shortlist; no title-only rankings.
+- [x] Canonical existing-effort map with retained owners and acceptance.
+- [x] Directed prerequisite graph with parallel work and unresolved cycles.
+- [x] Bounded execution waves, each with entry conditions, useful slices and
   source/release/native/adoption exit evidence appropriate to that scope.
-- [ ] Normal reviewed publication of the resulting plan.
+- [x] Normal reviewed publication of the resulting plan.
 
 ### 2026-11-20 integration assessment
 
