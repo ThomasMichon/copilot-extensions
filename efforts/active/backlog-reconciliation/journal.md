@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Specific correspondence and bounded source delivery](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
+
 - [2026-11-21 - Roadmap planning acceptance and continuing tracker work](journal/2026/11.21-roadmap-planning-acceptance.md)
 
 - [2026-11-21 - Integrated execution waves and explicit coverage gaps](journal/2026/11.21-integrated-execution-waves.md)

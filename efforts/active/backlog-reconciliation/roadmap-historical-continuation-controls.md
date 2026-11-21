@@ -6,6 +6,8 @@ Parent: [Backlog Reconciliation](README.md), Phase 2b.
 Selection: [current historical metadata](roadmap-historical-current-admission.md).
 Preceding decisions: [retained-receipt register](roadmap-historical-retained-receipts.md).
 Delivery and continuation: [dated journal](journal/2026/11.21-historical-continuation-controls.md).
+Correspondence follow-through:
+[specific retained receipts and source-delivery limits](journal/2026/11.21-specific-correspondence-and-source-delivery.md).
 
 ## Accounting and evidence boundary
 
@@ -160,35 +162,36 @@ neither releases a real restriction nor establishes copying by itself.
 | #5529 | The actual suspect whole-containing-copy condition remains; no alternate packet, text, count, hash or excision qualifies it. |
 | #5851 | The suspect held-derived whole-original and containing-copy condition remains; fresh metadata is not release. |
 | #5873 | The actual #7028 chain includes an independent unqualified source author. Commit-identity clarification does not clear that content. |
+| #6082 | The specific prior return was incomplete: an actual vendored-installer-engine-derived unit and its containing response remain opaque. The earlier five-row proposal did not establish whole coverage or authorize an installer amendment. Exposure followed by stopping is not whole-read acceptance; no part read, recount, hash, excision, alternate or proxy follows. |
 | #6109 | Actual vendored-installer-engine-derived content is a copy condition, not a mere citation. Its applicability remains unresolved; no whole original/source/alternate is admitted. |
 | #6464 | The precise older withholding cause is not established by this receipt. Recover the actual source/owner cause before affected text; neither infer copying from a reference nor clear an actual containing copy through another issue's correction. |
 | #7500 | The particular writer's source qualification is missing and its body was unread. This is neither a current complete original/home assessment nor an automatic whole-original ban; do not proxy the writer through another source. |
 
 ## Specific correspondence gaps
 
-For these thirteen identities, selected current metadata passes, but precise
-keyed prior-receipt navigation did not establish complete current
-original/discussion correspondence. This is not evidence that prior research
-is missing, a new feature/source prohibition or a reason to repeat an
-arbitrary original study. Retain the frozen assignment and resolve the actual
-correspondence when integrating current homes. A historical source locator,
-where present, is not itself a whole-original receipt.
+The earlier thirteen-row correspondence gap now has a specific follow-through.
+#6082 resolves to the actual copied-source boundary above. Ten other rows
+below recover particular earlier studies, preflight decisions or retained
+controls; #6888 and #7208 still lack complete case correspondence. None of
+these historical receipts establishes a complete current authored union.
+Selected metadata and a historical source locator are not whole-original
+proof, missing research, a new source prohibition or permission to repeat an
+arbitrary original study. Actual source/copy and ownership conditions remain.
 
 | Issue | Continuing discriminator |
 |---|---|
-| #6082 | Specific keyed correspondence remains unestablished. |
-| #6507 | Historical direct-source locator does not establish this current authored union. |
-| #6617 | Specific keyed correspondence remains unestablished. |
-| #6620 | Specific keyed correspondence remains unestablished. |
-| #6677 | Specific keyed correspondence remains unestablished. |
-| #6748 | Specific keyed correspondence remains unestablished. |
-| #6796 | Specific keyed correspondence remains unestablished. |
-| #6814 | Historical direct-source locator does not establish this current authored union. |
-| #6859 | Actual source/native/owner conditions remain independently preserved. |
-| #6888 | Specific keyed correspondence remains unestablished. |
-| #6925 | Historical direct-source locator does not establish this current authored union. |
-| #7208 | Specific keyed correspondence remains unestablished. |
-| #7758 | Durable update custody and existing #7117/#7743 owner conditions remain, not a new global prerequisite. |
+| #6507 | Earlier actual full-default Linux evidence supersedes targeted-only characterization, not the original exact native full-suite proof OR attributable original-scope disposition. #6506 bootstrap and #6237 release/portfolio custody remain separate. A later source-history preflight is not a permanent ban from numerical citation or a new whole-read receipt. |
+| #6617 | The earlier preflight retained an unresolved specific-unit cause. A null referenced-commit identity is irrelevant to content admission; references alone do not prove a copied-source ban. Actual cause/current correspondence still needs reconciliation before affected text, not an automatic retry or blanket release. |
+| #6620 | The prior receiving study identifies this as the canonical reclamation receiver, preserving #1488/#1666/#1918/#3114/#4101 cohort duties and #1519's different acceptance. It is not whole-parent deletion authority or a fresh current original/home comparison. |
+| #6677 | The earlier study retains manual versus supervised/park custody, no unintended rewake, explicit headed-multiplexer lineage and receipt versus actual pickup. Preserve the literal SUSPENDED OR PAUSED alternative; current whole correspondence is not newly established. |
+| #6748 | The prior study preserves republish OR fresh read PLUS stale-owner recovery; #6840 client startup and #7937 mutation receipts are not full convergence. A later qualified complete keeper read and verified OPEN preservation are already recorded; no repeated inquiry, mutation or new whole-current claim follows. |
+| #6796 | Preserve first WinError 5 cause OR an attributable original-scope disposition, with a guarded fix if needed. The later different watchdog retry is not causal proof. Further execution remains with #6600's owner; this receipt grants no retry. |
+| #6814 | Earlier selected identity-source and existing-session-file evidence credits #6816/#6842, not qualified release/attestation or acceptance of the original intended session file. Keep the actual custodian; do not invent a universal host, paid-model or generic acknowledgment gate. #2173 was reference-only. |
+| #6859 | The specific earlier whole-source boundary and unqualified PersistentDiagnostics/LaunchAttempt origin remain distinct from a numerical-reference inference. This control is not a newly admitted original, source, native result or owner transfer. |
+| #6888 | The earlier whole-source no-retry marker is recorded, but its precise cause and complete current correspondence remain unresolved. Reconcile that case rather than treating a marker as missing research, a fresh blanket prohibition or alternate-read permission. No original read is admitted here. |
+| #6925 | Earlier selected MCP child-wait/updater evidence is not phase/cap acceptance. Preserve all thirteen payload helpers, receipt/manifests, staging/context, native-language parity and no-Python first touch; real extension/cap/invalid/exit-race, unchanged build timeout and safe-tree cleanup remain with the existing watchdog owners. |
+| #7208 | Specific correspondence remains unestablished. Earlier dormant/no-wake markers are preserved, not evidence of present cause, missing research, a new whole-source prohibition or permission to wake/retry. |
+| #7758 | Durable update custody and existing #7117/#7743 owners remain. The later qualified #13605 description is a documentation-only receiving proposal, not delivered foreground-finite caller/native implementation or fulfillment of L1-L6. No held home is read and no global prerequisite is added. |
 
 ## Owner and publication receipts
 
@@ -199,13 +202,18 @@ where present, is not itself a whole-original receipt.
 
 ## Continuing integration
 
-The exact 131 rows plus the preceding register's 161 partition the selected
-292 with zero unaccounted continuation identities. Current vision/effort-home
-assessment, actual priority/owner selection and bounded sequencing integration
-remain open, including the explicit gaps above. All 43 parent check states,
-24 open parent items and six roadmap gates remain unchanged.
+The exact 131 rows plus the preceding register's 161 still partition the
+selected 292 with zero unaccounted continuation identities; the 75
+varied-strength authored/read bindings do not increase. The later
+[planning assessment](journal/2026/11.21-roadmap-planning-acceptance.md),
+reviewed in #13935, resolves the selected roadmap's six planning gates and
+three Phase 2b Plan items, not whole-home or technical fulfillment. All 43
+current parent check states, including 21 open items, and global Validation
+are unchanged by this correspondence follow-through.
 
-The last complete census remains **897 open at 02:52:42 PST on November 21**,
-**168 above fixed 729**, including excluded creators and later inflow.
+The latest complete census is **899 open at 09:26:47 PST on November 21**,
+**170 above fixed 729**, including 455 creator-eligible and 444 excluded
+identities and all later inflow. This replaces the earlier 897-open numerical
+observation, not its historical receipt scope. No new census is claimed here.
 Receipt accounting is not issue reduction, technical credit, whole-program
 acceptance, source admission or an execution charter.
