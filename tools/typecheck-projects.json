@@ -209,7 +209,8 @@
         "libs/payload-invocation/command_binding.py",
         "libs/payload-invocation/command_lifecycle.py",
         "libs/payload-invocation/generate.py",
-        "libs/payload-invocation/runtime_admission.py"
+        "libs/payload-invocation/runtime_admission.py",
+        "libs/payload-invocation/template_rendering.py"
       ],
       "exclude": [],
       "level": "pending",

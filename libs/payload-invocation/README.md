@@ -100,6 +100,8 @@ recipe for empty values, embedded quotes and trailing backslashes; it does not
 add an argument-encoding protocol or another process.
 Missing uv or a missing completed runtime reports prerequisite
 or explicit setup instructions, never implicit provisioning.
+The generator's closed template expansion and runtime substitutions live in
+`template_rendering.py`, packaged by the same admission toolkit.
 
 Budget Guidance is the first adopter. Its explicit native setup prepares the
 declared managed base before source/runtime helper execution and constructs
