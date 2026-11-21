@@ -2,6 +2,18 @@
 
 import sqlite3
 
+from .queue_records import Status, TaskError
+
+
+def supersedable(conn: sqlite3.Connection, repo: str | None, key: str | None) -> list[sqlite3.Row]:
+    candidates = conn.execute(
+        "SELECT id,status FROM tasks WHERE repo=? AND exclusive_key=? AND status IN (?,?)",
+        (repo, key, Status.PROPOSED, Status.QUEUED),
+    ).fetchall()
+    if any(retains_assignment(conn, row["id"]) for row in candidates):
+        raise TaskError("cannot supersede a reserved task; request owner closeout")
+    return candidates
+
 
 def retains_assignment(conn: sqlite3.Connection, task_id: str) -> bool:
     if not conn.in_transaction:

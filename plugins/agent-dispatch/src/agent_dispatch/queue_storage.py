@@ -813,24 +813,9 @@ class QueueStorageMixin(StorageOwner):
                             conn, standing_parent_id, canonical_repo,
                         )
                     if supersede_exclusive_key:
-                        from .reservation_assignment import retains_assignment
+                        from .reservation_assignment import supersedable
 
-                        superseded = conn.execute(
-                            "SELECT id, status FROM tasks "
-                            "WHERE repo = ? AND exclusive_key = ? "
-                            "AND status IN (?, ?)",
-                            (
-                                canonical_repo,
-                                exclusive_key,
-                                Status.PROPOSED,
-                                Status.QUEUED,
-                            ),
-                        ).fetchall()
-                        for prior in superseded:
-                            if retains_assignment(conn, prior["id"]):
-                                raise TaskError(
-                                    "cannot supersede a reserved task; request owner closeout"
-                                )
+                        for prior in supersedable(conn, canonical_repo, exclusive_key):
                             conn.execute(
                                 "UPDATE tasks SET status = ?, owner = NULL, "
                                 "lease_expires_at = NULL, activity = NULL, "

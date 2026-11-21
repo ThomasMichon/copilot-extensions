@@ -35,6 +35,7 @@ from .queue_common import (
     _task_transition_spec,
 )
 from .queue_execution_handoff import require_execution_admission
+from .queue_operator_hold import OperatorHoldMixin
 from .queue_progress import QueueProgressMixin
 from .queue_records import SpawnState, Status, TaskError
 from .queue_task_recovery import RESET_FIELDS, require_task_recovery_safe
@@ -54,7 +55,7 @@ def _task_result(value: Task | tuple[Task, bool]) -> Task:
     return value
 
 
-class QueueLifecycleMixin(QueueProgressMixin):
+class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
     """Lifecycle, ownership, and progress methods for :class:`TaskQueue`."""
 
     if TYPE_CHECKING:
@@ -397,90 +398,6 @@ class QueueLifecycleMixin(QueueProgressMixin):
             reject_if_held=True,
             idempotent_replay=True,
         ))
-
-    def set_hold(
-        self,
-        task_id: str,
-        *,
-        reason: str,
-        actor: str,
-        expected_status: str | None = None,
-        now: float | None = None,
-    ) -> Task:
-        """Set a durable, operator-owned hold on ``task_id``."""
-        meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
-        if meaningful is None:
-            raise TaskError("set_hold requires a non-empty reason")
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
-            if task is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such task {task_id!r}")
-            _check_expected_status(task, expected_status)
-            if task.status in Status.CONCLUDED:
-                conn.execute("COMMIT")
-                raise TaskError(f"cannot hold a {task.status!r} task {task_id!r}")
-            from .queue_pool_recovery import hold_recovery
-            hold_recovery(conn, task_id, held=True, ts=ts)
-            conn.execute(
-                "UPDATE tasks SET hold_reason = ?, hold_actor = ?, hold_at = ?,"
-                " updated_at = ? WHERE id = ?",
-                (meaningful, actor, ts, ts, task_id),
-            )
-            self._audit(
-                conn,
-                task_id,
-                ts=ts,
-                from_status=task.status,
-                to_status=task.status,
-                worker=actor,
-                note=f"hold: {meaningful}",
-            )
-            result = self._fetch(conn, task_id)
-            conn.execute("COMMIT")
-        return result  # type: ignore[return-value]
-
-    def clear_hold(
-        self,
-        task_id: str,
-        *,
-        actor: str | None = None,
-        expected_status: str | None = None,
-        now: float | None = None,
-    ) -> Task:
-        """Clear a hold set by :meth:`set_hold`."""
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
-            if task is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such task {task_id!r}")
-            if task.hold_reason is None:
-                conn.execute("COMMIT")
-                return task
-            _check_expected_status(task, expected_status)
-            from .queue_pool_recovery import hold_recovery
-            hold_recovery(conn, task_id, held=False, ts=ts)
-            conn.execute(
-                "UPDATE tasks SET hold_reason = NULL, hold_actor = NULL,"
-                " hold_at = NULL, updated_at = ? WHERE id = ?",
-                (ts, task_id),
-            )
-            self._audit(
-                conn,
-                task_id,
-                ts=ts,
-                from_status=task.status,
-                to_status=task.status,
-                worker=actor,
-                note=f"unhold (was: {task.hold_reason})",
-            )
-            result = self._fetch(conn, task_id)
-            conn.execute("COMMIT")
-        return result  # type: ignore[return-value]
 
     def yield_task(
         self,
