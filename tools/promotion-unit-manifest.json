@@ -2,6 +2,13 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_cli_respects_ca_registry_and_tls[True]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_cli_respects_ca_registry_and_tls[False]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_insecure_environment_refused",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_metadata_transport_bounded_and_fail_closed[timeout]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_metadata_transport_bounded_and_fail_closed[bad-json]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_metadata_transport_bounded_and_fail_closed[missing-versions]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_ca_transport_skips_urllib_only_for_authoritative_public_url",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_plugin_source_contract_requires_exact_runner_and_canonical_identity[present]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_plugin_source_contract_requires_exact_runner_and_canonical_identity[removed]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_plugin_source_contract_requires_exact_runner_and_canonical_identity[other-plugin]",
@@ -6993,7 +7000,7 @@
     "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_dependency_age_release_units.py": "788d3b63ed335d42b6a869f2ec81211cc139032ae6d4e534f2789b0474c2b6c7",
+        "tools/promotion_unit_tests/test_dependency_age_release_units.py": "82b6757efb35caf40e1dd9a84554210e6ef4d6c1faeef6ac5ed543d2aa26b9e4",
         "tools/test_dependency_age.py": "b019c533b68d607844044ca7647308ff37e0d746ddbb04e6c0a689157f0f6dc5",
         "tools/promotion_unit_tests/test_identifier_git_protocol_units.py": "ef063a19d9d58f39db2065129f5478df764b3dc7bfbb7876c6d74ddec1bbe6c4",
         "tools/test_check_no_internal_identifiers.py": "3ae7cddea5248d019a43fe014d85fff60258ede94e2668ca8d15f7d495a08fde",
