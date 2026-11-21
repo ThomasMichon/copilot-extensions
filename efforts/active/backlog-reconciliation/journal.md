@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
+
 - [2026-11-21 - Finite outside-wave coverage reconciliation](journal/2026/11.21-outside-wave-coverage-reconciliation.md)
 
 - [2026-11-21 - Relationship and Dispatch receiving boundaries](journal/2026/11.21-relationship-and-dispatch-receiving.md)
