@@ -1471,6 +1471,13 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [relationship and Dispatch receiving update](journal/2026/11.21-relationship-and-dispatch-receiving.md)
+records actual #13863 delivery and acknowledged #13778 completion, then
+distinguishes four new member-authored source reports from production caller,
+original-worker and readiness acceptance. OPEN #13742/#13831 retain their
+contributors. The complete 897-open census includes new #13866 and remains
+168 above fixed 729; all campaign check states and roadmap gates remain.
+
 The [orphan-owner and new-delivery comparison](journal/2026/11.21-orphan-owner-and-new-delivery-boundaries.md)
 proposes finite #13778 source completion through #13817 while retaining normal
 finalization and every actual resource owner. Thirteen new delivery descriptions,

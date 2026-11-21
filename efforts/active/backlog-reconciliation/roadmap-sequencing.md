@@ -71,6 +71,12 @@ work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
 
+The [later relationship and Dispatch delivery comparison](roadmap-current-qualification.md#2026-11-21-independent-relationship-and-dispatch-deliveries)
+distinguishes an opt-in provider from its caller, new allocation evidence from
+historical custody, and launch admission from readiness. It credits the
+separate source reports without adding hard edges to this historical register
+or declaring OPEN #13742/#13831 complete.
+
 The [next ten finite receiving relationships](receiving-next-ten.md) add
 bounded command/assurance next decisions without another hard dependency
 chain: six direct planning contracts and four credited/retained source
