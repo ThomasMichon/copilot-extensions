@@ -282,11 +282,11 @@ function Invoke-Hidden {
         [ValidateRange(0, 2147483647)][int]$TimeoutMilliseconds = 0,
         [ValidateRange(1, 2147483647)][int]$CleanupMilliseconds = 3000
     )
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    if ($TimeoutMilliseconds -gt 0 -and (
-        $StreamOutput -or $StreamErrorOutput -or $CleanupMilliseconds -ge $TimeoutMilliseconds
-    )) {
-        throw 'Bounded native capture requires captured streams and cleanup reserved inside its timeout.'
+    if ($TimeoutMilliseconds -gt 0) {
+        if ($StreamOutput -or $StreamErrorOutput -or $CleanupMilliseconds -ge $TimeoutMilliseconds) {
+            throw 'Bounded native capture requires captured streams and cleanup reserved inside its timeout.'
+        }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
     }
     if ($StreamOutput -and ($PSBoundParameters.ContainsKey('ErrorOutput') -or
         $PSBoundParameters.ContainsKey('InputText'))) {

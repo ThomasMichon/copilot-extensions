@@ -134,7 +134,7 @@ def test_bounded_native_capture_preserves_result_and_both_streams(tmp_path: Path
     values = ["", 'two words "quoted"', "tail\\", "line\nbreak"]
     code = (
         "import json,sys; sys.stdout.write('o'*131072); "
-        "print(json.dumps({'args':sys.argv[1:],'input':sys.stdin.read()})); "
+        "print(json.dumps({'args':sys.argv[1:],'input':sys.stdin.buffer.read().decode('utf-8')})); "
         "sys.stderr.write('e'*131072); sys.exit(7)"
     )
     script = f"""
@@ -195,6 +195,7 @@ def test_bounded_native_capture_does_not_confuse_root_exit_with_tree_cleanup(
     )
     code = (
         f"import subprocess,sys; subprocess.Popen([sys.executable,'-I','-c',{child!r}],"
+        "stdout=sys.stdout,stderr=sys.stderr,"
         "creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0)"
     )
     script = f"""
