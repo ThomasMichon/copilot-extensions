@@ -410,6 +410,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
+records three independently qualified merged-description reports: sixty
+additional original cases through 27 exact objects, with 103 of 165 mapped
+and 62 residual. Fixture-only source admission is not native, installed or
+whole-parent acceptance. Actual #13946 delivery and the complete 10:30:11 PST
+900-open census are recorded; all source/owner limits and the fixed target remain.
+
 The [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md)
 reconciles #6464's particular numerical-reference refusal and records a fresh
 qualified complete original/all-ten-discussion study. It preserves all five
