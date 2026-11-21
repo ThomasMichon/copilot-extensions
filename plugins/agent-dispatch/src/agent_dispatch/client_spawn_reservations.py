@@ -79,6 +79,7 @@ class SpawnReservationClientMixin:
         driver: str | None = None, allocation_project: str | None = None,
         worktree_path: str | None = None,
         creation_nonce: str | None = None,
+        pool_creation_nonce: str | None = None,
         worktree_writer_requirement: dict[str, Any] | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
@@ -105,6 +106,7 @@ class SpawnReservationClientMixin:
                 "allocation_project": allocation_project, "worktree_path": worktree_path,
                 **({"execution_machine": execution_machine} if execution_machine is not None else {}),
                 **({"creation_nonce": creation_nonce} if creation_nonce is not None else {}),
+                **({"pool_creation_nonce": pool_creation_nonce} if pool_creation_nonce is not None else {}),
                 **({"worktree_writer_requirement": worktree_writer_requirement}
                    if worktree_writer_requirement is not None else {}),
             },
