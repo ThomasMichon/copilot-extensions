@@ -125,10 +125,13 @@ cleanup and the other tracks still assigned to their current owners.
       supported reclamation command.
 
 ### Track B — Stop unsealed bytecode growth (#10966)
-The [Legacy Bytecode Reclamation follow-on](../legacy-bytecode-reclamation/README.md)
-proposes the bounded #12886 repair for unreclaimed whole-prefix backlogs.
-It preserves this parent's other tracks and requires design review before
-runtime changes; it does not authorize real-cache cleanup.
+The [Legacy Bytecode Reclamation follow-on](<../../2026/11/21 legacy-bytecode-reclamation/README.md>)
+delivered the bounded #12886 whole-prefix repair through #13865, following
+reviewed design #13828. Native fixtures, current-head review and required CI
+passed. The read-only host assessment still held all measured bytes because
+process-owner proof was incomplete. This source effort is Done; release,
+authorized installation and real-cache relief are separate. It preserves this
+parent's other tracks and installed-observation gates.
 
 The [Python Bytecode Cache Lifecycle follow-on](<../../2026/11/14 python-bytecode-cache-lifecycle/README.md>)
 delivered OS user-cache relocation, retirement-aware incremental collection
