@@ -52,6 +52,11 @@ _SELECTED = (
     "test_unowned_project_copy_is_not_an_attributable_vendor",
     "test_python_proof_independent_of_npm_metadata_failure",
     "test_dynamic_and_unsupported_requirements_fail_closed",
+    "test_npm_cli_respects_ca_registry_and_tls",
+    "test_npm_insecure_environment_refused",
+    "test_npm_metadata_transport_bounded_and_fail_closed",
+    "test_npm_ca_transport_skips_urllib_only_for_authoritative_public_url",
+    "test_npm_selector_reuses_node_and_attributable_cli_without_cmd_spawn",
 )
 for _name in _SELECTED:
     globals()[_name] = getattr(_original, _name)

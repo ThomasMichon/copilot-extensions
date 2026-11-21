@@ -602,6 +602,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
             state.seenEventIds.delete(state.seenEventOrder.shift());
           }
         }
+        retainedInbox?.observe(state.nativeSessionId, event);
         // Forward the id so the bridge can dedup too (defense-in-depth) and any
         // consumer has the event's stable identity.
         // The envelope's agentId marks a sub-agent's event (absent for the main

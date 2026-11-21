@@ -19,6 +19,7 @@ async function load(selected, version = 50, {
   historyResponse = { replay_accepted: true, ingested: 1 },
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
   tokenInitiallyMissing = false,
+  retainedReceipts,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const deferred = [];
@@ -60,7 +61,10 @@ async function load(selected, version = 50, {
       protocol_version: version, capabilities: compatible ? { compatible_native_inbox: 1 } : {},
     };
     else if (route.endsWith("/events?replay=true")) result = { session_id: nativeId, ...historyResponse };
-    else if (route.includes("/recovery?")) result = { messages: [], next_after: null };
+    else if (route.includes("/recovery?")) result = {
+      messages: structuredClone((retainedReceipts ?? []).filter((row) => row.stage !== "consumed")),
+      next_after: null,
+    };
     else if (route.endsWith("/negotiate")) result = {
       contract: "retained-inbox-v1", binding, expected_incarnation: null,
       ...(historyReplay ? { message_base: 1 } : {}),
@@ -73,7 +77,8 @@ async function load(selected, version = 50, {
       if (begin) controlStarts.add(body.message_id);
       result = { ...body, begin };
     } else if (route.endsWith("/poll")) result = {
-      contract: "retained-inbox-v1", binding, consumer, messages: [{
+      contract: "retained-inbox-v1", binding, consumer,
+      messages: retainedReceipts?.some((row) => row.stage !== "offered") ? [] : [{
         id: 1, body: "synthetic message", sender: "peer", kind: "prompt",
         delivery: "steer", handoff_id: "handoff-a", handoff_stage: "offered", consumer,
         ...(historyReplay ? {
@@ -86,7 +91,14 @@ async function load(selected, version = 50, {
       }],
     };
     else if (route.endsWith("/begin")) result = { begin: true };
-    else if (route.endsWith("/outcome")) result = { stage: body.outcome };
+    else if (route.endsWith("/outcome")) {
+      const original = retainedReceipts?.find((row) => row.message_id === body.message_id);
+      if (original && original.stage !== "consumed") {
+        original.stage = body.outcome;
+        if (body.outcome === "consumed") original.consumed_at = 4;
+      }
+      result = { stage: original?.stage ?? body.outcome };
+    }
     else if (route.includes("/messages?")) result = {
       messages: (inboxMessages ?? [{
         id: 1, body: "legacy body", sender: "peer", kind: "prompt", delivery: "steer",
@@ -232,6 +244,7 @@ async function load(selected, version = 50, {
   };
   return {
     calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
+    nativeSession: session,
     closed: () => closed, runDeferred, registeredSessions,
     publishBridge: () => { bridgeReady = true; },
     rename: (sid) => { session.sessionId = sid; nativeId = sid; },
@@ -681,6 +694,34 @@ test("launch-selected receiving uses the public SDK without invoking private dri
   assert.equal(old.sends.length, 0);
   assert.equal(old.driverSends.length, 0);
   assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
+});
+
+test("the actual retained adapter reconciles live native input without usable SDK history", async () => {
+  const receipts = [];
+  const f = await load("1", 52, { retainedReceipts: receipts });
+  assert.equal(f.sends.length, 1);
+  const enrollment = f.calls.find((call) => call.route.endsWith("/enroll")).body.consumer;
+  receipts.push({
+    session_id: "native-a", message_id: 1, handoff_id: "handoff-a",
+    consumer: structuredClone(enrollment), stage: "sdk_accepted",
+    admitted_at: 1, handoff_started_at: 2, sdk_accepted_at: 3, consumed_at: null,
+  });
+  f.nativeSession.getEvents = async () => { throw new Error("native history unavailable"); };
+  f.poll.fn();
+  await settle();
+  const before = f.calls.length;
+  for (const handler of f.handlers) handler({
+    id: "original-native-input", type: "user.message",
+    data: { source: "agent-bridge", content: "timeline display", turnId: "consuming-native-turn",
+      transformedContent: f.sends[0].prompt },
+  });
+  assert.equal(f.calls.length, before, "the native event callback must perform no I/O");
+  f.poll.fn();
+  await settle();
+  assert.equal(receipts[0].stage, "consumed");
+  assert.equal(f.calls.filter((call) => call.body?.outcome === "consumed").length, 1);
+  assert.equal(f.sends.length, 1);
+  f.shutdowns.get("SIGTERM")();
 });
 
 test("headed receiving preserves one-shot receipts using the public native SDK", async () => {

@@ -707,13 +707,32 @@ authorizes critical main-path acceptance or a bounded administrative change.
   executed packet evidence. No registry, installer, native-toolchain or
   whole-checkout witness is replaced; broader native, every-release and
   full-census gates stay open.
-- [ ] Qualify and land 42 additional original fixture-only source-attribution
+- [x] Qualify and land 42 additional original fixture-only source-attribution
   cases through thirteen exact test objects in the existing dependency-age
   adapter. Preserve its preceding 84 cases, all 77 remaining originals outside
   the packet, source closure, per-case production call coverage, prior
   admission/helper/budget gates, current-head review and complete Linux source
-  CI. No preparation fixture text executes, no original assertion is replaced,
+  CI. #13892 merges at `9f80675a62572da526244ecdf899e701ecbc5192`
+  after fresh corrected-head Copilot approval and complete required Linux CI.
+  The combined peer cohort is retained under the unchanged cap and budget.
+  No preparation fixture text executes, no original assertion is replaced,
   and broader native, every-release and full-census gates stay open.
+- [x] Qualify and land seven additional original mocked metadata-transport
+  cases through four exact test objects in the existing dependency-age adapter.
+  Preserve its preceding 126 cases, all 70 remaining originals outside the
+  packet, source closure, per-case production call coverage, prior admission/
+  helper/budget gates, current-head review and complete Linux source CI.
+  #13895 merges at `4c90091e566dbb0834491972c3a7d7e8c4e64bdc` after
+  exact-head Copilot approval and complete required Linux CI with freshly
+  executed packet evidence. No npm, registry, installer or native-toolchain witness is replaced;
+  broader native, every-release and full-census gates stay open.
+- [ ] Qualify and land the original fixture-only npm selector case through its
+  exact test object, preserving the preceding 133 selections and all 69
+  original residuals. Bind the real selector module and require positive
+  call-phase coverage of both wrapper and selector, zero prohibited effects,
+  unchanged preceding admission/helper/budget gates, current-head review and
+  complete Linux source CI. Do not execute fixture scripts or the installer
+  entrypoint, or replace native/whole-checkout qualification.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
