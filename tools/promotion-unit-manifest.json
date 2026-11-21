@@ -2,6 +2,16 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_independent_programs_refuse_source_change_between_programs[bytes]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_independent_programs_refuse_source_change_between_programs[identity]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_independent_programs_refuse_source_change_between_programs[directory]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_retains_optional_program_roots_without_changing_policy",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_refuses_invalid_or_cross_program_imports[None]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_refuses_invalid_or_cross_program_imports[programs1]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_refuses_invalid_or_cross_program_imports[programs2]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_refuses_invalid_or_cross_program_imports[programs3]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_refuses_invalid_or_cross_program_imports[programs4]",
+"tools/promotion_unit_tests/test_typecheck_program_control_units.py::test_manifest_refuses_invalid_or_cross_program_imports[programs5]",
 "tools/promotion_unit_tests/test_manager_release_inputs.py::test_manager_release_refuses_before_mutation[manifest]",
 "tools/promotion_unit_tests/test_manager_release_inputs.py::test_manager_release_refuses_before_mutation[digest]",
 "tools/promotion_unit_tests/test_manager_release_inputs.py::test_manager_release_refuses_before_mutation[pristine]",
@@ -6829,6 +6839,9 @@
         "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_typecheck_program_control_units.py": "764de8ae05a9bd98ff547411db70995de5546603e823eecc492c981746ef9a8c",
+        "tools/test_typecheck_programs.py": "2babe68f0c8613f13ec645f42873efe309cffe030e7f75f30634924a650905fb",
+        "tools/test_typecheck.py": "9b94eb3673a9c1b79823e0418b594e7482d741209daa6cd7b2156f72a0e04531",
         "tools/promotion_unit_tests/test_manager_release_inputs.py": "11e1afa43e8563f96df6bf8e533345c7cf2282fd436723e24bb31d82d701201e",
         "tools/promotion_unit_tests/test_local_git_evidence_control_units.py": "6ee46fea96cdc29f818b755e830c87783c9cb1e2b5d26cf9be06c6a82db1be4c",
         "tools/test_check_agent_bridge_contracts.py": "aa98fba7259335fb322d04e33ac5f9b82a198535ac8aa104cb2c8f19109451bd",

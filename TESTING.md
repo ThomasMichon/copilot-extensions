@@ -11258,6 +11258,12 @@ local-only availability, cache reuse, bounded/headless probes, unsupported-Git
 refusal and controlled timeout diagnostics. The original 83 native/schema/
 policy residuals remain outside the packet. No registry validation gate is
 restored, and no Git command, registry capture or baseline refresh executes.
+The independent-program typing adapter exports ten original in-process cases
+and their exact autouse scratch-isolation fixture. It retains physical source/
+directory identity and byte-change refusals, manifest round trips and invalid/
+cross-program import rejection. Four actual MyPy cases and the real toolkit
+declaration check stay outside the packet. No checker subprocess, environment
+preparation or lease operation is substituted into a claimed native result.
 Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
 while retaining the source map's existing layout so independent hash updates
 can merge cleanly.
