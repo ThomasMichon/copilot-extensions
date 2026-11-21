@@ -107,18 +107,20 @@ def test_packaged_invocation_renders_without_checkout(
     try:
         sys.dont_write_bytecode = True
         spec.loader.exec_module(generator)
-        source, _, plugin = _candidate(tmp_path / "fixture")
+        source, candidate, plugin = _candidate(tmp_path / "fixture")
         manifest = plugin / "payload-invocation.json"
         for launcher in ("direct", "uv"):
-            data = json.loads(manifest.read_bytes())
-            data.update(pythonLauncher=launcher, bootstrapPython="3.13.12")
-            manifest.write_text(json.dumps(data), encoding="utf-8")
-            parsed = generator.load_manifest(manifest, canonical_root=source)
-            output = generator.render("@@RUNTIME_PYTHON_POSIX@@", parsed)
-            if launcher == "uv":
-                assert output.endswith('"$AGENT_RT_PY" python')
-            else:
-                assert output == '"$AGENT_RT_PY"'
+            for root in (source, candidate):
+                declaration = root / "plugins/sample/payload-invocation.json"
+                data = json.loads(declaration.read_bytes())
+                data.update(pythonLauncher=launcher, bootstrapPython="3.13.12")
+                declaration.write_text(json.dumps(data), encoding="utf-8")
+            log = owner.materialize(candidate, canonical_root=source)
+            assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+            for path, output in generator.expected_files(manifest, canonical_root=source).items():
+                assert path.read_bytes() == (
+                    output.encode("utf-8") if isinstance(output, str) else output
+                )
     finally:
         sys.dont_write_bytecode = previous
     assert not list(packaged.rglob("__pycache__"))

@@ -7809,7 +7809,7 @@
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "374952cf04ce8b8a54156f754666fc5fb622b95f3f0fe6d176724a934cea3cb2",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "ca9b1256a450841e456d86f534aa5091414d250ff238da96a2882d29a1f7237b",
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "27c35cc37847645a3b523ce917656e8b2a4ad9c85a5d189723a1e16800a01e64",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
         "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
