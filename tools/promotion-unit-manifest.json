@@ -3,6 +3,13 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_promotion_message_units.py",
+      [
+        "test_promote_message_lists_bumps_and_changefiles",
+        "test_promote_no_changefiles_reports_none"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_accumulate_bumps_units.py",
       [
         "test_bump_version[1.3.1-patch-1.3.2-dev1]",
@@ -8323,6 +8330,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_promotion_message_units.py": "8bda810a8c5d55b4d50097c4ddef36865aab67308e33889431957dc618d259cb",
+    "tools/test_promote_release.py": "7c53ae3fb3e067b14fafd5337a4b574394e24c784fa6da3dee8e777df1204b60",
     "tools/promotion_unit_tests/test_accumulate_bumps_units.py": "3f28a972c12266bcd2e49c167898bcad76e8f4bd05c6245633e1df8ef5be97d2",
     "tools/test_accumulate_bumps.py": "d76f538583d764bbed88197b84bfe93cb70dd4b80dca973d1cf8652d1fcd0276",
     "tools/promotion_unit_tests/test_changefile_units.py": "37261576d68ba3ba60bec552a27f8d81386b1d10dc1813e27d568ca8fed1824b",
