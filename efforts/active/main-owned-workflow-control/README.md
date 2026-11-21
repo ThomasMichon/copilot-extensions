@@ -944,7 +944,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13953 merges at `6ffd1d3094b966d03416a812dbf80dde9184589c` after
   exact-head Copilot approval and complete required Linux CI with all 6,813
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land the 25 original synthetic installer-sync cases, exporting
+- [x] Qualify and land the 25 original synthetic installer-sync cases, exporting
   their 22 unchanged test functions and exact `fake_repo` fixture. Preserve
   original assertions, parameter identities and all 153 remaining originals
   outside the packet. Require closed Python bindings, actual per-case sync
@@ -955,6 +955,20 @@ authorizes critical main-path acceptance or a bounded administrative change.
   coverage target. Obtain strict typing, current-head review and complete
   Linux source CI. This finite item changes no installer behavior and settles
   no native, installed, release, full-census, whole-flow or custody gate.
+  #13956 merges at `dbfe919961bb50c22aec72f71a3f556652357d54` after
+  exact-head Copilot approval and complete required Linux CI with all 6,838
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land all thirty original synthetic ancestor-metadata cases,
+  three original bootstrap-declaration fixture cases and only the original
+  `eligible=False` serial plugin-copy case. Preserve exact test/fixture objects,
+  all assertions, parameters and existing exclusions; retain the isolated
+  bootstrap subprocess and `eligible=True` real workers outside. Require
+  actual per-case production call coverage, zero prohibited effects, closed
+  source bindings, unchanged preceding nodes/hashes/targets/helpers and
+  compact/flat-v1 contracts under the 300-second bound, strict typing,
+  current-head review and complete Linux source CI. Original metadata
+  simulations are not native-link qualification. Broader native, installed,
+  release, full-census, whole-flow and custody gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

@@ -189,11 +189,11 @@ arbitrary original study. Actual source/copy and ownership conditions remain.
 
 | Issue | Continuing discriminator |
 |---|---|
-| #6507 | Earlier actual full-default Linux evidence supersedes targeted-only characterization, not the original exact native full-suite proof OR attributable original-scope disposition. #6506 bootstrap and #6237 release/portfolio custody remain separate. A later source-history preflight is not a permanent ban from numerical citation or a new whole-read receipt. |
+| #6507 | The particular earlier numerical-reference stop is prospectively reconciled; fresh complete qualification and unchanged prior metadata reuse the existing complete study without new text or test trace. Actual full-default Linux evidence already supersedes targeted-only characterization, not exact native full-suite proof OR an attributable original-scope disposition. #6506 bootstrap, #6237 release/portfolio and requester/resource custody remain separate. |
 | #6617 | The actual earlier collector used numerical-reference intersection, prospectively reconciled before a fresh qualified complete original and all eight discussions. Preserve task-scoped transactional authority, outbound push/backstop notification, existing-supervisor restricted execution, explicit central/local writer selection and actual container/DevBox-aware placement. Earlier merged-source reports and completed auditability selection do not prove current placement, native enrollment, exact phase acceptance or whole-home fulfillment. Existing owners, actual linked-source/copy restrictions and old withheld packets remain; no new relay proxy, queue, scheduler, implementation-absence finding or activation follows. |
-| #6620 | The prior receiving study identifies this as the canonical reclamation receiver, preserving #1488/#1666/#1918/#3114/#4101 cohort duties and #1519's different acceptance. It is not whole-parent deletion authority or a fresh current original/home comparison. |
-| #6677 | The earlier study retains manual versus supervised/park custody, no unintended rewake, explicit headed-multiplexer lineage and receipt versus actual pickup. Preserve the literal SUSPENDED OR PAUSED alternative; current whole correspondence is not newly established. |
-| #6748 | The prior study preserves republish OR fresh read PLUS stale-owner recovery; #6840 client startup and #7937 mutation receipts are not full convergence. A later qualified complete keeper read and verified OPEN preservation are already recorded; no repeated inquiry, mutation or new whole-current claim follows. |
+| #6620 | The particular reference-only cause is reconciled, but current complete source metadata matches the earlier whole receiving study: reuse that judgment rather than repeat the unchanged cohort. Preserve #1488/#1666/#1918/#3114/#4101 duties, #1519's distinct trust acceptance and future Phases 2-5. Partial new copied-companion display stopped before further affected reading; it is not retroactive source clearance, a fresh whole-home comparison or deletion authority. |
+| #6677 | Complete qualified current original/all-three-discussion study preserves manual versus supervised claims, exit dormancy without automatic wake, explicit original-worktree headed mux/session lineage and recorded kick versus requested launch versus actual pickup. SUSPENDED OR PAUSED stays a design choice; the exact local steering/acknowledgment loop, failure/fence cases and separate execution/related owners remain. The actual planning merge is credited, not reopened as a pending review or mistaken for feature completion. |
+| #6748 | Complete qualified current receiver/all-three-discussion study separately qualifies embedded #7937 after reconciling its particular numerical stop. Preserve republish OR fresh read PLUS supported stale-owner recovery, obsolete-writer fencing with fresh usable generation/serviceable health, targeted owner receipt and same-row Manager publication confirmation. Six Plan/four Validation rows stay unchecked; client startup, planning-only reservation and mutation receipts do not complete producer recovery or transfer its owner. Earlier partial copied-source display remains a deviation; old packets and actual linked-source/copy conditions remain. |
 | #6796 | Preserve first WinError 5 cause OR an attributable original-scope disposition, with a guarded fix if needed. The later different watchdog retry is not causal proof. Further execution remains with #6600's owner; this receipt grants no retry. |
 | #6814 | Earlier selected identity-source and existing-session-file evidence credits #6816/#6842, not qualified release/attestation or acceptance of the original intended session file. Keep the actual custodian; do not invent a universal host, paid-model or generic acknowledgment gate. #2173 was reference-only. |
 | #6859 | The specific earlier whole-source boundary and unqualified PersistentDiagnostics/LaunchAttempt origin remain distinct from a numerical-reference inference. This control is not a newly admitted original, source, native result or owner transfer. |
@@ -234,6 +234,15 @@ It preserves every received family, broad mesh scope, both-direction all-peer
 convergence and actual owners without changing this 131-row membership, the
 earlier 75 bindings or any source/native/activation gate. Partial prequalification
 display is retained as a deviation, not silently relabeled compliant.
+
+The [manual-resume and publication studies](journal/2026/11.21-manual-resume-and-publication-contracts.md)
+update #6677/#6748 above after current complete qualification and specific
+reference-cause reconciliation. Identified copied-source qualification remains
+separate; #7937's settled administrative transfer is not replayed.
+These are two selected current issue studies, not new whole-home comparisons
+or additions to the 131-row membership or 75 earlier bindings. #6507/#6620
+reuse unchanged complete judgments instead of repeating source/native work;
+#6600 remains metadata-only under its independent source-author condition.
 
 ## Owner and publication receipts
 

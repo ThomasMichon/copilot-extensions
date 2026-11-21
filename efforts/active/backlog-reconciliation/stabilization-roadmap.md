@@ -57,6 +57,16 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [manual-resume and publication studies](journal/2026/11.21-manual-resume-and-publication-contracts.md)
+establish two complete current issue contracts after particular mechanical
+reference-stop reconciliation and separate identified-copy qualification.
+Manual no-auto-wake and real headed pickup remain distinct from generic
+suspend/resume; producer recovery, targeted owner receipts and Manager
+publication confirmation retain their separate owners and acceptance.
+Unchanged complete studies are reused, independent actual source/copy gaps
+remain and no new hard edge or execution charter follows. Actual #13954
+delivery and the complete 11:33:38 PST 900-open census are recorded.
+
 The [current SSH-mesh contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
 qualifies #63's whole current receiver and discussions after specific
 reference-cause reconciliation, including separate embedded-source qualification.
