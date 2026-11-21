@@ -230,7 +230,7 @@ if ($_py) {
     $ErrorActionPreference = 'Continue'
     $_pythonCacheArgs = @(Select-PythonCache $_py)
     try {
-@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & @@RUNTIME_PYTHON_POWERSHELL@@ @_pythonCacheArgs -m $_module @args
+@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & @@RUNTIME_PYTHON_POWERSHELL@@ @_pythonCacheArgs -m $_module @@RUNTIME_ARGUMENTS_POWERSHELL@@
 @@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    } finally {
         $ErrorActionPreference = $_previousEap
     }
@@ -313,7 +313,7 @@ if ($_provisionedPy) {
     $ErrorActionPreference = 'Continue'
     $_pythonCacheArgs = @(Select-PythonCache $_provisionedPy)
     try {
-@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & @@PROVISIONED_PYTHON_POWERSHELL@@ @_pythonCacheArgs -m $_module @args
+@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & @@PROVISIONED_PYTHON_POWERSHELL@@ @_pythonCacheArgs -m $_module @@RUNTIME_ARGUMENTS_POWERSHELL@@
 @@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    } finally {
         $ErrorActionPreference = $_previousEap
     }

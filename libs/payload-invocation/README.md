@@ -95,6 +95,9 @@ isolated-run and environment-file overrides cannot redirect that launch.
 PowerShell restores these named caller variables in `finally`, including on
 early exit. Legacy CLR hosts cannot restore empty environment values, so those
 values remain untouched and uv may refuse a malformed empty setting instead.
+Legacy PowerShell native invocation uses the existing Windows argument-quoting
+recipe for empty values, embedded quotes and trailing backslashes; it does not
+add an argument-encoding protocol or another process.
 Missing uv or a missing completed runtime reports prerequisite
 or explicit setup instructions, never implicit provisioning.
 

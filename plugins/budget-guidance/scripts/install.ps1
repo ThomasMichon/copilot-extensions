@@ -726,7 +726,7 @@ function Deploy-SelfProvisioningBinstub {
             '_root="$HOME/.budget-guidance"',
             'AGENT_RT_PY=""',
             'if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi',
-            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC',
+            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE',
             '_uv="$(command -v uv)" || exit 127',
             'case "$_uv" in /*) ;; *) echo "uv must be a PATH executable" >&2; exit 127;; esac',
             '[ -n "$AGENT_RT_PY" ] && exec "$_uv" run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"',
@@ -740,7 +740,7 @@ function Deploy-SelfProvisioningBinstub {
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
 $_savedUvEnvironment = @{}
-foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'UV_ISOLATED', 'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC')) {
+foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'UV_ISOLATED', 'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC', 'UV_CONFIG_FILE')) {
     $_savedUvEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 try {
@@ -765,7 +765,15 @@ function _Resolve-Py {
 $_py = _Resolve-Py
 if ($_py) {
     $ErrorActionPreference = 'Continue'
-    & $_uv run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @args
+    $_uvForwardedArguments = @($args)
+    $_nativeArgumentMode = Get-Variable PSNativeCommandArgumentPassing -ErrorAction SilentlyContinue
+    if ($null -eq $_nativeArgumentMode -or $_nativeArgumentMode.Value -eq 'Legacy') {
+        $_uvForwardedArguments = @($args | ForEach-Object {
+            if ($_ -and $_ -notmatch '[\s"]') { $_ }
+            else { '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }
+        })
+    }
+    & $_uv run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @_uvForwardedArguments
     exit $LASTEXITCODE
 }
 [Console]::Error.WriteLine('[budget-guidance] runtime is not prepared; run the owning scripts/install.ps1 install.')

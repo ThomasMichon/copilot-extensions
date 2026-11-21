@@ -768,6 +768,7 @@ def render(
         "RUNTIME_PYTHON_POSIX": '"$AGENT_RT_PY"',
         "CACHE_PYTHON_POWERSHELL": "$Python",
         "RUNTIME_PYTHON_POWERSHELL": "$_py",
+        "RUNTIME_ARGUMENTS_POWERSHELL": "@args",
         "PROVISIONED_PYTHON_POWERSHELL": "$_provisionedPy",
     })
     if data["pythonLauncher"] == "uv":
@@ -780,11 +781,12 @@ def render(
             "RUNTIME_PYTHON_POSIX": f'"$_uv" {uv_arguments} "$AGENT_RT_PY" python',
             "CACHE_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $Python python",
             "RUNTIME_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $_py python",
+            "RUNTIME_ARGUMENTS_POWERSHELL": "@_uvForwardedArguments",
             "PROVISIONED_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $_provisionedPy python",
             "UV_RUNTIME_PRELUDE_POSIX": (
                 "unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON "
                 "VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE "
-                "UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC\n"
+                "UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE\n"
                 "_uv=\"$(command -v uv 2>/dev/null || true)\"\n"
                 "case \"$_uv\" in /*) [ -x \"$_uv\" ] || _uv='' ;; *) _uv='' ;; esac\n"
                 "if [ -z \"$_uv\" ]; then\n"
@@ -796,7 +798,7 @@ def render(
                 "foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', "
                 "'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', "
                 "'UV_WORKING_DIRECTORY', 'UV_ISOLATED', 'UV_ENV_FILE', "
-                "'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC')) {\n"
+                "'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC', 'UV_CONFIG_FILE')) {\n"
                 "    $_savedUvEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')\n"
                 "}\n"
                 "try {\n"
@@ -810,6 +812,14 @@ def render(
                 "if (-not $_uv) {\n"
                 "    [Console]::Error.WriteLine('uv is unavailable; prepare the command prerequisites before launch.')\n"
                 "    exit 127\n}\n"
+                "$_uvForwardedArguments = @($args)\n"
+                "$_nativeArgumentMode = Get-Variable PSNativeCommandArgumentPassing -ErrorAction SilentlyContinue\n"
+                "if ($null -eq $_nativeArgumentMode -or $_nativeArgumentMode.Value -eq 'Legacy') {\n"
+                "    $_uvForwardedArguments = @($args | ForEach-Object {\n"
+                "        if ($_ -and $_ -notmatch '[\\s\"]') { $_ }\n"
+                "        else { '\"' + [regex]::Replace([regex]::Replace($_, '(\\\\*)\"', '$1$1\\\"'), '(\\\\+)$', '$1$1') + '\"' }\n"
+                "    })\n"
+                "}\n"
             ),
             "UV_RUNTIME_FINALLY_POWERSHELL": (
                 "\n} finally {\n"

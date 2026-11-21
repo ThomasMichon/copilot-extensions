@@ -68,10 +68,10 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
           for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':25,'budget-setup':8};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':8};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('25 prepared-command and eight native installer controls passed without skips')"
+          print('29 prepared-command and eight native installer controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

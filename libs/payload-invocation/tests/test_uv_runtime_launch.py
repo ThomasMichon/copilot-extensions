@@ -24,16 +24,22 @@ _UV_HINTS = (
     "UV_PYTHON", "UV_PYTHON_PREFERENCE", "UV_MANAGED_PYTHON", "UV_NO_MANAGED_PYTHON",
     "VIRTUAL_ENV", "CONDA_PREFIX", "UV_WORKING_DIR", "UV_WORKING_DIRECTORY",
     "UV_ISOLATED", "UV_ENV_FILE", "UV_PROJECT", "UV_FROZEN", "UV_LOCKED", "UV_NO_SYNC",
+    "UV_CONFIG_FILE",
 )
 
 
-def _same_host_wrapper(shim: Path) -> str:
+def _same_host_wrapper(shim: Path, *, legacy: bool = False) -> str:
     return (
+        ("$PSNativeCommandArgumentPassing = 'Legacy'\n" if legacy else "") +
         "$before = @{}\n"
         f"foreach ($key in @({','.join(repr(key) for key in _UV_HINTS)})) {{\n"
         "    $before[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')\n}\n"
         "function uv { throw 'A PowerShell function must not replace the uv application' }\n"
-        f"& '{str(shim).replace(chr(39), chr(39) * 2)}' @args\n"
+        "$applicationArguments = @($args)\n"
+        "if ($env:FIXTURE_ARGUMENTS) {\n"
+        "    $applicationArguments = @(ConvertFrom-Json $env:FIXTURE_ARGUMENTS)\n"
+        "}\n"
+        f"& '{str(shim).replace(chr(39), chr(39) * 2)}' @applicationArguments\n"
         "$code = $LASTEXITCODE\n"
         "foreach ($key in $before.Keys) {\n"
         "    $after = [Environment]::GetEnvironmentVariable($key, 'Process')\n"
@@ -43,7 +49,8 @@ def _same_host_wrapper(shim: Path) -> str:
 
 
 @pytest.mark.parametrize("kind", [
-    "sh", "installed-sh", "ps1", "installed-ps1", "winps", "installed-winps",
+    "sh", "installed-sh", "ps1", "installed-ps1", "ps1-legacy", "installed-ps1-legacy",
+    "winps", "installed-winps",
 ])
 @pytest.mark.parametrize("directory_hint", ["UV_WORKING_DIR", "UV_WORKING_DIRECTORY"])
 def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
@@ -125,6 +132,7 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         "UV_ISOLATED": "1", "UV_ENV_FILE": str(tmp_path / "missing.env"),
         "UV_PROJECT": str(tmp_path / "missing-project"),
         "UV_FROZEN": "1", "UV_LOCKED": "1", "UV_NO_SYNC": "1",
+        "UV_CONFIG_FILE": str(tmp_path / "missing-config.toml"),
     }
     foreign = tmp_path / "foreign directory"
     foreign.mkdir()
@@ -147,16 +155,19 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         shutil.copyfile(scripts / name, installed / name)
     if not posix:
         wrapper = tmp_path / "shadowed-uv.ps1"
-        wrapper.write_text(_same_host_wrapper(shim), encoding="utf-8")
+        wrapper.write_text(_same_host_wrapper(shim, legacy=kind.endswith("-legacy")), encoding="utf-8")
         shim = wrapper
-    arguments = ["", "space 'quoted' \"double\" \\slash &|<>()$?;", "λ", "line1\nline2"]
+    arguments = [
+        "", "space 'quoted' \"double\" \\slash &|<>()$?;", "λ", "line1\nline2",
+        "trailing space\\", 'backslash before quote \\" and trailing \\\\',
+    ]
     command = [host, str(shim)] if posix else [host, "-NoProfile", "-File", str(shim)]
     for code in (0, 37, None):
-        run_env = {**env, "FIXTURE_EXIT": str(code or 0)}
+        run_env = {**env, "FIXTURE_EXIT": str(code or 0), "FIXTURE_ARGUMENTS": json.dumps(arguments)}
         if code is None:
             run_env.update(UV_PYTHON_PREFERENCE="", UV_ISOLATED="", VIRTUAL_ENV="")
         result = subprocess.run(
-            [*command, *arguments], input="input\nλ\n", capture_output=True, text=True,
+            [*command, *(arguments if posix else [])], input="input\nλ\n", capture_output=True, text=True,
             encoding="utf-8", env=run_env, cwd=tmp_path, timeout=30,
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
@@ -214,7 +225,7 @@ def test_powershell_early_exit_restores_same_host_environment(
         [host, "-NoProfile", "-File", str(wrapper)], capture_output=True, text=True, timeout=20,
         env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
              "PATH": str(tools), "UV_PYTHON": "foreign", "VIRTUAL_ENV": "foreign",
-             "UV_ISOLATED": "1", "UV_ENV_FILE": "missing.env"},
+             "UV_ISOLATED": "1", "UV_ENV_FILE": "missing.env", "UV_CONFIG_FILE": "missing.toml"},
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     assert result.returncode == (127 if failure == "missing-uv" else 1), result.stdout + result.stderr
