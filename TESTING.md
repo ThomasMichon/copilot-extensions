@@ -6,7 +6,8 @@ The focused retained-active-review packet uses
 and standalone runners. Synthetic retained volumes exercise the actual
 transition CLI, fresh-process Native/tool inspection, asynchronous contract
 negotiation, before/after-replace interruption, same-operation retry, scope and
-capacity/deadline/lifecycle refusal, native-ID preservation and the permanent
+capacity/deadline/lifecycle refusal, native-ID preservation, actual foreground
+Gateway response qualification with larger bodies/receipt reservations, and the permanent
 no-new-attempt fence across open/close/reopen. It requires no live provider,
 credential or installed-volume migration and does not select a production
 recovery receiver.

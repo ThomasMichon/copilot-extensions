@@ -488,6 +488,10 @@ clients, including `pr_workspace_inspect`, retain the original inspection
 result. Partial adoption remains readable through the original library
 inspector; explicit retry validates the same persisted state and completes
 missing compatible extensions under its new invocation budget.
+The host qualifies a one-MiB response budget through its actual existing
+Gateway service binding; an unqualified smaller binding omits the optional
+inspection capability instead of advertising an unusable reader. Other
+workspace operations retain their existing response bounds.
 
 This observer configures no protected reconciliation factory and advertises
 `reconciliation: false`. Its observation credential cannot confirm a native

@@ -73,6 +73,10 @@ class WorkspaceClient:
             selection = terminal_mapping.SELECTION
         if operation == "inspect" and retained_review.selected(self._capabilities):
             selection = retained_review.SELECTION
+        response_limit = (
+            retained_review.RESPONSE_BYTES
+            if operation == "inspect" and selection == retained_review.SELECTION else BODY_BYTES
+        )
         data = encoded({
             "binding": self._binding.document(), "request": payload,
             **({"workspace_contract": selection}
@@ -91,7 +95,7 @@ class WorkspaceClient:
             response = await request(
                 *args, "POST", self._path + "/" + operation,
                 request_headers=(("Content-Type", "application/json"),),
-                body=data, response_limit=BODY_BYTES,
+                body=data, response_limit=response_limit,
             )
         except TransportError as error:
             raise WorkspaceClientError(error.code, http_status=error.status,

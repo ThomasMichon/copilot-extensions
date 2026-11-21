@@ -302,7 +302,8 @@ add a separate `retained_active_review_contract`:
   "representation": "original_active_v1",
   "storage_extension": "retained_active_review_version:1",
   "effects": "none",
-  "reconciliation": false
+  "reconciliation": false,
+  "max_response_bytes": 1048576
 }
 ```
 
@@ -320,6 +321,13 @@ bytes. Wrong scope, unimported operations and prepared/compact representations
 refuse. This optional contract configures no protected context and exposes no
 reconcile or receipt-confirmation operation; library readback still requires
 the original actual protected owner.
+
+The negotiated inspection response has a one-MiB bound within the existing
+Gateway channel's response ceiling; ordinary workspace responses keep their
+32-KiB bound. The request size is unchanged. This covers the full bounded
+original intent and action receipts, not only small comment bodies.
+Receipt validation derives each action's allowable growth from the preserved
+operation reservation rather than assuming the default receipt capacity.
 
 ## Optional local comment preparation
 

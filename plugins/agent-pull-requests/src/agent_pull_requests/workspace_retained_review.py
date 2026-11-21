@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 SELECTION = "agent-pull-requests.retained-active-review-inspection/v1"
 FIELD = "retained_active_review_contract"
+RESPONSE_BYTES = 1024 * 1024
 Document = dict[str, Any]
 
 
@@ -21,12 +22,15 @@ def contract() -> Document:
         "protocol": SELECTION, "operations": ["inspect"],
         "representation": "original_active_v1",
         "storage_extension": "retained_active_review_version:1",
-        "effects": "none", "reconciliation": False,
+        "effects": "none", "reconciliation": False, "max_response_bytes": RESPONSE_BYTES,
     }
 
 
 def supports(value: object) -> bool:
-    return isinstance(value, dict) and value == contract() and value.get("reconciliation") is False
+    return (
+        isinstance(value, dict) and value == contract()
+        and value.get("reconciliation") is False and type(value.get("max_response_bytes")) is int
+    )
 
 
 def selected(capabilities: object) -> bool:
@@ -82,8 +86,15 @@ def valid_result(value: object, payload: Document) -> bool:
         reserved = result["reserved_bytes"]
         if type(reserved) is not int:
             return False
+        selected = review_intent.intent(result["intent"], persisted=True)
+        baseline = review_intent.new_operation(
+            selected, created_at=result["created_at"], receipt_bytes=0,
+        )["reserved_bytes"]
+        receipt_bytes = (reserved - baseline) // len(selected["actions"])
+        if receipt_bytes < 4096:
+            return False
         review_intent.validate_operations(
-            [result], receipt_bytes=4096, review_bytes=1024 + reserved, retained_active=True,
+            [result], receipt_bytes=receipt_bytes, review_bytes=1024 + reserved, retained_active=True,
         )
     except (ValueError, KeyError, TypeError):
         return False

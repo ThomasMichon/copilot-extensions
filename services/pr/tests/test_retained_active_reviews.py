@@ -39,9 +39,15 @@ Document = dict[str, Any]
 
 def original(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch, *, native: bool = True,
+    body: str = "Original uncertain comment.", receipt_bytes: int = 4096,
 ) -> tuple[Path, Document, HostConfig, Document, Document]:
     path, value, baseline, generations = recorded(configuration, monkeypatch, native_targets=native)
     owner = baseline.store()
+    if receipt_bytes != 4096:
+        owner._review_transaction(
+            lambda document: document["capacities"].update(receipt_bytes=receipt_bytes),
+            expires_at=int(time.time()) + 60,
+        )
     generation = generations[-1]
     intent = {
         "schema": "agent-pull-requests.review-intent", "version": 1,
@@ -51,7 +57,7 @@ def original(
             "head_sha", "common_sha", "iteration",
         )},
         "actions": [
-            {"id": "comment", "kind": "comment", "body": "Original uncertain comment."},
+            {"id": "comment", "kind": "comment", "body": body},
             {"id": "vote", "kind": "verdict", "verdict": "APPROVED"},
         ],
     }
@@ -60,9 +66,12 @@ def original(
     attempt = owner.begin_review_action(
         intent["operation_id"], intent["scope"], "comment", expires_at=expires,
     )
+    ids: Document = {"thread_id": 100, "comment_id": 200}
+    if receipt_bytes > 4096:
+        ids.update({f"native-{index}": "\U0001f600" * 200 for index in range(6)})
     owner.record_review_receipt(
         intent["operation_id"], intent["scope"], "comment", attempt["action"]["attempt_id"],
-        {"origin": "response", "platform_ids": {"thread_id": 100, "comment_id": 200}, "proof": None},
+        {"origin": "response", "platform_ids": ids, "proof": None},
         confirm=False, expires_at=expires,
     )
     operation = owner.inspect_review(intent["operation_id"], intent["scope"], expires_at=expires)
@@ -346,3 +355,94 @@ def test_async_client_negotiates_inspection_separately_and_refuses_skew(
                 await client.exchange("inspect", payload)
             assert len(requests) == count
     asyncio.run(scenario())
+
+
+def test_actual_gateway_preserves_large_original_body_and_nondefault_receipt_reservation(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import watch_service
+    from agent_pull_requests.watch_replay_binding import ReplayBinding
+    from agent_pull_requests.workspace_client import WorkspaceClient
+    from agent_pull_requests.workspace_retained_review import RESPONSE_BYTES
+    from fleet_manager.gateway_service_channel import BODY_BYTES
+    from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
+    from agent_pull_requests_service import hosting
+
+    path, _, _, intent, operation = original(
+        configuration, monkeypatch, body="x" * 40000, receipt_bytes=16384,
+    )
+    assert len(json.dumps(operation["actions"][0]["receipt"]).encode()) > 4096
+    assert command(path).returncode == 0
+    config = load_config(path)
+    workspace = reader(config)
+    connectors: list[Any] = []
+
+    class Connector:
+        def __init__(self, **kwargs: Any) -> None:
+            self.handler = kwargs["handler"]
+            self.connected = asyncio.Event()
+            connectors.append(self)
+
+        async def run(self, stop: asyncio.Event) -> None:
+            self.connected.set()
+            await stop.wait()
+
+    async def access() -> str:
+        pytest.fail("the fixture connector must not acquire observation credentials")
+    monkeypatch.setattr(watch_service, "ServiceConnector", Connector)
+    monkeypatch.setattr(hosting, "load_service_credentials", lambda **_kwargs: SimpleNamespace(
+        proof_key=object(), access_token=access,
+    ))
+    selected = config.bindings[0]
+    binding = ReplayBinding(
+        "fleet-a", "gateway-a", "pr-watch", config.namespace, selected.principal, selected.target,
+        selected.scope.consumer, selected.scope.account, selected.scope.repo,
+    )
+    sizes: list[tuple[int, int]] = []
+
+    class Caller:
+        async def request(self, method: str, target: str, **kwargs: Any) -> Any:
+            assert len(kwargs["body"]) <= BODY_BYTES
+            handler = connectors[0].handler
+            response = await handler.handle(ServiceRequest(
+                CallerContext("fleet-a", "gateway-a", "pr-watch", "caller-a", int(time.time()) + 60),
+                method, target, tuple((name.lower(), value) for name, value in kwargs["request_headers"]),
+                kwargs["body"],
+                response_limit=handler.response_limit,
+            ))
+            assert response.status == 200, response.body
+            assert len(response.body) <= kwargs["response_limit"]
+            if target.endswith("/inspect"):
+                sizes.append((len(response.body), kwargs["response_limit"]))
+            return response
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        owner = asyncio.create_task(hosting.run(config, stop=stop))
+        try:
+            for _ in range(1000):
+                if connectors and connectors[0].connected.is_set():
+                    break
+                if owner.done():
+                    await owner
+                await asyncio.sleep(.001)
+            assert connectors and connectors[0].connected.is_set()
+            assert connectors[0].handler.response_limit == RESPONSE_BYTES
+            payload = {"number": intent["scope"]["number"], "operation_id": intent["operation_id"]}
+            native = NativeWorkspaceClient(
+                workspace, checkpoint=lambda: None, expires_at=lambda: int(time.time()) + 60,
+            )
+            native.exchange("capabilities", {})
+            expected = native.exchange("inspect", payload)
+            client = WorkspaceClient(Caller(), route_prefix="", binding=binding, scope=workspace.scope)
+            capabilities = await client.capabilities()
+            assert capabilities[FIELD]["max_response_bytes"] == RESPONSE_BYTES
+            assert await client.exchange("inspect", payload) == expected
+            assert expected["result"] == {**operation, "recovery_only": True}
+            assert sizes and BODY_BYTES < sizes[-1][0] <= sizes[-1][1] == RESPONSE_BYTES
+        finally:
+            stop.set()
+            await asyncio.wait_for(owner, 5)
+    before = workspace.store.path.read_bytes()
+    asyncio.run(scenario())
+    assert workspace.store.path.read_bytes() == before

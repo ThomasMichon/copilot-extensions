@@ -218,6 +218,11 @@ async def _serve(config: ServiceConfig, scope: LaunchScope, stop: asyncio.Event)
             "reports": config.reports.readers(config.operation_seconds),
             "response_limit": config.reports.response_bytes,
         }
+    if isinstance(config, HostConfig) and config.workspaces and config.workspaces.retained_active_reviews:
+        from .terminal import active_review_core
+        from agent_pull_requests.workspace_retained_review import RESPONSE_BYTES
+        active_review_core()
+        report_options["response_limit"] = max(report_options.get("response_limit", 0), RESPONSE_BYTES)
     if isinstance(config, LocalHostConfig):
         service = WatchService(
             store, fleet=None, gateway=None, slot=None,
