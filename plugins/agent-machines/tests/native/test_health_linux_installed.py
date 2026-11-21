@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 import os
 from pathlib import Path
 import stat
 import sys
+import time
 from typing import Any, cast
 import uuid
 
@@ -216,5 +217,197 @@ def test_finite_calendar_retained_action_replacement_and_rollback(
             assert len(requests) >= 3
             assert owner.disable()["status"] == "disabled"
             assert not owner.backend.call("read")["enabled"]
+    finally:
+        _cleanup(owner, native_scope, native_root / "cleanup.json")
+
+
+@pytest.mark.timeout(150)
+@pytest.mark.parametrize("operation", ["converge", "remove"])
+def test_fresh_installed_cli_recovers_exit_between_unit_publications(
+    native_root: Path, native_scope: Path, operation: str,
+) -> None:
+    first = fixture.installed(native_root / "runtime", "1.0")
+    owner = enrollment.Enrollment(first, selector=lambda *_args, **_kwargs: first)
+    backend = cast(NativePair, owner.backend)
+    assert not backend.call("read")["configured"]
+    store = _store(native_root / "store")
+    fixture.write_receipt(native_root / "fixture-owner.json", {
+        "units": list(backend.units), "owner": owner.owner, "runtime": str(first.root),
+        "fault": "publisher-exit-after-first-unit", "recovery": operation,
+    })
+    preview = _cli(first, "job", "configure", "--store-dir", str(store))
+    child = """
+import os
+from pathlib import Path
+import runpy
+import sys
+from agent_machines import health_slots
+
+scope, service, timer = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+original = health_slots._sync_directory
+def exit_after_first_unit(path):
+    original(path)
+    if path == scope and (scope / service).is_file() and not (scope / timer).exists():
+        os._exit(73)
+health_slots._sync_directory = exit_after_first_unit
+sys.argv = ["agent-machines", "health", "job", "configure", "--store-dir", sys.argv[4],
+            "--apply", "--expect", sys.argv[5]]
+runpy.run_module("agent_machines", run_name="__main__")
+"""
+    try:
+        exited = run_caller_owned(
+            [str(first.python), "-I", "-c", child, str(native_scope), *backend.units,
+             str(store), preview["preview_token"]],
+            timeout=65, max_stdout_bytes=64 * 1024, max_stderr_bytes=4096,
+            cwd=first.slot,
+        )
+        assert exited.returncode == 73, (exited.returncode, exited.stderr)
+        assert (native_scope / backend.units[0]).is_file()
+        assert not (native_scope / backend.units[1]).exists()
+        pending = owner.read()["pending"]
+        assert pending is not None and not pending["native_unsettled"]
+        observed = backend.call("read")
+        assert observed["configured"] and not observed["enabled"] and not observed["instances"]
+        recovered = _cli(first, "job", operation)
+        assert recovered["status"] == ("removed" if operation == "remove" else "disabled")
+        assert not recovered["enabled"] and not recovered["instances"] and not recovered["recovery_required"]
+        assert owner.read()["pending"] is None
+        references = owner.leases.read_runtime_references(first.root).get(enrollment.REFERENCE, [])
+        if operation == "remove":
+            assert not recovered["configured"] and references == []
+        else:
+            assert recovered["configured"] and references == ["1.0"]
+            assert backend.call("read")["loaded"]
+            assert all((native_scope / unit).is_file() for unit in backend.units)
+        assert (store / "policy.json").exists()
+        fixture.write_receipt(native_root / "publisher-recovery.json", {
+            "child_exit": exited.returncode, "partial_pair_observed": True,
+            "pending_native_unsettled": pending["native_unsettled"],
+            "result": recovered,
+        })
+    finally:
+        _cleanup(owner, native_scope, native_root / "cleanup.json")
+
+
+@pytest.mark.timeout(150)
+@pytest.mark.parametrize("failure", ["storage-unwritable", "startup-timeout"])
+def test_native_failure_is_not_reported_as_success_and_remains_removable(
+    native_root: Path, native_scope: Path, failure: str,
+) -> None:
+    installed = fixture.installed(native_root / "runtime", "1.0")
+    times, expires = fixture.calendar(datetime.now(timezone.utc))
+    marker = native_root / "pre-start-pid"
+    first = (
+        fixture.StartupDelayInstallation(installed, times, expires, marker)
+        if failure == "startup-timeout" else fixture.FiniteInstallation(installed, times, expires)
+    )
+    owner = enrollment.Enrollment(first, selector=lambda *_args, **_kwargs: first)
+    backend = cast(NativePair, owner.backend)
+    assert not backend.call("read")["configured"]
+    fixture.write_receipt(native_root / "fixture-owner.json", {
+        **first.receipt(owner.owner), "failure": failure, "enabled": False,
+    })
+    with observe.listener(observe.response(observe.QUALIFYING_BODY), count=2) as (port, requests):
+        store = _store(native_root / "store", port)
+        mode = stat.S_IMODE(store.stat().st_mode)
+        try:
+            desired = {
+                "store": str(store), "policy_token": health_run.policy_preview(store)[2],
+                "account_uid": enrollment.local_uid(), "enabled": False,
+            }
+            preview = owner.configure(desired)
+            result = owner.configure(desired, apply=True, expected=preview["preview_token"])
+            assert result["status"] == "converged" and not result["enabled"], result
+            before = {path.name: path.read_bytes() for path in store.iterdir() if path.is_file()}
+            if failure == "storage-unwritable":
+                store.chmod(0o500)
+            with pytest.raises(health_slots.HealthError, match="operation-unconfirmed"):
+                backend._command("start", backend.units[0], timeout=65)
+
+            def settled_failure() -> dict[str, Any] | None:
+                observed = backend.call("read")
+                return observed if not observed["instances"] else None
+
+            observed = fixture.until(settled_failure, 10)
+            properties = backend._properties(backend.units[0])
+            assert properties["Result"] == ("timeout" if failure == "startup-timeout" else "exit-code")
+            assert not observed["enabled"]
+            if failure == "startup-timeout":
+                assert marker.is_file() and int(marker.read_text()) > 0
+                assert observed["last_result"] is None and observed["last_run"] is None
+                assert requests == []
+            else:
+                assert observed["last_result"]["result"] == "exit-code"
+                assert observed["last_result"]["status"] != "0"
+                assert len(requests) == 1
+            store.chmod(mode)
+            assert {path.name: path.read_bytes() for path in store.iterdir() if path.is_file()} == before
+            fixture.write_receipt(native_root / "native-failure.json", {
+                "failure": failure, "manager_result": properties["Result"],
+                "observation": observed, "store_unchanged": True,
+            })
+        finally:
+            store.chmod(mode)
+            _cleanup(owner, native_scope, native_root / "cleanup.json")
+
+
+@pytest.mark.timeout(150)
+def test_persistent_late_start_coalesces_missed_triggers_without_replay(
+    native_root: Path, native_scope: Path,
+) -> None:
+    installed = fixture.installed(native_root / "runtime", "1.0")
+    times, expires = fixture.calendar(datetime.now(timezone.utc))
+    first = fixture.FiniteInstallation(installed, times, expires)
+    owner = enrollment.Enrollment(first, selector=lambda *_args, **_kwargs: first)
+    backend = cast(NativePair, owner.backend)
+    assert not backend.call("read")["configured"]
+    fixture.write_receipt(native_root / "fixture-owner.json", {
+        **first.receipt(owner.owner), "scenario": "persistent-late-start",
+    })
+    try:
+        with observe.listener(observe.response(observe.QUALIFYING_BODY), count=2) as (port, requests):
+            store = _store(native_root / "store", port)
+            desired = {
+                "store": str(store), "policy_token": health_run.policy_preview(store)[2],
+                "account_uid": enrollment.local_uid(), "enabled": True,
+            }
+            preview = owner.configure(desired)
+            result = owner.configure(desired, apply=True, expected=preview["preview_token"])
+            assert result["status"] == "converged" and result["enabled"], result
+            assert datetime.now(timezone.utc) < times[0]
+            backend._command("stop", backend.units[1], timeout=60)
+            assert backend._properties(backend.units[1])["ActiveState"] == "inactive"
+
+            def both_triggers_missed() -> dict[str, Any] | None:
+                return {"missed": True} if datetime.now(timezone.utc) > times[1] + timedelta(seconds=1) else None
+
+            fixture.until(both_triggers_missed, 60)
+            assert requests == []
+            resumed = datetime.now(timezone.utc)
+            assert resumed < expires
+            backend._command("start", backend.units[1], timeout=60)
+
+            def collected_once() -> dict[str, Any] | None:
+                if not requests:
+                    return None
+                observed = backend.call("read")
+                return observed if not observed["instances"] and observed["last_result"] is not None else None
+
+            observed = fixture.until(collected_once, 25)
+            assert observed["last_result"] == {"result": "success", "code": "1", "status": "0"}
+            assert datetime.fromisoformat(observed["last_run"]) >= resumed.replace(microsecond=0)
+            time.sleep(5)
+            assert len(requests) == 1
+            records = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in store.glob("*.json") if path.name != "policy.json"
+            ]
+            assert len(records) == 1 and records[0]["revision"] == 1
+            view = _cli(first, "inspect", "--store-dir", str(store), "--now", datetime.now(timezone.utc).isoformat())
+            assert view["observed_hours"] == 1 and view["carrier_receipt"] == "not-observed"
+            fixture.write_receipt(native_root / "late-start.json", {
+                "missed_triggers": 2, "requests": len(requests), "observed_hours": view["observed_hours"],
+                "resumed": resumed.isoformat(), "observation": observed,
+            })
     finally:
         _cleanup(owner, native_scope, native_root / "cleanup.json")

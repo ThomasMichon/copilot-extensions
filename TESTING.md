@@ -8077,8 +8077,18 @@ interrupted/failed cleanup remains owned recovery, not automatic deletion.
 pending-job controls, plus explicit T2 retained-helper and real-interpreter
 expiry checks. Passing those controls, or skipping
 the native cases on another platform, is not Linux installed qualification.
-Process-death recovery, late-start/overlap and deadline/storage failure
-qualification remain separate acceptance items.
+Selected publisher-exit recovery, late-start and native deadline/storage failure
+qualification is explicit within this packet: a fixture publisher exits after
+the first real unit-file publication, then a fresh installed CLI completes the
+approved disabled pair or removes it. A stopped persistent timer misses both
+finite triggers and resumes as one catch-up collection, not per-trigger replay.
+The unwritable-store case requests a real loopback observation before refusing
+staging and preserving store bytes. A test-only pre-start child exercises the
+unchanged manager startup deadline without modifying installed code, the real
+action, its lease or cgroup limits; a startup timeout is not reported as a
+completed collection. Each case retains its own result and exact cleanup receipt.
+Active-collection overlap, the collector's own child deadline and recovery from
+an unconfirmed native-client cleanup remain separate acceptance items.
 
 The actor-free `test_health_composition.py` packet executes the existing domain
 age projection, normal report/parser and SVG composition. Substituted storage
