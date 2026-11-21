@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .inbox_custody import InboxConsumer, handoff_stage, observed_time, original_handoff
+from .live_message_schema import PREDICATE, require_schema
 from .runtime_custody import RuntimeCustodyError, encode
 
 if TYPE_CHECKING:
@@ -130,6 +132,57 @@ def retain_message(conn: sqlite3.Connection, message_id: int) -> None:
                 "admission": row["runtime_custody_json"],
             }), message_id),
         )
+
+
+def reconcile_offers(
+    db: Database, session_id: str, worktree_id: str, incarnation: str, *,
+    after: int, limit: int,
+) -> list[int]:
+    """Attach missing original offers without claiming, submitting or retrying input."""
+    if (
+        type(after) is not int or not 0 <= after <= (1 << 63) - 1
+        or type(limit) is not int or not 1 <= limit <= 100
+    ):
+        raise RuntimeCustodyError("Offer reconciliation requires bounded page arguments")
+    now = time.time()
+    with db._runtime_transaction(write=True) as conn:
+        require_schema(conn)
+        require_live(conn, session_id, now)
+        target = conn.execute(
+            "SELECT worktree_id FROM live_sessions WHERE session_id=?", (session_id,),
+        ).fetchone()
+        if target["worktree_id"] != worktree_id:
+            raise RuntimeCustodyError("Pending queue worktree binding changed")
+        current = conn.execute(
+            "SELECT consumer_json FROM bridge_inbox_consumers WHERE session_id=? "
+            "AND incarnation=? AND installation=? AND current=1",
+            (session_id, incarnation, BINDING),
+        ).fetchone()
+        if current is None:
+            raise RuntimeCustodyError("Current compatible inbox receiver is unavailable or changed")
+        consumer = InboxConsumer(**json.loads(current["consumer_json"]))
+        require_current(conn, consumer)
+        # Page the original unresolved order, not a filtered list that jumps over
+        # uncertain work. The native consumer keeps final admission and send custody.
+        rows = conn.execute(
+            "SELECT id,delivery,kind,handoff_json,runtime_custody_json,claimed_at,"
+            "handoff_started_at,delivered_at,outcome FROM live_messages "
+            f"WHERE session_id=? AND id>? AND {PREDICATE} "
+            "ORDER BY id LIMIT ?", (session_id, after, limit),
+        ).fetchall()
+        prepared = []
+        for row in rows:
+            if (
+                row["handoff_json"] is not None or row["runtime_custody_json"] is not None
+                or row["claimed_at"] is not None or row["handoff_started_at"] is not None
+                or row["delivered_at"] is not None or row["outcome"] is not None
+                or row["delivery"] not in ("steer", "queue")
+                or row["kind"].casefold().startswith("startup:")
+            ):
+                continue
+            retain_message(conn, row["id"])
+            prepared.append(row["id"])
+        return prepared
 
 
 def require_supported(conn: sqlite3.Connection, row: sqlite3.Row, now: float) -> None:
