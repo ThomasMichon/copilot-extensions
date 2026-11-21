@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -269,7 +270,42 @@ def test_system_uv_flag_preserves_user_and_project_retention_inputs(
         (system, False),
     ]
     monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
-    assert reader._uv_default(environment, project) is (system_selected or user_default)
+    monkeypatch.setattr(policy._configuration.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="uv 0.11.16\n",
+    ))
+    assert reader._uv_default(environment, project, "selected-uv") is (system_selected or user_default)
+
+
+@pytest.mark.parametrize("version", ["0.8.0", "0.11.15", "0.11.16", "0.12.5"])
+def test_system_flag_qualifies_the_selected_provider_before_discovery_or_retention(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str,
+) -> None:
+    policy = reader._dependency_policy()
+    monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
+    probes = []
+
+    def run(command: list[str], **_options: object) -> SimpleNamespace:
+        probes.append(command)
+        return SimpleNamespace(returncode=0, stdout=f"uv {version}\n")
+
+    monkeypatch.setattr(policy._configuration.subprocess, "run", run)
+    environment = {"UV_NO_SYSTEM_CONFIG": "1"}
+    supported = version in {"0.11.16", "0.12.5"}
+    actions: tuple[Callable[[], object], ...] = (
+        lambda: reader._uv_default(environment, tmp_path, "selected-uv"),
+        lambda: policy.prepare_uv_install("selected-uv", [], env=environment, cwd=tmp_path),
+        lambda: policy.retain_uv_install("selected-uv", [], env=environment, cwd=tmp_path).__enter__(),
+    )
+    if not supported:
+        for action in actions:
+            with pytest.raises((ValueError, RuntimeError), match="0.11.16"):
+                action()
+        assert probes == [["selected-uv", "--version"]] * len(actions)
+    else:
+        policy._configuration.require_system_config_provider(
+            "selected-uv", environment, error_type=ValueError,
+        )
+        assert probes == [["selected-uv", "--version"]]
 
 
 def test_system_uv_flag_rejects_invalid_values(reader: ModuleType, tmp_path: Path) -> None:

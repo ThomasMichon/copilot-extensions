@@ -49,8 +49,11 @@ def _dependency_policy() -> types.ModuleType:
     return policy
 
 
-def _uv_default(environment: Mapping[str, str], base: Path) -> bool:
+def _uv_default(environment: Mapping[str, str], base: Path, uv: str = "") -> bool:
     policy = _dependency_policy()
+    policy._configuration.require_system_config_provider(
+        policy._select_uv_executable(uv), environment, error_type=ValueError,
+    )
     config_inputs: Callable[[list[str], dict[str, str], Path], list[tuple[Path, bool]]] = (
         policy._config_inputs
     )
@@ -130,10 +133,11 @@ def main(arguments: Sequence[str] = ()) -> int:
     """Print the selected index privately to the invoking installer's capture pipe."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--site-prefix", default="")
+    parser.add_argument("--uv", default="")
     options = parser.parse_args(list(arguments))
     try:
         if os.environ.get("UV_INDEX_URL") or os.environ.get("UV_DEFAULT_INDEX") or _uv_default(
-            os.environ, Path.cwd(),
+            os.environ, Path.cwd(), options.uv,
         ):
             return 0
         prefix = Path(options.site_prefix) if options.site_prefix else Path(sys.prefix)

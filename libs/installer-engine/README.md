@@ -117,15 +117,24 @@ Budget's POSIX installer also uses that selected interpreter for the canonical
 include the helper without knowing a new asset-registry entry. The clean-room
 copier likewise expands pointers before stamping a standalone snapshot.
 The checkout reference form resolves its owning canonical reader and policy.
-Stamping that form uses the existing pointer/SDK materializers to embed the
-reader and its complete policy family before publishing the snapshot; prepared
-payloads do not search another installation for missing helpers.
+Its first-session stamp remains Python- and uv-free. The installer consumes
+`installer-source-assets.tsv`, inert copy/request data projected by
+`tools/sync-installer-engine.py --only-source-snapshot-plans` from the existing
+SDK inventory, reader alias and Invocation bootstrap-request producer.
+This embeds the reader, policy family and deferred interpreter request before
+publishing the snapshot; explicit provision can then run after the checkout is
+removed. Source and materialized verification check that the plan still matches
+its producers. Prepared payloads do not search another installation for helpers.
 Existing uv environment/configuration defaults win, using the dependency-policy
 owner's discovery and TOML reader. Higher-priority named indexes shadow lower
 defaults; distinct unshadowed defaults remain effective. Only otherwise does the `global.index-url`
 bridge use `PIP_INDEX_URL` or pip's global/user/site/explicit-file order.
 The shared capture owner honors `UV_NO_SYSTEM_CONFIG` for system discovery
 and retention without suppressing user, project or explicit configuration.
+A true value requires the actual selected provider to report UV 0.11.16 or
+newer before discovery or retention; older supported UV versions otherwise
+ignore this option, so that combination refuses rather than changing feeds.
+The index-reader caller supplies that same provider through `--uv`.
 The installer passes a valid active venv/Conda site prefix as configuration data
 before isolating interpreter hints; it never executes that environment's Python.
 Discovery runs only for package construction, not completed-slot reuse.

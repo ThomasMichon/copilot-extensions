@@ -26,9 +26,6 @@ VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
     "project"
 ]["version"]
 
-pytestmark = pytest.mark.guard
-
-
 def _copy_payload(target: Path) -> None:
     def ignore(directory: str, names: list[str]) -> set[str]:
         omitted = {"__pycache__", ".pytest_cache"}
@@ -100,6 +97,7 @@ def _resolved_uv_defaults(output: str, native: ModuleType) -> list[str]:
     return defaults
 
 
+@pytest.mark.guard
 def test_installers_recommend_supported_version_flag() -> None:
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -110,6 +108,7 @@ def test_installers_recommend_supported_version_flag() -> None:
     assert "Try: budget-guidance version" not in powershell
 
 
+@pytest.mark.guard
 def test_package_installers_retain_quiet_native_output_with_explicit_failure() -> None:
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -404,6 +403,7 @@ def test_native_retry_after_failure_publishes_clean_slot(native_failed_install_s
         assert (state.old / "live").read_text() == "untouched"
 
 
+@pytest.mark.guard
 def test_posix_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     source = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     assert source.index('bootstrap-python-version.txt" Prepare') < source.index(
@@ -413,6 +413,7 @@ def test_posix_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     assert "Python fallback" not in source
 
 
+@pytest.mark.guard
 def test_powershell_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     assert source.index("Get-BootstrapPython -Prepare") < source.index(
@@ -746,32 +747,45 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
     catalog["plugins"] = [entry for entry in catalog["plugins"] if entry["name"] == "budget-guidance"]
     roster.write_text(json.dumps(catalog), encoding="utf-8")
     payload = checkout / "plugins/budget-guidance"
-    staged = tmp_path / "bootstrap-ready"
-    shutil.copytree(payload, staged)
-    previous = sys.path.copy()
-    sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
-    try:
-        materializer = importlib.import_module("materialize_main")
-    finally:
-        sys.path[:] = previous
-    for prepare in (
-        materializer.materialize_uv_editable_ref_into,
-        materializer.materialize_installer_engine_ref_into,
-        materializer.materialize_payload_invocation_into,
-    ):
-        changes = prepare(
-            source_consumer_dir=payload, dest_consumer_dir=staged, canonical_root=checkout,
-        )
-        assert not any(line.startswith("SKIP ") for line in changes), changes
-    assert (staged / "scripts/pip-index-config").read_text().startswith("<!-- VENDOR_POINTER:")
-    shutil.rmtree(payload)
-    staged.rename(payload)
+    if operation != "stamp":
+        staged = tmp_path / "bootstrap-ready"
+        shutil.copytree(payload, staged)
+        previous = sys.path.copy()
+        sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
+        try:
+            materializer = importlib.import_module("materialize_main")
+        finally:
+            sys.path[:] = previous
+        for prepare in (
+            materializer.materialize_uv_editable_ref_into,
+            materializer.materialize_installer_engine_ref_into,
+            materializer.materialize_payload_invocation_into,
+        ):
+            changes = prepare(
+                source_consumer_dir=payload, dest_consumer_dir=staged, canonical_root=checkout,
+            )
+            assert not any(line.startswith("SKIP ") for line in changes), changes
+        assert (staged / "scripts/pip-index-config").read_text().startswith("<!-- VENDOR_POINTER:")
+        shutil.rmtree(payload)
+        staged.rename(payload)
     if operation == "missing-reader":
         (payload / "scripts/pip-index-config").unlink()
     root = Path(env["HOME"]) / ".budget-guidance"
+    stamp_env = env
+    if operation == "stamp":
+        native_bin = tmp_path / "native-bin"
+        native_bin.mkdir()
+        for name in ("dirname", "basename", "sed", "head", "tr", "grep", "mkdir", "rm",
+                     "ln", "sleep", "date", "cat", "awk", "cp", "mv", "chmod"):
+            executable = shutil.which(name)
+            assert executable
+            (native_bin / name).symlink_to(executable)
+        stamp_env = {**env, "PATH": str(native_bin)}
+        assert not (payload / "scripts/bootstrap-uv.sh").exists()
+        assert not (payload / "scripts/bootstrap-python-version.txt").exists()
     result = subprocess.run(
         [BASH, str(payload / "scripts/install.sh"), "install" if operation == "missing-reader" else operation],
-        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
+        cwd=tmp_path, env=stamp_env, capture_output=True, text=True, timeout=120,
     )
     if operation == "missing-reader":
         assert result.returncode != 0
@@ -781,6 +795,10 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
     assert result.returncode == 0, result.stdout + result.stderr
     if operation == "stamp":
         snapshot = Path((root / "payload-dir").read_text().strip())
+        assert not (root / "current-version").exists()
+        assert (Path(env["HOME"]) / ".local/bin/budget-guidance").is_file()
+        assert (snapshot / "scripts/bootstrap-python-version.txt").read_text() == "cpython@3.13.12\n"
+        assert (snapshot / "scripts/bootstrap-uv.sh").is_file()
         assert (snapshot / "scripts/pip-index-config").read_bytes() == (
             checkout / "libs/installer-engine/installer_pip_index.py"
         ).read_bytes()
@@ -1128,6 +1146,7 @@ def test_closed_wheel_uv_off_path_refuses_before_construction(tmp_path: Path) ->
     assert not (home / ".local/bin").exists()
 
 
+@pytest.mark.guard
 def test_windows_compatibility_wrapper_does_not_provision_on_launch() -> None:
     wrapper = _compatibility_powershell_wrapper()
     assert "runtime is not prepared" in wrapper

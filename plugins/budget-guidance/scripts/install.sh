@@ -353,27 +353,39 @@ _budget_pip_index_helper() {
 }
 
 _materialize_budget_source_snapshot() {
-    local snapshot="$1" helper py
+    local snapshot="$1" helper root operation source target extra
     helper="$(_budget_pip_index_helper)" || return 1
     [[ "$helper" != "$SCRIPT_DIR/pip-index-config" ]] || return 0
-    . "$SCRIPT_DIR/bootstrap-uv.sh"
-    py="$(_bootstrap_python)" || return 1
-    invoke_uv_bootstrap_environment "$py" -I -B - "$PLUGIN_DIR" "$snapshot" <<'PY'
-import sys
-from pathlib import Path
-
-plugin, destination = map(Path, sys.argv[1:])
-root = plugin.resolve().parents[1]
-sys.path.insert(0, str(root / "tools"))
-from materialize_main import materialize_file_pointers, materialize_installer_engine_ref_into
-
-results = materialize_file_pointers(destination, canonical_root=root)
-results.extend(materialize_installer_engine_ref_into(
-    source_consumer_dir=plugin, dest_consumer_dir=destination, canonical_root=root,
-))
-if any(line.startswith("SKIP ") for line in results):
-    raise RuntimeError("Canonical snapshot helper materialization refused")
-PY
+    root="$(cd "$PLUGIN_DIR/../.." && pwd)" || return 1
+    [[ -s "$SCRIPT_DIR/installer-source-assets.tsv" ]] || {
+        _fail 'The owning native source asset plan is unavailable'
+        return 1
+    }
+    [[ ! -L "$root/libs" && ! -L "$root/libs/installer-engine" &&
+        ! -L "$snapshot/scripts" && ! -L "$snapshot/libs" ]] || return 1
+    while IFS=$'\t' read -r operation source target extra; do
+        [[ -z "$extra" && "$target" =~ ^(scripts|libs)/[A-Za-z0-9_.-]+$ &&
+            ! -L "$snapshot/$target" ]] || return 1
+        case "$operation" in
+            copy)
+                [[ "$target" == scripts/* && "$source" =~ ^libs/installer-engine/[A-Za-z0-9_.-]+$ &&
+                    -f "$root/$source" && ! -L "$root/$source" ]] || return 1
+                cp "$root/$source" "$snapshot/$target" || return 1
+                ;;
+            tree)
+                [[ "$source" == "$target" && "$source" =~ ^libs/[A-Za-z0-9_-]+$ &&
+                    -d "$root/$source" && ! -L "$root/$source" ]] || return 1
+                mkdir -p "$snapshot/$target" || return 1
+                cp -a "$root/$source/." "$snapshot/$target/" || return 1
+                ;;
+            request)
+                [[ "$target" == scripts/bootstrap-python-version.txt &&
+                    "$source" =~ ^cpython@3\.[0-9]+\.[0-9]+$ ]] || return 1
+                printf '%s\n' "$source" > "$snapshot/$target" || return 1
+                ;;
+            *) return 1 ;;
+        esac
+    done < "$SCRIPT_DIR/installer-source-assets.tsv"
 }
 
 _source_runtime_identity() {
@@ -533,7 +545,7 @@ _ensure_uv_index() {
     py="$(_bootstrap_python)" || return 1
     helper="$(_budget_pip_index_helper)" || return 1
     idx="$(invoke_uv_bootstrap_environment "$py" -I -B "$helper" \
-        --site-prefix "$site_prefix")" || return 1
+        --uv "$(command -v uv)" --site-prefix "$site_prefix")" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 # Deploy the prepared-only binstub. The existing resolver selects the runtime;

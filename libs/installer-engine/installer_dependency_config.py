@@ -170,6 +170,35 @@ if not TYPE_CHECKING:
     resolver_configuration = _arguments.resolver_configuration
 
 _WINDOWS = os.name == "nt"
+_TRUE_VALUES = {"y", "yes", "t", "true", "on", "1"}
+_FALSE_VALUES = {"n", "no", "f", "false", "off", "0"}
+
+
+def require_system_config_provider(
+    uv: str, environment: Mapping[str, str], *, deadline: float | None = None,
+    error_type: _Error,
+) -> None:
+    """Do not reinterpret an option that the selected UV would silently ignore."""
+    flag = environment.get("UV_NO_SYSTEM_CONFIG")
+    if flag is None:
+        return
+    if flag.lower() not in _TRUE_VALUES | _FALSE_VALUES:
+        raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")
+    if flag.lower() in _FALSE_VALUES:
+        return
+    if not uv:
+        raise error_type("UV_NO_SYSTEM_CONFIG requires its selected UV provider")
+    try:
+        result = subprocess.run(
+            [uv, "--version"], env=dict(environment), capture_output=True, text=True,
+            timeout=remaining_timeout(deadline, error_type=error_type, cap=30),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if _WINDOWS else 0,
+        )
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
+        raise error_type("Cannot qualify UV_NO_SYSTEM_CONFIG support") from exc
+    version = re.fullmatch(r"uv ([0-9]+)\.([0-9]+)\.([0-9]+)(?: \([^\r\n]*\))?\s*", result.stdout)
+    if result.returncode or version is None or tuple(map(int, version.group(1, 2, 3))) < (0, 11, 16):
+        raise error_type("UV_NO_SYSTEM_CONFIG requires UV 0.11.16 or newer")
 
 
 def immutable_install_arguments(
@@ -252,6 +281,8 @@ def prepare_uv_install(
     settings_timeout: float, headless: int, value_options: Set[str],
 ) -> list[str]:
     remaining_timeout(deadline, error_type=error_type)
+    uv = select_uv(uv)
+    require_system_config_provider(uv, environment, deadline=deadline, error_type=error_type)
     if native_target and environment.get("UV_PYTHON_PLATFORM"):
         raise error_type("native source lock export cannot override its selected target")
     if operation in ("compile", "source-compile"):
@@ -261,7 +292,6 @@ def prepare_uv_install(
         **({"operation": operation} if operation != "install" else {}),
     )
     remaining_timeout(deadline, error_type=error_type)
-    uv = select_uv(uv)
     probe_arguments = [arg for arg in arguments if arg != "--quiet" and not re.fullmatch(r"-q+", arg)]
     native_operation = "compile" if operation == "source-compile" else operation
     command, probe_cwd = uv_command(
@@ -603,11 +633,9 @@ def config_inputs(
     if explicit:
         return [(base / explicit, False)]
     system_flag = environment.get("UV_NO_SYSTEM_CONFIG")
-    true_values = {"y", "yes", "t", "true", "on", "1"}
-    false_values = {"n", "no", "f", "false", "off", "0"}
-    if system_flag is not None and system_flag.lower() not in true_values | false_values:
+    if system_flag is not None and system_flag.lower() not in _TRUE_VALUES | _FALSE_VALUES:
         raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")
-    no_system = system_flag is not None and system_flag.lower() in true_values
+    no_system = system_flag is not None and system_flag.lower() in _TRUE_VALUES
     candidates = []
     project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
     if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
