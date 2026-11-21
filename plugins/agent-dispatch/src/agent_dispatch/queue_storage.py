@@ -124,6 +124,8 @@ class QueueStorageMixin(StorageOwner):
                 (ts, detach_reason, task_id, old_session_id),
             )
         if new_session_id is not None:
+            from .native_attachment_custody import require_no_prior_effect
+            require_no_prior_effect(conn, task_id, new_session_id, machine)
             conn.execute(
                 "INSERT INTO task_attachments "
                 "(task_id, session_id, worktree_id, machine, attached_at, detached_at) "

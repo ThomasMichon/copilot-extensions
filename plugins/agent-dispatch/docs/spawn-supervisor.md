@@ -1166,6 +1166,12 @@ prevents the send; failed or superseded attempted wakes are not absence proof.
 Qualified execution scopes remain held until supervisor send enrollment is
 implemented, even if the owner-wake list is empty.
 
+If that native leaves the original assignment and attaches to another task,
+the later attachment fences both the old prompt and terminal cleanup of the
+old reservation. Conversely, a new task cannot attach that native while a
+previously admitted redrive or terminal cleanup still owns it. This comparison
+uses the recorded assignments, not the yield message or transport name.
+
 Before transport, the existing `record_spawn` operation atomically rechecks the
 snapshot and records a pending startup revision together with the frozen
 continuation invocation in reservation metadata. Terminal cleanup and capacity

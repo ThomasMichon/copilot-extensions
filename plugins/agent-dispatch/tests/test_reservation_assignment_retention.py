@@ -3,14 +3,19 @@
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-from agent_dispatch.ordinary_agent_storage import record_created_agent
+from agent_dispatch.coordinator import create_app
+from agent_dispatch.ordinary_agent_storage import record_created_agent, reservation_native_facts
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_records import Status, TaskError
 from agent_dispatch.queue_relevance import RelevanceScope
+from agent_dispatch.supervisor import Supervisor
 from tests._helpers import required
+from tests.test_native_owner_wake import hosted as hosted
 from tests.test_pool_placement import place, pool, publish, record_native
+from tests.test_pool_placement_client import connected
 
 
 def test_obsolete_target_sweep_and_supersession_preserve_reservation(tmp_path: Path) -> None:
@@ -121,13 +126,88 @@ def test_independent_worker_can_yield_and_accept_next_task_with_wip(
     reservation = queue.latest_reservation(task.id)
     assert bool(reservation and reservation.agent_info) is bridge
     assert queue.yield_task(task.id, "host-a/worktree-a").status == Status.QUEUED
+    before_claim = reservation_native_facts(queue, res.key)["ordinary_redrive"] if bridge else None
     next_task = queue.create("different goal", repo="example")
     assert isinstance(next_task, Task)
     assert queue.claim_one("host-a/worktree-a", task_id=next_task.id) is not None
     started = queue.start(next_task.id, "host-a/worktree-a", owner_session_id="native-a")
     assert (started.owner, started.owner_session_id) == ("host-a/worktree-a", "native-a")
+    if bridge:
+        assert before_claim and reservation
+        with pytest.raises(TaskError, match="another task"):
+            queue.record_spawn(
+                reservation.key, session_handle=reservation.session_handle,
+                worktree=reservation.worktree, startup_revision=reservation.startup_revision,
+                startup_complete=False, ordinary_redrive=before_claim,
+            )
+        app = create_app(queue, token="data", control_token="control", enable_mcp=False,
+                         verification_interval=0)
+        with TestClient(app) as api, connected(api, []) as client:
+            sup = Supervisor(
+                client, repo="example", machine="host-a",
+                spawn_fn=lambda *_: pytest.fail("unexpected replacement"),
+                redrive_fn=lambda *_: pytest.fail("unexpected prompt"),
+                local_end_fn=lambda *_: pytest.fail("unexpected native shutdown"),
+                conclusion_fn=lambda *_: pytest.fail("unexpected workspace conclusion"),
+            )
+            assert sup.redrive_unclaimed_spawns() == 0
+            queue.abandon(task.id, permitted=True)
+            assert sup.reconcile() == 0
+        assert queue.get(next_task.id) == started
     assert queue.latest_reservation(task.id) == reservation
     assert wip.read_text(encoding="utf-8") == "unfinished work\n"
+
+
+def test_cli_redrive_cannot_reopen_startup_on_reassigned_native(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("original goal", repo="example")
+    assert isinstance(task, Task)
+    owner, native = "host-a/driver", "original"
+    res, _ = queue.reserve_spawn(task.id, driver="cli")
+    record_native(queue, res, worktree="driver", native=native)
+    retained = queue.record_spawn(
+        res.key, worktree="driver", session_handle=native, startup_complete=True,
+        startup_revision=res.startup_revision,
+    )
+    queue.claim_one(owner, task_id=task.id)
+    queue.start(task.id, owner, owner_session_id=native)
+    queue.yield_task(task.id, owner)
+    other = queue.create("different goal", repo="example")
+    assert isinstance(other, Task) and queue.claim_one(owner, task_id=other.id)
+    queue.start(other.id, owner, owner_session_id=native)
+    with pytest.raises(TaskError, match="another task"):
+        queue.record_spawn(
+            res.key, worktree="driver", session_handle=native, startup_complete=False,
+            startup_revision=retained.startup_revision,
+        )
+    assert queue.get_reservation(res.key) == retained
+
+
+def test_unresolved_original_redrive_fences_transfer_until_receipt_completion(
+    hosted: tuple[TaskQueue, str],
+) -> None:
+    queue, original_id = hosted
+    owner, native = "host-a/worktree-a", "native-a"
+    queue.resume(original_id, owner, reuse_session=True)
+    queue.yield_task(original_id, owner)
+    original = required(queue.latest_reservation(original_id))
+    invocation = reservation_native_facts(queue, original.key)["ordinary_redrive"]
+    pending = queue.record_spawn(
+        original.key, session_handle=original.session_handle, worktree=original.worktree,
+        startup_complete=False, startup_revision=original.startup_revision,
+        ordinary_redrive=invocation,
+    )
+    other = queue.create("different goal", repo="example")
+    assert isinstance(other, Task) and queue.claim_one(owner, task_id=other.id)
+    with pytest.raises(TaskError, match="original native delivery"):
+        queue.start(other.id, owner, owner_session_id=native)
+    assert queue.latest_reservation(original_id) == pending
+    queue.record_spawn(
+        original.key, session_handle=pending.session_handle, worktree=pending.worktree,
+        startup_complete=True, startup_revision=pending.startup_revision,
+        ordinary_redrive=invocation,
+    )
+    assert queue.start(other.id, owner, owner_session_id=native).owner_session_id == native
 
 
 def test_failed_attempt_retains_native_published_only_in_acquisition(tmp_path: Path) -> None:
