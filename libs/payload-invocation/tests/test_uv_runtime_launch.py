@@ -153,6 +153,18 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         installed.mkdir(parents=True)
         name = "resolve-runtime.sh" if posix else "resolve-runtime.ps1"
         shutil.copyfile(scripts / name, installed / name)
+    native_report = tmp_path / "native-arguments.json"
+    if "winps" in kind:
+        content = shim.read_text(encoding="utf-8")
+        diagnostic = (
+            "    $mode = Get-Variable PSNativeCommandArgumentPassing -ErrorAction SilentlyContinue\n"
+            "    @{ original=@($args); forwarded=@($_uvForwardedArguments); "
+            "version=$PSVersionTable.PSVersion.ToString(); mode=[string]$mode.Value } | "
+            "ConvertTo-Json -Compress | Set-Content -Encoding UTF8 $env:FIXTURE_NATIVE_REPORT\n"
+        )
+        assert "    & $_uv run " in content
+        shim.write_text(content.replace("    & $_uv run ", diagnostic + "    & $_uv run "),
+                        encoding="utf-8")
     if not posix:
         wrapper = tmp_path / "shadowed-uv.ps1"
         wrapper.write_text(_same_host_wrapper(shim, legacy=kind.endswith("-legacy")), encoding="utf-8")
@@ -163,7 +175,10 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
     ]
     command = [host, str(shim)] if posix else [host, "-NoProfile", "-File", str(shim)]
     for code in (0, 37, None):
-        run_env = {**env, "FIXTURE_EXIT": str(code or 0), "FIXTURE_ARGUMENTS": json.dumps(arguments)}
+        run_env = {
+            **env, "FIXTURE_EXIT": str(code or 0), "FIXTURE_ARGUMENTS": json.dumps(arguments),
+            "FIXTURE_NATIVE_REPORT": str(native_report),
+        }
         if code is None:
             run_env.update(UV_PYTHON_PREFERENCE="", UV_ISOLATED="", VIRTUAL_ENV="")
         result = subprocess.run(
@@ -180,7 +195,8 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         assert result.stderr.strip() == "application diagnostic"
         output = json.loads(result.stdout)
         assert Path(output["python"]).absolute() == python.absolute()
-        assert output["args"] == arguments
+        detail = native_report.read_text(encoding="utf-8-sig") if native_report.is_file() else ""
+        assert output["args"] == arguments, detail
         assert output["stdin"] == "input\nλ\n"
         assert output["config"] == "caller configuration"
 
