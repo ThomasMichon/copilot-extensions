@@ -67,7 +67,7 @@ def persist_pull(
     config: cfg.Config, record: tracking.WorktreeRecord, target: tracking.PRRecord, pull: PullResult,
     *, head_sha: str, marker_published: bool, session: str,
 ) -> str | None:
-    from . import pr_ops, pr_publish, pr_unverified_creation
+    from . import obligations, pr_ops, pr_publish, pr_unverified_creation
 
     if type(pull.number) is not int or pull.number <= 0 or not pull.url:
         raise ValueError("Provider creation has no verified pull-request identity; reconcile the retained attempt.")
@@ -81,17 +81,21 @@ def persist_pull(
         current.url = pull.url
         current.number = pull.number
         current.state = pull.state or current.state
-        if current.creation.get("provider_outcome") == "publishing":
-            current.creation.update(
-                provider_outcome="verified", provider_number=str(pull.number) if pull.number is not None else "",
-                provider_url=pull.url,
-            )
         current.pr_revision += 1
         if marker_published:
             current.attribution_head = head_sha
         if not fresh.parent_session and session:
             fresh.parent_session = session
         claimed_ref = pr_ops._ensure_pr_claim(fresh, current)
+        if current.state not in ("closed", "merged") and not any(
+            claim.kind == "pr" and claim.ref == pr_ops._pr_claim_ref(current) and claim.state == obligations.ACTIVE
+            for claim in fresh.resources
+        ):
+            raise ValueError("Provider PR opened without an active responsibility claim; retain its unknown receipt.")
+        if current.creation.get("provider_outcome") == "publishing":
+            current.creation.update(
+                provider_outcome="verified", provider_number=str(pull.number), provider_url=pull.url,
+            )
         tracking.save_record(fresh)
         copy_pr(target, current)
         record.resources = fresh.resources

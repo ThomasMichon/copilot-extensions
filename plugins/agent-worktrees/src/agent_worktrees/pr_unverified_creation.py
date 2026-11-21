@@ -90,7 +90,7 @@ def create(
                 draft=False, publication_state="not-started",
             )
         return None
-    except (providers.ProviderError, OSError) as exc:
+    except (providers.ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
         if not retain(result, config, record, target, exc):
             result.update(pr_open_error=str(exc), pr_opened=False, draft=False)
         return None
@@ -114,11 +114,12 @@ def retain(
             _update(config, record, target, receipt)
         except (OSError, ValueError, TimeoutError) as exc:
             result["pr_receipt_tracking_error"] = str(exc)
+    detail = str(error) + " PR creation outcome is unknown; reconcile the retained attempt before retrying."
     result.update(
-        success=False, state="unknown", error=str(error),
+        success=False, state="unknown", error=detail,
         pr_opened=pull is not None, number=pull.number if pull is not None else None,
         url=pull.url if pull is not None else "",
         publication_state="unknown", pr_identity_verified=False, claimed=False,
-        pr_open_error=str(error),
+        pr_open_error=detail,
     )
     return True
