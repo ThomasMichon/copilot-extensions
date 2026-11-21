@@ -830,13 +830,8 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
                 to in (Status.QUEUED, Status.PROPOSED, Status.ABANDONED)
                 and "owner" in (extra or {}) and transaction_guard is None
             ):
-                from .reservation_assignment import require_independent_requeue, retains_assignment
-                if retains_assignment(conn, task_id):
-                    if not voluntary_requeue:
-                        raise TaskError(
-                            "spawn reservation retains assignment; conclude it through its owner"
-                        )
-                    require_independent_requeue(conn, task, worker_id)
+                from .reservation_assignment import require_disposition
+                require_disposition(conn, task, worker_id, to, voluntary=voluntary_requeue)
             if (release_spawn or to == Status.STARTED) and conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
                 (task_id,),

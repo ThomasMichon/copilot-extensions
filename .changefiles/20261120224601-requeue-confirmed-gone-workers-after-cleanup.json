@@ -1,6 +1,0 @@
-{
-  "comment": "Requeue confirmed-gone legacy workers only after their original reservation and required cleanup finish; preserve recovery across supervisor restarts.",
-  "changes": [
-    {"plugin": "agent-dispatch", "type": "patch"}
-  ]
-}

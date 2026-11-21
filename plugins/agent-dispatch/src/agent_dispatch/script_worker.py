@@ -16,8 +16,8 @@ itself. This module keeps that contract small and reusable:
        worker.report_success({"summary": "done"})
 
 If the body raises, or returns without an explicit terminal call, the helper
-reports the failure without releasing its own still-running process. The
-supervisor requests terminal closeout after that exact process exits.
+abandones the task with a clear reason instead of silently leaving a live
+reservation behind.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from .client import DispatchClient, DispatchError
 from .config import client_token, client_url, shared_token, shared_url
@@ -57,10 +57,7 @@ def _env_flag(name: str) -> bool:
 def _client_for_route(route: str) -> DispatchClient:
     route_name = (route or "local").strip().lower()
     if route_name == "shared":
-        url = shared_url()
-        if not url:
-            raise RuntimeError("shared script coordinator unavailable")
-        return DispatchClient(url, token=shared_token())
+        return DispatchClient(shared_url(), token=shared_token())
     if route_name == "strict-local":
         return DispatchClient(client_url(local=True), token=client_token())
     return DispatchClient(client_url(), token=client_token())
@@ -75,7 +72,7 @@ class ScriptTaskRuntime:
     worker_id: str
     repo: str | None = None
     all_repos: bool = False
-    heartbeat_seconds: float = 60
+    heartbeat_seconds: int = 60
     task: dict[str, Any] | None = None
     task_file: str | None = None
     admission_retry_seconds: float = 1.0
@@ -88,8 +85,6 @@ class ScriptTaskRuntime:
     _owner_session_id: str | None = None
     _heartbeat_stop: threading.Event | None = None
     _heartbeat_thread: threading.Thread | None = None
-    _failure_reason: str | None = None
-    _failure_reply: dict[str, Any] | None = None
 
     @classmethod
     def from_env(cls) -> "ScriptTaskRuntime":
@@ -132,23 +127,19 @@ class ScriptTaskRuntime:
     def __enter__(self) -> "ScriptTaskRuntime":
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None,
-                 _tb: object) -> Literal[False]:
-        try:
-            if self._admission_pending and not self._started:
-                return False
-            if exc is not None and not self._terminal:
-                try:
-                    self.report_failure(f"{type(exc).__name__}: {exc}")
-                except Exception:
-                    log.exception("script failure delivery unconfirmed; original exception retained")
-            elif exc is None and not self._terminal:
-                reason = "script exited without report_success() or report_failure()"
-                self.report_failure(reason)
-                raise ScriptTaskProtocolError(reason)
-            return False
-        finally:
+    def __exit__(self, exc_type, exc, _tb) -> bool:
+        if self._admission_pending and not self._started:
             self.close()
+            return False
+        if exc is not None and not self._terminal:
+            self.report_failure(f"{exc_type.__name__}: {exc}")
+        if exc is None and not self._terminal:
+            reason = "script exited without report_success() or report_failure()"
+            self.report_failure(reason)
+            self.close()
+            raise ScriptTaskProtocolError(reason)
+        self.close()
+        return False
 
     def _remember(self, payload: dict[str, Any]) -> dict[str, Any]:
         generation = payload.get("generation")
@@ -193,10 +184,10 @@ class ScriptTaskRuntime:
     def _start_heartbeats(self) -> None:
         if self._heartbeat_thread is not None or self.heartbeat_seconds <= 0:
             return
-        self._heartbeat_stop = stop = threading.Event()
+        self._heartbeat_stop = threading.Event()
 
         def _loop() -> None:
-            while not stop.wait(self.heartbeat_seconds):
+            while not self._heartbeat_stop.wait(self.heartbeat_seconds):
                 if self._terminal:
                     return
                 try:
@@ -219,7 +210,7 @@ class ScriptTaskRuntime:
         phase: str = "",
         summary: str,
         blocker: str | None = None,
-        pr: str | None = None,
+        pr: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = self.client.progress(
             self.task_id,
@@ -240,8 +231,6 @@ class ScriptTaskRuntime:
         return self._remember(payload)
 
     def report_success(self, result: Any = None) -> dict[str, Any]:
-        if self._failure_reason is not None:
-            raise ScriptTaskProtocolError("script already reported a failure")
         self._terminal = True
         payload = self.client.complete(
             self.task_id,
@@ -254,14 +243,14 @@ class ScriptTaskRuntime:
         return self._remember(payload)
 
     def report_failure(self, reason: str) -> dict[str, Any]:
-        if self._terminal:
-            if self._failure_reason == reason and self._failure_reply is not None:
-                return dict(self._failure_reply)
-            raise ScriptTaskProtocolError("prior script outcome already attempted; no replay")
-        self._failure_reason = reason
         self._terminal = True
-        payload = self.client.progress(
-            self.task_id, self.worker_id, phase="script-failure", summary=reason,
+        payload = self.client.abandon(
+            self.task_id,
+            worker_id=self.worker_id,
+            permitted=True,
+            reason=reason,
+            expected_status=None,
+            expected_generation=self._generation,
+            expected_owner_session_id=self._owner_session_id,
         )
-        self._failure_reply = dict(payload)
         return self._remember(payload)

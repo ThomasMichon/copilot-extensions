@@ -401,6 +401,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q: TaskQueue
         "protocol": "pool_placement/v1", "supported_versions": [1],
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
+        "ordinary_allocation_nonce_versions": [1],
         "ordinary_control_adoption_versions": [1],
         "ordinary_control_delivery_versions": [1],
         "ordinary_writer_requirement_versions": [1],

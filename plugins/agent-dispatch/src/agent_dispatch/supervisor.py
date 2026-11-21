@@ -802,9 +802,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 # An adopted legacy binding has no recovery assignment and stays here;
                 # record_spawn admits it against its bound pool's lanes first.
                 continue
-            if current.get("state") != SpawnState.COLD or current.get("session_handle") != res.get("session_handle"):
-                continue
-            local_sid = _parse_local_body_handle(current.get("session_handle"))
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is None:
                 continue
             try:
@@ -819,15 +817,22 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 _target_directory_missing(target_dir) if target_dir is not None else None
             )
             if target_missing is True:
+                # Missing workspace does not prove a missing worker. A retained
+                # normal Bridge conversation is never disposed of by this sweep.
+                if res.get("driver") in {"ordinary-bridge", "restricted-bridge"}:
+                    continue
                 try:
-                    try:
-                        verdict = self.local_body_verdict_fn(local_sid)
-                    except Exception:
-                        verdict = _tracking().UNKNOWN
-                    if verdict != _tracking().GONE:
-                        continue
-                    from .gone_owner_recovery import request
-                    request(self, current, task, productive=True)
+                    verdict = self.local_body_verdict_fn(local_sid)
+                except Exception:
+                    verdict = _tracking().UNKNOWN
+                if verdict != _tracking().GONE:
+                    continue
+                try:
+                    self.client.release(
+                        task["id"],
+                        owner,
+                        reason=("recorded worktree is missing; released for fresh re-embodiment"),
+                    )
                 except DispatchError:
                     self._resume_retry_after[key] = now + _COLD_RESUME_RETRY_SECONDS
                     log.exception(
@@ -840,8 +845,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 self._resume_retry_after.pop(key, None)
                 handled += 1
                 log.warning(
-                    "requested retirement for suspended task %s after its recorded "
-                    "worktree disappeared (%s); retaining owner until cleanup",
+                    "released suspended task %s after its recorded worktree "
+                    "disappeared (%s); durable task state retained for fresh "
+                    "re-embodiment",
                     task["id"],
                     target_dir,
                 )
@@ -2006,12 +2012,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     "failed to settle release-requested reservation %s",
                     res["key"],
                 )
-        reconcile = getattr(self.client, "reconcile_gone_requeues", None)
-        if callable(reconcile):
-            try:
-                reconcile(self.supervisor_id)
-            except (DispatchError, httpx.TransportError):
-                log.debug("gone owner requeue reconciliation unavailable", exc_info=True)
         return released
 
     # -- phases --------------------------------------------------------------
@@ -3071,25 +3071,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
         return renew_restricted_grants(self)
 
-    def _recover_gone_body(self, res: dict[str, Any], task: dict[str, Any], detail: str) -> int:
-        productive = _reservation_made_progress(res, task)
-        try:
-            if task["status"] in _LEASED and task.get("owner"):
-                from .gone_owner_recovery import request
-                request(self, res, task, productive)
-            elif res.get("worktree_ownership") == "created":
-                self.client.request_spawn_release(
-                    res["key"], detail=detail, disposition="settled" if productive else "failed",
-                )
-            elif productive:
-                self.client.settle_spawn(res["key"], detail=f"{detail}; productive turn completed", release_requested=True)
-            else:
-                self.client.fail_spawn(res["key"], detail=detail, release_requested=True)
-        except (DispatchError, httpx.TransportError):
-            log.warning("gone body recovery unconfirmed for %s", res["key"], exc_info=True)
-            return 0
-        return 1
-
     def recover_gone(self) -> int:
         """Release the spawn reservation of a **confirmed-gone** embody so its
         task can be re-embodied -- the auto-recovery half of the liveness model.
@@ -3101,9 +3082,12 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         - ``gone``    -> the embody is provably absent (its worktree is empty, or a
           different session reused it). Release the reservation (``fail_spawn``) so
           the next :meth:`poll_once` can re-reserve and re-embody; the replacement
-          resumes from the task's ``progress_log``. A leased task retains the
-          observed incarnation until its original retirement and any required
-          cleanup complete. A task that never claimed is already queued.
+          resumes from the task's ``progress_log``. A still-leased task is first
+          **requeued on the gone owner's behalf** (an on-behalf ``yield_task``,
+          across worktree, fleet, and local bodies alike) so re-embody is prompt
+          rather than waiting out the lease -- the coordinator's own lease-expiry
+          GC is only the backstop. A task whose embody died *before* it claimed is
+          already queued.
         - ``live``    -> leave it (:meth:`hold_live_leases` heartbeats it).
         - ``unknown`` -> leave it. A still-starting-up worker, or an unreachable
           bridge, is **never** treated as death -- recovery never fires on
@@ -3153,7 +3137,56 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 except Exception:  # liveness is best-effort -- never fatal
                     fverdict = tracking.UNKNOWN
                 if fverdict == tracking.GONE:
-                    recovered += self._recover_gone_body(res, task, f"fleet body confirmed gone ({host}:{bridge_sid})")
+                    # Requeue the task if the dead body still holds its lease --
+                    # yield on its behalf (preserving goal + progress_log) so
+                    # re-embody is PROMPT instead of waiting out the 15-min lease
+                    # (the origin can't liveness-probe a synthetic owner, so its
+                    # own GC would only requeue on expiry). Then release the
+                    # reservation so poll_once re-embodies from the recorded
+                    # progress. A queued task (body died before claiming) needs no
+                    # yield -- just the release.
+                    if status in _LEASED and owner:
+                        try:
+                            self.client.yield_task(
+                                task["id"],
+                                owner,
+                                note="fleet body confirmed gone; requeued for re-embody",
+                                release_spawn=False,
+                            )
+                        except DispatchError:
+                            continue  # Refusal or lost reply does not authorize retirement.
+                    try:
+                        detail = f"fleet body confirmed gone ({host}:{bridge_sid})"
+                        productive = _reservation_made_progress(res, task)
+                        if res.get("worktree_ownership") == "created":
+                            self.client.request_spawn_release(
+                                res["key"],
+                                detail=(
+                                    f"{detail}; productive turn completed"
+                                    if productive
+                                    else detail
+                                ),
+                                disposition="settled" if productive else "failed",
+                            )
+                        elif productive:
+                            self.client.settle_spawn(
+                                res["key"],
+                                detail=f"{detail}; productive turn completed",
+                                release_requested=True,
+                            )
+                        else:
+                            self.client.fail_spawn(
+                                res["key"], detail=detail, release_requested=True
+                            )
+                        recovered += 1
+                        log.info(
+                            "recovered gone fleet body for task %s (%s); reservation "
+                            "released for re-embody",
+                            task["id"],
+                            res["key"],
+                        )
+                    except DispatchError:
+                        log.exception("recovery release failed for reservation %s", res["key"])
                 continue  # fleet body handled -> don't fall to the worktree path
             # Local headless body: no worktree handle either, but its recovery
             # handle is THIS host's agent-bridge session -- probe it locally (no
@@ -3170,7 +3203,52 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 except Exception:  # liveness is best-effort -- never fatal
                     lverdict = tracking.UNKNOWN
                 if lverdict == tracking.GONE:
-                    recovered += self._recover_gone_body(res, task, f"local body confirmed gone ({local_sid})")
+                    # Requeue the task if the dead body still holds its lease
+                    # (yield on its behalf, preserving goal + progress_log) so
+                    # re-embody is prompt, then release the reservation. A queued
+                    # task (body died before claiming) needs no yield.
+                    if status in _LEASED and owner:
+                        try:
+                            self.client.yield_task(
+                                task["id"],
+                                owner,
+                                note="local body confirmed gone; requeued for re-embody",
+                                release_spawn=False,
+                            )
+                        except DispatchError:
+                            continue
+                    try:
+                        detail = f"local body confirmed gone ({local_sid})"
+                        productive = _reservation_made_progress(res, task)
+                        if res.get("worktree_ownership") == "created":
+                            self.client.request_spawn_release(
+                                res["key"],
+                                detail=(
+                                    f"{detail}; productive turn completed"
+                                    if productive
+                                    else detail
+                                ),
+                                disposition="settled" if productive else "failed",
+                            )
+                        elif productive:
+                            self.client.settle_spawn(
+                                res["key"],
+                                detail=f"{detail}; productive turn completed",
+                                release_requested=True,
+                            )
+                        else:
+                            self.client.fail_spawn(
+                                res["key"], detail=detail, release_requested=True
+                            )
+                        recovered += 1
+                        log.info(
+                            "recovered gone local body for task %s (%s); reservation "
+                            "released for re-embody",
+                            task["id"],
+                            res["key"],
+                        )
+                    except DispatchError:
+                        log.exception("recovery release failed for reservation %s", res["key"])
                 continue  # local body handled -> don't fall to the worktree path
             script_handle = _parse_script_body_handle(res.get("session_handle"))
             if script_handle is not None:
@@ -3199,10 +3277,35 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         except DispatchError:
                             log.exception("failed to release unclaimed script startup %s", res["key"])
                         continue
-                    from .script_failure_closeout import recover as recover_script_exit
-                    if recover_script_exit(self.client, res, task, worker_id):
-                        _cleanup_script_task_file(task_file)
+                    detail = (
+                        "script body exited without explicit complete/abandon "
+                        f"(worker {worker_id}, pid {pid})"
+                    )
+                    try:
+                        self.client.abandon(
+                            task["id"],
+                            worker_id=worker_id,
+                            permitted=True,
+                            reason=detail,
+                            expected_generation=task.get("generation"),
+                            expected_owner_session_id=task.get("owner_session_id"),
+                        )
+                    except DispatchError:
+                        log.exception("failed to abandon gone script task %s", task["id"])
+                        continue  # Preserve context on refusal or unknown outcome.
+                    _cleanup_script_task_file(task_file)
+                    try:
+                        self.client.settle_spawn(
+                            res["key"], detail=detail, release_requested=True
+                        )
                         recovered += 1
+                        log.info(
+                            "abandoned gone script body for task %s (%s)",
+                            task["id"],
+                            res["key"],
+                        )
+                    except DispatchError:
+                        log.exception("failed to settle gone script reservation %s", res["key"])
                 continue
             worktree = _worktree_from_reservation(res, owner)
             if not worktree:
@@ -3215,7 +3318,49 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 verdict = tracking.UNKNOWN
             if verdict != tracking.GONE:
                 continue  # live or unknown -> never recover on ignorance
-            recovered += self._recover_gone_body(res, task, f"owner confirmed gone ({worktree})")
+            try:
+                # Requeue the task if the gone owner still holds its lease -- yield
+                # on its behalf (preserving goal + progress_log) so re-embody is
+                # PROMPT instead of waiting out the lease. This matches the fleet/
+                # local body paths above; without it a confirmed-gone worktree
+                # owner's task lingers LEASED (not spawn-eligible) until the
+                # coordinator's lease-expiry GC requeues it -- a lease-window where
+                # the replacement is needlessly delayed (the liveness-not-lease
+                # gap). A queued task (embody died before claiming) needs no yield.
+                if status in _LEASED and owner:
+                    try:
+                        self.client.yield_task(
+                            task["id"],
+                            owner,
+                            note="worktree owner confirmed gone; requeued for re-embody",
+                            release_spawn=False,
+                        )
+                    except DispatchError:
+                        continue
+                detail = f"owner confirmed gone ({worktree})"
+                productive = _reservation_made_progress(res, task)
+                if res.get("worktree_ownership") == "created":
+                    self.client.request_spawn_release(
+                        res["key"],
+                        detail=(f"{detail}; productive turn completed" if productive else detail),
+                        disposition="settled" if productive else "failed",
+                    )
+                elif productive:
+                    self.client.settle_spawn(
+                        res["key"],
+                        detail=f"{detail}; productive turn completed",
+                        release_requested=True,
+                    )
+                else:
+                    self.client.fail_spawn(res["key"], detail=detail, release_requested=True)
+                recovered += 1
+                log.info(
+                    "recovered gone embody for task %s (%s); reservation released for re-embody",
+                    task["id"],
+                    res["key"],
+                )
+            except DispatchError:
+                log.exception("recovery release failed for reservation %s", res["key"])
         return recovered
 
     def redrive_unclaimed_spawns(self, *, now: float | None = None) -> int:

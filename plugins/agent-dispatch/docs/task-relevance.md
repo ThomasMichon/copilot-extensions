@@ -8,16 +8,10 @@ emitters are unchanged without that configuration. Registered evaluators can opt
 into [periodic reconsideration](periodic-relevance.md). Domain source adapters
 and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
-There is no default automatic task scrubber.
-
-A stopped process is not an unassigned task. Voluntary yield or release of
-an independent worker's task is not permission to stop the worker or clean
-its workspace. A pool-placed worker cannot bypass its reservation owner this
-way. Abandonment, orphan sweeps and exclusive-key supersession are not
-voluntary returns. An obsolete task with
-an attached agent goes through source relevance: one durable closeout steer
-and its original-owner wake, not a replacement task. Cooling a worker can
-free execution capacity without releasing the task or its workspace.
+There is no default automatic task scrubber. Once a source closeout is accepted,
+automatic GC, orphan sweeping and supersession cannot discard its original
+recipient or assign a replacement. A pending notification is not evidence that
+the original resources have been released.
 
 ## Existing owners and integration seams
 

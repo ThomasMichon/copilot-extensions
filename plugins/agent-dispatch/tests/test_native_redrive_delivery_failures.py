@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
-from agent_dispatch import remote_dispatch
+from agent_dispatch import bridge
 from agent_dispatch.ordinary_agent_storage import record_created_agent
-from agent_dispatch.queue_common import Task
-from tests._helpers import required
-from tests.test_native_owner_wake import OWNER, Hosted, _capture, _native_supervisor
+from tests.test_native_owner_wake import _capture, _native_supervisor
 from tests.test_native_owner_wake import hosted as hosted
 
 
-def test_native_delivery_identity_error_does_not_abort_later_reservations(
-    hosted: Hosted, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
+def test_native_delivery_identity_error_does_not_abort_later_reservations(hosted, monkeypatch, tmp_path):
     queue, task_id = hosted
     queue.resume(task_id, "host-a/worktree-a", reuse_session=True)
-    queue.yield_task(task_id, OWNER)
+    queue.yield_task(task_id, "host-a/worktree-a", release_spawn=False)
     second = queue.create("another review", repo="queue-project", source="wake-test")
-    assert isinstance(second, Task)
     reservation, _ = queue.reserve_spawn(
         second.id, reserved_by="supervisor", driver="ordinary-bridge",
     )
@@ -39,20 +30,19 @@ def test_native_delivery_identity_error_does_not_abort_later_reservations(
     )
     queue.claim_one("host-a/worktree-b", task_id=second.id)
     queue.start(second.id, "host-a/worktree-b", owner_session_id="native-b")
-    queue.yield_task(second.id, "host-a/worktree-b")
+    queue.yield_task(second.id, "host-a/worktree-b", release_spawn=False)
     supervisor = _native_supervisor(queue)
     ordered = supervisor._pool_reservations(state="spawned")
     assert len(ordered) == 2
     machines = iter([None, "host-a"])
-    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: next(machines))
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: next(machines))
     calls = _capture(monkeypatch)
 
     assert supervisor.redrive_unclaimed_spawns() == 1
 
     assert len(calls) == 1
-    failed, accepted = (required(queue.get_reservation(row["key"])) for row in ordered)
+    failed, accepted = (queue.get_reservation(row["key"]) for row in ordered)
     assert failed.startup_complete is False
-    redrive = required(failed.agent_info)["retained_redrive"]
-    assert redrive["startup_revision"] == failed.startup_revision
+    assert failed.agent_info["retained_redrive"]["startup_revision"] == failed.startup_revision
     assert accepted.startup_complete is True
-    assert calls[0][0][5] == required(accepted.agent_info)["session_id"]
+    assert calls[0][0][5] == accepted.agent_info["session_id"]

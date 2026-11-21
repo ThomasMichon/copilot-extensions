@@ -958,9 +958,8 @@ design doc's "Per-label embody body" section.
 
 `agent_dispatch.script_worker.ScriptTaskRuntime` is the helper contract for such
 bodies. It reads supervisor-injected task/coordinator context from environment
-variables, wraps claim/start/heartbeat/progress/complete, and reports a return
-without an explicit outcome as failure progress. Only verified process exit
-allows the supervisor to settle that reservation and abandon the failed task.
+variables, wraps claim/start/heartbeat/progress/complete/abandon, and treats a
+return without an explicit terminal call as a protocol violation.
 
 **Fleet mode (`--pool`) is fleet-wide, not per-label.** When the supervisor fans
 bodies out across a **pool of remote hosts** (`--pool a,b [--origin <alias>]`), the

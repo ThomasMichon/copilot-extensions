@@ -4,28 +4,52 @@ from pathlib import Path
 
 import pytest
 
+from agent_dispatch.ordinary_agent_storage import record_created_agent
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_records import Status, TaskError
+from agent_dispatch.queue_relevance import RelevanceScope
 from tests._helpers import required
-from tests.test_native_owner_wake import NATIVE, OWNER, _published_agent
 from tests.test_pool_placement import place, pool, publish, record_native
 
 
 def test_obsolete_target_sweep_and_supersession_preserve_reservation(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
-    task = queue.create("review", repo="example", exclusive_key="review:7",
-                        target_worktree="driver", target_machine="host", now=100)
+    task = queue.create(
+        "review",
+        repo="example",
+        exclusive_key="review:7",
+        source="emitter",
+        origin_ref="review:7",
+        target_worktree="driver",
+        target_machine="host",
+        now=100,
+    )
     assert isinstance(task, Task)
     reservation, _ = queue.reserve_spawn(task.id, now=101)
     queue.record_spawn(reservation.key, session_handle="local-body:original")
+    snapshot = queue.relevance_snapshot(task.id)
+    result = queue.reconcile_task_relevance(
+        task.id,
+        request_id="obsolete",
+        scope=RelevanceScope("example", "emitter", "review:7"),
+        expected_generation=task.generation,
+        expected_revision=snapshot["revision"],
+        verdict="obsolete",
+        reason="source closed",
+        observation_ref="source:closed",
+        reporter="emitter",
+    )
+    assert result["decision"] == "closeout_pending"
     assert not queue.reap_orphaned_targets(set(), machine="host", grace_secs=0, now=102)["reaped"]
     with pytest.raises(TaskError, match="owner closeout"):
         queue.create("replacement", repo="example", exclusive_key="review:7",
                      supersede_exclusive_key=True)
     with pytest.raises(TaskError, match="retains assignment"):
         queue.abandon(task.id, permitted=True)
-    assert queue.get(task.id) == task
+    with pytest.raises(TaskError, match="pending source closeout"):
+        queue.request_spawn_release(reservation.key)
+    assert required(queue.get(task.id)).status == Status.QUEUED
     retained = queue.get_reservation(reservation.key)
     assert retained and retained.session_handle == "local-body:original"
 
@@ -80,18 +104,28 @@ def test_independent_worker_can_yield_and_accept_next_task_with_wip(
     workspace.mkdir()
     wip = workspace / "unfinished.txt"
     wip.write_text("unfinished work\n", encoding="utf-8")
-    task = _published_agent(queue, workspace) if bridge else queue.create("review", repo="example")
+    task = queue.create("review", repo="example")
     assert isinstance(task, Task)
-    queue.claim_one(OWNER, task_id=task.id)
-    queue.start(task.id, OWNER, owner_session_id=NATIVE)
+    if bridge:
+        res, _ = queue.reserve_spawn(task.id, reserved_by="supervisor", driver="ordinary-bridge")
+        queue.record_spawn_allocation(res.key, "example")
+        record_created_agent(queue, res.key, task_generation=task.generation, agent_info={
+            "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
+            "connection": {"native_session_id": "native-a", "worktree_id": "worktree-a",
+                           "repo": "example", "target_dir": str(workspace)},
+        })
+        queue.record_spawn(res.key, session_handle="local-body:bridge-a", startup_complete=True,
+                           startup_revision=res.startup_revision)
+    queue.claim_one("host-a/worktree-a", task_id=task.id)
+    queue.start(task.id, "host-a/worktree-a", owner_session_id="native-a")
     reservation = queue.latest_reservation(task.id)
     assert bool(reservation and reservation.agent_info) is bridge
-    assert queue.yield_task(task.id, OWNER).status == Status.QUEUED
+    assert queue.yield_task(task.id, "host-a/worktree-a").status == Status.QUEUED
     next_task = queue.create("different goal", repo="example")
     assert isinstance(next_task, Task)
-    assert queue.claim_one(OWNER, task_id=next_task.id) is not None
-    started = queue.start(next_task.id, OWNER, owner_session_id=NATIVE)
-    assert (started.owner, started.owner_session_id) == (OWNER, NATIVE)
+    assert queue.claim_one("host-a/worktree-a", task_id=next_task.id) is not None
+    started = queue.start(next_task.id, "host-a/worktree-a", owner_session_id="native-a")
+    assert (started.owner, started.owner_session_id) == ("host-a/worktree-a", "native-a")
     assert queue.latest_reservation(task.id) == reservation
     assert wip.read_text(encoding="utf-8") == "unfinished work\n"
 
@@ -100,8 +134,10 @@ def test_failed_attempt_retains_native_published_only_in_acquisition(tmp_path: P
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("review", repo="example")
     assert isinstance(task, Task)
-    res, _ = queue.reserve_spawn(task.id)
-    queue.record_spawn_worktree(res.key, "driver", ownership="targeted")
+    publish(queue, pool())
+    res, _ = place(queue, task)
+    queue.record_spawn_worktree(res.key, "driver", ownership="targeted", driver="cli",
+                                execution_machine="host-a")
     with queue._connect() as conn:
         conn.execute(
             "INSERT INTO acquisition_receipts VALUES (?,?,?,?,?,?,?,?)",

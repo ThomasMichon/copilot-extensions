@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from .queue_records import SpawnState, Status
-from .reservation_assignment import retains_assignment
+from .reservation_assignment import protects_disposition
 
 #: Upper bound on concurrent per-task liveness probes across ALL
 #: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
@@ -132,9 +132,10 @@ class LivenessMixin:
           An ordinary hosted task that already recorded its native owner is
           suspended with that ownership intact: a stopped process does not
           retire its conversation. Its unfinished claim or missing native
-          binding is retained for explicit reconciliation. For a legacy fleet/local
-          headless reservation, GC records the verdict but leaves the task in its
-          current phase: supervisor recovery owns retirement and subsequent requeue. A
+          binding is retained for explicit reconciliation. Other **headless** bodies (a fleet/local
+          spawn-reservation owns them -- see
+          :meth:`_active_headless_handle`) keeps the pre-existing behavior
+          unchanged: requeue, or ``dead_letter`` past ``max_attempts``. A
           **CLI-embodied** ``started`` task (no headless reservation owns it) is
           instead auto-transitioned to ``suspended`` -- it never silently
           requeues/dead-letters out from under a durable interactive worktree,
@@ -301,12 +302,8 @@ class LivenessMixin:
                 )
                 if verdict != self.LIVENESS_GONE:
                     continue
-                if conn.execute(
-                    "SELECT 1 FROM gone_owner_requeues WHERE task_id=? AND json_extract(observation,'$.generation')=?"
-                    " AND json_extract(observation,'$.status')=? AND json_extract(observation,'$.native') IS ?",
-                    (task_id, generation, status, owner_session_id),
-                ).fetchone():
-                    continue  # The observed incarnation already has its own retirement disposition.
+                if protects_disposition(conn, task_id):
+                    continue  # Pool custody or source closeout is resolved by its original owner.
                 restricted = conn.execute(
                     "SELECT 1 FROM spawn_reservations s JOIN tasks t ON t.id=s.task_id "
                     "WHERE s.task_id=? AND t.generation=? AND s.driver='restricted-bridge' "
@@ -319,7 +316,7 @@ class LivenessMixin:
                 if restricted:
                     continue
                 retained = conn.execute(
-                    "SELECT driver,session_handle FROM spawn_reservations WHERE task_id=?"
+                    "SELECT driver FROM spawn_reservations WHERE task_id=?"
                     " AND state IN (?,?,?,?) ORDER BY attempt DESC LIMIT 1",
                     (task_id, SpawnState.RESERVING, SpawnState.SPAWNED,
                      SpawnState.COLD, SpawnState.RELEASING),
@@ -327,16 +324,9 @@ class LivenessMixin:
                 ordinary_native = (
                     retained is not None and retained["driver"] == "ordinary-bridge"
                 )
-                if retained is not None and retained["driver"] in (None, "cli", "agent-dispatch") and (
-                    _parse_local_body_handle(retained["session_handle"])
-                    or _parse_fleet_body_handle(retained["session_handle"])
-                ):
-                    # Suspending here would hide the still-owned task from recover_gone.
+                if ordinary_native and (not owner_session_id or status != Status.STARTED):
                     continue
-                reserved = retains_assignment(conn, task_id)
-                if reserved and (not owner_session_id or status != Status.STARTED):
-                    continue
-                if reserved and tuple(conn.execute(
+                if ordinary_native and tuple(conn.execute(
                     "SELECT t.wake_operation_id, w.status FROM tasks t"
                     " LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id WHERE t.id = ?",
                     (task_id,),
@@ -345,7 +335,7 @@ class LivenessMixin:
                 # A current wake still being delivered to the same ordinary
                 # native is how the Bridge resumes it (e.g. a rejected
                 # submission); suspending here would fence that wake stale.
-                if reserved and conn.execute(
+                if ordinary_native and conn.execute(
                     "SELECT 1 FROM tasks t JOIN wake_outbox w ON w.id = t.wake_operation_id"
                     " WHERE t.id = ? AND t.status = ? AND t.generation = ?"
                     " AND t.owner_session_id = ? AND w.task_id = t.id"
@@ -356,7 +346,7 @@ class LivenessMixin:
                     (task_id, Status.STARTED, generation, owner_session_id),
                 ).fetchone():
                     continue
-                suspend = (cli_embodied or reserved) and status == Status.STARTED
+                suspend = (cli_embodied or ordinary_native) and status == Status.STARTED
                 if suspend:
                     to_status = Status.SUSPENDED
                 else:
@@ -408,9 +398,7 @@ class LivenessMixin:
                     if to_status == Status.QUEUED:
                         note = "owner-gone"
                     elif to_status == Status.SUSPENDED:
-                        kind = "reserved" if reserved else "CLI-embodied"
-                        if ordinary_native:
-                            kind = "ordinary native"
+                        kind = "ordinary native" if ordinary_native else "CLI-embodied"
                         note = f"owner-gone: auto-suspended ({kind} session ended)"
                     else:
                         note = "owner-gone: abandoned (max attempts exhausted)"
@@ -498,7 +486,7 @@ class LivenessMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             for task_id, generation, status in victims:
-                if retains_assignment(conn, task_id):
+                if protects_disposition(conn, task_id):
                     continue
                 cur = conn.execute(
                     "UPDATE tasks SET status = ?, updated_at = ?, completed_at = ?,"

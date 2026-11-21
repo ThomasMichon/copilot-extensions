@@ -61,22 +61,6 @@ class TaskRecoveryClientMixin:
         _control_headers: Callable[[], dict[str, str]]
         health: Callable[[], dict[str, Any]]
 
-    def close_failed_script(self, task_id: str, **expected: object) -> dict[str, Any]:
-        """Ask the coordinator to verify exit, never submit a caller's verdict."""
-        return cast(dict[str, Any], self._unwrap(self._http.post(
-            f"/tasks/{task_id}/script-exit", headers=self._control_headers(), json=expected,
-        )))
-
-    def requeue_gone_owner(self, task_id: str, **observed: object) -> None:
-        self._unwrap(self._http.post(f"/tasks/{task_id}/gone-owner-requeue",
-                                     headers=self._control_headers(), json=observed))
-
-    def reconcile_gone_requeues(self, supervisor: str) -> None:
-        headers = self._control_headers()
-        if headers:
-            self._unwrap(self._http.post("/spawn-reservations/reconcile-gone-requeues",
-                                         headers=headers, params={"supervisor": supervisor}))
-
     def _require_task_recovery(self, operation: str | None = None) -> None:
         # Probe each call: an earlier advertisement cannot authorize a rolled-back
         # or replaced running provider.

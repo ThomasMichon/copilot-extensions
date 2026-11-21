@@ -519,12 +519,10 @@ double-spawned. Each cycle:
    reservation-created worktree enters `releasing`; targeted/reused legacy
    rows may fail directly. Unknown liveness remains reserved. An unbound
    reservation is never guessed away.
-3. **fulfill reservation release requests** — voluntary task yield or release
-   from suspension is not a request to stop an independent worker or clean its
-   workspace. It can take another task with its native and unfinished work
-   intact. Only an actual allocator placement—not a label, target or accounting
-   record—requires pool-owner closeout before a retained assignment can be
-   returned. For an explicit reservation release, the supervisor ends a
+3. **fulfill reservation release requests** — an independent worker can yield
+   or release its task without authorizing any cleanup of its native or workspace.
+   An active pool placement retains the assignment until its owner completes
+   the return. For an explicit reservation release, the supervisor ends a
    confirmed-live headless body (or observes it gone), concludes only a
    provenance-verified reservation-created worktree, and persists pending or
    held cleanup across restarts. Targeted, reused, foreign-host, origin-unknown,
@@ -955,24 +953,10 @@ ignored.
 
 `agent_dispatch.script_worker.ScriptTaskRuntime` is the small helper contract
 for those bodies. It reads the supervisor-injected task/coordinator context from
-environment variables and wraps claim/start/heartbeat/progress/complete.
-`report_failure`, an exception, or return without an explicit outcome records
-`script-failure` progress, **not** task abandonment or proof of process exit.
-A failed progress delivery leaves the task held; the helper does not retry an
-ambiguous write or suppress the script's original exception.
-
-For an owned `CLAIMED`/`STARTED` script that exits without completing, supervisor
-recovery uses the control-only `POST /tasks/{id}/script-exit` operation. The
-coordinator checks the original launch PID domain, process identity, task,
-worker, generation, reservation handle and startup revision. It independently
-observes exit of that exact script process, then rechecks ownership under the
-queue write lock. Settlement and abandonment commit together; an exact lost
-reply replays the saved outcome without a second abandonment. There is no
-generic abandon fallback. A foreign PID namespace, a legacy handle without
-the original launch pins, a live process, hold, competing reservation, or
-unconfirmed exit retains custody. This proves exit of the recorded script
-process, not cancellation of arbitrary external work. A remote coordinator
-without access to the launch PID domain cannot certify that script's exit.
+environment variables, wraps claim/start/heartbeat/progress/complete/abandon,
+and treats a claimed worker's return without an explicit terminal call as a
+protocol violation: an orderly exit auto-abandons in the helper, and a
+confirmed-gone claimed process is abandoned by supervisor recovery.
 An unclaimed worker instead waits through a structured
 [worker-admission inhibition](action-controls.md#worker-admission) and retries
 in the same process after clear. Cancellation does not abandon its queued task.
@@ -1144,18 +1128,9 @@ The supervisor now has the positive-death signal the earlier design deferred to:
   local Bridge for exact remote status over its shared carrier. A direct SSH
   status probe is compatibility-only.
 
-For a confirmed-gone leased body, the supervisor requests recovery under its
-existing control authority. Dispatch records the exact incarnation and intended
-disposition before releasing the reservation. It settles productive attempts
-and fails unproductive ones. A created worktree or cold body goes through the
-release and cleanup owners first: the task stays assigned while cleanup is
-pending or held. A missing target directory alone is not body absence, and an
-unqualified route 404 or CLI failure is not a terminal session observation.
-
-The supervisor's release pass also finishes its durable outstanding requeues
-after a restart. Requeue preserves the goal, steering and progress; it refuses
-a changed incarnation, hold, closed goal or unresolved send. An old receiver
-or missing control authority is not permission to fall back to `yield`. This legacy
+For a confirmed-gone body, the supervisor yields the task on the dead owner's
+behalf when it is still leased (preserving `goal` and `progress_log`), marks the
+reservation failed, and the next cycle can reserve a fresh attempt. This legacy
 replacement rule does not apply to `ordinary-bridge` or `restricted-bridge`
 reservations: process absence does not retire their native conversation. Ordinary
 started owners are suspended with their owner, native identity and reservation

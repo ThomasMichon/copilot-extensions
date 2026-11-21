@@ -143,6 +143,11 @@ def require_no_wake_for_cooling(queue: TaskQueue, conn: sqlite3.Connection, task
 
 
 def require_no_wake_for_release(queue: TaskQueue, conn: sqlite3.Connection, reservation: sqlite3.Row) -> None:
+    from .queue_relevance import closeout_request
+
+    closeout = closeout_request(conn, reservation["task_id"])
+    if closeout is not None and closeout["acknowledgement"] is None:
+        raise TaskError("pending source closeout requires the original reservation")
     task = queue._fetch(conn, reservation["task_id"])
     if task is not None:
         _require_no_owner_wake(queue, conn, task, operation="release", protect_pending=False)

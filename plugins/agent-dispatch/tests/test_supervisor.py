@@ -34,17 +34,17 @@ from agent_dispatch.supervise_cli import _cmd_supervise
 from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.supervisor_conclusion import _CONCLUSION_MAX_ATTEMPTS
 from tests._helpers import TEST_REPO, required
-from tests._legacy_supervisor_history import (
-    before_retention_abandon,
-    before_retention_gc,
-    before_retention_release,
-    before_retention_supersession,
-)
 from tests._supervisor_fixtures import OwnerResultQueue as OwnerResultQueue
-from tests._supervisor_fixtures import ProbeOptions, RecordingSpawn, record_result
+from tests._supervisor_fixtures import (
+    ProbeOptions,
+    RecordingSpawn,
+    record_result,
+    release_task_then_attempt,
+)
 from tests._supervisor_fixtures import QueueBackedClient as QueueBackedClient
 from tests._supervisor_fixtures import _ok_spawn as _ok_spawn
 from tests._supervisor_fixtures import client as client
+from tests._supervisor_fixtures import evaluator_client as evaluator_client
 from tests._supervisor_fixtures import q as q
 from tests._supervisor_fixtures import supervisor_api as supervisor_api
 from tests._supervisor_fixtures import supervisor_http as supervisor_http
@@ -798,7 +798,6 @@ def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
     before_progress: list[dict[str, object]] = q.progress_log(blocked.id)
     before_steers = q.steer_log(blocked.id)
     resumed: list[str] = []
-    cleanup_complete = False
     spawn = _ok_spawn()
     sup = Supervisor(
         supervisor_http,
@@ -807,7 +806,7 @@ def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
         labels=["review"],
         local_body_target_dir_fn=lambda _sid: str(missing_worktree),
         local_body_verdict_fn=lambda _sid: "gone",
-        local_end_fn=lambda _sid: cleanup_complete,
+        local_end_fn=lambda _sid: pytest.fail("not a workspace cleanup request"),
         local_acp_session_fn=lambda _sid: None,
         local_resume_fn=lambda sid, _prompt: record_result(resumed, sid, True),
     )
@@ -822,30 +821,45 @@ def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
     after_progress: list[dict[str, object]] = q.progress_log(blocked.id)
     assert after_progress == before_progress
     assert q.steer_log(blocked.id) == before_steers
-    assert released.status == Status.SUSPENDED
-    assert released.owner == before.owner
+    assert released.status == Status.QUEUED and released.owner is None
     assert resumed == []
     held = required(q.get_reservation(reservation.key))
-    assert held.state == SpawnState.RELEASING
-    assert held.release_requested is True
-    assert held.conclusion_state == "pending"
-
-    sup.release_requested_bodies(now=1001)
-    assert required(q.get_reservation(reservation.key)).conclusion_state == "pending"
-    with pytest.raises(TaskError, match="requires queued and unowned"):
-        q.reserve_spawn(blocked.id)
-    assert spawn.calls == []
-    assert len(q.list_reservations(task_id=blocked.id)) == 1
-    assert required(q.get(blocked.id)).owner == before.owner
-    cleanup_complete = True
-    sup.release_requested_bodies(now=time.time() + 600)
-    closed = required(q.get_reservation(reservation.key))
-    assert closed.state == SpawnState.SETTLED and closed.conclusion_state == "complete"
-    queued = required(q.get(blocked.id))
-    assert queued.status == Status.QUEUED and queued.owner is None
-    assert q.progress_log(blocked.id) == before_progress
-    assert q.steer_log(blocked.id) == before_steers
+    assert held.state == SpawnState.COLD and not held.release_requested
+    assert held.conclusion_state is None
+    assert sup.release_requested_bodies(now=1001) == 0
+    assert spawn.calls == [] and len(q.list_reservations(task_id=blocked.id)) == 1
+    assert sup.recover_stranded_cold_reservations() == 1
     assert q.reserve_spawn(blocked.id)[1]
+
+
+@pytest.mark.parametrize("liveness", ["live", "unknown", "probe-error"])
+def test_missing_cold_directory_alone_does_not_release_owner(
+    q: OwnerResultQueue, supervisor_http: DispatchClient, tmp_path: Path, liveness: str,
+) -> None:
+    task = q.create("resume missing workspace")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(reservation.key, session_handle="local-body:body", worktree="missing",
+                   startup_complete=True, startup_revision=1)
+    q.claim_one("original", task_id=task.id)
+    q.start(task.id, "original")
+    q.suspend(task.id, "original", reason="waiting")
+    q.record_cold(reservation.key)
+    q.submit_steer(task.id, fields={"decision": "continue"}, sender="operator")
+    before = q.get(task.id), q.get_reservation(reservation.key)
+
+    def verdict(_: str) -> str:
+        if liveness == "probe-error":
+            raise OSError("probe unavailable")
+        return liveness
+
+    supervisor = Supervisor(
+        supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        local_body_target_dir_fn=lambda _: str(tmp_path / "missing"),
+        local_body_verdict_fn=verdict,
+        local_resume_fn=lambda *_: pytest.fail("unknown or live body must not be resumed here"),
+    )
+    assert supervisor.release_resumed_cold_tasks() == 0
+    assert (q.get(task.id), q.get_reservation(reservation.key)) == before
 
 
 @pytest.mark.parametrize("target_kind", ["unknown", "present", "relative"])
@@ -947,11 +961,11 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
     q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
     attempts: list[str] = []
 
-    def fail_release(task_id: str, **_observed: object) -> NoReturn:
+    def fail_release(task_id: str, _owner: str, **_observed: object) -> NoReturn:
         attempts.append(task_id)
         raise DispatchError(500, "release failed")
 
-    monkeypatch.setattr(supervisor_http, "requeue_gone_owner", fail_release)
+    monkeypatch.setattr(supervisor_http, "release", fail_release)
     sup = Supervisor(
         supervisor_http,
         spawn_fn=_ok_spawn(),
@@ -1309,7 +1323,7 @@ def test_reconcile_settles_abandoned_cold_reservation(
     )
     q.record_cold(stale_reservation.key)
 
-    before_retention_abandon(q, t.id, reason="test")
+    q.abandon(t.id, permitted=True, reason="test")
     assert required(q.get(t.id)).status == Status.ABANDONED
     assert required(q.get_reservation(stale_reservation.key)).state == SpawnState.COLD
 
@@ -1444,7 +1458,7 @@ def test_release_requested_legacy_missing_worktree_recovers_from_held_conclusion
     q.start(blocked.id, "headless-owner")
     q.suspend(blocked.id, "headless-owner", reason="turn ended")
     q.record_cold(reservation.key)
-    before_retention_release(
+    release_task_then_attempt(
         q, blocked.id,
         "headless-owner",
         reason="recorded worktree is missing",
@@ -1494,7 +1508,7 @@ def test_release_requested_rechecks_target_after_live_body_teardown(
     q.start(blocked.id, "headless-owner")
     q.suspend(blocked.id, "headless-owner", reason="turn ended")
     q.record_cold(reservation.key)
-    before_retention_release(
+    release_task_then_attempt(
         q, blocked.id,
         "headless-owner",
         reason="recorded worktree is missing",
@@ -2821,7 +2835,7 @@ def test_requeued_task_is_not_double_spawned(
     # Historical GC left a queued task behind this still-spawned body.
     q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
     q.start(t.id, "m/wt")
-    before_retention_gc(q, t.id)
+    q.reconcile_liveness(headless_local_verdict=lambda _: "gone")
     assert required(q.get(t.id)).status == Status.QUEUED  # back in the queue
 
     # the supervisor must NOT re-spawn it (reservation still 'spawned')
@@ -4786,7 +4800,7 @@ def test_hold_live_leases_heartbeats_live_script_body(
     assert sup.hold_live_leases() == 1
 
 
-def test_unqualified_legacy_script_exit_retains_original_assignment(
+def test_recover_gone_script_body_abandons_task_without_explicit_terminal_call(
     q: OwnerResultQueue, supervisor_http: DispatchClient, tmp_path: Path
 ) -> None:
     task = q.create("maintenance")
@@ -4812,10 +4826,10 @@ def test_unqualified_legacy_script_exit_retains_original_assignment(
         script_body_verdict_fn=lambda pid, token: tracking.GONE,
     )
 
-    assert sup.recover_gone() == 0
-    assert required(q.get(task.id)).status == Status.STARTED
-    assert required(q.latest_reservation(task.id)).state == SpawnState.SPAWNED
-    assert task_file.exists()
+    assert sup.recover_gone() == 1
+    assert required(q.get(task.id)).status == Status.ABANDONED
+    assert required(q.latest_reservation(task.id)).state == SpawnState.SETTLED
+    assert not task_file.exists()
 
 
 def test_reconcile_settles_terminal_script_body_and_cleans_task_file(
@@ -4862,7 +4876,7 @@ def test_superseded_task_does_not_release_exclusive_live_reservation(
         session_handle="local-body:session-old",
         worktree="wt-review",
     )
-    new = before_retention_supersession(q, old)
+    new = q.create("new", exclusive_key="review:repo:42", supersede_exclusive_key=True)
     ended: list[str] = []
     sup = Supervisor(
         supervisor_http,
@@ -4892,7 +4906,7 @@ def test_confirmed_gone_superseded_body_releases_exclusive_key(
         session_handle="local-body:session-old",
         worktree="wt-review",
     )
-    new = before_retention_supersession(q, old)
+    new = q.create("new", exclusive_key="review:repo:42", supersede_exclusive_key=True)
     sup = Supervisor(
         supervisor_http,
         spawn_fn=_ok_spawn(),
@@ -4919,7 +4933,7 @@ def test_explicit_end_releases_live_exclusive_body(
         session_handle="local-body:session-live",
         worktree="wt-review",
     )
-    before_retention_abandon(q, task.id, reason="superseded")
+    q.abandon(task.id, permitted=True, reason="superseded")
     ended: list[str] = []
     sup = Supervisor(
         supervisor_http,
@@ -4948,7 +4962,7 @@ def test_yielded_fleet_body_is_not_replaced_before_safe_teardown(
     )
     q.claim_one("fleet-owner", task_id=task.id)
     q.start(task.id, "fleet-owner")
-    before_retention_release(q, task.id, "fleet-owner")
+    release_task_then_attempt(q, task.id, "fleet-owner")
     ended: list[tuple[str, str]] = []
     spawn = _ok_spawn()
     sup = Supervisor(
@@ -4982,7 +4996,7 @@ def test_yielded_fleet_body_respawns_only_after_explicit_end(
     )
     q.claim_one("fleet-owner", task_id=task.id)
     q.start(task.id, "fleet-owner")
-    before_retention_release(q, task.id, "fleet-owner")
+    release_task_then_attempt(q, task.id, "fleet-owner")
     ended: list[tuple[str, str]] = []
     spawn = _ok_spawn()
     sup = Supervisor(
@@ -5025,7 +5039,7 @@ def test_yielded_created_worktree_is_concluded_before_respawn(
         "host-a/wt-created",
         owner_session_id="acp-session-1",
     )
-    before_retention_release(q, task.id, "host-a/wt-created")
+    release_task_then_attempt(q, task.id, "host-a/wt-created")
     conclusions: list[tuple[str | None, ...]] = []
     spawn = _ok_spawn({"session": "sess-1", "worktree": "wt-created"})
     sup = Supervisor(
@@ -5077,7 +5091,7 @@ def test_yielded_attempt_checkpoints_identity_before_bridge_end_and_restart(
     )
     q.claim_one("host-a/wt-created", task_id=task.id)
     q.start(task.id, "host-a/wt-created", owner_session_id="session-exact")
-    before_retention_release(q, task.id, "host-a/wt-created")
+    release_task_then_attempt(q, task.id, "host-a/wt-created")
 
     def end_then_exit(_session: str) -> bool:
         checkpoint = json.loads(
@@ -5129,7 +5143,7 @@ def test_native_released_attempt_identity_survives_process_exit(tmp_path: Path) 
         import sys
         from pathlib import Path
         from agent_dispatch.supervisor import Supervisor
-        from tests._legacy_supervisor_history import before_retention_release
+        from tests._supervisor_fixtures import release_task_then_attempt
         from tests.test_supervisor import OwnerResultQueue, QueueBackedClient, _ok_spawn
         from tests._helpers import TEST_REPO
 
@@ -5149,7 +5163,7 @@ def test_native_released_attempt_identity_survives_process_exit(tmp_path: Path) 
             )
             q.claim_one("host-a/wt-created", task_id=task.id)
             q.start(task.id, "host-a/wt-created", owner_session_id="session-exact")
-            before_retention_release(q, task.id, "host-a/wt-created")
+            release_task_then_attempt(q, task.id, "host-a/wt-created")
         else:
             task = q.list(repo=TEST_REPO)[0]
             reservation = q.latest_reservation(task.id)
@@ -6757,7 +6771,7 @@ def test_yielded_targeted_worktree_is_preserved_without_conclusion(
     )
     q.claim_one("host-a/wt-target", task_id=task.id)
     q.start(task.id, "host-a/wt-target")
-    before_retention_release(q, task.id, "host-a/wt-target")
+    release_task_then_attempt(q, task.id, "host-a/wt-target")
     spawn = _ok_spawn()
     sup = Supervisor(
         supervisor_http,
@@ -6791,7 +6805,7 @@ def test_yielded_cli_worker_is_not_redriven_while_release_is_pending(
     )
     q.claim_one("host/wt-live", task_id=task.id)
     q.start(task.id, "host/wt-live")
-    before_retention_release(q, task.id, "host/wt-live", exclude="worktree:wt-live")
+    release_task_then_attempt(q, task.id, "host/wt-live", exclude="worktree:wt-live")
     redriven: list[tuple[object, ...]] = []
     spawn = _ok_spawn()
     sup = Supervisor(
@@ -7388,7 +7402,7 @@ def test_recover_gone_releases_stale_reservation_and_respawns(
     # Historical GC cleared the owner before the supervisor observed the body.
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
-    before_retention_gc(q, t.id)
+    q.reconcile_liveness(headless_local_verdict=lambda _: "gone")
     assert required(q.get(t.id)).status == Status.QUEUED
 
     # next cycle: recover_gone releases the stale reservation, then re-embodies
@@ -7572,7 +7586,7 @@ def test_recover_leaves_live_or_unknown(
 
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
-    before_retention_gc(q, t.id)
+    q.reconcile_liveness(headless_local_verdict=lambda _: "gone")
     assert required(q.get(t.id)).status == Status.QUEUED
 
     # supervisor's OWN verdict is not 'gone' -> hold, never re-spawn on ignorance
@@ -7940,7 +7954,7 @@ def test_recover_gone_fleet_body_started_requeues_then_reembodies(
     before = required(q.latest_reservation(t.id))
     if gc_first:
         counts = q.reconcile_liveness(headless_fleet_verdict=lambda host, sid: "gone")
-        _assert_gc_left_recovery_to_supervisor(q, started, before, counts)
+        _assert_legacy_gc_requeued(q, started, before, counts)
 
     assert sup.poll_once() == [t.id]
     assert required(q.get_reservation(before.key)).state == SpawnState.FAILED
@@ -8147,7 +8161,7 @@ def test_recover_gone_local_body_started_requeues_then_reembodies(
     before = required(q.latest_reservation(t.id))
     if gc_first:
         counts = q.reconcile_liveness(headless_local_verdict=lambda sid: "gone")
-        _assert_gc_left_recovery_to_supervisor(q, started, before, counts)
+        _assert_legacy_gc_requeued(q, started, before, counts)
 
     assert sup.poll_once() == [t.id]
     assert required(q.get_reservation(before.key)).state == SpawnState.FAILED
@@ -8155,16 +8169,14 @@ def test_recover_gone_local_body_started_requeues_then_reembodies(
     assert required(q.latest_reservation(t.id)).attempt == 2
 
 
-def _assert_gc_left_recovery_to_supervisor(
+def _assert_legacy_gc_requeued(
     q: OwnerResultQueue, started: Task, before: SpawnReservation, counts: dict[str, int],
 ) -> None:
     current = required(q.get(started.id))
-    assert counts["checked"] == counts["gone"] == 1
-    assert counts["suspended"] == counts["requeued"] == counts["dead_lettered"] == 0
-    assert current.last_liveness == "gone" and current.status == Status.STARTED
-    assert (current.owner, current.owner_session_id, current.generation) == (
-        started.owner, "original-native", started.generation,
-    )
+    assert counts["checked"] == counts["gone"] == counts["requeued"] == 1
+    assert counts["suspended"] == counts["dead_lettered"] == 0
+    assert current.status == Status.QUEUED and current.owner is current.owner_session_id is None
+    assert current.attempts == started.attempts + 1 and current.generation == started.generation
     assert before.state == SpawnState.SPAWNED and q.get_reservation(before.key) == before
 
 
@@ -8506,17 +8518,17 @@ def _conflict_followups(q: OwnerResultQueue) -> list[Task]:
     ]
 
 
-def test_no_evaluator_pass_is_noop(q: OwnerResultQueue, supervisor_http: DispatchClient) -> None:
-    sup = Supervisor(supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO)
+def test_no_evaluator_pass_is_noop(q: OwnerResultQueue, evaluator_client: DispatchClient) -> None:
+    sup = Supervisor(evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
     assert sup.advance_via_evaluator() == 0
 
 
 def test_evaluator_emits_followup_on_completed(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     t = _complete(q, "review o/n#42", labels=["recipe:reviewer"])
     sup = Supervisor(
-        supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
     )
     assert sup.advance_via_evaluator() == 1
@@ -8528,11 +8540,11 @@ def test_evaluator_emits_followup_on_completed(
 
 
 def test_evaluator_ignores_non_matching_terminal(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(q, "some other task", labels=["kind:misc"])  # no recipe:reviewer
     sup = Supervisor(
-        supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
     )
     assert sup.advance_via_evaluator() == 0
@@ -8540,7 +8552,7 @@ def test_evaluator_ignores_non_matching_terminal(
 
 
 def test_evaluator_ref_consumes_only_producer_associated_tasks(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(
         q, "mine", labels=["recipe:reviewer"], evaluator_ref="review-loop"
@@ -8549,7 +8561,7 @@ def test_evaluator_ref_consumes_only_producer_associated_tasks(
         q, "other", labels=["recipe:reviewer"], evaluator_ref="other-loop"
     )
     sup = Supervisor(
-        supervisor_http,
+        evaluator_client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
@@ -8562,13 +8574,13 @@ def test_evaluator_ref_consumes_only_producer_associated_tasks(
 
 
 def test_unscoped_evaluator_does_not_consume_associated_tasks(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(
         q, "associated", labels=["recipe:reviewer"], evaluator_ref="review-loop"
     )
     sup = Supervisor(
-        supervisor_http,
+        evaluator_client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
@@ -8578,7 +8590,7 @@ def test_unscoped_evaluator_does_not_consume_associated_tasks(
 
 
 def test_evaluator_filter_applies_before_terminal_result_limit(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     mine = _complete(
         q, "mine", labels=["recipe:reviewer"], evaluator_ref="review-loop"
@@ -8591,7 +8603,7 @@ def test_evaluator_filter_applies_before_terminal_result_limit(
             evaluator_ref="other-loop",
         )
     sup = Supervisor(
-        supervisor_http,
+        evaluator_client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
@@ -8604,11 +8616,11 @@ def test_evaluator_filter_applies_before_terminal_result_limit(
 
 
 def test_evaluator_fires_each_task_once_per_process(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(q, "review o/n#7", labels=["recipe:reviewer"])
     sup = Supervisor(
-        supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
     )
     assert sup.advance_via_evaluator() == 1
@@ -8618,26 +8630,26 @@ def test_evaluator_fires_each_task_once_per_process(
 
 
 def test_evaluator_dedup_guards_a_fresh_supervisor(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(q, "review o/n#9", labels=["recipe:reviewer"])
     ev = [_REVIEWER_DONE_RULE]
-    Supervisor(supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+    Supervisor(evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
                evaluator=_spec_evaluator(ev)).advance_via_evaluator()
     # a brand-new supervisor (empty in-process guard) re-emits, but the emit's
     # dedup_key collides -> no duplicate row is created.
-    Supervisor(supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+    Supervisor(evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
                evaluator=_spec_evaluator(ev)).advance_via_evaluator()
     assert len(_conflict_followups(q)) == 1
 
 
 def test_evaluator_handles_abandoned_event(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     t = q.create("drive something", labels=["recipe:goal"])
     q.abandon(t.id, permitted=True, reason="withdrawn")
     sup = Supervisor(
-        supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
         evaluator=_spec_evaluator([{
             "on": "task.abandoned",
             "emit": {"title_template": "re-carve {title}",
@@ -8651,7 +8663,7 @@ def test_evaluator_handles_abandoned_event(
 
 
 def test_evaluator_error_does_not_crash_the_cycle(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(q, "review o/n#11", labels=["recipe:reviewer"])
 
@@ -8659,18 +8671,18 @@ def test_evaluator_error_does_not_crash_the_cycle(
         def evaluate(self, event: object) -> None:
             raise RuntimeError("evaluator blew up")
 
-    sup = Supervisor(supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO, evaluator=_Boom())
+    sup = Supervisor(evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO, evaluator=_Boom())
     # the pass swallows the error (returns 0) and still marks the task seen
     assert sup.advance_via_evaluator() == 0
     assert sup.advance_via_evaluator() == 0  # not retried into a crash loop
 
 
 def test_poll_once_runs_the_evaluator_pass(
-    q: OwnerResultQueue, supervisor_http: DispatchClient
+    q: OwnerResultQueue, evaluator_client: DispatchClient
 ) -> None:
     _complete(q, "review o/n#13", labels=["recipe:reviewer"])
     sup = Supervisor(
-        supervisor_http, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5,
+        evaluator_client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5,
         evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
     )
     sup.poll_once()  # the evaluator pass runs inside poll_once

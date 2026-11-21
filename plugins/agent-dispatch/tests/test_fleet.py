@@ -459,14 +459,18 @@ def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch: pytest.
     )
 
     embody.spawn_fleet_embodied_worker(
-        "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz"
+        "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz",
+        project="fixture-harness",
     )
     cmd = captured["cmd"]
     assert cmd[0] == "/usr/bin/ssh"
     assert "BatchMode=yes" in cmd
     assert cmd[3] == "host-b"  # alias lowercased
     remote = cmd[4]
-    assert remote.startswith("agent-worktrees embody --new --seed ")
+    admission, launch = remote.rsplit(" && agent-worktrees ", 1)
+    assert "repos find fixture-harness --registered-only" in admission
+    assert "agent-policy check" in admission
+    assert launch.startswith("--project fixture-harness embody --new --seed ")
     assert "--driver agent-dispatch" in remote
     assert "--json" in remote
     # the seed rides inside the (shlex-quoted) remote command

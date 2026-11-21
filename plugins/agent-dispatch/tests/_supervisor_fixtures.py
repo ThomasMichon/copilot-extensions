@@ -602,6 +602,18 @@ def supervisor_http(supervisor_api: TestClient) -> Iterator[DispatchClient]:
         yield client
 
 
+@pytest.fixture
+def evaluator_client(
+    supervisor_http: DispatchClient, q: OwnerResultQueue, monkeypatch: pytest.MonkeyPatch,
+) -> DispatchClient:
+    """Evaluator unit tests feed the supervisor queue rows, as before the fixture split.
+
+    These cases exercise evaluator decisions, not HTTP list-filter serialization.
+    """
+    monkeypatch.setattr(supervisor_http, "list", QueueBackedClient(q).list)
+    return supervisor_http
+
+
 class RecordingSpawn:
     allocation_interface: str
     allocation_project: str
@@ -632,3 +644,25 @@ def record_result(calls: list[_Item], call: _Item, result: _Result) -> _Result:
     """Record an injected probe or operation and return its specified result."""
     calls.append(call)
     return result
+
+
+def release_task_then_attempt(
+    queue: TaskQueue,
+    task_id: str,
+    owner: str,
+    *,
+    reason: str | None = None,
+    exclude: str | None = None,
+) -> None:
+    """Model the old combined release as two separately authorized operations."""
+    reservation = required(queue.latest_reservation(task_id))
+    assert queue.task_pool_assignment(task_id) is None
+    if reason:
+        queue.release_suspended(task_id, owner, reason=reason)
+    else:
+        queue.yield_task(task_id, owner, exclude=exclude)
+    assert queue.get_reservation(reservation.key) == reservation
+    queue.request_spawn_release(
+        reservation.key, disposition="settled",
+        detail="task released from suspension" if reason else "task yielded",
+    )

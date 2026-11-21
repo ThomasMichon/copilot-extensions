@@ -1,9 +1,0 @@
-{
-  "comment": "Keep failed scripts assigned until their original process exits, then atomically retire the reservation and abandon the failed task.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

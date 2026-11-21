@@ -3294,10 +3294,10 @@ launch:
 
 `agent_dispatch.script_worker.ScriptTaskRuntime` is the small helper contract
 for those bodies: it reads the supervisor-injected task/coordinator context from
-environment variables and wraps claim/start/heartbeat/progress/complete.
-An exception, explicit failure or return without a result reports failure
-without releasing a running process. Only independently verified script exit
-allows supervisor failure closeout; see [script recovery](docs/spawn-supervisor.md#script-payload-contract).
+environment variables and wraps claim/start/heartbeat/progress/complete/
+abandon. Returning without an explicit terminal call is treated as a protocol
+violation: an orderly exit auto-abandons in the helper, and a confirmed-gone
+process is abandoned by supervisor recovery.
 
 For a remote host pool, `--pool host-a,host-b [--origin <alias>]` dispatches the
 body to the first live pool host. The default body is still CLI/mux embody on

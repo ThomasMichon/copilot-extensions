@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -49,9 +48,6 @@ def _encode_script_body_handle(
     start_token: str | None,
     *,
     task_file: str | None = None,
-    process_domain: str | None = None,
-    task_id: str | None = None,
-    generation: int | None = None,
 ) -> str:
     payload = json.dumps(
         {
@@ -59,8 +55,6 @@ def _encode_script_body_handle(
             "pid": pid,
             "start_token": start_token,
             "task_file": task_file,
-            **({"process_domain": process_domain} if process_domain else {}),
-            **({"task_id": task_id, "queued_generation": generation} if task_id else {}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -91,7 +85,7 @@ def _parse_script_body_handle(
     task_file = payload.get("task_file")
     if not isinstance(worker_id, str) or not worker_id:
         return None
-    if type(pid) is not int or not 1 <= pid <= 2**31 - 1:
+    if not isinstance(pid, int) or pid <= 0:
         return None
     if start_token is not None and not isinstance(start_token, str):
         return None
@@ -122,38 +116,7 @@ def _default_script_body_verdict(pid: int, start_token: str | None) -> str:
         return _tracking().UNKNOWN
     if current is None:
         return _tracking().UNKNOWN
-    if current != start_token:
-        return _tracking().GONE
-    # A child which has exited but has not yet been reaped still has a PID.
-    return _tracking().GONE if exact_script_exit(pid, start_token) else _tracking().LIVE
-
-
-def exact_script_exit(pid: int, start_token: str | None) -> bool:
-    """Absence or a different birth, using only the original OS token format."""
-    from . import companion
-
-    if not companion._process_exists(pid):
-        return True
-    if not start_token:
-        return False
-    if os.name == "nt":
-        from .cutover_process import _identity_running
-
-        # An exited Windows process object keeps its creation time while
-        # another handle is open. Only a definite exit/identity mismatch counts.
-        return start_token.isdecimal() and _identity_running(pid, start_token) is False
-    if not sys.platform.startswith("linux"):
-        return False
-    # Use one kernel process snapshot, not a second PID read for zombie state.
-    try:
-        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-        current_boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
-    except (OSError, UnicodeError):
-        return False
-    fields = raw[raw.rfind(")") + 2:].split()
-    boot, _, ticks = start_token.partition(":")
-    return bool(len(fields) > 19 and fields[19].isdecimal() and ticks.isdecimal()
-                and boot == current_boot and (ticks != fields[19] or fields[0] == "Z"))
+    return _tracking().LIVE if current == start_token else _tracking().GONE
 
 
 def _load_script_spec(task: dict[str, Any]) -> tuple[list[str], str | None, dict[str, str], int | None]:
@@ -326,21 +289,12 @@ def make_script_spawn(
             start_token = companion.process_start_token(process.pid)
         except Exception:
             start_token = None
-        try:
-            from .managed_retention import process_identity_domain
-
-            domain = process_identity_domain()
-        except (OSError, RuntimeError):
-            domain = None
         return True, {
             "session": _encode_script_body_handle(
                 worker_id,
                 process.pid,
                 start_token,
                 task_file=task_file_path,
-                process_domain=domain,
-                task_id=task["id"],
-                generation=task.get("generation"),
             ),
             "worktree": None,
         }
