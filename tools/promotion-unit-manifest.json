@@ -3,6 +3,40 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_dependency_source_compile_refusals.py",
+      [
+        "test_compile_refuses_effective_editable_graph",
+        "test_source_compile_refuses_ambient_omission_drift[omissions0]",
+        "test_source_compile_refuses_ambient_omission_drift[omissions1]",
+        "test_source_compile_refuses_ambient_omission_drift[omissions2]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[remote]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[unowned]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[duplicate]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[artifact]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[dynamic]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[caller-omission]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[conditional]",
+        "test_source_compile_refuses_unsafe_graph_before_uv[alternatives]",
+        "test_source_compile_refuses_effective_disabled_source_mappings",
+        "test_source_compile_refuses_context_only_local_mappings[registry-argument]",
+        "test_source_compile_refuses_context_only_local_mappings[registry-environment]",
+        "test_source_compile_refuses_context_only_local_mappings[registry-ambient]",
+        "test_source_compile_refuses_context_only_local_mappings[recursive-argument]",
+        "test_source_compile_refuses_context_only_local_mappings[recursive-environment]",
+        "test_source_compile_refuses_context_only_local_mappings[recursive-ambient]",
+        "test_source_compile_refuses_context_only_local_mappings[project-argument]",
+        "test_source_compile_refuses_context_only_local_mappings[project-environment]",
+        "test_source_compile_refuses_context_only_local_mappings[project-ambient]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[direct-marker]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[direct-extra]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[recursive-marker]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[recursive-extra]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[mapped-marker]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[mapped-extra]",
+        "test_source_compile_refuses_inactive_local_registry_ambiguity[nested-unselected]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_dependency_compile_cleanup_controls.py",
       [
         "test_compile_projection_is_admitted_without_install_flags",
@@ -8873,6 +8907,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_dependency_source_compile_refusals.py": "78d2b4aeeada918acb6b5bf6155735dd14fed53e98bcbe08b76adc0ba6761d64",
     "tools/promotion_unit_tests/test_dependency_compile_cleanup_controls.py": "a84737c62b4f67035c5cba8107c9b4d141358c7f10f0687efa3b8b08274cb322",
     "tools/test_installer_dependency_compile.py": "f1c757441409c363d346b03f66298f6d82a940df060ac09807345b07be5ff5ac",
     "tools/test_installer_dependency_cleanup.py": "4cc99e53440e2ce25dc47e35e6f16cc2a017e31b4b7abde6e4101bc7c3a497ee",
