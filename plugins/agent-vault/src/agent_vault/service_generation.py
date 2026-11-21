@@ -444,7 +444,7 @@ class ServiceGeneration:
         )
 
     async def tick(self) -> None:
-        recovery_settled = await self._recover_predecessors(for_admission=not self.has_writer)
+        recovery_settled = await self._recover_predecessors(for_admission=True)
         if self.retiring is not None:
             await self._retire()
             return
@@ -518,9 +518,10 @@ class ServiceGeneration:
             (self.writer_predecessor, "writer_predecessor_retirement"),
         ):
             if target is not None and getattr(target, "custody", None) is not None:
+                exited = getattr(target, "exited", None)
                 if await settle_owned(asyncio.to_thread(target.recover)):
                     setattr(self, status, "refused-native-retirement")
-                elif not for_admission or not target.exited():
+                elif not for_admission or not (callable(exited) and exited()):
                     settled = False
         return settled
 
