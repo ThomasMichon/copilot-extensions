@@ -6802,8 +6802,8 @@ candidate decision; a withdrawn status caller cannot commit receipt repair.
 
 ## Focused installer diagnostics
 
-The manual `installation-context-acceptance.yml` selector
-`installer_diagnostics=true` runs the Worktrees capture, standalone producer,
+The separate manual `installer-diagnostics-acceptance.yml` workflow
+runs the Worktrees capture, standalone producer,
 caller-reference and retained guardian controls, followed by both real-UV construction variants
 (capture disabled/enabled). Linux uses the canonical hardened, network-isolated
 test-container wrapper; hosted Windows uses the existing native contained runner.
@@ -6818,7 +6818,7 @@ whole-portfolio Windows enrollment or installed/serving qualification. It does
 not run the larger installer/monitor case, increase item/group/aggregate test
 budgets, or opt into desktop observation. Platform/prerequisite skips are not
 passes. The default derived-copy matrix and disabled Windows rotation remain
-unchanged when the selector is absent.
+unchanged; no diagnostics jobs are added to their dispatch.
 
 The native controls include open-but-unread parent pipes, a reading channel
 alongside a blocked peer, bounded replay from the existing private capture,

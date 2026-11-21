@@ -1509,3 +1509,23 @@ Authored direct per-source Plan, actual global Validation and continuing custody
   nested-support fixture also verifies every copied extra.
 - Fresh published-head CI, independent review and complete hosted native
   acceptance are still owed. The PR remains draft and rollout remains held.
+
+### 2026-11-20 - Publish recovery and dispatch admission
+
+- Published the retained source port through the existing preview-bound
+  `push-changes --break-glass-reason` recovery, preserving the original PR,
+  exact remote lease, normal hooks and recovery refs. No new ownership
+  implementation or disabled safeguard was required.
+- Requested current-head Copilot review. The hosted prepared-membership job
+  timed out in an existing ten-second Windows PowerShell pre-tool fixture;
+  that failure remains an open CI gate, not a passing native control.
+- GitHub rejected the focused native dispatch before any runner started:
+  the shared workflow had 26 inputs, exceeding its 25-input limit. Moved
+  only the two focused diagnostics jobs to their own manual workflow,
+  preserving immutable checkout, read-only permissions, six one-file
+  selections, both real-UV cases and the original Linux/Windows budgets.
+  The shared workflow retains its previous 25 selectors and other jobs.
+- Both focused workflow-contract controls pass under bounded supervision.
+  Local legacy test-environment setup refused access to its cached directory;
+  no ACL, environment ownership or installed runtime was repaired. The pure
+  workflow controls ran successfully in the existing interpreter instead.

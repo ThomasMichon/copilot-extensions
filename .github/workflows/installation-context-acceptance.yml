@@ -103,10 +103,6 @@ on:
         description: Qualify native daemon status, application cleanup and refusal without other runtime consumers
         type: boolean
         default: false
-      installer_diagnostics:
-        description: Run focused installer capture, guardian and real-UV controls only
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -349,7 +345,7 @@ jobs:
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit && !inputs.installer_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -373,7 +369,7 @@ jobs:
         run: python -m pytest -q tools/test_logger_runtime_uninstall.py -k command_removal_preserves_publication
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit && !inputs.installer_diagnostics }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -2569,66 +2565,3 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 6
     steps: *source-profiles-steps
-
-  installer-diagnostics-linux:
-    if: ${{ inputs.installer_diagnostics }}
-    name: Focused installer diagnostics (Linux isolated)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Provision the locked seasoned Dev Containers CLI
-        run: python tools/setup_test_devcontainer_cli.py
-      - name: Capture and producer controls in the canonical hardened container
-        run: >-
-          python tools/run_tests_in_devcontainer.py agent-worktrees
-          --test-file tests/test_installer_diagnostics.py
-          --test-file tests/test_installer_presentation.py
-          --test-file tests/test_installer_bash_diagnostics.py
-          --test-file tests/test_installer_python_producer.py
-          --test-file tests/test_installer_launch_diagnostics.py
-          --test-file tests/test_installer_guardian.py
-          --max-files-per-sub-suite 1
-      - name: Real UV construction with and without capture in the same containment
-        run: >-
-          python tools/run_tests_in_devcontainer.py agent-worktrees
-          --test-file tests/test_python_installer_engine.py
-          -k test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change
-
-  installer-diagnostics-windows:
-    if: ${{ inputs.installer_diagnostics }}
-    name: Focused installer diagnostics (native Windows)
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-        with:
-          version: "0.13.1"
-      - name: Capture, producer and retained Job guardian controls
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_installer_diagnostics.py
-          --test-file tests/test_installer_presentation.py
-          --test-file tests/test_installer_bash_diagnostics.py
-          --test-file tests/test_installer_python_producer.py
-          --test-file tests/test_installer_launch_diagnostics.py
-          --test-file tests/test_installer_guardian.py
-          --max-files-per-sub-suite 1
-      - name: Real UV construction with and without capture in the same containment
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_python_installer_engine.py
-          -k test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change

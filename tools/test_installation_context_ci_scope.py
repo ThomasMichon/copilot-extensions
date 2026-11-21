@@ -1162,8 +1162,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh_headless", "update_diagnostics",
         "runtime_removal", "source_cache", "uv_deployment_compatibility",
         "windows_broker_probe", "windows_broker_consumers", "native_daemon_exit",
-        "installer_diagnostics",
     }
+    assert len(inputs) <= 25
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
     assert inputs["ssh_service"]["type"] == "boolean"
@@ -1220,7 +1220,6 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "native-daemon-exit-windows",
         "wmi-durable-launch-windows",
         "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
-        "installer-diagnostics-linux", "installer-diagnostics-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -1233,7 +1232,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
             "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
             "&& !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers "
-            "&& !inputs.native_daemon_exit && !inputs.installer_diagnostics }}"
+            "&& !inputs.native_daemon_exit }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -2437,21 +2436,19 @@ def test_worktree_state_durability_is_manual_native_and_source_pinned() -> None:
 def test_installer_diagnostics_is_manual_exact_head_and_preserves_test_budgets() -> None:
     root = HERE.parent
     workflow = yaml.safe_load(
-        (root / ".github/workflows/installation-context-acceptance.yml").read_text()
+        (root / ".github/workflows/installer-diagnostics-acceptance.yml").read_text()
     )
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
-    assert trigger["workflow_dispatch"]["inputs"]["installer_diagnostics"] == {
-        "description": "Run focused installer capture, guardian and real-UV controls only",
-        "type": "boolean", "default": False,
-    }
+    assert not (trigger["workflow_dispatch"] or {}).get("inputs")
+    assert set(workflow["jobs"]) == {"installer-diagnostics-linux", "installer-diagnostics-windows"}
     assert workflow["permissions"] == {"contents": "read"}
     for platform, runner, wrapper, deadline in (
         ("linux", "ubuntu-latest", "tools/run_tests_in_devcontainer.py", 30),
         ("windows", "windows-latest", "tools/run-plugin-tests.py", 20),
     ):
         job = workflow["jobs"]["installer-diagnostics-" + platform]
-        assert job["if"] == "${{ inputs.installer_diagnostics }}"
+        assert "if" not in job
         assert job["runs-on"] == runner and job["timeout-minutes"] == deadline
         assert not job.get("continue-on-error") and not job.get("strategy")
         assert not job.get("env") and not job.get("permissions")
