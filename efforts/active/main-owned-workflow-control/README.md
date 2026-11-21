@@ -689,12 +689,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   after exact-head Copilot approval and complete required Linux CI with freshly
   executed packet evidence. No native Git/process or real identifier sweep is
   admitted or replaced; broader native, every-release and full-census gates stay open.
-- [ ] Qualify and land 58 original in-process dependency release-age cases
+- [x] Qualify and land 58 original in-process dependency release-age cases
   through thirteen exact test objects. Preserve all 145 original residuals,
   source closure, actual per-case production call coverage, preceding
   admission/helper/budget gates, current-head review and complete Linux source
-  CI. No registry, installer or native-toolchain witness is replaced; broader
-  native, every-release and full-census gates stay open.
+  CI. #13887 merges at `04510251c0f1551d7478bccc46f86eaef668fa41`
+  after exact-head Copilot approval and complete required Linux CI with freshly
+  executed packet evidence. No registry, installer or native-toolchain witness
+  is replaced; broader native, every-release and full-census gates stay open.
+- [ ] Qualify and land 26 additional original synthetic-metadata dependency
+  cases through thirteen exact test objects in the existing adapter. Preserve
+  its preceding 58 cases and all 119 remaining originals outside the packet,
+  fixture-owned inventory, source closure, per-case production call coverage,
+  admission/helper/budget gates, current-head review and complete Linux source
+  CI. No registry, installer, native-toolchain or whole-checkout witness is
+  replaced; broader native, every-release and full-census gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
