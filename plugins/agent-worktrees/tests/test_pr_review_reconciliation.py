@@ -3,6 +3,7 @@
 import argparse
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -55,7 +56,12 @@ def test_foreign_reuse_qualifies_the_real_workspace_before_claiming(
     if drift == "branch":
         git(workspace, "switch", "-c", "elsewhere")
     elif drift == "head":
-        git(workspace, "commit", "--allow-empty", "-m", "Unreviewed candidate")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.delenv(name, raising=False)
+        git(workspace, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+            "commit", "--allow-empty", "-m", "Unreviewed candidate")
     repo = replace(config.default_repo, pr=cfg.PRConfig(enabled=True, provider="github"))
     resolution = pr_config.ForeignRepoResolution(repo, "upstream/target")
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
