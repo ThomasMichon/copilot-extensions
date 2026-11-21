@@ -35,6 +35,26 @@ ownership scope and current or policy-valid retained authority qualify.
 Another Maintainer's valid coverage can avoid a duplicate vote, but not erase
 an explicit request or responsibility that repository policy still assigns.
 
+Unclear foreign or bot coverage is not a reason to defer this role's otherwise
+authorized, warranted independent review. Resolve what is available, retain
+unknowns, and provide an honest own assessment; another approval is permissible
+when the review need is real, not a demand to force a positive verdict or repeat
+an identical own vote on an unchanged head. An actual missing authority, required
+input, provider safeguard or hold still blocks the affected action.
+
+Qualify each opinion by actor, scope, head and discussion freshness under the
+target's actual policy; keep source assessment, individual native opinion and
+aggregate `reviewDecision` distinct. Neither aggregate null nor a success footer
+answers whether a required review exists.
+
+| Observed native state | Decision under actual target policy |
+|---|---|
+| COMMENTED | Assess the findings. It may be a nonblocking or accepted verdict where policy permits, but is not an approving CODEOWNER vote where one is required. |
+| APPROVED | Count only qualified, non-dismissed, current or policy-valid retained coverage; unresolved findings and independent gates still matter. |
+| CHANGES_REQUESTED | Revalidate the actual blocking findings and their owner; neither another approval nor a passing aggregate silently clears them. Preserve the adopted advisory peer posture for this role's own verdict. |
+| DISMISSED | Retain the historical source assessment and effect, but do not count the dismissed native vote as live coverage. |
+| null, missing or conflicting state | Resolve individual reviews, discussion and policy; unknown is neither approval nor a veto on an otherwise authorized independent review. Do not infer completion or replay an uncertain write. |
+
 The coordinator owns this census and coverage decision. The selected rubric
 owns one PR's judgment: complement native bot functional/line review with the
 adopted vision, architecture and governance lens. Verify whether existing

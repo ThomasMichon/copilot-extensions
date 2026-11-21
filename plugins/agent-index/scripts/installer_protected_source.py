@@ -47,26 +47,23 @@ def _native_mounts(paths: tuple[Path, ...]) -> dict[Path, tuple[bytes, Path]]:
             fields[4],
         )
         mount = Path(os.fsdecode(name))
-        origin = Path(
-            os.fsdecode(
-                re.sub(
-                    rb"\\(040|011|012|134)",
-                    lambda match: bytes([int(match[1], 8)]),
-                    fields[3],
-                )
-            )
-        )
-        if (
-            not mount.is_absolute()
-            or ".." in mount.parts
-            or not origin.is_absolute()
-            or ".." in origin.parts
-        ):
+        if not mount.is_absolute() or ".." in mount.parts:
             raise ValueError("protected installation mount table is invalid")
         root_seen |= mount == Path("/")
         if any(
             mount.is_relative_to(path) or path.is_relative_to(mount) for path in paths
         ):
+            origin = Path(
+                os.fsdecode(
+                    re.sub(
+                        rb"\\(040|011|012|134)",
+                        lambda match: bytes([int(match[1], 8)]),
+                        fields[3],
+                    )
+                )
+            )
+            if not origin.is_absolute() or ".." in origin.parts:
+                raise ValueError("protected installation mount table is invalid")
             if mount in mounts or any(
                 mount != path and mount.is_relative_to(path) for path in paths
             ):

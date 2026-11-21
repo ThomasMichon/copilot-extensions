@@ -164,6 +164,59 @@ def test_selected_contract_probe_does_not_execute_provider(
 
 
 @pytest.mark.parametrize(
+    ("origin", "mount", "filesystem", "refusal"),
+    [
+        ("net:[123]", "/unrelated/namespaces/example", "nsfs", None),
+        ("mnt:[456]", "/unrelated/other", "nsfs", None),
+        ("/", "/unrelated/native\\040mount", "ext4", None),
+        ("net:[123]", "/unit-protected/input", "nsfs", "mount table is invalid"),
+        ("relative", "/unit-protected/input", "ext4", "mount table is invalid"),
+        ("/data/../input", "/unit-protected/input", "ext4", "mount table is invalid"),
+        ("net:[123]", "relative", "nsfs", "mount table is invalid"),
+        ("net:[123]", "/unrelated/../other", "nsfs", "mount table is invalid"),
+        ("/", "/unit-protected/input", "nsfs", "supported native Linux filesystems"),
+        ("/", "/unit-protected/input/nested", "ext4", "nested or ambiguous mounts"),
+        ("/", "/", "ext4", "nested or ambiguous mounts"),
+        (
+            "/unit-protected/input",
+            "/unit-protected/runtime",
+            "ext4",
+            "outputs overlap admitted code or inputs",
+        ),
+    ],
+    ids=[
+        "unrelated-network-namespace",
+        "unrelated-mount-namespace",
+        "unrelated-escaped-mountpoint",
+        "selected-namespace-origin",
+        "selected-relative-origin",
+        "selected-parent-origin",
+        "unrelated-relative-mountpoint",
+        "unrelated-parent-mountpoint",
+        "selected-unsupported-filesystem",
+        "selected-nested-mount",
+        "ambiguous-root-mount",
+        "selected-bind-input-alias",
+    ],
+)
+def test_mount_admission_only_interprets_addressed_origins(
+    memory: Memory, origin: str, mount: str, filesystem: str, refusal: str | None
+) -> None:
+    code, record = policy(memory)
+    memory.files["/unit-protected/mountinfo"] += (
+        f"2 1 0:1 {origin} {mount} rw - {filesystem} fixture rw\n".encode()
+    )
+    path = cast(Path, code / "protected-installation.json")
+    if refusal is not None:
+        with pytest.raises(ValueError, match=refusal):
+            protected.admit(path, code=cast(Path, code))
+    else:
+        selected = protected.admit(path, code=cast(Path, code))
+        assert str(selected.snapshot) == record["snapshot"]
+        assert str(selected.root) == record["root"]
+
+
+@pytest.mark.parametrize(
     "case",
     [
         "valid",
