@@ -100,6 +100,41 @@ session hosts, keepers, foreground clients or a reselected generation.
 Actual exclusive-owner exclusion and mutation-time target safety still
 apply; unknown cleanup is reported rather than silently called success.
 
+## Ordinary cleanup diagnostic: current receiving boundary
+
+The separately qualified current publication #8045 supplies the actual
+[local-cache refresh source](https://github.com/ThomasMichon/copilot-extensions/blob/99771fc26d06f9e3fc5b3e17c35cdb6c96d9eb2b/plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py#L233-L449).
+Credit its mandatory Windows Job, structured renderer outcomes, bounded
+cleanup, cancellation handling and own-group/mismatched-birth refusal.
+The [native adapter](https://github.com/ThomasMichon/copilot-extensions/blob/99771fc26d06f9e3fc5b3e17c35cdb6c96d9eb2b/plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py#L116-L132)
+already supports Darwin through the existing psutil dependency. This lane
+is not a universal missing-macOS-backend defect.
+
+The opt-in `retire_group=True` path already reports a missing baseline as
+preparation stopped with descendant cleanup unconfirmed. That is real
+progress, but not the ordinary caller: [refresh's render call](https://github.com/ThomasMichon/copilot-extensions/blob/99771fc26d06f9e3fc5b3e17c35cdb6c96d9eb2b/plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py#L686-L710)
+omits that argument, whose default is False. In that path `_kill_tree`
+suppresses/skips an unverified group signal and returns no cleanup outcome.
+The timeout/failure result therefore carries generic subprocess failure,
+not the required specific missing-baseline/UNKNOWN-descendant diagnostic.
+Its direct-child kill/wait cannot establish descendant cleanup.
+
+Through the existing Bridge local-cache refresh/process-group cleanup
+custodians, the first useful contribution is to preserve that diagnostic
+through the existing run/refresh result on the actual default-False path.
+Characterize missing birth identity and a fast leader exit independently;
+retain opt-in behavior, baseline/mismatch/own-group protections, bounded
+cleanup and cancellation propagation. A focused control must show the
+specific unconfirmed-descendant result while no unverified group is
+signaled; generic renderer timeout or direct-child exit alone fails it.
+Preserve established-baseline cleanup and successful refresh controls.
+
+This is the P2 tracking lane's finite contribution under #5006, not a new
+severity assignment or a requirement to add a dependency, Darwin backend
+or unsafe timeout reap. The source observation and fixture design are not
+executed tests. This lane remains independent of force-capable retirement
+and native live-monitor acceptance; neither supplies the other's exit.
+
 ## Other keeper lanes remain independent
 
 The Bridge local-cache refresh/process-group cleanup workstream retains
