@@ -1,17 +1,113 @@
 """Thin fleet planning, explicit client lifecycle and opt-in NEW Gateway serving."""
 
+from __future__ import annotations
+
 import argparse
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 from . import __version__
 from .planning import MAX_BYTES, PlanError, canonical, decode, plan
 from .release import ROLES, inspect_release
 
+if TYPE_CHECKING:
+    from .artifact_staging import StagedArtifacts
 
-def read(path, label):
+
+class _ClientIdentity(TypedDict):
+    schema: str
+    version: int
+    authority: str
+    installation: str
+    role: str
+    initialized_by: str
+    receipt: str
+    selection_owner: str
+
+
+_Snapshot = dict[str, object]
+_ReadSnapshot = Callable[[], object]
+
+
+# The legacy lifecycle owners validate decoded input themselves. Keep their
+# CLI-facing signatures narrow without typing their internal state here.
+class _InitializeLineage(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, /, *,
+                 legacy_root: Path | None = None) -> _Snapshot: ...
+
+
+class _InspectGenerations(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, /, *,
+                 generation: str | None = None, after: str | None = None) -> _Snapshot: ...
+
+
+class _CommandTargets(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, reservation: _Snapshot, /, *,
+                 command_directory: Path) -> _Snapshot: ...
+
+
+class _RemovePublication(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, reservation: _Snapshot, /, *,
+                 publication: str, command_directory: Path) -> _Snapshot: ...
+
+
+class _ConstructGeneration(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, selection: object,
+                 staged: StagedArtifacts, /, *, generation: str, request: str,
+                 current_policy: _ReadSnapshot, current_target: _ReadSnapshot) -> _Snapshot: ...
+
+
+class _InstallGeneration(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, selection: object,
+                 staged: StagedArtifacts, /, *, generation: str, request: str,
+                 command_directory: Path, replace_commands: bool, legacy_root: Path | None,
+                 current_policy: _ReadSnapshot, current_target: _ReadSnapshot) -> _Snapshot: ...
+
+
+class _PublishGeneration(Protocol):
+    def __call__(self, root: Path, identity: _ClientIdentity, reservation: _Snapshot,
+                 staged: StagedArtifacts, /, *, command_directory: Path,
+                 replacement_targets: object, current_policy: _ReadSnapshot,
+                 current_target: _ReadSnapshot) -> _Snapshot: ...
+
+
+class _UnregisterFrontdoor(Protocol):
+    def __call__(self, root: Path, identity: object, /, *, command_directory: Path) -> _Snapshot: ...
+
+
+class _RemoveRuntime(Protocol):
+    def __call__(self, root: Path, identity: object, /, *, candidate: str) -> _Snapshot: ...
+
+
+class _SelectRuntime(Protocol):
+    def __call__(self, root: Path, identity: object, selection: object,
+                 staged: StagedArtifacts, /, *, current_policy: _ReadSnapshot,
+                 current_target: _ReadSnapshot) -> _Snapshot: ...
+
+
+class _RegisterFrontdoor(Protocol):
+    def __call__(self, root: Path, identity: object, selection: object,
+                 staged: StagedArtifacts, /, *, command_directory: Path,
+                 current_policy: _ReadSnapshot, current_target: _ReadSnapshot,
+                 current_recovery: _ReadSnapshot | None = None) -> _Snapshot: ...
+
+
+class _RecoverRelease(Protocol):
+    def __call__(self, root: Path, identity: object, selection: object,
+                 staged: StagedArtifacts, /, *, command_directory: Path,
+                 current_policy: _ReadSnapshot, current_target: _ReadSnapshot,
+                 current_recovery: _ReadSnapshot) -> _Snapshot: ...
+
+
+class _InspectRelease(Protocol):
+    def __call__(self, release: object, observation: object, /, *, role: str,
+                 authority: str, installation: str, now: float) -> _Snapshot: ...
+
+
+def read(path: Path, label: str) -> object:
     try:
         with path.open("rb") as stream:
             return decode(stream.read(MAX_BYTES + 1))
@@ -309,8 +405,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ImportError:
             print("fleet-manager: serve requires the server/auth extras", file=sys.stderr)
             return 1
-        return serve(args.config)
+        return cast(Callable[[Path], int], serve)(args.config)
     try:
+        result: _Snapshot
         if args.command == "client-generation":
             from .artifact_staging import _bytes, stage_authenticated_artifacts
             from .client_admission import _identity
@@ -319,35 +416,45 @@ def main(argv: Sequence[str] | None = None) -> int:
                 inspect_client_generations, remove_client_generation,
             )
 
-            def local(path):
+            def local(path: Path) -> object:
                 return decode(_bytes(path.absolute(), MAX_BYTES))
 
-            identity = _identity(local(args.identity))
+            identity = cast(Callable[[object], _ClientIdentity], _identity)(local(args.identity))
             operation = args.generation_command
             if operation == "initialize":
-                result = _initialize_lineage(args.root, identity, legacy_root=args.legacy_root)
+                result = cast(_InitializeLineage, _initialize_lineage)(
+                    args.root, identity, legacy_root=args.legacy_root,
+                )
             elif operation == "inspect":
-                result = inspect_client_generations(
+                result = cast(_InspectGenerations, inspect_client_generations)(
                     args.root, identity, generation=args.generation, after=args.after,
                 )
             else:
                 reservation = (
-                    None if operation in ("construct", "install") else _reservation(local(args.reservation), identity)
+                    None if operation in ("construct", "install") else
+                    cast(Callable[[object, _ClientIdentity], _Snapshot], _reservation)(
+                        local(args.reservation), identity,
+                    )
                 )
                 if operation == "inspect-command-targets":
+                    assert reservation is not None
                     from .client_generation_frontdoor import inspect_command_targets
 
-                    result = inspect_command_targets(
+                    result = cast(_CommandTargets, inspect_command_targets)(
                         args.root, identity, reservation, command_directory=args.command_directory,
                     )
                 elif operation == "remove-runtime":
-                    result = remove_client_generation(args.root, identity, reservation)
+                    assert reservation is not None
+                    result = cast(
+                        Callable[[Path, _ClientIdentity, _Snapshot], _Snapshot], remove_client_generation,
+                    )(args.root, identity, reservation)
                 elif operation in ("unregister-commands", "uninstall"):
+                    assert reservation is not None
                     from .client_generation_frontdoor import unregister_client_generation
                     from .client_installation import uninstall_client_generation
 
-                    execute = uninstall_client_generation if operation == "uninstall" else unregister_client_generation
-                    result = execute(
+                    remove_publication = uninstall_client_generation if operation == "uninstall" else unregister_client_generation
+                    result = cast(_RemovePublication, remove_publication)(
                         args.root, identity, reservation, publication=args.publication,
                         command_directory=args.command_directory,
                     )
@@ -363,34 +470,39 @@ def main(argv: Sequence[str] | None = None) -> int:
                         installation=identity["installation"], role="client",
                         staging_parent=args.staging_parent,
                     ) as staged:
-                        options = {
-                            "current_policy": lambda: local(args.policy),
-                            "current_target": lambda: local(args.target),
-                        }
+                        def current_policy() -> object:
+                            return local(args.policy)
+
+                        def current_target() -> object:
+                            return local(args.target)
+
                         if operation == "construct":
-                            result = construct_client_generation(
+                            result = cast(_ConstructGeneration, construct_client_generation)(
                                 args.root, identity, local(args.selection), staged,
-                                generation=args.generation, request=args.request, **options,
+                                generation=args.generation, request=args.request,
+                                current_policy=current_policy, current_target=current_target,
                             )
                         elif operation == "install":
                             from .client_installation import install_client_generation
 
-                            result = install_client_generation(
+                            result = cast(_InstallGeneration, install_client_generation)(
                                 args.root, identity, local(args.selection), staged,
                                 generation=args.generation, request=args.request,
                                 command_directory=args.command_directory,
                                 replace_commands=args.replace_commands,
-                                legacy_root=args.legacy_root, **options,
+                                legacy_root=args.legacy_root,
+                                current_policy=current_policy, current_target=current_target,
                             )
                         else:
+                            assert reservation is not None
                             from .client_generation_frontdoor import publish_client_generation
 
-                            result = publish_client_generation(
+                            result = cast(_PublishGeneration, publish_client_generation)(
                                 args.root, identity, reservation, staged,
                                 command_directory=args.command_directory,
                                 replacement_targets=(
                                     None if args.replacement_targets is None else local(args.replacement_targets)
-                                ), **options,
+                                ), current_policy=current_policy, current_target=current_target,
                             )
         elif args.command == "client-state":
             from .artifact_staging import _bytes, stage_authenticated_artifacts
@@ -399,41 +511,51 @@ def main(argv: Sequence[str] | None = None) -> int:
                 recover_client_admission,
             )
 
-            def local(path):
+            def state_input(path: Path) -> object:
                 return decode(_bytes(path.absolute(), MAX_BYTES))
 
-            identity = local(args.identity)
+            state_identity = state_input(args.identity)
             if args.state_command == "initialize":
-                result = initialize_client_admission(args.root, identity)
+                result = cast(Callable[[Path, object], _Snapshot], initialize_client_admission)(
+                    args.root, state_identity,
+                )
             elif args.state_command == "inspect":
-                result = inspect_client_admission(args.root, identity)
+                result = cast(Callable[[Path, object], _Snapshot], inspect_client_admission)(
+                    args.root, state_identity,
+                )
             elif args.state_command == "unregister-commands":
                 from .client_command_removal import unregister_client_frontdoor
 
-                result = unregister_client_frontdoor(
-                    args.root, identity, command_directory=args.command_directory,
+                result = cast(_UnregisterFrontdoor, unregister_client_frontdoor)(
+                    args.root, state_identity, command_directory=args.command_directory,
                 )
             elif args.state_command == "deactivate-runtime":
                 from .client_deactivation import deactivate_client_runtime
 
-                result = deactivate_client_runtime(args.root, identity)
+                result = cast(Callable[[Path, object], _Snapshot], deactivate_client_runtime)(
+                    args.root, state_identity,
+                )
             elif args.state_command == "remove-runtime":
                 from .client_runtime_removal import remove_client_runtime
 
-                result = remove_client_runtime(args.root, identity, candidate=args.candidate)
+                result = cast(_RemoveRuntime, remove_client_runtime)(
+                    args.root, state_identity, candidate=args.candidate,
+                )
             else:
-                recover_client_admission(args.root, identity)
+                cast(Callable[[Path, object], None], recover_client_admission)(args.root, state_identity)
+                # Recovery validates the decoded installation record before use.
+                validated_identity = cast(_ClientIdentity, state_identity)
                 if (
                     args.staging_parent.absolute().is_relative_to(args.root.absolute())
                     or args.root.absolute().is_relative_to(args.staging_parent.absolute())
                 ):
                     raise PlanError("client admission requires a separate explicit staging parent")
-                policy = local(args.policy)
-                selection = local(args.selection)
+                policy = state_input(args.policy)
+                selection = state_input(args.selection)
                 with stage_authenticated_artifacts(
-                    _bytes(args.release.absolute(), MAX_BYTES), local(args.proof), policy,
-                    local(args.sources), authority=identity["authority"],
-                    installation=identity["installation"], role="client",
+                    _bytes(args.release.absolute(), MAX_BYTES), state_input(args.proof), policy,
+                    state_input(args.sources), authority=validated_identity["authority"],
+                    installation=validated_identity["installation"], role="client",
                     staging_parent=args.staging_parent,
                 ) as staged:
                     if args.state_command in (
@@ -444,26 +566,40 @@ def main(argv: Sequence[str] | None = None) -> int:
                         from .client_frontdoor import register_client_frontdoor
                         from .client_recovery import recover_client_release
 
-                        execute = {
-                            "construct": construct_client_release,
-                            "activate-runtime": activate_client_runtime,
-                            "register-commands": register_client_frontdoor,
-                            "recover-retained": recover_client_release,
-                        }[args.state_command]
-                        options = ({"command_directory": args.command_directory}
-                                   if args.state_command in ("register-commands", "recover-retained") else {})
-                        if args.state_command in ("register-commands", "recover-retained") and (
-                            args.recovery_decision is not None
-                        ):
-                            options["current_recovery"] = lambda: local(args.recovery_decision)
-                        result = execute(
-                            args.root, identity, selection, staged,
-                            current_policy=lambda: local(args.policy),
-                            current_target=lambda: local(args.target),
-                            **options,
-                        )
+                        def state_policy() -> object:
+                            return state_input(args.policy)
+
+                        def state_target() -> object:
+                            return state_input(args.target)
+
+                        def current_recovery() -> object:
+                            return state_input(args.recovery_decision)
+
+                        if args.state_command == "recover-retained":
+                            result = cast(_RecoverRelease, recover_client_release)(
+                                args.root, state_identity, selection, staged,
+                                command_directory=args.command_directory, current_recovery=current_recovery,
+                                current_policy=state_policy, current_target=state_target,
+                            )
+                        elif args.state_command == "register-commands":
+                            result = cast(_RegisterFrontdoor, register_client_frontdoor)(
+                                args.root, state_identity, selection, staged,
+                                command_directory=args.command_directory,
+                                current_recovery=None if args.recovery_decision is None else current_recovery,
+                                current_policy=state_policy, current_target=state_target,
+                            )
+                        else:
+                            select_runtime = (construct_client_release if args.state_command == "construct"
+                                              else activate_client_runtime)
+                            result = cast(_SelectRuntime, select_runtime)(
+                                args.root, state_identity, selection, staged,
+                                current_policy=state_policy, current_target=state_target,
+                            )
                     else:
-                        result = admit_client_release(args.root, identity, selection, staged, policy)
+                        result = cast(
+                            Callable[[Path, object, object, "StagedArtifacts", object], _Snapshot],
+                            admit_client_release,
+                        )(args.root, state_identity, selection, staged, policy)
         elif args.command == "design":
             from .loadouts import design_loadout
 
@@ -476,7 +612,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             result = diagnose_client()
         elif args.command == "inspect":
-            result = inspect_release(
+            result = cast(_InspectRelease, inspect_release)(
                 read(args.release, "release"),
                 read(args.observation, "observation") if args.observation else None,
                 role=args.role, authority=args.authority, installation=args.installation,
