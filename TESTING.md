@@ -11178,6 +11178,12 @@ Its isolation regression supplies a contrary checkout allowance in memory and
 requires the original spawn assertion to pass without reading that allowance.
 Every admitted case must reach the actual guard during its call phase; fixture
 isolation does not alter production allowances or qualify native launches.
+The sibling tracking-write and asyncio-timeout adapters likewise export their
+original analysis tests and the latter's original `guard` fixture. They admit
+91 tracking-write cases and twelve asyncio cases with real guard call coverage.
+The tracking-write checkout subprocess smoke and nine asyncio CLI subprocess
+cases remain unchanged in their original suites, outside the actor-free packet;
+unit admission neither replaces nor claims execution of those native cases.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
