@@ -1171,6 +1171,10 @@ the later attachment fences both the old prompt and terminal cleanup of the
 old reservation. Conversely, a new task cannot attach that native while a
 previously admitted redrive or terminal cleanup still owns it. This comparison
 uses the recorded assignments, not the yield message or transport name.
+Case and surrounding whitespace do not distinguish host identities. When a
+detached assignment and a later task share a native or checkout, an unfamiliar
+host alias or unmapped process handle cannot establish that they are disjoint.
+An unrelated native in a different checkout is not held by that comparison.
 
 Before transport, the existing `record_spawn` operation atomically rechecks the
 snapshot and records a pending startup revision together with the frozen

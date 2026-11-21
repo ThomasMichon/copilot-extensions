@@ -4,7 +4,9 @@ from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_records import SpawnReservation
 
 
-def seed_pre_retention_yield(q: TaskQueue, reservation: SpawnReservation) -> None:
+def seed_pre_retention_yield(
+    q: TaskQueue, reservation: SpawnReservation, *, expected_state: str = "failed",
+) -> None:
     """Load the historical queued task; do not retire or alter its reservation."""
     with q._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -12,9 +14,9 @@ def seed_pre_retention_yield(q: TaskQueue, reservation: SpawnReservation) -> Non
             "SELECT r.task_id,r.session_handle,r.worktree,r.execution_machine,t.owner,t.updated_at"
             " FROM spawn_reservations r JOIN tasks t ON t.id=r.task_id"
             " JOIN task_pool_assignments a ON a.task_id=t.id AND a.reservation_key=r.key"
-            " WHERE r.key=? AND r.state='failed' AND r.conversation_retired=0"
+            " WHERE r.key=? AND r.state=? AND r.conversation_retired=0"
             " AND t.status='started' AND t.owner_session_id=r.session_handle"
-            " AND t.generation=a.task_generation", (reservation.key,),
+            " AND t.generation=a.task_generation", (reservation.key, expected_state),
         ).fetchone()
         assert row is not None, reservation.key
         conn.execute(

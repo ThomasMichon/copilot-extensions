@@ -6,12 +6,25 @@ import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from typing import TypedDict
 
 import pytest
 
-from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_records import Status, TaskError
 from agent_dispatch.queue_common import CompletionOutcome
 from tests import test_task_relevance_closeout_readiness as readiness
+from tests._helpers import required
+from tests._legacy_pool_history import seed_pre_retention_yield
+
+Json = dict[str, object]
+
+
+class FinishArgs(TypedDict):
+    request_id: str
+    worker_id: str
+    native_id: str
+    expected_generation: int
 
 managed_assignment = readiness.managed_assignment
 assignment = readiness.assignment
@@ -22,7 +35,7 @@ def finish(value: readiness.Ready) -> CompletionOutcome:
     queue, _, workspace, task, _ = value
     return queue.finish_relevance_closeout(
         task.id, request_id="closed-source", worker_id=workspace.worker_id,
-        native_id="native", expected_generation=queue.get(task.id).generation,
+        native_id="native", expected_generation=required(queue.get(task.id)).generation,
     )
 
 
@@ -33,11 +46,11 @@ def finalized(ready: readiness.Ready, monkeypatch: pytest.MonkeyPatch) -> readin
     queue, _, workspace, task, _ = ready
     assert readiness.prepare(queue, workspace, task)["relationship"]["state"] == "closed"
 
-    def observe(task_row: dict, allocation: dict, native: dict) -> dict:
+    def observe(task_row: Json, allocation: Json, native: Json) -> Json:
         with queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
         assert task_row["id"] == task.id
-        assert allocation["key"] == queue.task_relationship(task.id)["request"]["reservation_key"]
+        assert allocation["key"] == required(queue.task_relationship(task.id))["request"]["reservation_key"]
         assert native["native_id"] == "native"
         return {
             "operation": "observe-finalized", "creation_nonce": workspace.creation_nonce,
@@ -52,7 +65,7 @@ def test_observed_finalization_abandons_through_existing_lifecycle_without_nativ
     finalized: readiness.Ready,
 ) -> None:
     queue, _, _, task, _ = finalized
-    before = queue.get_reservation(queue.task_relationship(task.id)["request"]["reservation_key"])
+    before = required(queue.get_reservation(required(queue.task_relationship(task.id))["request"]["reservation_key"]))
     result = finish(finalized)
     assert result.event_type == "task.abandoned"
     assert result.task.status == Status.ABANDONED and result.task.owner is None
@@ -72,13 +85,13 @@ def test_readiness_without_finalization_cannot_acknowledge(
     queue, _, workspace, task, _ = ready
     readiness.prepare(queue, workspace, task)
 
-    def blocked(*_: object) -> dict:
+    def blocked(*_: object) -> Json:
         raise TaskError("workspace is not finalized")
 
     monkeypatch.setattr(pool_decline_observation, "observe", blocked)
     with pytest.raises(TaskError, match="not finalized"):
         finish(ready)
-    assert queue.get(task.id).status == Status.STARTED
+    assert required(queue.get(task.id)).status == Status.STARTED
     assert queue.relevance_snapshot(task.id)["closeout"].get("acknowledgement") is None
 
 
@@ -90,12 +103,12 @@ def test_liveness_during_finalized_observation_preserves_closeout(
 
     queue, _, workspace, task, _ = finalized
     observe = pool_decline_observation.observe
-    before = queue.get(task.id)
-    key = queue.task_relationship(task.id)["request"]["reservation_key"]
+    before = required(queue.get(task.id))
+    key = required(queue.task_relationship(task.id))["request"]["reservation_key"]
     reservation = queue.get_reservation(key)
 
-    def interleaved(*args: object) -> dict:
-        result = observe(*args)
+    def interleaved(a: Json, b: Json, c: Json) -> Json:
+        result = observe(a, b, c)
         if update == "heartbeat":
             changed = queue.heartbeat(task.id, workspace.worker_id, now=before.updated_at + 1)
             assert changed.lease_expires_at != before.lease_expires_at
@@ -125,13 +138,13 @@ def test_unprepared_claim_cannot_reach_finalized_observation(
 ) -> None:
     from agent_dispatch import pool_decline_observation
 
-    def unexpected(*_: object) -> dict:
+    def unexpected(*_: object) -> Json:
         raise AssertionError("an unsettled original claim must retain custody")
 
     monkeypatch.setattr(pool_decline_observation, "observe", unexpected)
     with pytest.raises(TaskError, match="readiness"):
         finish(ready)
-    assert ready[0].task_relationship(ready[3].id)["state"] == "bound"
+    assert required(ready[0].task_relationship(ready[3].id))["state"] == "bound"
 
 
 @pytest.mark.parametrize("field,value", [
@@ -143,11 +156,22 @@ def test_committed_acknowledgement_is_not_transferable(
 ) -> None:
     queue, _, workspace, task, _ = finalized
     finish(finalized)
-    arguments = {
+    arguments: FinishArgs = {
         "request_id": "closed-source", "worker_id": workspace.worker_id,
-        "native_id": "native", "expected_generation": queue.get(task.id).generation,
+        "native_id": "native", "expected_generation": required(queue.get(task.id)).generation,
     }
-    arguments[field] = value
+    if field == "expected_generation":
+        assert isinstance(value, bool)
+        arguments["expected_generation"] = value
+    else:
+        assert isinstance(value, str)
+        if field == "request_id":
+            arguments["request_id"] = value
+        elif field == "worker_id":
+            arguments["worker_id"] = value
+        else:
+            assert field == "native_id"
+            arguments["native_id"] = value
     with pytest.raises(TaskError, match="incarnation"):
         queue.finish_relevance_closeout(task.id, **arguments)
 
@@ -159,9 +183,9 @@ def test_restart_and_lost_terminal_reply_replay_without_observation_or_duplicate
 
     queue, owner, workspace, task, calls = finalized
     first = finish(finalized)
-    before = queue.events(task.id)
+    before: list[Json] = queue.events(task.id)
 
-    def unexpected(*_: object) -> dict:
+    def unexpected(*_: object) -> Json:
         raise AssertionError("a committed outcome must not observe or finalize again")
 
     monkeypatch.setattr(pool_decline_observation, "observe", unexpected)
@@ -177,7 +201,10 @@ def test_prepared_then_yielded_owner_finishes_and_retries_with_retained_native(
     from agent_dispatch import pool_decline_observation
 
     queue, owner, workspace, task, calls = finalized
-    yielded = queue.yield_task(task.id, workspace.worker_id, release_spawn=False)
+    with pytest.raises(TaskError, match="retains assignment"):
+        queue.yield_task(task.id, workspace.worker_id, release_spawn=False)
+    seed_pre_retention_yield(queue, required(queue.latest_reservation(task.id)), expected_state="spawned")
+    yielded = required(queue.get(task.id))
     assert yielded.owner is None and yielded.owner_session_id is None
     first = finish(finalized)
     assert first.event_type == "task.abandoned"
@@ -188,7 +215,7 @@ def test_prepared_then_yielded_owner_finishes_and_retries_with_retained_native(
         "generation": yielded.generation, "owner_session_id": None,
     }
 
-    def unexpected(*_: object) -> dict:
+    def unexpected(*_: object) -> Json:
         raise AssertionError("a yielded closeout replay must not repeat observation")
 
     monkeypatch.setattr(pool_decline_observation, "observe", unexpected)
@@ -209,8 +236,8 @@ def test_change_during_finalized_observation_retains_task_and_receipt_absence(
     queue, _, _, task, _ = finalized
     observe = pool_decline_observation.observe
 
-    def changed(*args: object) -> dict:
-        result = observe(*args)
+    def changed(a: Json, b: Json, c: Json) -> Json:
+        result = observe(a, b, c)
         with queue._connect() as conn:
             if change == "hold":
                 conn.execute("UPDATE tasks SET hold_reason='operator' WHERE id=?", (task.id,))
@@ -248,7 +275,7 @@ def test_change_during_finalized_observation_retains_task_and_receipt_absence(
     with pytest.raises(TaskError, match=r"closeout|incarnation|held|expected status"):
         finish(finalized)
     expected_status = Status.SUSPENDED if change == "task-status" else Status.STARTED
-    assert queue.get(task.id).status == expected_status
+    assert required(queue.get(task.id)).status == expected_status
     assert queue.relevance_snapshot(task.id)["closeout"].get("acknowledgement") is None
 
 
@@ -259,13 +286,13 @@ def test_changed_workspace_incarnation_cannot_authorize_terminal_transition(
 
     observe = pool_decline_observation.observe
 
-    def replaced(*args: object) -> dict:
-        return {**observe(*args), "creation_nonce": "replacement"}
+    def replaced(a: Json, b: Json, c: Json) -> Json:
+        return {**observe(a, b, c), "creation_nonce": "replacement"}
 
     monkeypatch.setattr(pool_decline_observation, "observe", replaced)
     with pytest.raises(TaskError, match="incarnation"):
         finish(finalized)
-    assert finalized[0].get(finalized[3].id).status == Status.STARTED
+    assert required(finalized[0].get(finalized[3].id)).status == Status.STARTED
 
 
 def test_failed_task_write_rolls_back_acknowledgement(finalized: readiness.Ready) -> None:
@@ -279,7 +306,7 @@ def test_failed_task_write_rolls_back_acknowledgement(finalized: readiness.Ready
         finish(finalized)
     closeout = queue.relevance_snapshot(task.id)["closeout"]
     assert closeout.get("acknowledgement") is None
-    assert queue.get(task.id).status == Status.STARTED
+    assert required(queue.get(task.id)).status == Status.STARTED
 
 
 def test_concurrent_acknowledgements_commit_one_terminal_outcome(
@@ -291,8 +318,8 @@ def test_concurrent_acknowledgements_commit_one_terminal_outcome(
     observe = pool_decline_observation.observe
     barrier = Barrier(2)
 
-    def together(*args: object) -> dict:
-        result = observe(*args)
+    def together(a: Json, b: Json, c: Json) -> Json:
+        result = observe(a, b, c)
         barrier.wait(timeout=10)
         return result
 
