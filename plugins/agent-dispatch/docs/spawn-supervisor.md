@@ -1174,8 +1174,12 @@ the later attachment fences both the old prompt and terminal cleanup of the
 old reservation. Conversely, a new task cannot attach that native while a
 previously admitted redrive or terminal cleanup still owns it. This comparison
 uses the recorded assignments, not the yield message or transport name.
+Completion counts even when it leaves the original attachment undetached.
+A release-in-progress or pending/held retired cleanup also retains custody.
+Cleanup retry admission and lease revalidation both reject a later attachment;
+new attachment admission checks the same outstanding effects in reverse.
 Case and surrounding whitespace do not distinguish host identities. When a
-detached assignment and a later task share a native or checkout, an unfamiliar
+prior assignment and a later task share a native or checkout, an unfamiliar
 host alias or unmapped process handle cannot establish that they are disjoint.
 An unrelated native in a different checkout is not held by that comparison.
 
