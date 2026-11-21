@@ -9,13 +9,17 @@ Run:  python -m pytest tools/test_check_headless_launch.py
 """
 from __future__ import annotations
 
+import ast
+from collections.abc import Callable
 import importlib.util
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 _SCRIPT = Path(__file__).resolve().parent / "check-headless-launch.py"
 _spec = importlib.util.spec_from_file_location("check_headless_launch", _SCRIPT)
+assert _spec is not None and _spec.loader is not None
 guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
 
@@ -30,31 +34,36 @@ def _mk_plugin(root: Path, name: str, *, adopts: bool, body: str) -> None:
 
 
 @pytest.fixture()
-def repo(tmp_path, monkeypatch):
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(guard, "REPO", tmp_path)
     monkeypatch.setattr(guard, "PLUGINS_DIR", tmp_path / "plugins")
     monkeypatch.setattr(guard, "LIBS_DIR", tmp_path / "libs")
+    monkeypatch.setattr(
+        guard, "HEADLESS_GUARD_ALLOWLIST", tmp_path / "tools" / "headless-guard.allow",
+    )
     return tmp_path
 
 
-def test_flags_raw_flag_in_adopting_plugin(repo):
+def test_flags_raw_flag_in_adopting_plugin(repo: Path) -> None:
     _mk_plugin(repo, "agent-foo", adopts=True,
                body="import subprocess\nx = subprocess.CREATE_NO_WINDOW\n")
     problems = guard.verify()
     assert any("agent-foo" in p and "CREATE_NO_WINDOW" in p for p in problems)
 
 
-def test_one_parse_preserves_all_rules_and_refreshes_between_runs(repo, monkeypatch):
+def test_one_parse_preserves_all_rules_and_refreshes_between_runs(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _mk_plugin(
         repo, "agent-all", adopts=True,
         body=("import subprocess\nx = subprocess.CREATE_NEW_CONSOLE\n"
               "y = subprocess.CREATE_NO_WINDOW\nsubprocess.run(['git', 'status'])\n"),
     )
     source = repo / "plugins" / "agent-all" / "src" / "agent_all" / "mod.py"
-    original_parse = guard.ast.parse
-    calls = []
+    original_parse = cast(Callable[..., ast.AST], guard.ast.parse)
+    calls: list[str] = []
 
-    def parse(text, **kwargs):
+    def parse(text: str, **kwargs: Any) -> ast.AST:
         calls.append(kwargs["filename"])
         return original_parse(text, **kwargs)
 
@@ -69,7 +78,7 @@ def test_one_parse_preserves_all_rules_and_refreshes_between_runs(repo, monkeypa
     assert calls == [str(source)] * 2
 
 
-def test_ignores_non_adopting_plugin(repo):
+def test_ignores_non_adopting_plugin(repo: Path) -> None:
     _mk_plugin(repo, "agent-bar", adopts=False,
                body="import subprocess\nx = subprocess.CREATE_NO_WINDOW\n")
     assert guard.verify() == []
@@ -96,30 +105,34 @@ def test_ignores_non_adopting_plugin(repo):
     "    settings = detached_kwargs()\n"
     "    subprocess.Popen(['worker'], **settings)\n",
 ])
-def test_ast_admission_preserves_unfiltered_spawn_diagnostics(repo, monkeypatch, body):
+def test_ast_admission_preserves_unfiltered_spawn_diagnostics(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, body: str,
+) -> None:
     _mk_plugin(repo, "agent-foo", adopts=True, body=body)
     actual = guard.verify()
     assert actual
     original = guard._FlagFinder
 
-    class Unfiltered(original):
-        def __init__(self):
-            super().__init__()
-            self.has_spawn_reference = True
-            self.has_popen_reference = True
-            self.has_detach_reference = True
+    def initialize(self: object) -> None:
+        original.__init__(self)
+        setattr(self, "has_spawn_reference", True)
+        setattr(self, "has_popen_reference", True)
+        setattr(self, "has_detach_reference", True)
 
+    Unfiltered = type("Unfiltered", (original,), {"__init__": initialize})
     monkeypatch.setattr(guard, "_FlagFinder", Unfiltered)
     assert guard.verify() == actual
 
 
-def test_ast_admission_skips_only_impossible_visitors_and_still_parses(repo, monkeypatch):
+def test_ast_admission_skips_only_impossible_visitors_and_still_parses(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _mk_plugin(
         repo, "agent-foo", adopts=True,
         body=("description = 'subprocess.Popen detached_kwargs'\n"
               "value = subprocess.CREATE_NEW_CONSOLE\n"),
     )
-    def unexpected(*_args):
+    def unexpected(*_args: object) -> None:
         raise AssertionError("an impossible spawn visitor was constructed")
 
     monkeypatch.setattr(guard, "_SpawnFinder", unexpected)
@@ -134,25 +147,27 @@ def test_ast_admission_skips_only_impossible_visitors_and_still_parses(repo, mon
 
 
 @pytest.mark.parametrize("visitor_name", ["_FlagFinder", "_SpawnFinder", "_DetachedSpawnFinder"])
-def test_visitor_dispatch_resolves_each_node_type_once_per_file(visitor_name, monkeypatch):
+def test_visitor_dispatch_resolves_each_node_type_once_per_file(
+    visitor_name: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     text = "from subprocess import Popen\n" + "value = alias\n" * 50
     tree = guard.ast.parse(text)
     visitor_type = getattr(guard, visitor_name)
-    lookups = []
+    lookups: list[str] = []
 
-    def getattribute(self, name):
+    def getattribute(self: object, name: str) -> Any:
         if name == "visit_Name":
             lookups.append(name)
         return object.__getattribute__(self, name)
 
     monkeypatch.setattr(visitor_type, "__getattribute__", getattribute)
 
-    def visitor():
+    def visitor() -> ast.NodeVisitor:
         if visitor_name == "_SpawnFinder":
-            return visitor_type(text)
+            return cast(ast.NodeVisitor, visitor_type(text))
         if visitor_name == "_DetachedSpawnFinder":
-            return visitor_type(tree)
-        return visitor_type()
+            return cast(ast.NodeVisitor, visitor_type(tree))
+        return cast(ast.NodeVisitor, visitor_type())
 
     visitor().visit(tree)
     assert lookups == ["visit_Name"]
@@ -161,8 +176,8 @@ def test_visitor_dispatch_resolves_each_node_type_once_per_file(visitor_name, mo
 
 
 def test_daemon_analysis_only_visits_adopting_source_without_skipping_other_rules(
-    repo, monkeypatch,
-):
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     body = (
         "import subprocess\n"
         "from agent_procutil import detached_kwargs\n"
@@ -181,10 +196,10 @@ def test_daemon_analysis_only_visits_adopting_source_without_skipping_other_rule
     for root in extra_roots:
         root.mkdir(parents=True)
         (root / "mod.py").write_text(body, encoding="utf-8")
-    visited = []
+    visited: list[ast.AST] = []
     original_init = guard._DetachedSpawnFinder.__init__
 
-    def record_init(self, tree):
+    def record_init(self: ast.NodeVisitor, tree: ast.AST) -> None:
         visited.append(tree)
         original_init(self, tree)
 
@@ -205,14 +220,14 @@ def test_daemon_analysis_only_visits_adopting_source_without_skipping_other_rule
     assert sum("hand-rolled detached Popen" in p for p in problems) == 2
 
 
-def test_forbids_new_console_in_non_adopting_plugin(repo):
+def test_forbids_new_console_in_non_adopting_plugin(repo: Path) -> None:
     _mk_plugin(repo, "agent-window", adopts=False,
                body="import subprocess\nx = subprocess.CREATE_NEW_CONSOLE\n")
     problems = guard.verify()
     assert any("unsafe 'CREATE_NEW_CONSOLE'" in p for p in problems)
 
 
-def test_forbids_new_console_in_canonical_shared_library(repo):
+def test_forbids_new_console_in_canonical_shared_library(repo: Path) -> None:
     src = repo / "libs" / "ssh-manager" / "src" / "ssh_manager"
     src.mkdir(parents=True)
     (src / "process.py").write_text(
@@ -224,7 +239,7 @@ def test_forbids_new_console_in_canonical_shared_library(repo):
                for p in problems)
 
 
-def test_forbids_aliased_new_console_import(repo):
+def test_forbids_aliased_new_console_import(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-alias",
@@ -237,7 +252,7 @@ def test_forbids_aliased_new_console_import(repo):
     assert any("CREATE_NEW_CONSOLE" in p for p in guard.verify())
 
 
-def test_forbids_new_console_imported_from_low_level_module(repo):
+def test_forbids_new_console_imported_from_low_level_module(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-winapi",
@@ -247,7 +262,7 @@ def test_forbids_new_console_imported_from_low_level_module(repo):
     assert any("CREATE_NEW_CONSOLE" in p for p in guard.verify())
 
 
-def test_forbids_named_new_console_numeric_constant(repo):
+def test_forbids_named_new_console_numeric_constant(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-numeric",
@@ -257,7 +272,7 @@ def test_forbids_named_new_console_numeric_constant(repo):
     assert any("CREATE_NEW_CONSOLE" in p for p in guard.verify())
 
 
-def test_forbids_new_console_in_vendored_library(repo):
+def test_forbids_new_console_in_vendored_library(repo: Path) -> None:
     src = (
         repo / "plugins" / "agent-vendor" / "libs" / "ssh-manager"
         / "src" / "ssh_manager"
@@ -272,7 +287,7 @@ def test_forbids_new_console_in_vendored_library(repo):
     )
 
 
-def test_forbids_new_console_in_shipped_plugin_script(repo):
+def test_forbids_new_console_in_shipped_plugin_script(repo: Path) -> None:
     scripts = repo / "plugins" / "agent-script" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "launch.py").write_text(
@@ -282,13 +297,13 @@ def test_forbids_new_console_in_shipped_plugin_script(repo):
     assert any("plugins/agent-script/scripts" in p for p in guard.verify())
 
 
-def test_production_syntax_error_fails_closed(repo):
+def test_production_syntax_error_fails_closed(repo: Path) -> None:
     _mk_plugin(repo, "agent-invalid", adopts=False, body="if (\n")
     problems = guard.verify()
     assert any("cannot parse production Python" in p for p in problems)
 
 
-def test_forbids_annotated_new_console_numeric_constant(repo):
+def test_forbids_annotated_new_console_numeric_constant(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-annotated",
@@ -298,20 +313,20 @@ def test_forbids_annotated_new_console_numeric_constant(repo):
     assert any("CREATE_NEW_CONSOLE" in p for p in guard.verify())
 
 
-def test_docstring_mention_not_flagged(repo):
+def test_docstring_mention_not_flagged(repo: Path) -> None:
     _mk_plugin(repo, "agent-doc", adopts=True,
                body='"""Uses CREATE_NO_WINDOW and DETACHED_PROCESS in prose."""\nx = 1\n')
     assert guard.verify() == []
 
 
-def test_allow_comment_suppresses(repo):
+def test_allow_comment_suppresses(repo: Path) -> None:
     _mk_plugin(repo, "agent-ok", adopts=True,
                body="import subprocess\n"
                     "x = subprocess.DETACHED_PROCESS  # headless-guard: allow: daemon\n")
     assert guard.verify() == []
 
 
-def test_allow_comment_suppresses_interactive_new_console(repo):
+def test_allow_comment_suppresses_interactive_new_console(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-interactive",
@@ -325,7 +340,7 @@ def test_allow_comment_suppresses_interactive_new_console(repo):
     assert guard.verify() == []
 
 
-def test_bare_allow_comment_does_not_suppress(repo):
+def test_bare_allow_comment_does_not_suppress(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-empty-allow",
@@ -339,7 +354,7 @@ def test_bare_allow_comment_does_not_suppress(repo):
 
 
 @pytest.mark.parametrize("directive", ["allowed", "allowance"])
-def test_allow_prefix_word_does_not_suppress(repo, directive):
+def test_allow_prefix_word_does_not_suppress(repo: Path, directive: str) -> None:
     _mk_plugin(
         repo,
         f"agent-{directive}",
@@ -352,7 +367,7 @@ def test_allow_prefix_word_does_not_suppress(repo, directive):
     assert any("CREATE_NEW_CONSOLE" in p for p in guard.verify())
 
 
-def test_allow_text_in_string_does_not_suppress(repo):
+def test_allow_text_in_string_does_not_suppress(repo: Path) -> None:
     _mk_plugin(
         repo,
         "agent-string-allow",
@@ -366,7 +381,7 @@ def test_allow_text_in_string_does_not_suppress(repo):
     assert any("CREATE_NEW_CONSOLE" in p for p in guard.verify())
 
 
-def test_getattr_string_flag_flagged(repo):
+def test_getattr_string_flag_flagged(repo: Path) -> None:
     _mk_plugin(repo, "agent-ga", adopts=True,
                body='import subprocess\n'
                     'x = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)\n')
@@ -376,7 +391,7 @@ def test_getattr_string_flag_flagged(repo):
 # -- Rule 3: unsuppressed console-program spawn (#789) -----------------------
 
 
-def test_flags_unsuppressed_spawn_list_literal(repo):
+def test_flags_unsuppressed_spawn_list_literal(repo: Path) -> None:
     _mk_plugin(repo, "agent-spawn", adopts=False,
                body='import subprocess\n'
                     'subprocess.run(["cmd.exe", "/c", "dir"], check=False)\n')
@@ -384,21 +399,39 @@ def test_flags_unsuppressed_spawn_list_literal(repo):
     assert any("unsuppressed console spawn of 'cmd'" in p for p in problems)
 
 
-def test_flags_unsuppressed_spawn_regardless_of_adoption(repo):
+def test_fixture_ignores_checkout_allowlist(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkout_allowlist = _SCRIPT.parent / "headless-guard.allow"
+    reads: list[Path] = []
+    original = Path.read_text
+
+    def read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == checkout_allowlist:
+            reads.append(path)
+            return "plugins/agent-spawn/src/agent_spawn/mod.py:2  synthetic contrary input\n"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    test_flags_unsuppressed_spawn_list_literal(repo)
+    assert reads == []
+
+
+def test_flags_unsuppressed_spawn_regardless_of_adoption(repo: Path) -> None:
     _mk_plugin(repo, "agent-spawn2", adopts=True,
                body='import subprocess\n'
                     'subprocess.Popen(["powershell.exe", "-Command", "x"])\n')
     assert any("powershell" in p for p in guard.verify())
 
 
-def test_allows_spawn_with_creationflags(repo):
+def test_allows_spawn_with_creationflags(repo: Path) -> None:
     _mk_plugin(repo, "agent-ok-flags", adopts=False,
                body='import subprocess\n'
                     'subprocess.run(["cmd.exe", "/c", "x"], creationflags=0x08000000)\n')
     assert guard.verify() == []
 
 
-def test_allows_spawn_splatting_no_window_kwargs(repo):
+def test_allows_spawn_splatting_no_window_kwargs(repo: Path) -> None:
     _mk_plugin(repo, "agent-ok-splat", adopts=True,
                body='import subprocess\n'
                     'from agent_procutil import no_window_kwargs\n'
@@ -406,7 +439,7 @@ def test_allows_spawn_splatting_no_window_kwargs(repo):
     assert guard.verify() == []
 
 
-def test_allows_spawn_via_kwargs_dict_update_in_same_function(repo):
+def test_allows_spawn_via_kwargs_dict_update_in_same_function(repo: Path) -> None:
     _mk_plugin(
         repo, "agent-ok-update", adopts=True,
         body=(
@@ -423,7 +456,7 @@ def test_allows_spawn_via_kwargs_dict_update_in_same_function(repo):
     assert [p for p in guard.verify() if "hand-rolled detached Popen" not in p] == []
 
 
-def test_spawn_daemon_call_alone_is_clean(repo):
+def test_spawn_daemon_call_alone_is_clean(repo: Path) -> None:
     """A launch through ``agent_procutil.spawn_daemon`` (the shared
     resident-daemon primitive) is windowless by construction and is never
     reported, even with a literal console-program argv[0]."""
@@ -439,7 +472,7 @@ def test_spawn_daemon_call_alone_is_clean(repo):
     assert guard.verify() == []
 
 
-def test_spawn_daemon_does_not_approve_a_raw_spawn_in_the_same_function(repo):
+def test_spawn_daemon_does_not_approve_a_raw_spawn_in_the_same_function(repo: Path) -> None:
     """``spawn_daemon`` is its own approved call, not a kwargs helper: a bare
     fallback ``Popen`` next to it is still an unsuppressed console spawn."""
     _mk_plugin(
@@ -460,7 +493,7 @@ def test_spawn_daemon_does_not_approve_a_raw_spawn_in_the_same_function(repo):
     assert "unsuppressed console spawn of 'python'" in problems[0]
 
 
-def test_spawn_daemon_mention_elsewhere_does_not_approve_a_raw_spawn(repo):
+def test_spawn_daemon_mention_elsewhere_does_not_approve_a_raw_spawn(repo: Path) -> None:
     _mk_plugin(
         repo, "agent-bad-daemon", adopts=True,
         body=(
@@ -476,7 +509,7 @@ def test_spawn_daemon_mention_elsewhere_does_not_approve_a_raw_spawn(repo):
     assert any("unsuppressed console spawn of 'python'" in p for p in problems)
 
 
-def test_flags_literal_argv_wrapped_in_a_safety_dead_function(repo):
+def test_flags_literal_argv_wrapped_in_a_safety_dead_function(repo: Path) -> None:
     """The real production incident this rule generalizes from
     (ThomasMichon/copilot-extensions#789): a bare list-literal argv reaching
     ``subprocess.run`` with no window handling anywhere in its function."""
@@ -493,7 +526,7 @@ def test_flags_literal_argv_wrapped_in_a_safety_dead_function(repo):
     assert any("unsuppressed console spawn of 'cmd'" in p for p in problems)
 
 
-def test_known_limitation_does_not_resolve_argv_rebuilt_via_list_call(repo):
+def test_known_limitation_does_not_resolve_argv_rebuilt_via_list_call(repo: Path) -> None:
     """Documented scope boundary, not a bug: ``list(cmd)``/``tuple(cmd)``
     wraps a *call* expression, not a literal, so its elements are opaque to
     this guard -- exactly the shape of the real incident's own
@@ -515,7 +548,7 @@ def test_known_limitation_does_not_resolve_argv_rebuilt_via_list_call(repo):
     assert guard.verify() == []
 
 
-def test_ignores_dynamic_unresolvable_argv(repo):
+def test_ignores_dynamic_unresolvable_argv(repo: Path) -> None:
     _mk_plugin(repo, "agent-dynamic", adopts=False,
                body='import subprocess\n'
                     'def spawn(cmd):\n'
@@ -523,27 +556,27 @@ def test_ignores_dynamic_unresolvable_argv(repo):
     assert guard.verify() == []
 
 
-def test_ignores_non_console_program(repo):
+def test_ignores_non_console_program(repo: Path) -> None:
     _mk_plugin(repo, "agent-benign", adopts=False,
                body='import subprocess\n'
                     'subprocess.run(["gh", "pr", "view"], check=False)\n')
     assert guard.verify() == []
 
 
-def test_ignores_pythonw_gui_subsystem(repo):
+def test_ignores_pythonw_gui_subsystem(repo: Path) -> None:
     _mk_plugin(repo, "agent-pythonw", adopts=False,
                body='import subprocess\n'
                     'subprocess.Popen(["pythonw.exe", "-m", "x"])\n')
     assert guard.verify() == []
 
 
-def test_flags_os_system_console_program(repo):
+def test_flags_os_system_console_program(repo: Path) -> None:
     _mk_plugin(repo, "agent-ossystem", adopts=False,
                body='import os\nos.system("cmd.exe /c dir")\n')
     assert any("unsuppressed console spawn of 'cmd'" in p for p in guard.verify())
 
 
-def test_allow_comment_suppresses_unsuppressed_spawn(repo):
+def test_allow_comment_suppresses_unsuppressed_spawn(repo: Path) -> None:
     _mk_plugin(
         repo, "agent-spawn-allow", adopts=False,
         body=(
@@ -555,7 +588,7 @@ def test_allow_comment_suppresses_unsuppressed_spawn(repo):
     assert guard.verify() == []
 
 
-def test_flags_imported_run_alias(repo):
+def test_flags_imported_run_alias(repo: Path) -> None:
     _mk_plugin(repo, "agent-bare-run", adopts=False,
                body='from subprocess import run\n'
                     'run(["git", "status"])\n')
@@ -568,7 +601,7 @@ def test_flags_imported_run_alias(repo):
 # -- Rule 4: declarative (JSON/YAML) console-program spawn (#789) ------------
 
 
-def test_flags_declarative_json_spawn(repo):
+def test_flags_declarative_json_spawn(repo: Path) -> None:
     plugin = repo / "plugins" / "agent-json"
     (plugin / "scripts").mkdir(parents=True)
     (plugin / "pyproject.toml").write_text('[project]\nname = "agent-json"\n', encoding="utf-8")
@@ -578,7 +611,7 @@ def test_flags_declarative_json_spawn(repo):
     assert any("declarative spawn of 'powershell'" in p for p in guard.verify())
 
 
-def test_json_repeated_identical_literal_maps_to_distinct_occurrences(repo):
+def test_json_repeated_identical_literal_maps_to_distinct_occurrences(repo: Path) -> None:
     """Regression: multiple arrays sharing an identical literal argv[0]
     (e.g. several "python ..." prerequisite entries) must not all collapse
     onto the first occurrence's position."""
@@ -595,7 +628,7 @@ def test_json_repeated_identical_literal_maps_to_distinct_occurrences(repo):
     assert linenos == [2, 3]
 
 
-def test_flags_declarative_yaml_spawn(repo):
+def test_flags_declarative_yaml_spawn(repo: Path) -> None:
     plugin = repo / "plugins" / "agent-yaml"
     (plugin / "scripts").mkdir(parents=True)
     (plugin / "pyproject.toml").write_text('[project]\nname = "agent-yaml"\n', encoding="utf-8")
@@ -605,7 +638,7 @@ def test_flags_declarative_yaml_spawn(repo):
     assert any("declarative spawn of 'cmd'" in p for p in guard.verify())
 
 
-def test_declarative_yaml_allow_comment_suppresses(repo):
+def test_declarative_yaml_allow_comment_suppresses(repo: Path) -> None:
     plugin = repo / "plugins" / "agent-yaml-ok"
     (plugin / "scripts").mkdir(parents=True)
     (plugin / "pyproject.toml").write_text('[project]\nname = "agent-yaml-ok"\n', encoding="utf-8")
@@ -616,7 +649,9 @@ def test_declarative_yaml_allow_comment_suppresses(repo):
     assert guard.verify() == []
 
 
-def test_declarative_json_allowlist_file_suppresses(repo, monkeypatch):
+def test_declarative_json_allowlist_file_suppresses(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugin = repo / "plugins" / "agent-json-ok"
     (plugin / "scripts").mkdir(parents=True)
     (plugin / "pyproject.toml").write_text('[project]\nname = "agent-json-ok"\n', encoding="utf-8")
@@ -641,7 +676,7 @@ _UPDATE_SHAPE = (
 )
 
 
-def _daemon_problems(problems):
+def _daemon_problems(problems: list[str]) -> list[str]:
     return [p for p in problems if "hand-rolled detached Popen" in p or "daemon-spawn" in p]
 
 
@@ -667,7 +702,7 @@ def _daemon_problems(problems):
     "module-alias-imported-after-use", "popen-alias-imported-after-use", "aliased-detach-helper",
     "class-body-launch",
 ])
-def test_hand_rolled_detached_popen_is_flagged(repo, body):
+def test_hand_rolled_detached_popen_is_flagged(repo: Path, body: str) -> None:
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     problems = _daemon_problems(guard.verify())
     assert len(problems) == 1
@@ -697,29 +732,29 @@ def test_hand_rolled_detached_popen_is_flagged(repo, body):
     "spawn-daemon", "no-detach-helper", "inline-allow-with-reason", "helper-only-in-nested-scope",
     "helper-only-in-lambda", "class-alias-not-visible-in-method", "multiline-inline-allow",
 ])
-def test_daemon_launches_that_pass(repo, body):
+def test_daemon_launches_that_pass(repo: Path, body: str) -> None:
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     assert _daemon_problems(guard.verify()) == []
 
 
-def test_inline_daemon_allow_needs_a_reason(repo):
+def test_inline_daemon_allow_needs_a_reason(repo: Path) -> None:
     _mk_plugin(repo, "agent-daemon", adopts=True,
                body=_UPDATE_SHAPE.format(comment="  # daemon-spawn: allow"))
     assert len(_daemon_problems(guard.verify())) == 1
 
 
-def test_non_adopting_plugin_is_out_of_daemon_scope(repo):
+def test_non_adopting_plugin_is_out_of_daemon_scope(repo: Path) -> None:
     _mk_plugin(repo, "agent-legacy", adopts=False, body=_UPDATE_SHAPE.format(comment=""))
     assert _daemon_problems(guard.verify()) == []
 
 
-def _write_daemon_allow(repo, text):
+def _write_daemon_allow(repo: Path, text: str) -> None:
     allow = repo / guard.DAEMON_SPAWN_ALLOWLIST
     allow.parent.mkdir(parents=True, exist_ok=True)
     allow.write_text(text, encoding="utf-8")
 
 
-def test_daemon_baseline_entry_suppresses_and_stale_entries_are_reported(repo):
+def test_daemon_baseline_entry_suppresses_and_stale_entries_are_reported(repo: Path) -> None:
     _mk_plugin(repo, "agent-daemon", adopts=True, body=_UPDATE_SHAPE.format(comment=""))
     key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
     _write_daemon_allow(repo, f"# header\n{key}  resident daemon; migration pending\n")
@@ -737,12 +772,14 @@ def test_daemon_baseline_entry_suppresses_and_stale_entries_are_reported(repo):
     "plugins/agent-daemon/src/agent_daemon/mod.py::start",
     "plugins/agent-daemon/src/agent_daemon/mod.py:6  path:line is not a function key",
 ])
-def test_daemon_baseline_entries_need_a_function_key_and_reason(repo, entry):
+def test_daemon_baseline_entries_need_a_function_key_and_reason(
+    repo: Path, entry: str,
+) -> None:
     _mk_plugin(repo, "agent-daemon", adopts=True, body=_UPDATE_SHAPE.format(comment=""))
     _write_daemon_allow(repo, entry + "\n")
     assert any("daemon-spawn.allow:1: expected" in p for p in guard.verify())
 
-def test_a_daemon_baseline_entry_covers_exactly_one_launch(repo):
+def test_a_daemon_baseline_entry_covers_exactly_one_launch(repo: Path) -> None:
     body = (
         "import subprocess\nfrom agent_procutil import detached_kwargs\n"
         "def start():\n    subprocess.Popen(['a'], **detached_kwargs())\n"
@@ -768,12 +805,12 @@ def test_a_daemon_baseline_entry_covers_exactly_one_launch(repo):
      "class Box:\n    from subprocess import Popen as P\n"
      "def run(P):\n    return P(['x'], **detached_kwargs())\n"),
 ], ids=["sibling-function-import", "class-body-import"])
-def test_local_subprocess_aliases_do_not_leak_to_other_scopes(repo, body):
+def test_local_subprocess_aliases_do_not_leak_to_other_scopes(repo: Path, body: str) -> None:
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     assert _daemon_problems(guard.verify()) == []
 
 
-def test_enclosing_function_alias_reaches_a_nested_function(repo):
+def test_enclosing_function_alias_reaches_a_nested_function(repo: Path) -> None:
     _mk_plugin(
         repo, "agent-daemon", adopts=True,
         body=("from agent_procutil import detached_kwargs\ndef outer():\n"
@@ -783,7 +820,7 @@ def test_enclosing_function_alias_reaches_a_nested_function(repo):
     problems = _daemon_problems(guard.verify())
     assert len(problems) == 1 and "outer.inner" in problems[0]
 
-def test_inline_allowance_never_consumes_a_baseline_entry(repo):
+def test_inline_allowance_never_consumes_a_baseline_entry(repo: Path) -> None:
     one_shot = "    subprocess.Popen(['waiter'], **detached_kwargs())  # daemon-spawn: allow waiter\n"
     resident = "    subprocess.Popen(['svc'], **detached_kwargs())\n"
     head = "import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
@@ -799,7 +836,7 @@ def test_inline_allowance_never_consumes_a_baseline_entry(repo):
     assert len(problems) == 1 and "stale entry" in problems[0]
 
 
-def test_two_launches_on_one_line_need_two_baseline_entries(repo):
+def test_two_launches_on_one_line_need_two_baseline_entries(repo: Path) -> None:
     _mk_plugin(
         repo, "agent-daemon", adopts=True,
         body=("import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
@@ -839,7 +876,9 @@ def _installer_problems(problems: list[str]) -> list[str]:
     "Start-Process -WindowStyle Hidden conhost -ArgumentList $a",
     "$p = Start-Process -ArgumentList $a -FilePath $conhost -PassThru",
 ])
-def test_installer_conhost_start_process_is_reported(repo, rel, statement):
+def test_installer_conhost_start_process_is_reported(
+    repo: Path, rel: str, statement: str,
+) -> None:
     _write_installer(repo, rel, "function Start-It {\n    " + statement + "\n}\n")
     problems = _installer_problems(guard.verify())
     assert len(problems) == 1
@@ -866,12 +905,12 @@ def test_installer_conhost_start_process_is_reported(repo, rel, statement):
     "Start-Process -FilePath $conhostLike -ArgumentList $a\n",
     "Start-ScheduledTask -TaskName conhost\n",
 ])
-def test_installer_rule_ignores_allowed_and_non_launch_lines(repo, text):
+def test_installer_rule_ignores_allowed_and_non_launch_lines(repo: Path, text: str) -> None:
     _write_installer(repo, "plugins/agent-x/scripts/install.ps1", text)
     assert _installer_problems(guard.verify()) == []
 
 
-def test_installer_rule_needs_a_reason_and_an_adjacent_marker(repo):
+def test_installer_rule_needs_a_reason_and_an_adjacent_marker(repo: Path) -> None:
     _write_installer(
         repo, "plugins/agent-x/scripts/install.ps1",
         "# daemon-spawn: allow\nStart-Process conhost.exe\n"
@@ -881,7 +920,7 @@ def test_installer_rule_needs_a_reason_and_an_adjacent_marker(repo):
     assert [p.split(":", 2)[1] for p in problems] == ["2", "5"]
 
 
-def test_installer_rule_scope_excludes_non_installer_scripts(repo):
+def test_installer_rule_scope_excludes_non_installer_scripts(repo: Path) -> None:
     _write_installer(
         repo, "plugins/agent-x/scripts/bootstrap-check.ps1",
         "Start-Process -FilePath 'conhost.exe' -ArgumentList $a\n",
