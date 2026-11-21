@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude anchor checkouts from automatic intent capture and replay.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

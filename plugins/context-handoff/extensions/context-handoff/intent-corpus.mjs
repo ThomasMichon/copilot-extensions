@@ -41,7 +41,8 @@ function scopeFor(cwd) {
       const pointer = lstatSync(git).isFile()
         ? readFileSync(git, "utf8").match(/^gitdir:\s*(.+)\s*$/u)?.[1] : null;
       const metadata = realpathSync(pointer ? resolve(path, pointer) : git);
-      return { root: path, incarnation: `${metadata}:${lstatSync(metadata).birthtimeMs}` };
+      return { root: path, incarnation: `${metadata}:${lstatSync(metadata).birthtimeMs}`,
+        isAnchor: !existsSync(join(metadata, "commondir")) };
     }
     const parent = dirname(path);
     if (parent === path) break;
@@ -91,7 +92,8 @@ function commit(path, text) {
 
 export class IntentCorpus {
   constructor(cwd, { storageRoot = join(homedir(), ".copilot", "context-handoff", "intent"), scope } = {}) {
-    const identity = scope ?? scopeFor(cwd);
+    const { isAnchor = false, ...identity } = scope ?? scopeFor(cwd);
+    this.isAnchor = isAnchor;
     this.storageRoot = storageRoot;
     this.home = join(storageRoot, digest(JSON.stringify(identity)));
   }
@@ -100,6 +102,7 @@ export class IntentCorpus {
     if (!input.sessionId || !input.eventId || typeof input.text !== "string") {
       throw new Error("intent-event-identity-required");
     }
+    if (this.isAnchor) return null;
     const identity = digest(JSON.stringify([input.sessionId, input.eventId]));
     const records = join(this.home, "records");
     directory(this.storageRoot);
@@ -118,6 +121,7 @@ export class IntentCorpus {
   }
 
   snapshot() {
+    if (this.isAnchor) return null;
     const records = join(this.home, "records");
     if (existsSync(this.home)) checkDirectory(this.home);
     if (!existsSync(records)) return null;
