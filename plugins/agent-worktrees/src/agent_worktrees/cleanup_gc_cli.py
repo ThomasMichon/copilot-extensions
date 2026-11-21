@@ -16,9 +16,11 @@ from . import finalize as fin, finalize_local, git_ops, output, prune, reap_cli,
 from . import session_lease
 from . import claimant as claimant_mod
 from . import config as cfg
-from .closure_descriptor import assemble_closure_descriptor
+from .cleanup_blockers import (
+    _closure_blockers as _closure_blockers,
+    _enrich_reason_with_blockers as _enrich_reason_with_blockers,
+)
 from .retirement_safety import retirement_blocker
-from .tracking_claims import effective_open_follow_up_count
 
 if TYPE_CHECKING:
     from .finalize_lock import FinalizeLock
@@ -145,52 +147,6 @@ def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
     if disp.bucket in _CLEANUP_PER_ITEM_BUCKETS:
         return disp.reason
     return ""
-
-
-def _closure_blockers(
-    rec: tracking.WorktreeRecord,
-    info: git_ops.WorktreeStateInfo,
-    disp: prune.CleanupDisposition,
-    *,
-    turn_count: int = 0,
-) -> list[dict[str, Any]]:
-    """The closure descriptor's full ``blockers`` list for ``rec``/``info``/
-    ``disp`` (worktree-finality-and-obligations Phase 4) -- REPORTING only,
-    never a decision input; cleanup/GC's actual cleanable/not gate stays
-    exactly ``disp.cleanable`` (see the Plan bullet's own note on why a full
-    switch to the descriptor's ``action_disposition`` was deferred: it
-    degrades "safe" to "blocked" whenever evidence isn't a fresh fetch,
-    which would newly block cleanups this revalidation path -- no-fetch by
-    design -- has always allowed).
-
-    Unlike ``disp.reason`` (only the single FIRST blocking condition
-    ``cleanup_disposition`` short-circuited on), ``blockers`` independently
-    names every concurrently-true one -- e.g. a worktree that is both
-    held-claims AND has open follow-ups reports both, not just whichever
-    check ran first. ``evidence_mode``/``repo_fetch_fresh`` are fixed,
-    conservative placeholders: this helper only ever reads the returned
-    ``blockers`` field, which does not depend on either.
-    """
-    held_claims = sum(1 for c in rec.resources if c.is_live)
-    open_follow_ups = effective_open_follow_up_count(rec)
-    descriptor = assemble_closure_descriptor(
-        rec, info, disp,
-        held_claims=held_claims, open_follow_ups=open_follow_ups,
-        evidence_mode="cached", turn_count=turn_count,
-        cross_machine_claims=prune.cross_machine_claim_count(rec),
-    )
-    return descriptor.blockers
-
-
-def _enrich_reason_with_blockers(reason: str, blockers: list[dict[str, Any]]) -> str:
-    """Append every blocker code+count beyond the single one already named in
-    ``reason``, when :func:`_closure_blockers` found more than one
-    concurrently-true blocker -- a no-op (returns ``reason`` unchanged) when
-    there are 0 or 1, since the existing text already says everything."""
-    if len(blockers) <= 1:
-        return reason
-    parts = [f"{b['code']}\u00d7{b['count']}" for b in blockers]
-    return f"{reason} \u00b7 blockers: {', '.join(parts)}"
 
 
 @dataclasses.dataclass
@@ -350,17 +306,8 @@ def _revalidate_cleanup_safety(
                     False, "mux presence is unknown; cleanup deferred", "mux-unknown",
                 )
             fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
-            # An open pane keeps the checkout live unless the shared lease
-            # predicate -- the same one the pre-lock scan applied -- proves
-            # every session lease on this finalized latch expired.
-            if sessions.mux_session_name(latest.worktree_id) in mux and (
-                not latest.worktree_path
-                or sessions._normalize_path(latest.worktree_path) in active_paths
-                or not session_lease.finalized_lease_released(
-                    latest,
-                    session_lease.observed_sessions(
-                        session_ctx.active_sessions, latest.worktree_path),
-                )
+            if sessions.mux_session_name(latest.worktree_id) in mux and session_lease.pane_holds_checkout(
+                latest, active_paths, session_ctx.active_sessions,
             ):
                 return RevalidationResult(
                     False, "worktree became active since the initial scan", "active",

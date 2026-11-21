@@ -245,3 +245,25 @@ def finalized_lease_released(
         and _latched(record)
         and idle_finalized(record, session_ids, now=now)
     )
+
+
+def pane_holds_checkout(
+    record: tracking.WorktreeRecord,
+    active_paths: set[str],
+    active_sessions: Mapping[str, Iterable[str]],
+) -> bool:
+    """Whether an open mux pane still keeps ``record``'s checkout live.
+
+    It does unless the shared :func:`finalized_lease_released` predicate --
+    the same one the pre-lock scan applied -- proves every session lease on
+    this finalized latch expired.
+    """
+    from . import sessions
+
+    if not record.worktree_path:
+        return True
+    if sessions._normalize_path(record.worktree_path) in active_paths:
+        return True
+    return not finalized_lease_released(
+        record, observed_sessions(active_sessions, record.worktree_path),
+    )
