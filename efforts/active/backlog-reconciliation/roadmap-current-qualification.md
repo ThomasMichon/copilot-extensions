@@ -25,6 +25,19 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 selected current handoff-atomicity contribution
+
+The [bounded handoff-atomicity proposal](roadmap-selected-handoff-atomicity.md)
+reads the complete current #4619 contract before source: accepted OA/OAV and
+OS3/OS4/OSV2 lanes are credited, not missing implementation. Its qualified
+core, actual note/cancel CLI and lifecycle-writer trace retains the separate
+BOTH-store arm boundary after successful final validation, without claiming
+a live rearm or cancelled-to-pending transition. Original owners, independent
+remaining custody lanes and finite exits survive. The
+[journal](journal/2026/11.21-current-handoff-atomicity.md) records actual
+#13922 delivery and separate #13851/#13909/#13902/#13893 source descriptions,
+none a new whole-program acceptance or fixture-debt closure.
+
 ## 2026-11-21 selected current claim-custody contribution
 
 The [bounded claim-custody proposal](roadmap-selected-claim-custody.md)

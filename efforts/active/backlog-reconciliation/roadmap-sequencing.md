@@ -95,6 +95,13 @@ work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
 
+The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
+removes accepted OA/OAV and task-closeout source lanes from #4619's missing-work
+selection while retaining their actual evidence tiers. Its BOTH-store
+atomic-arm, CodeSpace OR settlement, retained-job and live-use lanes are
+independently progressable under their own owners. No new hard edge connects
+that selected arm boundary to #5842 or whole resource/installer programs.
+
 The [current claim-custody contribution](roadmap-selected-claim-custody.md)
 retains #5842's P1 ordinary transaction residual after its actual changed
 source was qualified and read. Operator direction, actual consumer readiness

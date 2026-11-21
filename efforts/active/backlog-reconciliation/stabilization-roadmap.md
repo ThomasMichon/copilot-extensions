@@ -53,6 +53,14 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
+credits #4619's accepted source lanes before selecting the independently
+unfinished BOTH-store boundary. Actual qualified call/lock scopes, current
+vision, retained P1/owners and finite competing-outcome exits support it,
+not a new runtime experiment. Its
+[journal](journal/2026/11.21-current-handoff-atomicity.md) records actual
+#13922 delivery and four distinct source descriptions with original limits.
+
 The [current claim-custody contribution](roadmap-selected-claim-custody.md)
 adds a qualified #5842 ordinary acceptance/finalization delta, retained P1
 rationale, independent gates and original owners. It credits stronger
