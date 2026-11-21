@@ -759,6 +759,7 @@ def render(
         ),
     }
     values.update({
+        "POSIX_SHELL_OPTIONS": "eu",
         "UV_RUNTIME_PRELUDE_POSIX": "",
         "UV_RUNTIME_PRELUDE_POWERSHELL": "",
         "UV_RUNTIME_FINALLY_POWERSHELL": "",
@@ -775,6 +776,7 @@ def render(
             "--managed-python --python"
         )
         values.update({
+            "POSIX_SHELL_OPTIONS": "u",
             "RUNTIME_PYTHON_POSIX": f'"$_uv" {uv_arguments} "$AGENT_RT_PY" python',
             "CACHE_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $Python python",
             "RUNTIME_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $_py python",

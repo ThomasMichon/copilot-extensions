@@ -516,7 +516,7 @@ deploy_binstub() {
 # (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
 # version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
 # a PATH python. Missing setup is reported without changing the installation.
-set -eu
+set -u
 export PYTHONUTF8=1
 unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC
 _uv="$(command -v uv 2>/dev/null || true)"

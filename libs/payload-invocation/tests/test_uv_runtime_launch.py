@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shlex
 import shutil
 import subprocess
 
@@ -43,16 +42,19 @@ def _same_host_wrapper(shim: Path) -> str:
     )
 
 
-@pytest.mark.parametrize("kind", ["sh", "ps1", "installed-ps1", "winps", "installed-winps"])
+@pytest.mark.parametrize("kind", [
+    "sh", "installed-sh", "ps1", "installed-ps1", "winps", "installed-winps",
+])
 @pytest.mark.parametrize("directory_hint", ["UV_WORKING_DIR", "UV_WORKING_DIRECTORY"])
 def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
     tmp_path: Path, kind: str, directory_hint: str,
 ) -> None:
-    if kind == "sh" and os.name == "nt":
+    posix = kind in ("sh", "installed-sh")
+    if posix and os.name == "nt":
         pytest.skip("POSIX shell execution is qualified on POSIX")
     if "winps" in kind and os.name != "nt":
         pytest.skip("Windows PowerShell execution is qualified on Windows")
-    host = shutil.which("sh" if kind == "sh" else "powershell.exe" if "winps" in kind else "pwsh")
+    host = shutil.which("sh" if posix else "powershell.exe" if "winps" in kind else "pwsh")
     uv = shutil.which("uv")
     if not host or not uv:
         pytest.skip("This native control requires the addressed shell and uv")
@@ -63,7 +65,8 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
     (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}')
     root = tmp_path / "home"
     root.mkdir()
-    runtime = root / ".agent-example/versions/selected"
+    runtime = root / (".budget-guidance" if kind.startswith("installed-") else ".agent-example")
+    runtime = runtime / "versions/selected"
     environment = {**os.environ, "UV_PYTHON_DOWNLOADS": "never"}
     for key in ("UV_PYTHON", "UV_NO_MANAGED_PYTHON", "UV_MANAGED_PYTHON",
                 "UV_PYTHON_PREFERENCE", "VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONHOME", "PYTHONPATH"):
@@ -94,14 +97,23 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         "import os\nraise SystemExit(int(os.environ['FIXTURE_EXIT']))\n"
     )
     scripts = manifest.parent / "scripts"
-    (scripts / "resolve-runtime.sh").write_text("AGENT_RT_PY=" + shlex.quote(str(python)) + "\n")
+    resolver = Path(__file__).resolve().parents[3] / "plugins/budget-guidance/scripts/resolve-runtime.sh"
+    shutil.copyfile(resolver, scripts / "resolve-runtime.sh")
+    selected_root = runtime.parents[1]
+    (runtime / ".install-complete.json").write_text(json.dumps({
+        "version": "selected", "completed_at": "fixture", "pid": 1,
+    }))
+    (selected_root / "current-version").write_text("incomplete\n")
+    (selected_root / "last-known-good").write_text("selected\n")
     (scripts / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n",
     )
     assert generator.process_manifest(manifest, check=False) == []
     tools = tmp_path / "without-python"
     tools.mkdir()
-    for name in (("uv",) if os.name == "nt" else ("uv", "dirname", "date", "sed", "mkdir")):
+    for name in (("uv",) if os.name == "nt" else (
+        "uv", "dirname", "date", "sed", "mkdir", "tr", "awk", "grep", "sort", "cut",
+    )):
         source = shutil.which(name)
         assert source
         shutil.copy2(source, tools / Path(source).name)
@@ -119,19 +131,26 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
     (tmp_path / "caller-config.json").write_text("caller configuration")
     (foreign / "caller-config.json").write_text("unrelated configuration")
     env[directory_hint] = str(foreign)
-    shim = manifest.parent / "bin" / ("agent-example" if kind == "sh" else "agent-example.ps1")
+    shim = manifest.parent / "bin" / ("agent-example" if posix else "agent-example.ps1")
     if kind.startswith("installed-"):
-        shim = tmp_path / "installed.ps1"
-        shim.write_text(_installed_powershell_shim(), encoding="utf-8")
+        shim = tmp_path / ("installed.sh" if posix else "installed.ps1")
+        content = _installed_powershell_shim()
+        if posix:
+            installer = resolver.with_name("install.sh").read_text(encoding="utf-8")
+            content = installer.split("cat > \"$STUB\" << 'STUBEOF'\n", 1)[1].split(
+                "\nSTUBEOF", 1,
+            )[0]
+        shim.write_text(content, encoding="utf-8")
         installed = root / ".budget-guidance/bin"
         installed.mkdir(parents=True)
-        shutil.copyfile(scripts / "resolve-runtime.ps1", installed / "resolve-runtime.ps1")
-    if kind != "sh":
+        name = "resolve-runtime.sh" if posix else "resolve-runtime.ps1"
+        shutil.copyfile(scripts / name, installed / name)
+    if not posix:
         wrapper = tmp_path / "shadowed-uv.ps1"
         wrapper.write_text(_same_host_wrapper(shim), encoding="utf-8")
         shim = wrapper
     arguments = ["", "space 'quoted' \"double\" \\slash &|<>()$?;", "λ", "line1\nline2"]
-    command = [host, str(shim)] if kind == "sh" else [host, "-NoProfile", "-File", str(shim)]
+    command = [host, str(shim)] if posix else [host, "-NoProfile", "-File", str(shim)]
     for code in (0, 37, None):
         run_env = {**env, "FIXTURE_EXIT": str(code or 0)}
         if code is None:
