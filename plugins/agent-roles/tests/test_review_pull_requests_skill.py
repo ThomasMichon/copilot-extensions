@@ -446,6 +446,36 @@ def test_loop_discipline_stops_repetition_and_hands_back_explicitly() -> None:
         assert requirement in communication, requirement
 
 
+def test_capacity_and_ambiguous_coverage_remain_honest_and_policy_bound() -> None:
+    loops = " ".join(_read(
+        SKILL / "references" / "throughput-and-loops.md"
+    ).split())
+    mode = " ".join(_read(
+        SKILL / "references" / "maintainer-mode.md"
+    ).split())
+    for requirement in (
+        "minimum available lanes",
+        "available, running and shortfall",
+        "not a count of retained handles, configured slots or blocked admissions",
+        "cold `review_actions` list is only one intake signal",
+        "without waiting for another cold action",
+        "retain the minimum and report the shortage",
+    ):
+        assert requirement in loops, requirement
+    for requirement in (
+        "not a reason to defer",
+        "another approval is permissible when the review need is real",
+        "not a demand to force a positive verdict",
+        "source assessment, individual native opinion and aggregate `reviewDecision` distinct",
+        "not an approving CODEOWNER vote",
+        "do not count the dismissed native vote as live coverage",
+        "Do not infer completion or replay an uncertain write",
+    ):
+        assert requirement in mode, requirement
+    for state in ("COMMENTED", "APPROVED", "CHANGES_REQUESTED", "DISMISSED", "null"):
+        assert f"| {state}" in mode
+
+
 def test_effect_ids_and_receipt_timing_are_not_fabricated_prerequisites() -> None:
     text = _read(SKILL / "SKILL.md")
     assert "provider-native review/comment effect IDs as returned" in text
