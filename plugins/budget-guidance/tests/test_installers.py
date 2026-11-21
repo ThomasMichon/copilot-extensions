@@ -793,6 +793,52 @@ def test_command_path_publication_does_not_confuse_bootstrap_with_persistence(
     assert output["process"] == local_bin + ";process-before;process-after"
 
 
+@pytest.mark.skipif(PWSH is None, reason="PowerShell host unavailable")
+def test_closed_wheel_uv_off_path_refuses_before_construction(tmp_path: Path) -> None:
+    assert PWSH
+    uv = shutil.which("uv")
+    assert uv, "The closed-wheel command-prerequisite control requires uv"
+    payload = tmp_path / "budget-guidance"
+    _copy_payload(payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / ".budget-guidance"
+    root.mkdir()
+    selected = root / "current-version"
+    selected.write_text("retained-generation")
+    configuration = root / "config.yaml"
+    configuration.write_text("retained: true\n")
+    tools = tmp_path / "command-tools"
+    tools.mkdir()
+    if os.name != "nt":
+        mkdir = shutil.which("mkdir")
+        assert mkdir
+        shutil.copy2(mkdir, tools / "mkdir")
+    off_path = tmp_path / "construction-tools"
+    off_path.mkdir()
+    wheel_uv = off_path / Path(uv).name
+    shutil.copy2(uv, wheel_uv)
+    profile = tmp_path / "profile.json"
+    profile.write_text("{}")
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(payload / "scripts/install.ps1"),
+         "-Action", "update", "-InstallDir", str(root), "-WheelProfile", str(profile),
+         "-WheelDirectory", str(tmp_path), "-WheelPython", sys.executable,
+         "-WheelUv", str(wheel_uv)],
+        cwd=home, capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW,
+        env={**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+             "PATH": str(tools), "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
+             "UV_OFFLINE": "1", "UV_PYTHON_DOWNLOADS": "never"},
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Closed-wheel command publication requires prepared uv" in result.stdout + result.stderr
+    assert selected.read_text() == "retained-generation"
+    assert configuration.read_text() == "retained: true\n"
+    assert not (root / "versions").exists()
+    assert not (root / ".install.lock").exists()
+    assert not (home / ".local/bin").exists()
+
+
 def test_windows_compatibility_wrapper_does_not_provision_on_launch() -> None:
     wrapper = _compatibility_powershell_wrapper()
     assert "runtime is not prepared" in wrapper

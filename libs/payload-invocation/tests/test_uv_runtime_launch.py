@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -57,7 +58,7 @@ def _same_host_wrapper(shim: Path, *, legacy: bool = False) -> str:
 ])
 @pytest.mark.parametrize("directory_hint", ["UV_WORKING_DIR", "UV_WORKING_DIRECTORY"])
 def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
-    tmp_path: Path, kind: str, directory_hint: str,
+    tmp_path: Path, kind: str, directory_hint: str, request: pytest.FixtureRequest,
 ) -> None:
     posix = kind in ("sh", "installed-sh")
     if posix and os.name == "nt":
@@ -172,17 +173,21 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         }
         if code is None:
             run_env.update(UV_PYTHON_PREFERENCE="", UV_ISOLATED="", VIRTUAL_ENV="")
+        started = time.monotonic()
         result = subprocess.run(
             [*command, *(arguments if posix else [])], input="input\nλ\n", capture_output=True, text=True,
             encoding="utf-8", env=run_env, cwd=tmp_path, timeout=30,
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
-        expected = 2 if code is None and "winps" in kind else code or 0
-        assert result.returncode == expected, result.stdout + result.stderr
-        if expected == 2:
+        request.node.user_properties.append((
+            "launch_" + ("empty" if code is None else "cold" if code == 0 else "warm") + "_seconds",
+            time.monotonic() - started,
+        ))
+        if code is None and "winps" in kind and result.returncode == 2:
             assert "--python-preference" in result.stderr
             assert not result.stdout
             continue
+        assert result.returncode == (code or 0), result.stdout + result.stderr
         assert result.stderr.strip() == "application diagnostic"
         output = json.loads(result.stdout)
         assert Path(output["python"]).absolute() == python.absolute()

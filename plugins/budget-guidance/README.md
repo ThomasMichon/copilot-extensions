@@ -19,6 +19,10 @@ shell-native prerequisite route in the user's command directory; no Python
 command is needed to acquire it.
 Windows setup checks persisted User/Machine command discovery independently
 of uv's temporary process PATH prefix, preserving unrelated entries.
+Closed-wheel setup requires that command prerequisite to be prepared already;
+an off-PATH `-WheelUv` is construction-only and cannot silently publish a
+command that lacks uv. Missing command prerequisites refuse before construction,
+without acquiring tools or changing the selected runtime.
 
 The payload-local and installed command binstubs use PATH uv with the exact
 completed environment selected by the existing runtime resolver. Commands do

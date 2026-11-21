@@ -62,16 +62,16 @@ jobs:
           python tools/run-plugin-tests.py budget-guidance
           --test-file tests/test_installers.py
           --junit-dir qualification-evidence/budget-setup
-          --allow-explicit-tiers -k "native_failed_install or native_retry or command_path_publication"
+          --allow-explicit-tiers -k "native_failed_install or native_retry or command_path_publication or closed_wheel_uv"
       - name: Require actual command and installer controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
           for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':8};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 prepared-command and eight native installer controls passed without skips')"
+          print('29 prepared-command and nine native installer controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
