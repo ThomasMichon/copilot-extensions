@@ -833,6 +833,8 @@ Existing checked rows below retain only their historical scope.
   Manager-owned dependency/downstream-installable discovery.
   The [bounded native consumer qualification](manager-worktrees-native-consumer.md)
   tests this real path without claiming whole-inventory or productive adoption.
+  #12708 merged its retained legacy fixture source only; exact-source native
+  acceptance and the new-footprint reference remain open.
 - [ ] W2: Integrate stage/readiness and activation through existing app adapters
   for the declared installed inventory. Retain the selected activation strategy;
   qualify coordinated toolset selection only where that strategy is used.
@@ -1116,6 +1118,10 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+- [2026-11-21 - Retained legacy fixture source merged; native acceptance open](manager-worktrees-native-consumer.md#2026-11-21---fixture-source-merged-native-acceptance-remains-open).
+  #12708 closes its source extension, not W1/W2, P4bD, lifetime qualification or
+  installed adoption. The complete parent Goal remains Active.
 
 - 2026-11-18: [Atomic bootstrap-write headroom](journal/2026/11.17%20manager-footprint-consumer.md#merged-atomic-write-prerequisite)
   merged in #13182 after exact-head approval, required Linux unit/coverage CI
