@@ -31,7 +31,14 @@ helpers = runpy.run_path(str(selected))
 helpers["select_bytes"](
     [selected], "runtime build helper", optional_paths=[included] if canonical else [],
 )
+resources = helpers["application_resources"](project, "worktree_manager")
+policy_prefix = "_runtime_assets/scripts/runtime-source-tools/fleet_role_policy/"
+for filename in ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py"):
+    key = policy_prefix + filename
+    if key not in resources:
+        # Development builds have not gone through release asset materialization.
+        resources[key] = project.parent / "fleet-manager" / "src" / "fleet_manager" / filename
 setup(cmdclass=helpers["commands"](
     project, "worktree_manager", canonical,
-    companion_resources=helpers["application_resources"](project, "worktree_manager"),
+    companion_resources=resources,
 ))

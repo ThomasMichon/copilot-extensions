@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from importlib import import_module
 import json
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,32 @@ class HarnessPolicy:
     machines: tuple[str, ...]
     index_role: Literal["host", "client", "unconfigured"] | None = None
     vault_state: Literal["configured", "configuration-empty"] | None = None
+    fleet_config: Path | None = None
+    fleet_target: str | None = None
+
+
+def fleet_service_roles(path: Path, target: str) -> tuple[str, ...]:
+    if not path.is_absolute() or not target:
+        raise ValueError("Fleet policy requires an addressed configuration and target machine")
+    runtime_source_repository._ordinary(path)
+    try:
+        owner = import_module("worktree_manager._runtime_assets.scripts.runtime-source-tools.fleet_role_policy.target_policy")
+        with path.open("rb") as stream:
+            raw = stream.read(owner.MAX_BYTES + 1)
+        result = owner.service_roles(raw, target)
+    except (ImportError, OSError, ValueError) as error:
+        raise ValueError("Fleet target policy could not be resolved") from error
+    if not isinstance(result, tuple) or not all(isinstance(role, str) for role in result):
+        raise ValueError("Invalid Fleet target policy observation")
+    return result
+
+
+def _requires_fleet(policy: HarnessPolicy) -> bool:
+    if policy.fleet_config is None and policy.fleet_target is None:
+        return False
+    if policy.fleet_config is None or not policy.fleet_target or policy.fleet_target not in policy.machines:
+        raise ValueError("Fleet policy requires an addressed configuration and target machine")
+    return bool(fleet_service_roles(policy.fleet_config, policy.fleet_target))
 
 
 def registrations(root: Path) -> tuple[str, dict[str, Path]]:
@@ -73,6 +100,7 @@ def registered_plan(
                 anchor, suite.marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
                 index_role=policy.index_role, vault_state=policy.vault_state,
             )
+            fleet = _requires_fleet(policy)
         except (ValueError, OSError) as exc:
             raise ValueError(f"Harness {name}, selected commit {suite.commit}: {exc}") from exc
         if not result["complete"]:
@@ -82,6 +110,8 @@ def registered_plan(
             raise ValueError(f"Invalid application roster for {name}")
         for app in required:
             wanted.setdefault(app, []).append(name)
+        if fleet:
+            wanted.setdefault("fleet-manager", []).append(name)
     apps_root = root / "apps"
     inventory = {app.name for app in application_footprints.plan(suite.footprint, apps_root)}
     for app, harnesses in wanted.items():

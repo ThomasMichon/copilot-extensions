@@ -39,6 +39,41 @@ def fingerprint(root: Path) -> dict[str, str]:
             for p in root.rglob("*") if p.is_file()}
 
 
+def test_standalone_fleet_is_selected_by_service_binding_target(tmp_path: Path) -> None:
+    root, anchor, knowledge = tmp_path / "install", tmp_path / "harness", tmp_path / "knowledge"
+    write(root / "registry/repos.yaml", {"repos": {"h": {harness_state._platform_key(): str(anchor)}}})
+    write(root / "registry/projects.yaml", {"projects": {"h": {}}})
+    write(root / "registry/footprint.json", {"schema": "copilot-extensions.suite-footprint", "version": 1,
+                                            "root": str(root), "default_project": "h"})
+    write(anchor / ".github/copilot/settings.json", {"enabledPlugins": {}})
+    catalog = prepared(tmp_path / "suite", "1.0", OLD, {"worktree-manager", "fleet-manager"})
+    write(catalog.marketplace / ".github/plugin/marketplace.json", {"name": "copilot-extensions", "plugins": []})
+    config = knowledge / ".copilot-extensions/fleet-manager/config.json"
+    write(config, {"schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "r1",
+                   "capacity": {"machine_limit": 2, "execution_hosts": 0},
+                   "roles": {"controller": {"kind": "service", "required": True, "available": True}},
+                   "extensions": {"role_bindings": {
+                       "schema": "fleet-manager.role-bindings", "version": 1,
+                       "providers": {"provider": {"implementation": "komodo", "instance_ref": "primary",
+                                                 "target": "other", "configuration_ref": "cfg", "bootstrap_ref": "boot"}},
+                       "bindings": {"controller": {"implementation": "fleet-manager.gateway", "provider": "provider",
+                                                   "target": "selected", "resource": "gateway", "artifact_ref": "app",
+                                                   "configuration_ref": "cfg"}}}}})
+
+    def targets(target: str) -> set[str]:
+        return {app.name for app in suite.registered_plan(
+            root, resolve=lambda *_: catalog,
+            observe=lambda *_: suite.HarnessPolicy((), (target,), fleet_config=config, fleet_target=target),
+        )}
+
+    assert targets("selected") == {"worktree-manager", "fleet-manager"}
+    assert targets("other") == {"worktree-manager"}
+    config.unlink()
+    with pytest.raises(ValueError, match="Fleet"):
+        targets("selected")
+    assert not (root / "apps").exists()
+
+
 @pytest.mark.parametrize("case", ["fresh", "same-source-update", "missing-app", "same-pin", "switch-default", "bare-default"])
 def test_registered_stage_matrix(case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                  capsys: pytest.CaptureFixture[str]) -> None:
