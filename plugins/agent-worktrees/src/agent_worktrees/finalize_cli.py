@@ -809,7 +809,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             reminder_flow = pr_config._profile_for_pr_config(reminder_prcfg)
         # "created" only when a PR was actually opened: a pushed branch with no PR
         # (--no-open, a dry run, or a provider refusal) has nothing to merge yet.
-        opened = bool(result.get("pr_opened"))
+        opened = bool(result.get("pr_opened")) and result.get("pr_identity_verified") is not False
         why_not = ("" if opened or result.get("dry_run") else
                    f"the provider refused: {result['pr_open_error']}" if result.get("pr_open_error") else
                    f"the branch was pushed ({result['pr_open_skipped']})" if result.get("pr_open_skipped") else
@@ -825,7 +825,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         )
         if reminder is not None:
             result["reminder"] = reminder.as_dict()
-        if result.get("pr_opened") and result.get("url"):
+        if opened and result.get("url"):
             result["pr"] = {
                 "ref": result.get("url"),
                 "url": result.get("url"),
@@ -834,6 +834,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             }
         if use_json:
             output._json_output(result)
+        elif result.get("pr_identity_verified") is False:
+            output.warn(f"Unverified PR receipt #{result.get('number')}: {result.get('url', '')}")
+            output.warn("Creation outcome is unknown. Reconcile this receipt before retrying.")
+            if result.get("pr_receipt_tracking_error"):
+                output.warn(str(result["pr_receipt_tracking_error"]))
         elif result.get("success"):
             _warn_publication_labels(result)
             branch = result.get("branch", "")
