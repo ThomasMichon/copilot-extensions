@@ -1631,7 +1631,7 @@ and Chat initializer. The latter is read as fixture data, not imported or
 executed. All original suites and production files remain unchanged.
 
 Positive admission adds 89 nodes, eighteen source hashes and six targets:
-6,254 nodes, 996 sources and 420 targets. All 6,165 current-base nodes, 978 source
+6,254 nodes, 998 sources and 420 targets. All 6,165 current-base nodes, 980 source
 digests and 414 targets remain, with the same profile, 300-second budget and
 all 88 release-helper decision targets. All six adapters pass whole-file strict
 typing on Linux and Windows targets and fatal Ruff checks. Focused audited
@@ -1660,6 +1660,19 @@ its resolution uses the current-base admission plus the owned additions, then
 two-space serialization. Counts, limits and file size remain unchanged.
 Prior-head review and CI do not qualify these new complete packet inputs;
 fresh exact-head review and full required CI remain mandatory.
+
+Another concurrent Dev change updates seven existing source hashes, including
+the imported standalone-consumer helper, and adds two Fleet source inputs
+without changing the original node/target inventories or limits. The second
+backed replay preserves those inputs and all 89 additions. The batch is
+re-observed against that actual dependency: all 89 cases pass with no prohibited
+effects and own-guard call coverage, reading the same twenty repository files.
+No prior complete-packet result is reused as current qualification.
+To avoid repeating source-map whitespace conflicts, final compaction changes
+only the node-list indentation; source-map and other field layout remain as
+on Dev. The manifest is 1,024,599 bytes with identical decoded admission to
+the current-base union. The cap, all 88 helper decisions and the 300-second
+budget remain enforced. This is not a new schema or eligibility exception.
 
 ### November 20 path-gated audit-guard native boundary
 
