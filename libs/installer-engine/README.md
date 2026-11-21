@@ -148,6 +148,10 @@ Qualification resolves the provider in its actual launch directory and captured
 environment, retaining that absolute executable when source retention changes
 the working directory. Provider-version failures remain actionable without
 printing configuration or captured subprocess output.
+Windows wrapper lookup normalizes enclosing PATH-entry quotes, while POSIX
+entries remain literal. Qualification shares the resolver's short-directory
+fallback for overlong Windows working directories. Configuration-disable and
+isolation flags accept the same boolish true spellings as uv.
 The installer passes a valid active venv/Conda site prefix as configuration data
 before isolating interpreter hints; it never executes that environment's Python.
 Discovery runs only for package construction, not completed-slot reuse.

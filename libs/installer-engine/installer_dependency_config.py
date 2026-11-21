@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time as clock
 import types
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
+from collections.abc import Callable, Iterable, Iterator, Mapping, Set
 from contextlib import contextmanager
 from datetime import date, datetime, time
 from pathlib import Path, PureWindowsPath
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         check_compile_projection as check_compile_projection,
         cutoff_arguments as cutoff_arguments,
         cutoff_value as cutoff_value,
+        immutable_install_arguments as immutable_install_arguments,
         merge_config as merge_config,
         package_cutoffs as package_cutoffs,
         resolver_configuration as resolver_configuration,
@@ -167,6 +168,7 @@ if not TYPE_CHECKING:
     check_compile_projection = _arguments.check_compile_projection
     cutoff_arguments = _arguments.cutoff_arguments
     cutoff_value = _arguments.cutoff_value
+    immutable_install_arguments = _arguments.immutable_install_arguments
     merge_config = _arguments.merge_config
     package_cutoffs = _arguments.package_cutoffs
     resolver_configuration = _arguments.resolver_configuration
@@ -193,11 +195,12 @@ def require_system_config_provider(
     if not _WINDOWS:
         uv = _arguments.uv_launch_path(uv, environment, cwd, error_type=error_type)
     elif not Path(uv).is_absolute():
-        uv = _arguments.uv_launch_path(uv, environment, None, error_type=error_type)
+        uv = _arguments.uv_launch_path(uv, environment, None, windows=True, error_type=error_type)
         uv = select_uv_executable(uv, error_type=error_type)
     try:
         result = subprocess.run(
-            [uv, "--version"], env=dict(environment), cwd=cwd, capture_output=True, text=True,
+            [uv, "--version"], env=dict(environment),
+            cwd=_arguments.uv_process_cwd(cwd, windows=_WINDOWS), capture_output=True, text=True,
             timeout=remaining_timeout(deadline, error_type=error_type, cap=30),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if _WINDOWS else 0,
         )
@@ -207,19 +210,6 @@ def require_system_config_provider(
     if result.returncode or version is None or tuple(map(int, version.group(1, 2, 3))) < (0, 11, 16):
         raise error_type("UV_NO_SYSTEM_CONFIG requires UV 0.11.16 or newer")
     return uv
-
-
-def immutable_install_arguments(
-    arguments: Iterable[str], pairs: Sequence[tuple[str, str]], *, error_type: _Error,
-) -> list[str]:
-    if any(option in ("-e", "--editable") for option, _ in pairs):
-        raise error_type("deployed runtimes require non-editable immutable versioned slots")
-    if any(option == "--link-mode" and value != "copy" for option, value in pairs):
-        raise error_type("deployed runtimes require copied installation artifacts")
-    result = list(arguments)
-    if not any(option == "--link-mode" for option, _ in pairs):
-        result.extend(["--link-mode", "copy"])
-    return result
 
 
 _content_path = Path(__file__).with_name("installer_retained_content.py")
@@ -645,7 +635,7 @@ def config_inputs(
     argument_pairs: _Pairs, toml: _Toml, error_type: _Error,
 ) -> list[tuple[Path, bool]]:
     pairs = dict(argument_pairs(arguments))
-    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):
+    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in _TRUE_VALUES:
         return []
     explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
     if explicit:
@@ -656,7 +646,7 @@ def config_inputs(
     no_system = system_flag is not None and system_flag.lower() in _TRUE_VALUES
     candidates = []
     project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
-    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
+    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in _TRUE_VALUES:
         for directory in (project, *project.parents):
             uv = directory / "uv.toml"
             manifest = directory / "pyproject.toml"

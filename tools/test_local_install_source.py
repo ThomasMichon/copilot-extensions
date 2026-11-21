@@ -2738,6 +2738,16 @@ def test_copied_application_qualifies_after_the_prepared_source_is_removed(
 ) -> None:
     if deep_slot and os.name != "nt":
         pytest.skip("long native CreateProcess cwd control is Windows-specific")
+    if deep_slot:
+        version = subprocess.run(
+            [_required_executable("uv"), "--version"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=vars(subprocess)["CREATE_NO_WINDOW"],
+        )
+        match = re.match(r"uv ([0-9]+)\.([0-9]+)\.([0-9]+)", version.stdout)
+        assert version.returncode == 0 and match is not None, version.stdout + version.stderr
+        if tuple(map(int, match.group(1, 2, 3))) < (0, 11, 16):
+            pytest.skip("long-cwd system-config control requires uv 0.11.16 or newer")
     source, snapshot = native_source
     selected = source.select_project(snapshot, "demo-app")
     application = snapshot / selected.project["application"]
@@ -2762,6 +2772,8 @@ def test_copied_application_qualifies_after_the_prepared_source_is_removed(
         UV_PYTHON=sys.executable, UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never",
         HOME=str(home), USERPROFILE=str(home),
     )
+    if deep_slot:
+        environment["UV_NO_SYSTEM_CONFIG"] = "1"
     if os.name == "nt":
         environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
         # A copied launcher keeps fixture cleanup independent of mapped UV

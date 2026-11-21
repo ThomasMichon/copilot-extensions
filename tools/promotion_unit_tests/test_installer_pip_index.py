@@ -352,12 +352,62 @@ def test_system_flag_pins_windows_wrapper_from_captured_path(
         return SimpleNamespace(returncode=0, stdout="uv 0.11.16\n")
 
     monkeypatch.setattr(configuration.subprocess, "run", run)
-    selected = configuration.require_system_config_provider(
-        "uv.cmd", {"UV_NO_SYSTEM_CONFIG": "1", "PATH": str(providers)},
-        cwd=child, error_type=ValueError,
+    for path in (str(providers), f'"{providers}"'):
+        selected = configuration.require_system_config_provider(
+            "uv.cmd", {"UV_NO_SYSTEM_CONFIG": "1", "PATH": path},
+            cwd=child, error_type=ValueError,
+        )
+        assert selected == str(wrapper)
+    assert probes == [[str(wrapper), "--version"]] * 2
+
+
+def test_system_flag_qualifies_from_short_windows_directory(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = reader._dependency_policy()._configuration
+    monkeypatch.setattr(configuration, "_WINDOWS", True)
+    deep = tmp_path / ("deep" * 50) / ("path" * 50)
+    assert len(str(deep)) >= 260
+    uv = str(tmp_path / "uv")
+
+    def run(command: list[str], **options: object) -> SimpleNamespace:
+        assert command == [uv, "--version"]
+        assert options["cwd"] == Path(deep.anchor)
+        return SimpleNamespace(returncode=0, stdout="uv 0.11.16\n")
+
+    monkeypatch.setattr(configuration.subprocess, "run", run)
+    assert configuration.require_system_config_provider(
+        uv, {"UV_NO_SYSTEM_CONFIG": "1"}, cwd=deep, error_type=ValueError,
+    ) == uv
+
+
+@pytest.mark.parametrize("variable", ["UV_NO_CONFIG", "UV_ISOLATED"])
+@pytest.mark.parametrize("value", ["yes", "ON", "t", "Y"])
+def test_boolish_config_flags_preserve_composed_index_precedence(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], variable: str, value: str,
+) -> None:
+    (tmp_path / "uv.toml").write_text(
+        '[[index]]\nurl = "https://disabled.example/simple"\ndefault = true\n',
+        encoding="utf-8",
     )
-    assert selected == str(wrapper)
-    assert probes == [[str(wrapper), "--version"]]
+    system = tmp_path / "system/uv/uv.toml"
+    system.parent.mkdir(parents=True)
+    system.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for key in ("UV_NO_CONFIG", "UV_ISOLATED", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(variable, value)
+    monkeypatch.setenv("PIP_INDEX_URL", "https://selected.example/simple")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "user"))
+    monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "system"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "user"))
+    monkeypatch.setenv("SYSTEMDRIVE", str(tmp_path / "drive"))
+    assert reader.main() == 0
+    output = capsys.readouterr()
+    assert output.out == "https://selected.example/simple\n"
+    assert output.err == ""
 
 
 def test_system_uv_flag_rejects_invalid_values(reader: ModuleType, tmp_path: Path) -> None:
