@@ -607,7 +607,7 @@ def test_gateway_native_budgets_reach_the_owned_producer_and_native_consumer(
         ),
     })
     windows_native = platform == "nt" and not preparation_only
-    assert [limit.wall_seconds for limit in observed] == [240 if windows_native else 180]
+    assert [limit.wall_seconds for limit in observed] == [300 if windows_native else 180]
     if preparation_only:
         assert not receipt.exists()
     else:

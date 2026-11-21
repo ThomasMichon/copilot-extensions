@@ -2051,7 +2051,7 @@ capability. Each further dependent normal-setup job requires both its platform's
 artifact controls and explicit continuity case to succeed, prepares the declared
 engine/Manager dependencies, and runs `test_ssh_setup.py` and the whole
 `test_repository_ssh_setup_installed.py` sequence. Linux retains its 180-second
-phase bounds and six-minute job; Windows normal setup uses 240-second Source
+phase bounds and six-minute job; Windows normal setup uses 300-second Source
 preparation, a 300-second lifecycle and a 12-minute job. That native sequence
 builds the engine wheel with its packaged Source API and drives the actual
 Manager/engine handoff into synthetic
@@ -2135,7 +2135,7 @@ continuity SSH lifecycle on each platform, rather than after artifact constructi
 Normal setup still depends on both continuity and artifacts, so it cannot start
 until all the same prerequisite packets pass. This balances the same nine-job
 portfolio without changing selectors, cases or assertions.
-Windows normal setup has a 12-minute job bound, 240-second Source preparation
+Windows normal setup has a 12-minute job bound, 300-second Source preparation
 and 300-second installed lifecycle. Linux normal setup and both preparation-only
 lanes retain their six-minute jobs and 180-second phase bounds. The other
 qualification jobs, 25-minute role witness and 90/60-second engine/Manager calls

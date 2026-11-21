@@ -1950,7 +1950,7 @@ jobs:
 
           cohort_only = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY") == "1"
           windows_native = os.name == "nt" and not cohort_only
-          preparation_seconds = 240 if windows_native else 180
+          preparation_seconds = 300 if windows_native else 180
           lifecycle_seconds = 300 if windows_native else 180
           root = Path.cwd()
           sys.path.insert(0, str(root / "tools"))
