@@ -1094,7 +1094,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13978 merges at `aa78f9f22d9f8ea8ac485e066e1b8998735382bb` after
   exact-head Copilot approval and complete required Linux CI with all 7,109
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land twenty-nine original source-compile refusal cases through
+- [x] Qualify and land twenty-nine original source-compile refusal cases through
   six exact unchanged functions. Preserve effective editable-graph, omission,
   unsafe/disabled/context-only mapping and inactive local/registry ambiguity
   witnesses, all assertions, parameter identities and original callbacks.
@@ -1103,6 +1103,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
   compact/flat-v1 contracts and the 300-second bound, strict typing,
   current-head review and complete Linux source CI. Add no native substitute;
   broader parent acceptance remains open.
+  #13979 merges at `eb71944ea62770438eebb37a0b8491d7758a7ade` after
+  exact-head Copilot approval and complete required Linux CI with all 7,138
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land ten original bundled-artifact exception cases through
+  the exact unchanged function and canonical/Manager fixture, plus one focused
+  hash-bound-data regression. Admit only the explicit checked-in wheel as data,
+  never executable test source or a coverage target; retain its full hash and
+  both actual policy owners. Preserve all original assertions/parameters,
+  preceding nodes, unrelated hashes/targets, helper decisions, compact/flat-v1
+  identity, effect refusals and the 300-second bound. Require closed Python
+  reads, positive per-case actual-owner calls, strict typing, current-head
+  review and complete Linux source CI. No native, runtime, installation or
+  broader parent acceptance is implied.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
