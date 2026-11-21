@@ -1471,6 +1471,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
+credits #4619's newly accepted observation/task-closeout lanes before selecting
+its independent BOTH-store arm boundary, owners and finite exit. Its
+[journal](journal/2026/11.21-current-handoff-atomicity.md) records actual
+#13922 delivery and four separate source descriptions, not whole completion.
+
+The [current claim-custody contribution](roadmap-selected-claim-custody.md)
+qualifies #5842's changed ordinary acceptance/finalization paths and retains
+its independent authorization/readiness/atomicity gates, owners and finite
+exits. Its [journal](journal/2026/11.21-current-claim-custody.md) records actual
+#13919 delivery; this is neither implementation nor whole-home acceptance.
+
 The [selected current framing contribution](roadmap-selected-framing-contribution.md)
 and [publication-safety contributions](roadmap-selected-publication-safety.md)
 advance selected priority/receiver and scoped-wave integration with actual
