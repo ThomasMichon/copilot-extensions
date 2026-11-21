@@ -237,7 +237,7 @@ def test_protected_startup_retry_continues_same_claim_after_exact_retirement(
             reservation.key, generation=current_task(queue, task.id).generation,
             startup_revision=reservation.startup_revision, now=deadline,
         )
-        assert queued.status == Status.CLAIMED and queued.not_before == due
+        assert queued.status == Status.QUEUED and queued.not_before == due
         assert not any(operation == "close" for operation, _ in owner.calls)
         assert place(queue, queued, now=due)[1] is False
         if episode == 0:
@@ -458,7 +458,7 @@ def test_exhausted_queued_pool_recovery_preserves_original_retry_binding(
         reservation.key, generation=current_task(queue, task.id).generation,
         startup_revision=reservation.startup_revision, now=700,
     )
-    assert queued.status == Status.CLAIMED
+    assert queued.status == Status.QUEUED
     queue.request_spawn_release(
         reservation.key, finished_startup_revision=reservation.startup_revision, now=701,
     )

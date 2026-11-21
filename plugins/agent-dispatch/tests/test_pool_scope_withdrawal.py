@@ -362,4 +362,4 @@ def test_withdrawal_and_new_placement_serialize_without_lost_custody(q: TaskQueu
     assert snapshot.configured_ready and not snapshot.definitions and len(snapshot.scopes) == 2
     assert current_task(q, fresh.id).status == (Status.CLAIMED if admitted else Status.QUEUED)
     assert len(q.list_reservations(task_id=fresh.id)) == int(admitted)
-    assert (assignment_for(q, fresh.id) is not None) == admitted
+    assert (q.task_pool_assignment(fresh.id) is not None) == admitted
