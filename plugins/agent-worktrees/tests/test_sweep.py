@@ -206,31 +206,6 @@ def test_session_claim_gone_false_when_process_alive(monkeypatch):
     assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is False
 
 
-def test_session_claim_gone_true_when_live_process_lease_expired(monkeypatch):
-    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
-    rec = types.SimpleNamespace(status="active")
-    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (rec, True))
-    import agent_worktrees.sessions as sessions_mod
-    from agent_worktrees import session_lease
-    monkeypatch.setattr(sessions_mod, "session_id_is_live", lambda r, sid: True)
-    monkeypatch.setattr(session_lease, "last_activity", lambda sid: 0.0)
-    assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is True
-    assert sweep.claim_safe(claim, types.SimpleNamespace()) is True
-
-
-def test_session_claim_live_process_with_fresh_or_missing_lease_is_not_gone(monkeypatch):
-    import time as _time
-    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
-    rec = types.SimpleNamespace(status="active")
-    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (rec, True))
-    import agent_worktrees.sessions as sessions_mod
-    from agent_worktrees import session_lease
-    monkeypatch.setattr(sessions_mod, "session_id_is_live", lambda r, sid: True)
-    for stamp in (_time.time(), None):
-        monkeypatch.setattr(session_lease, "last_activity", lambda sid, stamp=stamp: stamp)
-        assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is False
-
-
 def test_session_claim_gone_true_when_owning_record_is_entirely_gone(monkeypatch):
     claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
     monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (None, True))

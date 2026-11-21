@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
-from . import obligations, tracking
+from . import obligations, tracking, tracking_claims
 
 #: Idle period after which an ``active`` session lease is released.
 ACTIVE_LEASE_TTL_S = 2 * 60 * 60
@@ -77,12 +77,12 @@ def session_expired(
 
 
 def lease_expired(
-    record: object, claim: tracking.ResourceClaim, *, now: float | None = None,
+    record: object, claim: tracking_claims.ResourceClaim, *, now: float | None = None,
 ) -> bool | None:
     """Tri-state lease verdict for a session claim: True only on stale evidence."""
     if claim.kind != "session":
         return None
-    parsed = tracking.parse_claim_ref(claim.ref)
+    parsed = tracking_claims.parse_claim_ref(claim.ref)
     if parsed is None or not parsed.session:
         return None
     return session_expired(parsed.session, ttl_for(record, claim.state), now=now)
@@ -106,7 +106,7 @@ def idle_finalized(
     for claim in record.resources:
         if claim.kind != "session" or not claim.is_live:
             continue
-        parsed = tracking.parse_claim_ref(claim.ref)
+        parsed = tracking_claims.parse_claim_ref(claim.ref)
         if parsed is None or not parsed.session:
             return False
         if obligations.normalize(claim.state) == obligations.ACTIVE:

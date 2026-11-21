@@ -6,10 +6,12 @@ import os
 import time
 import types
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from agent_worktrees import session_lease, sessions, tracking
+from agent_worktrees import config as cfg
+from agent_worktrees import session_lease, sessions, sweep, tracking, tracking_claims
 
 
 @pytest.fixture
@@ -26,8 +28,8 @@ def _touch(state_dir: Path, session_id: str, age_s: float) -> None:
     os.utime(events, (stamp, stamp))
 
 
-def _claim(state: str = "active", session_id: str = "sess-1") -> tracking.ResourceClaim:
-    return tracking.ResourceClaim(kind="session", ref=f"m/p/wt#{session_id}", state=state)
+def _claim(state: str = "active", session_id: str = "sess-1") -> tracking_claims.ResourceClaim:
+    return tracking_claims.ResourceClaim(kind="session", ref=f"m/p/wt#{session_id}", state=state)
 
 
 def test_missing_activity_is_unknown_never_expired(state_dir: Path) -> None:
@@ -59,7 +61,7 @@ def test_env_overrides_ttl(state_dir: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert session_lease.active_ttl() == session_lease.ACTIVE_LEASE_TTL_S
 
 
-def _finalized(path: Path, *claims: tracking.ResourceClaim) -> tracking.WorktreeRecord:
+def _finalized(path: Path, *claims: tracking_claims.ResourceClaim) -> tracking.WorktreeRecord:
     return tracking.WorktreeRecord(
         worktree_id="wt", branch="worktree/wt", worktree_path=str(path), repo="p",
         machine="m", platform="wsl", started_at="2026-06-01T10:00:00",
@@ -98,3 +100,30 @@ def test_recent_conversation_or_unknown_session_keeps_finalized_active(
         [rec], {rec.worktree_path: ["unknown"]}, active, keep=lambda r: False)
     assert active == {norm}
     assert not session_lease.idle_finalized(_finalized(tmp_path / "wt"))
+
+
+def _live_session(monkeypatch: pytest.MonkeyPatch) -> tracking_claims.ResourceClaim:
+    rec = types.SimpleNamespace(status="active")
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (rec, True))
+    monkeypatch.setattr(sessions, "session_id_is_live", lambda r, sid: True)
+    return _claim()
+
+
+def test_session_claim_gone_when_live_process_lease_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _live_session(monkeypatch)
+    monkeypatch.setattr(session_lease, "last_activity", lambda sid: 0.0)
+    config = cast(cfg.Config, types.SimpleNamespace())
+    assert sweep.session_claim_gone(claim, config) is True
+    assert sweep.claim_safe(claim, config) is True
+
+
+def test_session_claim_live_process_with_fresh_or_missing_lease_is_not_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _live_session(monkeypatch)
+    config = cast(cfg.Config, types.SimpleNamespace())
+    for stamp in (time.time(), None):
+        monkeypatch.setattr(session_lease, "last_activity", lambda sid, stamp=stamp: stamp)
+        assert sweep.session_claim_gone(claim, config) is False

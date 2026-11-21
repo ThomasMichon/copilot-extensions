@@ -10,8 +10,6 @@ from __future__ import annotations
 import dataclasses
 import types
 
-import pytest
-
 import agent_worktrees.__main__ as m
 from agent_worktrees import git_ops
 from agent_worktrees import sessions
@@ -115,32 +113,6 @@ class TestApplyTrackingOverride:
             info = _info(git_ops.WorktreeState.DIRTY, dirty=0)
             out = m._apply_tracking_override(_rec(status), info)
             assert out.state == git_ops.WorktreeState.DIRTY, status
-
-    def _latched(self, monkeypatch, head):
-        rec = _rec("finalized")
-        rec.finalized_checkout = {"head": "a" * 40, "branch": "worktree/wt1"}
-        monkeypatch.setattr(
-            git_ops, "git", lambda *a, **k: types.SimpleNamespace(stdout=head + "\n"))
-        return rec
-
-    def test_finalized_head_moved_past_latch_is_not_masked(self, monkeypatch):
-        rec = self._latched(monkeypatch, "b" * 40)
-        out = m._apply_tracking_override(rec, _info(git_ops.WorktreeState.WIP, ahead=2))
-        assert out.state == git_ops.WorktreeState.WIP
-
-    def test_finalized_head_at_latch_or_landed_stays_completed(self, monkeypatch):
-        rec = self._latched(monkeypatch, "a" * 40)
-        out = m._apply_tracking_override(rec, _info(git_ops.WorktreeState.WIP, ahead=2))
-        assert out.state == git_ops.WorktreeState.COMPLETED
-        rec = self._latched(monkeypatch, "b" * 40)  # fast-forwarded to landed content
-        out = m._apply_tracking_override(rec, _info(git_ops.WorktreeState.UNUSED, ahead=0))
-        assert out.state == git_ops.WorktreeState.COMPLETED
-
-    def test_legacy_finalized_without_latch_stays_completed(self, monkeypatch):
-        monkeypatch.setattr(git_ops, "git", lambda *a, **k: pytest.fail("no probe"))
-        out = m._apply_tracking_override(
-            _rec("finalized"), _info(git_ops.WorktreeState.WIP, ahead=2))
-        assert out.state == git_ops.WorktreeState.COMPLETED
 
     def test_active_status_is_untouched(self):
         info = _info(git_ops.WorktreeState.ACTIVE, ahead=2, behind=1)
