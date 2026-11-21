@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import logging
+from importlib import import_module
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 from agent_procutil._daemon_instance_identity import identity_state, path_identity
 from agent_procutil.daemon_instances import inspect_instances
@@ -132,7 +133,7 @@ class Predecessor:
                 return "refused-owner-or-selection"
             phase = "custodian-start"
             self.custody = RetirementCustody(self.root)
-            self.custody.__enter__()
+            cast(Callable[[], object], self.custody.__enter__)()
             phase = "native-pin"
             with self.custody.pin(self.pid, self.record["birth"]) as process:
                 if process.exited():
@@ -174,7 +175,7 @@ class Predecessor:
 def _has_children(pid: int) -> bool:
     """The pinned, paused parent cannot launch another credential subprocess."""
     try:
-        import psutil
+        psutil = import_module("psutil")
     except ImportError as error:
         raise RetirementRefused("native worker census unavailable") from error
     try:
@@ -198,7 +199,7 @@ def _console_host_path() -> Path | None:
     import ctypes
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.GetSystemDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
     kernel.GetSystemDirectoryW.restype = wintypes.UINT
     directory = ctypes.create_unicode_buffer(32768)

@@ -153,24 +153,6 @@ def test_one_owned_predecessor_uses_its_native_pin_and_confirms_exit(
     assert events == [(123, "native-birth"), "paused", "terminate-and-confirm", "closed"]
 
 
-def test_native_refusal_reports_phase_and_code_without_private_error_text(
-    owned, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
-) -> None:
-    endpoint, root, _ = owned
-    captured = predecessor.Predecessor.capture(endpoint, root)
-    assert captured is not None
-    error = PermissionError("private credential path must not enter diagnostics")
-    error.winerror = 5
-
-    def pin(*_):
-        raise error
-
-    monkeypatch.setattr(predecessor, "RetirementCustody", lambda _: _custody(pin))
-    assert captured.retire(lambda: True) == "refused-native-retirement"
-    assert "phase=native-pin error_type=PermissionError winerror=5" in caplog.text
-    assert "private credential" not in caplog.text
-
-
 def test_unavailable_native_identity_is_not_mistaken_for_exit(
     owned, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

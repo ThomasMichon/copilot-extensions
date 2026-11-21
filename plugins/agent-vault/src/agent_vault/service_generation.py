@@ -444,7 +444,7 @@ class ServiceGeneration:
         )
 
     async def tick(self) -> None:
-        recovery_settled = await self._recover_predecessors(for_admission=True)
+        recovery_settled = await self._recover_predecessors(for_admission=not self.has_writer)
         if self.retiring is not None:
             await self._retire()
             return

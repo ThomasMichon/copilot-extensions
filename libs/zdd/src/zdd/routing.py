@@ -49,11 +49,12 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, cast
 
 from . import publication_history, routing_persistence
 
@@ -112,11 +113,11 @@ class Endpoint:
     def base_url(self) -> str:
         return f"http://{format_authority(self.client_host, self.port)}"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None or k == "pid"}
 
     @classmethod
-    def from_dict(cls, data: dict) -> Endpoint | None:
+    def from_dict(cls, data: dict[str, Any]) -> Endpoint | None:
         try:
             from .darwin_identity import valid_start_time
 
@@ -143,7 +144,7 @@ def routing_table_path(config_dir: str | os.PathLike[str]) -> Path:
 @contextmanager
 def _file_routing_lock(
     config_dir: str | os.PathLike[str], *, deadline: float | None = None,
-):
+) -> Iterator[None]:
     path = Path(config_dir) / _LOCK_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
@@ -201,7 +202,7 @@ def _wait_for_lock(acquire: Callable[[], object], deadline: float) -> None:
 @contextmanager
 def _routing_lock(
     config_dir: str | os.PathLike[str], *, deadline: float | None = None,
-):
+) -> Iterator[None]:
     """Serialize routing mutations across threads and processes."""
     acquired = (
         _PROCESS_ROUTING_LOCK.acquire()
@@ -220,13 +221,13 @@ def _routing_lock(
 @contextmanager
 def routing_lock(
     config_dir: str | os.PathLike[str], *, deadline: float,
-):
+) -> Iterator[None]:
     """Hold native routing authority within an explicit acquisition deadline."""
     with _routing_lock(config_dir, deadline=deadline):
         yield
 
 
-def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict | None:
+def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict[str, Any] | None:
     """Read the table; strict ownership callers distinguish absence from damage."""
     path = routing_table_path(config_dir)
     try:
@@ -335,7 +336,7 @@ def read_active_endpoint(
     return None
 
 
-def _atomic_write(path: Path, data: dict) -> None:
+def _atomic_write(path: Path, data: dict[str, Any]) -> None:
     _validate_endpoint_rows(data)
     path.parent.mkdir(parents=True, exist_ok=True)
     previous = _read_mutation_table(path.parent)
@@ -350,7 +351,7 @@ def _atomic_write(path: Path, data: dict) -> None:
     routing_persistence.write(path, following)
 
 
-def _validate_endpoint_rows(table: dict | None) -> None:
+def _validate_endpoint_rows(table: dict[str, Any] | None) -> None:
     for key in ("active", "previous"):
         raw = table.get(key) if table is not None else None
         if raw is not None and (
@@ -362,7 +363,7 @@ def _validate_endpoint_rows(table: dict | None) -> None:
             raise ActivePublicationRefused(reason)
 
 
-def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict:
+def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict[str, Any]:
     try:
         table = read_table(config_dir, strict=True) or {}
         _validate_endpoint_rows(table)
@@ -385,10 +386,10 @@ def publication_witness(
             history = publication_history.read(_read_mutation_table(config_dir))
         if history is None:
             raise ActivePublicationRefused("publication history cannot establish candidate custody")
-        return history["epoch"]
+        return cast(str, history["epoch"])
 
 
-def _next_generation(data: dict | None) -> int:
+def _next_generation(data: dict[str, Any] | None) -> int:
     if not data:
         return 1
     best = 0
@@ -441,7 +442,7 @@ def _publish_active_unlocked(
         bind=bind, port=port, pid=pid, version=version, generation=gen,
         process_start_time=process_start_time,
     )
-    table: dict = {"active": new_active.to_dict()}
+    table: dict[str, Any] = {"active": new_active.to_dict()}
 
     demoted = None
     if demote_existing:
@@ -474,10 +475,10 @@ def _same_endpoint(left: Endpoint | None, right: Endpoint | None) -> bool:
 
 
 def _refuse_or_changed(
-    current_raw: dict | None,
+    current_raw: dict[str, Any] | None,
     *,
     expected_active: Endpoint | None,
-    refuse_current: Callable[[dict | None], str | None] | None,
+    refuse_current: Callable[[dict[str, Any] | None], str | None] | None,
     require_expected_active: bool,
 ) -> str | None:
     if refuse_current is not None:
@@ -591,7 +592,7 @@ def publish_active_with_previous_guarded(
     generation: int | None = None,
     demote_existing: bool = False,
     expected_active: Endpoint | None = None,
-    refuse_current: Callable[[dict | None], str | None] | None = None,
+    refuse_current: Callable[[dict[str, Any] | None], str | None] | None = None,
     require_expected_active: bool = True,
     process_start_time: str | None = None,
     lock_deadline: float | None = None,
@@ -632,7 +633,7 @@ def validate_active(
     config_dir: str | os.PathLike[str],
     expected: Endpoint,
     *,
-    refuse_current: Callable[[dict | None], str | None] | None = None,
+    refuse_current: Callable[[dict[str, Any] | None], str | None] | None = None,
     lock_deadline: float | None = None,
 ) -> None:
     """Validate an exact raw owner under the native routing lock, without writing."""
@@ -653,9 +654,9 @@ def withdraw_active_guarded(
     config_dir: str | os.PathLike[str],
     *,
     expected_active: Endpoint,
-    refuse_current: Callable[[dict | None], str | None],
+    refuse_current: Callable[[dict[str, Any] | None], str | None],
     lock_deadline: float,
-) -> dict:
+) -> dict[str, Any]:
     """Withdraw an exact owner under CAS, retaining publication and generation custody.
 
     The caller supplies lifecycle authority (including original process exit),
@@ -705,7 +706,7 @@ def restore_previous_if_owner(
             if isinstance(previous_raw, dict)
             else None
         )
-        table: dict = {"epoch": datetime.now(timezone.utc).isoformat()}
+        table: dict[str, Any] = {"epoch": datetime.now(timezone.utc).isoformat()}
         if previous is not None:
             restored = Endpoint(
                 bind=previous.bind,
@@ -745,7 +746,7 @@ def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
         if active is None or active.pid != pid:
             return False
         path = routing_table_path(config_dir)
-        table: dict = {"previous": active.to_dict(),
+        table: dict[str, Any] = {"previous": active.to_dict(),
                        "epoch": datetime.now(timezone.utc).isoformat()}
         try:
             _atomic_write(path, table)
@@ -762,7 +763,7 @@ def reap_stale_active(
     listening: Callable[[str, int], bool] | None = None,
     pid_alive: Callable[[int | None], bool] | None = None,
     lock_deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Reap a stale active endpoint under the optionally bounded mutation lock."""
     with _routing_lock(config_dir, deadline=lock_deadline):
         return _reap_stale_active_unlocked(
@@ -779,7 +780,7 @@ def _reap_stale_active_unlocked(
     service: str | None = None,
     listening: Callable[[str, int], bool] | None = None,
     pid_alive: Callable[[int | None], bool] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Dead-port/missing-active watchdog: heal a table that names no live active.
 
     :func:`read_active_endpoint` heals a stale ``active`` only for the one reader
@@ -840,9 +841,9 @@ def _reap_stale_active_unlocked(
         when deciding whether to *trust* a listener as proof of identity --
         that must require an actual recorded pid to check against.
         """
-        return bool(pid) and pid > 0 and _alive(pid)
+        return pid is not None and pid > 0 and _alive(pid)
 
-    result: dict = {"reaped": False, "reason": "", "dead_port": None,
+    result: dict[str, Any] = {"reaped": False, "reason": "", "dead_port": None,
                     "promoted_port": None}
     try:
         data = read_table(config_dir)
@@ -945,7 +946,7 @@ def _emit_reap(
     config_dir: str | os.PathLike[str],
     service: str | None,
     dead: Endpoint,
-    result: dict,
+    result: dict[str, Any],
 ) -> None:
     """Write a durable lifecycle record for a watchdog reap (fail-open)."""
     try:
@@ -969,7 +970,7 @@ def _emit_promotion(
     config_dir: str | os.PathLike[str],
     service: str | None,
     promoted: Endpoint,
-    result: dict,
+    result: dict[str, Any],
 ) -> None:
     """Write a durable lifecycle record for a missing-active promotion (fail-open).
 
