@@ -25,6 +25,23 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 independent relationship and Dispatch deliveries
+
+The [four-publication comparison](journal/2026/11.21-relationship-and-dispatch-receiving.md#new-delivery-evidence)
+adds current, complete member-authored descriptions for #13804, #13824,
+#13827 and #13796. They report separate compare-and-bind, original-worker
+closeout, future allocation identity and uncertain CI-launch foundations.
+The comparison credits those reported deliveries without treating them as
+production adoption or re-qualifying the twelve pinned findings below.
+
+The first operation remains opt-in with no enabled caller. Original-worker
+closeout still requires actual own-workspace finalization; future assignment
+evidence does not fabricate historical custody. An admitted or UNKNOWN launch
+is not replay permission or readiness proof. OPEN #13742 and #13831 retain
+their contributors and unresolved acceptance. These are independent receiving
+boundaries, not new issue transfers, priority assignments or hard edges in the
+historical 145-relationship graph.
+
 ## 2026-11-20 singleton tracking route and current coverage
 
 The [complete integration partition](stabilization-roadmap.md#2026-11-20-integration-assessment)
