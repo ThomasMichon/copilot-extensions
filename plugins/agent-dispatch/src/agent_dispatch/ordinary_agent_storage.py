@@ -226,6 +226,8 @@ def _record_agent(
             if (startup_invocation is not None and startup_invocation["binding"]["creation_nonce"]
                     != record["creation_nonce"]):
                 raise TaskError("ordinary invocation incarnation changed")
+            if row["creation_nonce"] is not None and row["creation_nonce"] != record["creation_nonce"]:
+                raise TaskError("ordinary agent differs from the original workspace incarnation")
             if (
                 record["id"] != actual.worktree or record["repo"] != actual.project
                 or record["path"] != actual.path
@@ -238,6 +240,10 @@ def _record_agent(
                     raise TaskError("ordinary agent does not match the ground native head")
         elif resumed or row["worktree"] and not row["agent_info"]:
             raise TaskError("assigned agent requires the exact ground owner record")
+        nonce = None
+        if not row["agent_info"]:
+            from .ordinary_pool_allocation import published_nonce
+            nonce = published_nonce(conn, task, row, agent_info, worktree_record, resumed=resumed)
         if row["conversation_retired"] and not resumed:
             raise TaskError("retired history requires a proven current native head")
         known, retired = native_bindings(conn, row, task)
@@ -294,12 +300,13 @@ def _record_agent(
         conn.execute(
             "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
             "worktree_ownership=?,creating_host=?,driver='ordinary-bridge',allocation_project=?,"
-            "worktree_path=?,execution_machine=?,conversation_retired=0,updated_at=? WHERE key=?",
+            "worktree_path=?,execution_machine=?,creation_nonce=COALESCE(?,creation_nonce),"
+            "conversation_retired=0,updated_at=? WHERE key=?",
             (
                 actual.worktree, handle, encoded,
                 "created" if created_host else row["worktree_ownership"] or "targeted",
                 created_host or row["creating_host"],
-                actual.project, actual.path, row["execution_machine"] or execution_machine, queue._now(None), key,
+                actual.project, actual.path, row["execution_machine"] or execution_machine, nonce, queue._now(None), key,
             ),
         )
         result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()

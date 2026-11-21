@@ -98,6 +98,16 @@ Owned creation also rechecks current task admission immediately before calling
 Bridge, including when hosting lookup retained a workspace but the task became
 held. A keyed recovery receipt cannot authorize a newly held task's launch.
 
+For a new, non-relationship-managed ordinary Bridge allocation, the caller
+requires `ordinary_allocation_nonce_versions: [1]` before creation. It sends
+the Worktrees owner's returned nonce as `pool_creation_nonce` and checks the
+reservation read-back. If an older preparation omitted the nonce, the provider
+can still retain it from Bridge's original keyed, sessionless creation receipt.
+Agent publication checks the current pool claim, original allocation cohort,
+workspace, attempt and nonce in the same transaction that stores the native.
+Conflicting or incomplete evidence stops publication before the first prompt.
+This does not create a task relationship or backfill already published agents.
+
 ### Conditional ordinary writer consumer
 
 The prepared-workspace provider can retain the same optional
