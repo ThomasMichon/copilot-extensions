@@ -697,13 +697,23 @@ authorizes critical main-path acceptance or a bounded administrative change.
   after exact-head Copilot approval and complete required Linux CI with freshly
   executed packet evidence. No registry, installer or native-toolchain witness
   is replaced; broader native, every-release and full-census gates stay open.
-- [ ] Qualify and land 26 additional original synthetic-metadata dependency
+- [x] Qualify and land 26 additional original synthetic-metadata dependency
   cases through thirteen exact test objects in the existing adapter. Preserve
   its preceding 58 cases and all 119 remaining originals outside the packet,
   fixture-owned inventory, source closure, per-case production call coverage,
   admission/helper/budget gates, current-head review and complete Linux source
-  CI. No registry, installer, native-toolchain or whole-checkout witness is
-  replaced; broader native, every-release and full-census gates stay open.
+  CI. #13889 merges at `ffb9f8b130b9c49a2217410863c1599202e483f8`
+  after exact-head Copilot approval and complete required Linux CI with freshly
+  executed packet evidence. No registry, installer, native-toolchain or
+  whole-checkout witness is replaced; broader native, every-release and
+  full-census gates stay open.
+- [ ] Qualify and land 42 additional original fixture-only source-attribution
+  cases through thirteen exact test objects in the existing dependency-age
+  adapter. Preserve its preceding 84 cases, all 77 remaining originals outside
+  the packet, source closure, per-case production call coverage, prior
+  admission/helper/budget gates, current-head review and complete Linux source
+  CI. No preparation fixture text executes, no original assertion is replaced,
+  and broader native, every-release and full-census gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
