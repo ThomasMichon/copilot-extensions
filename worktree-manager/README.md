@@ -965,6 +965,11 @@ automatic downloads; when preparation is needed, the explicit bootstrap uses
 `uv python install --no-bin --no-registry 3.11`, then repeats the same lookup.
 It does not publish Python command aliases or register Python with the Windows
 launcher. These controls are supported by uv 0.8.0 and newer.
+Both native bootstraps exclude inherited Python selection/preference and
+managed-disable switches during their uv Python requests, while preserving
+custom managed-interpreter storage and download policy. Windows restores the
+caller's selector values on return or refusal; POSIX confines the cleanup to
+the uv child's subshell.
 Bootstrap checks external uv commands in PATH order and retains the first
 supported executable; an older, malformed or failing earlier copy does not
 hide a supported later copy. Windows selection excludes PowerShell-only
