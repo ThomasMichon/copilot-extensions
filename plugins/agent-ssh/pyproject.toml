@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-ssh"
-version = "0.1.348-dev1"
+version = "0.1.349-dev1"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -77,6 +77,9 @@ agent-ssh = "agent_ssh.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agent_ssh = ["health-observation-v1.json"]
 
 [tool.ruff]
 target-version = "py310"

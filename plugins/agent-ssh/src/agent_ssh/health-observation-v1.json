@@ -1,0 +1,7 @@
+{
+  "schema": "agent-ssh.health.observation",
+  "version": 1,
+  "operations": ["observe"],
+  "routes": ["direct-key-file"],
+  "max_timeout_ms": 5000
+}

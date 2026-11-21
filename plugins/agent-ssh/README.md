@@ -88,6 +88,51 @@ POSIX probe behavior is unchanged.
 See [native qualification](../../TESTING.md#optional-owned-windows-jump-probes);
 source changes do not silently replace an installed runtime.
 
+### Bounded direct-route health observations
+
+`observe` is a separate, explicit operation; `verify` keeps its existing
+behavior. It reads one absolute closed profile fragment and an existing
+host-key file, without profile refresh, warning-state writes, provisioning,
+login, key acceptance or credential refresh:
+
+```text
+agent-ssh observe --alias worker-a --profile <absolute-fragment> --known-hosts <absolute-known-hosts> --timeout-ms 5000 --json
+```
+
+The fragment must contain exact `Host` blocks. The selected block requires
+literal `HostName`, `User` and absolute `IdentityFile`; it may also contain
+`Port`, `IdentitiesOnly yes` and `StrictHostKeyChecking yes`. `Include`, `Match`,
+global/wildcard rules, duplicate options and selected proxy/helper/forwarding
+directives are unsupported. Paths do not expand environment or SSH tokens.
+This intentionally supports direct key-file routes only, not the full
+interactive profile language.
+
+The client bypasses ambient SSH configuration, agents, hardware-key providers,
+password prompts, persistent control connections and forwarding. It uses
+strict existing-host-key verification and the fixed remote action `exit 0`.
+One shared monotonic budget, between 100 and 5,000 milliseconds, includes selection,
+execution and native settlement; stdout and stderr are each limited to 16 KiB
+and never exported. Filesystem stalls remain a qualification failure, not a
+hard real-time guarantee.
+
+The closed `agent-ssh.health.observation` v1 result carries only outcome/reason,
+outbound direction and successful proof time. A failed attempt has no
+authenticated proof timestamp; a generic client failure is not a credential
+diagnosis. Exit 0 means authenticated success, 1 means no proof, and 3 means
+native cleanup is unconfirmed. The Python API preserves the original
+`OwnedCleanupError` and its cleanup owner. An enclosing collector must retain
+its own containment/custody fence on exit 3, not retry or continue launching
+children. Native custody support is required before execution.
+
+`health-observation-v1.json` is package data in the selected runtime, not a
+package-version or current-payload inference. Consumers must discover support
+provider-first before sending this new syntax; missing legacy metadata is
+unsupported optional coverage, never a fallback to `verify`.
+No hourly collection, policy migration, job registration or activation occurs.
+The [implementation effort](../../efforts/active/machine-health-heartbeats/domain-probes.md)
+retains successful native authentication, mixed-version consumer and installed
+qualification obligations separately.
+
 ### Session topology and profile evidence
 
 `session-snapshot` captures fresh declared aliases and this client's managed
