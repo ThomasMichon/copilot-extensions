@@ -11170,6 +11170,14 @@ rules still scan every production root. Adoption and file eligibility are
 recomputed on every invocation. Each AST visitor resolves its bound dispatch
 method once per node type and file, retaining the same traversal and scope
 handling without repeated dynamic method lookup.
+The promotion unit adapter `tools/promotion_unit_tests/test_headless_guard_units.py`
+exports the original guard test functions, parameterization and `repo` fixture
+from `tools/test_check_headless_launch.py`, rather than copying assertions.
+The fixture roots the public headless allowlist in its temporary repository.
+Its isolation regression supplies a contrary checkout allowance in memory and
+requires the original spawn assertion to pass without reading that allowance.
+Every admitted case must reach the actual guard during its call phase; fixture
+isolation does not alter production allowances or qualify native launches.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
