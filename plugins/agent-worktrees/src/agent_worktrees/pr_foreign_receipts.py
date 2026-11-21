@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from . import config as cfg, pr_publish, record_machine_identity, tracking
+from . import config as cfg, pr_authority, pr_publish, record_machine_identity, tracking
 from .providers.base import ProviderError, PullResult
+from .providers.github_pull_source import endpoint_identity
 from .receiving_allocation import serialized_receipt
 
 
@@ -28,6 +30,64 @@ def failure(detail: str, pull: PullResult | None = None) -> dict[str, Any]:
     return result
 
 
+def _read_receipt(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or path.parent.resolve() != path.parent:
+        raise ProviderError("Foreign creation receipt path is redirected.")
+    try:
+        if path.stat().st_size > 65536:
+            raise ValueError
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] != 1
+            or not isinstance(value.get("binding"), dict)
+            or set(value["binding"]) != {"provider", "endpoint", "target", "source", "branch"}
+            or any(not isinstance(item, str) or not item for item in value["binding"].values())
+            or value.get("phase") not in ("publishing", "unknown", "verified")
+            or type(value.get("revision")) is not int or value["revision"] < 1
+            or not isinstance(value.get("owner"), dict)
+            or not isinstance(value.get("history"), list)
+            or (value.get("provider_number") is not None and (
+                type(value["provider_number"]) is not int or value["provider_number"] <= 0
+            ))
+            or not isinstance(value.get("provider_url", ""), str)
+        ):
+            raise ValueError
+        return value
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
+        raise ProviderError("Foreign creation receipt is unavailable; reconcile it before publication.") from exc
+
+
+def _receipts(ledger: Path) -> Iterator[Path]:
+    try:
+        directories = list(ledger.iterdir())
+    except FileNotFoundError:
+        return
+    for folder in sorted(directories):
+        if not folder.name.endswith(".foreign-pr-receipts"):
+            continue
+        if folder.is_symlink() or folder.resolve() != folder or not folder.is_dir():
+            raise ProviderError("Foreign creation receipt directory is unavailable.")
+        for path in sorted(folder.iterdir()):
+            if path.name.endswith(".json"):
+                yield path
+
+
+def owner_receipts(record: tracking.WorktreeRecord) -> tuple[bool, bool]:
+    """Report retained and pending evidence while the native owner lock is held."""
+    folder = record.yaml_path.with_suffix(".foreign-pr-receipts")
+    try:
+        if folder.is_symlink():
+            return True, True
+        if not folder.exists():
+            return False, False
+        if folder.resolve() != folder or not folder.is_dir():
+            return True, True
+        paths = [path for path in folder.iterdir() if path.name.endswith(".json")]
+        return bool(paths), any(_read_receipt(path)["phase"] != "verified" for path in paths)
+    except (ProviderError, OSError, ValueError):
+        return True, True
+
+
 class Attempt:
     def __init__(
         self, config: cfg.Config, path: Path, record: tracking.WorktreeRecord | None,
@@ -35,7 +95,7 @@ class Attempt:
     ) -> None:
         self.config, self.owner_path, self.record = config, path, record
         self.binding = {
-            "provider": provider, "endpoint": endpoint.casefold(),
+            "provider": provider, "endpoint": endpoint_identity(endpoint),
             "target": target.casefold(), "source": source.casefold(), "branch": branch,
         }
         key = hashlib.sha256(json.dumps(self.binding, sort_keys=True).encode()).hexdigest()
@@ -47,37 +107,28 @@ class Attempt:
             raise ProviderError("Foreign creation receipt path is redirected.")
         if not self.path.exists():
             return None
-        try:
-            if self.path.stat().st_size > 65536:
-                raise ValueError
-            value = json.loads(self.path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] != 1
-                or value.get("binding") != self.binding
-                or value.get("phase") not in ("publishing", "unknown", "verified")
-                or type(value.get("revision")) is not int or value["revision"] < 1
-                or not isinstance(value.get("owner"), dict)
-                or not isinstance(value.get("history"), list)
-                or (value.get("provider_number") is not None and (
-                    type(value["provider_number"]) is not int or value["provider_number"] <= 0
-                ))
-                or not isinstance(value.get("provider_url", ""), str)
-            ):
-                raise ValueError
-            return value
-        except (OSError, ValueError, TypeError, RecursionError) as exc:
-            raise ProviderError("Foreign creation receipt is unavailable; reconcile it before publication.") from exc
+        value = _read_receipt(self.path)
+        if {**value["binding"], "endpoint": endpoint_identity(value["binding"]["endpoint"])} != self.binding:
+            raise ProviderError("Foreign creation receipt binding changed; reconcile before publication.")
+        return value
 
     def pending(self) -> dict[str, Any] | None:
-        if self.expected is None:
-            return None
-        value = self.expected
-        if value["phase"] == "verified" and self.record is not None and value["owner"] == self._owner(self.record):
-            return None
-        number = value.get("provider_number")
-        return failure("A prior foreign creation is still unverified.", (
-            PullResult(number=number, url=value.get("provider_url", "")) if number else None
-        ))
+        ledgers = set(pr_authority._ledgers(self.config.repo_name)) | {self.owner_path.parent}
+        for ledger in sorted(ledgers):
+            for path in _receipts(ledger):
+                value = _read_receipt(path)
+                binding = {**value["binding"], "endpoint": endpoint_identity(value["binding"]["endpoint"])}
+                if binding != self.binding:
+                    continue
+                if value["phase"] == "verified" and (
+                    path != self.path or self.record is not None and value["owner"] == self._owner(self.record)
+                ):
+                    continue
+                number = value.get("provider_number")
+                return failure("A prior foreign creation is still unverified.", (
+                    PullResult(number=number, url=value.get("provider_url", "")) if number else None
+                ))
+        return None
 
     def _owner(self, record: tracking.WorktreeRecord) -> dict[str, Any]:
         return {
@@ -107,22 +158,24 @@ class Attempt:
             tracking._atomic_write(self.path, raw)
             self.expected = value
 
-    def reserve(self, base: str, expected_head: str | None) -> None:
+    def reserve(self, base: str, expected_head: str | None) -> dict[str, Any] | None:
         if self.record is None:
             raise ProviderError("Foreign creation needs an existing managed owner.")
-        pending = self.pending()
-        if pending is not None:
-            raise ProviderError(pending["error"])
-        previous = self.expected
-        history = [] if previous is None else [
-            *previous["history"], {key: value for key, value in previous.items() if key != "history"},
-        ]
-        self._write({
-            "version": 1, "binding": self.binding, "owner": self._owner(self.record),
-            "revision": 1 if previous is None else previous["revision"] + 1,
-            "phase": "publishing", "base": base, "expected_head": expected_head or "",
-            "history": history,
-        })
+        with pr_authority.guard():
+            pending = self.pending()
+            if pending is not None:
+                return pending
+            previous = self.expected
+            history = [] if previous is None else [
+                *previous["history"], {key: value for key, value in previous.items() if key != "history"},
+            ]
+            self._write({
+                "version": 1, "binding": self.binding, "owner": self._owner(self.record),
+                "revision": 1 if previous is None else previous["revision"] + 1,
+                "phase": "publishing", "base": base, "expected_head": expected_head or "",
+                "history": history,
+            })
+        return None
 
     def finish(self, pull: PullResult | None, *, verified: bool) -> None:
         if self.expected is None or self.expected["phase"] != "publishing":

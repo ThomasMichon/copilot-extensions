@@ -292,7 +292,9 @@ def create_foreign_pr_from_branch(
                     "repo": target_repo,
                 }
             if attempt is not None:
-                attempt.reserve(base_branch, expected_head)
+                blocked = attempt.reserve(base_branch, expected_head)
+                if blocked is not None:
+                    return {**blocked, "repo": target_repo, "head": from_branch, "base": base_branch}
             creation_attempted = True
             pull = provider.create_pull(scope, token=token)
             if attempt is not None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from collections.abc import Callable
 
 import dataclasses
 import json
@@ -980,7 +981,9 @@ def test_owned_pr_rebase_binary_timeouts_are_reported_as_git_errors(monkeypatch:
     sys.platform != "win32" or os.environ.get("AGENT_WORKTREES_NATIVE_HEADLESS_TEST") != "1",
     reason="Opt-in native Windows consoleless-parent observation",
 )
-def test_owned_pr_rebase_native_headless_two_cycles(pr_repo: Any, tmp_path: Path) -> None:
+def test_owned_pr_rebase_native_headless_two_cycles(
+    pr_repo: Any, tmp_path: Path, record_property: Callable[[str, object], None],
+) -> None:
     from agent_procutil import no_window_kwargs
 
     _config, _wid, path, _remote, _branch, head = _prepare(pr_repo)
@@ -996,6 +999,7 @@ def test_owned_pr_rebase_native_headless_two_cycles(pr_repo: Any, tmp_path: Path
     )
     assert result.is_file(), proc.stderr
     observation = json.loads(result.read_text(encoding="utf-8"))
+    record_property("native_headless_observation", json.dumps(observation, sort_keys=True))
     assert proc.returncode == 0, (proc.stderr, observation)
     assert observation["cycles"] == 2
     assert observation["observed_descendants"] > 0

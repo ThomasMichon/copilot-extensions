@@ -47,11 +47,35 @@ kernel.CreateToolhelp32Snapshot.restype = w.HANDLE
 kernel.Process32FirstW.argtypes = [w.HANDLE, ctypes.POINTER(ProcessEntry)]
 kernel.Process32NextW.argtypes = kernel.Process32FirstW.argtypes
 kernel.CloseHandle.argtypes = [w.HANDLE]
+kernel.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
+kernel.OpenProcess.restype = w.HANDLE
+kernel.GetProcessTimes.argtypes = [w.HANDLE, *([ctypes.POINTER(w.FILETIME)] * 4)]
+kernel.QueryFullProcessImageNameW.argtypes = [w.HANDLE, w.DWORD, w.LPWSTR, ctypes.POINTER(w.DWORD)]
 user.GetForegroundWindow.restype = w.HWND
 user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
 user.IsWindowVisible.argtypes = [w.HWND]
+user.GetClassNameW.argtypes = [w.HWND, w.LPWSTR, ctypes.c_int]
 callback_type = getattr(ctypes, "WINFUNCTYPE")(w.BOOL, w.HWND, w.LPARAM)
 user.EnumWindows.argtypes = [callback_type, w.LPARAM]
+
+process_facts: dict[int, dict[str, object]] = {}
+window_facts: dict[int, dict[str, object]] = {}
+
+
+def identity(pid: int) -> dict[str, object]:
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return {"pid": pid, "error": getattr(ctypes, "get_last_error")()}
+    try:
+        times = [w.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+            return {"pid": pid, "error": getattr(ctypes, "get_last_error")()}
+        image, size = ctypes.create_unicode_buffer(32768), w.DWORD(32768)
+        kernel.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(size))
+        return {"pid": pid, "birth": times[0].dwHighDateTime << 32 | times[0].dwLowDateTime,
+                "image": Path(image.value).name}
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def descendants() -> set[int]:
@@ -64,14 +88,17 @@ def descendants() -> set[int]:
         entry.dwSize = ctypes.sizeof(entry)
         exists = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
         while exists:
-            pairs.append((entry.th32ProcessID, entry.th32ParentProcessID))
+            pairs.append((entry.th32ProcessID, entry.th32ParentProcessID, entry.szExeFile))
             exists = kernel.Process32NextW(snapshot, ctypes.byref(entry))
     finally:
         kernel.CloseHandle(snapshot)
     owned = {os.getpid()}
     while True:
-        found = {pid for pid, parent in pairs if parent in owned}
+        found = {pid for pid, parent, _name in pairs if parent in owned}
         if found <= owned:
+            for pid, parent, name in pairs:
+                if pid in owned:
+                    process_facts[pid] = {**identity(pid), "parent": parent, "snapshot_image": name}
             return owned
         owned.update(found)
 
@@ -105,6 +132,16 @@ def observe() -> None:
                     current_windows.add(int(handle))
                     if window_pid(handle) in seen:
                         visible.add(int(handle))
+                        name = ctypes.create_unicode_buffer(256)
+                        user.GetClassNameW(handle, name, len(name))
+                        pid = window_pid(handle)
+                        observed = process_facts.get(pid, {})
+                        parent = observed.get("parent")
+                        window_facts[int(handle)] = {
+                            "process": identity(pid), "observed": observed,
+                            "parent": process_facts.get(parent) if isinstance(parent, int) else None,
+                            "class": name.value,
+                        }
                 return True
 
             callback = callback_type(inspect)
@@ -160,6 +197,7 @@ finally:
         "visible_windows": len(visible), "foreground_owned": len(foreground),
         "new_visible_windows": len(new_visible), "foreground_transitions": len(focus_changes),
         "errors": errors,
+        "window_facts": list(window_facts.values())[:10],
     }), encoding="utf-8")
 assert not thread.is_alive()
 assert not errors
