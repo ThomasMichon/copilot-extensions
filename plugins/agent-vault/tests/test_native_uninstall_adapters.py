@@ -22,6 +22,13 @@ LABELS = dict(zip(PLUGINS, ("Bridge", "Dispatch", "Vault", "Budget"), strict=Tru
 GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
 BASH = str(GIT_BASH) if GIT_BASH.is_file() else shutil.which("bash")
 PWSH = shutil.which("pwsh")
+NO_WINDOW = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _base_python() -> Path:
+    value = getattr(sys, "_base_executable", None)
+    assert isinstance(value, str)
+    return Path(value)
 
 
 def _path(path: Path) -> str:
@@ -54,7 +61,7 @@ def _run(
     )
     return subprocess.run(  # noqa: S603 - fixture-owned script and fixed native host
         args, cwd=tmp_path, capture_output=True, text=True, timeout=40,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
 
 
@@ -131,7 +138,7 @@ def test_nonfile_helper_refused_without_removing_unknown_files(
     assert sentinel.read_bytes() == b"not an installer-owned file"
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", tuple(p for p in PLUGINS if p != "budget-guidance"))
 @pytest.mark.parametrize("shell", ("ps1", "sh"))
 def test_real_uninstall_foreign_ownership_preserves_all_durable_bytes(
     tmp_path: Path, plugin: str, shell: str,
@@ -187,7 +194,7 @@ def test_real_uninstall_foreign_ownership_preserves_all_durable_bytes(
     )
     result = subprocess.run(  # noqa: S603 - fixed installer and disposable installation
         args, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode != 0, result.stdout + result.stderr
     assert "foreign" in (result.stdout + result.stderr).lower(), result.stdout + result.stderr
@@ -305,7 +312,8 @@ def test_root_indirection_refused_before_process_inspection(
     reason="Windows synthetic redirector requires canonical process-tree containment",
 )
 @pytest.mark.parametrize("fault", [
-    "none", "base-argv", "argv", "foreign-argv-image", "foreign-owner", "stale-birth", "foreign-base",
+    "none", "base-argv", "argv", "foreign-argv-image", "foreign-owner",
+    "stale-birth", "foreign-base",
     "missing-config", "grandchild", "sibling", "utf8-home-stock",
 ])
 def test_vault_uninstall_admits_only_native_service_redirector_closure(
@@ -331,7 +339,7 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
     config = slot / "pyvenv.cfg"
     if fault == "utf8-home-stock":
         alias = tmp_path / "base-\u7532\u57fa"
-        base = Path(sys._base_executable).parent
+        base = _base_python().parent
         # A physical Unicode home tests decoding without RedirectionGuard's
         # independent prohibition on traversing a fixture-created junction.
         shutil.copytree(
@@ -349,7 +357,7 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
         [str(slot / "Scripts" / "python.exe"), "-m", "agent_vault.service",
          "--foreground", "--persistent"],
         cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+        stderr=subprocess.PIPE, creationflags=NO_WINDOW,
     )
     try:
         until = time.monotonic() + 5
@@ -359,7 +367,9 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
         if not ready.exists() and process.poll() is not None:
             stdout, stderr = process.communicate(timeout=2)
             diagnostic = f"exit={process.returncode}; stdout={stdout!r}; stderr={stderr!r}"
-        assert ready.exists(), "synthetic redirector did not publish its child identity; " + diagnostic
+        assert ready.exists(), (
+            "synthetic redirector did not publish its child identity; " + diagnostic
+        )
         child = json.loads(ready.read_text())
         assert child["pid"] != process.pid and child["ppid"] == process.pid
         if fault == "missing-config":
@@ -377,11 +387,14 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
             "if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) "
             "{ throw 'Unicode-home control requires stock Windows PowerShell 5.1' }"
             if fault == "utf8-home-stock" else "",
-            "Import-Module (Join-Path $PSHOME 'Modules\\CimCmdlets\\CimCmdlets.psd1') -ErrorAction Stop"
+            "Import-Module (Join-Path $PSHOME 'Modules\\CimCmdlets\\CimCmdlets.psd1') "
+            "-ErrorAction Stop"
             if fault == "utf8-home-stock" else "",
             f". {_quote(REPO / 'plugins/agent-vault/scripts/versioned_runtime_native.ps1')}",
-            f"function Get-FiniteUninstallPython {{ param($InstallRoot); {_quote(Path(sys._base_executable))} }}",
-            f"$InstallDir={_quote(install)};$PidFile={_quote(install / 'pid')};$TaskName='fixture'",
+            "function Get-FiniteUninstallPython { param($InstallRoot); "
+            f"{_quote(_base_python())} }}",
+            f"$InstallDir={_quote(install)};$PidFile={_quote(install / 'pid')};"
+            "$TaskName='fixture'",
             "function Get-ScheduledTask { param($TaskName,$ErrorAction) }",
             "function Invoke-FiniteRuntimeUninstall { param($InstallRoot,[switch]$Check) }",
             f"$launcher={process.pid};$physical={child['pid']};$fault='{fault}'",
@@ -395,7 +408,8 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
             "if ($fault -eq 'argv') { $base.CommandLine+=' --unexpected' }",
             "if ($fault -eq 'foreign-argv-image') { $base.CommandLine='\"'+"
             "(Get-Process -Id $PID).Path+'\" -m agent_vault.service --foreground --persistent' }",
-            "if ($fault -eq 'stale-birth') { $base.CreationDate=$base.CreationDate.AddSeconds(-1) }",
+            "if ($fault -eq 'stale-birth') { "
+            "$base.CreationDate=$base.CreationDate.AddSeconds(-1) }",
             "if ($fault -in @('grandchild','sibling')) {",
             "  $script:inventory+=@([pscustomobject]@{ProcessId=2147483647;",
             "    ParentProcessId=$(if ($fault -eq 'grandchild') {$physical} else {$launcher});",
@@ -418,7 +432,8 @@ def test_vault_uninstall_admits_only_native_service_redirector_closure(
             _function("agent-vault", "ps1", "Test-VaultUninstallRedirectorChild"),
             _function("agent-vault", "ps1", "Get-VaultUninstallProcesses"),
             "try { $owned=@(Get-VaultUninstallProcesses) } catch {",
-            "  foreach ($row in $script:inventory | Where-Object ProcessId -in @($launcher,$physical)) {",
+            "  foreach ($row in $script:inventory | "
+            "Where-Object ProcessId -in @($launcher,$physical)) {",
             "    $native=[Diagnostics.Process]::GetProcessById([int]$row.ProcessId)",
             "    try { [Console]::Error.WriteLine((@{row=$row;path=$native.Path;",
             "      birth=$native.StartTime.ToUniversalTime().ToFileTimeUtc();",
@@ -452,24 +467,27 @@ def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
     if not PWSH:
         pytest.skip("Native PowerShell host unavailable")
     process = subprocess.Popen(  # noqa: S603 - bounded caller-owned actor, no Vault service
-        [sys._base_executable, "-c",
+        [str(_base_python()), "-c",
          "import time\nfrom pathlib import Path\nuntil=time.monotonic()+20\n"
          "while not Path('release').exists() and time.monotonic()<until: time.sleep(.02)\n"],
         cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+        stderr=subprocess.PIPE, creationflags=NO_WINDOW,
     )
     try:
         body = "\n".join((
             "$ErrorActionPreference='Stop'",
             f". {_quote(REPO / 'plugins/agent-vault/scripts/versioned_runtime_native.ps1')}",
             f"$InstallDir={_quote(tmp_path / 'unused-runtime')}",
-            f"function Get-FiniteUninstallPython {{ param($InstallRoot); {_quote(Path(sys._base_executable))} }}",
-            f"$script:captured=CimCmdlets\\Get-CimInstance Win32_Process -Filter 'ProcessId={process.pid}' |",
+            "function Get-FiniteUninstallPython { param($InstallRoot); "
+            f"{_quote(_base_python())} }}",
+            "$script:captured=CimCmdlets\\Get-CimInstance Win32_Process "
+            f"-Filter 'ProcessId={process.pid}' |",
             "  Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate",
             # Keep both CIM snapshots equal: only the pinned native birth exposes the change.
             "$script:captured.CreationDate=$script:captured.CreationDate.AddSeconds(-1)"
             if stale_birth else "",
-            "function Get-CimInstance { param($ClassName,$Filter,$ErrorAction); $script:captured }",
+            "function Get-CimInstance { param($ClassName,$Filter,$ErrorAction); "
+            "$script:captured }",
             _function("agent-vault", "ps1", "Get-VaultUninstallPathInfo"),
             _function("agent-vault", "ps1", "Stop-VaultUninstallProcess"),
             "Stop-VaultUninstallProcess -Row $script:captured",
@@ -490,11 +508,15 @@ def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
 @pytest.mark.skipif(os.name != "nt", reason="Windows canonical daemon command admission")
 @pytest.mark.parametrize("leased", [False, True])
 @pytest.mark.parametrize("fault", [
-    "none", "nt-prefix", "command", "source", "cache", "foreign-image", "foreign-base", "trailing-argument",
+    "none", "nt-prefix", "command", "source", "cache", "foreign-image", "foreign-base",
+    "trailing-argument",
     "no-bytecode", "no-bytecode-command",
 ])
-def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path, fault, leased):
+def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(
+    tmp_path: Path, fault: str, leased: bool,
+) -> None:
     from agent_procutil._daemon_instance_child import _BOOTSTRAP
+
     from agent_vault.launch import _SERVICE_BOOTSTRAP
 
     root = tmp_path / "runtime"
@@ -502,12 +524,12 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
     venv.EnvBuilder(with_pip=False).create(slot)
     package = slot / "Lib/site-packages"
     command = [
-        str(Path(sys._base_executable)),
+        str(_base_python()),
         "-X", "pycache_prefix=" + str(root / "cache/python" / ("installed-" + "a" * 64)),
         "-c", _BOOTSTRAP, str(package), "-c", _SERVICE_BOOTSTRAP, str(package),
         "--foreground", "--persistent", "--configuration-root", str(tmp_path),
     ]
-    image = str(Path(sys._base_executable))
+    image = str(_base_python())
     if fault == "nt-prefix":
         image = "\\\\?\\" + image
         command[0] = image
@@ -538,7 +560,7 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
             "COPILOT_EXTENSIONS_DAEMON_REGISTRY",
         ):
             environment.pop(key, None)
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - fixed admission program and fixture-owned request
         [
             sys.executable, "-I", "-S", "-B", "-X", "utf8",
             str(REPO / "plugins/agent-vault/scripts/vault-uninstall-process.py"),
@@ -547,15 +569,15 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
             "root": str(root), "image": image, "command": subprocess.list2cmdline(command),
         }),
         env=environment, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) is (fault in {"none", "nt-prefix", "no-bytecode"})
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native image path observations")
-def test_vault_uninstall_file_observations_normalize_native_namespace(tmp_path):
-    base = Path(sys._base_executable).resolve()
+def test_vault_uninstall_file_observations_normalize_native_namespace(tmp_path: Path) -> None:
+    base = _base_python().resolve()
     extended = Path("\\\\?\\" + str(base))
     body = "\n".join((
         "$ErrorActionPreference='Stop'",
@@ -563,7 +585,8 @@ def test_vault_uninstall_file_observations_normalize_native_namespace(tmp_path):
         f"$InstallDir={_quote(tmp_path / 'unused-runtime')}",
         f"function Get-FiniteUninstallPython {{ param($InstallRoot); {_quote(base)} }}",
         _function("agent-vault", "ps1", "Get-VaultUninstallPathInfo"),
-        f"ConvertTo-Json -InputObject @(Get-VaultUninstallPathInfo @({_quote(base)},{_quote(extended)})) -Compress",
+        "ConvertTo-Json -InputObject @(Get-VaultUninstallPathInfo "
+        f"@({_quote(base)},{_quote(extended)})) -Compress",
     ))
     result = _run(tmp_path, "ps1", body)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -669,7 +692,7 @@ def test_runtime_code_absent_and_retained_bytes_unchanged(
          "--plugin-id", plugin, "--root", str(install), "--shell", host,
          "--profile", str(profile), "--remove-runtime"],
         cwd=tmp_path, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert not any((install / name).exists() for name in entries)

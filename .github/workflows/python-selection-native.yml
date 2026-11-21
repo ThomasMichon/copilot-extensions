@@ -86,10 +86,10 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
           for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':8};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, nine installer, four prerequisite-lock and eight uninstall controls passed without skips')"
+          print('29 command, nine installer, four prerequisite-lock and 16 uninstall controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
