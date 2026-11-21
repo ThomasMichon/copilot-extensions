@@ -1108,7 +1108,9 @@ does not fetch or silently replace a stale target ref. A terminal historical
 PR does not need to contain the expected HEAD of new work on the branch.
 Qualified creation sends GitHub's explicit `head_repo` field
 and checks the returned source, target and exact host/repository/number URL
-before claiming success. A created
+before claiming success. Unqualified GitHub creation verifies the CLI's
+returned URL and observes that same PR's source, base and expected object
+before accepting its identity. A created
 PR whose identity cannot be verified retains its number, available URL and
 unknown publication outcome; reconcile it rather than creating another PR.
 Foreign GitHub creation reserves an owner- and revision-fenced attempt in
@@ -1122,14 +1124,28 @@ nondefault ports remain distinct. Failed receipt
 persistence leaves the earlier reservation blocking rather than permitting
 a replay. Do not edit or remove that evidence to retry. Plain errors include
 the known unverified number and URL as well as the unknown outcome.
-Pending attempts prevent native owner retirement; verified receipt history
-still retains the owner's metadata after normal retirement.
-The same receipt rule applies to ordinary fork `create-pr`: a malformed URL
+Reuse is rechecked under the same reservation authority before claiming.
+If another attempt completes during an empty lookup, creation refuses that
+stale lookup; retry the lookup instead of submitting another POST.
+Receipt verification remains pending until the claim is durable under the
+same owner lock. Pending attempts prevent finalization's freeze, physical
+cleanup (including forced managed removal), terminal session/pair conclusion
+and native owner retirement. Verified receipt history still retains the
+owner's metadata after normal retirement. Trusted home/ledger ancestor aliases
+are canonicalized; redirected receipt directories and files remain refused.
+The same receipt rule applies to ordinary `create-pr`: a malformed URL
 does not discard a valid number, and an unverified receipt is not claimed
 or automatically recreated. Ordinary managed creation persists its hold before
 the provider call and settles it in the same write as a verified PR association.
 Transport uncertainty or a failed completion write leaves the hold in place;
 if the initial reservation cannot persist, no provider call occurs.
+Ordinary creation checks existing holds before provider reconciliation or any
+branch publication, including with `--new`; a missing branch cannot convert
+an unknown creation into a merged PR. A proven local refusal before invoking
+creation transport records `provider_outcome: refused` (foreign receipt phase
+`refused`) and permits a normal retry. Unknown transport failures and failed
+refusal persistence remain blocking; neither an error string nor a missing
+provider number establishes that no request was sent.
 The command reports failure with any known receipt
 and unknown outcome, not a successful authoritative `pr` handle. Branch-only
 numberless healing cannot replace a pending or retained unverified provider identity.

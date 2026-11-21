@@ -95,7 +95,7 @@ def generation(head: Head, *, initialize: bool = False) -> str:
 
 
 def _targets(remote: str, refspec: str, cwd: str, lifetime: ExitStack, *, timeout: float) -> tuple[tuple[Head, ...], str]:
-    from . import git_acquisition_budget, git_ops, pr_publish
+    from . import git_acquisition_budget, git_ops, git_push_binding, pr_publish
     from .git_push_transport import captured_urls, pinned_destination
     branch = refspec.rpartition(":")[2] if ":" in refspec else refspec.removeprefix("+")
     if any(c.isspace() or c in "*?\0\r\n" for c in branch):
@@ -131,6 +131,14 @@ def _targets(remote: str, refspec: str, cwd: str, lifetime: ExitStack, *, timeou
             if fetch.returncode or pushes.returncode or not fetch.stdout.strip() or not urls or any(not u.strip() for u in urls):
                 raise ValueError("The exact push destinations are unavailable.")
         lifetime.enter_context(pinned_destination(remote, urls, settings, fetch_url=fetch.stdout.rstrip("\r\n")))
+    destination = git_push_binding.destination(
+        refspec.rpartition(":")[2] if ":" in refspec else refspec.removeprefix("+"),
+        urls, cwd=cwd, timeout=timeout,
+    )
+    if destination.startswith("refs/") and not destination.startswith("refs/heads/"):
+        return (), refspec.partition(":")[0] + ":" + destination
+    if destination.startswith("refs/heads/"):
+        branch = destination.removeprefix("refs/heads/")
     identities = {pr_publish._identity(url, cwd) for url in urls}
     if not identities or "" in identities:
         raise ValueError("Publication destination identity is unavailable.")
@@ -195,9 +203,14 @@ def provider_creation(function: Callable[P, PullResult]) -> Callable[P, PullResu
     @wraps(function)
     def fenced(*args: P.args, **kwargs: P.kwargs) -> PullResult:
         from .pr_provider_admission import creation_guard
+        from .providers.base import CreationRefused, ProviderError
 
         bound = signature.bind(*args, **kwargs).arguments
-        with creation_guard(bound["self"], bound["scope"], token=bound.get("token")):
+        with ExitStack() as lifetime:
+            try:
+                lifetime.enter_context(creation_guard(bound["self"], bound["scope"], token=bound.get("token")))
+            except (ProviderError, OSError, ValueError, TimeoutError) as exc:
+                raise CreationRefused(str(exc)) from exc
             return function(*args, **kwargs)
     return fenced
 
@@ -223,10 +236,12 @@ def cleanup_guard(record: object, repo: object) -> Iterator[None]:
 @contextmanager
 def cleanup_guards(owners: list[tuple[object, object]]) -> Iterator[None]:
     """Fence the union once, then locally revalidate every affected owner."""
-    from . import pr_creation_reconcile, tracking
+    from . import pr_creation_reconcile, pr_foreign_receipts, tracking
     from .config import RepoConfig
     selected = []
     for record, repo in owners:
+        if isinstance(record, tracking.WorktreeRecord):
+            pr_foreign_receipts.require_settled(record)
         if not isinstance(record, tracking.WorktreeRecord) or not any(
             pr_creation_reconcile.requires_qualification(pr) for pr in record.prs
         ):

@@ -24,6 +24,7 @@ class Binding:
     refspec: str
     object_id: str
     hook_ref: str
+    namespace: str = ""
 
 
 current: ContextVar[Binding | None] = ContextVar("push-source-binding", default=None)
@@ -56,7 +57,35 @@ def _capture(refspec: str, *, cwd: str | Path, timeout: float | None) -> Binding
     ).stdout.strip()
     if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", oid):
         raise ValueError("The exact pushed source object is unavailable.")
-    return Binding(force + oid + ":" + target, oid, "HEAD" if source == "HEAD" else symbolic or source)
+    namespace = next((prefix for prefix in ("refs/heads/", "refs/tags/") if symbolic.startswith(prefix)), "")
+    return Binding(force + oid + ":" + target, oid, "HEAD" if source == "HEAD" else symbolic or source, namespace)
+
+
+def destination(target: str, urls: tuple[str, ...], *, cwd: str, timeout: float) -> str:
+    """Resolve a short destination using the original named source, before OID pinning."""
+    from . import git_acquisition_budget, git_ops
+
+    binding = current.get()
+    if binding is None or target.startswith("refs/"):
+        return target
+    selected = set()
+    for url in urls:
+        result = git_ops.git(
+            "ls-remote", "--refs", url, target, cwd=cwd, isolated_repository=True,
+            timeout=git_acquisition_budget.remaining_timeout(timeout), kill_tree=True,
+        )
+        refs = {line.split("\t")[1] for line in result.stdout.splitlines() if "\t" in line}
+        if len(refs) > 1:
+            raise ValueError("The short push destination is ambiguous; use its full ref.")
+        if refs:
+            selected.update(refs)
+        elif binding.namespace:
+            selected.add(binding.namespace + target)
+        else:
+            raise ValueError("An unnamed source needs an existing or fully qualified push destination.")
+    if len(selected) != 1:
+        raise ValueError("Push destinations disagree on the short target's namespace; use its full ref.")
+    return selected.pop()
 
 
 def capture(function: Callable[P, PushResult]) -> Callable[P, PushResult]:

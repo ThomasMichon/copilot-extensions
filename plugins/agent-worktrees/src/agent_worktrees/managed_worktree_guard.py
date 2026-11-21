@@ -12,10 +12,38 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, git_ops, tracking
 from .retirement_safety import pending_prs
+
+
+def foreign_publication_guard(
+    function: Callable[..., tuple[bool, list[str]]],
+) -> Callable[..., tuple[bool, list[str]]]:
+    @wraps(function)
+    def guarded(
+        rec: tracking.WorktreeRecord, repo: cfg.RepoConfig, tracking_path: Path, *, force: bool = False,
+    ) -> tuple[bool, list[str]]:
+        from . import launch_seed_state, pr_foreign_receipts
+        from .receiving_allocation import serialized_receipt
+
+        path = tracking_path / f"{rec.worktree_id}.yaml"
+        try:
+            with launch_seed_state.removal_transaction(path):
+                fresh = tracking.load_record(path)
+                fields = ("worktree_id", "worktree_path", "branch", "machine", "creation_nonce")
+                if (
+                    any(getattr(fresh, name) != getattr(rec, name) for name in fields)
+                    or serialized_receipt(fresh) != serialized_receipt(rec)
+                ):
+                    return False, ["managed removal owner changed"]
+                pr_foreign_receipts.require_settled(fresh)
+                return function(fresh, repo, tracking_path, force=force)
+        except (OSError, ValueError, TimeoutError) as exc:
+            return False, [str(exc)]
+    return guarded
 
 
 def _resolve_repo(config: cfg.Config, record: tracking.WorktreeRecord) -> cfg.RepoConfig | None:
@@ -103,6 +131,9 @@ def blockers_for(rec: tracking.WorktreeRecord, repo: cfg.RepoConfig) -> list[str
     still exists, so the merge check below runs unconditionally.
     """
     blockers: list[str] = []
+    from . import pr_foreign_receipts
+    if pr_foreign_receipts.owner_receipts(rec)[1]:
+        blockers.append("Foreign PR creation is unverified; reconcile it before removal.")
     checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
     if checkout_exists:
         info = git_ops.classify_worktree(

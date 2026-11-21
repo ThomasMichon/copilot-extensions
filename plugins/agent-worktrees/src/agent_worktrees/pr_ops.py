@@ -454,6 +454,11 @@ def create_pr(
         except Exception:
             record = None
     from . import pr_creation_reconcile
+    if record is not None:
+        from . import pr_unverified_creation
+        for retained in record.prs:
+            if pr_unverified_creation.pending(base, retained):
+                return base
     error = pr_creation_reconcile.publication_error(record, new=new)
     if error:
         return {**base, "error": error}
