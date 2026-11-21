@@ -5,7 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
 import json
+import os
 from pathlib import Path
+import stat
 from typing import Literal
 
 from . import application_footprints, harness_state, repository_suite_roster, runtime_source_repository, source_config
@@ -34,7 +36,14 @@ def fleet_service_roles(path: Path, target: str) -> tuple[str, ...]:
     runtime_source_repository._ordinary(path)
     try:
         owner = import_module("worktree_manager._runtime_assets.scripts.runtime-source-tools.fleet_role_policy.target_policy")
-        with path.open("rb") as stream:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("Fleet policy must be a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(before, opened):
+                raise ValueError("Fleet policy changed during observation")
             raw = stream.read(owner.MAX_BYTES + 1)
         result = owner.service_roles(raw, target)
     except (ImportError, OSError, ValueError) as error:

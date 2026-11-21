@@ -22,8 +22,12 @@ def service_roles(raw: bytes, target: str) -> tuple[str, ...]:
     selected = []
     for binding in bindings:
         role = roles.get(binding.role)
-        if not isinstance(role, dict) or role.get("kind") not in ("service", "execution"):
-            raise PlanError("Fleet binding requires a declared role with a known kind")
-        if role["kind"] == "service" and binding.target == target:
+        if not isinstance(role, dict):
+            raise PlanError("Fleet binding requires a declared role")
+        if binding.target != target:
+            continue
+        if role.get("kind") not in ("service", "execution"):
+            raise PlanError("Fleet binding on selected target has unresolved role kind")
+        if role["kind"] == "service":
             selected.append(binding.role)
     return tuple(sorted(selected))

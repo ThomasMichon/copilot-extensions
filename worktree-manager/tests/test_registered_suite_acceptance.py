@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import time
 
@@ -68,10 +69,29 @@ def test_standalone_fleet_is_selected_by_service_binding_target(tmp_path: Path) 
 
     assert targets("selected") == {"worktree-manager", "fleet-manager"}
     assert targets("other") == {"worktree-manager"}
+    policy = json.loads(config.read_bytes())
+    policy["roles"]["custom"] = {"description": "application-specific role"}
+    bindings = policy["extensions"]["role_bindings"]["bindings"]
+    bindings["custom"] = {**bindings["controller"], "target": "custom-host", "resource": "custom-app"}
+    write(config, policy)
+    assert targets("selected") == {"worktree-manager", "fleet-manager"}
+    with pytest.raises(ValueError, match="Fleet"):
+        targets("custom-host")
     config.unlink()
     with pytest.raises(ValueError, match="Fleet"):
         targets("selected")
     assert not (root / "apps").exists()
+
+
+@pytest.mark.timeout(5)
+def test_fleet_policy_refuses_fifo_without_waiting_for_a_writer(tmp_path: Path) -> None:
+    fifo = tmp_path / "policy"
+    mkfifo = getattr(os, "mkfifo", None)
+    if mkfifo is None:
+        pytest.skip("POSIX FIFO")
+    mkfifo(fifo)
+    with pytest.raises(ValueError, match="Fleet"):
+        suite.fleet_service_roles(fifo, "target")
 
 
 @pytest.mark.parametrize("case", ["fresh", "same-source-update", "missing-app", "same-pin", "switch-default", "bare-default"])
