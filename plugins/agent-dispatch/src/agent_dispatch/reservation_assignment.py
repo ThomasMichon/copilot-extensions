@@ -24,6 +24,9 @@ def retains_assignment(conn: sqlite3.Connection, task_id: str) -> bool:
         " OR conclusion_state IN ('pending','held')"
         " OR (worktree_ownership='created' AND worktree IS NOT NULL"
         " AND COALESCE(conclusion_state,'') NOT IN ('complete','skipped'))"
-        " OR ((session_handle IS NOT NULL OR agent_info IS NOT NULL)"
-        " AND conversation_retired=0 AND release_requested=0)) LIMIT 1", (task_id,),
+        " OR ((session_handle IS NOT NULL OR agent_info IS NOT NULL OR EXISTS ("
+        " SELECT 1 FROM acquisition_receipts a WHERE a.reservation_key=spawn_reservations.key))"
+        " AND conversation_retired=0"
+        " AND NOT (release_requested=1 AND state IN ('failed','settled','rearmed')))) LIMIT 1",
+        (task_id,),
     ).fetchone() is not None

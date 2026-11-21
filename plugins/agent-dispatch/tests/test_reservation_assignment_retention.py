@@ -42,3 +42,22 @@ def test_release_cannot_unassign_a_suspended_reserved_worker(tmp_path: Path) -> 
     assert retained and (retained.status, retained.owner, retained.owner_session_id) == (
         Status.SUSPENDED, "host/driver", "original",
     )
+
+
+def test_failed_attempt_retains_native_published_only_in_acquisition(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("review", repo="example")
+    assert isinstance(task, Task)
+    res, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(res.key, "driver", ownership="targeted")
+    with queue._connect() as conn:
+        conn.execute(
+            "INSERT INTO acquisition_receipts VALUES (?,?,?,?,?,?,?,?)",
+            (res.key, task.id, task.generation, "driver", "bridge", "native", "acp", "delivery"),
+        )
+    failed = queue.fail_spawn(res.key)
+    assert failed.session_handle is None and failed.agent_info is None
+    before = queue.get(task.id)
+    with pytest.raises(TaskError, match="retains assignment"):
+        queue.abandon(task.id, permitted=True)
+    assert queue.get(task.id) == before
