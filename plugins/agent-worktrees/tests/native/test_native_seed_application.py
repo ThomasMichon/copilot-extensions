@@ -818,12 +818,14 @@ def test_manager_install_retains_only_the_selected_runner_lifecycle(
     _manager_install_environment = cast(_ManagerEnvironment, environment_fixture)
 
     monkeypatch.setenv(TEST_CONTEXT_ENV, "unselected ambient context")
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "unselected-copilot-home"))
     arguments = tmp_path / "home", tmp_path / "manager", tmp_path, sys.executable
     selected = {TEST_CONTEXT_ENV: "selected runner context"}
     environment = _manager_install_environment(
         *arguments, caller_jobs=True, worktrees_environment=selected,
     )
     assert environment[TEST_CONTEXT_ENV] == selected[TEST_CONTEXT_ENV]
+    assert environment["COPILOT_HOME"] == str(arguments[0] / ".copilot")
     assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
     assert TEST_CONTEXT_ENV not in _manager_install_environment(
         *arguments, caller_jobs=False, worktrees_environment=selected,
@@ -1056,6 +1058,7 @@ def _owned_application_command(
     }), encoding="utf-8")
     environment.update(
         COPILOT_PLUGIN_ROOT=str(owner), COPILOT_PLUGIN_STAGED_FROM=str(owner),
+        COPILOT_HOME=str(home / ".copilot"),
         COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(caller),
     )
     return [
@@ -1076,6 +1079,7 @@ def test_application_fixture_installs_through_its_private_command_owner(
     home.mkdir()
     caller.mkdir()
     root = home / ".agent-worktrees"
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "unselected-copilot-home"))
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
@@ -1106,6 +1110,7 @@ def test_application_fixture_installs_through_its_private_command_owner(
         [sys.executable, "-I", "-B", "-c", probe, root, str(exit_code)],
         interpreter=sys.executable, deadline=deadline,
     )
+    assert environment["COPILOT_HOME"] == str(home / ".copilot")
     result = run_caller_owned(
         command, cwd=caller, env=environment, timeout=max(0.01, deadline - time.monotonic()),
         max_stdout_bytes=8192, max_stderr_bytes=8192,
@@ -1200,6 +1205,12 @@ def _qualify_native_application(
     if caller_jobs:
         environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED")
         environment[TEST_CONTEXT_ENV] = os.environ[TEST_CONTEXT_ENV]
+    from application_python_fixture import managed_python_environment
+
+    environment = managed_python_environment(
+        environment, directory=tmp_path / "managed-python", uv=uv,
+        deadline=deadline, run=_run,
+    )
     assert environment.get("PYTEST_CURRENT_TEST")
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]

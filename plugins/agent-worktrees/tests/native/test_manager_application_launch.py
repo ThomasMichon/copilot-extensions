@@ -62,6 +62,7 @@ def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jo
     }
     environment.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        COPILOT_HOME=str(home / ".copilot"),
         WORKTREE_MANAGER_ROOT=str(root), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
         AGENT_WORKTREES_STATUS_MONITOR="0",
         UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
@@ -203,6 +204,12 @@ def _qualify_manager_application(
     environment = _manager_install_environment(
         home, root, tmp_path, interpreter,
         caller_jobs=caller_jobs, worktrees_environment=worktrees_environment,
+    )
+    from application_python_fixture import managed_python_environment
+
+    environment = managed_python_environment(
+        environment, directory=tmp_path / "managed-python", uv=uv,
+        deadline=deadline, run=_run,
     )
     (tmp_path / "mux-data").mkdir()
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
