@@ -3756,6 +3756,47 @@ installed external lanes are not exercised because no provisioning or runtime
 behavior changes. Full-census, every-release, comparable whole-flow, native,
 installed and retained-custody gates remain open.
 
+### November 21 original source-compile refusal qualification
+
+The adapter exports six exact unchanged original functions as twenty-nine
+cases, retaining effective editable-graph, omission, unsafe/disabled/context-only
+mapping and inactive local/registry ambiguity witnesses. The original 92-case
+compile collection matches the exact selected identities. All assertions,
+parameter suffixes and original callbacks remain. Guarded development execution
+passes twenty-nine in 3.328 seconds with zero prohibited effects, eight bound
+Python reads and actual per-case policy/configuration/argument owner calls.
+Native compile/retention paths remain outside without replacement callbacks.
+
+Only the adapter adds a source binding. All preceding 7,109 nodes/hashes,
+445 targets, 89 helper decisions and the 300-second bound remain, yielding
+7,138 nodes and 1,101 sources in 817,280 compact-v2 bytes with unchanged flat-v1
+identity. Ruff and whole-file strict Linux/Windows typing pass. Copilot approval
+`6008493399` covers exact head
+`fdf99c9b8c108a1fd3d0e89680512a4063ce5ddb`, without comments or open threads.
+CI `44954422805` unit job `136999272257` freshly passes all 7,138 cases with
+39 deselections, 173.65 pytest seconds and 195.218 packet seconds. Evidence
+reports `mode=executed`, origin run `44954422805` attempt one and digest
+`adece15b0b712bd06e1d2b9e69a08bccd872c3e072dffee84e75f5cf6d3675d1`.
+Required aggregate `137000410588`, guards, trusted run `44954423185`, complete
+review/thread pagination, seven fresh verifier reads and final veto/hold/head
+checks precede the managed merge, without CI bypass or manual metadata refresh.
+
+Source #13979 merges at `2026-11-21T22:07:29Z` as
+`eb71944ea62770438eebb37a0b8491d7758a7ade`. Independent readback confirms merged
+state, no closing references and open parent #6237. The actual parent Goal,
+current Plan and Validation Plan are reread before resolving only this leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+provisioning or runtime behavior changes. Full-census, every-release, comparable
+whole-flow, native, installed and retained-custody gates remain open.
+
+A separate nine-case health/pre-copy-deadline candidate remains outside. Its
+two exact original functions and engine fixture match the full 65-case source
+collection, but the first guarded attempt refuses an unbound runtime copy.
+After binding its four actual eager runtime dependencies, the guard still
+refuses an unattributable bytecode path during the original extended-path
+runtime load. No test callback, fixture, preload or effect contract is changed
+to admit it; no passing qualification or native acceptance is inferred.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

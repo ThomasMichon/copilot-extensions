@@ -46,6 +46,7 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "tools/typecheck-projects.json",
     "worktree-manager/launch-wrapper-assets.json",
     "worktree-manager/packaged-assets.json",
+    "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl",
     "fleet-manager/containers/gateway/Dockerfile",
     "fleet-manager/containers/gateway/Dockerfile.dockerignore",
 })

@@ -167,7 +167,8 @@ def test_noncanonical_or_git_source_is_refused(path: str) -> None:
     "libs/payload-invocation/templates/catalog-python.tmpl",
     "fleet-manager/containers/gateway/Dockerfile",
     "fleet-manager/containers/gateway/Dockerfile.dockerignore",
-], ids=["catalog", "gateway-recipe", "gateway-ignore"])
+    "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl",
+], ids=["catalog", "gateway-recipe", "gateway-ignore", "bundled-wheel"])
 def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path: Path, name: str) -> None:
     data = manifest()
     content = b"def emitted() -> str:\n    return 'catalog'\n"

@@ -3,6 +3,27 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_dependency_bundled_artifact.py",
+      [
+        "test_bundled_dbus_next_exception_is_exact[canonical-none]",
+        "test_bundled_dbus_next_exception_is_exact[canonical-bytes]",
+        "test_bundled_dbus_next_exception_is_exact[canonical-package]",
+        "test_bundled_dbus_next_exception_is_exact[canonical-project]",
+        "test_bundled_dbus_next_exception_is_exact[canonical-filename]",
+        "test_bundled_dbus_next_exception_is_exact[manager-none]",
+        "test_bundled_dbus_next_exception_is_exact[manager-bytes]",
+        "test_bundled_dbus_next_exception_is_exact[manager-package]",
+        "test_bundled_dbus_next_exception_is_exact[manager-project]",
+        "test_bundled_dbus_next_exception_is_exact[manager-filename]"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_contract.py",
+      [
+        "test_build_data_is_hash_bound_but_never_executable_unit_source[bundled-wheel]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_dependency_source_compile_refusals.py",
       [
         "test_compile_refuses_effective_editable_graph",
@@ -9467,7 +9488,7 @@
     "tools/coverage_guided_selection/correlation.py": "ad046f82729bf0c0ebdaf3ce2e780a67c173d95165fb551015614a83d1f7d170",
     "tools/coverage_guided_selection/selection.py": "bfa87b4332a72b4def6536914b3d39daa785561d90a72162ebd96339984697fb",
     "tools/governed_feed_trust.py": "6fcfca959294d45d5b9b92475674fddcf81cbb22fbb0d3f6ac8b0b99b513311f",
-    "tools/installer_engine_ref.py": "a05d848d801b77e576c3f36452355ea74e2b5320800fd6a6bb9814fade9b3d6b",
+    "tools/installer_engine_ref.py": "95b0aa21a37eb2e80c5f680518f9e6fb3193f440e7e28642d69bc58707733640",
     "tools/launch_wrapper_assets_ref.py": "881412e885a63e41680f923fb9af33e8f188994b729434009a4e1861ed0d27be",
     "tools/materialize_installer_engine.py": "f2ee8f71e2129cd6f7644ffdfee35f8b235c90af2bce0ff9ee9849b32fe3b0fb",
     "tools/materialize_launch_wrapper_assets.py": "e7c1dcbb9ddf7095bfba8d11dc84ecac08b3e4883c5fd7967fbdb961e83559fc",
@@ -9505,7 +9526,7 @@
     "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
     "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
     "tools/promotion_source_archive.py": "81d81229ea298b3cf4ca9e47740efd2c4787d8db51a71ffa08b747aff53d4d4e",
-    "tools/promotion_unit_contract.py": "b5f73590476b54eaaa7d609661e910170ccfcb96d97bd74c39703fcba478c68c",
+    "tools/promotion_unit_contract.py": "694f7494226ce11a9be8a604e93361c48d6dd200cc2e7ffdc6e389dc3a9b0fc1",
     "tools/promotion_unit_effects.py": "d8c8b2fd44c7aff1d46b95fd0cff48a2addbed59183b9fc6bbb2a6156d3a33a1",
     "tools/promotion_unit_packet.py": "56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
     "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
@@ -9522,7 +9543,7 @@
     "tools/promotion_unit_tests/test_complete_source_publication.py": "bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",
     "tools/promotion_unit_tests/test_config_migrate.py": "2fffbe90f4829c339f9e1905bb33c25031f9c8b8776f8661e0f3233a77c397a4",
     "tools/promotion_unit_tests/test_container_inventory.py": "de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
-    "tools/promotion_unit_tests/test_contract.py": "fe825cc6ecda337c63575dba058049db2abad214a23f36324019f22d0f610ab4",
+    "tools/promotion_unit_tests/test_contract.py": "6c884bfe23214753bbcb1875f9cb38500103d01543b24652c94f62fec37f77b9",
     "tools/promotion_unit_tests/test_control_retirement.py": "b68350d5859ae1147e97c2b55594ef284ffbe11912146ff6fb9a3d4d8929ca49",
     "tools/promotion_unit_tests/test_control_transition.py": "c84dc26b1113638c6dcce05b8df7894aced38c2e321a45f425ca7fcf25aab6cc",
     "tools/promotion_unit_tests/test_creation_diagnostics.py": "d4061059850bb6d429ac7f2e221a0ea8d6715f030c5e97221d193f6463f7df27",
@@ -9880,7 +9901,7 @@
     "libs/agent-procutil/src/agent_procutil/windows_broker_entry.py": "e14b94233c06065b4747f6713a021d2dc1c16a64edd3e56bb62be7ac3c790d6f",
     "libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1": "3237e16014172b91db3226dc0a2e64da0ef666abda043d385ce5b1d7b7e8dfb2",
     "libs/agent-procutil/src/agent_procutil/wsl.py": "4ff4cff1b1549736e09a1c18a2c2ba66ac72e2d4ab1a95cd218e449c8a85d8bf",
-    "libs/versioned-runtime/versioned_runtime_native.ps1": "a22da504f4b9b55a8d7284af18e39a3ef140b9f52b1ee9c08335deb5a87ed596",
+    "libs/versioned-runtime/versioned_runtime_native.ps1": "2ea5f12f7df89c0298680fe205c6db6518755af8c7e700e2f5a49ddc8fedfedd",
     "tools/manager_application_provider.json": "2a6bf96931f64ccc67fe6780065d60071dcafb8d6fc2db35958c7910a6783ed3",
     "tools/prepare_manager_application.py": "d50f8d8d6c9cb7bc87586d60cc876280f16fabf6cf0dca7243e06ee214ca6aae",
     "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
@@ -10007,9 +10028,16 @@
     "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47",
     "libs/installer-engine/installer_pip_index.py": "bf7b9ed86c3b4212ec05d80794947e0906fbf0d535f098747cf23fde6a369601",
     "tools/promotion_unit_tests/test_installer_pip_index.py": "066327d880f3ae3d3a9a73a4993692a80642c8cb46037f0c6aebcee7f5d016e3",
-    "tools/promotion_unit_tests/test_materialization_exclusions.py": "cdd5ea44d568b7dc40be03097f0f663b291e8847b9b46e4f9733d26334475224"
+    "tools/promotion_unit_tests/test_materialization_exclusions.py": "cdd5ea44d568b7dc40be03097f0f663b291e8847b9b46e4f9733d26334475224",
+    "tools/promotion_unit_tests/test_dependency_bundled_artifact.py": "87a1e6f38e7b3ef3c37e5895181565715b94c1bd3c3687bd8a55705a983aa2ef",
+    "worktree-manager/scripts/installer_dependency_policy.py": "58bb3e9fb49cfba51fc8d7fad5f3ab6b70b2776be906a13726a8cfb492063184",
+    "worktree-manager/scripts/installer_dependency_config.py": "feae756f8c302cb9992d015ffb94fb0390fe2fb3c968407e149a160f9093b11c",
+    "worktree-manager/scripts/installer_dependency_arguments.py": "395e0ac408c8666dc268000affdeb5730c3898a536dac5412abb7b72f43fd18f",
+    "worktree-manager/scripts/installer_retained_content.py": "b6cfb196232ea4fd56d7ede393486d6708e67a8ee2d4bae4348a024db08dfbc6",
+    "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl": "58948f9aff9db08316734c0be2a120f6dc502124d9642f55e90ac82ffb16a18b"
   },
   "coverage_targets": [
+    "worktree-manager/scripts/installer_dependency_policy.py",
     "tools/sync-versioned-runtime.py",
     "tools/daemon_lifecycle_assets.py",
     "tools/sync-installer-engine.py",
