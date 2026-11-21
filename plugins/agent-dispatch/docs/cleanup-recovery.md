@@ -48,10 +48,14 @@ a settled process slot, a future retry time or a cleanup claim already in flight
 does not discharge that marker. The supervisor may still send a same-owner
 conclusion prompt for the recorded local body.
 
-The read uses a partial workspace index and the reservation owner's host evidence.
+The read uses a partial workspace index. It compares the reservation's route
+with the session-bound worker and indexed attachments for that task, session,
+and workspace. The creating host is a fallback, not proof against a retained
+worker on another host. Task prompts, results, and cards are not read.
 A matching host returns `MATCH`; missing or conflicting host evidence returns
 `UNKNOWN` unless a match is found. If more than 32 pending candidates for that
-tree would need examination, absence is not established. `CLEAR` is specific
+tree or 32 matching attachment records per candidate would need examination,
+absence is not established. `CLEAR` is specific
 to pending work on this workspace; it says nothing about native-only work or
 other cleanup and execution gates. The read does not claim, validate, resume,
 or schedule a retry.

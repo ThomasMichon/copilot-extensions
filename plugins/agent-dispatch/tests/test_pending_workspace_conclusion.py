@@ -10,6 +10,42 @@ from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
 
 
+def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("Finished", repo="example", prompt="x" * 250_000)
+    assert isinstance(task, Task)
+    with queue._connect() as conn:
+        conn.execute("BEGIN")
+        conn.execute("UPDATE tasks SET completed_by='host-a/tree',owner_session_id='local-body:s' "
+                     "WHERE id=?", (task.id,))
+        conn.execute(
+            "INSERT INTO spawn_reservations(key,task_id,attempt,state,reserved_at,updated_at,"
+            "worktree,creating_host,session_handle,conclusion_state) VALUES "
+            "('retry',?,1,'settled',1,1,'tree','host-b','local-body:s','pending')", (task.id,),
+        )
+        columns: set[str] = set()
+
+        def observe(action: int, table: str, column: str, *unused: object) -> int:
+            if action == sqlite3.SQLITE_READ and table == "tasks":
+                columns.add(column)
+            return sqlite3.SQLITE_OK
+
+        def result(machine: str) -> DriverMatch:
+            return pending_workspace_conclusion(conn, machine=machine, worktree="tree")
+
+        conn.set_authorizer(observe)
+        assert result("host-a") is DriverMatch.MATCH
+        assert columns <= {"id", "owner", "owner_session_id", "completed_by"}
+        conn.set_authorizer(None)
+        conn.execute(
+            "INSERT INTO task_attachments(task_id,session_id,worktree_id,machine,attached_at)"
+            " VALUES (?,'local-body:s','tree','host-c',1)", (task.id,),
+        )
+        assert result("host-a") is DriverMatch.UNKNOWN
+        conn.execute("UPDATE tasks SET owner_session_id='different' WHERE id=?", (task.id,))
+        assert result("host-c") is DriverMatch.MATCH
+
+
 def test_plain_writer_pending_retry_until_owner_records_completion(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("Finished", repo="example")
