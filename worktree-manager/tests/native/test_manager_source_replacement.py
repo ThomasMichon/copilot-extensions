@@ -31,7 +31,7 @@ def contained_run(monkeypatch: pytest.MonkeyPatch) -> None:
 
     original = _caller_owned.run
 
-    def contained(*args: Any, **options: Any) -> subprocess.CompletedProcess[str]:
+    def contained(*args: Any, **options: Any) -> subprocess.CompletedProcess[str | bytes | None]:
         options["allow_daemon_breakaway"] = False
         return original(*args, **options)
 
