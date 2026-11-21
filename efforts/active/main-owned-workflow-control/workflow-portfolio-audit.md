@@ -2826,6 +2826,55 @@ Source arithmetic/stamping units do not prove real Git behavior, actual
 promotion, native lifecycle, every-release/full-census acceptance, reuse
 savings, workflow-count reduction or controlled whole-flow improvement.
 
+Source #13924 merges at `2026-11-21T16:23:31Z` as
+`1d33ace36596e1be64e0350d9a6658322689f55a`. Copilot approval `6006547674`
+at `16:20:32Z` names exact head
+`690766c112ba4a690e6321c33b7aff7baa8160f0`; complete review and thread
+readback finds no active finding and no omitted thread page. Required source
+CI `44923764396` and trusted metadata CI `44923764525` both succeed.
+Actual unit job `136905246822` freshly executes all 6,684 cases with 35
+deselections in 106.39 pytest seconds and 123.552 packet seconds. Lookup takes
+462 ms and finds no qualified completed packet; no reuse saving is credited.
+The existing packet-only selector omits the AST scanner group, not the unit
+packet or required aggregate. These are observed execution/work counts, not a
+controlled before/after speedup or an eliminated workflow invocation.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite source cohort is resolved. Scoped managed
+synchronization retains the published head and advances to the actual merge
+without conflict, reset, stash, peer edit or resource release. Continue the
+remaining unit census; broader native, every-release, accepted-owner, lifecycle
+and whole-flow gates remain open.
+
+### November 21 original release-message source admission
+
+The original promotion suite has 48 expanded cases. Only the two pure message
+controls are admitted here, as their exact original test objects, not copied
+assertions or replacement tests. Neither Git nor the ambient Git-identity
+fixture is selected. Their populated and empty summaries reach the actual
+`format_promotion_message`; the 46 Git/process cases remain unchanged outside
+the packet. No existing adapter references this original source.
+
+Development collection proves exact object identity and matching original
+suffixes. Both cases pass actual effect auditing in 1.062 seconds, with positive
+formatter call-phase coverage, zero prohibited effects and six observed Python
+reads, all source-bound. Only the adapter and original suite bindings are new.
+All 6,684 preceding nodes retain their order and source hashes; 440 coverage
+targets, 89 helper decisions and the 300-second bound remain unchanged. The
+6,686-node, 1,059-source manifest keeps compact-v2 storage at 768,266 bytes
+and flat-v1 normalization/evidence.
+
+This is a finite original-source census slice, not a workflow removal or
+controlled savings claim. No production, plugin, workflow or runtime changes
+are included. Focused Ruff and whole-file strict typing pass the adapter on
+Linux and Windows without suppressions. Current-head review and complete
+required Linux source CI remain delivery gates. A fresh-install lane is inapplicable because
+no install or first-touch behavior changes; live source Actions exercises the
+packet consumer, not native promotion or release publication. All broader
+owner, native, every-release, lifecycle and whole-flow gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

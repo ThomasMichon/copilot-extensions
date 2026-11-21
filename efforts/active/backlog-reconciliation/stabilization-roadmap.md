@@ -53,6 +53,13 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [current force-identity contribution](roadmap-selected-force-identity.md)
+qualifies #5006's actual force caller and shared termination API against
+current lifecycle intent. It preserves force/tree behavior and the keeper's
+independent lanes without reopening delivered schema/caller work. Its
+[journal](journal/2026/11.21-current-force-identity.md) records actual
+#13925 delivery and 899 whole open; no implementation or new hard edge follows.
+
 The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
 credits #4619's accepted source lanes before selecting the independently
 unfinished BOTH-store boundary. Actual qualified call/lock scopes, current

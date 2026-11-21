@@ -811,13 +811,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13920 merges at `02e34a3217bf60736bf6260512d967108b050b87` after
   corrected-head Copilot approval and complete required Linux CI with all
   6,647 units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land 37 original pure/fixture-owned version-stamping cases
+- [x] Qualify and land 37 original pure/fixture-owned version-stamping cases
   through 23 exact test objects and the original isolation fixture. Preserve
   the eight actual-Git cases and canonical checkout-data case outside the
   packet, every preceding identity/hash/target/helper decision and the
   300-second budget. Require source closure, positive per-case production
   coverage, zero prohibited effects, strict typing, current-head review and
   complete Linux source CI; this is not live promotion or full-census proof.
+  #13924 merges at `1d33ace36596e1be64e0350d9a6658322689f55a` after
+  exact-head Copilot approval and complete required Linux CI with all 6,684
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land the two exact original release-message test objects
+  under source closure, positive production call coverage and effect auditing,
+  retaining all 46 Git/process originals outside the packet. Preserve every
+  prior node/hash/target/helper decision and the 300-second limit; require
+  strict typing, current-head review and complete Linux source CI. Formatter
+  admission is not promotion, native, full-census or whole-flow acceptance.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
