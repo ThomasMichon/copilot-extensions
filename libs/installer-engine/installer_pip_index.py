@@ -106,7 +106,7 @@ def configured_index(
     if environment.get("PIP_INDEX_URL"):
         return _index(environment["PIP_INDEX_URL"])
     explicit = environment.get("PIP_CONFIG_FILE")
-    if explicit and os.path.abspath(explicit) == os.path.abspath(os.devnull):
+    if explicit == os.devnull:
         return None
     platform = sys.platform if platform is None else platform
     files = list(_global_files(environment, platform) if global_files is None else global_files)

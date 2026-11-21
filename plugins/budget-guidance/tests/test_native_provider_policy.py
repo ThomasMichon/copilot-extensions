@@ -58,11 +58,12 @@ def test_native_uv_policy_qualification_retains_selected_provider(
     project.mkdir(parents=True)
     original = {
         "pyproject.toml": b'[project]\nname = "native-provider-sample"\nversion = "1.0.0"\n',
-        "uv.toml": b"",
+        "uv.toml": b'[[index]]\nurl = "https://index.example/simple"\ndefault = true\n',
         "sample.py": b"VALUE = 1\n",
     }
     for name, content in original.items():
         (project / name).write_bytes(content)
+    environment.update(UV_NO_CONFIG="yes", UV_CONFIG_FILE=str(project / "uv.toml"))
     expected = Path(uv)
     log = tmp_path / "wrapper.log"
     if case == "quoted-wrapper":

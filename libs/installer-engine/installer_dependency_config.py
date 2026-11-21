@@ -419,8 +419,10 @@ def report_cleanup_error(error: BaseException) -> None:
 
 
 def native_retained_path(path: _Path) -> str:
+    if os.name != "nt":
+        return str(Path(path).absolute())
     value = os.path.abspath(path)
-    if os.name != "nt" or value.startswith("\\\\?\\"):
+    if value.startswith("\\\\?\\"):
         return value
     return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
 
@@ -635,11 +637,11 @@ def config_inputs(
     argument_pairs: _Pairs, toml: _Toml, error_type: _Error,
 ) -> list[tuple[Path, bool]]:
     pairs = dict(argument_pairs(arguments))
-    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in _TRUE_VALUES:
-        return []
     explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
     if explicit:
         return [(base / explicit, False)]
+    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in _TRUE_VALUES:
+        return []
     system_flag = environment.get("UV_NO_SYSTEM_CONFIG")
     if system_flag is not None and system_flag.lower() not in _TRUE_VALUES | _FALSE_VALUES:
         raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")

@@ -22,11 +22,11 @@ def uv_launch_path(
     """Resolve captured PATH entries against the actual OS launch directory."""
     base = Path.cwd() if cwd is None else cwd.absolute()
     if os.path.dirname(uv):
-        return os.path.abspath(base / uv)
+        return str((base / uv).absolute())
     for entry in os.get_exec_path(dict(environment)):
         if windows and entry.startswith('"') and entry.endswith('"'):
             entry = entry[1:-1]
-        selected = os.path.abspath(base / entry / uv)
+        selected = str((base / entry / uv).absolute())
         if os.path.isfile(selected) and os.access(selected, os.X_OK):
             return selected
     raise error_type("Cannot qualify UV_NO_SYSTEM_CONFIG support: selected UV is unavailable")

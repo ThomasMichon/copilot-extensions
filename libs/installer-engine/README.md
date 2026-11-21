@@ -152,6 +152,9 @@ Windows wrapper lookup normalizes enclosing PATH-entry quotes, while POSIX
 entries remain literal. Qualification shares the resolver's short-directory
 fallback for overlong Windows working directories. Configuration-disable and
 isolation flags accept the same boolish true spellings as uv.
+Explicit configuration files take precedence over discovery-disable flags.
+POSIX input paths preserve symlink/parent traversal, and pip's null-device
+configuration switch matches its literal spelling rather than normalized aliases.
 The installer passes a valid active venv/Conda site prefix as configuration data
 before isolating interpreter hints; it never executes that environment's Python.
 Discovery runs only for package construction, not completed-slot reuse.

@@ -725,7 +725,9 @@ def test_posix_cleanroom_snapshot_provisions_without_index_environment(tmp_path:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable search semantics")
-@pytest.mark.parametrize("lookup", ["relative-command", "relative-path", "empty-path-entry"])
+@pytest.mark.parametrize("lookup", [
+    "relative-command", "relative-path", "empty-path-entry", "symlink-command", "symlink-path",
+])
 def test_system_flag_pins_provider_in_actual_launch_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lookup: str,
 ) -> None:
@@ -750,8 +752,19 @@ def test_system_flag_pins_provider_in_actual_launch_context(
         else ("uv", "bin", child) if lookup == "relative-path"
         else ("uv", "", child / "bin")
     )
-    environment = {"UV_NO_SYSTEM_CONFIG": "1", "PATH": path}
     expected = str(child / "bin/uv")
+    if lookup.startswith("symlink-"):
+        physical = tmp_path / "physical"
+        (physical / "nested").mkdir(parents=True)
+        (physical / "bin").mkdir()
+        shutil.copy2(child / "bin/uv", physical / "bin/uv")
+        (child / "bin/uv").write_text("#!/bin/sh\nprintf 'uv 0.8.0\\n'\n", encoding="utf-8")
+        (child / "link").symlink_to(physical / "nested", target_is_directory=True)
+        expected = str(child / "link" / ".." / "bin" / "uv")
+        uv = "link/../bin/uv" if lookup == "symlink-command" else "uv"
+        path = "/missing" if lookup == "symlink-command" else "link/../bin"
+        cwd = child
+    environment = {"UV_NO_SYSTEM_CONFIG": "1", "PATH": path}
 
     @contextmanager
     def retain(selected: str, _arguments: list[str], **options: object) -> Iterator[str]:
@@ -771,6 +784,34 @@ def test_system_flag_pins_provider_in_actual_launch_context(
         configuration.require_system_config_provider(
             "bin/uv", environment, cwd=parent, error_type=ValueError,
         )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink and parent traversal")
+def test_posix_explicit_uv_config_preserves_physical_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    spec = importlib.util.spec_from_file_location("installer_pip_index", source)
+    assert spec and spec.loader
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    logical, physical = tmp_path / "logical", tmp_path / "physical"
+    logical.mkdir()
+    (physical / "nested").mkdir(parents=True)
+    (logical / "link").symlink_to(physical / "nested", target_is_directory=True)
+    (logical / "uv.toml").write_text("", encoding="utf-8")
+    (physical / "uv.toml").write_text(
+        '[[index]]\nurl = "https://physical.example/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    for key in ("UV_NO_SYSTEM_CONFIG", "UV_INDEX_URL", "UV_DEFAULT_INDEX"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(logical / "link" / ".." / "uv.toml"))
+    monkeypatch.setenv("UV_NO_CONFIG", "yes")
+    monkeypatch.setenv("PIP_INDEX_URL", "https://not-selected.example/simple")
+    assert reader.main() == 0
+    output = capsys.readouterr()
+    assert output.out == output.err == ""
 
 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX checkout reference coverage")

@@ -106,7 +106,10 @@
         "test_boolish_config_flags_preserve_composed_index_precedence[t-UV_NO_CONFIG]",
         "test_boolish_config_flags_preserve_composed_index_precedence[t-UV_ISOLATED]",
         "test_boolish_config_flags_preserve_composed_index_precedence[Y-UV_NO_CONFIG]",
-        "test_boolish_config_flags_preserve_composed_index_precedence[Y-UV_ISOLATED]"
+        "test_boolish_config_flags_preserve_composed_index_precedence[Y-UV_ISOLATED]",
+        "test_explicit_uv_configuration_precedes_disabled_discovery[environment]",
+        "test_explicit_uv_configuration_precedes_disabled_discovery[argument]",
+        "test_null_config_switch_is_literal_not_a_normalized_alias"
       ]
     ],
     [
@@ -8944,8 +8947,8 @@
     "libs/installation-context/_installation_context_source.py": "f377eb2bc2432742ba0b568ed0a45eddb22f371d6e3c45b661fc84e015705ad7",
     "libs/installation-context/_installation_context_worker.py": "9fa6e8b3babca28cea7502738db931afd9e15c96e6b6dc4842c4e1db8b91de05",
     "libs/installation-context/installation_context.py": "17b12e0dc590ead8b434db38a9d92c8f1fdde970346ccc58befd97a3696ba4fc",
-    "libs/installer-engine/installer_dependency_config.py": "cdd8278c0617743d2be7f5a72de8fb5e9868b8fcb6ba658e0e622811e803b5b6",
-    "libs/installer-engine/installer_dependency_arguments.py": "0f8caefa240444225f2cf5d54b4cca6b9eb25d6d6722ad7d9a21a1eb3a03f82f",
+    "libs/installer-engine/installer_dependency_config.py": "ff933dce66ab312285d55c5f83a5406bd01053809fdf4947136c00a558758287",
+    "libs/installer-engine/installer_dependency_arguments.py": "65da0c39aedf0e0d0ee4f625a59080a416216a69f10167a276a9a3ddb6782d85",
     "libs/installer-engine/installer_dependency_policy.py": "58bb3e9fb49cfba51fc8d7fad5f3ab6b70b2776be906a13726a8cfb492063184",
     "libs/installer-engine/installer_engine.py": "20b1e3e3c965874f2bda1554a742929e04e1ed7b2ac441b92b13c6f4d7246994",
     "libs/installer-engine/installer_provider_roots.py": "874d8c440eb6200378641a8b6d86f12e7187fad9d62bdd1a2df1daa2067539ab",
@@ -9666,8 +9669,8 @@
     "tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445",
     "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d",
     "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47",
-    "libs/installer-engine/installer_pip_index.py": "0dfe9c970c8a86e1eb7c46a555d2a0ca2fb6269890d03d1f7490b2bcb558d83b",
-    "tools/promotion_unit_tests/test_installer_pip_index.py": "99bdba36d4bf4a5abec45107582fffb147e6523cd5a162eb526382500fe52e49",
+    "libs/installer-engine/installer_pip_index.py": "bf7b9ed86c3b4212ec05d80794947e0906fbf0d535f098747cf23fde6a369601",
+    "tools/promotion_unit_tests/test_installer_pip_index.py": "066327d880f3ae3d3a9a73a4993692a80642c8cb46037f0c6aebcee7f5d016e3",
     "tools/promotion_unit_tests/test_materialization_exclusions.py": "cdd5ea44d568b7dc40be03097f0f663b291e8847b9b46e4f9733d26334475224"
   },
   "coverage_targets": [

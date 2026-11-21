@@ -83,6 +83,26 @@ def test_null_config_disables_all_files(reader: ModuleType, tmp_path: Path) -> N
     ) is None
 
 
+def test_null_config_switch_is_literal_not_a_normalized_alias(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    null = tmp_path / "null.conf"
+    null.write_text("", encoding="utf-8")
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    system = _config(tmp_path / "system.conf", "https://system.example/simple")
+    monkeypatch.setattr(reader, "os", SimpleNamespace(**{**vars(os), "devnull": str(null)}))
+    alias = branch / ".." / null.name
+    assert reader.configured_index(
+        {"PIP_CONFIG_FILE": str(alias)}, home=tmp_path / "home", prefix=tmp_path,
+        global_files=[system],
+    ) == "https://system.example/simple"
+    assert reader.configured_index(
+        {"PIP_CONFIG_FILE": str(null)}, home=tmp_path / "home", prefix=tmp_path,
+        global_files=[system],
+    ) is None
+
+
 @pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty"])
 def test_empty_xdg_config_dirs_uses_unix_default(reader: ModuleType, value: str | None) -> None:
     environment = {} if value is None else {"XDG_CONFIG_DIRS": value}
@@ -408,6 +428,35 @@ def test_boolish_config_flags_preserve_composed_index_precedence(
     output = capsys.readouterr()
     assert output.out == "https://selected.example/simple\n"
     assert output.err == ""
+
+
+@pytest.mark.parametrize("reference", ["environment", "argument"])
+def test_explicit_uv_configuration_precedes_disabled_discovery(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], reference: str,
+) -> None:
+    config = tmp_path / "explicit.toml"
+    config.write_text(
+        '[[index]]\nurl = "https://configured.example/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    policy = reader._dependency_policy()
+    environment = {"UV_NO_CONFIG": "yes", "PIP_INDEX_URL": "https://not-selected.example/simple"}
+    arguments = ["--no-config"]
+    if reference == "environment":
+        environment["UV_CONFIG_FILE"] = str(config)
+    else:
+        arguments.extend(["--config-file", str(config)])
+    assert policy._config_inputs(arguments, environment, tmp_path) == [(config, False)]
+    if reference == "environment":
+        monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
+        for key in ("UV_INDEX_URL", "UV_DEFAULT_INDEX"):
+            monkeypatch.delenv(key, raising=False)
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        assert reader.main() == 0
+        output = capsys.readouterr()
+        assert output.out == output.err == ""
 
 
 def test_system_uv_flag_rejects_invalid_values(reader: ModuleType, tmp_path: Path) -> None:
