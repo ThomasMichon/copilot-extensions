@@ -252,6 +252,20 @@ delivery from an SDK promise or a timer.
 
 ## Journal
 
+### 2026-11-21 - Qualify an empty successful startup inventory
+
+- Corrected the review's empty-registry edge case: ordinary startup now binds
+  the worktree cache after a qualified empty repository read, even without
+  agents, machines or inventory-only projects. An unavailable empty owner
+  retains its existing unavailable/incomplete distinction.
+- The focused startup/cache packet passed 54 cases, including actual daemon
+  startup through public worktree and target listings plus private snapshot
+  restoration into the forwarded catalog. Healthy empty results are complete
+  and fresh rather than permanently unbound.
+- Both changed Python files passed whole-file strict typing on Linux and
+  Windows. Exact-head review and required CI remain completion gates.
+  No installed service or native session changed.
+
 ### 2026-11-21 - Degrade selected-launcher failures and reconcile upstream
 
 - Assessed the next clean review's Windows-launcher caveat against the actual

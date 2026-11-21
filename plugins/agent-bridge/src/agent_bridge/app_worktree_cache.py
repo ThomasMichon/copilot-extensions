@@ -15,7 +15,10 @@ def start_worktree_cache(
     app: FastAPI, resolver: AgentResolver, cfg: ServiceConfig, governance: LoopGovernance,
 ) -> None:
     """Retain the exact configured cache before starting its ordinary owner."""
-    if resolver.agents or resolver.machines or resolver.inventory_sources:
+    if (
+        resolver.agents or resolver.machines or resolver.inventory_sources
+        or not resolver.repository_inventory_unavailable
+    ):
         from .routes.worktrees import cache_for_app
 
         cache = cache_for_app(app)

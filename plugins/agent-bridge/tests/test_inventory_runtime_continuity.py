@@ -428,3 +428,58 @@ async def test_unavailable_registry_does_not_break_healthy_agent_stream_or_initi
     assert [frame["type"] for frame in frames] == ["begin", "row", "done"]
     assert frames[1]["entry"]["name"] == "worker"
     assert calls == [{"force_refresh": False, "require_complete": True}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner_available", [False, True])
+async def test_empty_daemon_inventory_is_qualified_through_public_listings_and_snapshot(
+    startup_owner: list[Any], monkeypatch: pytest.MonkeyPatch, owner_available: bool,
+) -> None:
+    from agent_bridge import provider_process, session_lifecycle_cli
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        startup_owner.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0, '{"inventory_authority":"complete","repos":[]}', "",
+        )
+
+    monkeypatch.setattr(provider_process, "run_captured", run)
+    if not owner_available:
+        monkeypatch.setattr(session_lifecycle_cli, "_agent_worktrees_launch_prefix", lambda **kwargs: None)
+    cfg = ServiceConfig(worktree_discovery_interval=0)
+    resolver = agent_registry.daemon_resolver(cfg)
+    assert not (resolver.agents or resolver.machines or resolver.inventory_sources)
+    app = FastAPI()
+    app.state.resolver = resolver
+    app.state.session_manager = SimpleNamespace(
+        list_sessions=lambda: [], _host_index=None,
+        db=SimpleNamespace(list_live_sessions=lambda **kwargs: []),
+    )
+    monkeypatch.setattr(registered_inventory, "registered_hosts", lambda: (
+        [], {"availability": "available"},
+    ))
+    cache = worktrees.WorktreeDiscoveryCache()
+    app.state.worktree_discovery_cache = cache
+    governance = LoopGovernance(helper=lambda checkpoint: {"status": "ready"})
+    start_worktree_cache(app, resolver, cfg, governance)
+    request = Request({"type": "http", "app": app})
+    result = await worktrees.list_worktrees(request, render=False, refresh=False)
+    catalog = await target_inventory.inventory(request)
+    assert result["groups"] == {} and catalog["targets"] == []
+    for evidence in (result["discovery"], catalog["sources"]["worktrees"]):
+        assert evidence["completeness"] == ("complete" if owner_available else "incomplete")
+        if owner_available:
+            assert evidence["freshness"] == "fresh" and "repository_inventory" not in evidence
+        else:
+            assert evidence["repository_inventory"]["availability"] == "unavailable"
+    if owner_available:
+        await asyncio.gather(*tuple(cache._backfill_tasks))
+        restored = restore_resolver(capture_resolver(resolver))
+        frozen = restore_worktrees(capture_worktrees(cache, resolver, governance), restored)
+        app.state.resolver = restored
+        app.state.worktree_discovery_cache = frozen
+        forwarded = await target_inventory.inventory(request)
+        assert forwarded["targets"] == []
+        assert forwarded["sources"]["worktrees"]["completeness"] == "complete"
+        assert forwarded["sources"]["worktrees"]["freshness"] == "fresh"
+    await cache.stop()
