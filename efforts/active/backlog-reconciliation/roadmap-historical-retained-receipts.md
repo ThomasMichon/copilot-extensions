@@ -6,6 +6,8 @@ Parent: [Backlog Reconciliation](README.md), Phase 2b.
 Selection: [current historical metadata](roadmap-historical-current-admission.md).
 Delivery and changed evidence:
 [dated journal](journal/2026/11.21-historical-retained-receipts.md).
+The [next continuation](journal/2026/11.21-historical-scoped-controls.md)
+records the additional 33 decisions and actual #13904 delivery.
 
 ## Accounting boundary
 
@@ -21,8 +23,10 @@ the following disjoint continuation decisions.
 | Scoped controls and explicit gaps | 10 | Actual research history is retained without claiming a newly complete current authored union. |
 | Previously retained controls | 3 | #63/#78/#356 remain separate controls, not additional affirmative read correspondences. |
 | Actual linked-source author gaps | 24 | The metadata audit's existing admission gaps remain; #6237 additionally lacks complete enumeration. |
-| Accounted identities | 111 | Receipt/control/gap decisions, not 111 new technical assessments. |
-| Remaining correspondence decisions | 181 | The rest of the same selected 292; existing research is not presumed absent. |
+| Additional exact whole-read correspondence | 1 | #2464's current selected metadata matches the initial and terminal metadata of its earlier complete original/four-discussion read. |
+| Additional scoped controls and explicit gaps | 32 | Specific prior studies, receiving/owner conditions and unresolved correspondence or copy causes; not new complete current authored unions. |
+| Accounted identities | 144 | The previously published 111 plus this disjoint 33; not 144 new technical assessments. |
+| Remaining correspondence decisions | 148 | The rest of the same selected 292; existing research is not presumed absent. |
 
 The 23 plus 51 give 74 retained authored/read correspondences, with different
 proof strengths. Temporal precedence is not body-byte equality; a reported
@@ -30,6 +34,9 @@ whole read is not silently relabeled an independently repeated read. These
 bindings do not newly qualify every current vision/effort home, establish
 implementation absence everywhere, admit a held containing copy, or release
 an owner. No issue disposition or technical checkbox changes.
+The additional #2464 binding makes 75 retained authored/read correspondences
+at their stated proof strengths; the other 32 decisions do not join that
+affirmative count.
 
 ## Previously published exact correspondence
 
@@ -140,9 +147,59 @@ creators or proposed departures. #6237 retains both source-author and
 enumeration gaps. The raw umbrella's gap does not taint independently
 qualified canonical files or create permission to reconstruct the raw source.
 
+## Additional 33 specific decisions
+
+These are retained receipt/control judgments, not another original,
+discussion, product-code or native sweep. Current metadata below means the
+same serial observation described in the selection register, not a new
+census. Each row preserves the complete earlier contract; its discriminator
+does not replace that contract or newly qualify every current vision/home.
+
+| Issue | Actual retained scope and continuing boundary |
+|---|---|
+| #2464 | Current selected metadata exactly matches both boundaries of the earlier complete 559-line original/four-discussion read. The expanded canonical, all directly received duties, alternatives and actual account-context/passive-startup claims remain. #13246 is optional publication without production opt-in; #13249's exit settlement explicitly excludes startup; #13261 is a separate connected-reader/history caller. None completes the whole canonical or native continuity/cutover. |
+| #2549 | The retained acquisition was original-only; matching qualification metadata does not invent a read of all three discussions. Persistent operator raw-SSH-only policy remains distinct from deliberate per-dispatch SSH, with scope/precedence, actual launch consumers, default-carrier compatibility, uncertain-failure outreach and authentication custody preserved. |
+| #2847 | A specific previously acquired refinement has unresolved source-pin/containing-copy overlap. That unit and actual containing copies remain opaque; current metadata does not clear them. The original itself is not automatically wholly withheld. No protected unit is reopened or reconstructed. |
+| #2879 | Earlier whole-refusal history names #6132/#6677; separately corrected citation-only causes are not revived. The particular copy/cause and complete current authored correspondence remain unresolved, not a new permanent numerical-reference rule. |
+| #2887 | Earlier qualified research and its KEEP judgment exist: reviewer-land/native-ADO foundations are partial, critical-area consent and knowledge/persona-pointer semantics remain, and a general comment is not an anchored finding. The parked parent is not an accepting receiver; current whole correspondence is not newly established. |
+| #2908 | Earlier qualified research retains the original cadence request. Whole-effort completion guidance is not conditional phase-PR cadence. Historical unread-parent/refusal observations remain scoped to those receipts, not a new global planner/home ban or proof research is absent. |
+| #3000 | Earlier refusal history names #84/#912/#3584. The independent #84/#912 reads already retained above do not clear #3000's actual copies or accept #3584's ownership. Preserve the particular unresolved cause and current-correspondence gap without reviving citation-only rules. |
+| #3115 | The separate OPEN live umbrella and Linux AND macOS scheduler acceptance remain; #3983's narrower entire-original validation does not erase this gate. Earlier changed-metadata research is retained, not newly bound to a complete current authored union. |
+| #3208 | A later metadata-only receipt retains unresolved actual causes behind earlier #5930/#7268 stops. The qualified #5930 canonical child is not parent-original or containing-copy admission. No new feature ban or body read follows. |
+| #3303 | An actual earlier receipt qualified metadata and requested text, but explicitly did not open/render the stored text to the model. That is a receipt-specific distinction, not proof no prior research exists anywhere. Later source/copy-refusal history is not cleared by current metadata or converted into a permanent citation rule. |
+| #3444 | The explicit own-OPEN token and publisher, installation-construction, staging, coordinator/supervisor-unit and consumer-redrive owners remain. Bind the observed publication to immutable release evidence or retain tracked uncertainty; rejected candidates remain separate. Earlier complete requirement research is retained without republishing private incident detail. |
+| #3511 | Earlier whole research retains partial #3519/#8156 credit. Completion still needs an admitted configured `--all` result OR an accepted revision-equivalent result, then the original conditional completion checks. No new sweep, source scrub, history rewrite or private finding-list acquisition/publication is assigned. |
+| #3556 | Preserve the wrapper's implementation custodian, action-native Dispatch/Worktrees/Bridge owners and actual OPEN parent. Finite wrapper TL1 OR same-writer lost-response TL4-TL6 choices do not discharge other clauses, current/late/unknown-attempt controls or owner acceptance. |
+| #3654 | Stronger freshness versus ordinary caching remains a rightful-owner contract choice over actual root AND nested consumers. Independent install overrides, both copy boundaries and #3905/#7028 owners remain; the whole is OPEN and completed conversion is not reopened. |
+| #3657 | The earlier admitted eighteen-map/210-row study and narrow supplement exist. A later correction establishes that #3658's same-day merge was not a receiver. Older reference preflight is history, not missing-research proof or an automatic new ban. |
+| #3761 | The same earlier admitted study remains, but a later actual whole-original withholding cause is still unreconciled. Fresh metadata does not waive it. #12357's producer inventory is not composed latency/productive-throughput or installed-adoption acceptance. |
+| #3905 | Retain the complete eighteen-map/210-row study, narrow supplement and KEEP judgment, not a claim that research is missing. Actual #3654/#5472/#7028 copy, native and owner conditions remain independently scoped; no current whole-home qualification is renewed. |
+| #3940 | The complete eighteen-map/210-row study and supplement retain canonical acceptance and KEEP. Current authored-union/home correspondence is not newly bound here; older qualified reads and refusals remain version-scoped, not global implementation-absence evidence. |
+| #3985 | Retain the actual client-half, local-first fallback and local-custody judgment plus the later complete eighteen-map study. Real Windows generation handoff is not universal-hub or POSIX proof. The issue stays OPEN; current complete home fit is not newly established. |
+| #3989 | Original first-use/on-demand mapping remains explicitly unresolved. Installation is not first-use or supersession. Preserve actual OS-assigned endpoint publication, its real consumer, the recovery alternative and role preservation; a named owner alone is not a new barrier. |
+| #4023 | Bounded receipt navigation did not establish current authored-to-earlier-whole-read correspondence. Census matches are not read receipts; this is a specific correspondence gap, not proof prior research is absent or permission to retry the original arbitrarily. |
+| #4043 | Native zero-turn/profile attribution remains unresolved; an older project-backed witness predates the report on another branch. An independently qualified description is not excluded merely because separate nonmember reviews remain unread. Container ACP is not the actual native SSH target turn; retain finite attribution rather than inventing a generic native gate. |
+| #4050 | A historical sixteen-PR alignment review is not an accepted generic grammar receiver. Preserve all six #4176 clauses, P1-P9/V1-V9/C1-C5, docs AND skills, aliases and independent read/write/list custody. |
+| #4102 | The finite claim completed through #13514/#13524/#13529; the whole parent, M4305 and native-wheel acceptance remain OPEN. Earlier launch-core non-fit and unresolved all-key opt-in meaning remain separate from that finite completion. |
+| #4118 | Bridge owns the independent interface origin; Manager/Picker consumer work is partial. The whole producer contract and its actual global Validation remain open, without stronger whole-home fit or accepted handoff inferred from consumer credit. |
+| #4122 | The historical installer-upgrade-recovery candidate is plan-only at the incoming boundary, which must be explicit P0. Planned receipt/coverage clarification remains; a candidate is not an accepted complete-original receiver or an implementation assignment. |
+| #4124 | Manual fresh-context versus root behavior still needs the original meaning resolved, with #4564's acknowledgment before closure/transfer. A reference is not receiving or claim handoff. |
+| #4125 | Bridge Draft receiving is partial, not whole fit. Worktrees create-time and deliberate-parallel scope remain independently unfinished. No owner transfer or complete current home qualification follows. |
+| #4163 | The actual source/copy cause and current original-version correspondence remain unreconciled. #4195's independently corrected sole commit-identity cause applies to #4195, not #4163 by association. This is neither blanket feature prohibition nor copy clearance from metadata. |
+| #4173 | The earlier complete 503-line original/five-discussion study remains. The finite claim completed through #13543/#13554/#13564 and five local rows; independent global V4 shadow/model/selection/anchor/Vault acceptance remains. No broader native qualification or new trial is inferred. |
+| #4180 | The canonical account-execution keeper remains. Completed CTA work was explicitly not a receiver for the whole #4180 contract; no credential/account or effect authority transfers. |
+| #4182 | Actual earlier direct planned receiving preserved admitted originals, old discussions, assignments, owners and Plan/Validation receiving. Those affirmative preservation/receiving facts are not technical delivery, resource release or permission to replay acknowledgment/closure. |
+| #4183 | The same affirmative original/owner/planned-receiving preservation remains. Manager Phase 3's engine-owned JSON process boundary is not a persistent duplex receiver. Retain the standalone interface and actual custodians; no forced frontend or whole-home fit. |
+
+These 33 identities are disjoint from the previously published 111. One adds
+an exact whole-read binding; 32 retain the specific scopes or unresolved gaps
+above. In particular, earlier complete studies and later actual withholding
+can coexist. Metadata freshness, an earlier accepted map and current
+containing-copy admission are different claims.
+
 ## Continuing exit
 
-Continue the remaining 181 correspondence/control decisions against actual
+Continue the remaining 148 correspondence/control decisions against actual
 earlier receipts and genuinely changed authored evidence. Record specific
 freshness, interpretation or admission gaps rather than treating an unfamiliar
 locator as missing research. Revisit implementation only for relevant changed
