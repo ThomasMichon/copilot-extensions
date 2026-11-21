@@ -10,11 +10,15 @@ Evidence and continuation: [dated journal](journal/2026/11.21-current-inflow-and
 Authored-delta follow-through:
 [retained correspondence and new delivery](journal/2026/11.21-historical-authored-deltas-and-delivery.md).
 The [retained-receipt continuation](roadmap-historical-retained-receipts.md)
-accounts for 144 selected identities: the prior 111 plus one exact #2464
-whole-read binding and 32 specific scoped controls/gaps, leaving 148.
+accounts for 161 selected identities: the prior 144 plus seventeen specific
+owner/causal controls, leaving 131. Its 75 varied-strength authored/read
+bindings do not grow with those seventeen scoped retentions.
 The [continuation journal](journal/2026/11.21-historical-scoped-controls.md)
 retains actual #13904 delivery and distinguishes earlier complete studies,
 later withholding and current correspondence gaps.
+The [owner/causal follow-through](journal/2026/11.21-historical-owner-and-causal-controls.md)
+retains actual #13907 delivery and seventeen additional decisions without
+claiming another current whole-original/home study or source-hold release.
 Its proof scopes are distinct from new technical studies or whole-home
 qualification; existing actual source/copy and ownership conditions remain.
 

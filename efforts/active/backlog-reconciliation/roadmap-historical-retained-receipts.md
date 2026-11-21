@@ -8,6 +8,8 @@ Delivery and changed evidence:
 [dated journal](journal/2026/11.21-historical-retained-receipts.md).
 The [next continuation](journal/2026/11.21-historical-scoped-controls.md)
 records the additional 33 decisions and actual #13904 delivery.
+The [seventeen-control follow-through](journal/2026/11.21-historical-owner-and-causal-controls.md)
+retains the next specific studies/gaps and actual #13907 delivery.
 
 ## Accounting boundary
 
@@ -25,8 +27,9 @@ the following disjoint continuation decisions.
 | Actual linked-source author gaps | 24 | The metadata audit's existing admission gaps remain; #6237 additionally lacks complete enumeration. |
 | Additional exact whole-read correspondence | 1 | #2464's current selected metadata matches the initial and terminal metadata of its earlier complete original/four-discussion read. |
 | Additional scoped controls and explicit gaps | 32 | Specific prior studies, receiving/owner conditions and unresolved correspondence or copy causes; not new complete current authored unions. |
-| Accounted identities | 144 | The previously published 111 plus this disjoint 33; not 144 new technical assessments. |
-| Remaining correspondence decisions | 148 | The rest of the same selected 292; existing research is not presumed absent. |
+| Further scoped controls and explicit gaps | 17 | Complete earlier studies, finite acceptance/owner conditions and actual unresolved source/copy causes; no new exact current authored/read binding. |
+| Accounted identities | 161 | The previously published 144 plus this disjoint 17; not 161 new technical assessments. |
+| Remaining correspondence decisions | 131 | The rest of the same selected 292; existing research is not presumed absent. |
 
 The 23 plus 51 give 74 retained authored/read correspondences, with different
 proof strengths. Temporal precedence is not body-byte equality; a reported
@@ -197,9 +200,45 @@ above. In particular, earlier complete studies and later actual withholding
 can coexist. Metadata freshness, an earlier accepted map and current
 containing-copy admission are different claims.
 
+## Further seventeen owner and causal controls
+
+These decisions retain actual earlier research and source-specific constraints.
+They add no new exact current authored/read correspondence, whole-home
+qualification, native proof or implementation-absence claim. In particular,
+an operational record's abbreviated label does not override its actual
+complete-read receipt.
+
+| Issue | Actual retained scope and continuing boundary |
+|---|---|
+| #4187 | The earlier complete original/three-discussion read retains the whole finite-pool/budget/state/recycle/capture union, seven #4188 periodic rows, six #4212 distributed rows and five #4230 compute rows with Validation. Owned Capacity's selected-account admission/sequential reuse claim is partial; umbrella, recycler/rescue, owner-wave integration and native/resource custody do not transfer. |
+| #4190 | An actual complete follow-up retained ten dispositive paths matching the examined release branches, #1409's real retirement instruction and #1412's actual merge. Those are credited, not merely inferred availability. The later original's broad-enough condition remains without an accepted floor/population countermand; no fresh generic acknowledgment, all-host or native campaign is invented, and removal is not repeated. |
+| #4268 | The earlier complete original/three-discussion read retains the distinct one-shot/poll incident and all four heartbeat/shared-resident-cache/safe-cutover/single-flight clauses. #918's actual owner kept the gap separate; a roster claim is not whole acceptance. Resident/reaping history is partial, not orphan proof; private incident identifiers are not republished. |
+| #4303 | The actual four-unit study preserves generic Worktrees AND CodeSpaces requested-branch behavior: characterization first, followed by alignment to the fetched head OR correct upstream tracking before work. Both consumers retain that characterization AND (alignment OR tracking correction) sequence while preserving dirty/ahead/diverged commits. A venue-only trusted CodeSpace/container candidate is partial, not a generic receiver. Empty assignees do not release claimed work. |
+| #4309 | The complete original/four-discussion study retains the whole #580/#109 union and A4218/B4219/E4311/R4011/S4030/T7046, original implementation refinements, no-displacement and current custody. A helper or transport is not whole actual credential-consumer acceptance. |
+| #4418 | Earlier complete research preserves all eight original #2971 round-trip clauses and discussions, explicit OPEN umbrella and separate native legacy `user_input` qualification. #6917's MR9/MRV10 retained-writer deadline remains independent, with legitimate caller, incarnation/race, cursor availability, read-only permission, unsupported/manual-takeover and custody semantics. |
+| #4453 | Retain the whole baseline-correlation/diff-selection/debt-fallback/vendor-attribution umbrella. #10209 preserves the original prototype, baseline enrollment/publication, native/performance acceptance and #6617 prerequisite. Existing Windows, collector, Dispatch and shadow owners plus current unit-only gates remain; bounded amendment credit is not whole runtime acceptance. |
+| #4477 | The [later exact cause reconciliation](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md#prospective-4477-source-cause-reconciliation) superseded the old whole-original/dependent stop: its sole cause was the obsolete commit-identity gate, and fresh eligible complete original/discussion research followed. Retain the expanded deployment canonical and all inherited deployment/native alternatives, both installer branches/consumers, actual no-replay claimant and already-complete planned receiving. Genuine installer/ROOT, content-author, privacy and resource restrictions remain; no old incident is retroactively declared clean. |
+| #4488 | Preserve the original three alternatives and later selected-anchor claims graph, strict linear lineage and Dispatch handoff v1. No anchor code write is selected and build leasing remains deferred. Existing-ledger baseline is not contributor-owned #6009 delivery. The bounded claim covers explicit adoption/provenance/discovery, with promised completion/release rather than age-based release; broader lineage/handoff acceptance remains. |
+| #4564 | #5573 writer observation and its released writer claim are credited without releasing the later claimant. Reachable/headed/dead/manual repair and accepted automatic recovery remain. Preserve unexpected-last-active AND prepared-restart-through-graceful-exit candidate sets, exact-conversation deduplication, positive eligibility, survivor/fenced Resume, status-first acknowledgment, uncertainty and cancel/failure semantics. Separate Windows/WSL boot-readiness acceptance and broader adoption remain; #8676's source receipt is not whole completion. |
+| #4944 | Earlier complete unchanged original/sole-comment research retains deliberately conditional future intent. An actual known-good fork/patch/cherry-pick fallback triggers documentation AND rehearsal; normal forward fix/promotion or generic rollback is not that trigger. Not-yet-triggered is not obsolete, completed or permission to restore a removed nonblocking item as an active parent prerequisite. No incident or rehearsal is started. |
+| #5006 | Preserve the final OPEN whole birth-identity keeper. Shared publication, mux #5060, Bridge #5524 and Darwin #9935/#10101 are partial credit. Force-capable POSIX fallback needs matched/stale-birth real-exit semantics; #5063's false default, cleanup diagnostics/unknown descendants, #5140's five-case causal record including the unresolved fifth, and #7659's supported Darwin cutover/native controls remain distinct. No universal extra acknowledgment/native gate or process operation follows. |
+| #5301 | The historical cause chain was recovered but actual source/containing-copy applicability remains uncertain and the specific whole-original hold remains. Independently qualified #5319/#5330 work is not blanket #5301 admission. No original, alternate source or containing copy is acquired. |
+| #5340 | #5424's bounded Git repair and required unit-only shadow retirement are credited. Preserve #5461's whole-invocation bound/equivalent accepted completion, no success from errors, historical causal baseline OR bounded limitation, two repeats, full-job cancellation versus bounded-shadow timeout and successful underlying-guard aggregation. No strict activation, timeout increase or retired-CI restoration is assigned. |
+| #5352 | Complete earlier research retains #5042's full 32-round review/comment/resolved-thread mining, appropriate other long-PR samples, recurring author-response checklist and the specified review heuristics. Generic guidance is partial, not proof mining finished. No current reviewer-service inspection, one-off lock detail or new public execution-receipt bar is introduced. |
+| #5353 | Preserve all three actual create/provider/background-reconcile causal-safety asks, separate from #5035 readiness telemetry, #5293 busy admission and generic serialization. Existing guards were acknowledged; no complete receiver, combined-path causal disposition or fulfillment was established. No live-fire retry or new native/source operation follows. |
+| #5356 | Retain the finite live-venv admission and owned abandoned-uv/liveness residual under the bounded Windows installer owner. #5829 watchdog/identity and #5832 engine adoption are credited, not whole fulfillment/receiving. #5820 immutable anchoring is separately owned; the payload sharing observation is cross-reference only, and one WMI stack is not a global diagnosis. No process action, implementation study or repeated comment follows. |
+
+These seventeen are disjoint from the previous 144. The earlier #4187/#4268
+qualification summaries omit identity/editor-history fields needed to claim
+an exact current binding, so their actual complete reads remain scoped
+retentions instead. Missing direct comparison fields do not erase those reads.
+#4477's exact superseded cause is distinct from #5301's still-unresolved
+source/copy boundary; the former's correction clears neither genuine
+installer/ROOT restrictions nor the latter's independent case.
+
 ## Continuing exit
 
-Continue the remaining 148 correspondence/control decisions against actual
+Continue the remaining 131 correspondence/control decisions against actual
 earlier receipts and genuinely changed authored evidence. Record specific
 freshness, interpretation or admission gaps rather than treating an unfamiliar
 locator as missing research. Revisit implementation only for relevant changed
