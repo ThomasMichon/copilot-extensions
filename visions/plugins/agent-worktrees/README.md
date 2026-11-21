@@ -59,7 +59,9 @@ session-state and its workspace CWD records are the canonical holder of
 session/workspace membership. The service proactively maintains their joined
 mapping in an operational store so ordinary concurrent operations do not need
 to reconstruct it on demand, while converging to the mapping reconstructable
-from those native sources. The selected user directory, project registry,
+from those native sources and the nearby recovery catalog for intentionally
+dehydrated worktrees. Checkout absence does not erase retained agency. The
+selected user directory, project registry,
 checkouts and Copilot roots already scope local execution; copied
 machine/environment/platform fields are not a second qualification of a local
 worktree or session mapping. This derived mapping does not replace durable
@@ -175,6 +177,14 @@ The [worktree data](worktree-data/README.md) child governs discoverable,
 checkout-independent homes for domain-owned worktree state and its archival
 lifetime. The agency record retains identity and locators, not an unbounded
 agenda, transcript or history warehouse.
+
+### Reversible checkout hydration
+
+The [checkout hydration](checkout-hydration/README.md) child governs reversible
+storage release for stopped, clean worktrees and restoration before ordinary
+entry. Branches, agency and obligations survive checkout absence. A nearby
+recovery catalog keeps dehydrated worktrees discoverable when Git membership or
+operational tracking alone cannot describe them.
 
 ### Title and naming
 
