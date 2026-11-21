@@ -5,8 +5,10 @@ from __future__ import annotations
 import copy
 import inspect
 from collections import OrderedDict
+from collections.abc import Callable
 import hashlib
 import sys
+from typing import Any, cast
 
 from .source_attachment import EXECUTION_CONTRACT, attach_source, attach_source_async
 from .workspace_operations import PROTOCOL, encoded, needs_prepared_review, supports_prepared_review
@@ -16,8 +18,10 @@ from .workspace_selection import supports_selection
 from .review_comment_observation import supports as supports_comment_observation
 from .workspace_comment_mapping import supports as supports_mapping
 from .workspace_terminal_mapping import selected as terminal_mapping_selected
+from .workspace_retained_review import selected as retained_review_selected
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
+Document = dict[str, Any]
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt",
             "prepare", "allocate", "observe-comment", "retained-comment")
 FIELDS = {
@@ -52,12 +56,14 @@ class WorkspaceToolUnavailable(RuntimeError):
     pass
 
 
-async def _call(function, *args, **kwargs):
+async def _call(function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     result = function(*args, **kwargs)
     return await result if inspect.isawaitable(result) else result
 
 
-def _snapshot_generation(generation, number, identity):
+def _snapshot_generation(
+    generation: Document, number: int, identity: str,
+) -> tuple[Document, Document, bytes]:
     generation = copy.deepcopy(generation)
     scope = _scope(generation.get("scope"))
     _generation(generation, scope)
@@ -68,7 +74,7 @@ def _snapshot_generation(generation, number, identity):
                         "sha256": hashlib.sha256(data).hexdigest()}, data
 
 
-def _read_identity(source):
+def _read_identity(source: object) -> tuple[Any, ...]:
     if type(source) is not dict:
         raise ValueError("invalid retained source selection")
     identifier(source.get("id"))
@@ -90,17 +96,20 @@ class WorkspaceTools:
     Neither a Python type nor a capability declaration authenticates a binding.
     """
 
-    def __init__(self, client=None, *, source_owner=None, comment_preparer=None):
+    def __init__(
+        self, client: Any = None, *, source_owner: Any = None,
+        comment_preparer: Callable[..., Any] | None = None,
+    ) -> None:
         if client is not None and not all(callable(getattr(client, name, None)) for name in ("exchange", "materialize")):
             raise ValueError("existing workspace client required")
         self.client, self.source_owner = client, source_owner
         if comment_preparer is not None and not callable(comment_preparer):
             raise ValueError("existing comment preparation binding required")
         self.comment_preparer = comment_preparer
-        self._generations = OrderedDict()
+        self._generations: OrderedDict[str, tuple[Document, Document, bytes]] = OrderedDict()
         self._native_execution = client is not None and not inspect.iscoroutinefunction(client.exchange)
 
-    def _async_source(self):
+    def _async_source(self) -> bool:
         declaration = getattr(self.source_owner, "execution_contract", None)
         value = declaration() if callable(declaration) else None
         return (
@@ -111,7 +120,7 @@ class WorkspaceTools:
             and callable(getattr(self.source_owner, "operation", None))
         )
 
-    def for_one_shot(self):
+    def for_one_shot(self) -> WorkspaceTools:
         """One-shot CLI cannot adopt or drain another loop's source lifetime."""
         if not self._async_source():
             return self
@@ -119,7 +128,7 @@ class WorkspaceTools:
         view.source_owner = None
         return view
 
-    def _preparation_mode(self):
+    def _preparation_mode(self) -> str | None:
         from .workspace_operations import NativeWorkspaceClient, _native_source_supported
         if type(self.client) is NativeWorkspaceClient:
             return "worker" if _native_source_supported(self.client) else None
@@ -129,7 +138,9 @@ class WorkspaceTools:
             return "loop-with-prepare" if client_type._source_supported(self.client) else None
         return None
 
-    async def _client_call(self, function, *args, operation=None, **kwargs):
+    async def _client_call(
+        self, function: Callable[..., Any], *args: Any, operation: Any = None, **kwargs: Any,
+    ) -> Any:
         if operation is None:
             return await _call(function, *args, **kwargs)
         mode = self._preparation_mode()
@@ -137,11 +148,11 @@ class WorkspaceTools:
             raise WorkspaceToolUnavailable("workspace_preparation_binding_unsupported")
         if mode == "loop-with-prepare" or inspect.iscoroutinefunction(function):
             return await operation.call(function, *args, checkpoint=operation.remaining, **kwargs)
-        def invoke_native(*selected_args, **selected_kwargs):
+        def invoke_native(*selected_args: Any, **selected_kwargs: Any) -> Any:
             return function(*selected_args, checkpoint=operation.remaining, **selected_kwargs)
         return await operation.call(operation.prepare, invoke_native, *args, **kwargs)
 
-    async def capabilities(self, *, operation=None):
+    async def capabilities(self, *, operation: Any = None) -> Document:
         operations = ["capabilities"]
         backend = None
         if self.client is not None:
@@ -171,6 +182,8 @@ class WorkspaceTools:
             ]
             if terminal_mapping_selected(backend):
                 operations.append("retained-comment")
+            if retained_review_selected(backend):
+                operations.append("inspect")
             if (
                 callable(self.comment_preparer) and "submit" in available
                 and supports_prepared_review(backend.get("prepared_review_contract"))
@@ -205,7 +218,7 @@ class WorkspaceTools:
                 "native_synchronous" if self._native_execution else "async_owner_unavailable"),
         }
 
-    async def definitions(self):
+    async def definitions(self) -> list[Document]:
         """MCP-shaped descriptors for an existing host; no registration side effect."""
         capabilities = await self.capabilities()
         identity = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
@@ -238,7 +251,7 @@ class WorkspaceTools:
                             "required": ["request"], "additionalProperties": False},
         } for command in capabilities["operations"]]
 
-    async def invoke(self, command, request):
+    async def invoke(self, command: str, request: Document) -> Document:
         if command not in COMMANDS or not isinstance(request, dict):
             raise ValueError("invalid workspace tool operation")
         if command == "capabilities":
@@ -260,7 +273,9 @@ class WorkspaceTools:
                 capabilities = await self.capabilities(operation=operation)
                 if command not in capabilities["operations"]:
                     raise WorkspaceToolUnavailable("workspace_operation_unsupported")
-                return await self._source_command(command, request, operation=operation, read_identity=read_identity)
+                return cast(Document, await self._source_command(
+                    command, request, operation=operation, read_identity=read_identity,
+                ))
         capabilities = await self.capabilities()
         if command not in capabilities["operations"]:
             raise WorkspaceToolUnavailable("workspace_operation_unsupported")
@@ -274,7 +289,7 @@ class WorkspaceTools:
             return await self._prepare_comments(request)
         if command in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate",
                        "observe-comment", "retained-comment"):
-            return await _call(self.client.exchange, command, copy.deepcopy(request))
+            return cast(Document, await _call(self.client.exchange, command, copy.deepcopy(request)))
         required = {"number", "generation_id"}
         if command in ("source", "source-read"):
             required.add("budget_seconds")
@@ -282,9 +297,9 @@ class WorkspaceTools:
             required.update(("source_attachment", "path", "side"))
         if set(request) != required:
             raise ValueError("invalid workspace tool request fields")
-        return await self._source_command(command, request)
+        return cast(Document, await self._source_command(command, request))
 
-    async def _prepare_comments(self, request: dict) -> dict:
+    async def _prepare_comments(self, request: Document) -> Document:
         from .review_intent import MAX_INTENT_BYTES, intent
         from .review_preparation import _guid, validate
 
@@ -323,9 +338,9 @@ class WorkspaceTools:
                 or prepared["effects"] != "none"
             ):
                 raise ValueError("unsupported executing comment preparation")
-            binding = validate(
+            binding = cast(Document, validate(
                 {"identity": prepared["identity"], "body_id": prepared["body_id"]}, prepared["body"],
-            )
+            ))
             if any(binding["identity"][key] != identity[key] for key in ("comment_id", "write_id")):
                 raise ValueError("preparer changed the selected comment identities")
             action.update(body=prepared["body"], preparation=binding)
@@ -335,7 +350,10 @@ class WorkspaceTools:
             "effects": "none", "approval_required": True,
         }
 
-    async def _source_command(self, command, request, *, operation=None, read_identity=None):
+    async def _source_command(
+        self, command: str, request: Document, *, operation: Any = None,
+        read_identity: tuple[Any, ...] | None = None,
+    ) -> Any:
         immutable = operation is not None and command == "source"
         materialized = await self._materialize(
             request["number"], request["generation_id"], operation=operation, immutable=immutable,
@@ -372,7 +390,9 @@ class WorkspaceTools:
             attachment["source"], request["path"], request["side"], budget=request["budget_seconds"],
         )
 
-    async def _materialize(self, number, identity, *, operation=None, immutable=False):
+    async def _materialize(
+        self, number: int, identity: str, *, operation: Any = None, immutable: bool = False,
+    ) -> Any:
         identifier(identity)
         cached = self._generations.get(identity)
         if cached is not None:
@@ -405,7 +425,7 @@ class WorkspaceTools:
         return (value, data) if immutable else value
 
 
-async def dispatch_tool(host, name, arguments):
+async def dispatch_tool(host: object, name: object, arguments: object) -> Document:
     if not isinstance(host, WorkspaceTools) or not isinstance(name, str) or not name.startswith("pr_workspace_"):
         raise WorkspaceToolUnavailable("workspace_tool_host_unavailable")
     if not isinstance(arguments, dict) or set(arguments) != {"request"}:
