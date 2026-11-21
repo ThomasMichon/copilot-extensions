@@ -2192,7 +2192,7 @@ including the preceding 84 selections. Actual `UnitRun` execution passes all
 production call-phase coverage for every case and the same fourteen already
 hash-bound Python reads. The existing parameter-strategy warning remains visible.
 
-Admission adds 42 nodes and updates only the existing adapter digest, preserving
+Initial admission adds 42 nodes and updates only the existing adapter digest, preserving
 every preceding node, target and source entry: 6,537 nodes, 1,044 sources and
 436 targets. The profile, all 88 release-helper decisions and 300-second
 packet budget remain unchanged. The manifest is 1,046,504 bytes, leaving
@@ -2200,6 +2200,16 @@ packet budget remain unchanged. The manifest is 1,046,504 bytes, leaving
 is retained. Complete current-head review and Linux source CI remain required.
 This is not installed/native, every-release, full-census, workflow-count or
 whole-flow qualification; existing owners and custody remain.
+
+Managed publication then incorporates a separately merged 13-case cohort:
+6,550 nodes, 1,048 sources, 437 targets and 89 helper decisions. No original
+node, target or source entry is dropped. All fourteen Python inputs from the
+focused observation remain byte-identical. The combined manifest initially
+exceeds the unchanged cap by 233 bytes. Reducing only coverage-target list
+indentation from eight spaces to four restores 1,515 bytes of headroom:
+1,047,061 bytes, with byte-for-byte identical parsed JSON and unchanged node/
+source-map layout. No cap, deadline, eligibility or helper rule is weakened.
+The corrected head requires fresh review and complete current-head source CI.
 
 ### November 20 path-gated audit-guard native boundary
 

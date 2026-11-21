@@ -11301,8 +11301,8 @@ imported, not invoked to build, query a registry or prepare an installation.
 The original unselected npm-toolchain skip marker still observes
 tool presence at import; no npm, UV, network or installer process executes.
 Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
-while retaining the source map's existing layout so independent hash updates
-can merge cleanly.
+and coverage-target entries indented four spaces, while retaining the source
+map's existing layout so independent hash updates can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
 Whitespace does not change the canonical manifest digest; do not raise the
 cap or remove admitted cases to accommodate formatting.
