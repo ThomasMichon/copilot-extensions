@@ -33,9 +33,9 @@ export function formatIntentOutline(data = {}) {
   ];
   const pointer = (label, reference, description) => {
     if (!reference) return;
-    const displayed = line(reference, 220);
-    const location = displayed.endsWith("...") && displayed !== reference
-      ? "(long reference; use explicit facts for the exact locator)" : displayed;
+    const exact = String(reference);
+    const location = Buffer.byteLength(exact, "utf8") > 220 || /[\r\n\u2028\u2029]/u.test(exact)
+      ? "(reference exceeds one-line budget; use explicit facts for the exact locator)" : exact;
     lines.push(`- ${label}: ${location} -- ${description}`);
   };
   pointer("Effort", goal.path || goal.ref,

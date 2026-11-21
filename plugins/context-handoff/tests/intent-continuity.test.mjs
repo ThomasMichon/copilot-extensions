@@ -423,6 +423,21 @@ test("recovery uses canonical goal and safety lines, leaving exact corpus histor
   assert.equal(fragments.join(""), original);
 });
 
+test("source locators retain exact whitespace and multiline locators use explicit facts", () => {
+  const effort = " effort  notes.md ";
+  const history = "history\u00a0  directory";
+  const outline = formatIntentOutline({
+    goal: { path: effort },
+    checkpoint: "checkpoint\nnot-a-second-pointer",
+    corpus: { home: history, id: "snapshot", count: 1 },
+  });
+  assert.ok(outline.includes(`- Effort: ${effort} -- `));
+  assert.ok(outline.includes(`- Intent history: ${history} -- `));
+  assert.ok(outline.includes("- Checkpoint: (reference exceeds one-line budget; use explicit facts"));
+  assert.equal(outline.includes("not-a-second-pointer"), false);
+  assert.ok(Buffer.byteLength(outline, "utf8") <= MAX_INTENT_OUTLINE_BYTES);
+});
+
 test("the extension-free payload reader returns the exact pinned continuation page", (t) => {
   const f = fixture(t);
   const store = new IntentCorpus(f.a, {

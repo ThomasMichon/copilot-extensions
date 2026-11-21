@@ -66,9 +66,9 @@ An effort can supply those short lines through `Authorization Evidence & Limits`
 (or `Scope Approvals`), `Outstanding Background Flows & External State`, and
 `Next Action` sections. Missing summaries remain explicitly unknown; shortened
 lines are not substitutes for the source approval or completion gate.
-Locators that exceed the outline's display budget are identified as long
-references, not emitted as unusable truncated paths. Explicit facts retain the
-exact locators.
+Single-line locators preserve whitespace exactly. Locators that exceed the
+display budget or contain line breaks use an explicit-facts marker, not a
+modified or truncated path. Explicit facts retain the exact locators.
 
 Read only the sources needed for the current next step. There is no full-history
 reread prerequisite. Explicit facts retain the first bounded page; call
