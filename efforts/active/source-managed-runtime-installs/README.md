@@ -201,18 +201,18 @@ and global Validation item is resolved or explicitly transferred to a named
 tracked objective. Record the actual accepted outcomes, settle owned obligations
 and use the normal worktree finalization flow; a merged child is insufficient.
 
-**Now:** qualify the authentic legacy consumer after correcting its Git
-transport preparation. The tenth hosted attempt passed preparation, then its
-local Git HTTP backend exceeded the unchanged 20-second request limit during
-the ordinary update. Settlement left no fixture tasks or processes. Prepare
-reusable full-history packs before installed effects, retain the same frozen
-objects and request bounds, and validate the correction. Another native attempt
-remains held until focused validation, fresh review and required CI pass; no
-update, survival or adoption pass is inferred.
+**Now:** the selected legacy first-use foreground receiving contract cleared
+review in #13605. Its finite receiving writer is reconciled through the existing
+execution coordination. Expand receiving support before caller/test migration,
+including honest interruption/recovery across admission and start. The existing
+legacy-consumer qualification and Dispatch contribution retain their own
+source/native gates, original bounds and current holds; neither a non-durable
+launch acknowledgement nor a missing ordinary receipt establishes completion.
 
-**Return:** after this bounded fixture slice, select the next unmet criterion
-from the complete Plan and global Validation Plan, retaining the addressed-suite,
-staging-barrier, managed-Python, lifetime and authorized-adoption obligations.
+**Return:** after this bounded receiving/caller migration, select the next unmet
+criterion from the complete Plan and global Validation Plan, retaining the
+addressed-suite, staging-barrier, managed-Python, lifetime and authorized-adoption
+obligations.
 
 ## Guiding Intent
 
