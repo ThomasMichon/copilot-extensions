@@ -2319,6 +2319,66 @@ Complete current-head review and Linux source CI are still required.
 This is not installed/native, every-release, full-census, workflow-count
 or whole-flow qualification. Existing owners and custody remain.
 
+Source #13897 merges at `2026-11-21T12:55:20Z` as
+`a2541fa0edb89a29321d0a8ca7a5e12e58b6c8b9`. Copilot approval
+`6005300141` at `12:52:11Z` names exact head
+`6ce96ffeaa891263ae3b448ec7a4c2c1609f860e`. Complete review/thread reads
+confirm no active finding and no omitted page. The published packet is
+independently checked against its actual current base: every prior entry
+survives and all thirteen observed Python reads remain byte-identical.
+
+Required source CI `44905828370` and trusted metadata CI `44905828480`
+both complete successfully. Unit job `136851068404` freshly qualifies the
+packet from `12:50:14Z` to `12:53:28Z`, then uploads evidence. Its actual
+log reports 6,558 passed and 35 deselected in 155.12 pytest seconds and
+174.025 packet seconds, under the unchanged 300-second budget. Lookup takes
+2,200 ms before fresh execution because no qualified completed packet exists.
+These natural observations are not a controlled speedup or a run-count saving.
+
+Seven fresh scoped verifier reads precede the managed Maintainer merge,
+without bypassing failing CI. Closing references are empty and parent #6237
+stays open. The full canonical parent is reread and only this finite selector
+leaf is resolved. Scoped managed pull-forward retains the published head and
+succeeds without conflict. Continue retained source work and accepted
+reductions; broader native, every-release, full-census, whole-flow and custody
+acceptance remain open.
+
+### November 21 fixture preparation and resolution-input unit admission
+
+Four exact original functions add 47 fixture-only cases to the existing
+dependency-age adapter: 181 of the unchanged original suite's 203 cases
+are selected, with all 22 residuals retained outside the packet. The 32-case
+canonical-preparation matrix retains dead/uninvoked/repointed calls, local
+shadowing, terminating branches and evidence revocation. Fifteen compatible
+cases retain canonical local-file URL attribution, resolution-input seasoning
+and malformed/unsupported table refusal. All preparation scripts remain text.
+The mixed table-shape case that can invoke the actual UV parser stays outside;
+no native boundary is replaced with a mock or silently skipped.
+
+Real collection verifies exact original objects and all parameter IDs.
+Initial actual effect qualification passes the 32-case and 15-case groups
+separately. After the final adapter changes, the complete 47-case batch is
+qualified together against those exact bytes: all pass in 2.641 development
+seconds with zero prohibited effects, real production call-phase coverage for
+every case and fourteen already-bound Python reads. No fixture script, builder,
+installer, registry query or subprocess executes. The existing parameter-
+strategy warning remains visible.
+
+Admission adds 47 nodes and changes only the existing adapter digest:
+6,605 nodes, 1,049 sources, 438 targets and all 89 release-helper decisions.
+Every preceding node/source/target entry, profile and the 300-second packet
+budget remain. At the preceding source-map indentation the same data would
+occupy 1,056,166 bytes, 7,590 bytes above the existing 1 MiB cap. Removing
+only source-entry indentation saves 8,392 bytes and preserves parsed JSON,
+canonical digest semantics, one entry per line and independent hash updates.
+The resulting 1,047,774 bytes leaves 802 bytes of headroom under the unchanged
+cap; node and target layout are unchanged. No schema, producer, cap, deadline,
+helper or eligibility rule changes.
+
+Complete current-head review and Linux source CI are still required.
+This is not installed/native, every-release, full-census, workflow-count
+or whole-flow qualification. Existing owners and custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

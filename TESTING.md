@@ -11283,8 +11283,8 @@ propagation. All 54 remaining original cases stay outside this packet,
 including real Git/process fixtures and controls coupled to those fixtures.
 The original tests and scanner are unchanged; no Git command, live identifier
 sweep or real denylist read executes in the selected cases.
-The dependency release-age adapter exports 134 original in-process cases through
-44 exact test functions. It retains inclusive timestamp bounds, newest-
+The dependency release-age adapter exports 181 original in-process cases through
+48 exact test functions. It retains inclusive timestamp bounds, newest-
 file/yank refusal, Python floor and satisfiability rules, controlled npm
 metadata and UV cutoff/override rejection. Synthetic manifest trees additionally
 exercise scoped OTLP prerelease seasoning, declaration inventory, local-source
@@ -11304,15 +11304,21 @@ selection and missing-CLI refusal. Only executable lookup is already mocked;
 the temporary Node/shim/CLI files are never executed. The selector module is
 hash-bound and a positive production coverage target; its installer entrypoint
 does not run.
-All 69 remaining original cases stay outside this packet.
+The canonical-preparation branch matrix retains all 32 original fixture-text
+cases, including dead/uninvoked/repointed calls, local shadowing, terminating
+branches and changed evidence. Fifteen additional fixture-only cases retain
+canonical local-file URL attribution, seasoning for UV resolution-input
+declarations and malformed/unsupported table refusal. Fixture preparation text
+is parsed, never executed. The mixed table-shape case that can invoke the real
+UV parser remains among the 22 original cases outside this packet.
 Inventory operates only on fixture-owned
 trees, never the actual checkout; shared build and installer-policy modules are
 imported, not invoked to build, query a registry or prepare an installation.
 The original unselected npm-toolchain skip marker still observes
 tool presence at import; no npm, UV, network or installer process executes.
-Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
-and coverage-target entries indented four spaces, while retaining the source
-map's existing layout so independent hash updates can merge cleanly.
+Keep `tools/promotion-unit-manifest.json` node and source-map entries unindented,
+one per line, and coverage-target entries indented four spaces. Independent
+source hash updates retain their own lines so they can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
 Whitespace does not change the canonical manifest digest; do not raise the
 cap or remove admitted cases to accommodate formatting.
