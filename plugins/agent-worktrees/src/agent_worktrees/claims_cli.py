@@ -632,32 +632,50 @@ def _claims_sweep(args: argparse.Namespace) -> int:
 
     gone_of, safe_of = sweep_mod.make_resolvers(config)
 
+    def _judge(claim: tracking_claims.ResourceClaim) -> tuple[bool | None, bool | None]:
+        try:
+            gone = gone_of(claim)
+        except Exception:
+            gone = None
+        try:
+            safe = safe_of(claim)
+        except Exception:
+            safe = None
+        return gone, safe
+
+    def _key(claim: tracking_claims.ResourceClaim) -> tuple[str, str, str]:
+        return claim.ref, claim.state, claim.claim_nonce
+
     reclaimed: list[dict[str, str]] = []
     tdir = cfg.tracking_dir()
     for rec in tracking.list_records(tdir):
         rec_path = tdir / f"{rec.worktree_id}.yaml"
-        verdicts: dict[str, tuple[bool | None, bool | None]] = {}
+        # Pre-lock verdicts apply only to the claim state they judged; a
+        # session lease is local, so it is re-judged against the record and
+        # activity seen at commit time, never from a stale pre-lock read.
+        verdicts: dict[tuple[str, str, str], tuple[bool | None, bool | None]] = {}
         for claim in rec.resources:
-            if (
+            if claim.kind == "session" or (
                 not claim.is_unsettled
                 and not session_lease.expired_finalized_self_claim(rec, claim)
             ) or tracking_claims.claim_handoff_reservation(rec, claim):
                 continue
-            try:
-                gone = gone_of(claim)
-            except Exception:
-                gone = None
-            try:
-                safe = safe_of(claim)
-            except Exception:
-                safe = None
-            verdicts[claim.ref] = (gone, safe)
+            verdicts[_key(claim)] = _judge(claim)
+        fresh: dict[tuple[str, str, str], tuple[bool | None, bool | None]] = {}
+
+        def _verdict(claim: tracking_claims.ResourceClaim) -> tuple[bool | None, bool | None]:
+            key = _key(claim)
+            if claim.kind != "session":
+                return verdicts.get(key, (None, None))
+            if key not in fresh:
+                fresh[key] = _judge(claim)
+            return fresh[key]
 
         def _gone(claim: tracking_claims.ResourceClaim) -> bool | None:
-            return verdicts.get(claim.ref, (None, None))[0]
+            return _verdict(claim)[0]
 
         def _safe(claim: tracking_claims.ResourceClaim) -> bool | None:
-            return verdicts.get(claim.ref, (None, None))[1]
+            return _verdict(claim)[1]
 
         if apply:
             with tracking._RecordLock(rec_path, require_sidecar=True):

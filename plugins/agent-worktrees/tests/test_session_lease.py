@@ -6,6 +6,7 @@ import os
 import time
 import types
 from pathlib import Path
+from collections.abc import Callable
 from typing import cast
 
 import pytest
@@ -13,7 +14,8 @@ import pytest
 import agent_worktrees.__main__ as m
 import argparse
 
-from agent_worktrees import activity, claim_history, claims_cli, cleanup_reap, execution_spaces
+from agent_worktrees import activity, claim_history, claims_cli, cleanup_gc_cli, cleanup_reap
+from agent_worktrees import execution_spaces
 from agent_worktrees import git_ops, local_cache_worker, output, prune, reclaim
 from agent_worktrees import config as cfg
 from agent_worktrees import retirement_safety, session_lease, sessions, sweep, tracking
@@ -344,3 +346,150 @@ def test_claims_sweep_apply_releases_expired_finalized_self_claim(
     assert history == [("released", "lease-expired")]
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
     assert prune.cleanup_disposition(reloaded, info).cleanable
+
+
+class _RenewingLock:
+    """A record lock whose acquisition races a session renewal."""
+
+    def __init__(self, renew: Callable[[], None], real: type[tracking._RecordLock]) -> None:
+        self._renew: Callable[[], None] | None = renew
+        self._real = real
+
+    def __call__(self, path: Path, **kwargs: bool) -> tracking._RecordLock:
+        renew, self._renew = self._renew, None
+        if renew is not None:
+            renew()
+        return self._real(path, **kwargs)
+
+
+@pytest.mark.parametrize("renewal", ["fresh-activity", "reopened-active"])
+def test_claims_sweep_rejudges_session_claim_renewed_before_commit(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, renewal: str,
+) -> None:
+    tdir = tmp_path / "tracking"
+    tdir.mkdir()
+    rec_path = tdir / "wt.yaml"
+    _finalized_self(tmp_path / "wt", saved_at=rec_path)
+    monkeypatch.setattr(cfg, "load_config", lambda: types.SimpleNamespace())
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tdir)
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", lambda r, c: None)
+    monkeypatch.setattr(
+        sweep, "load_claim_child_record",
+        lambda ref, config: (tracking.load_record(rec_path), True))
+    monkeypatch.setattr(sessions, "session_id_is_live", lambda r, sid: True)
+    history: list[str] = []
+    monkeypatch.setattr(claim_history, "record_event", lambda **kw: history.append(str(kw["event"])))
+    monkeypatch.setattr(activity, "log_event", lambda *a, **kw: None)
+    monkeypatch.setattr(output, "_json_output", lambda payload: None)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+
+    def _renew() -> None:
+        _touch(state_dir, "sess-1", 5)
+        if renewal == "reopened-active":
+            latest = tracking.load_record(rec_path)
+            latest.resources[0].state = "active"
+            tracking.save_record(latest, rec_path)
+
+    monkeypatch.setattr(tracking, "_RecordLock", _RenewingLock(_renew, tracking._RecordLock))
+    assert claims_cli._claims_sweep(argparse.Namespace(apply=True, json=True)) == 0
+    expected = "active" if renewal == "reopened-active" else "at-rest"
+    assert [c.state for c in tracking.load_record(rec_path).resources] == [expected]
+    assert history == []
+
+
+def _revalidation_env(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, pane: bool,
+) -> tuple[tracking.WorktreeRecord, Path, list[str]]:
+    tdir = tmp_path / "tracking"
+    tdir.mkdir()
+    (tmp_path / "wt").mkdir()
+    rec = _finalized_self(tmp_path / "wt", saved_at=tdir / "wt.yaml")
+    rec.checkout_managed = False
+    tracking.save_record(rec, tdir / "wt.yaml")
+    norm = sessions._normalize_path(rec.worktree_path)
+    monkeypatch.setattr(execution_spaces, "require_cleanup_identity", lambda r, a: None)
+    monkeypatch.setattr(m, "_hosted_session_blocks_cleanup", lambda r: False)
+    monkeypatch.setattr(m, "_apply_tracking_override", lambda r, info: info)
+    panes = {sessions.mux_session_name(rec.worktree_id)} if pane else set()
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: panes)
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
+    monkeypatch.setattr(local_cache_worker, "is_active", lambda path: False)
+    monkeypatch.setattr(
+        sessions, "scan_sessions_fast",
+        lambda records: sessions.SessionContext(active_sessions={norm: ["sess-1"]}))
+
+    def _classify(path: str, branch: str, **kw: object) -> git_ops.WorktreeStateInfo:
+        active = cast(set[str], kw["active_paths"])
+        state = (git_ops.WorktreeState.ACTIVE if sessions._normalize_path(path) in active
+                 else git_ops.WorktreeState.COMPLETED)
+        return git_ops.WorktreeStateInfo(state=state)
+
+    monkeypatch.setattr(git_ops, "classify_worktree", _classify)
+    return rec, tdir, []
+
+
+def _revalidate(
+    rec: tracking.WorktreeRecord, tdir: Path, reaped: list[str],
+) -> cleanup_gc_cli.RevalidationResult:
+    def _reap(
+        latest: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo,
+    ) -> tuple[int, list[str]]:
+        reaped.append(latest.worktree_id)
+        return 0, []
+
+    repo = cast(cfg.RepoConfig, types.SimpleNamespace(
+        anchor=str(tdir), remote="origin", default_branch="dev"))
+    return cleanup_gc_cli._revalidate_cleanup_safety(
+        rec.worktree_id, repo=repo, tracking_path=tdir, reap=_reap)
+
+
+def test_revalidation_accepts_expired_lease_with_idle_pane_like_prelock_scan(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec, tdir, reaped = _revalidation_env(state_dir, tmp_path, monkeypatch, pane=True)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    ctx = sessions.scan_sessions_fast([rec])
+    assert m._build_active_paths([rec], ctx) == set()
+    result = _revalidate(rec, tdir, reaped)
+    assert result.cleanable, result.reason
+    assert reaped == ["wt"]
+
+
+@pytest.mark.parametrize("pane", [True, False], ids=["pane", "no-pane"])
+def test_revalidation_refuses_lease_renewed_before_lock(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pane: bool,
+) -> None:
+    rec, tdir, reaped = _revalidation_env(state_dir, tmp_path, monkeypatch, pane=pane)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    assert prune.cleanup_disposition(rec, info).cleanable
+    _touch(state_dir, "sess-1", 5)
+    result = _revalidate(rec, tdir, reaped)
+    assert not result.cleanable
+    assert reaped == []
+
+
+def test_reap_does_not_release_lease_renewed_after_disposition(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tdir = tmp_path / "tracking"
+    tdir.mkdir()
+    rec = _finalized_self(tmp_path / "wt", saved_at=tdir / "wt.yaml")
+    rec.checkout_managed = False
+    tracking.save_record(rec, tdir / "wt.yaml")
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    assert prune.cleanup_disposition(rec, info).cleanable
+    _touch(state_dir, "sess-1", 5)
+    retired: list[str] = []
+
+    def _retire(r: tracking.WorktreeRecord, p: Path) -> bool:
+        retired.append(r.worktree_id)
+        return True
+
+    monkeypatch.setattr(tracking, "retire_record", _retire)
+    repo = cast(cfg.RepoConfig, types.SimpleNamespace(anchor=str(tmp_path), default_branch="dev"))
+    failures, _warnings = cleanup_reap.reap_worktree(rec, info, repo, tdir)
+    assert failures
+    assert retired == []
+    assert [c.state for c in tracking.load_record(tdir / "wt.yaml").resources] == ["at-rest"]

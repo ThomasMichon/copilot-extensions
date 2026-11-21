@@ -199,17 +199,49 @@ def drop_expired_finalized(
     """
     from . import sessions
 
-    observed: dict[str, set[str]] = {}
-    for path, sids in active_sessions.items():
-        observed.setdefault(sessions._normalize_path(path), set()).update(sids or ())
     for rec in records:
-        if rec.status != "finalized" or not rec.worktree_path or not _latched(rec):
+        if not rec.worktree_path:
             continue
         norm = sessions._normalize_path(rec.worktree_path)
         if norm not in active:
             continue
         try:
-            if not keep(rec) and idle_finalized(rec, observed.get(norm, ())):
+            if not keep(rec) and finalized_lease_released(
+                rec, observed_sessions(active_sessions, rec.worktree_path),
+            ):
                 active.discard(norm)
         except Exception:
             continue
+
+
+def observed_sessions(active_sessions: Mapping[str, Iterable[str]], path: str) -> set[str]:
+    """Session ids observed at ``path`` under any spelling of that path."""
+    from . import sessions
+
+    norm = sessions._normalize_path(path)
+    found: set[str] = set()
+    for candidate, sids in active_sessions.items():
+        if sessions._normalize_path(candidate) == norm:
+            found.update(sids or ())
+    return found
+
+
+def finalized_lease_released(
+    record: tracking.WorktreeRecord,
+    session_ids: Iterable[str] = (),
+    *,
+    now: float | None = None,
+) -> bool:
+    """The one lease-aware eligibility predicate for finalized checkouts.
+
+    True only for a stamped finalized latch whose every known session lease
+    has positively expired. Both the pre-lock active-path scan and the
+    lock-held cleanup revalidation decide through this predicate, so they
+    can neither disagree about an expired lease nor accept a renewed one.
+    """
+    return (
+        record.status == "finalized"
+        and bool(record.worktree_path)
+        and _latched(record)
+        and idle_finalized(record, session_ids, now=now)
+    )

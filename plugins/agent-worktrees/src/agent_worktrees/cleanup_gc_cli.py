@@ -5,41 +5,51 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import types
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+import yaml
 
 from . import finalize as fin, finalize_local, git_ops, output, prune, reap_cli, sessions, tracking
+from . import session_lease
 from . import claimant as claimant_mod
 from . import config as cfg
+from .closure_descriptor import assemble_closure_descriptor
 from .retirement_safety import retirement_blocker
+from .tracking_claims import effective_open_follow_up_count
+
+if TYPE_CHECKING:
+    from .finalize_lock import FinalizeLock
 
 
-def _core():
+def _core() -> types.ModuleType:
     from . import __main__ as core
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[..., Any]) -> Callable[..., Any]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[..., Any], candidate)
     return local
 
 
-def _age_str(*args, **kwargs): return _core()._age_str(*args, **kwargs)
-def _apply_tracking_override(*args, **kwargs): return _core()._apply_tracking_override(*args, **kwargs)
-def _build_active_paths(*args, **kwargs): return _core()._build_active_paths(*args, **kwargs)
-def _hosted_session_blocks_cleanup(*args, **kwargs): return _core()._hosted_session_blocks_cleanup(*args, **kwargs)
-def _local_claimant_alive(*args, **kwargs): return _core()._local_claimant_alive(*args, **kwargs)
-def _make_pr_lookup(*args, **kwargs): return _core()._make_pr_lookup(*args, **kwargs)
-def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
-def reap_one(*args, **kwargs): return _core().reap_one(*args, **kwargs)
-def reap_orphan_launcher_shells(*args, **kwargs): return reap_cli.reap_orphan_launcher_shells(*args, **kwargs)
-def sweep_managed_worktrees(*args, **kwargs): return reap_cli.sweep_managed_worktrees(*args, **kwargs)
-def sweep_finished_session_worktrees(*args, **kwargs): return reap_cli.sweep_finished_session_worktrees(*args, **kwargs)
+def _age_str(*args: Any, **kwargs: Any) -> Any: return _core()._age_str(*args, **kwargs)
+def _apply_tracking_override(*args: Any, **kwargs: Any) -> Any: return _core()._apply_tracking_override(*args, **kwargs)
+def _build_active_paths(*args: Any, **kwargs: Any) -> Any: return _core()._build_active_paths(*args, **kwargs)
+def _hosted_session_blocks_cleanup(*args: Any, **kwargs: Any) -> Any: return _core()._hosted_session_blocks_cleanup(*args, **kwargs)
+def _local_claimant_alive(*args: Any, **kwargs: Any) -> Any: return _core()._local_claimant_alive(*args, **kwargs)
+def _make_pr_lookup(*args: Any, **kwargs: Any) -> Any: return _core()._make_pr_lookup(*args, **kwargs)
+def _reap_worktree(*args: Any, **kwargs: Any) -> Any: return _core()._reap_worktree(*args, **kwargs)
+def reap_one(*args: Any, **kwargs: Any) -> Any: return _core().reap_one(*args, **kwargs)
+def reap_orphan_launcher_shells(*args: Any, **kwargs: Any) -> Any: return reap_cli.reap_orphan_launcher_shells(*args, **kwargs)
+def sweep_managed_worktrees(*args: Any, **kwargs: Any) -> Any: return reap_cli.sweep_managed_worktrees(*args, **kwargs)
+def sweep_finished_session_worktrees(*args: Any, **kwargs: Any) -> Any: return reap_cli.sweep_finished_session_worktrees(*args, **kwargs)
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
     p.add_argument("--worktree-id", default=None, help="Clean a single worktree by ID (non-interactive, re-checks prune-safety; pair with --json for the picker's per-item progress)")
@@ -143,7 +153,7 @@ def _closure_blockers(
     disp: prune.CleanupDisposition,
     *,
     turn_count: int = 0,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """The closure descriptor's full ``blockers`` list for ``rec``/``info``/
     ``disp`` (worktree-finality-and-obligations Phase 4) -- REPORTING only,
     never a decision input; cleanup/GC's actual cleanable/not gate stays
@@ -162,8 +172,8 @@ def _closure_blockers(
     ``blockers`` field, which does not depend on either.
     """
     held_claims = sum(1 for c in rec.resources if c.is_live)
-    open_follow_ups = tracking.effective_open_follow_up_count(rec)
-    descriptor = prune.assemble_closure_descriptor(
+    open_follow_ups = effective_open_follow_up_count(rec)
+    descriptor = assemble_closure_descriptor(
         rec, info, disp,
         held_claims=held_claims, open_follow_ups=open_follow_ups,
         evidence_mode="cached", turn_count=turn_count,
@@ -172,7 +182,7 @@ def _closure_blockers(
     return descriptor.blockers
 
 
-def _enrich_reason_with_blockers(reason: str, blockers: list[dict]) -> str:
+def _enrich_reason_with_blockers(reason: str, blockers: list[dict[str, Any]]) -> str:
     """Append every blocker code+count beyond the single one already named in
     ``reason``, when :func:`_closure_blockers` found more than one
     concurrently-true blocker -- a no-op (returns ``reason`` unchanged) when
@@ -203,7 +213,7 @@ class RevalidationResult:
 def _revalidate_cleanup_safety(
     wt_id: str,
     *,
-    repo,
+    repo: cfg.RepoConfig,
     tracking_path: Path,
     force: bool = False,
     include_unused: bool = False,
@@ -318,7 +328,7 @@ def _revalidate_cleanup_safety(
 
             try:
                 latest = tracking.load_record(yaml_path)
-            except (ExecutionSpaceError, ValueError, OSError, cfg.yaml.YAMLError) as exc:
+            except (ExecutionSpaceError, ValueError, OSError, yaml.YAMLError) as exc:
                 return RevalidationResult(False, f"record/reporting context unavailable: {exc}", "execution-space")
             if automatic and (
                 latest.dispatch_attempt is not None or latest.dispatch_attempt_opaque
@@ -339,11 +349,22 @@ def _revalidate_cleanup_safety(
                 return RevalidationResult(
                     False, "mux presence is unknown; cleanup deferred", "mux-unknown",
                 )
-            if sessions.mux_session_name(latest.worktree_id) in mux:
+            fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
+            # An open pane keeps the checkout live unless the shared lease
+            # predicate -- the same one the pre-lock scan applied -- proves
+            # every session lease on this finalized latch expired.
+            if sessions.mux_session_name(latest.worktree_id) in mux and (
+                not latest.worktree_path
+                or sessions._normalize_path(latest.worktree_path) in active_paths
+                or not session_lease.finalized_lease_released(
+                    latest,
+                    session_lease.observed_sessions(
+                        session_ctx.active_sessions, latest.worktree_path),
+                )
+            ):
                 return RevalidationResult(
                     False, "worktree became active since the initial scan", "active",
                 )
-            fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
             if fresh_info.state == git_ops.WorktreeState.ACTIVE:
                 return RevalidationResult(
                     False, "worktree became active since the initial scan",
@@ -405,7 +426,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     ):
         return output._json_error("--automatic requires --worktree-id and forbids --force", 2)
     if getattr(args, "worktree_id", None):
-        return _core_helper("_cleanup_one", _cleanup_one)(args)
+        return cast(int, _core_helper("_cleanup_one", _cleanup_one)(args))
 
     config = cfg.load_config()
     repo = config.default_repo
@@ -608,7 +629,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
     # Acquire finalization lock to prevent races with post-exit finalization
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
-    lock = fin.FinalizeLock(lock_path)
+    lock_cls: Callable[[Path], FinalizeLock] = getattr(fin, "FinalizeLock")
+    lock = lock_cls(lock_path)
     try:
         lock.acquire()
     except TimeoutError:
@@ -620,8 +642,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     try:
         for rec, info in to_clean:
 
-            def _reap_cb(latest_rec, latest_info):
-                return _reap_worktree(latest_rec, latest_info, repo, tracking_path)
+            def _reap_cb(
+                latest_rec: tracking.WorktreeRecord, latest_info: git_ops.WorktreeStateInfo,
+            ) -> tuple[int, list[str]]:
+                return cast(
+                    tuple[int, list[str]],
+                    _reap_worktree(latest_rec, latest_info, repo, tracking_path),
+                )
 
             result = _core_helper("_revalidate_cleanup_safety", _revalidate_cleanup_safety)(
                 rec.worktree_id,
@@ -653,7 +680,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     return 0
 
 
-def _print_gc_orphans(report: dict, dry_run: bool) -> None:
+def _print_gc_orphans(report: dict[str, Any], dry_run: bool) -> None:
     """Human-facing summary of the orphan-directory sweep."""
     removed = report.get("removed", [])
     skipped = report.get("skipped", [])
@@ -674,7 +701,7 @@ def _print_gc_orphans(report: dict, dry_run: bool) -> None:
         output.ok(f"Removed {len(removed)} orphan dir(s); {len(skipped)} skipped.")
 
 
-def _print_gc_managed(report: dict, dry_run: bool) -> None:
+def _print_gc_managed(report: dict[str, Any], dry_run: bool) -> None:
     """Human-facing summary of the managed (system/bridge) worktree sweep."""
     removed = report.get("removed", [])
     skipped = report.get("skipped", [])
@@ -695,7 +722,7 @@ def _print_gc_managed(report: dict, dry_run: bool) -> None:
         output.ok(f"Reaped {len(removed)} managed worktree(s); {len(skipped)} kept.")
 
 
-def _print_gc_shells(report: dict, dry_run: bool) -> None:
+def _print_gc_shells(report: dict[str, Any], dry_run: bool) -> None:
     """Human-facing summary of the orphaned launcher-shell reap."""
     reaped = report.get("reaped", [])
     candidates = report.get("candidates", [])
@@ -892,8 +919,8 @@ def _run_claim_history_mirror(args: argparse.Namespace) -> dict[str, object]:
 def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None:
     if not result.get("available"):
         return
-    refs = result.get("refs") or []
-    failed = result.get("failed") or []
+    refs = cast(list[dict[str, Any]], result.get("refs") or [])
+    failed = cast(list[dict[str, Any]], result.get("failed") or [])
     if dry:
         pending = sum(int(r.get("pending", 0)) for r in refs)
         confirmed = len(refs)
@@ -941,7 +968,7 @@ def _run_lease_gc(args: argparse.Namespace) -> dict[str, object]:
 def _print_gc_lease(lease_gc: dict[str, object], dry: bool) -> None:
     if not lease_gc.get("available"):
         return
-    squashed = lease_gc.get("squashed") or []
+    squashed = cast(list[dict[str, Any]], lease_gc.get("squashed") or [])
     verb = "Would squash" if dry else "Squashed"
     if not squashed:
         print(f"{verb} 0 stale lease ref(s).")
