@@ -237,7 +237,7 @@ class NativePair:
                 artifacts[unit] = text
             stamps[unit] = stamp
             properties = self._properties(unit)
-            if properties.get("Job", "0") != "0":
+            if properties.get("Job", "0") not in {"", "0"}:
                 raise slots.HealthError("native-health-pair-operation-unconfirmed")
             fragment = properties["FragmentPath"]
             if (
