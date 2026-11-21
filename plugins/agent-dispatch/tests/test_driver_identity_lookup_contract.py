@@ -3,13 +3,16 @@
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
-from agent_dispatch import provisional_driver_work, submission_readiness_observation
-from agent_dispatch.queue import TaskQueue
+from agent_dispatch import submission_readiness_observation
+from agent_dispatch.execution_effect_adapter import ExecutionScope
+from agent_dispatch.execution_send_destination import ExecutionDestination
 from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_execution_custody import ExecutionSendIdentity
+from agent_dispatch.queue_execution_handoff import _scope_key
 from tests import test_task_relevance_closeout_transport as transport
 from tests.test_pool_placement import place, pool, publish
 from tests.test_task_relevance import report
@@ -103,35 +106,69 @@ def test_exact_driver_identity_on_both_snapshots(
     assert (statuses, calls) == (([409, 409], 1) if blocked else ([200, 200], 2))
 
 
-def test_settled_same_tree_reservations_have_bounded_cost(
+def test_legacy_writer_unknown_send_during_observation_blocks_both_snapshots(
     observer: Ready, monkeypatch: pytest.MonkeyPatch,
-    record_property: Callable[[str, object], None],
+) -> None:
+    queue, _, _, _, _ = observer
+    scope = ExecutionScope("installation", "coordinator", "other", "fixture")
+    old = ExecutionSendIdentity(scope, "old", "runtime", "retired", 1, "launch")
+    calls = 0
+
+    def observe(*_: object) -> dict[str, bool]:
+        nonlocal calls
+        calls += 1
+        with sqlite3.connect(queue.db_path) as writer:
+            writer.execute(
+                "INSERT INTO execution_send_custody VALUES (?,?,'other','fixture',1,'other',"
+                "?,1,'launch',?,'unknown','reply lost',1,1)",
+                (_scope_key(scope), old.send_id, old.reservation_key, old.encoded()),
+            )
+        return {"ready": True}
+
+    monkeypatch.setattr(submission_readiness_observation, "observe", observe)
+    with transport.api(observer) as api:
+        for _ in range(2):
+            response = api.post(transport.path(observer, "/observe-provisional"),
+                                headers=transport.headers(observer), json=transport.body(observer))
+            assert response.status_code == 409 and "immutable driver destination" in response.text
+        assert calls == 1
+
+
+@pytest.mark.parametrize("unresolved", [False, True], ids=["settled-tree", "unresolved-sends"])
+def test_observation_request_sql_cost(
+    observer: Ready, monkeypatch: pytest.MonkeyPatch,
+    record_property: Callable[[str, object], None], unresolved: bool,
 ) -> None:
     queue, _, workspace, _, _ = observer
-    original = provisional_driver_work.require_no_outstanding_driver_work
+    connect = queue._connect
     costs: list[int] = []
+    steps = 0
+    measuring = False
 
-    def measured(q: TaskQueue, conn: sqlite3.Connection, task: Task,
-                 reservation: dict[str, Any], native: str) -> None:
-        cost = 0
+    def measured() -> sqlite3.Connection:
+        conn = connect()
 
         def step() -> int:
-            nonlocal cost
-            cost += 1
+            nonlocal steps
+            steps += 1
             return 0
 
-        conn.set_progress_handler(step, 1)
-        try:
-            original(q, conn, task, reservation, native)
-        finally:
-            conn.set_progress_handler(None, 0)
-        costs.append(cost)
+        if measuring:
+            conn.set_progress_handler(step, 1)
+        return conn
 
-    monkeypatch.setattr(provisional_driver_work, "require_no_outstanding_driver_work", measured)
-    monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
+    def observe(*_: object) -> dict[str, bool]:
+        nonlocal steps
+        costs.append(steps)
+        steps = 0
+        return {"ready": True}
+
+    monkeypatch.setattr(queue, "_connect", measured)
+    monkeypatch.setattr(submission_readiness_observation, "observe", observe)
     with transport.api(observer) as api:
         for start, end in ((0, 20), (20, 2000)):
-            rows = [{"id": f"old-{i}", "tree": workspace.worktree} for i in range(start, end)]
+            rows = [{"id": f"old-{i}", "tree": "foreign" if unresolved else workspace.worktree}
+                    for i in range(start, end)]
             with queue._connect() as conn:
                 conn.executemany("INSERT INTO tasks(id,status) VALUES (:id,'completed')", rows)
                 conn.executemany(
@@ -158,10 +195,34 @@ def test_settled_same_tree_reservations_have_bounded_cost(
                     "reservation_key,task_generation,catalog_revision,assignment_released)"
                     " VALUES ('new-'||:id,'pool','MÜNCHEN','linux','new-'||:id,1,1,0)", rows,
                 )
+                if unresolved:
+                    scope = ExecutionScope("installation", "coordinator", "other", "fixture")
+                    for r in rows:
+                        send = ExecutionSendIdentity(
+                            scope, str(r["id"]), "runtime", str(r["id"]), 1, "launch",
+                            destination=ExecutionDestination("driver", "other", "foreign"),
+                        )
+                        r["identity"] = send.encoded()
+                        r["scope"] = _scope_key(scope)
+                    conn.executemany(
+                        "INSERT INTO wake_outbox(id,task_id,owner,generation,wake_seq,status,"
+                        "created_at,updated_at,execution_send_state) VALUES (:id,:id,"
+                        "'other/foreign',1,1,'failed',1,1,'unknown')", rows,
+                    )
+                    conn.executemany(
+                        "INSERT INTO execution_send_custody(scope_key,send_id,repo,source,"
+                        "producer_generation,task_id,reservation_key,task_generation,kind,"
+                        "identity,state,detail,created_at,updated_at) VALUES (:scope,:id,"
+                        "'other','fixture',1,:id,:id,1,'launch',:identity,'unknown','',1,1)", rows,
+                    )
+            headers, body = transport.headers(observer), transport.body(observer)
+            steps, measuring = 0, True
             response = api.post(transport.path(observer, "/observe-provisional"),
-                                headers=transport.headers(observer), json=transport.body(observer))
+                                headers=headers, json=body)
+            measuring = False
+            costs.append(steps)
             assert response.status_code == 200, response.text
-    record_property("pre_post_steps_20_then_2000", costs)
+    record_property("authorization_pre_and_post_steps_20_then_2000", costs)
     assert len(costs) == 4
     for small, large in zip(costs[:2], costs[2:], strict=True):
         assert large <= 2 * small, costs

@@ -9,6 +9,7 @@ import pytest
 
 from agent_dispatch import provisional_driver_work, submission_readiness_observation
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
+from agent_dispatch.coordinator_execution_sender import CoordinatorExecutionProvenance
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_execution_handoff import require_execution_admission
@@ -16,6 +17,7 @@ from agent_dispatch.queue_records import Status, TaskError
 from agent_dispatch.queue_task_relationships import require_relationship
 from agent_dispatch.review_closeout_submission import SUBMIT
 from agent_dispatch.task_obligations import read_snapshot
+from tests import test_execution_wake_sends as wake_controls
 from tests import test_task_relevance_closeout_transport as transport
 from tests.test_assignment_relationships import start_managed
 from tests.test_pool_placement import place, pool
@@ -299,10 +301,15 @@ def test_preview_reconciliations_skip_unrelated_live_and_settled_history(
                 conn.executemany(
                     "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
                     "owner,resume_worktree,sender,message,status,attempts,created_at,updated_at,"
-                    "execution_send_state,first_qualified_attempt)"
+                    "execution_send_state,first_qualified_attempt,execution_scope_key,execution_send)"
                     " VALUES (:i,:task,1,1,'host/w','w','test','message',"
-                    "'delivered',2,1,1,'sent',1)",
-                    rows,
+                    "'delivered',2,1,1,'sent',1,:scope,json_object('scope',json(:scope),"
+                    "'runtime_id','fixture','producer_generation',1,'delivery_token','fixture',"
+                    "'task_generation',1,'owner_session_id',NULL,'outbox','run_waiter_wakes',"
+                    "'wake_id',cast(:i as text)))",
+                    [{**r, "scope": json.dumps({"installation": "fixture", "coordinator": "q",
+                       "repository": "example", "producer_registration": "fixture"},
+                       sort_keys=True, separators=(",", ":"))} for r in rows],
                 )
                 conn.executemany(
                     "INSERT INTO execution_send_custody(scope_key,send_id,repo,source,"
@@ -339,14 +346,14 @@ def test_preview_waits_for_detached_work_even_without_workspace_claim(
 
 @pytest.mark.parametrize(("foreign", "owner", "native", "send", "blocked"), [
     (False, "host-a/worktree", "native", None, True),
-    (False, "host-a/worktree", "native", "sent", False),
-    (False, "host-a/worktree", "native", "not_sent", False),
+    (False, "host-a/worktree", "native", "sent", True),  # no retained envelope
+    (False, "host-a/worktree", "native", "not_sent", True),
     (True, "HOST-A/other", "native", "unknown", True),
     (True, "host-a/worktree", None, "pending", True),
     (True, "other/worktree", "native", "unknown", False),
     (True, "worker-1", "native", "unknown", True),
     (True, "other/worktree", None, "unknown", False),
-    (True, "host-a/worktree", "different", "unknown", False),
+    (True, "host-a/worktree", "different", "unknown", True),
 ])
 @pytest.mark.parametrize("waiter", [False, True], ids=["owner-wake", "waiter-wake"])
 def test_preview_rechecks_exact_wake_target_after_owner_read(
@@ -362,6 +369,8 @@ def test_preview_rechecks_exact_wake_target_after_owner_read(
               ref: str) -> dict[str, object]:
         evidence = observe(request, allocation, ref)
         with queue._connect() as conn:
+            if foreign:
+                conn.execute("UPDATE tasks SET status='completed' WHERE id=?", (target.id,))
             if waiter:
                 conn.execute(
                     "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
@@ -422,7 +431,7 @@ def test_other_assignment_or_delivery_during_preview(
     blocked: bool,
 ) -> None:
     queue, _, workspace, _, _ = ready
-    other = queue.create("Second assignment", repo="other")
+    other = queue.create("Second assignment", repo="other", source="fixture")
     assert isinstance(other, Task)
     host, _, tree = worker.partition("/")
     different = AssignmentWorkspace(host, "other", tree, workspace.path, "fixture-2")
@@ -449,23 +458,22 @@ def test_other_assignment_or_delivery_during_preview(
                 if mode in {"retry", "unretryable"}:
                     wake = queue.claim_due_run_waiter_wake()
                     assert wake and wake.delivery_token
-                    identity = {
-                        "outbox": "run_waiter_wakes", "wake_id": wake.id,
-                        "task_generation": wake.task_generation, "owner_session_id": native,
-                        "delivery_token": wake.delivery_token,
-                    }
+                    current = queue.get(other.id)
+                    assert current is not None
+                    wake_controls._qualify(queue, current, monkeypatch)
+                    provenance = CoordinatorExecutionProvenance(
+                        queue, current, wake_controls.INCARNATION,
+                    ).prepare()
+                    admission = queue.admit_execution_wake(wake, provenance=provenance)
                     refusal = {
                         "schema": "dispatch-native-prompt-refusal", "version": 1,
                         "outcome": "refused_busy", "reason": "busy", "retryable": mode == "retry",
                         "invocation_key": wake.id, "native_session_id": native,
                         "bridge_session_id": "fixture",
                     }
+                    queue.settle_execution_wake(wake, admission, outcome="not_sent",
+                                                detail=json.dumps(refusal))
                     with queue._connect() as conn:
-                        conn.execute(
-                            "UPDATE run_waiter_wakes SET execution_send=?,"
-                            " execution_send_state='not_sent', execution_send_detail=? WHERE id=?",
-                            (json.dumps(identity), json.dumps(refusal), wake.id),
-                        )
                         settling = conn.execute(
                             "SELECT * FROM run_waiter_wakes WHERE id=?", (wake.id,)
                         ).fetchone()

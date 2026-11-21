@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .execution_effect_adapter import ExecutionScope, _token
+from .execution_send_destination import ExecutionDestination
 from .queue_execution_handoff import _scope_key, require_execution_admission
 from .queue_execution_lineage import execution_lineage_match_sql
 from .queue_records import TaskError
@@ -39,6 +40,7 @@ class ExecutionSendIdentity:
     task_generation: int
     kind: SendKind
     generation: int = 1
+    destination: ExecutionDestination | None = None
 
     def __post_init__(self) -> None:
         _scope_key(self.scope)
@@ -50,6 +52,14 @@ class ExecutionSendIdentity:
             raise TaskError("only initial automatic execution custody is implemented")
         if self.kind not in {"launch", "resume", "deliver", "redrive"}:
             raise TaskError("unknown execution send kind")
+        if self.destination is not None and not isinstance(self.destination, ExecutionDestination):
+            raise TaskError("execution send requires a transport-owner destination")
+
+    def encoded(self) -> str:
+        fields = asdict(self)
+        if self.destination is None:
+            del fields["destination"]  # Keep legacy exact-identity replay and settlement.
+        return json.dumps(fields, sort_keys=True, separators=(",", ":"))
 
 
 @dataclass(frozen=True)
@@ -218,6 +228,8 @@ class QueueExecutionCustodyMixin:
             "CREATE INDEX IF NOT EXISTS idx_execution_send_unresolved"
             " ON execution_send_custody(state,task_id) WHERE state IN ('pending', 'unknown')"
         )
+        from .execution_send_destination import migrate
+        migrate(conn)
 
     def admit_execution_send(
         self,
@@ -236,7 +248,7 @@ class QueueExecutionCustodyMixin:
         if not isinstance(identity, ExecutionSendIdentity):
             raise TaskError("execution send requires a qualified identity")
         key = _scope_key(identity.scope)
-        encoded = json.dumps(asdict(identity), sort_keys=True, separators=(",", ":"))
+        encoded = identity.encoded()
         queue = cast("TaskQueue", self)
         repo, source = queue._validate_producer_scope(identity.scope.repository, source)
         with queue._connect() as conn:
@@ -274,6 +286,8 @@ class QueueExecutionCustodyMixin:
                 or reservation["conclusion_state"] == "pending"
             ):
                 raise TaskError("execution send requires the current retained reservation")
+            if identity.destination is not None:
+                identity.destination.check_reservation(conn, reservation)
             require_execution_admission(conn, reservation["task_id"])
             require_execution_wake_reconciliation(
                 conn, reservation["task_id"], exclusive_key=reservation["exclusive_key"],
@@ -345,7 +359,7 @@ class QueueExecutionCustodyMixin:
         if not isinstance(detail, str) or not detail.strip():
             raise TaskError("execution send outcome requires its reconciliation detail")
         key = _scope_key(identity.scope)
-        encoded = json.dumps(asdict(identity), sort_keys=True, separators=(",", ":"))
+        encoded = identity.encoded()
         queue = cast("TaskQueue", self)
         with queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")

@@ -82,9 +82,12 @@ def test_qualified_result_covers_only_its_attempts(
             require_no_outstanding_driver_work(restarted, conn, original, reservation, "session-a")
 
 
-@pytest.mark.parametrize("attempts,valid", [(1, True), (2, True), (2, False)])
+@pytest.mark.parametrize("attempts,damage", [
+    (1, None), (1, "wrong-id"), (1, "no-runtime"), (1, "invalid-json"),
+    (2, None), (2, "wrong-id"),
+])
 def test_v2_upgrade_never_infers_first_attempt_from_later_receipt(
-    cohort: controls.Cohort, attempts: int, valid: bool,
+    cohort: controls.Cohort, attempts: int, damage: str | None,
 ) -> None:
     queue, pending, _ = cohort
     wake = controls._claim(queue, pending)
@@ -93,35 +96,41 @@ def test_v2_upgrade_never_infers_first_attempt_from_later_receipt(
     controls._finish(queue, wake, delivered=True)
     with queue._connect() as conn:
         for table in TABLES:
+            for suffix in ("task", "tree", "native"):
+                conn.execute(f"DROP INDEX idx_{table}_driver_{suffix}_v4")
             for suffix in ("task", "target"):
-                conn.execute(f"DROP INDEX idx_{table}_driver_{suffix}_v3")
                 conn.execute(f"CREATE INDEX idx_{table}_driver_{suffix}_v2 ON {table}(task_id)"
                              " WHERE execution_send_state IN ('pending','unknown')")
-            conn.execute(f"DROP TRIGGER {table}_first_qualified_attempt")
+            conn.execute(f"DROP TRIGGER {table}_first_qualified_attempt_v4")
             conn.execute(f"ALTER TABLE {table} DROP COLUMN first_qualified_attempt")
         # A legacy retained row has only the last send identity, not its first ordinal.
         original = json.loads(controls._row(queue, wake)["execution_send"])
-        if not valid:
+        if damage == "wrong-id":
             original["wake_id"] = "different"
+        elif damage == "no-runtime":
+            del original["runtime_id"]
+        encoded = "{" if damage == "invalid-json" else json.dumps(original)
         conn.execute(
             f"UPDATE {wake_table(wake)} SET attempts=?, execution_send=? WHERE id=?",  # noqa: S608 -- fixed outbox
-            (attempts, json.dumps(original), wake.id),
+            (attempts, encoded, wake.id),
         )
     restarted = TaskQueue(queue.db_path)
     assert controls._row(restarted, wake)["first_qualified_attempt"] == (
-        1 if attempts == 1 and valid else None
+        1 if attempts == 1 and damage is None else None
     )
     with restarted._connect() as conn:
         conn.execute("BEGIN")
         indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
         for table in TABLES:
+            for suffix in ("task", "tree", "native"):
+                assert f"idx_{table}_driver_{suffix}_v4" in indexes
             for suffix in ("task", "target"):
-                assert f"idx_{table}_driver_{suffix}_v3" in indexes
+                assert f"idx_{table}_driver_{suffix}_v3" not in indexes
                 assert f"idx_{table}_driver_{suffix}_v2" not in indexes
         task = restarted._fetch(conn, wake.task_id)
         assert task is not None
         reservation = {"execution_machine": "host", "worktree": "worktree", "task_id": task.id}
-        if attempts > 1:
+        if attempts > 1 or damage is not None:
             with pytest.raises(TaskError, match="unresolved driver wake"):
                 require_no_outstanding_driver_work(restarted, conn, task, reservation, "session-a")
         else:

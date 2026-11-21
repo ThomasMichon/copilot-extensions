@@ -73,6 +73,10 @@ current pending delivery (including a qualified retry) also blocks; a stale
 unattempted wake or this observation's own pending closeout notification does
 not. A confirmed single-attempt delivery settles an unqualified wake; a later
 retry cannot establish what happened on an earlier ambiguous attempt.
+For owner and waiter wakes, a qualified workspace target and a native target
+are independent: a different native does not clear an unresolved wake for the
+same host and tree. A terminal send label without an attributable outbox
+envelope is not clearance.
 For each outbox, Dispatch records the first delivery attempt with a qualified
 send identity. A later `sent` or `not_sent` settles only that send. If accounting
 began after attempt one, readiness still refuses. A retry of an exact known
@@ -80,6 +84,18 @@ refusal remains supported when accounting began on attempt one. On upgrade,
 an existing multi-attempt row with no recorded first ordinal is not assumed
 to have been qualified from the start. This evidence is for observation only:
 it does not authorize a retry or change an outbox outcome.
+
+Non-wake execution sends are also checked by destination, independently of
+task lineage, reservation status or subsequent workspace changes. A qualified
+sender freezes its selected route in the existing send identity before transport.
+A driver route binds the execution host and the known workspace/native selectors
+against the reservation in the admission transaction. Either same-host selector
+blocks until the owner settles the send. The container launcher instead records
+the selected venue and container directory; direct Bridge delivery records the
+addressed session. Neither proves a managed driver identity. An unresolved
+incomparable or legacy target therefore blocks observation, even across tasks;
+it is never reconstructed from the reservation's current contents. Settled sends
+do not block. No second send ledger or send permission is created.
 A successful response identifies the request,
 generation and assignment event; it does not persist a readiness receipt, submit,
 authorize release or send a wake. Previously settled and finalized drivers cannot
