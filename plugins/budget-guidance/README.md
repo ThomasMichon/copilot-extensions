@@ -17,6 +17,8 @@ signed-system fallback. Explicit closed-wheel inputs keep their admitted
 interpreter/profile contract. Missing PATH uv is established by the existing
 shell-native prerequisite route in the user's command directory; no Python
 command is needed to acquire it.
+Windows setup checks persisted User/Machine command discovery independently
+of uv's temporary process PATH prefix, preserving unrelated entries.
 
 The payload-local and installed command binstubs use PATH uv with the exact
 completed environment selected by the existing runtime resolver. Commands do
@@ -25,6 +27,11 @@ Both uv directory-override spellings are ignored so relative configuration
 continues to resolve from the caller's directory. Setup also isolates inherited
 Python-selection hints separately for environment construction and packaging,
 not only bootstrap lookup.
+Ordinary launch ignores inherited uv project, synchronization, isolated-run
+and environment-file overrides. PowerShell binstubs restore the affected
+caller variables on success and early failure. On legacy CLR hosts, already
+empty values remain untouched because those hosts cannot restore them;
+uv may refuse a malformed empty setting rather than mutate the caller.
 Missing uv or an unprepared runtime reports setup instructions. `stamp` still
 creates a source snapshot and command, but first command use no longer performs
 installation: invoke the snapshot's `scripts/install.* provision` explicitly.

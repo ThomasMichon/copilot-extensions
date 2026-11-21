@@ -726,10 +726,10 @@ function Deploy-SelfProvisioningBinstub {
             '_root="$HOME/.budget-guidance"',
             'AGENT_RT_PY=""',
             'if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi',
-            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY',
+            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC',
             '_uv="$(command -v uv)" || exit 127',
             'case "$_uv" in /*) ;; *) echo "uv must be a PATH executable" >&2; exit 127;; esac',
-            '[ -n "$AGENT_RT_PY" ] && exec "$_uv" run --no-project --no-config --no-python-downloads --managed-python --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"',
+            '[ -n "$AGENT_RT_PY" ] && exec "$_uv" run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"',
             'echo "[budget-guidance] runtime not prepared; run scripts/install.sh install" >&2; exit 1'
         ) -join "`n"
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
@@ -739,8 +739,16 @@ function Deploy-SelfProvisioningBinstub {
     $ps1Path = Join-Path $LocalBin 'budget-guidance.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY')) {
-    Remove-Item "Env:$key" -ErrorAction SilentlyContinue
+$_savedUvEnvironment = @{}
+foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'UV_ISOLATED', 'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC')) {
+    $_savedUvEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+}
+try {
+foreach ($key in $_savedUvEnvironment.Keys) {
+    # Older CLR versions cannot restore empty values; leave those untouched.
+    if ([Environment]::Version.Major -ge 9 -or $_savedUvEnvironment[$key] -cne '') {
+        [Environment]::SetEnvironmentVariable($key, [NullString]::Value, 'Process')
+    }
 }
 $_uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
 if (-not $_uv) {
@@ -757,11 +765,20 @@ function _Resolve-Py {
 $_py = _Resolve-Py
 if ($_py) {
     $ErrorActionPreference = 'Continue'
-    & $_uv run --no-project --no-config --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @args
+    & $_uv run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @args
     exit $LASTEXITCODE
 }
 [Console]::Error.WriteLine('[budget-guidance] runtime is not prepared; run the owning scripts/install.ps1 install.')
 exit 1
+} finally {
+    foreach ($key in $_savedUvEnvironment.Keys) {
+        if ([Environment]::Version.Major -ge 9 -or $_savedUvEnvironment[$key] -cne '') {
+            $value = $_savedUvEnvironment[$key]
+            if ($null -eq $value) { $value = [NullString]::Value }
+            [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+        }
+    }
+}
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
@@ -784,6 +801,19 @@ exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, prepared uv runtime)"
+}
+
+function Publish-BudgetCommandPath {
+    $currentUserPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
+    $currentMachinePath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine'
+    if (($currentUserPath -split ';') -notcontains $LocalBin -and
+        ($currentMachinePath -split ';') -notcontains $LocalBin) {
+        Set-CopilotPersistentEnvironmentVariable -Name 'PATH' -Value "$LocalBin;$currentUserPath" -Target 'User'
+        Write-Ok "PATH: Added $LocalBin to User PATH"
+    }
+    if (($env:PATH -split ';') -notcontains $LocalBin) {
+        $env:PATH = "$LocalBin;$env:PATH"
+    }
 }
 
 function Invoke-Stamp {
@@ -1154,17 +1184,7 @@ if ($importOk) {
     exit 1
 }
 
-$pathDirs = $env:PATH -split ';'
-if ($pathDirs -contains $LocalBin) {
-    Write-Ok "PATH: $LocalBin is on PATH"
-} else {
-    $currentUserPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
-    if (-not ($currentUserPath -split ';' | Where-Object { $_ -eq $LocalBin })) {
-        Set-CopilotPersistentEnvironmentVariable -Name 'PATH' -Value "$LocalBin;$currentUserPath" -Target 'User'
-        $env:PATH = "$LocalBin;$env:PATH"
-        Write-Ok "PATH: Added $LocalBin to User PATH"
-    }
-}
+Publish-BudgetCommandPath
 
 Write-Ok 'budget-guidance install'
 } finally {

@@ -106,7 +106,8 @@ args = sys.argv[1:]
 base = os.environ["TEST_BASE_PYTHON"]
 if os.environ.get("TEST_ASSERT_CLEAN_UV") == "1" and args and args[0] in ("python", "venv", "pip"):
     hints = ("UV_PYTHON", "UV_PYTHON_PREFERENCE", "UV_MANAGED_PYTHON", "UV_NO_MANAGED_PYTHON",
-             "VIRTUAL_ENV", "CONDA_PREFIX", "UV_WORKING_DIR", "UV_WORKING_DIRECTORY")
+             "VIRTUAL_ENV", "CONDA_PREFIX", "UV_WORKING_DIR", "UV_WORKING_DIRECTORY",
+             "UV_ISOLATED", "UV_ENV_FILE", "UV_PROJECT", "UV_FROZEN", "UV_LOCKED", "UV_NO_SYNC")
     inherited = [name for name in hints if name in os.environ]
     if inherited:
         print("unexpected inherited uv hints: " + ", ".join(inherited), file=sys.stderr)
@@ -246,6 +247,9 @@ def _poison_uv_environment(env: dict[str, str], root: Path) -> None:
         "UV_NO_MANAGED_PYTHON": "1", "VIRTUAL_ENV": str(foreign),
         "CONDA_PREFIX": str(foreign), "UV_WORKING_DIR": str(foreign),
         "UV_WORKING_DIRECTORY": str(foreign),
+        "UV_ISOLATED": "1", "UV_ENV_FILE": str(root / "missing.env"),
+        "UV_PROJECT": str(root / "missing-project"),
+        "UV_FROZEN": "1", "UV_LOCKED": "1", "UV_NO_SYNC": "1",
     })
 
 
@@ -720,6 +724,73 @@ def _compatibility_powershell_wrapper() -> str:
     start = source.index(start_marker) + len(start_marker)
     end = source.index(end_marker, start)
     return source[start:end]
+
+
+@pytest.mark.skipif(PWSH is None, reason="PowerShell host unavailable")
+@pytest.mark.parametrize("published", ["user", "machine", "neither", "bootstrap-process"])
+def test_command_path_publication_does_not_confuse_bootstrap_with_persistence(
+    tmp_path: Path, published: str,
+) -> None:
+    assert PWSH
+    source = (PLUGIN / "scripts/install.ps1").read_text(encoding="utf-8")
+    function = source.split("function Publish-BudgetCommandPath {", 1)[1].split(
+        "\nfunction Invoke-Stamp {", 1,
+    )[0]
+    local_bin = str(tmp_path / ".local/bin")
+    bootstrap = ""
+    if published == "bootstrap-process":
+        uv = shutil.which("uv")
+        assert uv, "The native bootstrap control requires uv"
+        Path(local_bin).mkdir(parents=True)
+        shutil.copy2(uv, Path(local_bin) / "uv.exe")
+        engine = PLUGIN.parents[1] / "libs/installer-engine/installer-engine.ps1"
+        bootstrap = (
+            f". '{str(engine).replace(chr(39), chr(39) * 2)}'\n"
+            "if (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue) {\n"
+            "    throw 'uv was unexpectedly available before bootstrap'\n}\n"
+            f"$selected = Ensure-Uv -InstallRoot '{str(tmp_path).replace(chr(39), chr(39) * 2)}' "
+            "-ToolDirectory '.local/bin' -AcquireIfMissing:$false\n"
+            "if (-not $selected -or ($env:PATH -split ';')[0] -cne $LocalBin) {\n"
+            "    throw 'Real uv bootstrap did not prepare temporary command discovery'\n}\n"
+        )
+    script = tmp_path / "publish-path.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$LocalBin = '{local_bin.replace(chr(39), chr(39) * 2)}'\n"
+        "$store = @{ User='user-before;user-after'; Machine='machine-before;machine-after' }\n"
+        f"$published = '{published}'\n"
+        "if ($published -eq 'user') { $store.User += ';' + $LocalBin }\n"
+        "if ($published -eq 'machine') { $store.Machine += ';' + $LocalBin }\n"
+        "$machineBefore = $store.Machine\n"
+        "$env:PATH = 'process-before;process-after'\n"
+        + bootstrap +
+        "$writes = [Collections.Generic.List[string]]::new()\n"
+        "function Get-CopilotPersistentEnvironmentVariable {\n"
+        "    param($Name,$Target) $store[$Target]\n}\n"
+        "function Set-CopilotPersistentEnvironmentVariable { param($Name,$Value,$Target)\n"
+        "    $store[$Target]=$Value; $writes.Add($Target)\n}\n"
+        "function Write-Ok { param($Message) }\n"
+        "function Publish-BudgetCommandPath {" + function +
+        "\nPublish-BudgetCommandPath\nPublish-BudgetCommandPath\n"
+        "if ($store.Machine -cne $machineBefore) { throw 'Machine PATH changed' }\n"
+        "@{ user=$store.User; process=$env:PATH; writes=@($writes.ToArray()) } | "
+        "ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script)], capture_output=True, text=True,
+        timeout=20, creationflags=NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    output = json.loads(result.stdout)
+    expected_user = "user-before;user-after"
+    if published == "user":
+        expected_user += ";" + local_bin
+    elif published != "machine":
+        expected_user = local_bin + ";" + expected_user
+    assert output["user"] == expected_user
+    assert output["writes"] == ([] if published in ("user", "machine") else ["User"])
+    assert output["process"] == local_bin + ";process-before;process-after"
 
 
 def test_windows_compatibility_wrapper_does_not_provision_on_launch() -> None:

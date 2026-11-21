@@ -90,8 +90,12 @@ still selects the completed application generation. uv receives that exact
 environment as `--python`, with no project discovery, configuration lookup or
 Python download; it does not select a different generation or resolve package
 dependencies. Both the cache-policy probe and the final module launch use this
-path. Inherited Python-selection/active-environment hints are removed in the
-shim process. Missing uv or a missing completed runtime reports prerequisite
+path. Inherited Python-selection, active-environment, project, synchronization,
+isolated-run and environment-file overrides cannot redirect that launch.
+PowerShell restores these named caller variables in `finally`, including on
+early exit. Legacy CLR hosts cannot restore empty environment values, so those
+values remain untouched and uv may refuse a malformed empty setting instead.
+Missing uv or a missing completed runtime reports prerequisite
 or explicit setup instructions, never implicit provisioning.
 
 Budget Guidance is the first adopter. Its explicit native setup prepares the

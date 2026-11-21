@@ -5,6 +5,8 @@ function Get-UvBootstrapEnvironment {
         VIRTUAL_ENV = $null; CONDA_PREFIX = $null
         PYTHONPATH = $null; PYTHONHOME = $null
         UV_WORKING_DIR = $null; UV_WORKING_DIRECTORY = $null
+        UV_ISOLATED = $null; UV_ENV_FILE = $null
+        UV_PROJECT = $null; UV_FROZEN = $null; UV_LOCKED = $null; UV_NO_SYNC = $null
     }
 }
 

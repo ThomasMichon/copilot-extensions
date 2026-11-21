@@ -133,8 +133,9 @@ $invoke = {
     if ($FilePath -cne $env:FIXTURE_UV) { throw 'Wrong uv application.' }
     if ($env:ISOLATE -ceq '1') {
         $keys = @(
-            'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_MANAGED_PYTHON',
-            'UV_NO_MANAGED_PYTHON', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE',
+            'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_ENV_FILE', 'UV_FROZEN',
+            'UV_ISOLATED', 'UV_LOCKED', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON',
+            'UV_NO_SYNC', 'UV_PROJECT', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE',
             'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'VIRTUAL_ENV'
         )
         if ((@($Environment.Keys | Sort-Object) -join ',') -cne ($keys -join ',') -or

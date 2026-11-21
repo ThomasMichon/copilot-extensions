@@ -75,8 +75,9 @@ def test_uv_launcher_is_materialized_with_prepared_exact_environment(tmp_path: P
     assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
     shell = (plugin / "bin/sample").read_text()
     powershell = (plugin / "bin/sample.ps1").read_text()
-    assert '"$_uv" run --no-project --no-config --no-python-downloads --managed-python --python "$AGENT_RT_PY" python' in shell
-    assert '$_uv run --no-project --no-config --no-python-downloads --managed-python --python $_py python' in powershell
+    arguments = "run --no-project --no-config --no-env-file --no-python-downloads --managed-python"
+    assert f'"$_uv" {arguments} --python "$AGENT_RT_PY" python' in shell
+    assert f'$_uv {arguments} --python $_py python' in powershell
     for text in (shell, powershell):
         assert "UV_WORKING_DIR" in text and "UV_WORKING_DIRECTORY" in text
         assert "runtime is not prepared; run the owning scripts/install." in text
