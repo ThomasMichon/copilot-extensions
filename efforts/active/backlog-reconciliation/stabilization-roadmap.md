@@ -57,6 +57,15 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md)
+reconciles #6464's specific reference-only research stop and preserves the
+complete current original/all-discussion contract under its existing owner.
+Default no-write planning, qualified selected actions, independent readiness,
+source/stale-input checks and real consumer/native acceptance remain distinct.
+Reported source credit and narrower caller claims do not establish whole
+fulfillment or new missing implementation. Actual #13943 delivery is recorded;
+the complete 900-open census and continuing campaign gate are unchanged.
+
 The [current Python-prerequisite study](journal/2026/11.21-current-python-prerequisite-contract.md)
 qualifies #6888's complete constructor, dtssh, shared-helper and ordinary
 consumer contract after resolving its specific reference-derived stop.

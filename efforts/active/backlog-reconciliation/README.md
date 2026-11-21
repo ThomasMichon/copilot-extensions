@@ -410,6 +410,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md)
+reconciles #6464's particular numerical-reference refusal and records a fresh
+qualified complete original/all-ten-discussion study. It preserves all five
+acceptance clauses, ordinary/active-core and actual-consumer distinctions,
+and the existing conductor, installer and serving owners. It is not a new
+implementation-absence finding or transfer. Actual #13943 delivery is recorded;
+the last complete census remains 900 open, 171 above the fixed target.
+
 The [current Python-prerequisite contract](journal/2026/11.21-current-python-prerequisite-contract.md)
 resolves #6888's specific reference-derived research stop through actual
 cause reconciliation and a qualified complete original/all-discussion read.
