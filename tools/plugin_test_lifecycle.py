@@ -129,6 +129,33 @@ def _native_scope_environment(environment: dict[str, str]) -> dict[str, str]:
     return {**environment, "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(bus)}
 
 
+def _bind_native_scope_bus(environment: dict[str, str], sandbox: Path) -> None:
+    if sys.platform != "linux" or not environment.get("DBUS_SESSION_BUS_ADDRESS"):
+        return
+    from agent_procutil.linux_daemon_scope import caller_unit
+
+    if caller_unit() is None:
+        return
+    uid = os.getuid()
+    native = Path(f"/run/user/{uid}/systemd/private")
+    try:
+        info = native.lstat()
+    except OSError:
+        raise ValueError("Native application testing requires an existing private user-manager bus.") from None
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid:
+        raise ValueError("Native application private user-manager bus is not owned by the current user.")
+    runtime = Path(environment["XDG_RUNTIME_DIR"])
+    info = runtime.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+        or not runtime.resolve().is_relative_to(sandbox.resolve())
+    ):
+        raise ValueError("Native application runtime directory must remain inside its sandbox.")
+    manager = runtime / "systemd"
+    manager.mkdir(mode=0o700)
+    (manager / "private").symlink_to(native)
+
+
 def run_contained(
     owner: Any, command: list[str], *, cwd: Path, env: dict[str, str], sandbox: Path,
     limits: Any, daemon_purpose: str, daemon_lease: Any, qualification: Any,
@@ -151,6 +178,7 @@ def run_contained(
         env = dict(env)
         env.pop(owner.CONTAINED_ENV, None)
         env = _native_scope_environment(env)
+        _bind_native_scope_bus(env, sandbox)
     lifecycle_results: list[_CleanupOutcome] = []
     if qualification is not None:
         if owner.os.name != "nt":

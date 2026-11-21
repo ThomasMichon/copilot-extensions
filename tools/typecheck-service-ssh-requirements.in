@@ -6,3 +6,4 @@ jwcrypto==1.6.1
 PyJWT==2.15.1
 pytest-asyncio==1.4.0
 multidict==7.1.0
+types-PyYAML==6.0.12.20250915

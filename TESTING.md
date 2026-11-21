@@ -247,6 +247,30 @@ eligibility and faithful consumer selection before expensive qualification.
 Reuse supported prepared environments only where doing so preserves the
 cold-start, concurrency or lifetime property being tested.
 
+The `installation-context-acceptance.yml` manual `runtime_profiles` selection
+includes normal SSH Source/profile preparation on disposable Linux and
+Windows runners, alongside its existing profile-reader controls. Preparation
+preserves the 180-second prebuild and six-minute job limits, real builders,
+dependency feed and cleanup, but does not run the installed
+Manager/engine/Fleet lifecycle. Its result qualifies preparation only, not
+installed setup or full SSH acceptance. The existing `pr_artifacts` selection
+remains the complete lane; selecting it together with `runtime_profiles`
+still runs the full lane and omits the redundant preparation-only jobs.
+
+The existing `immutable_runtime_ref` input can independently select a full
+lowercase40-hex application Source for these normal SSH jobs. Empty selection
+still uses the dispatch commit. The disposable checkout probes that exact
+commit and fetches it from its existing `origin` only when absent, with
+bounded native children; malformed or unavailable inputs refuse instead of
+falling back. The fixture's optional `--source-commit` feeds the existing
+Source composer and real profile builders, not a copied constructor patch.
+The fixture/workflow source, selected application Source and prepared
+dependency inputs are distinct evidence. Testing a published unmerged
+candidate supplies feedback on that candidate only, not acceptance of its
+whole PR, current-Dev qualification, release or installation authority.
+The25-input limit, original selectors, complete dependency bytes, provenance/
+health checks, preparation/lifecycle clocks and cleanup remain unchanged.
+
 Keep functional correctness, performance budgets and environment suitability
 separate. A supported diagnostic profile or narrower selection can supply
 useful evidence without passing the original full acceptance gate. Preserve
@@ -2023,18 +2047,26 @@ source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
+The copied wheel fixture retains the complete canonical versioned-runtime
+resource family. The container witness and Docker context keep explicit
+Fleet/procutil input rosters; new source modules must be reconciled in both
+without weakening unknown-source or missing-resource refusal.
 The Gateway jobs keep each complete installed Gateway and SSH lifecycle case
 in its own sequential 180-second runner, separate from the independent consumer
 controls. No lifecycle sequence is split; the six-minute job limit and peak job
 concurrency are unchanged.
 
-Its further dependent normal-setup jobs prepare the engine's declared test
-dependencies and run the repository continuity module's `normal_ssh_setup or
-setup_status` controls, including real Git source qualification and required
-request-pin capability. They then run `test_ssh_setup.py` and the whole
-`test_repository_ssh_setup_installed.py` sequence under the same 180-second
-runner/six-minute job limits. The latter builds the engine wheel with its
-packaged Source API and drives the actual Manager/engine handoff into synthetic
+The selected continuity SSH application jobs run the repository continuity
+module's `normal_ssh_setup or setup_status` controls after their installed
+lifecycle, including real Git source qualification and required request-pin
+capability. Each further dependent normal-setup job requires both its platform's
+artifact controls and explicit continuity case to succeed, prepares the declared
+engine/Manager dependencies, and runs `test_ssh_setup.py` and the whole
+`test_repository_ssh_setup_installed.py` sequence. Linux retains its 180-second
+phase bounds and six-minute job; Windows normal setup uses 300-second Source
+preparation, a 300-second lifecycle and a 12-minute job. That native sequence
+builds the engine wheel with its packaged Source API and drives the actual
+Manager/engine handoff into synthetic
 TLS enrollment and the complete Source application installer, repeat,
 wrong-scope preservation, selected update and exact native stop. The Manager
 and engine dependency support remain fixtures; this is not complete installed
@@ -2042,8 +2074,98 @@ product-cohort, provider, fresh-adopter or rollout proof. These jobs are
 sequenced after the retained explicit continuity cases, not parallel replacement
 coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
+The engine application installer runs through the separately materialized
+original payload owner's declared command-binding lifecycle entry, with the
+selected Source pin and fixture repository context. The fixture's isolated
+Copilot home declares the copied owner's actual marketplace, and its control
+requires ownership publication, not merely a successful child command.
+Prepared application Source is never substituted as its own command owner.
+The copied owner omits development test trees, not runtime scripts or their
+declared materialized dependencies. Manager support must use its existing
+`runtime_install.py --install-source` lifecycle: the generic application receiver
+explicitly refuses Manager. Its receiver-level control exercises actual native
+Source admission before construction. A fixture-only Python wrapper enables a
+single stack dump after 40 seconds while preserving the installer script,
+arguments and script import root. A timed-out Manager support call reports that
+stack plus bounded Source phase/progress lines; its 60-second limit is unchanged.
+The initial SDK-free engine and Manager support installations overlap through
+two fixture workers, with separate runtime roots and their original commands
+and 90/60-second call bounds. Both settle before any Manager setup call, including
+on failure; the later SDK upgrade and all lifecycle assertions remain ordered.
+Real child controls require overlap and verify settlement when either installer
+fails. This removes serial fixture overhead without relaxing a native deadline.
+The wrapper's real subprocess control verifies argument forwarding and stack
+delivery without constructing or modifying a prepared Source.
+Failed or timed-out activation also reports at most the final 16 KiB of the
+fixture Manager's passive-startup log; missing or linked logs remain explicit.
+It also reads at most 16 KiB from that Manager bootstrap request's installation
+log, selected through the isolated home's read-only queue. Other projects,
+invalid request identifiers and missing or linked files are not followed;
+the diagnostic never creates a queue or changes the installation result.
+The workflow forwards native lifecycle stdout/stderr explicitly through its
+headless Windows parent. A real nested-subprocess control exercises that
+workflow call, rather than only checking creation flags.
+The Linux native owner validates both existing same-user bus sockets and
+aliases only the private systemd socket beneath its sandbox runtime directory.
+Applications keep their private `XDG_RUNTIME_DIR`; no user manager is started
+and no host runtime directory is changed. The fixture's real socket control
+exercises the alias, while missing, non-socket, foreign, escaped and pre-existing
+paths remain refusals.
+Source-independent repeat still requires renaming the actual Source snapshot.
+Only Windows access/sharing errors 5, 32 and 33 retry for at most two seconds
+inside the original runner deadline; exhaustion or other errors still fail.
+The normal cohort fixture records each canonical wheel-build duration and
+names bootstrap/engine/Manager setup phases. These observations preserve the
+actual builder calls, return values, refusals, lifecycle sequence and all
+existing deadlines; they do not enable artifact reuse or skip a setup stage.
+The composer supplies its existing archive/extraction/materialization observer;
+fixture-only wall timers also bracket actual first-party profile inspection,
+profile construction, snapshot writing and application locking. Their starts
+remain visible if the original preparation bound expires. They preserve actual
+arguments, results and refusals, and are restored after preparation; nested
+durations are inclusive rather than additive. Local parallel-write/streaming
+extraction experiments did not establish a sustained gain and are not retained.
+The engine receiver runs with fixture-only wall timing around its actual
+construction, child, freezing and identity functions. The import observer
+preserves each callable's arguments, result and refusal and restores its loader
+on exit; nested durations are inclusive, not additive. Its original script
+arguments, Source, command-owner lifecycle lease and 90-second deadline remain
+unchanged. Whole-receiver call profiling materially perturbed an earlier run;
+these coarse observations replace it rather than qualify that failed run or
+claim a performance fix.
+The fixture explicitly selects its Manager root as well as its private homes;
+a real generated-launcher control retains an inherited runner root override and
+verifies that the fixture still reaches its own selected slot.
+Installed-engine provenance resolves paths and normalizes Windows namespace
+spellings through the existing runtime helper before every equality/containment
+check. Real ordinary/extended-path controls preserve identity, while foreign
+prefixes, engine/SDK origins and checkout paths remain refusals. No installed
+origin or source-isolation assertion is skipped for an extended-length path.
+The real installed Manager front door and all native setup assertions remain
+the acceptance boundary; this fixture does not establish complete Manager
+self-installation qualification.
+Preparation-only jobs retain the source controls locally; normal lifecycle jobs
+do not repeat that independently gated work inside their unchanged time budget.
+The unchanged source-admission ordering/status packet runs after the selected
+continuity SSH lifecycle on each platform, rather than after artifact construction.
+Normal setup still depends on both continuity and artifacts, so it cannot start
+until all the same prerequisite packets pass. This balances the same nine-job
+portfolio without changing selectors, cases or assertions.
+Windows normal setup has a 12-minute job bound, 300-second Source preparation
+and 300-second installed lifecycle. Linux normal setup and both preparation-only
+lanes retain their six-minute jobs and 180-second phase bounds. The other
+qualification jobs, 25-minute role witness and 90/60-second engine/Manager calls
+remain unchanged; the Windows allowance never applies to preparation-only mode.
+Direct Git Sources without Main composition use the existing
+`install_source.py --install-application` receiver; fixture code must not invent
+Main metadata to satisfy a different update-planner contract. Source preparation
+materializes the four declared cohort consumers and their required closures,
+not unrelated plugins; all five prepared profiles and native assertions remain.
 
 Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
+keeps Source preparation in the ordinary runner-owned private scratch root;
+it does not assume shared `RUNNER_TEMP` ancestors satisfy Source ownership.
+The separately admitted native lifecycle still
 requires an explicitly selected Fleet lane on a GitHub-hosted disposable runner,
 with its owned sandbox beneath `RUNNER_TEMP`; ordinary hosts, self-hosted
 runners and nested contained callers refuse before preparation. The native
