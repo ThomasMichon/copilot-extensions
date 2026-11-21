@@ -199,19 +199,38 @@ def drop_expired_finalized(
     """
     from . import sessions
 
+    grouped: dict[str, set[str]] | None = None
     for rec in records:
-        if not rec.worktree_path:
-            continue
-        norm = sessions._normalize_path(rec.worktree_path)
-        if norm not in active:
+        if not latch_eligible(rec):
             continue
         try:
-            if not keep(rec) and finalized_lease_released(
-                rec, observed_sessions(active_sessions, rec.worktree_path),
-            ):
+            norm = sessions._normalize_path(rec.worktree_path)
+            if norm not in active or keep(rec):
+                continue
+            if grouped is None:
+                try:
+                    grouped = group_sessions(active_sessions)
+                except Exception:
+                    return
+            if finalized_lease_released(rec, grouped.get(norm, ())):
                 active.discard(norm)
         except Exception:
             continue
+
+
+def latch_eligible(record: tracking.WorktreeRecord) -> bool:
+    """Cheap precondition of :func:`finalized_lease_released` (no I/O)."""
+    return record.status == "finalized" and bool(record.worktree_path) and _latched(record)
+
+
+def group_sessions(active_sessions: Mapping[str, Iterable[str]]) -> dict[str, set[str]]:
+    """Session ids keyed by normalized path, merging every path spelling once."""
+    from . import sessions
+
+    grouped: dict[str, set[str]] = {}
+    for candidate, sids in active_sessions.items():
+        grouped.setdefault(sessions._normalize_path(candidate), set()).update(sids or ())
+    return grouped
 
 
 def observed_sessions(active_sessions: Mapping[str, Iterable[str]], path: str) -> set[str]:
@@ -239,12 +258,7 @@ def finalized_lease_released(
     lock-held cleanup revalidation decide through this predicate, so they
     can neither disagree about an expired lease nor accept a renewed one.
     """
-    return (
-        record.status == "finalized"
-        and bool(record.worktree_path)
-        and _latched(record)
-        and idle_finalized(record, session_ids, now=now)
-    )
+    return latch_eligible(record) and idle_finalized(record, session_ids, now=now)
 
 
 def pane_holds_checkout(
@@ -260,7 +274,7 @@ def pane_holds_checkout(
     """
     from . import sessions
 
-    if not record.worktree_path:
+    if not latch_eligible(record):
         return True
     if sessions._normalize_path(record.worktree_path) in active_paths:
         return True

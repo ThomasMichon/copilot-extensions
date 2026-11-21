@@ -493,3 +493,31 @@ def test_reap_does_not_release_lease_renewed_after_disposition(
     assert failures
     assert retired == []
     assert [c.state for c in tracking.load_record(tdir / "wt.yaml").resources] == ["at-rest"]
+
+
+def test_lease_scan_normalizes_session_paths_once_and_skips_ineligible(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    finalized = [_finalized_self(tmp_path / f"fin-{i}") for i in range(3)]
+    plain = []
+    for i in range(200):
+        rec = _finalized(tmp_path / f"live-{i}")
+        rec.status = "active"
+        plain.append(rec)
+    records = [*plain, *finalized]
+    sessions_map = {str(r.worktree_path): ["sess-1"] for r in records}
+    active = {sessions._normalize_path(str(r.worktree_path)) for r in records}
+    real = sessions._normalize_path
+    calls: list[str] = []
+
+    def _counting(path: str) -> str:
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(sessions, "_normalize_path", _counting)
+    session_lease.drop_expired_finalized(records, sessions_map, active, keep=lambda r: False)
+    # One normalization per eligible record plus one grouping pass -- never
+    # a per-record scan of the whole session map.
+    assert len(calls) == len(finalized) + len(sessions_map)
+    assert active == {real(str(r.worktree_path)) for r in plain}
