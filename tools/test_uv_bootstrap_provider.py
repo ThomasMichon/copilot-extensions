@@ -57,6 +57,18 @@ function Get-Command {
 $invoke = {
     param($FilePath, $ArgList, $Environment)
     if ($FilePath -cne $env:FIXTURE_UV) { throw 'Wrong uv application.' }
+    if ($env:ISOLATE -ceq '1') {
+        $keys = @(
+            'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_MANAGED_PYTHON',
+            'UV_NO_MANAGED_PYTHON', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'VIRTUAL_ENV'
+        )
+        if ((@($Environment.Keys | Sort-Object) -join ',') -cne ($keys -join ',') -or
+            @($keys | Where-Object { $null -ne $Environment[$_] }).Count -ne 0) {
+            throw 'Every uv stage requires the complete null-valued selector override map.'
+        }
+    } elseif ($PSBoundParameters.ContainsKey('Environment') -or $args.Count -ne 0) {
+        throw 'A legacy capture callback received new override arguments.'
+    }
     $script:calls.Add(@($ArgList))
     $response = $responses[$script:calls.Count - 1]
     if ($response.PSObject.Properties['Throw']) { throw $response.Throw }
@@ -81,6 +93,7 @@ try {
         env={
             **os.environ, "PROVIDER": str(PROVIDER), "REQUEST_FILE": str(request_file),
             "FIXTURE_UV": str(uv_file), "HAS_UV": "1" if uv else "0",
+            "ISOLATE": "1" if isolate else "0",
             "RESPONSES": json.dumps(responses), "OPERATION": operation,
         },
         **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),

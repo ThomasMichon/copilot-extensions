@@ -12,6 +12,7 @@ on:
       - libs/installer-engine/bootstrap-uv.ps1
       - libs/installation-context/tests/test_managed_python_transport.py
       - libs/versioned-runtime/versioned_runtime_native.ps1
+      - libs/versioned-runtime/tests/test_runtime_source_native.py
       - plugins/agent-worktrees/scripts/install.ps1
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
 
@@ -98,3 +99,17 @@ jobs:
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four managed-interpreter controls passed without skips')"
+      - name: Qualify null, empty and replacement environment values in both capture modes
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_runtime_source_native.py
+          --junit-dir qualification-evidence/environment
+          --allow-explicit-tiers -k environment_removal
+      - name: Require child-only environment semantics on both PowerShell engines
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/environment').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==4;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          print('Four native child-environment controls passed without skips')"
