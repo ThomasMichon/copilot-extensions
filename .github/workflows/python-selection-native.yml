@@ -27,12 +27,16 @@ on:
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
       - plugins/budget-guidance/payload-invocation.json
       - plugins/budget-guidance/scripts/install.ps1
+      - plugins/budget-guidance/scripts/write-session-guidance.ps1
       - plugins/budget-guidance/scripts/uninstall-runtime.ps1
       - plugins/budget-guidance/scripts/uninstall-runtime.sh
       - plugins/budget-guidance/tests/test_installers.py
       - plugins/budget-guidance/tests/test_native_provider_policy.py
       - plugins/budget-guidance/tests/test_install_transaction_lock.py
       - plugins/budget-guidance/tests/test_managed_uninstall.py
+      - plugins/budget-guidance/tests/test_session_guidance.py
+      - plugins/budget-guidance/tests/cue_fixture.py
+      - plugins/budget-guidance/tests/test_managed_cue.py
 
 permissions:
   contents: read
@@ -92,15 +96,21 @@ jobs:
           --test-file tests/test_native_provider_policy.py
           --junit-dir qualification-evidence/budget-provider
           --allow-explicit-tiers -k native_uv_policy_qualification
+      - name: Qualify managed cue selection and shared native deadline
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_managed_cue.py
+          --junit-dir qualification-evidence/budget-cue
+          --allow-explicit-tiers -k "powershell_writer or powershell_selector"
       - name: Require actual command, installer, lock and uninstall controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall','budget-provider')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16,'budget-provider':2};
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall','budget-provider','budget-cue')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16,'budget-provider':2,'budget-cue':12};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, nine installer, four prerequisite-lock, 16 uninstall and two native provider controls passed without skips')"
+          print('29 command, nine installer, four prerequisite-lock, 16 uninstall, two native provider and 12 managed cue controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

@@ -1,0 +1,9 @@
+{
+  "comment": "Select managed Python through the shared uv provider for the Windows session cue while retaining direct-child capture and its original deadline.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}
