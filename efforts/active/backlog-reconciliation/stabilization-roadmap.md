@@ -57,6 +57,14 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [fleet-authority current contract](journal/2026/11.21-fleet-authority-current-contract.md)
+reconciles #6617's precise reference-only refusal before a complete qualified
+original/all-discussion study. Five distinct original outcomes and their existing
+owners remain; reported source progress and auditability selection are not actual
+container/DevBox placement, native enrollment or whole-home proof. Actual #13948
+delivery is recorded without another product trace, native run or disposition.
+The latest complete census remains 900 open, 171 above fixed 729.
+
 The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
 adds attributed #13940/#13942/#13944 fixture-only asset and local-source
 admissions: sixty original cases through 27 exact objects, leaving 62 of

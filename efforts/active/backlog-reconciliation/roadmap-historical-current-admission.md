@@ -59,6 +59,16 @@ The complete 10:30:11 PST census is still 900 open, with the exact eligible
 455-identity set unchanged. #6237's changed counting-metadata timestamp does
 not clear its independent actual source or discussion-enumeration gaps.
 
+The [fleet-authority current contract](journal/2026/11.21-fleet-authority-current-contract.md)
+separately reconciles #6617's specific-unit refusal/correspondence gap. Its actual
+earlier collector propagated numerical references, not a copied-content finding.
+Fresh complete current author/editor/history qualification precedes the whole
+original and all eight discussions. This third selected current issue study
+preserves the five-part contract, original owners and the distinction between
+reported source progress, auditability selection and native/placement acceptance.
+The earlier 75 retained bindings and 292-identity partition remain unchanged;
+actual linked-source/copy restrictions and old withheld packets remain.
+
 ## Selection and observation boundary
 
 The later [integrated-wave comparison](roadmap-execution-waves.md#counted-coverage-not-technical-completion)
