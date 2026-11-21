@@ -2696,6 +2696,68 @@ required Linux source CI remain outstanding. This development-only result
 does not qualify broader native, every-release, full-census or controlled
 whole-flow savings.
 
+Source #13917 merges at `2026-11-21T15:41:18Z` as
+`d3aa1214142b748ff772234867bd0a99084a5c9e`. Copilot approval `6006329531`
+at `15:38:01Z` names exact head
+`ba73a528ddf400ec776e9b7b8080f3a5653d53ea`; complete review and thread
+readback finds no active finding and no omitted page. Required source CI
+`44919982459` and trusted metadata CI `44919982509` both complete successfully.
+Actual unit job `136893687703` freshly executes all 6,640 cases with 35
+deselections in 158.17 pytest seconds and 178.255 packet seconds. Lookup takes
+493 ms and finds no qualified completed packet; no reuse saving is credited.
+The existing positively closed packet-only selector omits the AST scanner
+group, not the unit packet or required aggregate. This is observed omitted
+work, not an eliminated workflow invocation or controlled speedup.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite cohort is resolved. Scoped managed synchronization
+retains the published head and advances to the actual merge without conflict,
+reset, stash, peer edit or resource release. Broader native, every-release,
+full-census, accepted-owner and whole-flow gates remain open.
+
+### November 21 remaining guard census and original changefile cohort
+
+The remaining 28 version-bump cases retain actual Git/process contracts,
+including native symlink controls; they remain unchanged outside the packet.
+The trusted-CI originals read checked-in YAML/workflow inputs not admitted by
+the current source contract. Do not copy those inputs into surrogate Python
+fixtures, substitute a weaker assertion or expand admission merely to increase
+the count. Their separate workflow/consumer obligations remain open.
+
+The ten original local Git evidence cases are already exported by
+`test_local_git_evidence_control_units.py`; a second adapter would repeat
+the same original functions and parameterizations under different node names.
+They are not a new admission. Preserve that existing mapping and its 46
+outside-packet original cases without restoring the retired registry CI gate.
+
+The changefile adapter exports seven exact original test objects and the
+original autouse isolation fixture. Original assertions cover serial writes
+and reads, empty input, unreadable-file diagnostics, multiple paired intents,
+mismatched/invalid intent refusal and actual CLI list output. Writes stay
+inside fixture-owned temporary state. No Git child, registry capture or
+installed actor runs. The eighth original case requires real reader threads
+and stays unchanged outside this actor-free admission.
+
+Development collection proves exact object/fixture identity and matching
+original case names. Effect auditing passes all seven cases in 1.344 seconds,
+with positive call-phase coverage in the real changefile implementation for
+every case, zero prohibited effects and three source-bound Python reads.
+Focused Ruff and whole-file strict typing pass the new adapter on Linux and
+Windows without suppressions.
+
+The adapter and original suite bindings are new; the existing production
+implementation remains byte-identical and already source-bound.
+All 6,640 prior unit nodes retain their order and source hashes; 440 production
+coverage targets, 89 helper decisions and the 300-second limit are unchanged.
+The resulting 6,647-node, 1,055-source manifest retains compact-v2 storage at
+765,299 bytes and unchanged flat-v1 normalization/evidence.
+
+Current-head review and complete required Linux source CI remain outstanding.
+These units do not prove threaded behavior, broader native/every-release/full-census acceptance,
+workflow-count reduction, reuse savings or controlled whole-flow improvement.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

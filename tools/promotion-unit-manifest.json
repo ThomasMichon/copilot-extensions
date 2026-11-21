@@ -3,6 +3,18 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_changefile_units.py",
+      [
+        "test_write_and_read_changefile",
+        "test_read_changefiles_empty_dir_returns_empty",
+        "test_read_changefiles_skips_unreadable_file",
+        "test_cmd_add_writes_multiple_pairs",
+        "test_cmd_add_rejects_mismatched_pairs",
+        "test_cmd_add_rejects_invalid_type",
+        "test_cmd_list_reports_pending"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_version_bump_guard_units.py",
       [
         "test_revision_diff_is_unambiguously_separated_from_paths",
@@ -8269,6 +8281,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_changefile_units.py": "37261576d68ba3ba60bec552a27f8d81386b1d10dc1813e27d568ca8fed1824b",
+    "tools/test_changefile.py": "4e0c9b4f8874999c4fca7a20a2a3c45777e54b3689240141d4efa2f2f6104af1",
     "tools/promotion_unit_tests/test_version_bump_guard_units.py": "53061beb6375227c19199245cd149d887590f321225f67fd2fe1b98071bacd36",
     "tools/test_check_version_bump.py": "af1f39d99aa3a19b21ed34f0af769213d19dc4a7ecfeb67e122fb463c8428f9a",
     "tools/promotion_unit_tests/test_dependency_age_release_units.py": "89e7ddec666215751fac9a0bf84194d77567c776905ae3b80a4503090209d89a",

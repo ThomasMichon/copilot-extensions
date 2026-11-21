@@ -11421,6 +11421,16 @@ changefile/release consumers. The 28 other original cases remain outside this
 slice, including actual Git/process contracts. Their source and assertions are
 unchanged; unit admission does not replace release, native or full-census proof.
 
+The original changefile packet exports seven exact test objects and their
+original autouse isolation fixture. Serial read/write behavior, unreadable
+input diagnostics, paired-intent validation and real in-process CLI output
+retain their original assertions. Temporary writes stay fixture-owned; no
+Git child or installed actor runs. All observed Python reads are source-bound,
+and every case requires positive production call-phase coverage. The eighth
+original case requires actual reader threads and remains unchanged outside
+the unit packet. Existing local Git evidence controls remain mapped once
+through `test_local_git_evidence_control_units.py`, not a duplicate adapter.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:

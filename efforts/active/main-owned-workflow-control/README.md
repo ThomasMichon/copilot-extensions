@@ -791,13 +791,23 @@ authorizes critical main-path acceptance or a bounded administrative change.
   executed from compact source storage into unchanged flat-v1 evidence.
   Every logical field/order/digest remains identical, old-runner pre-effect
   refusal and matched-v1 rollback are proven, and broader parent gates stay open.
-- [ ] Qualify and land eleven original version-bump guard cases through eight
+- [x] Qualify and land eleven original version-bump guard cases through eight
   exact test objects and the original fixture. Preserve all 28 other original
   cases, including real Git/process contracts, unchanged prior admission,
   source closure, positive per-node call coverage, helper decisions and the
   300-second budget. Require whole-file strict typing, current-head review and
   complete Linux source CI; retain compact source storage and flat-v1 evidence.
+  #13917 merges at `d3aa1214142b748ff772234867bd0a99084a5c9e` after exact-head
+  Copilot approval and complete required Linux CI with all 6,640 units freshly
+  executed under the unchanged budget.
   Broader native, release, full-census and whole-flow gates remain separate.
+- [ ] Qualify and land seven original serial changefile cases and their
+  original isolation fixture, preserving the real threaded residual and all existing
+  unit identities, source bindings, coverage targets, helper decisions and
+  limits. Require actual per-case production call coverage, effect auditing,
+  strict typing, current-head review and complete Linux source CI. The ten
+  original local Git evidence cases are already mapped; do not duplicate them
+  or restore the retired registry CI gate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
