@@ -1062,8 +1062,9 @@ def _owned_application_command(
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
+@pytest.mark.parametrize("root_alias", [False, True])
 def test_application_fixture_installs_through_its_private_command_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int, root_alias: bool,
 ) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     home, caller = tmp_path / "home", tmp_path / "caller"
@@ -1080,6 +1081,13 @@ def test_application_fixture_installs_through_its_private_command_owner(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
         COPILOT_EXTENSIONS_TEST_CONTAINED="1",
     )
+    selected_root = root
+    if root_alias:
+        if os.name == "nt":
+            selected_root = Path("\\\\?\\" + str(root))
+        else:
+            (root / "alias-component").mkdir(parents=True)
+            selected_root = root / "alias-component" / ".."
     probe = (
         "import json,os,sys;from pathlib import Path;"
         "owner=Path(os.environ['COPILOT_PLUGIN_STAGED_FROM']);"
@@ -1098,7 +1106,7 @@ def test_application_fixture_installs_through_its_private_command_owner(
     deadline = time.monotonic() + 60
     command = _owned_application_command(
         home, caller, root, environment,
-        [sys.executable, "-I", "-B", "-c", probe, root, str(exit_code)],
+        [sys.executable, "-I", "-B", "-c", probe, selected_root, str(exit_code)],
         interpreter=sys.executable, deadline=deadline,
     )
     assert environment["COPILOT_HOME"] == str(home / ".copilot")
