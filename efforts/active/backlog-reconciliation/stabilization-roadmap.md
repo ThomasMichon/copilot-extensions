@@ -54,9 +54,9 @@ research wave, not a claim that the remaining corpus has been ranked.
 ## Research findings
 
 The [retained historical receipt register](roadmap-historical-retained-receipts.md)
-accounts for 144 of the existing 292 identities without repeating unchanged
-original/source studies: the previous 111 plus one exact whole-read binding
-and 32 specific scoped controls/gaps. The remaining 148 and current
+accounts for 161 of the existing 292 identities without repeating unchanged
+original/source studies: the previous 144 plus seventeen specific owner/causal
+controls. The remaining 131 and current
 vision/effort-home integration remain open. Its
 [dated changed-evidence journal](journal/2026/11.21-historical-retained-receipts.md)
 retains #2556's finite source counterexample, #13851's bounded consumer
@@ -65,6 +65,9 @@ custody release or new implementation authority. All six gates remain open.
 The [33-decision continuation](journal/2026/11.21-historical-scoped-controls.md)
 also retains actual #13904 delivery, finite claim completion versus whole
 acceptance, and affirmative planned receiving versus resource release.
+The [seventeen-control follow-through](journal/2026/11.21-historical-owner-and-causal-controls.md)
+preserves complete earlier studies, conditional future work, actual claims
+and source/copy uncertainty while recording actual #13907 delivery.
 
 The [later-inflow register](roadmap-coverage-later-inflow.md) separately maps
 the thirteen newer identities at the complete 02:52 PST observation to
