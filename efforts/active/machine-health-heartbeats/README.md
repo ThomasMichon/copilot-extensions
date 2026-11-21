@@ -66,10 +66,14 @@ single successful hourly run or restart is not that finish line.
 
 The installed local Windows collection/report slice has recorded verification.
 The Linux retained finite-action foundation, native enrollment and pair-recovery
-source are merged. Real-user-manager and closed installed-runtime qualification
-remain open; the next slice prepares and exercises the isolated native fixture
-only in an explicitly available, authorized Linux test venue. Receiver
-selection and broader carrier, preference and domain gates remain open.
+source and bounded native fixture are merged. The real-user-manager packet now
+passes closed installed CLI execution, two finite calendar cycles,
+replacement/rollback and exact cleanup. Its first native run exposed an empty
+no-job readback value; the source fix and regression checks are ready for review.
+Next, clear that source gate, then qualify the remaining Linux interruption,
+late-start, overlap, deadline and storage-failure controls without provisioning
+or production enrollment. Receiver selection and broader carrier, preference
+and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
 
@@ -225,6 +229,12 @@ units/services, credentials, carrier writes, rollout and production enrollment.
 The exact private venue selector and approval response remain in adopter records;
 this grant does not release receiving or carrier-selection holds.
 
+A subsequent explicit answer permits test-only preparation in a new private
+timestamped directory: a pinned source packet, private test tools/dependencies
+and the canonical fixture. Global installs, shell/profile changes, `sudo`,
+host provisioning and existing-service changes remain excluded. This preparation
+authority does not broaden the already-approved finite fixture-unit scope.
+
 ## Plan
 
 ### Phase 1 - Reviewed architecture and design
@@ -350,6 +360,54 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-21 - Real Linux installed packet qualified
+- The first native run failed at initial readback before unit creation:
+  the real user manager reports no pending job as an empty `Job` property.
+  The adapter incorrectly accepted only zero. Exact read-only reconciliation
+  confirmed both failed-preflight pairs absent and inactive.
+- Accept empty or zero no-job values while retaining refusal of queued or
+  unrecognized values. Eighty focused adapter, enrollment and finite-fixture
+  controls pass. The unchanged native assertions then pass both installed
+  cases in 78.39 seconds, with 83.47 seconds including runner preparation and
+  cleanup.
+- The packet proves normal disabled installed CLI enrollment/collection/removal,
+  two absolute UTC calendar cycles, retained execution after build-input
+  removal, failed replacement with confirmed rollback, successful replacement
+  and successor execution. Both exact pair cleanup receipts report no
+  configuration, active instance or unconfirmed native cleanup.
+- Retain the initial failure and successful candidate evidence separately.
+  A preparation retry refused an already-used JUnit directory before collection;
+  run-specific evidence paths resolved it without changing native assertions.
+  Interruption recovery, late-start/overlap, deadline/storage failures and
+  actual hourly publication remain open. No production enrollment, carrier
+  publication or receiving authority follows from this fixture result.
+
+### 2026-11-20 - Selected native test route available
+- Restored the selected test route through its existing setup and connectivity
+  owners, retaining the existing identity and preserving unrelated SSH profiles.
+  Authenticated native commands and the existing user manager pass readback.
+- Distinguished a redirected Windows caller-context stall from the healthy
+  route; qualified native SSH controls and the normal consumer in a fresh
+  invocation context both complete. This is not a deployed caller-code fix.
+- The route prerequisite is resolved, not the Linux installed-job acceptance.
+  Native fixture execution, cleanup and remaining platform/failure/hourly
+  evidence still need qualification. No production enrollment, carrier or
+  receiving gate is released.
+
+### 2026-11-19 - Linux fixture source merged; execution boundary remains open
+- Merged #13424 as `a19894bde47f026a21da8798b88f07f95915425c` after
+  exact-head Copilot approval, resolved threads and required CI. A newer
+  metadata-triggered CI run had to finish before managed completion; no CI gate
+  was bypassed.
+- Review corrections include the shipped retained-runtime archive, retry of
+  only transient pending native jobs within the unchanged polling deadline,
+  and explicit host-state opt-in for the approved config/evidence paths.
+  Eleven focused controls pass; the two Linux-native cases remain skipped.
+- Reconciled the accepted squash history only after verifying all local
+  additions/removals exactly match the merged patch, preserving unrelated
+  upstream documentation. The real Linux execution boundary remains
+  unavailable; no platform, carrier or parent acceptance item closes.
 
 ### 2026-11-19 - Bounded Linux native fixture prepared
 - Prepared an opt-in closed installed-CLI and real-user-manager packet with
