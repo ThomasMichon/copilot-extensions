@@ -216,7 +216,7 @@ def create_app(
 
     validate_server_authority()
     bus = EventBus()
-    consumer = attach(bus, consumer_telemetry, authenticated=bool(token))
+    consumer = attach(bus, consumer_telemetry)
     directory = FleetDirectory(fencing_floor=queue.advance_fencing_epoch)
     # FleetDirectory.discover_coordinator() already matches the shape the
     # Rendezvous Protocol expects, so this in-process fencing guard needs no

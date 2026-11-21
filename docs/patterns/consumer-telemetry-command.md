@@ -40,7 +40,7 @@ Source links name the actual record owner, not a catalog of desired hooks.
 | [Bridge telemetry](../../plugins/agent-bridge/src/agent_bridge/telemetry.py) | `session_lifecycle_event` and `SessionTraceReducer`: session health, session/conversation/tool state transitions, rebuild markers; original source cursors and log epochs where available | U1 first consumer: structural lifecycle projection below, through its normal owner initialization and real transition |
 | [Bridge inbox delivery](../../plugins/agent-bridge/src/agent_bridge/delivery_telemetry.py) | Already offers reduced `inbox_delivery` observations to the existing owned buffer, not directly to every callable sink | Not admitted in v1; U2 must account for these dropped/uncovered records, not claim all Bridge events |
 | [Bridge diagnostics](../../plugins/agent-bridge/docs/diagnostic-logs.md) and watchdog | Retained application diagnostics and watchdog-owned bounded observations are distinct owners | No automatic enrollment; no raw application logs in this route |
-| [Dispatch telemetry](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) | `task_lifecycle_event` and `producer_fence_event`; factory, legacy spool and explicit retained-spool APIs | U2: `dispatch.lifecycle.v1` through the same command owner; authenticated service policy binds stored task repositories and an explicit, separate service route |
+| [Dispatch telemetry](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) | `task_lifecycle_event` and `producer_fence_event`; factory, legacy spool and explicit retained-spool APIs | U2: `dispatch.lifecycle.v1` through the same command owner; trusted service policy binds stored task repositories and an explicit, separate service route |
 | [Dispatch emission diagnostics](../../plugins/agent-dispatch/src/agent_dispatch/emission_trace.py) | An independently owned `BufferedSink` writes content-free stderr diagnostics | Explicitly inapplicable to lifecycle command v1; not enrolled by library import |
 | [Dispatch hourly reporting](../../plugins/agent-dispatch/src/agent_dispatch/hourly_reporting.py) | Reads retained sources and reduces hourly reports | Explicitly inapplicable: reader/reducer, not a command producer |
 | [Manager source observation](../../worktree-manager/docs/source-observation.md) | Existing frame-health writer, typed performance measurements and optional real OTLP exporters | Reserved under #7935/#5900; no command adoption in this slice |
@@ -315,12 +315,14 @@ accounting. No trace/span identity or missing operation key is synthesized.
 There is no cross-record deduplication: source instance/sequence identifies an
 observation; explicit replay and attempt values keep their original meaning.
 
-Ordinary authenticated HTTP/MCP mutations and the existing relevance/
+Ordinary HTTP/MCP mutations and the existing relevance/
 verification publishers retain one coordinator-owned admission. Stored task
 repository selects its approved initiating root; taskless/rejected fence events
 use only the explicit service root. Missing admission never borrows a last
 caller or falls back to the legacy sink. The Dispatch reference owns the
-bounded local service-policy file and lifecycle wiring.
+bounded local service-policy file and lifecycle wiring. Telemetry does not
+require an API bearer token; existing API authentication, task mutation
+authorization and network-bind policy remain unchanged.
 
 The envelope identifies a transport observation, not an operation attempt.
 `source_instance` + `sequence` remains unchanged if a receiver deliberately

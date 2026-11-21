@@ -17,8 +17,8 @@ from .install_paths import install_dir
 from .identity import canonicalize_remote
 
 
-def attach(bus: Any, policy: Any, *, authenticated: bool) -> ConsumerTelemetry:
-    consumer = ConsumerTelemetry(policy, authenticated=authenticated)
+def attach(bus: Any, policy: Any) -> ConsumerTelemetry:
+    consumer = ConsumerTelemetry(policy)
     bus._consumer_telemetry = consumer
     return consumer
 
@@ -108,7 +108,7 @@ def validate_policy(value: Any) -> dict[str, Any]:
 class ConsumerTelemetry:
     """One coordinator lifetime; task routing follows its immutable stored repo."""
 
-    def __init__(self, policy: Any = LEGACY, *, authenticated: bool = False) -> None:
+    def __init__(self, policy: Any = LEGACY) -> None:
         self.legacy = policy is LEGACY
         self.owner: CommandRoutes | None = None
         self.bindings: dict[str, Binding] = {}
@@ -123,8 +123,6 @@ class ConsumerTelemetry:
             self.policy = validate_policy(policy)
         except (ValueError, TypeError):
             self.refusal = "invalid_config"
-        if not authenticated:
-            self.refusal = "origin_unavailable"
 
     def start(self) -> None:
         if self.legacy or self.refusal is not None or self.started:
