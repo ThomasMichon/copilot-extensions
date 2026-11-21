@@ -51,6 +51,14 @@ selected current issue study nor #6888 changes the earlier 75 retained bindings
 or the 292-identity partition. Actual linked-source and containing-copy
 restrictions, old withheld packets and other admission gaps remain.
 
+The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
+independently qualifies the whole descriptions of three new merged
+four-file portfolio publications. They report sixty additional original
+cases, not current #6237 original/home admission or whole fulfillment.
+The complete 10:30:11 PST census is still 900 open, with the exact eligible
+455-identity set unchanged. #6237's changed counting-metadata timestamp does
+not clear its independent actual source or discussion-enumeration gaps.
+
 ## Selection and observation boundary
 
 The later [integrated-wave comparison](roadmap-execution-waves.md#counted-coverage-not-technical-completion)

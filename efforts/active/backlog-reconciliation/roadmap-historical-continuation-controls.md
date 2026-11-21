@@ -10,6 +10,8 @@ Correspondence follow-through:
 [specific retained receipts and source-delivery limits](journal/2026/11.21-specific-correspondence-and-source-delivery.md).
 Selected current repair contract:
 [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md).
+Independent source-unit delivery:
+[materializer asset and local-source admissions](journal/2026/11.21-materializer-asset-and-source-units.md).
 
 ## Accounting and evidence boundary
 

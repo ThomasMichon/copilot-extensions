@@ -57,6 +57,14 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
+adds attributed #13940/#13942/#13944 fixture-only asset and local-source
+admissions: sixty original cases through 27 exact objects, leaving 62 of
+165 outside the packet. It preserves native, linked-source, installed and
+whole-flow boundaries without claiming new test runs or #6237 admission.
+Actual #13946 delivery and the unchanged complete 900-open census remain
+separate from technical completion.
+
 The [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md)
 reconciles #6464's specific reference-only research stop and preserves the
 complete current original/all-discussion contract under its existing owner.
