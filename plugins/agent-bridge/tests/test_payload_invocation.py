@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -13,13 +14,15 @@ import time
 import venv
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import BinaryIO, cast
 
 import pytest
 
-from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import no_window_flags, no_window_kwargs, spawn_sync_in_kill_on_close_job
 from agent_remote_driver.session_host import launcher
 
 PLUGIN = Path(__file__).resolve().parents[1]
+PayloadRuntime = tuple[Path, Path, dict[str, str]]
 
 _ABBREVIATED_OBSERVER_ARGS = [
     pytest.param(
@@ -68,8 +71,11 @@ _ABBREVIATED_OBSERVER_ARGS = [
         ["telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused"],
         id="telemetry-apply",
     ),
-] + _ABBREVIATED_OBSERVER_ARGS)
-def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, mode, argv):
+    *_ABBREVIATED_OBSERVER_ARGS,
+])
+def test_passive_observer_attributed_payload_never_provisions(
+    tmp_path: Path, shell: str, mode: str, argv: list[str],
+) -> None:
     """Run the shipped dispatcher with inert context/publication/installer spies."""
     if shell == "bash" and os.name == "nt":
         pytest.skip("native POSIX Bash required; Windows bash.exe is a WSL launcher")
@@ -187,7 +193,7 @@ def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, m
     # PowerShell's host-owned startup caches are not plugin runtime state.
     host_cache = home / "AppData" / "Local" / "Microsoft" / "PowerShell"
 
-    def snapshot_home():
+    def snapshot_home() -> dict[Path, bytes]:
         return {path.relative_to(home): path.read_bytes()
                 for path in home.rglob("*")
                 if path.is_file() and not path.is_relative_to(host_cache)}
@@ -218,7 +224,7 @@ def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, m
 
 
 @pytest.fixture(scope="module")
-def windows_payload_runtime(tmp_path_factory):
+def windows_payload_runtime(tmp_path_factory: pytest.TempPathFactory) -> PayloadRuntime:
     """Stage the real payload gate and a completed, selected probe runtime."""
     if os.name != "nt":
         pytest.skip("native Windows payload transport")
@@ -326,6 +332,7 @@ sys.exit(17)
         COPILOT_PLUGIN_ROOT=str(plugin),
         AGENT_BRIDGE_INSTALL_DIR=str(runtime),
         AGENT_BRIDGE_NO_SELFPROVISION="1",
+        COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON=sys.executable,
         EXPECTED_RUNTIME_ROOT=str(runtime),
         EXPECTED_RUNTIME_SLOT=str(slot),
         EXPECTED_RUNTIME_PYTHON=str(slot / "Scripts" / "python.exe"),
@@ -359,14 +366,14 @@ sys.exit(17)
     rendered = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File", str(render)],
         env=env, capture_output=True, timeout=15, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        **no_window_kwargs(),
     )
     assert rendered.returncode == 0, rendered.stderr
     return plugin, legacy_bin, env
 
 
 def _assert_generated_windows_binary_frames(
-    windows_payload_runtime, entrypoint: str, surface: str, held_open: bool
+    windows_payload_runtime: PayloadRuntime, entrypoint: str, surface: str, held_open: bool,
 ) -> None:
     plugin, legacy_bin, base_env = windows_payload_runtime
     env = dict(base_env)
@@ -412,9 +419,11 @@ def _assert_generated_windows_binary_frames(
                 assert process.stdin is not None and process.stdout is not None
                 output = pool.submit(process.stdout.read, len(expected))
 
-                def write_frames():
-                    process.stdin.write(frame)
-                    process.stdin.flush()
+                input_stream = process.stdin
+
+                def write_frames() -> None:
+                    input_stream.write(frame)
+                    input_stream.flush()
 
                 writer = pool.submit(write_frames)
                 writer.result(timeout=max(0.01, deadline - time.monotonic()))
@@ -444,7 +453,9 @@ def _assert_generated_windows_binary_frames(
 
 @pytest.mark.parametrize("entrypoint", ["powershell", "cmd"])
 @pytest.mark.skipif(os.name != "nt", reason="native Windows payload transport")
-def test_generated_management_binary_smoke(windows_payload_runtime, entrypoint: str) -> None:
+def test_generated_management_binary_smoke(
+    windows_payload_runtime: PayloadRuntime, entrypoint: str,
+) -> None:
     _assert_generated_windows_binary_frames(
         windows_payload_runtime, entrypoint, "management", True
     )
@@ -458,7 +469,7 @@ def test_generated_management_binary_smoke(windows_payload_runtime, entrypoint: 
 )
 @pytest.mark.skipif(os.name != "nt", reason="native Windows payload transport")
 def test_generated_windows_payload_preserves_binary_frames(
-    windows_payload_runtime, entrypoint: str, surface: str, held_open: bool
+    windows_payload_runtime: PayloadRuntime, entrypoint: str, surface: str, held_open: bool,
 ) -> None:
     _assert_generated_windows_binary_frames(
         windows_payload_runtime, entrypoint, surface, held_open
@@ -470,7 +481,7 @@ def test_generated_windows_payload_preserves_binary_frames(
 @pytest.mark.parametrize("host_kind", ["powershell", "powershell51"])
 @pytest.mark.skipif(os.name != "nt", reason="native Windows prompt transport")
 def test_generated_windows_prompt_stdin(
-    windows_payload_runtime, surface: str, input_kind: str, host_kind: str
+    windows_payload_runtime: PayloadRuntime, surface: str, input_kind: str, host_kind: str,
 ) -> None:
     plugin, legacy_bin, base_env = windows_payload_runtime
     env = dict(base_env)
@@ -529,7 +540,7 @@ def test_generated_windows_prompt_stdin(
 @pytest.mark.parametrize("previous", [None, "caller-owned-runtime"])
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell caller environment")
 def test_windows_entrypoint_restores_callers_runtime_root(
-    windows_payload_runtime, surface: str, previous: str | None,
+    windows_payload_runtime: PayloadRuntime, surface: str, previous: str | None,
 ) -> None:
     plugin, legacy_bin, base_env = windows_payload_runtime
     environment = dict(base_env)
@@ -561,7 +572,7 @@ def test_windows_entrypoint_restores_callers_runtime_root(
 @pytest.mark.parametrize("entrypoint", ["powershell", "cmd"])
 @pytest.mark.skipif(os.name != "nt", reason="native Windows carrier transport")
 def test_real_carrier_through_generated_windows_launchers(
-    windows_payload_runtime, surface: str, entrypoint: str
+    windows_payload_runtime: PayloadRuntime, surface: str, entrypoint: str,
 ) -> None:
     from ssh_manager import Envelope, EnvelopeType, hello_envelope
     from ssh_manager.carrier import read_envelope_sync, write_envelope_sync
@@ -588,22 +599,24 @@ def test_real_carrier_through_generated_windows_launchers(
     )
     assert job is not None
     assert process.stdin is not None and process.stdout is not None
+    carrier_input = cast(BinaryIO, process.stdin)
+    carrier_output = cast(BinaryIO, process.stdout)
     with ThreadPoolExecutor(max_workers=1) as pool:
         try:
             deadline = time.monotonic() + 15
-            hello = pool.submit(read_envelope_sync, process.stdout).result(
+            hello = pool.submit(read_envelope_sync, carrier_output).result(
                 timeout=max(0.01, deadline - time.monotonic())
             )
             assert hello is not None and hello.type is EnvelopeType.HELLO
-            write_envelope_sync(process.stdin, hello_envelope())
+            write_envelope_sync(carrier_input, hello_envelope())
             write_envelope_sync(
-                process.stdin,
+                carrier_input,
                 Envelope(
                     EnvelopeType.REQUEST, request_id="framing-test",
                     payload={"operation": "synthetic"},
                 ),
             )
-            response = pool.submit(read_envelope_sync, process.stdout).result(
+            response = pool.submit(read_envelope_sync, carrier_output).result(
                 timeout=max(0.01, deadline - time.monotonic())
             )
             assert response is not None and response.type is EnvelopeType.ERROR
@@ -627,8 +640,10 @@ def test_real_carrier_through_generated_windows_launchers(
 @pytest.mark.parametrize("entrypoint", ["powershell", "cmd"])
 @pytest.mark.skipif(os.name != "nt", reason="native Windows descendant custody")
 def test_generated_management_cancellation_retires_descendants(
-    windows_payload_runtime, tmp_path: Path, entrypoint: str
+    windows_payload_runtime: PayloadRuntime, tmp_path: Path, entrypoint: str,
 ) -> None:
+    if sys.platform != "win32":
+        pytest.skip("native Windows descendant custody")
     import ctypes
     from ctypes import wintypes
 
@@ -663,11 +678,16 @@ def test_generated_management_cancellation_retires_descendants(
     descendant = None
     try:
         deadline = time.monotonic() + 15
-        while not marker.exists() and time.monotonic() < deadline:
+        descendant_pid = None
+        while time.monotonic() < deadline:
             assert process.poll() is None
-            time.sleep(0.01)
-        assert marker.exists()
-        descendant = kernel.OpenProcess(0x100000, False, int(marker.read_text()))
+            try:
+                descendant_pid = int(marker.read_text())
+                break
+            except (FileNotFoundError, PermissionError):
+                time.sleep(0.01)
+        assert descendant_pid is not None
+        descendant = kernel.OpenProcess(0x100000, False, descendant_pid)
         assert descendant, ctypes.get_last_error()
         assert kernel.WaitForSingleObject(descendant, 0) == 258
         job.terminate_and_wait(2)
@@ -684,7 +704,7 @@ def test_generated_management_cancellation_retires_descendants(
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows context admission")
 def test_generated_payload_refuses_unavailable_context(
-    windows_payload_runtime, tmp_path: Path
+    windows_payload_runtime: PayloadRuntime, tmp_path: Path,
 ) -> None:
     plugin, _legacy_bin, base_env = windows_payload_runtime
     env = {**base_env, "COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / "missing-context")}
@@ -720,6 +740,7 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
         "module": "agent_bridge",
         "legacyRuntimeRoot": ".agent-bridge",
         "installationContext": "required",
+        "bootstrapPython": "3.11.18",
         "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
@@ -873,17 +894,19 @@ def test_list_command_docs_place_global_json_before_subcommand() -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_host_strips_parent_payload_context(monkeypatch, tmp_path: Path) -> None:
+async def test_session_host_strips_parent_payload_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_spawn(*args, **kwargs):
+    async def fake_spawn(*args: object, **kwargs: object) -> object:
         captured["args"] = args
         captured["env"] = kwargs["env"]
         captured["kwargs"] = kwargs
         return object()
 
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/parent/payload")
-    monkeypatch.setattr(launcher.asyncio, "create_subprocess_exec", fake_spawn)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
     monkeypatch.setattr(launcher, "child_preexec", lambda: None)
 
     await launcher._spawn_child(
@@ -898,9 +921,9 @@ async def test_session_host_strips_parent_payload_context(monkeypatch, tmp_path:
     assert child_env["KEEP"] == "yes"
     spawn_kwargs = captured["kwargs"]
     assert isinstance(spawn_kwargs, dict)
-    assert spawn_kwargs["creationflags"] == launcher.no_window_flags()
-    assert spawn_kwargs["stdin"] is launcher.asyncio.subprocess.PIPE
-    assert spawn_kwargs["stdout"] is launcher.asyncio.subprocess.PIPE
+    assert spawn_kwargs["creationflags"] == no_window_flags()
+    assert spawn_kwargs["stdin"] is asyncio.subprocess.PIPE
+    assert spawn_kwargs["stdout"] is asyncio.subprocess.PIPE
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")

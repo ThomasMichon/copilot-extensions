@@ -70,10 +70,15 @@ STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-machines": ("runtime_launcher.py",),
     "plugins/agent-worktrees": ("bootstrap-uv.ps1",),
 }
+NATIVE_SUPPORT_FILES = {
+    "plugins/agent-bridge": ("bootstrap-uv.ps1",),
+}
 
 
 def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
     relative = consumer.relative_to(repo).as_posix()
+    if relative in NATIVE_SUPPORT_FILES:
+        return NATIVE_SUPPORT_FILES[relative]
     return (*STANDALONE_NATIVE_FILES, *STANDALONE_NATIVE_EXTRA_FILES.get(relative, ()))
 
 
@@ -89,7 +94,10 @@ def python_adopter_dirs(repo: Path, *, plugins: tuple[str, ...] | None = None) -
 
 
 def native_adopter_dirs(repo: Path) -> tuple[Path, ...]:
-    return tuple(repo / name for name in STANDALONE_NATIVE_ADOPTERS if os.path.lexists(repo / name))
+    return tuple(
+        repo / name for name in (*STANDALONE_NATIVE_ADOPTERS, *NATIVE_SUPPORT_FILES)
+        if os.path.lexists(repo / name)
+    )
 
 
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")

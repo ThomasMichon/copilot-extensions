@@ -436,7 +436,10 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
-    for asset in (*contract.FILES, *contract.support_files(origin)):
+    native_support = (
+        asset for files in contract.NATIVE_SUPPORT_FILES.values() for asset in files
+    )
+    for asset in (*contract.FILES, *contract.support_files(origin), *native_support):
         (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(origin / asset, canonical / asset)
 
@@ -447,7 +450,10 @@ def test_real_engine_fixture_retains_nested_support_assets(
     contract = sync_installer_engine.ier
     origin = tmp_path / "input"
     canonical = origin / "libs" / "installer-engine"
-    assets = (*contract.FILES, "nested/support.py")
+    native_support = (
+        asset for files in contract.NATIVE_SUPPORT_FILES.values() for asset in files
+    )
+    assets = (*contract.FILES, "nested/support.py", *native_support)
     for asset in assets:
         path = canonical / asset
         path.parent.mkdir(parents=True, exist_ok=True)

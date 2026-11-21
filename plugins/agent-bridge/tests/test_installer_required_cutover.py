@@ -172,6 +172,7 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
         "function Write-Step { param($m) }; function Write-Ok { param($m) }; function Write-Skip { param($m) }",
         "function Write-Warn { param($m) Write-Host $m }; function Write-Fail { param($m) Write-Host $m }",
         "function Ensure-Uv { return $true }; function Enter-InstallLock { Write-Host locked; return $true }",
+        "function Initialize-BridgeBootstrapPython {}",
         "function Exit-InstallLock { Write-Host unlocked }; function Test-PayloadUnchangedSinceAdmission { return $true }",
         "function Get-PayloadHash { return 'hash' }",
         f"function Test-SlotContentCurrent {{ return ${str(outcome == 'complete').lower()} }}",
