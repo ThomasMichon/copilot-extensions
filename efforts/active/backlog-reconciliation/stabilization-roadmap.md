@@ -53,6 +53,16 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [retained historical receipt register](roadmap-historical-retained-receipts.md)
+accounts for 111 of the existing 292 identities without repeating unchanged
+original/source studies: 74 varied-strength authored/read bindings, thirteen
+scoped/prior controls and the same 24 source-author gaps. The remaining 181
+and current vision/effort-home integration remain open. Its
+[dated changed-evidence journal](journal/2026/11.21-historical-retained-receipts.md)
+retains #2556's finite source counterexample, #13851's bounded consumer
+delivery and two later #4130 observations without technical completion,
+custody release or new implementation authority. All six gates remain open.
+
 The [later-inflow register](roadmap-coverage-later-inflow.md) separately maps
 the thirteen newer identities at the complete 02:52 PST observation to
 retained whole-original research, current qualification and actual changed
