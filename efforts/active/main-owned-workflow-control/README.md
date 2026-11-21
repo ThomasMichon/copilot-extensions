@@ -915,7 +915,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13947 merges at `8d563d86f9b4d7b4c551f57e85a3e8a7ea8929db` after
   exact-head Copilot approval and complete required Linux CI with all 6,798
   units freshly executed. Broader parent gates stay open.
-- [ ] Repair the reproduced incomplete invocation fixture with the three
+- [x] Repair the reproduced incomplete invocation fixture with the three
   missing entry modules and eight current build resources, preserving every
   original assertion and parameterization. Satisfy the mandatory whole-file
   strict ratchet without suppressions; retain equivalent runtime module
@@ -928,6 +928,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
   including the four driver-refresh cases refused by the current explicit
   build-data input contract. Do not widen that contract merely for admission.
   Native, installed, release, full-census and whole-flow gates stay open.
+  #13950 merges at `e73a6e85ee37973702bd82a816efab82dd4d4315` after
+  exact-head Copilot approval and complete required Linux CI with all 6,809
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land only the four original serial pointer-discovery cases
+  from the unchanged six-case matrix. Preserve exact original function
+  identity, parameter values, suffixes, fixtures and assertions; retain both
+  `parallel=True` real-worker cases outside. Require closed sources, actual
+  per-case production call coverage, zero prohibited effects, unchanged
+  preceding nodes/hashes/targets/helpers/compact/flat-v1 contracts and the
+  300-second limit, strict typing, current-head review and complete Linux source
+  CI. No native prefilter, token import or thread may be preloaded or replaced
+  to qualify a case. All 44 residual originals and broader acceptance gates
+  remain outside this finite item.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
