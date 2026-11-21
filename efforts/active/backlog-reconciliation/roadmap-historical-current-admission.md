@@ -9,6 +9,11 @@ Outside historical assignments: [fixed-cohort register](roadmap-coverage-reconci
 Evidence and continuation: [dated journal](journal/2026/11.21-current-inflow-and-admission-gaps.md).
 Authored-delta follow-through:
 [retained correspondence and new delivery](journal/2026/11.21-historical-authored-deltas-and-delivery.md).
+The [retained-receipt continuation](roadmap-historical-retained-receipts.md)
+accounts for 111 selected identities as 74 authored/read bindings, thirteen
+scoped/prior controls and the same 24 source-author gaps, leaving 181.
+Its proof scopes are distinct from new technical studies or whole-home
+qualification; existing actual source/copy and ownership conditions remain.
 
 ## Selection and observation boundary
 
