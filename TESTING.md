@@ -2295,8 +2295,11 @@ staging before run, reject an unprepared environment without creating one,
 and execute the prepared command with poisoned PATH/Python selectors and a
 foreign active venv. The actual uv-managed base, selected slot, argument/exit
 forwarding and unchanged lock are checked without Python downloads. Missing
-prepared managed test interpreters are prerequisite failures, not permission
-to use an ambient interpreter.
+managed test interpreters are prepared once by explicit test setup into a private
+session-owned uv root, with bin/registry publication disabled. Application
+setup and ordinary run then disable downloads; acquisition or lookup failures
+never select an ambient interpreter. This fixture prerequisite is separate from
+the application's ordinary-launch boundary.
 Worktrees' optional `tests/test_runtime_input_verifier.py` packet uses real
 native children and invocation-local inherited pipes for successful checks,
 revocation, cancellation, owner disconnection, identity mismatch and expired

@@ -1186,8 +1186,39 @@ def test_application_source_fallback_only_on_real_wheel_absence(tmp_path: Path, 
         assert not (destination / "wheels" / wheel.name).exists()
 
 
+@pytest.fixture(scope="session")
+def application_python(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("a real uv executable is required")
+    root = tmp_path_factory.mktemp("application-managed-python")
+    home = root / "home"
+    home.mkdir()
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("UV_") and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home),
+        UV_PYTHON_INSTALL_DIR=str(root / "python"), UV_CACHE_DIR=str(root / "cache"),
+    )
+    if os.name == "nt":
+        environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+    version = ".".join(map(str, sys.version_info[:3]))
+    result = subprocess.run(
+        [uv, "python", "install", "--no-bin", "--no-registry", version],
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return root / "python"
+
+
 @pytest.fixture
-def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> tuple[Path, Path, Path, dict[str, str]]:
+def application(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+    application_python: Path,
+) -> tuple[Path, Path, Path, dict[str, str]]:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("a real uv executable is required")
@@ -1342,12 +1373,7 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
         if not key.startswith("UV_") and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
     }
     environment["UV_CACHE_DIR"] = str(root / "cache" / "uv")
-    managed = subprocess.run(
-        [uv, "python", "dir"], capture_output=True, text=True, timeout=30,
-        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
-    )
-    assert managed.returncode == 0, managed.stderr
-    environment["UV_PYTHON_INSTALL_DIR"] = managed.stdout.strip()
+    environment["UV_PYTHON_INSTALL_DIR"] = str(application_python)
     environment["UV_PYTHON_DOWNLOADS"] = "never"
     home = tmp_path / "home"
     home.mkdir()
