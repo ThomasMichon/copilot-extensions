@@ -583,3 +583,19 @@ def test_orphaned_owner_repair_refuses_live_parent_residue(
             holder.join(30)
     assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
     assert lock.exists() and sidecar.is_dir()
+
+
+def test_orphaned_owner_repair_refuses_unenumerable_sidecar(orphaned: SimpleNamespace) -> None:
+    import os
+
+    if os.name == "nt" or os.geteuid() == 0:
+        pytest.skip("POSIX permission denial required")
+    hidden = orphaned.parent.with_suffix("") / "handoff"
+    hidden.mkdir(parents=True)
+    hidden.chmod(0)
+    try:
+        code, report = _doctor(orphaned)
+    finally:
+        hidden.chmod(0o700)
+    assert code == 1 and "(retired-parent/)" in report["error"]
+

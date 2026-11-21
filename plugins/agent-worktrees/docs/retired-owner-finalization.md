@@ -104,8 +104,9 @@ local configuration. The repair refuses if any of these is present:
   parent ID
 - a `<parent-id>.lock` that is non-empty, a symlink, not a regular file, or
   currently held (probed without blocking through the record lock itself)
-- a `<parent-id>/` sidecar that is a symlink or contains any file, symlink or
-  other non-directory entry at any depth
+- a `<parent-id>/` sidecar that is a symlink, contains any file, symlink or
+  other non-directory entry at any depth, or has a subtree that cannot be
+  enumerated
 - the parent checkout path, or a path symlink
 - the `worktree/<parent-id>` branch
 - a Git worktree registration for the parent

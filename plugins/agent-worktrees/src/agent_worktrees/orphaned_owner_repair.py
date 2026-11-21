@@ -81,8 +81,12 @@ def _residual_sidecar(sidecar: Path) -> str:
     """Accept only a sidecar tree made solely of real, empty directories."""
     if sidecar.is_symlink() or not sidecar.is_dir():
         raise _present(f"{sidecar.name}/")
+    def unreadable(error: OSError) -> None:
+        raise _present(f"{sidecar.name}/") from error
+
     try:
-        for root, dirs, files in os.walk(sidecar, followlinks=False):
+        # onerror: an unenumerable subtree must never read as empty.
+        for root, dirs, files in os.walk(sidecar, onerror=unreadable, followlinks=False):
             linked = [name for name in dirs if Path(root, name).is_symlink()]
             if files or linked:
                 raise _present(f"{sidecar.name}/")
