@@ -246,7 +246,12 @@ Durable SDK history is read lazily, at most once per 30 seconds, and shared
 across the bounded receipt page. It is not an event-handler operation or a
 per-message RPC. A page awaiting the history-read cooldown keeps its cursor;
 older unknown receipts cannot phase-lock all reads to the first page and starve
-later consumption evidence. Neither the bounded represented-event queue nor the legacy
+later consumption evidence. One outstanding history observation has its own
+bounded slot; a rejected or timed-out read does not block compatible ordinary
+delivery after fresh native-context checks and final admission. The original
+receipts stay unresolved, and a timed-out history call is not repeated until
+its promise settles. Legacy recovery holds and unresolved input-effect fences
+remain enforced. Neither the bounded represented-event queue nor the legacy
 in-flight cache is consumption evidence. Lost outcome replies are read back
 from the original receipt, or the same outcome is reported again without
 another SDK effect. Missing historical evidence remains visibly outstanding;
