@@ -1003,7 +1003,6 @@ async def test_native_ground_and_bridge_creation_share_one_fresh_workspace(
 async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
     rig: Any, monkeypatch: pytest.MonkeyPatch, native_owner: NativeOwner, new_generation: bool,
 ) -> None:
-    from types import SimpleNamespace
     from agent_bridge import acquisition_runtime, transport
     from agent_bridge.acquisition_contract import AcquisitionRequest
     from agent_bridge.plugin_readiness import prepared_readiness
@@ -1013,6 +1012,7 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
     repository = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(repository / "plugins" / "agent-dispatch" / "src"))
     from agent_dispatch import embody
+    from agent_dispatch.client import DispatchClient
     from agent_dispatch.queue import TaskQueue
     from agent_dispatch.queue_common import Task
     from agent_dispatch.workspace_binding import record_prepared
@@ -1021,11 +1021,17 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
     queue = TaskQueue(root / "queue.db")
     task = queue.create(title="work", repo="queue-repo", dedup_key="logical-work")
     assert isinstance(task, Task)
-    client = SimpleNamespace(
-        record_spawn_allocation=lambda key, project: asdict(queue.record_spawn_allocation(key, project)),
-        record_spawn_worktree=lambda key, worktree, **kwargs:
-            asdict(queue.record_spawn_worktree(key, worktree, **kwargs)),
-    )
+    class QueueClient(DispatchClient):
+        def __init__(self, owner: TaskQueue) -> None:
+            self.owner = owner
+
+        def record_spawn_allocation(self, key: str, project: str, **kwargs: Any) -> dict[str, Any]:
+            return asdict(self.owner.record_spawn_allocation(key, project, **kwargs))
+
+        def record_spawn_worktree(self, key: str, worktree: str, **kwargs: Any) -> dict[str, Any]:
+            return asdict(self.owner.record_spawn_worktree(key, worktree, **kwargs))
+
+    client = QueueClient(queue)
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
     run = subprocess.run
     attempts: list[list[str]] = []
