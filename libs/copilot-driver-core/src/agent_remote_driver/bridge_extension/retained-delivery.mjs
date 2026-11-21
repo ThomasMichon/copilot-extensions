@@ -103,7 +103,7 @@ export function createRetainedInbox({
   let after = 0;
   let retryAt = 0;
   let pendingReport = null;
-  let pendingNative = null;
+  const pendingNative = { serial: null, history: null };
   let lastLog = "";
   let lastLogAt = 0;
   const note = (message) => {
@@ -130,20 +130,27 @@ export function createRetainedInbox({
     } catch { /* diagnostics cannot change delivery or receipt settlement */ }
   };
 
-  // A timeout does not cancel a native effect. Keep the unresolved promise
-  // fenced, rather than starting another native call every polling tick.
-  async function nativeCall(call) {
-    if (pendingNative) throw new Error("previous native observation/effect is still outstanding");
+  // History is a read-only observation, not an input effect. Bound it separately
+  // so an unresolved read cannot poison fresh context checks or granted input.
+  // Each slot stays fenced until its original promise actually settles.
+  async function nativeCall(call, { history = false } = {}) {
+    const lane = history ? "history" : "serial";
+    if (pendingNative[lane]) {
+      throw new Error(history ? "previous native history observation is still outstanding"
+        : "previous native observation/effect is still outstanding");
+    }
     let timer;
     const pending = Promise.resolve().then(call);
-    pendingNative = pending;
+    pendingNative[lane] = pending;
     pending.then(
-      () => { if (pendingNative === pending) pendingNative = null; },
-      () => { if (pendingNative === pending) pendingNative = null; },
+      () => { if (pendingNative[lane] === pending) pendingNative[lane] = null; },
+      () => { if (pendingNative[lane] === pending) pendingNative[lane] = null; },
     );
     try {
       return await Promise.race([pending, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error("native reply timed out; no retry authorized")), nativeTimeoutMs);
+        timer = setTimeout(() => reject(new Error(history
+          ? "native history reply timed out; observation remains outstanding"
+          : "native reply timed out; no retry authorized")), nativeTimeoutMs);
       })]);
     } finally {
       clearTimeout(timer);
@@ -227,7 +234,13 @@ export function createRetainedInbox({
     if (attempts.length && now() < historyAt) return !compatible;
     if (attempts.length && now() >= historyAt) {
       historyAt = now() + RECHECK_MS;
-      events = await nativeCall(() => session.getEvents());
+      try {
+        events = await nativeCall(() => session.getEvents(), { history: true });
+      } catch (error) {
+        if (!compatible) throw error;
+        note(`durable SDK history unavailable: ${errorText(error)}; original receipts retained`);
+        return false;
+      }
       if (!Array.isArray(events)) throw new Error("durable SDK history unavailable");
       await nativeContext(sid);
     }

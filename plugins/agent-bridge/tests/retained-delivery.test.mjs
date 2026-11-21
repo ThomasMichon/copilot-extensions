@@ -773,6 +773,75 @@ test("history is lazy and shared across pending receipts with bounded retry cade
   assert.equal(f.sends.length, 1);
 });
 
+for (const failure of ["rejected", "pending"]) {
+  test(`unavailable history cannot starve compatible fresh delivery (${failure})`, async () => {
+    const f = fixture();
+    f.capabilities.compatible_native_inbox = 1;
+    f.add();
+    const consumer = f.consumer("native", {
+      receivingApi: "native-sdk-v1", nativeTimeoutMs: 5,
+    });
+    await consumer.tick(sid);
+    const original = clone(f.rows[0]);
+    const originalEvent = f.event();
+    let release;
+    const history = new Promise((resolve) => { release = resolve; });
+    f.session.getEvents = () => {
+      f.historyReads++;
+      return failure === "pending" ? history : Promise.reject(new Error("history unavailable"));
+    };
+    try {
+      f.add();
+      f.clock += 30_001;
+      await consumer.tick(sid);
+      assert.equal(f.sends.length, 2, "history observation must not gate a fresh granted send");
+      assert.deepEqual(f.rows[0], original, "unobserved original consumption stays unresolved");
+      f.add();
+      f.clock += 30_001;
+      await consumer.tick(sid);
+      assert.equal(f.sends.length, 3);
+      assert.equal(f.historyReads, failure === "pending" ? 1 : 2);
+
+      f.add();
+      f.snapshotSid = "other";
+      f.clock += 30_001;
+      await consumer.tick(sid);
+      assert.equal(f.sends.length, 3, "fresh native-context checks still gate delivery");
+      assert.equal(f.rows[3].handoff_id, undefined);
+      f.snapshotSid = sid;
+      release([originalEvent]);
+      await tick();
+      f.session.getEvents = async () => [originalEvent];
+      f.clock += 30_001;
+      await consumer.tick(sid, { allowSend: false });
+      assert.equal(f.rows[0].handoff_stage, "consumed");
+      assert.equal(f.sends.length, 3, "late history observes the original without resending");
+    } finally {
+      release([]);
+      consumer.close();
+    }
+  });
+}
+
+test("unavailable history keeps legacy original-recovery admission held", async () => {
+  const f = fixture();
+  f.add();
+  const consumer = f.consumer();
+  await consumer.tick(sid);
+  const originalEvent = f.event();
+  f.add();
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  f.clock += 30_001;
+  await consumer.tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.rows[1].handoff_id, undefined);
+  f.session.getEvents = async () => [originalEvent];
+  f.clock += 30_001;
+  await consumer.tick(sid);
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.equal(f.sends.length, 2);
+});
+
 test("overlapping ticks serialize delivery and muted ticks never acquire a new handoff", async () => {
   const f = fixture();
   f.add();
