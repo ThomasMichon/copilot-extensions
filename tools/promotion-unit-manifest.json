@@ -8592,8 +8592,8 @@
   ],
   "sources": {
     "tools/promotion_unit_tests/test_installer_sync_fixture_units.py": "ea2bb3fc71aab60510df2f0c92ac43dc8569b269d51e12f634162b7a07b91656",
-    "tools/test_sync_installer_engine.py": "d5886342146904a97301447c1dce62f2236fddf7ac99564b9839d2f140064dd5",
-    "tools/sync-installer-engine.py": "38148669ae27d8503a72838716f1a1d4da223472730def4a35f968f61f436bda",
+    "tools/test_sync_installer_engine.py": "ef52226fb069e81cbd279ec3b9d669763d987ff09c0d431fa8ac3a62dba10d52",
+    "tools/sync-installer-engine.py": "dfe1b70085845a3c100d2e7b0fecfce5509abfab19b12521e5c60f2a3b96586e",
     "tools/promotion_unit_tests/test_materializer_serial_discovery_units.py": "963ea69bb2208b94cdfd7f057f1cd6bffcf7e27aafac6dac4cd4c5c448f38724",
     "tools/promotion_unit_tests/test_materializer_invocation_boundary_units.py": "64f5cc791a1be853be2ada5796f7d1af079283403b6fd668ff0bc159d56d9bb2",
     "libs/update-telemetry/src/update_telemetry/capabilities.py": "b0cc3f45cc763fbd441fbd3639434086b1ec9bcedbfb3d17290d792b006fad84",
