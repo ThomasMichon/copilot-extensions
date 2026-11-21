@@ -1,6 +1,7 @@
 # Minimal JSON scalar/query reader for the installation-context bootstrap.
 #
-# Query paths are separated by ASCII FS (034). Modes: get, hex, type, len, keys, directory.
+# Query paths use ASCII FS (034).
+# Modes: get, string, deployment-string, hex, type, len, keys, directory.
 
 function fail(message) {
     parse_failed = 1
@@ -39,7 +40,11 @@ function continuation(position_value, value) {
 
 function validate_utf8(index_value, first, second, third, fourth) {
     if (length(document) >= 3 && byte_value(substr(document, 1, 1)) == 239 && byte_value(substr(document, 2, 1)) == 187 && byte_value(substr(document, 3, 1)) == 191) {
-        fail("UTF-8 BOM is not allowed")
+        if (mode == "deployment-string") {
+            document = substr(document, 4)
+        } else {
+            fail("UTF-8 BOM is not allowed")
+        }
     }
     index_value = 1
     while (index_value <= length(document)) {
@@ -418,7 +423,12 @@ END {
         }
         exit 3
     }
-    if (mode == "type") {
+    if (mode == "string" || mode == "deployment-string") {
+        if (value_type[query_path] != "string") {
+            fail("expected string")
+        }
+        printf "%s", directory_string(query_path, "")
+    } else if (mode == "type") {
         print value_type[query_path]
     } else if (mode == "len") {
         if (value_type[query_path] != "array" && value_type[query_path] != "object") {
