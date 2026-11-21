@@ -14,8 +14,9 @@ from test_generate import _manifest, generator
 
 
 @pytest.mark.parametrize("kind", ["sh", "ps1"])
+@pytest.mark.parametrize("directory_hint", ["UV_WORKING_DIR", "UV_WORKING_DIRECTORY"])
 def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
-    tmp_path: Path, kind: str,
+    tmp_path: Path, kind: str, directory_hint: str,
 ) -> None:
     if kind == "sh" and os.name == "nt":
         pytest.skip("POSIX shell execution is qualified on POSIX")
@@ -54,9 +55,9 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
     package.mkdir()
     (package / "__init__.py").write_text("")
     (package / "__main__.py").write_text(
-        "import json,sys\n"
+        "import json,sys\nfrom pathlib import Path\n"
         "print(json.dumps({'python':sys.executable,'args':sys.argv[1:],"
-        "'stdin':sys.stdin.read()}))\n"
+        "'stdin':sys.stdin.read(),'config':Path('caller-config.json').read_text()}))\n"
         "print('application diagnostic',file=sys.stderr)\n"
         "raise SystemExit(37)\n"
     )
@@ -78,6 +79,11 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         "UV_PYTHON_PREFERENCE": "only-system", "VIRTUAL_ENV": str(tmp_path / "foreign"),
         "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
     }
+    foreign = tmp_path / "foreign directory"
+    foreign.mkdir()
+    (tmp_path / "caller-config.json").write_text("caller configuration")
+    (foreign / "caller-config.json").write_text("unrelated configuration")
+    env[directory_hint] = str(foreign)
     shim = manifest.parent / "bin" / ("agent-example" if kind == "sh" else "agent-example.ps1")
     if kind == "ps1":
         wrapper = tmp_path / "shadowed-uv.ps1"
@@ -101,6 +107,7 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
         assert Path(output["python"]).absolute() == python.absolute()
         assert output["args"] == arguments
         assert output["stdin"] == "input\nλ\n"
+        assert output["config"] == "caller configuration"
 
 
 @pytest.mark.parametrize("kind", ["sh", "ps1"])

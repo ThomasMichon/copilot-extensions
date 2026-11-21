@@ -384,9 +384,11 @@ function Install-BudgetGuidancePackage {
         Select-Object -First 1
     if ($uvCommand) {
         try {
-            & $Python -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `
-                --uv $uvCommand.Source -- --python $Python @pipSources --quiet 2>&1 |
-                ForEach-Object { Write-Host $_ }
+            . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+            $arguments = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), `
+                '--uv', $uvCommand.Source, '--', '--python', $Python) + $pipSources + @('--quiet')
+            Invoke-Hidden -FilePath $Python -ArgList $arguments -StreamOutput `
+                -Environment (Get-UvBootstrapEnvironment)
             if ($LASTEXITCODE -ne 0) { Write-Fail "Canonical dependency installation exited $LASTEXITCODE" }
             return $LASTEXITCODE -eq 0
         } catch {
@@ -724,7 +726,7 @@ function Deploy-SelfProvisioningBinstub {
             '_root="$HOME/.budget-guidance"',
             'AGENT_RT_PY=""',
             'if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi',
-            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX',
+            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY',
             '_uv="$(command -v uv)" || exit 127',
             'case "$_uv" in /*) ;; *) echo "uv must be a PATH executable" >&2; exit 127;; esac',
             '[ -n "$AGENT_RT_PY" ] && exec "$_uv" run --no-project --no-config --no-python-downloads --managed-python --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"',
@@ -737,7 +739,7 @@ function Deploy-SelfProvisioningBinstub {
     $ps1Path = Join-Path $LocalBin 'budget-guidance.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX')) {
+foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY')) {
     Remove-Item "Env:$key" -ErrorAction SilentlyContinue
 }
 $_uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
@@ -1039,10 +1041,15 @@ if ($Force -or -not (Test-Path $VenvPython)) {
     if (-not (Test-Path $VenvPython)) {
         Write-Step 'Creating managed Python venv via uv...'
         Invoke-VersionedSlotClean
-        & $uvCommand.Source venv $VenvDir --python $pythonCmd --managed-python `
-            --no-python-downloads --allow-existing 2>&1 | Out-Null
+        . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+        $nativeError = ''
+        $nativeOutput = Invoke-Hidden -FilePath $uvCommand.Source `
+            -ArgList @('venv', $VenvDir, '--python', $pythonCmd, '--managed-python',
+                '--no-python-downloads', '--allow-existing') `
+            -Environment (Get-UvBootstrapEnvironment) -ErrorOutput ([ref]$nativeError) -InputText ''
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
+            [Console]::Error.Write($nativeError + $nativeOutput)
             Write-Fail 'uv could not construct the declared managed Python environment'
             exit 1
         }

@@ -86,7 +86,7 @@ def test_package_installers_retain_quiet_native_output_with_explicit_failure() -
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     assert '"${dependencies[@]}" "$PLUGIN_DIR" --quiet' in posix
-    assert '@pipSources --quiet 2>&1' in powershell
+    assert "$pipSources + @('--quiet')" in powershell
     assert "installer_dependency_policy.py" in posix and "installer_dependency_policy.py" in powershell
     assert '-m pip install' not in posix and '-m pip install' not in powershell
     assert "Failed to install budget-guidance package into venv" in posix
@@ -104,6 +104,13 @@ import sys
 
 args = sys.argv[1:]
 base = os.environ["TEST_BASE_PYTHON"]
+if os.environ.get("TEST_ASSERT_CLEAN_UV") == "1" and args and args[0] in ("python", "venv", "pip"):
+    hints = ("UV_PYTHON", "UV_PYTHON_PREFERENCE", "UV_MANAGED_PYTHON", "UV_NO_MANAGED_PYTHON",
+             "VIRTUAL_ENV", "CONDA_PREFIX", "UV_WORKING_DIR", "UV_WORKING_DIRECTORY")
+    inherited = [name for name in hints if name in os.environ]
+    if inherited:
+        print("unexpected inherited uv hints: " + ", ".join(inherited), file=sys.stderr)
+        raise SystemExit(94)
 if args == ["--version"]:
     print("uv 0.12.5")
     raise SystemExit(0)
@@ -230,6 +237,18 @@ raise SystemExit(2)
     return fake_bin, env
 
 
+def _poison_uv_environment(env: dict[str, str], root: Path) -> None:
+    foreign = root / "foreign directory"
+    foreign.mkdir()
+    env.update({
+        "TEST_ASSERT_CLEAN_UV": "1", "UV_PYTHON": "must-not-be-selected",
+        "UV_PYTHON_PREFERENCE": "only-system", "UV_MANAGED_PYTHON": "1",
+        "UV_NO_MANAGED_PYTHON": "1", "VIRTUAL_ENV": str(foreign),
+        "CONDA_PREFIX": str(foreign), "UV_WORKING_DIR": str(foreign),
+        "UV_WORKING_DIRECTORY": str(foreign),
+    })
+
+
 @pytest.fixture(scope="module", params=[False, True], ids=["fresh", "retained"])
 def native_failed_install_state(
     tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest,
@@ -239,6 +258,7 @@ def native_failed_install_state(
     tmp_path = tmp_path_factory.mktemp("budget-failure")
     previous = request.param
     fake_bin, env = _fake_uv_environment(tmp_path)
+    _poison_uv_environment(env, tmp_path)
     powershell_home = Path(PWSH).resolve().parent
     git = shutil.which("git")
     assert git is not None, "native installer fixture requires Git"
@@ -348,7 +368,7 @@ def test_posix_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     assert source.index('bootstrap-python-version.txt" Prepare') < source.index(
         "    _initialize_source_runtime || exit 1"
     )
-    assert 'uv venv "$VENV_DIR" --python "$PYTHON_CMD" --managed-python' in source
+    assert 'venv "$VENV_DIR" --python "$PYTHON_CMD" --managed-python' in source
     assert "Python fallback" not in source
 
 
@@ -357,7 +377,7 @@ def test_powershell_installer_is_uv_first_when_ambient_python_is_absent() -> Non
     assert source.index("Get-BootstrapPython -Prepare") < source.index(
         "if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }"
     )
-    assert "--python $pythonCmd --managed-python" in source
+    assert "'--python', $pythonCmd, '--managed-python'" in source
     assert "Get-AuthenticodeSignature" not in source
     assert "Python fallback" not in source
 
@@ -667,6 +687,30 @@ def test_powershell_installer_bootstraps_with_uv_and_no_ambient_python(tmp_path:
 
     assert result.returncode == 0, result.stdout
     assert (install_dir / "current-version").is_file()
+
+
+@pytest.mark.parametrize("kind", ["posix", "powershell"])
+@pytest.mark.skipif(os.name == "nt", reason="Native Windows uses the failure/retry fixture")
+def test_full_setup_isolates_inherited_uv_selection_hints(tmp_path: Path, kind: str) -> None:
+    host = BASH if kind == "posix" else PWSH
+    if not host:
+        pytest.skip(f"{kind} shell is unavailable")
+    _, env = _fake_uv_environment(tmp_path)
+    _poison_uv_environment(env, tmp_path)
+    env.pop("UV_WORKING_DIR")
+    env.pop("UV_WORKING_DIRECTORY")
+    payload = tmp_path / "budget-guidance"
+    _copy_payload(payload)
+    arguments = (
+        [host, str(payload / "scripts/install.sh"), "install"] if kind == "posix" else
+        [host, "-NoProfile", "-File", str(payload / "scripts/install.ps1"), "install"]
+    )
+    result = subprocess.run(
+        arguments, env=env, cwd=tmp_path, capture_output=True, text=True,
+        timeout=120, creationflags=NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (Path(env["HOME"]) / ".budget-guidance/current-version").is_file()
 
 
 def _compatibility_powershell_wrapper() -> str:

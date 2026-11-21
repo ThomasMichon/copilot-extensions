@@ -780,7 +780,7 @@ def render(
             "PROVISIONED_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $_provisionedPy python",
             "UV_RUNTIME_PRELUDE_POSIX": (
                 "unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON "
-                "VIRTUAL_ENV CONDA_PREFIX\n"
+                "VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY\n"
                 "_uv=\"$(command -v uv 2>/dev/null || true)\"\n"
                 "case \"$_uv\" in /*) [ -x \"$_uv\" ] || _uv='' ;; *) _uv='' ;; esac\n"
                 "if [ -z \"$_uv\" ]; then\n"
@@ -789,7 +789,7 @@ def render(
             ),
             "UV_RUNTIME_PRELUDE_POWERSHELL": (
                 "foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', "
-                "'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX')) {\n"
+                "'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY')) {\n"
                 "    Remove-Item \"Env:$key\" -ErrorAction SilentlyContinue\n"
                 "}\n"
                 "$_uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source\n"

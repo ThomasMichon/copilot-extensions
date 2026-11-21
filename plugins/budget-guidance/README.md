@@ -21,6 +21,10 @@ command is needed to acquire it.
 The payload-local and installed command binstubs use PATH uv with the exact
 completed environment selected by the existing runtime resolver. Commands do
 not discover another project, synchronize dependencies or download Python.
+Both uv directory-override spellings are ignored so relative configuration
+continues to resolve from the caller's directory. Setup also isolates inherited
+Python-selection hints separately for environment construction and packaging,
+not only bootstrap lookup.
 Missing uv or an unprepared runtime reports setup instructions. `stamp` still
 creates a source snapshot and command, but first command use no longer performs
 installation: invoke the snapshot's `scripts/install.* provision` explicitly.

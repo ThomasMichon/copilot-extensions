@@ -1,3 +1,13 @@
+function Get-UvBootstrapEnvironment {
+    return @{
+        UV_PYTHON = $null; UV_PYTHON_PREFERENCE = $null
+        UV_MANAGED_PYTHON = $null; UV_NO_MANAGED_PYTHON = $null
+        VIRTUAL_ENV = $null; CONDA_PREFIX = $null
+        PYTHONPATH = $null; PYTHONHOME = $null
+        UV_WORKING_DIR = $null; UV_WORKING_DIRECTORY = $null
+    }
+}
+
 function Resolve-UvBootstrapPython {
     [CmdletBinding()]
     param(
@@ -48,12 +58,7 @@ function Resolve-UvBootstrapPython {
         param([string[]]$Arguments)
         $options = @{FilePath=$uv; ArgList=$Arguments}
         if ($IsolateSelection) {
-            $options.Environment = @{
-                UV_PYTHON = $null; UV_PYTHON_PREFERENCE = $null
-                UV_MANAGED_PYTHON = $null; UV_NO_MANAGED_PYTHON = $null
-                VIRTUAL_ENV = $null; CONDA_PREFIX = $null
-                PYTHONPATH = $null; PYTHONHOME = $null
-            }
+            $options.Environment = Get-UvBootstrapEnvironment
         }
         $result = & $InvokeCaptured @options
         if ($null -eq $result -or $result -is [array] -or

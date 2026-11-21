@@ -34,7 +34,7 @@ def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
     uv = tools / "uv"
     uv.write_text(
         "#!/bin/sh\n"
-        '[ -z "${UV_PYTHON-}${UV_NO_MANAGED_PYTHON-}${VIRTUAL_ENV-}" ] || exit 95\n'
+        '[ -z "${UV_PYTHON-}${UV_NO_MANAGED_PYTHON-}${VIRTUAL_ENV-}${UV_WORKING_DIR-}${UV_WORKING_DIRECTORY-}" ] || exit 95\n'
         'printf "%s\\n" "$*" >> "$CALLS"\n'
         'case "$*" in\n'
         '  --version) printf "uv 0.12.6\\n";;\n'
@@ -52,6 +52,7 @@ def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
             **os.environ, "PATH": str(tools) + os.pathsep + os.defpath,
             "CALLS": str(log), "MANAGED": str(python), "UV_PYTHON": "foreign",
             "UV_NO_MANAGED_PYTHON": "1", "VIRTUAL_ENV": "foreign",
+            "UV_WORKING_DIR": "foreign", "UV_WORKING_DIRECTORY": "foreign",
         },
     )
     assert result.returncode == 0, result.stderr
@@ -133,7 +134,8 @@ $invoke = {
     if ($env:ISOLATE -ceq '1') {
         $keys = @(
             'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_MANAGED_PYTHON',
-            'UV_NO_MANAGED_PYTHON', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'VIRTUAL_ENV'
+            'UV_NO_MANAGED_PYTHON', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE',
+            'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'VIRTUAL_ENV'
         )
         if ((@($Environment.Keys | Sort-Object) -join ',') -cne ($keys -join ',') -or
             @($keys | Where-Object { $null -ne $Environment[$_] }).Count -ne 0) {

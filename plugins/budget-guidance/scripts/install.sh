@@ -40,7 +40,7 @@ _install_budget_guidance_package() {
     _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
     if [[ "$HAVE_UV" -eq 1 ]]; then
         local uv_rc=0
-        "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
+        invoke_uv_bootstrap_environment "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
             --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "${dependencies[@]}" "$PLUGIN_DIR" --quiet || uv_rc=$?
         for dependency in "${dependencies[@]}"; do _remove_budget_build_artifacts "$dependency" || return 1; done
         _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
@@ -518,7 +518,7 @@ deploy_binstub() {
 # a PATH python. Missing setup is reported without changing the installation.
 set -eu
 export PYTHONUTF8=1
-unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX
+unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY
 _uv="$(command -v uv 2>/dev/null || true)"
 case "$_uv" in /*) [ -x "$_uv" ] || _uv='' ;; *) _uv='' ;; esac
 if [ -z "$_uv" ]; then
@@ -780,7 +780,7 @@ if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     _step 'Creating managed Python venv via uv...'
     _versioned_slot_clean
-    uv venv "$VENV_DIR" --python "$PYTHON_CMD" --managed-python \
+    invoke_uv_bootstrap_environment "$(command -v uv)" venv "$VENV_DIR" --python "$PYTHON_CMD" --managed-python \
         --no-python-downloads --allow-existing >/dev/null 2>&1 || {
         _fail 'uv could not construct the declared managed Python environment'
         exit 1

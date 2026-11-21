@@ -126,7 +126,10 @@ if [ -d "$RUNTIME" ]; then
     jam "path-binstub" "ordinary launch created a runtime" "inspect unprepared-command.log"
     cr_finalize
 fi
-if ! capture "explicit-provision" -- timeout 300 bash "$SNAPSHOT/scripts/install.sh" provision; then
+if ! capture "explicit-provision" -- env UV_PYTHON=must-not-be-selected \
+    UV_PYTHON_PREFERENCE=only-system UV_MANAGED_PYTHON=1 UV_NO_MANAGED_PYTHON=1 \
+    VIRTUAL_ENV=/unrelated CONDA_PREFIX=/unrelated \
+    timeout 300 bash "$SNAPSHOT/scripts/install.sh" provision; then
     jam "toolchain-uv" "explicit snapshot preparation failed" "inspect explicit-provision.log and the dependency feed"
     cr_finalize
 fi

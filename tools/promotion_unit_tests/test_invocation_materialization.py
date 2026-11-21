@@ -64,6 +64,52 @@ def test_pinned_invocation_owner_replaces_candidate_outputs_without_running_them
                       for path in source.rglob("*") if path.is_file()}
 
 
+def test_uv_launcher_is_materialized_with_prepared_exact_environment(tmp_path: Path) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data.update(bootstrapPython="3.13.12", pythonLauncher="uv")
+        manifest.write_text(json.dumps(data))
+    log = owner.materialize(candidate, canonical_root=source)
+    assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+    shell = (plugin / "bin/sample").read_text()
+    powershell = (plugin / "bin/sample.ps1").read_text()
+    assert '"$_uv" run --no-project --no-config --no-python-downloads --managed-python --python "$AGENT_RT_PY" python' in shell
+    assert '$_uv run --no-project --no-config --no-python-downloads --managed-python --python $_py python' in powershell
+    for text in (shell, powershell):
+        assert "UV_WORKING_DIR" in text and "UV_WORKING_DIRECTORY" in text
+        assert "runtime is not prepared; run the owning scripts/install." in text
+    assert (plugin / "scripts/bootstrap-python-version.txt").read_bytes() == b"cpython@3.13.12\n"
+
+
+@pytest.mark.parametrize("selection", [
+    "null", "boolean", "unknown", "missing-declaration", "dispatcher",
+])
+def test_uv_launcher_refuses_incomplete_contract_before_candidate_writes(
+    tmp_path: Path, selection: str,
+) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data.update(bootstrapPython="3.13.12", pythonLauncher="uv")
+        if selection in ("null", "boolean", "unknown"):
+            data["pythonLauncher"] = {"null": None, "boolean": True, "unknown": "unsupported"}[selection]
+        elif selection == "missing-declaration":
+            del data["bootstrapPython"]
+        else:
+            data["payloadDispatcher"] = {"posix": "scripts/install.sh", "windows": "scripts/install.ps1"}
+        manifest.write_text(json.dumps(data))
+    before = {path.relative_to(candidate): path.read_bytes()
+              for path in candidate.rglob("*") if path.is_file()}
+    log = owner.materialize(candidate, canonical_root=source)
+    assert len(log) == 1 and log[0].startswith("SKIP Invocation materialization:"), log
+    assert before == {path.relative_to(candidate): path.read_bytes()
+                      for path in candidate.rglob("*") if path.is_file()}
+    assert not (plugin / "bin").exists()
+
+
 def test_pinned_invocation_owner_refuses_corrupted_actual_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -657,7 +657,7 @@ def _uses_dependency_policy_install(text: str, ext: str) -> bool:
         return False
     code = "\n".join(_non_comment_lines(text))
     return bool(re.search(
-        r'(?m)^\s*"\$VENV_PYTHON"\s+-I\s+'
+        r'(?m)^\s*(?:invoke_uv_bootstrap_environment\s+)?"\$VENV_PYTHON"\s+-I\s+'
         r'"\$SCRIPT_DIR/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
         code,
     ))
