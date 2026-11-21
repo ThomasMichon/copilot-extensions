@@ -2552,11 +2552,98 @@ added through the standard changefile tool, without a version hand-edit,
 runtime deployment, CI bypass or manual rerun. Fresh source CI and review
 are required after publishing that correction.
 
+Source #13905 merges at `2026-11-21T14:32:45Z` as
+`725346e538fc4e1329549ff6f8af7f490e9c4518`. Fresh Copilot approval
+`6005909626` at `14:23:57Z` names corrected head
+`2ab11d0199ee6c16d881668eca027edd192a640c`; the earlier approval is dismissed.
+Complete review/thread reads confirm zero active findings and no omitted page.
+The corrected head changes only the patch intent and explanatory documents;
+all tested code and packet data remain byte-identical.
+
+Both natural source-CI events pass completely. Push run `44913465912`, unit
+job `136873974965`, freshly executes all 6,629 cases in 167.67 pytest seconds
+and 189.462 packet seconds. Lookup takes 453 ms before fresh execution.
+The necessary description-correction event `44913477404`, unit job
+`136875103620`, freshly executes the same 6,629 cases in 126.10 pytest seconds
+and 142.821 packet seconds. Lookup takes 675 ms across run/artifact inventory.
+Both report 35 deselections and mode `executed` with no qualified completed
+packet selected. Trusted metadata runs `44913464657` and `44913477879` also
+complete successfully. No manual dispatch, rerun or cancellation is used.
+The original failed run is not counted as complete required CI.
+
+The bounded pre-inventory context projections from those two natural runs
+compare equal. This is not assumed to be complete qualified-identity equality:
+the executed helper adds `qualification_epoch` after printing that projection.
+No provider-epoch fence is removed, and neither execution is credited as a
+reuse hit or workflow-count reduction.
+
+Seven fresh scoped verifier reads precede the managed Maintainer merge,
+without bypassing failing CI. Closing references are empty and parent #6237
+stays open. The full canonical parent is reread and only the finite reader
+leaf is resolved. Pull-forward initially refuses replaying the two commits
+against their squash merge and safely aborts. All eleven owned paths match
+the actual merge exactly; a retained published-head backup and empty-range
+rebase preserve both the merged work and unrelated upstream changes before
+scoped managed synchronization succeeds. No reset, stash, peer edit or
+resource release is used.
+
 A later writer migration must establish support at the actual selected
 consumers and reconcile raw node-list assertions before use. Source merge,
 released/selected reader adoption and writer/control activation remain separate.
 No native grant, live probe, timeout waiver, source-census completion or
 owner/custody release follows from this contract expansion.
+
+### November 21 compact source inventory migration
+
+The actual source-reader trace establishes that the promotion source-unit
+command selects its runner from the frozen Dev candidate and supplies the
+selected Dev workspace for composition. The controller checkout's older
+decoder is not that reader. Manager's source preparer archives and copies
+the inventory opaquely; its reference materializers do not parse the source
+node list. Packaged evidence consumers continue receiving flat v1 packets.
+No Main repin, installed-runtime selection or constructor execution follows
+from this source-storage change.
+
+The inventory converts losslessly from flat v1 into 324 consecutive file groups.
+Admission before and after compares equal in every field and exact node order:
+6,629 nodes, 1,051 source digests, 440 coverage targets and the unchanged
+300-second limit. The canonical logical digest is identical. Two-space
+reviewable formatting reduces the file from 1,048,189 to 763,435 bytes, leaving
+285,141 bytes under the unchanged 1 MiB cap. Raw source bytes change, so this
+is not permission to reuse a mismatched artifact.
+
+Two remaining test-only raw node readers now use shared strict admission.
+The first affected regression selection passes 243 cases. Whole-file strict
+typing initially exposes 34 legacy errors in the standalone workflow test;
+explicit fixture, callback and legacy JSON-boundary types address them without
+suppressions. Original names and parameterizations remain identical across
+all 65 installation-scope and 16 standalone test functions.
+The complete affected files initially expose two stale workflow expectations:
+the existing HTTP52 capture option and the separately owned promotion Resume
+lane. Updated expectations retain the unconditional historical validator and
+all three historical guard files, confine capture to its explicit option, and
+permit only the exact existing named native command with unchanged budgets.
+Required CI still permits no plugin or standalone integration commands.
+No workflow is edited or activated. Both complete affected files then pass
+all 240 cases; whole-file strict typing passes on Linux and Windows, as does
+focused Ruff.
+
+A bounded in-memory execution uses the actual pre-reader runner and admission
+module from `6174ac7d9588c33b6162f6e0be22ae5eb55fedbf`.
+V2 refuses before source verification, output creation or test execution;
+the matched original v1 bytes reach the source-verification boundary, where
+the check intentionally stops. Environment and nonexistent output stay
+unchanged. This is actual parser/CLI control flow, not an installed/native
+run or qualification of all legacy deployments. The representation-only
+rollback retains the identical matched v1 source revision; decoder-only
+rollback with v2 inventory is explicitly incompatible.
+
+`TESTING.md` records current source/evidence formats, selected-reader ownership
+and rollback requirements. No runtime or packaged helper changes, dependency
+changes, new unit admissions, limit changes or new execution lanes are needed.
+Current-head review and complete required Linux source CI remain outstanding;
+the writer leaf and full parent remain open until their own gates pass.
+No native, every-release, full-census or controlled-saving claim is made.
 
 ### November 20 path-gated audit-guard native boundary
 

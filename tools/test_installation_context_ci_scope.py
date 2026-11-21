@@ -19,6 +19,7 @@ from typing import Any, NoReturn
 import pytest
 import yaml
 from plugin_test_containment import Limits
+from promotion_unit_contract import admit_manifest, decode_json
 from _pytest.mark.expression import Expression
 
 _CREATION_FLAGS = 0
@@ -1343,7 +1344,7 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
         assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' && matrix.suite != 'overlap' }}"
         assert job["steps"].index(backend) < job["steps"].index(refusal)
-    unit_manifest = json.loads((HERE / "promotion-unit-manifest.json").read_text())
+    unit_manifest = admit_manifest(decode_json((HERE / "promotion-unit-manifest.json").read_text()))
     assert not any(
         "::test_posix_fresh_lease_root_passes_strict_private_admission[" in node
         or node.endswith("::test_posix_existing_root_is_not_repaired_for_private_admission")

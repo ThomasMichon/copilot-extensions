@@ -11350,20 +11350,19 @@ trees, never the actual checkout; shared build and installer-policy modules are
 imported, not invoked to build, query a registry or prepare an installation.
 The original unselected npm-toolchain skip marker still observes
 tool presence at import; no npm, UV, network or installer process executes.
-Keep `tools/promotion-unit-manifest.json` node, coverage-target and source-map
-entries unindented, one per line. Independent
-source hash updates retain their own lines so they can merge cleanly.
-Source entries omit the optional space after the JSON colon.
-Its closed admission data is nearing the existing non-image file-size cap.
-Whitespace does not change the canonical manifest digest; do not raise the
-cap or remove admitted cases to accommodate formatting.
+Keep `tools/promotion-unit-manifest.json` case suffixes, coverage targets and
+source-map entries independently reviewable, one per line. Source hash updates
+retain their own lines so they can merge cleanly. The ordered compact storage
+format avoids repeating a test-file prefix for every case; whitespace does not
+change the canonical manifest digest. Do not raise the existing non-image
+file-size cap or remove admitted cases to accommodate formatting.
 
 ### Unit-manifest storage compatibility
 
-The checked-in source inventory remains
+The checked-in source inventory uses the compact source-storage profile
+`copilot-extensions.promotion-units/v2`. The admission reader also accepts
 `copilot-extensions.promotion-units/v1`, with flat, ordered `nodes`.
-The admission reader additionally accepts the compact source-storage profile
-`copilot-extensions.promotion-units/v2`. It replaces only `nodes` with
+V2 replaces only `nodes` with
 `node_groups`: an ordered list of `[test_file, [case_suffix, ...]]` pairs.
 Each full identity is `test_file + "::" + case_suffix`. Repeated nonadjacent
 file groups are allowed and their order is significant; grouping by a
@@ -11382,15 +11381,25 @@ still bind actual bytes: storage conversion cannot relabel a prior artifact
 or bypass source, recipe, execution or reuse validation. Candidate composition,
 proof profiles and the explicit Windows-native schema remain unchanged.
 
-This is a reader-first expansion, not writer activation or a workflow change.
+Source storage and evidence storage have distinct lifecycles: emitted unit
+packets remain flat v1, and this source-format migration changes no workflow.
+The promotion source-unit command uses the frozen candidate's runner, with the
+selected Dev workspace supplied for composition, rather than the controller
+checkout's decoder. Source and packet readers normalize through shared admission.
 The shared admission module also ships in Worktree Manager's declared
 `runtime-source-tools` footprint; a source merge or patch release intent is not
 proof that an installed consumer has selected the capable reader.
-The actual prior reader still accepts v1 and refuses v2; keeping the repository
-inventory and emitted packets in v1 preserves that rollback path today.
-A later writer change must prove capable readers at each actual selected
-consumer, migrate raw node-list assertions, and retain an equivalent supported
-rollback or explicit pre-effect incompatibility. It must not infer support
+Its source preparer copies the inventory opaquely; this operation does not
+decode the source node list. Packaged evidence readers still consume flat v1.
+The actual prior source runner accepts v1 and refuses v2 before source
+verification, output-directory creation or test execution. Rolling that runner
+back requires the matching v1 source inventory too; decoder-only rollback with
+v2 storage is explicitly incompatible. A representation-only migration retains
+the matching v1 source revision with identical admission data; rollback must
+not silently discard newer admissions to regain compatibility.
+Future format changes must prove capable readers at each actual selected
+consumer, reconcile raw node-list assertions, and retain an equivalent supported
+rollback or explicit pre-effect incompatibility. They must not infer support
 from a package version, drop tests to produce a fallback, weaken limits or
 activate an independently owned control path.
 
