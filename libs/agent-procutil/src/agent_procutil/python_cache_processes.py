@@ -8,7 +8,11 @@ import re
 import time
 from typing import Any, Callable, ContextManager, Iterable, Iterator, Protocol
 
-_REFERENCE = re.compile(r"(?:unsealed-[A-Za-z0-9-]+|installed-[a-fA-F0-9]{64})")
+_REFERENCE = re.compile(r"(?:unsealed-[A-Za-z0-9-]+|installed-[a-fA-F0-9]{64})", re.IGNORECASE)
+
+
+def _names(text: str) -> set[str]:
+    return {name.upper().lower() for name in _REFERENCE.findall(text)}
 
 class Unavailable(ValueError):
     def __init__(self, reason: str) -> None:
@@ -40,7 +44,14 @@ class References:
     _check: Callable[[], None] = field(default=lambda: None, repr=False)
     _held: ExitStack | None = field(default=None, repr=False)
     _required: frozenset[int] = field(default_factory=frozenset, repr=False)
+    _required_source: Callable[[], Iterable[int]] | None = field(default=None, repr=False)
     _pins: dict[int, Any] = field(default_factory=dict, repr=False)
+
+    def require(self, pids: Iterable[int]) -> None:
+        values = frozenset(pids)
+        if any(type(pid) is not int or not 0 < pid <= 0xFFFFFFFF or pid == 4 for pid in values):
+            raise Unavailable("runtime-consumers-unavailable")
+        self._required |= values
 
     def _inspect(self, records: dict[int, tuple[int, str]]) -> None:
         if self._reader is None or self._held is None:
@@ -53,7 +64,7 @@ class References:
                     raise Unavailable("process-identity-changed")
                 for text in self._reader.texts(self._pins[pid]):
                     self._check()
-                    self.names.update(name.lower() for name in _REFERENCE.findall(text))
+                    self.names.update(_names(text))
                 continue
             birth, principal = record
             if principal != self._reader.principal and pid not in self._required:
@@ -65,7 +76,7 @@ class References:
                 continue
             for text in self._reader.texts(process):
                 self._check()
-                self.names.update(name.lower() for name in _REFERENCE.findall(text))
+                self.names.update(_names(text))
             self._identities[pid] = record
             self._pins[pid] = process
             self.processes += 1
@@ -78,6 +89,8 @@ class References:
                 raise Unavailable("process-observer-unavailable")
             for _ in range(3):
                 self._check()
+                if self._required_source is not None:
+                    self.require(self._required_source())
                 records = self._reader.snapshot()
                 new = any(
                     (principal == self._reader.principal or pid in self._required)
@@ -96,7 +109,8 @@ class References:
 @contextmanager
 def observe(
     *, reader: ProcessReader | None = None, seconds: float = 10.0,
-    check: Callable[[], None] = lambda: None, required_pids: Iterable[int] = (),
+    check: Callable[[], None] = lambda: None,
+    required_pids: Iterable[int] | Callable[[], Iterable[int]] = (),
 ) -> Iterator[References]:
     """Keep process handles pinned until the caller finishes its decision.
 
@@ -107,16 +121,20 @@ def observe(
     if not math.isfinite(seconds) or seconds <= 0:
         raise ValueError("cache process deadline must be finite and positive")
     deadline = time.monotonic() + seconds
-    required = frozenset(required_pids)
 
     def bounded() -> None:
         check()
         if time.monotonic() >= deadline:
             raise TimeoutError("cache process observation deadline")
 
-    result = References(_check=bounded, _required=required)
+    result = References(_check=bounded)
     with ExitStack() as held:
         try:
+            if callable(required_pids):
+                result._required_source = required_pids
+                result.require(required_pids())
+            else:
+                result.require(required_pids)
             if reader is None:
                 from .python_cache_windows import Reader
 

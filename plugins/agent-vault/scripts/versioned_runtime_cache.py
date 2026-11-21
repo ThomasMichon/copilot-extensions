@@ -196,6 +196,42 @@ def _measurement(
     }
 
 
+def recorded_consumers(root: Path, *, filename: str, check: Callable[[], None]) -> set[int]:
+    from agent_procutil import python_cache_files, python_cache_permissions, python_cache_processes
+
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in values:
+                raise ValueError("duplicate runtime consumer field")
+            values[key] = value
+        return values
+
+    try:
+        with python_cache_files.installation(root, private=False, check_budget=check) as directory:
+            with python_cache_files.child(directory, filename, read=True) as entry:
+                python_cache_permissions.check_file(entry.path, private=False)
+                if entry.info.st_nlink != 1:
+                    raise ValueError("linked runtime consumer record")
+                data = json.loads(entry.read(65536), object_pairs_hook=unique)
+                current = entry.verify()
+                if (current.st_size, current.st_mtime_ns, current.st_ctime_ns) != (
+                    entry.info.st_size, entry.info.st_mtime_ns, entry.info.st_ctime_ns,
+                ):
+                    raise ValueError("runtime consumer record changed")
+        rows = data if isinstance(data, list) else [data]
+        if len(rows) > 32768 or any(
+            not isinstance(row, dict) or type(row.get("pid")) is not int
+            or not 0 < row["pid"] <= 0xFFFFFFFF or row["pid"] == 4 for row in rows
+        ):
+            raise ValueError("runtime consumer record is invalid")
+        return {row["pid"] for row in rows}
+    except FileNotFoundError:
+        return set()
+    except (OSError, ValueError, TypeError, RecursionError):
+        raise python_cache_processes.Unavailable("runtime-consumers-unavailable") from None
+
+
 def _collect_prefixes(
     root: Path, *, custody: Any, protected: Any, version_dir: Any,
     busy_errors: tuple[type[Exception], ...],
@@ -204,6 +240,7 @@ def _collect_prefixes(
     byte_limit: int | None = None, min_age_seconds: float = 7 * 86400,
     entries: int = 262144, namespaces: int = 512, details: bool = False, after: str = "",
     on_pass: Callable[[dict[str, Any]], None] | None = None,
+    running_file: str | None = None,
 ) -> dict[str, Any]:
     seconds = (1800 if drain else 30) if seconds is None else seconds
     byte_limit = (512 * 1024**3 if drain else 4 * 1024**3) if byte_limit is None else byte_limit
@@ -251,6 +288,9 @@ def _collect_prefixes(
     while time.monotonic() < deadline and removed < byte_limit:
         last = provider.collect_prefixes(
             root, retirement=retirement, apply=apply, after=cursor,
+            required_pids=(
+                lambda *, check: recorded_consumers(root, filename=running_file or "", check=check)
+            ) if running_file is not None else (),
             min_age_seconds=min_age_seconds, budget={
                 "seconds": min(30, max(0.001, deadline - time.monotonic())),
                 "bytes": min(4 * 1024**3, byte_limit - removed),

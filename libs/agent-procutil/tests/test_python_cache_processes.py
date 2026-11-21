@@ -138,3 +138,27 @@ def test_native_current_process_identity_and_parameter_reads() -> None:
     assert len(texts) == 2
     assert "python" in texts[0].lower()
     assert "PATH=" in texts[1].upper()
+
+
+@pytest.mark.parametrize("stem,width", [("UNSEALED-", 32), ("InStAlLeD-", 64)])
+def test_case_variants_remain_live_references(
+    monkeypatch: pytest.MonkeyPatch, stem: str, width: int,
+) -> None:
+    reader = Reader()
+    monkeypatch.setattr(reader, "texts", lambda handle: iter([
+        "PYTHONPYCACHEPREFIX=C:\\cache\\" + stem + "A" * width,
+    ]))
+    with processes.observe(reader=reader) as report:
+        assert report.verify()
+        assert stem.lower() + "a" * width in report.names
+
+
+def test_new_recorded_foreign_consumer_is_required_on_revalidation() -> None:
+    reader = Reader()
+    required: set[int] = set()
+    with processes.observe(reader=reader, required_pids=lambda: required) as report:
+        required.add(30)
+        reader.records[30] = (300, "other")
+        assert report.verify()
+        assert 30 in reader.open and report.processes == 2
+    assert not reader.open

@@ -221,6 +221,43 @@ def test_fresh_bytecode_does_not_inherit_interrupted_prefix_grace(
     result = collect(area, apply=True)
     assert result.reasons["bytecode-changed-since-admission"] == 1
     assert result.bytes == 0 and fresh.read_bytes() == data
+    later = collect(area, apply=True, now=time.time() + 8 * 86400)
+    assert later.completed == 1 and later.bytes == len(data)
+    assert not target.exists()
+
+
+def test_resumed_association_includes_new_visible_slots(
+    area: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = namespace(area)
+    sample = next(target.rglob("*.pyc"))
+    name, data = sample.name, sample.read_bytes()
+    original = files.Entry.remove
+
+    def interrupt(entry: files.Entry) -> None:
+        if entry.path == store.native(target):
+            raise indexed._Exhausted
+        original(entry)
+
+    monkeypatch.setattr(files.Entry, "remove", interrupt)
+    assert collect(area, apply=True).bytes > 0
+    monkeypatch.setattr(files.Entry, "remove", original)
+    mirror = target.joinpath(*legacy._mirror_parts(area), "versions", "2.0")
+    mirror.mkdir(parents=True)
+    evidence = mirror / name
+    evidence.write_bytes(data)
+    old = time.time() - 10 * 86400
+    os.utime(evidence, (old, old))
+
+    @contextmanager
+    def protected(slots: list[str], *, check: Callable[[], None]) -> Iterator[str]:
+        check()
+        assert slots == ["1.0", "2.0"]
+        yield "runtime-protected"
+
+    result = collect(area, apply=True, retirement=protected)
+    assert result.bytes == 0 and result.reasons["runtime-protected"] == 1
+    assert evidence.read_bytes() == data
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows disposable consumer")

@@ -332,3 +332,62 @@ def test_finite_worker_runs_retained_cli_and_persists_terminal_observation(
             process.kill()
             process.wait(timeout=10)
         sys.modules.pop(spec.name, None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows owner-to-planner pipeline")
+@pytest.mark.parametrize("opaque", [False, True])
+def test_actual_owner_observes_recorded_foreign_consumer_with_absent_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opaque: bool,
+) -> None:
+    from agent_procutil import python_cache_processes, python_cache_store
+    from test_python_cache_prefixes import namespace
+    from test_python_cache_processes import Reader
+
+    source = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"
+    spec = importlib.util.spec_from_file_location("_recorded_consumer_runtime", source)
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = runtime
+    try:
+        spec.loader.exec_module(runtime)
+        root = tmp_path / "runtime"
+        target = namespace(root)
+        assert not (root / "versions" / "1.0").exists()
+        (root / runtime.RUNNING_VERSION_FILE).write_text('{"pid":20,"version":"1.0"}')
+        monkeypatch.setattr(python_cache_store, "user_cache", lambda: tmp_path / "os-cache")
+
+        class ForeignReader(Reader):
+            @contextmanager
+            def pin(self, pid: int, birth: int) -> Iterator[int]:
+                if opaque and pid == 20:
+                    raise PermissionError("foreign consumer unavailable")
+                with super().pin(pid, birth) as handle:
+                    yield handle
+
+            def texts(self, pid: int) -> Iterator[str]:
+                yield target.name if pid == 20 else "unrelated"
+
+        reader = ForeignReader()
+        original = python_cache_processes.observe
+        monkeypatch.setattr(python_cache_processes, "observe",
+                            lambda **options: original(reader=reader, **options))
+        monkeypatch.setattr(runtime, "_gc_protected_versions",
+                            lambda *args, **kwargs: pytest.fail("reference refusal must precede retirement"))
+        result = runtime.collect_python_cache(root, min_age_seconds=0, details=True)
+        expected = "process-reference-unavailable" if opaque else "referenced-by-live-process"
+        assert result["summary"]["eligible_bytes"] == 0
+        assert result["reasons"][expected] == 1
+        assert target.is_dir() and not reader.open
+    finally:
+        sys.modules.pop(spec.name, None)
+
+
+@pytest.mark.parametrize("data", ['{"pid":true}', '{"pid":10,"pid":20}', 'not-json'])
+def test_ambiguous_consumer_record_is_unavailable_not_empty(
+    owner: Any, tmp_path: Path, data: str,
+) -> None:
+    from agent_procutil.python_cache_processes import Unavailable
+
+    (tmp_path / "running-version.json").write_text(data)
+    with pytest.raises(Unavailable, match="runtime-consumers-unavailable"):
+        owner.recorded_consumers(tmp_path, filename="running-version.json", check=lambda: None)

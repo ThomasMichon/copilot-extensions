@@ -146,6 +146,18 @@ bytes until the installed ownership and live-reference proof passes.
 
 ### 2026-11-21 - Review corrections
 
+- The second review exposed mixed-case Windows references, missing recorded
+  foreign-consumer observation and interrupted prefixes stranded by a stale
+  admission cutoff. Regressions now cover each path through the production
+  runtime owner, including opaque consumers, fresh grace-period admission and
+  newly visible runtime slots. The shared packet passed 166 cases with eight
+  platform/privilege skips; strict Windows and Linux type checks passed.
+- The unchanged Gateway build-context admission test found five missing cache
+  modules in the Docker context whitelist. Added the exact closure; its full
+  77-case module passed. Generated copies, source-size ceilings, focused lint
+  and the install contract passed. Updated only changed source digests;
+  preserved the 6,378-node inventory, coverage targets, effect restrictions and
+  execution budgets. Required current-head CI and a fresh review remain gates.
 - Preserved empty runtime-association stubs during automatic Windows leaf
   maintenance. Existing retired-leaf relief under a live shared prefix remains
   active. A normal-GC-then-catch-up regression proves that the remaining base

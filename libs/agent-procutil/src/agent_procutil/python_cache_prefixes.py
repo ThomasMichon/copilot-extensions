@@ -46,7 +46,10 @@ class Report(legacy.Report):
     candidates: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _progress(root: Path, name: str, work: Any, value: Any = _UNSET) -> Any:
+def _progress(
+    root: Path, name: str, work: Any, value: Any = _UNSET, *,
+    previous: dict[str, Any] | None = None,
+) -> Any:
     location = store.installation_root(root, check_budget=work.check) / "legacy-prefix-progress"
     if value is not _UNSET and value is not None:
         store.installation_root(root, create=True, check_budget=work.check)
@@ -73,7 +76,16 @@ def _progress(root: Path, name: str, work: Any, value: Any = _UNSET) -> Any:
                     stream.flush()
                     os.fsync(stream.fileno())
                 directory.verify()
-                os.link(temporary, location / key)
+                if previous is None:
+                    os.link(temporary, location / key)
+                else:
+                    with files.child(directory, key, read=True) as entry:
+                        permissions.check_file(entry.path)
+                        if _record(entry.read(4096)) != previous:
+                            raise ValueError("namespace continuation changed")
+                        entry.verify()
+                    directory.verify()
+                    os.replace(temporary, location / key)
             finally:
                 temporary.unlink(missing_ok=True)
             return value
@@ -110,7 +122,7 @@ def _record(encoded: bytes) -> dict[str, Any]:
     return cast(dict[str, Any], record)
 
 
-def _slots(tree: inventory.Tree, root: Path) -> list[str]:
+def _slots(tree: inventory.Tree, root: Path, *, allow_missing: bool = False) -> list[str]:
     relative = (*cast(Any, legacy)._mirror_parts(root), "versions")
     actual = next((
         parts for parts in tree.directories
@@ -118,9 +130,13 @@ def _slots(tree: inventory.Tree, root: Path) -> list[str]:
         == tuple(os.path.normcase(part) for part in relative)
     ), None)
     if actual is None:
+        if allow_missing:
+            return []
         raise ValueError("runtime-association-unavailable")
     record = tree.directories[actual]
     slots = [name for name in record[1] if (*actual, name) in tree.directories]
+    if not slots and allow_missing:
+        return []
     if not 1 <= len(slots) <= 64 or any(
         not indexed._SLOT.fullmatch(slot) or slot.endswith(".") or slot.lower() == "dev"
         for slot in slots
@@ -132,7 +148,7 @@ def _slots(tree: inventory.Tree, root: Path) -> list[str]:
 def collect(
     root: Path, *, retirement: Callable[..., ContextManager[str]], apply: bool = False,
     budget: Budget | None = None, after: str = "", min_age_seconds: float = 7 * 86400,
-    proof: Any = None,
+    proof: Any = None, required_pids: Any = (),
     namespace_birth: Callable[[files.Entry], list[int | str]] = inventory.birth,
     now: float | None = None,
 ) -> Report:
@@ -164,6 +180,8 @@ def collect(
                 return report
             context = nullcontext(proof) if proof is not None else processes.observe(
                 seconds=budget.seconds, check=work.check,
+                required_pids=(lambda: required_pids(check=work.check)) if callable(required_pids)
+                else required_pids,
             )
             with context as references:
                 report.liveness = references.mode
@@ -194,10 +212,12 @@ def collect(
                                 created = created / 10000000 - 11644473600
                             if not math.isfinite(created):
                                 raise ValueError("namespace creation time unavailable")
-                            if record is None and current_time - max(created, tree.content_newest) < min_age_seconds:
+                            young = current_time - max(created, tree.content_newest) < min_age_seconds
+                            renewing = record is not None and tree.content_newest > record["cutoff"]
+                            if record is None and young:
                                 item["reason"] = "younger-than-grace-period"
                                 continue
-                            if record is not None and tree.content_newest > record["cutoff"]:
+                            if renewing and young:
                                 item["reason"] = "bytecode-changed-since-admission"
                                 continue
                             if not references.verify():
@@ -206,7 +226,13 @@ def collect(
                             if name.lower() in references.names:
                                 item["reason"] = "referenced-by-live-process"
                                 continue
-                            slots = record["slots"] if record is not None else _slots(tree, root)
+                            slots = _slots(tree, root, allow_missing=record is not None)
+                            if record is not None:
+                                slots = sorted({
+                                    slot.lower(): slot for slot in [*record["slots"], *slots]
+                                }.values(), key=str.lower)
+                            if len(slots) > 64:
+                                raise ValueError("runtime association exceeds its bound")
                             with retirement(slots, check=work.check) as reason:
                                 if reason:
                                     item["reason"] = reason
@@ -229,11 +255,12 @@ def collect(
                                     report.eligible += 1
                                     report.eligible_bytes += tree.bytes
                                     continue
-                                if record is None:
+                                if record is None or renewing or slots != record["slots"]:
                                     _progress(root, name, work, {
                                         "version": 1, "identity": identity, "slots": slots,
-                                        "cutoff": current_time - min_age_seconds,
-                                    })
+                                        "cutoff": current_time - min_age_seconds
+                                        if record is None or renewing else record["cutoff"],
+                                    }, previous=record)
                                 item["status"] = "partial"
                                 inventory.remove(namespace, tree, work)
                                 item["status"] = "removed"

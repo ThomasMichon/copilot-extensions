@@ -1014,7 +1014,7 @@ def collect_python_cache(
     return cast(dict[str, Any], _runtime_component("versioned_runtime_cache").collect_prefixes(
         _leases._native_path(root), custody=_leases.batch_removal_custody,
         protected=lambda **kwargs: _gc_protected_versions(root, None, True, link_name, **kwargs),
-        version_dir=version_dir,
+        version_dir=version_dir, running_file=RUNNING_VERSION_FILE,
         busy_errors=(_leases.ConstructionTimeout, _leases.RetentionTimeout),
         windows_owned_file=_leases.windows_owned_file, **options,
         maintenance=lambda: _leases._kernel_lease(
