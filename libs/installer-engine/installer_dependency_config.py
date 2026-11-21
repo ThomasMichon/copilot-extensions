@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         check_compile_projection as check_compile_projection,
         cutoff_arguments as cutoff_arguments,
         cutoff_value as cutoff_value,
+        merge_config as merge_config,
         package_cutoffs as package_cutoffs,
         resolver_configuration as resolver_configuration,
     )
@@ -166,6 +167,7 @@ if not TYPE_CHECKING:
     check_compile_projection = _arguments.check_compile_projection
     cutoff_arguments = _arguments.cutoff_arguments
     cutoff_value = _arguments.cutoff_value
+    merge_config = _arguments.merge_config
     package_cutoffs = _arguments.package_cutoffs
     resolver_configuration = _arguments.resolver_configuration
 
@@ -987,16 +989,3 @@ def private_retained_root(parent: Path, *, error_type: _Error, name: str = "inpu
     finally:
         kernel.LocalFree(descriptor)
     return root
-
-
-def merge_config(high: Mapping[str, object], low: Mapping[str, object]) -> dict[str, object]:
-    result = dict(low)
-    for key, value in high.items():
-        previous = result.get(key)
-        if isinstance(value, dict) and isinstance(previous, dict):
-            result[key] = merge_config(cast(dict[str, object], value), cast(dict[str, object], previous))
-        elif isinstance(value, list) and isinstance(previous, list):
-            result[key] = [*cast(list[object], value), *cast(list[object], previous)]
-        else:
-            result[key] = value
-    return result

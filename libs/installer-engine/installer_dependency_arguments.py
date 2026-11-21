@@ -8,10 +8,26 @@ import re
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 _Error = type[Exception]
 _Balanced = Callable[[str, int, str, str], tuple[str, int]]
 _Pairs = Callable[[list[str]], Iterable[tuple[str, str]]]
+
+
+def merge_config(high: Mapping[str, object], low: Mapping[str, object]) -> dict[str, object]:
+    """Apply UV's recursive table and ordered-list precedence without doing I/O."""
+    result = dict(low)
+    for key, value in high.items():
+        previous = result.get(key)
+        if isinstance(value, dict) and isinstance(previous, dict):
+            result[key] = merge_config(cast(dict[str, object], value), cast(dict[str, object], previous))
+        elif isinstance(value, list) and isinstance(previous, list):
+            result[key] = [*cast(list[object], value), *cast(list[object], previous)]
+        else:
+            result[key] = value
+    return result
+
 
 def captured_environment(
     env: Mapping[str, str], *, windows: bool, error_type: _Error,
