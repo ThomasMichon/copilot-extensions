@@ -855,13 +855,26 @@ authorizes critical main-path acceptance or a bounded administrative change.
   6,705 units freshly executed. The failed initial native-import selection
   remains recorded; no guard or original witness is weakened.
   Broader parent gates stay open.
-- [ ] Qualify and land thirty additional original fixture-only UV-reference
+- [x] Qualify and land thirty additional original fixture-only UV-reference
   cases through 27 exact test objects. Preserve the thirteen mapped pointer
   cases, all 122 remaining originals, exact parameter suffixes/assertions,
   source closure, positive per-case reader/materializer call coverage, effect
   auditing, preceding admission/helper/budget gates and compact/flat-v1
   contracts. Require strict typing, current-head review and complete Linux
   source CI; this is not native, installed, release, full-census or whole-flow
+  acceptance.
+  #13937 merges at `ad90cdaa21ea958e3ada7e6f169a14fd44f087a4` after
+  exact-head Copilot approval and complete required Linux CI with all 6,735
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land fourteen original fixture-only installer and wrapper
+  asset cases through twelve exact test objects. Preserve all 43 preceding
+  original materializer cases, all 108 remaining originals, original fixtures,
+  parameter suffixes and assertions. Retain source closure, positive per-case
+  production call coverage, zero prohibited effects, all preceding node/hash/
+  target/helper decisions, the compact/flat-v1 contracts and 300-second limit.
+  Require strict typing, current-head review and complete Linux source CI.
+  Native symlink and broader refresh cases remain outside this slice; this is
+  not installed materialization, release, native, full-census or whole-flow
   acceptance.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
