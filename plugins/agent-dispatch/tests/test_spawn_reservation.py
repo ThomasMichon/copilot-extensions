@@ -633,11 +633,11 @@ def test_yield_cannot_release_a_live_reservation(q: TaskQueue) -> None:
     q.claim_one("fleet-owner", task_id=task.id)
     q.start(task.id, "fleet-owner")
 
-    with pytest.raises(TaskError, match="retains assignment"):
-        q.yield_task(task.id, "fleet-owner")
+    yielded = q.yield_task(task.id, "fleet-owner")
     updated = required(q.get_reservation(reservation.key))
 
-    assert required(q.get(task.id)).owner == "fleet-owner"
+    assert yielded.status == "queued" and yielded.owner is None
+    assert updated.session_handle == "fleet-body:worker-host:session-live"
     assert updated.state == SpawnState.SPAWNED
     assert not updated.release_requested
 

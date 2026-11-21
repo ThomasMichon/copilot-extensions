@@ -43,9 +43,6 @@ from .queue_task_recovery import RESET_FIELDS, require_task_recovery_safe
 # marketplace-isolation: allow release-verb (a business verb, "release from
 # suspension" -- coincidentally matches the guard's lease/mutex keyword scan
 # via "release" containing "lease", not a lifecycle identity)
-_RELEASED_FROM_SUSPENSION = (
-    "task released from suspension"  # marketplace-isolation: allow release-verb
-)
 _RESET_TO_PROPOSED = "task reset to proposed"  # marketplace-isolation: allow release-verb
 
 
@@ -393,8 +390,7 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
                 "last_liveness": None,
                 "resume_requested": 0,
             },
-            release_spawn=True,
-            release_spawn_detail=_RELEASED_FROM_SUSPENSION,
+            voluntary_requeue=True,
             reject_if_held=True,
             idempotent_replay=True,
         ))
@@ -409,7 +405,11 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
         release_spawn: bool = True,
         now: float | None = None,
     ) -> Task:
-        """Return an owned task to ``queued`` with updates."""
+        """Return the task, not the worker's process or workspace.
+
+        ``release_spawn`` is accepted for wire compatibility; it cannot grant
+        teardown authority for an independent worker or bypass pool custody.
+        """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             current = self._fetch(conn, task_id)
@@ -454,8 +454,7 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
             now=now,
             note=note or "yield",
             extra=extra,
-            release_spawn=release_spawn,
-            release_spawn_detail="task yielded",  # marketplace-isolation: allow release-verb
+            voluntary_requeue=True,
             idempotent_replay=True,
         ))
 
@@ -680,6 +679,7 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
         stamp: str | None = None,
         extra: Mapping[str, object] | None = None,
         release_spawn: bool = False,
+        voluntary_requeue: bool = False,
         release_spawn_detail: str = "task released from suspension",
         wake_requested: bool = False,
         wake_message: str | None = None,
@@ -830,11 +830,13 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
                 to in (Status.QUEUED, Status.PROPOSED, Status.ABANDONED)
                 and "owner" in (extra or {}) and transaction_guard is None
             ):
-                from .reservation_assignment import retains_assignment
+                from .reservation_assignment import require_independent_requeue, retains_assignment
                 if retains_assignment(conn, task_id):
-                    raise TaskError(
-                        "spawn reservation retains assignment; conclude it through its owner"
-                    )
+                    if not voluntary_requeue:
+                        raise TaskError(
+                            "spawn reservation retains assignment; conclude it through its owner"
+                        )
+                    require_independent_requeue(conn, task, worker_id)
             if (release_spawn or to == Status.STARTED) and conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
                 (task_id,),

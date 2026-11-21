@@ -519,8 +519,12 @@ double-spawned. Each cycle:
    reservation-created worktree enters `releasing`; targeted/reused legacy
    rows may fail directly. Unknown liveness remains reserved. An unbound
    reservation is never guessed away.
-3. **fulfill yield/release requests** — yielding marks the active reservation
-   for release but does not settle it transactionally. The supervisor ends a
+3. **fulfill reservation release requests** — voluntary task yield or release
+   from suspension is not a request to stop an independent worker or clean its
+   workspace. It can take another task with its native and unfinished work
+   intact. Only an actual allocator placement—not a label, target or accounting
+   record—requires pool-owner closeout before a retained assignment can be
+   returned. For an explicit reservation release, the supervisor ends a
    confirmed-live headless body (or observes it gone), concludes only a
    provenance-verified reservation-created worktree, and persists pending or
    held cleanup across restarts. Targeted, reused, foreign-host, origin-unknown,

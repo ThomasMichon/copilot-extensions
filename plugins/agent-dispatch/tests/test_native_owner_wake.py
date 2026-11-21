@@ -32,7 +32,6 @@ from agent_dispatch.run_waiter_wake import drain_run_waiter_wakes
 from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.wake import drain_wake_outbox
 from tests._helpers import required
-from tests._legacy_native_wake_history import seed_retained_native_yield
 from tests._legacy_supervisor_history import before_retention_abandon
 from tests.test_pool_placement_client import connected
 
@@ -204,7 +203,7 @@ def test_supervisor_does_not_release_stopped_ordinary_native_owner(
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
     if queued:
-        seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+        queue.yield_task(task_id, OWNER)
     before = required(queue.get(task_id))
     if body_kind == "fleet":
         with queue._connect() as conn:
@@ -237,7 +236,7 @@ def test_stranded_cold_recovery_retains_original_ordinary_conversation(
 
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     queue.record_cold(required(queue.latest_reservation(task_id)).key)
     before, reservation = required(queue.get(task_id)), required(queue.latest_reservation(task_id))
     supervisor = Supervisor(
@@ -382,7 +381,7 @@ def test_original_native_can_normally_reclaim_a_retained_queued_task(
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     reservation = required(queue.latest_reservation(task_id))
     claimed = queue.claim_one(OWNER, task_id=task_id)
     assert isinstance(claimed, Task)
@@ -404,7 +403,7 @@ def test_retained_native_reclaim_does_not_bypass_identity_or_custody(
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     owner = "host-a/other-worktree" if change == "owner" else OWNER
     queue.claim_one(owner, task_id=task_id)
     with queue._connect() as conn:
@@ -465,7 +464,7 @@ def test_queued_ordinary_redrive_preserves_native_and_unresolved_wake(
             wake.id, required(wake.delivery_token), delivered=False, max_attempts=1,
             error="acceptance unknown",
         )
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     with queue._connect() as conn:
         conn.execute(
             "UPDATE spawn_reservations SET state=?,session_handle=? WHERE task_id=?",
@@ -510,7 +509,7 @@ def test_queued_ordinary_redrive_unknown_retry_and_restart_keep_exact_key_and_pr
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     calls = _capture(monkeypatch, unknown_first=True)
     supervisor = _native_supervisor(queue)
     assert supervisor.redrive_unclaimed_spawns() == 0
@@ -525,7 +524,7 @@ def test_queued_ordinary_redrive_unknown_retry_and_restart_keep_exact_key_and_pr
     )
     queue.claim_one(OWNER, task_id=task_id)
     queue.start(task_id, OWNER, owner_session_id=NATIVE)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     assert supervisor.redrive_unclaimed_spawns() == 1
     assert supervisor.redrive_unclaimed_spawns() == 0
     assert _native_supervisor(queue).redrive_unclaimed_spawns() == 1
@@ -558,7 +557,7 @@ def test_queued_ordinary_redrive_negotiates_existing_reservation_read(
 
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     reservation = required(queue.latest_reservation(task_id))
     calls = _capture(monkeypatch)
     with TestClient(create_app(queue, enable_mcp=False)) as api:
@@ -617,7 +616,7 @@ def test_queued_redrive_recovers_lost_startup_publication_response(
 
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     original = required(queue.latest_reservation(task_id))
     calls = _capture(monkeypatch)
     lost = False
@@ -664,7 +663,7 @@ def test_queued_redrive_holds_startup_during_terminal_overlap(
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     original = required(queue.latest_reservation(task_id))
     supervisor = _native_supervisor(queue)
 
@@ -701,7 +700,7 @@ def test_queued_redrive_respects_released_sibling_exclusivity(
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     sibling = queue.create("other", repo="queue-project", exclusive_key="shared")
     assert isinstance(sibling, Task)
     other, _ = queue.reserve_spawn(sibling.id, reserved_by="other")
@@ -728,7 +727,7 @@ def test_queued_redrive_completion_requires_its_exact_operation(
 
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     original = required(queue.latest_reservation(task_id))
     facts = reservation_native_facts(queue, original.key)["ordinary_redrive"]
     kwargs = dict(
@@ -766,7 +765,7 @@ def test_queued_redrive_admission_rechecks_snapshot_under_startup_lock(
 
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     original = required(queue.latest_reservation(task_id))
     facts = reservation_native_facts(queue, original.key)["ordinary_redrive"]
     if change == "release":
@@ -780,10 +779,10 @@ def test_queued_redrive_admission_rechecks_snapshot_under_startup_lock(
         queue.start(task_id, OWNER, owner_session_id=NATIVE)
         queue.suspend(task_id, OWNER, reason="external")
         queue.resume(task_id, OWNER, reuse_session=True, wake_requested=True, wake_message="held")
-        seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+        queue.yield_task(task_id, OWNER)
     else:
         queue.claim_one(OWNER, task_id=task_id)
-        seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+        queue.yield_task(task_id, OWNER)
     before = required(queue.latest_reservation(task_id))
     with pytest.raises(TaskError, match="redrive"):
         queue.record_spawn(
@@ -803,7 +802,7 @@ def test_queued_redrive_unknown_requires_its_frozen_pending_operation(
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     calls = _capture(monkeypatch, returncode=70)
     assert _native_supervisor(queue).redrive_unclaimed_spawns() == 0
     pending = required(queue.latest_reservation(task_id))
@@ -831,7 +830,7 @@ def test_completed_redrive_allows_later_normal_cold_resume(
 ) -> None:
     queue, task_id = hosted
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     _capture(monkeypatch)
     supervisor = _native_supervisor(queue)
     assert supervisor.redrive_unclaimed_spawns() == 1
@@ -890,7 +889,7 @@ def test_queued_ordinary_redrive_refuses_changed_custody(
             message="original continuation", sender="recovery",
         )
     queue.resume(task_id, OWNER, reuse_session=True)
-    seed_retained_native_yield(queue, task_id, OWNER, NATIVE)
+    queue.yield_task(task_id, OWNER)
     with queue._connect() as conn:
         if change == "native-history":
             conn.execute(
