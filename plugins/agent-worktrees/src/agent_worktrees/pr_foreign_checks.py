@@ -63,10 +63,38 @@ def observe(provider: PRProvider, repository: str, branch: str, *,
     return cast(str, result["head_sha"])
 
 
+def target_ref(root: Path, repository: str, branch: str, repo: RepoConfig, head: str) -> dict[str, str]:
+    """Resolve an already-fetched target independently of the source push remote."""
+    from .worktree_base_preparation import _fetch_rules, _mapped_source
+
+    source = "refs/heads/" + branch
+    remotes = checks._git(root, "remote").splitlines()
+    for remote in sorted(remotes, key=lambda value: (value != repo.remote, value)):
+        urls = checks._git(root, "remote", "get-url", "--all", remote).splitlines()
+        if len(urls) != 1 or not matches_remote(urls[0], repository, repo.pr, str(root)):
+            continue
+        rules = _fetch_rules(root, remote)
+        if any(_mapped_source(source, pattern, source) is not None for pattern in rules.exclusions):
+            continue
+        refs = {
+            mapped for left, right in rules.mappings
+            if (mapped := _mapped_source(source, left, right)) is not None
+        }
+        for ref in sorted(refs):
+            if not ref.startswith("refs/remotes/"):
+                continue
+            try:
+                if checks._commit(root, ref) == head:
+                    return {"remote": remote, "url": urls[0], "ref": ref}
+            except checks.CheckError:
+                continue
+    raise checks.CheckError("source workspace has no current fetched ref for the selected target; refresh before reviewing")
+
+
 def qualify(
     workspace: str, repository: str, branch: str, expected_head: str, repo: RepoConfig,
     provider: PRProvider, *, token: str | None = None,
-    source_repository: str | None = None,
+    source_repository: str | None = None, base_branch: str | None = None,
 ) -> dict[str, Any]:
     """Run current target checks and fence them with authoritative ref observations."""
     if (
@@ -77,7 +105,7 @@ def qualify(
     root = Path(workspace).resolve()
     if not Path(workspace).is_absolute():
         raise checks.CheckError("--source-workspace must be an absolute exact Git root")
-    top = Path(checks._git(root, "rev-parse", "--show-toplevel").strip()).resolve()
+    top = Path(checks._git(root, "rev-parse", "--show-toplevel").removesuffix("\n").removesuffix("\r")).resolve()
     if root != top:
         raise checks.CheckError("source workspace must be the exact Git worktree root")
     if checks._git(root, "symbolic-ref", "--quiet", "--short", "HEAD").strip() != branch:
@@ -91,27 +119,28 @@ def qualify(
     if branch == repo.default_branch or not branch or branch.startswith("-"):
         raise checks.CheckError("foreign creation needs a feature branch, not the target default")
     endpoint = repo.pr.api_base
+    target_branch = base_branch or repo.default_branch
     source = observe(provider, source_repository, branch, api_base=endpoint, token=token)
-    target = observe(provider, repository, repo.default_branch, api_base=endpoint, token=token)
+    target = observe(provider, repository, target_branch, api_base=endpoint, token=token)
     if source != expected_head:
         raise checks.CheckError("authoritative source branch differs from the reviewed candidate")
-    base = f"{repo.remote}/{repo.default_branch}"
-    if checks._commit(root, base) != target:
-        raise checks.CheckError("source workspace target ref is stale; refresh before reviewing")
+    target_binding = target_ref(root, repository, target_branch, repo, target)
     result = checks.before_publish(
-        root, base, repo.pr.publication_checks, expected_head=expected_head,
+        root, target_binding["ref"], repo.pr.publication_checks, expected_head=expected_head,
     )
     if not result["ok"]:
         raise checks.CheckError(checks.failure_detail(result))
     if (
         observe(provider, source_repository, branch, api_base=endpoint, token=token) != source
-        or observe(provider, repository, repo.default_branch, api_base=endpoint, token=token) != target
+        or observe(provider, repository, target_branch, api_base=endpoint, token=token) != target
         or checks._commit(root, "HEAD") != expected_head
+        or target_ref(root, repository, target_branch, repo, target) != target_binding
     ):
         raise checks.CheckError("source or target moved while qualifying publication")
     return {
         "ok": True, "adapter": "reachable-workspace", "repository": repository,
-        "branch": branch, "head": source, "base": repo.default_branch, "base_head": target,
+        "branch": branch, "head": source, "base": target_branch, "base_head": target,
+        "target_binding": target_binding,
         "checks": result,
         "source_repository": source_repository,
         "atomic": False,
@@ -127,7 +156,7 @@ def after_create(evidence: dict[str, Any], repository: str, repo: RepoConfig,
             api_base=repo.pr.api_base, token=token,
         )
         base = observe(
-            provider, repository, repo.default_branch, api_base=repo.pr.api_base, token=token,
+            provider, repository, evidence["base"], api_base=repo.pr.api_base, token=token,
         )
         if source != evidence["head"] or base != evidence["base_head"]:
             return {**evidence, "ok": False, "outcome": "changed-after-create",
