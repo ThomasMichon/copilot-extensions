@@ -9,7 +9,7 @@ from . import compatible_inbox, pending_queue_notice
 from .db import Database
 from .inbox_custody import handoff_stage
 from .live_delivery_state import LiveDeliveryState
-from .pending_queue_schema import PREDICATE, require_schema
+from .live_message_schema import PREDICATE, require_schema
 from .runtime_custody import RuntimeCustodyError
 
 SCHEMA = "agent-bridge.pending-queue"

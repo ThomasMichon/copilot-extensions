@@ -10,7 +10,7 @@ import pytest
 from agent_bridge import compatible_inbox, pending_queue
 from agent_bridge.db import Database
 from agent_bridge.inbox_custody import InboxConsumer
-from agent_bridge.pending_queue_schema import INDEX
+from agent_bridge.live_message_schema import INDEX
 from agent_bridge.runtime_custody import RuntimeCustodyError
 
 

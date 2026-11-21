@@ -10,7 +10,7 @@ import uuid
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .inbox_custody import InboxConsumer, handoff_stage, observed_time, original_handoff
-from .pending_queue_schema import PREDICATE, require_schema
+from .live_message_schema import PREDICATE, require_schema
 from .runtime_custody import RuntimeCustodyError, encode
 
 if TYPE_CHECKING:

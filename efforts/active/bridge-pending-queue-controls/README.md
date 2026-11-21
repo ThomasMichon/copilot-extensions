@@ -236,6 +236,17 @@ refusal without inventing a second delivery authority.
 
 ## Journal
 
+### 2026-11-20 - Keep schema bootstrap within its module boundary
+
+- Moved the existing exact-native column validator into the cohesive
+  live-message schema owner alongside unresolved-original index preparation.
+  The bootstrap retains its existing compatibility export and invocation;
+  no validation condition or receipt semantics changed.
+- The changed-file hard module-size check passes without raising a baseline.
+  The same 41 focused tests and twelve-file Linux/Windows strict typing
+  analyses pass after extraction. Current-head CI and re-review still precede
+  merge; source approval does not establish release or live adoption.
+
 ### 2026-11-20 - Bound unresolved-page database work
 
 - An output limit alone does not bound a history scan or temporary sort under
