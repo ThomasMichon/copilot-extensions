@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Current publication safety and whole-queue refresh](journal/2026/11.21-current-publication-safety.md)
+
 - [2026-11-21 - Current framing contribution and historical register delivery](journal/2026/11.21-current-framing-contribution.md)
 
 - [2026-11-21 - Historical continuation controls and remaining integration](journal/2026/11.21-historical-continuation-controls.md)
