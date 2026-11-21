@@ -79,10 +79,13 @@ async def _run_worktree_command(
     correlation_id = uuid.uuid4().hex
     if before_spawn is not None:
         before_spawn()
-    proc = await asyncio.create_subprocess_exec(
-        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env=env, **no_window_kwargs(),
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=env, **no_window_kwargs(),
+        )
+    except OSError as exc:
+        raise AcquisitionRefused("worktrees_unavailable", str(exc)) from exc
 
     def log_failure(reason: str, stdout: bytes | None = None, stderr: bytes | None = None) -> None:
         operation = args[0] if args and args[0] in {
