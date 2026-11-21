@@ -78,7 +78,7 @@ def create_foreign_pr_from_branch(
     which is this function's only caller today).
     """
     from dataclasses import replace
-    from . import pr_publication_labels
+    from . import pr_foreign_receipts, pr_publication_labels
     try:
         config = pr_publication_labels.activate(config, publication_origin, publication_labels)
     except ValueError as exc:
@@ -200,6 +200,8 @@ def create_foreign_pr_from_branch(
     )
     evidence = None
     creation_attempted = False
+    attempt = None
+    pull = None
     try:
         provider = providers.get_provider(prcfg.provider)
         token = providers.account_token_for_slug(scope.repo, prcfg)
@@ -213,6 +215,14 @@ def create_foreign_pr_from_branch(
             scope.head_identity = pr_publish._identity(
                 "https://" + provider.authority_endpoint(scope.api_base) + "/" + source_repo, "",
             )
+            attempt = pr_foreign_receipts.Attempt(
+                config, rec_path, pre_record, provider=prcfg.provider,
+                endpoint=provider.authority_endpoint(scope.api_base),
+                target=target_repo, source=source_repo, branch=local_branch,
+            )
+            pending = attempt.pending()
+            if pending is not None:
+                return {**pending, "repo": target_repo, "head": from_branch, "base": base_branch}
         elif source_repository:
             return {"error": "--source-repo is only supported for GitHub foreign creation.",
                     "repo": target_repo}
@@ -222,10 +232,10 @@ def create_foreign_pr_from_branch(
             evidence = pr_foreign_checks.qualify(
                 source_workspace, target_repo, local_branch, expected_head,
                 repo_cfg, provider, token=token, source_repository=source_repo,
+                base_branch=base_branch,
             )
             scope.expected_head_sha = evidence["head"]
         reused = False
-        pull = None
         if not new:
             # Idempotency (matches `create_pr`'s own contract -- safe to
             # re-run): a retried `--repo/--from-branch` call for the SAME
@@ -248,12 +258,12 @@ def create_foreign_pr_from_branch(
                     from .providers.github_pull_source import matches
                     if not matches(existing, source_repo, local_branch, provider.authority_endpoint(scope.api_base)):
                         raise providers.ProviderError("Existing PR does not match the selected source repository and branch.")
-                    if expected_head and existing.head_sha != expected_head:
-                        raise providers.ProviderError("Existing PR does not contain the expected source head.")
                 existing_state = _OPEN_STATE_ALIASES.get(existing.state, existing.state) or "open"
                 if not tracking._pr_is_terminal(
                     tracking.PRRecord(state=existing_state),
-                ):
+                ) and not getattr(existing, "merged", False):
+                    if prcfg.provider == "github" and expected_head and existing.head_sha != expected_head:
+                        raise providers.ProviderError("Existing PR does not contain the expected source head.")
                     existing_base = getattr(existing, "base_ref", "")
                     if existing_base != base_branch and (
                         existing_base or prcfg.provider in ("azure-devops", "github")
@@ -281,8 +291,12 @@ def create_foreign_pr_from_branch(
                     ),
                     "repo": target_repo,
                 }
+            if attempt is not None:
+                attempt.reserve(base_branch, expected_head)
             creation_attempted = True
             pull = provider.create_pull(scope, token=token)
+            if attempt is not None:
+                attempt.finish(pull, verified=True)
     except (providers.ProviderError, OSError, ValueError) as e:
         failure: dict[str, Any] = {"error": str(e), "repo": target_repo}
         if creation_attempted:
@@ -291,8 +305,15 @@ def create_foreign_pr_from_branch(
                 recovery="Reconcile the existing source PR before retrying; do not force a new PR.",
             )
             from .providers.github_pull_source import CreatedSourceMismatch
-            if isinstance(e, CreatedSourceMismatch):
-                failure.update(number=e.pull.number, url=e.pull.url, pr_opened=True)
+            receipt = e.pull if isinstance(e, CreatedSourceMismatch) else pull
+            if attempt is not None:
+                failure.update(pr_foreign_receipts.failure(str(e), receipt))
+                try:
+                    attempt.finish(receipt, verified=False)
+                except (providers.ProviderError, OSError, ValueError, TimeoutError) as exc:
+                    failure["pr_receipt_tracking_error"] = str(exc)
+            elif receipt is not None:
+                failure.update(number=receipt.number, url=receipt.url, pr_opened=True)
         return failure
 
     normalized_state = _OPEN_STATE_ALIASES.get(pull.state, pull.state) or "open"
@@ -337,6 +358,8 @@ def create_foreign_pr_from_branch(
             record = tracking.load_record(rec_path) if rec_path.exists() else None
             if record is None:
                 raise FileNotFoundError(f"no tracking record for {worktree_id!r}")
+            if attempt is not None:
+                attempt.require_owner(record)
             target_pr = tracking.PRRecord(
                 repo=target_repo, number=pull.number, url=pull.url,
                 state=normalized_state,

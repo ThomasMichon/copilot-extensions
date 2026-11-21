@@ -1,13 +1,14 @@
 """Creation retains exact source ownership and uncertain provider receipts."""
 
 import argparse
+from collections.abc import Callable
 from dataclasses import replace
 import json
 import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -17,6 +18,7 @@ from agent_worktrees.providers import github
 from agent_worktrees.providers.base import PRScope, ProviderError, PullResult
 from test_parallel_publication import git
 from test_pr_fork_source import _pull
+from test_pr_foreign_create import _tracking_setup as _tracking_setup
 from test_pr_source_binding import NativeOwners
 from test_pr_transport_fence import native_source_owners as native_source_owners
 from test_status_write import status_env as status_env
@@ -42,15 +44,25 @@ def test_completion_explicit_empty_title_clears_the_assertion_and_records_histor
 
 
 @pytest.mark.parametrize("drift", ["none", "destination", "branch", "head"])
+@pytest.mark.parametrize("fork_origin", [False, True])
 def test_foreign_reuse_qualifies_the_real_workspace_before_claiming(
-    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch, drift: str,
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch, drift: str, fork_origin: bool,
 ) -> None:
     from agent_worktrees import pr_config, pr_foreign_create
     from agent_worktrees.providers import base as providers
 
     config, caller, _owner, workspace = native_source_owners
     git(workspace, "switch", "-c", "topic")
+    if fork_origin:
+        git(workspace, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+            "commit", "--allow-empty", "-m", "New target candidate")
     expected = git(workspace, "rev-parse", "HEAD")
+    git(workspace, "remote", "set-url", "origin", "https://github.com/" + (
+        "contributor/source.git" if fork_origin else "upstream/target.git"
+    ))
+    if fork_origin:
+        git(workspace, "remote", "add", "upstream", "https://github.com/upstream/target.git")
+        git(workspace, "update-ref", f"refs/remotes/upstream/{config.default_repo.default_branch}", expected)
     git(workspace, "remote", "set-url", "--push", "origin",
         "https://github.com/contributor/" + ("another-copy" if drift == "destination" else "source") + ".git")
     if drift == "branch":
@@ -147,6 +159,232 @@ def test_publication_labels_pin_the_endpoint_and_every_selected_credential_alias
     else:
         assert backend.get_publication_labels("upstream/target", 7, **options) == ("review-needed",)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("redirect", [False, True])
+@pytest.mark.parametrize("trailing_space", [False, True])
+def test_missing_completion_owner_uses_the_cwd_repository_not_inherited_git_context(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch,
+    redirect: bool, trailing_space: bool,
+) -> None:
+    from agent_worktrees import completion_tracking
+
+    config, caller, _owner, workspace = native_source_owners
+    monkeypatch.setattr(cfg, "project_name", lambda: config.repo_name)
+    if trailing_space:
+        if os.name == "nt":
+            pytest.skip("Win32 paths do not preserve a trailing-space directory component")
+        destination = workspace.with_name(workspace.name + " ")
+        workspace.rename(destination)
+        workspace = destination
+    git(workspace, "switch", "-c", "completion-topic")
+    monkeypatch.chdir(workspace)
+    if redirect:
+        monkeypatch.setenv("GIT_DIR", git(Path(caller.worktree_path), "rev-parse", "--absolute-git-dir"))
+        monkeypatch.setenv("GIT_WORK_TREE", caller.worktree_path)
+    destination = caller.yaml_path.parent / "completion-owner.yaml"
+    completion_tracking.update(destination, "completion-owner", title=None, title_only=False)
+    loaded = tracking.load_record(destination)
+    assert Path(loaded.worktree_path).resolve() == workspace.resolve()
+    assert loaded.branch == "completion-topic" and loaded.status == "complete"
+
+
+def test_numberless_healing_never_replaces_a_retained_unverified_provider_identity(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import pr_reconcile, providers
+
+    config, caller, _owner, _workspace = native_source_owners
+    caller.prs = [tracking.PRRecord(
+        pr_id="uncertain", branch="pr/topic", state="creating", repo="upstream/target",
+        creation={"provider_outcome": "unknown", "provider_number": "7",
+                  "provider_url": "https://github.com/upstream/target/pull/7"},
+    )]
+    tracking.save_record(caller)
+    before = caller.yaml_path.read_bytes()
+
+    def find(*_args: Any, **_kwargs: Any) -> PullResult:
+        pytest.fail("A branch lookup cannot reconcile a retained, unverified provider receipt")
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: SimpleNamespace(find_pull_by_head=find))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    assert not pr_reconcile.heal_numberless_active_pr(caller, config)
+    assert caller.yaml_path.read_bytes() == before and caller.prs[0].number is None
+
+
+@pytest.mark.parametrize("binding", ["unrelated", "stale", "excluded", "mapped"])
+def test_target_fetch_binding_is_not_inferred_from_an_equal_object_or_source_push(
+    native_source_owners: NativeOwners, binding: str,
+) -> None:
+    from agent_worktrees import pr_foreign_checks, pr_publication_checks
+
+    config, _caller, _owner, workspace = native_source_owners
+    repo = replace(config.default_repo, pr=cfg.PRConfig(enabled=True, provider="github"))
+    expected = git(workspace, "rev-parse", "HEAD")
+    git(workspace, "remote", "set-url", "origin", "https://github.com/" + (
+        "unrelated/target.git" if binding == "unrelated" else "upstream/target.git"
+    ))
+    git(workspace, "remote", "set-url", "--push", "origin", "https://github.com/contributor/source.git")
+    branch = config.default_repo.default_branch
+    if binding == "excluded":
+        git(workspace, "config", "--add", "remote.origin.fetch", "^refs/heads/" + branch)
+    elif binding == "mapped":
+        git(workspace, "config", "--replace-all", "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/base-cache/*")
+        git(workspace, "update-ref", "refs/remotes/base-cache/" + branch, expected)
+    if binding == "mapped":
+        result = pr_foreign_checks.target_ref(workspace, "upstream/target", branch, repo, expected)
+        assert result["ref"] == "refs/remotes/base-cache/" + branch
+    else:
+        with pytest.raises(pr_publication_checks.CheckError, match="fetched ref"):
+            pr_foreign_checks.target_ref(
+                workspace, "upstream/target", branch, repo,
+                "b" * 40 if binding == "stale" else expected,
+            )
+
+
+@pytest.mark.parametrize("retry_new", [False, True])
+def test_foreign_unverified_creation_is_durable_unclaimed_and_blocks_retry(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any, retry_new: bool,
+) -> None:
+    from agent_worktrees import pr_config, pr_foreign_create
+    from agent_worktrees.providers import base as providers
+    from agent_worktrees.providers.github_pull_source import CreatedSourceMismatch
+    from test_pr_foreign_create import _config, _foreign_resolution
+
+    ledger, wid = _tracking_setup
+    path = ledger / f"{wid}.yaml"
+    before = path.read_bytes()
+    resolution = cast(Callable[..., pr_config.ForeignRepoResolution], _foreign_resolution)(provider="github")
+    config = cast(Callable[..., cfg.Config], _config)()
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    calls: list[PRScope] = []
+
+    class GitHub(github.GitHubProvider):
+        def find_pull_by_source(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
+            calls.append(scope)
+            raise CreatedSourceMismatch(PullResult(
+                number=7, url="https://github.com/owner/other-repo/pull/7",
+            ))
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: GitHub())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    options: dict[str, Any] = dict(
+        target_repo="owner/other-repo", from_branch="contributor:topic",
+        source_repository="contributor/source", title="Fix",
+    )
+    first = pr_foreign_create.create_foreign_pr_from_branch(wid, config, **options)
+    second = pr_foreign_create.create_foreign_pr_from_branch(wid, config, new=retry_new, **options)
+    for result in (first, second):
+        assert result["publication_state"] == "unknown" and not result.get("claimed")
+        assert result["number"] == 7 and result["url"].endswith("/pull/7")
+        assert "#7" in result["error"] and "unknown" in result["error"].lower()
+    assert len(calls) == 1 and path.read_bytes() == before
+    receipts = list(ledger.glob("*.foreign-pr-receipts/*.json"))
+    assert len(receipts) == 1
+    receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+    assert receipt["provider_number"] == 7 and receipt["phase"] == "unknown"
+    assert receipt["binding"]["source"] == "contributor/source"
+
+
+@pytest.mark.parametrize("conflict", ["owner", "receipt-revision", "receipt-write", "transport"])
+def test_foreign_attempt_retains_uncertainty_when_the_owner_or_receipt_changes(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any, conflict: str,
+) -> None:
+    from agent_worktrees import pr_config, pr_foreign_create
+    from agent_worktrees.providers import base as providers
+    from test_pr_foreign_create import _config, _foreign_resolution
+
+    ledger, wid = _tracking_setup
+    path = ledger / f"{wid}.yaml"
+    resolution = cast(Callable[..., pr_config.ForeignRepoResolution], _foreign_resolution)(provider="github")
+    config = cast(Callable[..., cfg.Config], _config)()
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    calls: list[PRScope] = []
+    unchanged: list[bytes] = []
+    atomic_write = tracking._atomic_write
+
+    class GitHub(github.GitHubProvider):
+        def find_pull_by_source(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
+            calls.append(scope)
+            receipt = next(ledger.glob("*.foreign-pr-receipts/*.json"))
+            if conflict == "owner":
+                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+                raw["creation_nonce"] = "replacement-incarnation"
+                path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+            elif conflict == "receipt-revision":
+                value = json.loads(receipt.read_text(encoding="utf-8"))
+                value["revision"] += 1
+                receipt.write_text(json.dumps(value), encoding="utf-8")
+            elif conflict == "receipt-write":
+                def refuse(destination: Path, content: str | bytes) -> None:
+                    if destination == receipt:
+                        raise OSError("Fixture receipt persistence unavailable")
+                    atomic_write(destination, content)
+                monkeypatch.setattr(tracking, "_atomic_write", refuse)
+            unchanged.append(path.read_bytes())
+            if conflict == "transport":
+                raise ProviderError("Fixture remote outcome unavailable")
+            return PullResult(number=7, url="https://github.com/owner/other-repo/pull/7", state="open")
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: GitHub())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    options: dict[str, Any] = dict(
+        target_repo="owner/other-repo", from_branch="contributor:topic",
+        source_repository="contributor/source", title="Fix",
+    )
+    first = pr_foreign_create.create_foreign_pr_from_branch(wid, config, **options)
+    second = pr_foreign_create.create_foreign_pr_from_branch(wid, config, new=True, **options)
+    assert first["publication_state"] == second["publication_state"] == "unknown"
+    assert not first.get("claimed") and not second.get("claimed") and len(calls) == 1
+    assert path.read_bytes() == unchanged[0] and not tracking.load_record(path).resources
+    if conflict != "transport":
+        assert first.get("pr_receipt_tracking_error") and first["number"] == 7
+    receipt = json.loads(next(ledger.glob("*.foreign-pr-receipts/*.json")).read_text(encoding="utf-8"))
+    assert receipt["phase"] in ("publishing", "unknown")
+
+
+@pytest.mark.parametrize("terminal", ["closed", "merged"])
+def test_foreign_new_work_ignores_the_expected_head_of_a_terminal_historical_pr(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: Any, terminal: str,
+) -> None:
+    from agent_worktrees import pr_config, pr_foreign_checks, pr_foreign_create
+    from agent_worktrees.providers import base as providers
+    from test_pr_foreign_create import _config, _foreign_resolution
+
+    _ledger, wid = _tracking_setup
+    resolution = cast(Callable[..., pr_config.ForeignRepoResolution], _foreign_resolution)(provider="github")
+    config = cast(Callable[..., cfg.Config], _config)()
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    monkeypatch.setattr(pr_foreign_checks, "qualify", lambda *a, **k: {"head": "b" * 40})
+    monkeypatch.setattr(pr_foreign_checks, "after_create", lambda *a, **k: {"ok": True})
+    calls: list[PRScope] = []
+
+    class GitHub(github.GitHubProvider):
+        def find_pull_by_source(self, *_args: Any, **_kwargs: Any) -> PullResult:
+            return PullResult(
+                number=3, state="closed", merged=terminal == "merged", head_sha="a" * 40,
+                head_ref="topic", head_url="https://github.com/contributor/source.git",
+            )
+
+        def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
+            calls.append(scope)
+            return PullResult(number=7, url="https://github.com/owner/other-repo/pull/7", state="open")
+
+    monkeypatch.setattr(providers, "get_provider", lambda *_: GitHub())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, config, target_repo="owner/other-repo", from_branch="contributor:topic",
+        source_repository="contributor/source", source_workspace="reachable-source",
+        expected_head="b" * 40, title="Fix",
+    )
+    assert result.get("number") == 7 and result.get("claimed") and len(calls) == 1, result
 
 
 @pytest.mark.parametrize("use_json", [False, True])

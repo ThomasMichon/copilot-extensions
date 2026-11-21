@@ -132,7 +132,35 @@ def test_source_lookup_uses_supported_query_and_exact_repository_across_pages(
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("defect", ["none", "source", "branch", "base", "head", "labels", "url"])
+@pytest.mark.parametrize("url", [
+    None, "", "not-a-url", "https://other.example.test/upstream/target/pull/7",
+    "https://forge.example.test/elsewhere/target/pull/7",
+    "https://forge.example.test/upstream/target/pull/8",
+    "https://forge.example.test/upstream/target/pull/\n7",
+])
+def test_source_lookup_rejects_missing_or_unrelated_pull_urls(
+    monkeypatch: pytest.MonkeyPatch, url: str | None,
+) -> None:
+    payload = _pull()
+    payload["html_url"] = url
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps([[payload]]), "")
+
+    monkeypatch.setattr(github, "run_cli", run)
+    with pytest.raises(ProviderError, match="URL"):
+        github.GitHubProvider().find_pull_by_source(
+            "upstream/target", "contributor/renamed-source", "topic", api_base="https://forge.example.test",
+        )
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("defect", [
+    "none", "source", "branch", "base", "head", "labels", "url",
+    "missing-url", "empty-url", "malformed-url", "other-host", "other-target", "other-number",
+])
 def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
     monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
@@ -149,6 +177,18 @@ def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
         payload["head"]["sha"] = "b" * 40
     elif defect == "url":
         payload["html_url"] = 7
+    elif defect == "missing-url":
+        del payload["html_url"]
+    elif defect == "empty-url":
+        payload["html_url"] = ""
+    elif defect == "malformed-url":
+        payload["html_url"] = "not-a-url"
+    elif defect == "other-host":
+        payload["html_url"] = "https://other.example.test/upstream/target/pull/7"
+    elif defect == "other-target":
+        payload["html_url"] = "https://forge.example.test/unrelated/target/pull/7"
+    elif defect == "other-number":
+        payload["html_url"] = "https://forge.example.test/upstream/target/pull/8"
     calls: list[list[str]] = []
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -181,7 +221,7 @@ def test_qualified_creation_sends_exact_repository_and_checks_actual_response(
         with pytest.raises(CreatedSourceMismatch) as error:
             provider.create_pull(scope)
         assert error.value.pull.number == 7
-        assert error.value.pull.url == ("" if defect == "url" else _pull()["html_url"])
+        assert error.value.pull.url == (payload.get("html_url", "") if defect != "url" else "")
         assert len(calls) == 1
 
 
