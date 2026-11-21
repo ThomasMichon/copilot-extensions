@@ -114,6 +114,8 @@ class PRScope:
     api_base: str = ""              # provider endpoint (self-hosted gitea / ADO org)
     labels: tuple[str, ...] = ()
     draft: bool = False             # open as a draft (not-yet-ready-for-review)
+    head_identity: str = ""         # actual published host/owner/repository
+    expected_head_sha: str = ""     # published object, rechecked under its fence
 
 
 @dataclass

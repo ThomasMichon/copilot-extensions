@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import secrets
 import sys
-from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import yaml
 
-from . import codename_tracking, config as cfg, finalize as fin, git_ops, output, pr_ops, tracking, worktree_identity
+from . import codename_tracking, config as cfg, finalize as fin, output, pr_ops, tracking, worktree_identity
 from . import context_cli, pr_break_glass
 
 
@@ -183,6 +181,8 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
                    help="Exact reachable delegated Git root for --from-branch checks")
     p.add_argument("--expected-head",
                    help="Full reviewed source commit for --source-workspace")
+    p.add_argument("--source-repo",
+                   help="Actual GitHub owner/repository for a colon-qualified --from-branch")
     p.add_argument(
         "--body",
         default=None,
@@ -680,6 +680,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         )
         if not is_foreign_from_branch and (
             getattr(args, "source_workspace", None) or getattr(args, "expected_head", None)
+            or getattr(args, "source_repo", None)
         ):
             msg = "Delegated source inputs require --repo and foreign --from-branch."
             return output._json_error(msg) if use_json else _refuse(msg, 2)
@@ -724,6 +725,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 publication_origin=getattr(args, "publication_origin", None),
                 publication_labels=tuple(getattr(args, "publication_label", ())),
                 source_workspace=getattr(args, "source_workspace", None),
+                source_repository=getattr(args, "source_repo", None),
                 expected_head=getattr(args, "expected_head", None),
             )
             if result.get("error"):
@@ -807,7 +809,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             reminder_flow = pr_config._profile_for_pr_config(reminder_prcfg)
         # "created" only when a PR was actually opened: a pushed branch with no PR
         # (--no-open, a dry run, or a provider refusal) has nothing to merge yet.
-        opened = bool(result.get("pr_opened"))
+        opened = bool(result.get("pr_opened")) and result.get("pr_identity_verified") is not False
         why_not = ("" if opened or result.get("dry_run") else
                    f"the provider refused: {result['pr_open_error']}" if result.get("pr_open_error") else
                    f"the branch was pushed ({result['pr_open_skipped']})" if result.get("pr_open_skipped") else
@@ -823,7 +825,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         )
         if reminder is not None:
             result["reminder"] = reminder.as_dict()
-        if result.get("pr_opened") and result.get("url"):
+        if opened and result.get("url"):
             result["pr"] = {
                 "ref": result.get("url"),
                 "url": result.get("url"),
@@ -832,6 +834,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             }
         if use_json:
             output._json_output(result)
+        elif result.get("pr_identity_verified") is False:
+            output.warn(f"Unverified PR receipt #{result.get('number')}: {result.get('url', '')}")
+            output.warn("Creation outcome is unknown. Reconcile this receipt before retrying.")
+            if result.get("pr_receipt_tracking_error"):
+                output.warn(str(result["pr_receipt_tracking_error"]))
         elif result.get("success"):
             _warn_publication_labels(result)
             branch = result.get("branch", "")
@@ -928,41 +935,15 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
 
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
 
-    if not yaml_path.exists():
-        output.warn(f"Tracking file not found at {yaml_path}")
-        print("Creating minimal tracking file...")
-        record = tracking.WorktreeRecord(
-            worktree_id=worktree_id,
-            branch=git_ops.get_current_branch("."),
-            worktree_path=str(Path.cwd()),
-            repo=cfg.project_name(),
-            machine="",
-            platform="",
-            started_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            last_resumed_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            resume_count=0,
-            title=full_title,
-            title_asserted=full_title is not None,
-            status="active" if args.title_only else "complete",
-            completed_at=None if args.title_only else datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            creation_nonce=secrets.token_hex(8),
+    from . import completion_tracking
+
+    try:
+        completion_tracking.update(
+            yaml_path, worktree_id, title=args.title, title_only=args.title_only,
         )
-        if args.title:
-            tracking.set_disposition(
-                record, title=args.title, save=False, tracking_path=yaml_path.parent,
-            )
-        tracking.save_record(record, yaml_path)
-    else:
-        if (not args.title_only) or args.title:
-            with tracking._RecordLock(yaml_path):
-                record = tracking.load_record(yaml_path)
-                if args.title:
-                    tracking.set_disposition(
-                        record, title=args.title, save=False, tracking_path=yaml_path.parent,
-                    )
-                if not args.title_only:
-                    tracking.update_status(record, "complete", save=False)
-                tracking.save_record(record)
+    except (OSError, ValueError, TimeoutError) as error:
+        output.err(str(error))
+        return 1
 
     if args.title_only:
         print(f"[OK] Worktree {worktree_id} title updated: {full_title}")

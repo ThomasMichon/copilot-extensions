@@ -33,13 +33,18 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import re
+from collections.abc import Callable, Iterator
+from typing import Literal
 from urllib.parse import urlparse
 
 from . import output, tracking
-from .config import Config
+from .config import Config, PRConfig, RepoConfig
+from .providers.base import PRProvider, PullResult
+
+_PullRead = tuple[PRProvider, str, int, str | None, PullResult]
 
 
-def _authority_origin(value: str) -> tuple[str, str, int] | None:
+def _authority_origin(value: str) -> tuple[str, str, int | None] | None:
     """Parse ``value`` (an ``authority_endpoint()`` result OR a tracked PR
     URL) into a comparable ``(scheme, host, port)`` origin triple, or
     ``None`` when it cannot be confidently parsed (no host). Port defaults
@@ -232,7 +237,7 @@ def _tracked_branch_ahead(
     return False
 
 
-def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
+def pr_merge_status(record: tracking.WorktreeRecord, repo: RepoConfig) -> bool | None:
     """Tri-state merge lookup for ``record.pr`` (the ACTIVE tracked PR) --
     see :func:`_pr_entry_merge_status` for the full contract. ``False`` when
     there is no ``pr`` at all (nothing that could have merged); otherwise
@@ -256,7 +261,7 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     return _pr_entry_merge_status(pr, repo)
 
 
-def trusted_target(pr, prcfg, fallback: str = ""):
+def trusted_target(pr: tracking.PRRecord | None, prcfg: PRConfig, fallback: str = "") -> tuple[PRProvider, str] | Literal[False] | None:
     """``(provider, slug)`` to read tracked *pr* from, only when the record can be
     trusted to name exactly this PR at the configured authority; ``False`` when no
     PR was ever opened (neither a number nor a repository); ``None`` otherwise
@@ -299,7 +304,7 @@ def trusted_target(pr, prcfg, fallback: str = ""):
     return provider, slug
 
 
-def pull_for(pr, repo):
+def pull_for(pr: tracking.PRRecord | None, repo: RepoConfig) -> _PullRead | Literal[False] | None:
     """The configured provider's view of tracked *pr*: ``(provider, slug, number,
     token, PullResult)``; ``False`` when no PR was ever opened (neither ``number``
     nor ``repo``); ``None`` when it can't be trusted to name exactly this PR at the
@@ -313,6 +318,8 @@ def pull_for(pr, repo):
     if not target:
         return target
     provider, slug = target
+    if pr is None or pr.number is None:
+        return None
     number = int(pr.number)
     try:
         from . import providers
@@ -333,11 +340,11 @@ def pull_for(pr, repo):
 
 #: Within one decision (:func:`one_read_per_pr`), each tracked PR is read from the
 #: provider once: a merged head refresh and a base lookup share the same answer.
-_READS: contextvars.ContextVar[dict | None] = contextvars.ContextVar("pr_reads", default=None)
+_READS: contextvars.ContextVar[dict[tuple[str, str, str, int], _PullRead] | None] = contextvars.ContextVar("pr_reads", default=None)
 
 
 @contextlib.contextmanager
-def one_read_per_pr():
+def one_read_per_pr() -> Iterator[None]:
     if _READS.get() is not None:
         yield
         return
@@ -348,7 +355,7 @@ def one_read_per_pr():
         _READS.reset(token)
 
 
-def pr_base_ref(pr, repo) -> str:
+def pr_base_ref(pr: tracking.PRRecord | None, repo: RepoConfig) -> str:
     """The branch tracked *pr* targets, from the provider (``dev`` for a repo whose
     PRs land on ``dev`` while its default branch is ``main``); "" when unknown."""
     pulled = pull_for(pr, repo) if pr is not None else None
@@ -358,7 +365,7 @@ def pr_base_ref(pr, repo) -> str:
     return base.removeprefix("refs/heads/")
 
 
-def _pr_entry_merge_status(pr, repo) -> bool | None:
+def _pr_entry_merge_status(pr: tracking.PRRecord | None, repo: RepoConfig) -> bool | None:
     """Tri-state merge lookup for a single tracked PR entry: ``True``
     (confirmed merged), ``False`` (confirmed NOT merged -- neither
     ``number`` nor ``repo`` recorded, meaning a PR was never even opened --
@@ -386,8 +393,10 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
     unmerged would let a tree-only upstream match certify and prune a
     record whose merge boundary genuinely can't be checked.
     """
-    from . import pr_creation_state
-    if pr_creation_state.cancelled(pr):
+    from . import pr_creation_state, pr_creation_reconcile
+    if pr is None:
+        return False
+    if pr_creation_state.cancelled(pr) or pr_creation_reconcile.retired(pr):
         return False
     head_sha = (getattr(pr, "head_sha", "") or "").strip()
     if getattr(pr, "state", "") == "merged" and head_sha:
@@ -438,7 +447,7 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
         return None
 
 
-def refresh_merged_head(pr, repo) -> bool:
+def refresh_merged_head(pr: tracking.PRRecord, repo: RepoConfig) -> bool:
     """Re-read a merged PR's head from the provider before trusting a block.
 
     A record can carry ``state: merged`` with a stale ``head_sha`` (written
@@ -465,7 +474,7 @@ def refresh_merged_head(pr, repo) -> bool:
 
 
 def merged_content_exceeds(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str | tuple[str, ...], *, cwd: str, repo: RepoConfig,
 ) -> bool:
     """:func:`content_exceeds_merged_head_any` for a merged PR, re-reading stale
     recorded merged heads from the provider once (see :func:`refresh_merged_head`)
@@ -483,7 +492,7 @@ def merged_content_exceeds(
     return True
 
 
-def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo) -> None:
+def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo: RepoConfig) -> None:
     """Best-effort, authority-validated repair of every OTHER tracked PR's
     missing ``head_sha`` -- not just ``record.pr`` (the active entry).
 
@@ -518,7 +527,7 @@ def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo) -> None
 
 
 def upstream_match_is_trustworthy(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo: RepoConfig,
 ) -> bool:
     """True iff step 1's tree-level upstream match may be trusted without a
     further merged-head check (#4400 fourth + eleventh + twelfth rounds).
@@ -690,7 +699,7 @@ def _cleanup_branch_refs(record: tracking.WorktreeRecord) -> list[tuple[str, str
     could plausibly represent real landed work (merged, or still open/
     unresolved) replaces it.
     """
-    def _confirmed_rejected(pr) -> bool:
+    def _confirmed_rejected(pr: tracking.PRRecord) -> bool:
         state = (getattr(pr, "state", "") or "").strip()
         return state not in tracking._PR_NON_TERMINAL and state != "merged"
 
@@ -767,7 +776,7 @@ def _extra_commit_count(
 
 
 def content_exceeds_merged_head(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str | tuple[str, ...], *, cwd: str,
 ) -> bool:
     """True iff ``content_ref`` carries commits beyond the tracked PR's merged
     head that are NOT already reachable from ``upstream``.
@@ -799,8 +808,8 @@ def content_exceeds_merged_head(
 
 
 def content_exceeds_merged_head_any(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *,
-    cwd: str, repo=None,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str | tuple[str, ...], *,
+    cwd: str, repo: RepoConfig | None = None,
 ) -> bool:
     """True iff ``content_ref`` OR any branch finalize's cleanup will
     force-delete carries commits beyond ITS OWN corresponding PR's merged
@@ -884,9 +893,13 @@ def assert_no_live_pr(
     if record is None or not record.prs:
         return True
     reconcile_every_live_pr(record, config)
-    if not record.has_live_pr():
+    from . import pr_creation_reconcile
+    live = [
+        p for p in record.prs if not tracking._pr_is_terminal(p)
+        and not pr_creation_reconcile.retired(p)
+    ]
+    if not live:
         return True
-    live = [p for p in record.prs if not tracking._pr_is_terminal(p)]
     if force:
         output.warn(
             f"Worktree {worktree_id} has {len(live)} still-open tracked PR(s); "
@@ -915,11 +928,11 @@ def assert_no_live_pr(
 
 def pr_precondition_recheck(
     record: tracking.WorktreeRecord,
-    repo,
+    repo: RepoConfig,
     worktree_path: str,
     anchor: str,
     *,
-    precondition_fn,
+    precondition_fn: Callable[[tracking.WorktreeRecord, RepoConfig, str, str], tuple[bool, str | None]],
 ) -> str | None:
     """Re-run the dirty-tree guard + full PR-mode precondition (#4400 round
     16). Returns an error message on failure, else ``None``. Shared by

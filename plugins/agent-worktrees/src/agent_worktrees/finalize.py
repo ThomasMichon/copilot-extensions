@@ -65,7 +65,7 @@ from . import (
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
-from .finalize_lock import FinalizeLock
+from .finalize_lock import FinalizeLock as FinalizeLock
 from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
 from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
@@ -74,6 +74,7 @@ from .git_repository_environment import repository_identity_scope
 from .finalize_ref import resolve_finalize_ref as _resolve_finalize_ref
 from .finalize_ref import warn_if_tracked_branch_diverged as _warn_if_diverged
 from .pr_incremental_publish import push_refspec as _push_changes_pr_refspec
+from . import pr_transport_fence
 
 
 def _warn_of_codespace_claims_for_worktree(worktree_id: str) -> None:
@@ -287,6 +288,11 @@ def push_changes(
             )
             return False
     branch = _worktree_branch(record, worktree_id)
+    from . import pr_creation_reconcile
+    active_pr = record.active_pr() if record is not None else None
+    if active_pr is not None and pr_creation_reconcile.requires_qualification(active_pr):
+        output.err("The selected attempt is locally retired or damaged; use an explicit new contribution and distinct head.")
+        return False
     if explicit_rewrite:
         pr_publication_labels.validate_scope(repo.pr, record.active_pr() if record else None)
 
@@ -718,7 +724,7 @@ def _push_changes_pr(
     wt_branch = f"worktree/{worktree_id}"
     active_pr = record.pr
     if active_pr is None:
-        output.err("PR mode: no tracked PR to update.")
+        output.err("No tracked PR remains; reload publication before pushing.")
         return False
     feature = active_pr.branch
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
@@ -818,6 +824,9 @@ def _push_changes_pr(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
+    if pushed_pr is None:
+        output.err("Tracked PR changed before publication; reload it before retrying.")
+        return False
     lock_factory = cast(Callable[..., pr_authority.PublicationLock], pr_authority.PublicationLock)
     lock = lock_factory(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr, timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds))
     try:
@@ -937,7 +946,10 @@ def _pr_finalize_precondition(
     Returns ``(ok, error_message)``.
     """
     remote = repo.remote
-    feature = record.pr.branch if record.pr is not None else ""
+    pr = record.pr
+    if pr is None:
+        return False, "Tracked PR qualification is missing."
+    feature = pr.branch
     cwd = worktree_path if Path(worktree_path).exists() else anchor
     upstream = f"{remote}/{repo.default_branch}"
     strategy = (getattr(repo.pr, "strategy", "") or "keep-alive").strip().lower()
@@ -1160,7 +1172,7 @@ def _rehome_abandoned_obligations(
     }
     expected = {(worktree_id, claim.ref) for claim in abandoned}
     if not expected.issubset(persisted):
-        missing = sorted(ref for owner, ref in expected - persisted)
+        missing = sorted(ref for owner, ref in expected if (owner, ref) not in persisted)
         output.err(
             "Affirmative handoff could not be durably persisted; finalize is "
             "refused and creator ownership is preserved. Missing: "
@@ -1189,6 +1201,7 @@ def _worktree_branch(
 
 
 @repository_identity_scope()
+@pr_transport_fence.qualification_scope
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -1382,9 +1395,10 @@ def validate_and_finalize(
         output.err(dirty_err)
         return False
     if pr_mode:
-        if record is None:
-            output.err("PR finalization requires a tracking record.")
+        if record is None or record.pr is None:
+            output.err("Tracked PR qualification is missing; retain the checkout.")
             return False
+        tracked_pr = record.pr
         # PR mode (#4400 round 12): `assert_no_live_pr` above already refused
         # a still-open PR (short of --force-open-pr). `detach` allows an
         # early ok once pushed; other strategies require a genuine merge
@@ -1393,9 +1407,11 @@ def validate_and_finalize(
         if not ok:
             output.err(err or "PR finalize precondition not met.")
             return False
-        print(f"Verified: feature branch '{record.pr.branch}' is safely on {repo.remote}."
-              if record.pr and record.pr.branch else
-              f"Verified: tracked PR #{record.pr.number if record.pr else '?'}'s work is safely on {repo.remote}.")
+        print(f"Verified: feature branch '{tracked_pr.branch}' is safely on {repo.remote}."
+              if tracked_pr.branch else
+              f"Verified: tracked PR #{tracked_pr.number}'s work is safely on {repo.remote}."
+              if tracked_pr.number is not None else
+              f"Verified: tracked local attempt's work is safely on {repo.remote}.")
     elif wt_exists:
         # Validate against the worktree's ACTUAL current checkout, not just
         # the possibly-stale tracked `record.branch` name (#7723). A worktree
@@ -1578,6 +1594,7 @@ def validate_and_finalize(
             require_record_mutation(record, config)
             if record_guard is not None:
                 record_guard(record)
+            cleanup_records.enter_context(pr_transport_fence.cleanup_guard(record, repo))
             checkout_managed = record.checkout_managed
             from . import paired_claims
             cleanup_records.enter_context(paired_claims.lifecycle_guard(record))
@@ -1595,7 +1612,9 @@ def validate_and_finalize(
         # PR mode (#4400 round 16): re-validate BEFORE reconciliation --
         # its rebase can itself drop a just-landed EMPTY race commit,
         # narrowing that window.
-        if pr_mode and record is not None:
+        if pr_mode:
+            if record is None:
+                raise ValueError("Tracked PR owner disappeared before cleanup.")
             from . import finalize_open_pr_gate
             err = finalize_open_pr_gate.pr_precondition_recheck(
                 record, repo, worktree_path, anchor, precondition_fn=_pr_finalize_precondition)
@@ -1622,7 +1641,9 @@ def validate_and_finalize(
         )
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
-        if pr_mode and record is not None:
+        if pr_mode:
+            if record is None:
+                raise ValueError("Tracked PR owner disappeared before cleanup.")
             err = finalize_open_pr_gate.pr_precondition_recheck(
                 record, repo, worktree_path, anchor,
                 precondition_fn=_pr_finalize_precondition)
@@ -1737,13 +1758,15 @@ def validate_and_finalize(
                 # parallel); the remote branches are left intact as PR backing.
                 seen: set[str] = set()
                 for pr in record.prs:
-                    if not pr.branch or pr.branch in seen:
+                    from . import pr_creation_reconcile
+                    feature_branch = pr_creation_reconcile.source_branch(pr)
+                    if not feature_branch or feature_branch in seen:
                         continue
-                    seen.add(pr.branch)
-                    print(f"Removing local feature branch {pr.branch}...")
-                    git_ops.delete_branch(pr.branch, cwd=anchor, force=True)
+                    seen.add(feature_branch)
+                    print(f"Removing local feature branch {feature_branch}...")
+                    git_ops.delete_branch(feature_branch, cwd=anchor, force=True)
                     output.info(
-                        f"Remote feature branch '{pr.branch}' left intact on "
+                        f"Remote feature branch '{feature_branch}' left intact on "
                         f"{repo.remote} -- it backs the PR and is the recovery source."
                     )
 

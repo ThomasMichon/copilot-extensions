@@ -7,10 +7,12 @@ policy or credentials are transplanted into the source repository.
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import ExitStack
 import re
 import subprocess
+from typing import Any
 
-from . import config as cfg, git_ops, hooks, pr_config, pr_publish
+from . import config as cfg, git_ops, hooks, pr_authority, pr_config, pr_publish
 from . import pr_publication_checks, pr_worker_config, publication_deadline, repos, tracking
 from .git_push_transport import observed_ref, pinned_destination
 from .providers.pr_source import same_repository
@@ -35,7 +37,7 @@ def _sha(value: str, name: str, *, absent: bool = False) -> str:
     return value
 
 
-def _canonical_destination(repo, target_repo: str, workspace: str) -> str:
+def _canonical_destination(repo: cfg.RepoConfig, target_repo: str, workspace: str) -> str:
     matches = [
         entry for entry in repos.list_repos()
         if entry.remote and pr_worker_config.matches_remote(entry.remote, target_repo, repo.pr, workspace)
@@ -48,8 +50,8 @@ def _canonical_destination(repo, target_repo: str, workspace: str) -> str:
     return matches[0].remote
 
 
-def validate_source_workspace(repo_cfg, target_repo: str, workspace: str | Path,
-                              branch: str, expected_head: str) -> dict:
+def validate_source_workspace(repo_cfg: cfg.RepoConfig, target_repo: str, workspace: str | Path,
+                              branch: str, expected_head: str) -> dict[str, Any]:
     """Qualify reachable local source; callers must separately run policy checks.
 
     The returned binding is freshly computed data, never an attestation accepted
@@ -61,7 +63,13 @@ def validate_source_workspace(repo_cfg, target_repo: str, workspace: str | Path,
     if not root.is_absolute() or not root.is_dir():
         raise SourcePublicationError("Source workspace must be an existing absolute Git root")
     root = root.resolve()
-    if Path(_git(root, "rev-parse", "--show-toplevel")).resolve() != root:
+    facts = _git(
+        root, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--verify", "HEAD^{commit}",
+    ).splitlines()
+    if len(facts) != 3:
+        raise SourcePublicationError("Source Git root, directory and commit cannot be qualified")
+    top_level, git_dir, head = facts
+    if Path(top_level).resolve() != root:
         raise SourcePublicationError("Source workspace must be the exact Git top level")
     if not repo_cfg.pr.enabled:
         raise SourcePublicationError("The target repository has not enabled PR publication")
@@ -76,7 +84,6 @@ def validate_source_workspace(repo_cfg, target_repo: str, workspace: str | Path,
         raise SourcePublicationError("Source workspace is not on the explicitly selected branch")
     if _git(root, "status", "--porcelain", "--untracked-files=all"):
         raise SourcePublicationError("Dirty source workspace blocks publication")
-    head = _git(root, "rev-parse", "--verify", "HEAD^{commit}")
     if head != expected_head:
         raise SourcePublicationError("Source HEAD differs from the reviewed expected_head")
     remote = repo_cfg.remote
@@ -96,7 +103,7 @@ def validate_source_workspace(repo_cfg, target_repo: str, workspace: str | Path,
     settings = pr_publish._transport_settings(remote, cwd=str(root))
     return {
         "repo": target_repo, "workspace": str(root),
-        "git_dir": _git(root, "rev-parse", "--absolute-git-dir"),
+        "git_dir": git_dir,
         "branch": branch, "head": head, "remote": remote,
         "head_repo": target.head_repo, "head_identity": target.head_identity,
         "fetch_url": fetch.stdout.rstrip("\r\n"),
@@ -104,8 +111,8 @@ def validate_source_workspace(repo_cfg, target_repo: str, workspace: str | Path,
     }
 
 
-def source_evidence(repo_cfg, target_repo: str, workspace: str | Path,
-                    branch: str, expected_head: str) -> dict:
+def source_evidence(repo_cfg: cfg.RepoConfig, target_repo: str, workspace: str | Path,
+                    branch: str, expected_head: str) -> dict[str, Any]:
     """Produce recheckable local evidence using only the resolved target policy."""
     binding = validate_source_workspace(repo_cfg, target_repo, workspace, branch, expected_head)
     checks = pr_publication_checks.before_publish(
@@ -119,7 +126,7 @@ def source_evidence(repo_cfg, target_repo: str, workspace: str | Path,
     return {**binding, "publication_checks": checks}
 
 
-def _caller(worktree_id: str, config: cfg.Config):
+def _caller(worktree_id: str, config: cfg.Config) -> tracking.WorktreeRecord:
     if not worktree_id or Path(worktree_id).name != worktree_id:
         raise SourcePublicationError("Source publication requires a managed caller")
     path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
@@ -133,10 +140,11 @@ def _caller(worktree_id: str, config: cfg.Config):
             or not record_namespace_matches(record, config) or not expected.is_dir()
             or record.status in ("finalizing", "finalized", "archived")):
         raise SourcePublicationError("Caller record does not own this active managed workspace")
-    if Path(_git(expected, "rev-parse", "--show-toplevel")).resolve() != expected:
+    facts = _git(expected, "rev-parse", "--show-toplevel", "--git-common-dir").splitlines()
+    if len(facts) != 2 or Path(facts[0]).resolve() != expected:
         raise SourcePublicationError("Caller workspace is not its recorded Git root")
     anchor_common = _git(config.default_repo.anchor, "rev-parse", "--git-common-dir")
-    caller_common = _git(expected, "rev-parse", "--git-common-dir")
+    caller_common = facts[1]
     if (Path(config.default_repo.anchor, anchor_common).resolve()
             != Path(expected, caller_common).resolve()):
         raise SourcePublicationError("Caller is unrelated to the configured managed repository")
@@ -145,7 +153,7 @@ def _caller(worktree_id: str, config: cfg.Config):
 
 def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
                    workspace: str | Path, branch: str, expected_head: str,
-                   expected_remote_head: str | None = None) -> dict:
+                   expected_remote_head: str | None = None) -> dict[str, Any]:
     """Publish only the reviewed source tip, preserving existing remote history.
 
     No automatic fetch, merge, squash or rebase is performed. When remote history
@@ -155,10 +163,15 @@ def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
     """
     result = {"ok": False, "repo": target_repo, "branch": branch, "head": expected_head,
               "publication_state": "not_pushed"}
+    lifetime = ExitStack()
     try:
         caller = _caller(worktree_id, config)
+        recheck_owners = lifetime.enter_context(
+            pr_authority.publication_lifecycle(config, record=caller, workspace=workspace),
+        )
+        caller = _caller(worktree_id, config)
         resolution = pr_config.resolve_repo_config_for_slug(config, target_repo)
-        if not resolution.resolved:
+        if not resolution.resolved or resolution.repo_config is None:
             raise SourcePublicationError(resolution.error or "Target repository binding is unresolved")
         repo = resolution.repo_config
         timeout = publication_deadline.configured(repo.pr)
@@ -175,13 +188,14 @@ def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
         root, remote = evidence["workspace"], evidence["remote"]
         binding = {key: value for key, value in evidence.items() if key != "publication_checks"}
 
-        def validate_transport_source():
+        def validate_transport_source() -> None:
             with pr_publish.metadata_lock(worktree_id, project=config.repo_name,
                                           timeout=publication_deadline.lock_wait(timeout)):
                 if validate_source_workspace(repo, target_repo, root, branch, expected_head) != binding:
                     raise SourcePublicationError("Source publication evidence changed before transport")
                 if _caller(worktree_id, config).worktree_path != caller.worktree_path:
                     raise SourcePublicationError("Managed caller source changed before transport")
+                recheck_owners()
 
         with pinned_destination(remote, evidence["push_urls"], evidence["transport_settings"],
                                 fetch_url=evidence["fetch_url"]):
@@ -203,6 +217,7 @@ def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
                               f"refs/remotes/{remote}/{default_branch}^{{commit}}")
             if not base_head or local_base != base_head:
                 raise SourcePublicationError("Target base changed; fetch and review against the current base")
+            recheck_owners()
             result.update(publication_checks=evidence["publication_checks"],
                           expected_remote_head=old_head, head_identity=evidence["head_identity"],
                           publication_state="unknown")
@@ -224,3 +239,5 @@ def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
             return {**result, "ok": True, "observed_head": actual}
     except (ValueError, OSError, git_ops.GitError, TimeoutError, subprocess.SubprocessError) as exc:
         return {**result, "error": str(exc)}
+    finally:
+        lifetime.close()

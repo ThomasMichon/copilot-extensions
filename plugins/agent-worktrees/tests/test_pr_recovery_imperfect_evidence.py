@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -44,10 +45,17 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     elif defect in {"null-ref", "surrogate-ref"}:
         point["local_ref"] = "\0" if defect == "null-ref" else "\ud800"
         checkpoint.write_text(json.dumps(collection))
+        real_git = git_ops.git
+
+        def valid_probe(*args: str, **kwargs: Any) -> object:
+            assert point["local_ref"] not in args, "invalid evidence must not reach process creation"
+            return real_git(*args, **kwargs)
+
+        monkeypatch.setattr(git_ops, "git", valid_probe)
     elif defect == "spawn":
         real_git = git_ops.git
 
-        def probe(*args: str, **kwargs: object) -> object:
+        def probe(*args: str, **kwargs: Any) -> object:
             if "--end-of-options" in args and args[-1].startswith(point["local_ref"]):
                 raise OSError(22, "evidence probe could not start")
             return real_git(*args, **kwargs)
@@ -57,7 +65,7 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
         real_git_bytes = pr_rebase._git_bytes
         requested = (point["local_ref"] + "^{commit}").encode()
 
-        def batch_probe(*args: str, **kwargs: object) -> bytes:
+        def batch_probe(*args: str, **kwargs: Any) -> bytes:
             data = kwargs.get("stdin")
             if (
                 args == ("cat-file", "--batch-check=%(objectname) %(objecttype)", "-z")
@@ -71,7 +79,7 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     else:
         real_text, real_bytes = Path.read_text, Path.read_bytes
 
-        def read_text(path: Path, *args: object, **kwargs: object) -> str:
+        def read_text(path: Path, *args: Any, **kwargs: Any) -> str:
             if path == checkpoint:
                 raise PermissionError(13, "checkpoint is unreadable")
             return real_text(path, *args, **kwargs)
@@ -97,12 +105,14 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     captured = capfd.readouterr()
     assert "settlement evidence is unusable" in captured.out + captured.err
     assert not list(metadata(wt).glob("*break-glass*.json"))
-    assert record(wid).pr.head_sha == saved
+    current = record(wid)
+    assert current.pr is not None and current.pr.head_sha == saved
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
     assert finalize.push_changes(
         wid, config, break_glass_reason=REASON, confirm_break_glass=first["confirmation"],
     )
-    assert record(wid).pr.head_sha == git("rev-parse", "HEAD", cwd=wt)
+    current = record(wid)
+    assert current.pr is not None and current.pr.head_sha == git("rev-parse", "HEAD", cwd=wt)
     audit = json.loads(next(metadata(wt).glob("*break-glass*.json")).read_text())
     assert audit["operation"]["evidence_status"] == "unusable"
     assert audit["operation"]["action"] == "rewrite"
@@ -158,5 +168,6 @@ def test_recreated_non_commit_evidence_ref_requires_fresh_confirmation(
     changed = preview(wid, config, first["confirmation"])
     assert changed["confirmation"] != first["confirmation"]
     assert changed["operation"]["evidence_status"] == "unusable"
-    assert record(wid).pr.head_sha == saved
+    current = record(wid)
+    assert current.pr is not None and current.pr.head_sha == saved
     assert not list(metadata(wt).glob("*break-glass*.json"))

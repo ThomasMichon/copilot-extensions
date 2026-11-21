@@ -112,7 +112,7 @@ from . import (
     pane_lifecycle,
     permissions as permissions,
     pr_config as pr_config,
-    pr_ops,
+    pr_ops as pr_ops,
     procs as _procs_module,
     profile_assignment,
     prune,
@@ -1554,10 +1554,11 @@ def _worktree_to_dict(
                 d["title"] = summary
     # Direct PR metadata stays distinct from descendant claim projections.
     if rec.prs:
+        from .pr_metadata import pr_to_dict
         active = rec.active_pr()
-        d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
+        d["pr"] = pr_to_dict(active) if active is not None else None
         if not current_only:
-            d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
+            d["prs"] = [pr_to_dict(p) for p in rec.prs]
         d["pr_count"] = len(rec.prs)
     else:
         active = None
@@ -4511,7 +4512,7 @@ def _reap_worktree(
     return reap_worktree(rec, info, repo, tracking_path)
 
 
-def reap_one(
+def _reap_one(
     wt_id: str,
     *,
     force: bool = False,
@@ -4519,25 +4520,22 @@ def reap_one(
     include_conversations: bool = False,
     reconcile_prs: bool = False,
     automatic: bool = False,
+    _config: cfg.Config | None = None,
 ) -> dict[str, Any]:
-    """Reap a single worktree by ID and return a JSON-ready result dict.
+    """Recheck one exact worktree and return a JSON-ready cleanup result.
 
-    Re-checks prune-safety (defense in depth: the picker only sends cleanable
-    ids, but a stray call must never reap unsafe work) unless ``force``; an
-    active session is never reaped even with ``force``. This is the pure
-    result-returning core shared by the ``cleanup --worktree-id`` CLI and the
-    picker's in-process local Cleanup executor.
+    Force overrides content checks, never active sessions. This core is shared
+    by cleanup --worktree-id and the picker's in-process executor.
     """
     # Import the owner directly so cleanup stays cluster-free.
     from . import cleanup_gc_cli as _cleanup_gc_cli
 
     _revalidate_cleanup_safety = _self_override("_revalidate_cleanup_safety", _cleanup_gc_cli._revalidate_cleanup_safety)
 
-    config = cfg.load_config()
+    config = _config if _config is not None else cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
 
-    wt_id = worktree_identity._resolve_worktree_id(wt_id)
     yaml_path = tracking_path / f"{wt_id}.yaml"
 
     def _result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4691,6 +4689,18 @@ def reap_one(
             "state": info.state.value,
             "warnings": warnings,
         }
+    )
+
+
+def reap_one(
+    wt_id: str, *, force: bool = False, include_unused: bool = False,
+    include_conversations: bool = False, reconcile_prs: bool = False, automatic: bool = False,
+) -> dict[str, Any]:
+    """Run exact cleanup with operation-scoped retirement qualification."""
+    from .pr_retirement_consumers import cleanup_one
+    return cleanup_one(
+        wt_id, force=force, include_unused=include_unused, include_conversations=include_conversations,
+        reconcile_prs=reconcile_prs, automatic=automatic,
     )
 
 

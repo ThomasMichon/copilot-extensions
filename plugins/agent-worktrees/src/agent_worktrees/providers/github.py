@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, cast
 from urllib.parse import urlparse
 from urllib.parse import quote
 
+from .. import pr_transport_fence
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
 from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
@@ -21,7 +24,16 @@ from .observation_credentials import (
     github_endpoint, github_request,
 )
 from .observation_http import github_environment, github_reader
+from .github_permissions import (
+    _GH_PERMISSION_PRIORITY as _GH_PERMISSION_PRIORITY,
+    _GH_PERMISSION_TOKEN as _GH_PERMISSION_TOKEN,
+    _github_viewer_permission as _github_viewer_permission,
+)
 
+if TYPE_CHECKING:
+    from ..pr_bar import Snapshot
+    from ..pr_contract import RepoPolicy
+_NativeRead = Callable[..., subprocess.CompletedProcess[str]]
 
 # HTTP statuses worth retrying (network / 5xx / 429 / 408); 4xx (auth / not-found
 # / bad-request) is permanent. gh surfaces the upstream status in its stderr as
@@ -48,47 +60,21 @@ def _gh_detail_is_transient(detail: str) -> bool:
     )
 
 
-#: GitHub's ``repos/{owner}/{repo}`` payload carries a ``permissions`` object
-#: of booleans for the *authenticated* identity -- the acting token/CLI-login,
-#: never a config value. Highest-to-lowest so one true bit wins.
-_GH_PERMISSION_PRIORITY = ("admin", "maintain", "push", "triage", "pull")
-#: GitHub's boolean key -> the provider-neutral token ``actor_merge_authority``
-#: understands (``push`` is GitHub's name for write access).
-_GH_PERMISSION_TOKEN = {
-    "admin": "admin", "maintain": "maintain", "push": "write",
-    "triage": "triage", "pull": "read",
-}
-
-
-def _github_viewer_permission(permissions: object) -> str:
-    """Normalize ``repos/{owner}/{repo}.permissions`` to a merge-authority token.
-
-    Returns ``""`` when the payload is missing/malformed or every bit is false
-    (an authenticated call always has at least ``pull`` true for a repo it can
-    see, so all-false means the field wasn't populated -- report unknown, not a
-    confident "none"). A bit must be the actual boolean ``True`` -- a malformed
-    payload with e.g. ``"push": "false"`` (a truthy string) must never
-    normalize to write access.
-    """
-    if not isinstance(permissions, dict):
-        return ""
-    for bit in _GH_PERMISSION_PRIORITY:
-        if permissions.get(bit) is True:
-            return _GH_PERMISSION_TOKEN[bit]
-    return ""
-
-
 class GitHubProvider:
     """Open + query pull requests on GitHub via the ``gh`` CLI."""
 
     name = "github"
 
-    def __init__(self, *, report_capture=None):
+    def __init__(self, *, report_capture: Callable[..., str | bytes] | None = None) -> None:
         self._report_capture = report_capture
 
-    def confirm_no_pull_by_head_v1(self, repo, head, *, api_base="", token=None) -> bool:
+    def confirm_no_pull_by_head_v1(self, repo: str, head: str, *, api_base: str = "", token: str | None = None) -> bool:
         from .github_head_absence import confirm
         return confirm(self, repo, head, api_base=api_base, token=token)
+
+    def confirm_reconciled_head_v1(self, repo: str, head: str, *, number: int | None = None, head_sha: str = "", api_base: str = "", token: str | None = None) -> bool:
+        from .github_head_reconciliation import confirm
+        return confirm(self, repo, head, number=number, head_sha=head_sha, api_base=api_base, token=token)
 
     def authority_endpoint(self, api_base: str = "") -> str:
         configured = (api_base or "").strip()
@@ -115,9 +101,13 @@ class GitHubProvider:
             env["GH_HOST"] = host
         return env
 
+    @pr_transport_fence.provider_creation
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         reject_copilot_mention(scope.title, what="PR title")
         reject_copilot_mention(scope.body, what="PR description")
+        if ":" in scope.head:
+            from .github_pull_source import create
+            return create(self, scope, token=token, run=run_cli)
         args = [
             "gh", "pr", "create",
             "--repo", scope.repo,
@@ -130,7 +120,10 @@ class GitHubProvider:
             args.append("--draft")
         for label in scope.labels:
             args += ["--label", label]
-        proc = run_cli(args, env=self._env(token))
+        env = self._env(token, host=self.authority_endpoint(scope.api_base))
+        if token is not None:
+            env.update({key: token for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")})
+        proc = run_cli(args, env=env)
         if proc.returncode != 0:
             raise ProviderError(
                 f"gh pr create failed for {scope.repo} "
@@ -146,27 +139,13 @@ class GitHubProvider:
         tail = url.rstrip("/").rsplit("/", 1)[-1] if url else ""
         return int(tail) if tail.isdigit() else None
 
-    def get_publication_labels(self, repo, number, *, api_base="", token=None):
-        args = ["gh", "api", f"repos/{repo}/issues/{number}/labels", "--paginate", "--slurp"]
-        proc = run_cli(args, env=self._env(token, host=self.authority_endpoint(api_base)))
-        if proc.returncode:
-            raise ProviderError(f"Publication-label read failed: {proc.stderr.strip()}")
-        data = json.loads(proc.stdout)
-        if not isinstance(data, list) or any(not isinstance(page, list) for page in data):
-            raise ProviderError("Malformed publication-label pages")
-        data = [item for page in data for item in page]
-        if not isinstance(data, list) or any(
-                not isinstance(item, dict) or not isinstance(item.get("name"), str) for item in data):
-            raise ProviderError("Malformed publication-label response")
-        return tuple(item["name"] for item in data)
+    def get_publication_labels(self, repo: str, number: int, *, api_base: str = "", token: str | None = None) -> tuple[str, ...]:
+        from .github_publication_labels import read
+        return read(self, repo, number, api_base=api_base, token=token, run=run_cli)
 
-    def add_publication_labels(self, repo, number, labels, *, api_base="", token=None):
-        args = ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{number}/labels"]
-        for label in labels:
-            args.extend(["-f", f"labels[]={label}"])
-        proc = run_cli(args, env=self._env(token, host=self.authority_endpoint(api_base)))
-        if proc.returncode:
-            raise ProviderError(f"Publication-label addition failed: {proc.stderr.strip()}")
+    def add_publication_labels(self, repo: str, number: int, labels: tuple[str, ...], *, api_base: str = "", token: str | None = None) -> None:
+        from .github_publication_labels import add
+        add(self, repo, number, labels, api_base=api_base, token=token, run=run_cli)
 
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
@@ -208,12 +187,22 @@ class GitHubProvider:
         from .github_observation import observe_head
         return observe_head(self, repo, number, api_base=api_base, token=token, run=run_cli)
 
-    def observe_branch(self, repo, branch, *, api_base="", token=None):
+    def observe_branch(self, repo: str, branch: str, *, api_base: str = "", token: str | None = None) -> dict[str, str]:
         """Read an exact authoritative remote branch tip, never local Git state."""
         from .github_observation import observe_branch
         return observe_branch(
             self, repo, branch, api_base=api_base, token=token, run=run_cli,
         )
+
+    def resolve_head_repository(self, repo: str, owner: str, *, api_base: str = "",
+                                token: str | None = None) -> str:
+        from .github_fork_source import resolve
+        return resolve(self, repo, owner, api_base=api_base, token=token, run=run_cli)
+
+    def find_pull_by_source(self, repo: str, source: str, branch: str, *,
+                            api_base: str = "", token: str | None = None) -> PullResult | None:
+        from .github_pull_source import find
+        return find(self, repo, source, branch, api_base=api_base, token=token, run=run_cli)
 
     def publish_source_marker(
         self,
@@ -407,16 +396,17 @@ class GitHubProvider:
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
         credential_env: Callable[[], dict[str, str]] | None = None,
-        api_base: str = "", native_read: Callable | None = None,
+        api_base: str = "", native_read: _NativeRead | None = None,
     ) -> tuple[Review, ...]:
         from .github_review_pages import read_reviews
+        read_options: dict[str, Any] = {"max_stdout_bytes": 1_048_576} if credential_env is not None else {}
         return read_reviews(
             repo, number, host=host, is_transient=_gh_detail_is_transient,
             sanitized_errors=credential_env is not None,
             invoke=lambda argv: (native_read or run_cli)(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
-                **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
+                **read_options,
             ),
         )
 
@@ -430,15 +420,16 @@ class GitHubProvider:
     def _checks_report(
         self, repo: str, sha: str, token: str | None, *, host: str = "github.com",
         credential_env: Callable[[], dict[str, str]] | None = None,
-        api_base: str = "", native_read: Callable | None = None,
+        api_base: str = "", native_read: _NativeRead | None = None,
     ) -> ChecksReport:
         from .github_checks import read_checks
+        read_options: dict[str, Any] = {"max_stdout_bytes": 1_048_576} if credential_env is not None else {}
 
-        def read(argv):
+        def read(argv: list[str]) -> subprocess.CompletedProcess[str]:
             proc = (native_read or run_cli)(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
-                **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
+                **read_options,
             )
             if (
                 credential_env is not None and proc.returncode
@@ -470,21 +461,18 @@ class GitHubProvider:
     def list_open_pull_records(
         self, repo: str, *, api_base: str = "", token: str | None = None,
         expected_login: str | None = None,
-    ) -> tuple[dict, ...]:
+    ) -> tuple[dict[str, Any], ...]:
         from .repository_inventory import github_open_pulls
         return github_open_pulls(self, repo, api_base=api_base, token=token, expected_login=expected_login)
 
     def find_pull_by_head(
         self, repo: str, head: str, *, api_base: str = "", token: str | None = None
     ) -> PullResult | None:
-        """Resolve a PR by its head branch via ``gh pr list --head`` (all states).
-
-        fleet-flows Phase 2 (#2146): heals a tracked record whose active PR has
-        no ``number``. ``gh pr list --head`` scopes to branches in ``repo``
-        itself -- correct here, since every branch this facility opens a PR
-        from lives in the same repo (no cross-fork PRs). Returns ``None`` when
-        no PR (of any state) has that head.
-        """
+        """Find any-state PRs; qualified heads use exact-source REST lookup."""
+        if ":" in head:
+            owner, _, branch = head.partition(":")
+            source = self.resolve_head_repository(repo, owner, api_base=api_base, token=token)
+            return self.find_pull_by_source(repo, source, branch, api_base=api_base, token=token)
         proc = run_cli(
             [
                 "gh", "pr", "list",
@@ -693,10 +681,11 @@ class GitHubProvider:
         """Resolve only a configured automated-reviewer binding."""
         return self._REVIEWER_BOT_LOGINS.get((reviewer or "").strip().lower(), "")
 
-    def request_review_target(self, repo, number, *, reviewer="", api_base="", token=None):
+    def request_review_target(self, repo: str, number: int, *, reviewer: str = "", api_base: str = "", token: str | None = None) -> dict[str, Any]:
         """Request one explicit active PR through the existing review transport."""
         from .github_review_request import target
-        return target(self, repo, number, reviewer=reviewer, api_base=api_base, token=token, run=run_cli)
+        invoke = cast(Callable[..., dict[str, Any]], target)
+        return invoke(self, repo, number, reviewer=reviewer, api_base=api_base, token=token, run=run_cli)
 
     def request_review(
         self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
@@ -730,7 +719,7 @@ class GitHubProvider:
     def get_repo_policy(
         self, repo: str, *, default_branch: str = "", api_base: str = "",
         token: str | None = None,
-    ):
+    ) -> RepoPolicy:
         """Read GitHub repo settings + branch protection into a ``RepoPolicy``.
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
@@ -762,7 +751,7 @@ class GitHubProvider:
         except json.JSONDecodeError as exc:
             return RepoPolicy(supported=False, error=f"non-JSON repo payload: {exc}")
 
-        def _b(key):
+        def _b(key: str) -> bool | None:
             v = data.get(key)
             return bool(v) if isinstance(v, bool) else None
 
@@ -887,7 +876,7 @@ class GitHubProvider:
         owner, name = repo.split("/", 1)
         return owner, name
 
-    def _graphql(self, query: str, token: str | None, **fields) -> tuple[dict, str]:
+    def _graphql(self, query: str, token: str | None, **fields: object) -> tuple[dict[str, Any], str]:
         if self._report_capture is not None:
             if query != self._THREADS_QUERY:
                 raise ProviderError("scoped report transport only supports thread reads")
@@ -905,7 +894,7 @@ class GitHubProvider:
         except json.JSONDecodeError as exc:
             return {}, f"bad GraphQL JSON: {exc}"
 
-    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None):
+    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None) -> Snapshot:
         from .github_bar import read_bar  # every list paged to its end, fail closed (pr bar)
         return read_bar(repo, number, host=self.authority_endpoint(api_base), token=token)
 
@@ -1013,9 +1002,10 @@ class GitHubProvider:
             env.update({name: token for name in (
                 "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
             )})
+        diff_options: dict[str, Any] = {"preserve_line_endings": True} if preserve_line_endings else {}
         proc = run_cli(
             ["gh", "pr", "diff", str(number), "--repo", repo],
-            env=env, **({"preserve_line_endings": True} if preserve_line_endings else {}),
+            env=env, **diff_options,
         )
         if proc.returncode != 0:
             return PRDiff(

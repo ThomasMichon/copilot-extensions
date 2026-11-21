@@ -154,6 +154,21 @@ Foreign `create-pr --from-branch` without the source workspace refuses when
 checks are configured; the caller's unrelated checkout cannot satisfy a target
 repository's local receipt.
 
+For a GitHub `--from-branch contributor:topic`, pass
+`--source-repo contributor/actual-fork-name`, or let the reachable source
+workspace supply its exact push destination. Without either input, the existing
+colon-qualified invocation resolves the actual owner from the selected target's
+complete, paginated GitHub fork network. Missing, ambiguous or incomplete
+observations require explicit selection instead of a guessed fork.
+The fork name is never derived
+from the target repository. Local checks select branch `topic`, not the
+colon-qualified provider head; remote source observations use the actual fork
+while target observations retain the selected base repository.
+Unqualified heads retain the target repository. The native PR frontend forwards
+`--source-repo` only when the executing owner's author capabilities explicitly
+advertise `operations.foreign-source-repo: true`; old or unsupported peers refuse
+before creation, without fallback or automatic update.
+
 With `--source-workspace` and `--expected-head`, the reachable-workspace adapter
 uses GitHub or Azure DevOps to read exact remote source and target branch tips.
 GitHub uses an absolute URL for the selected HTTPS endpoint, including its port,
