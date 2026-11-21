@@ -186,6 +186,14 @@ No whole-backlog acyclicity claim follows from these finite relationships.
 
 ## Finite integration research queue
 
+The [outside-wave coverage register](roadmap-coverage-reconciliation.md)
+records the first 32 identities in this lane as existing research with
+retained scope, explicit refresh needs or admission/interpretation gaps.
+The original 153-identity cohort remains fixed; its two observed departures
+and thirteen later outside-wave identities are accounted separately. The
+older 882/437 counting references below retain their original observation,
+not the register's later 897/441 snapshot.
+
 The [current gate assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
 keeps six integration gates open and separates the 882-identity counting
 inventory from current technical qualification. Continue these bounded
