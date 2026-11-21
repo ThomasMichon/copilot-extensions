@@ -158,6 +158,8 @@ def test_installed_application_starts_its_slot_not_the_healthy_predecessor(
     monkeypatch.setattr(install_paths, "__file__", str(path.parent / "install_paths.py"))
     if not root_override:
         monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR")
+    elif sys.platform == "win32":
+        monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", "\\\\?\\" + str(root.resolve()))
     original = importlib.metadata.version
     monkeypatch.setattr(
         importlib.metadata, "version",
@@ -171,6 +173,10 @@ def test_installed_application_starts_its_slot_not_the_healthy_predecessor(
     assert len(state.launches) == 1 and state.releases == [3]
     assert state.launches[0][1]["contained_last_resort"] is False
     monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(root / "foreign"))
+    with pytest.raises(ServingReconcileError, match="installation root differs"):
+        callback.start_installed_slot()
+    assert len(state.launches) == 1
+    (root / "foreign").mkdir()
     with pytest.raises(ServingReconcileError, match="installation root differs"):
         callback.start_installed_slot()
     assert len(state.launches) == 1

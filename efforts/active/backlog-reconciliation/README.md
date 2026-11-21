@@ -1471,6 +1471,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [next outside-wave coverage slice](journal/2026/11.21-outside-wave-coverage-continuation.md)
+accounts for numeric positions 33-64 of the existing finite 153-identity lane.
+The [coverage register](roadmap-coverage-reconciliation.md#next-32-receipt-and-gap-decisions)
+retains fourteen research receipts, one owner-control receipt, one previously
+verified completion, six interpretation gaps, two provenance gaps and eight
+source/refusal gaps. This brings accounted continuation decisions to 64,
+leaving 89 cohort identities and thirteen later identities separate. No new
+closure, original/source acquisition, priority or campaign check state follows.
+
 The [outside-wave coverage register](roadmap-coverage-reconciliation.md)
 accounts for the first 32 identities in the existing finite 153-issue
 reconciliation lane, retaining research, freshness, provenance and interpretation

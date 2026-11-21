@@ -11252,8 +11252,15 @@ IDs and assertions. They exercise real batch/reference/diff parsing and launch,
 timeout and error handling in-process. All 44 original Git integration cases
 and six real scanner subprocess cases remain unchanged outside the packet.
 No native witness is replaced by a mock or used to infer native qualification.
-Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
-the source map's existing layout so independent hash updates can merge cleanly.
+The local-Git evidence and module-size probe adapters export ten and one
+original mocked controls respectively. They preserve delimiter refusal,
+local-only availability, cache reuse, bounded/headless probes, unsupported-Git
+refusal and controlled timeout diagnostics. The original 83 native/schema/
+policy residuals remain outside the packet. No registry validation gate is
+restored, and no Git command, registry capture or baseline refresh executes.
+Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
+while retaining the source map's existing layout so independent hash updates
+can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
 Whitespace does not change the canonical manifest digest; do not raise the
 cap or remove admitted cases to accommodate formatting.

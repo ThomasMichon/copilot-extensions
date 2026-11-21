@@ -53,6 +53,14 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
+extends the existing [coverage register](roadmap-coverage-reconciliation.md)
+through numeric position 64 of its fixed 153-identity cohort. These are
+accounted research/control receipts and explicit gaps, not 64 new technical
+assessments or completed issues. The remaining 89 cohort identities and
+thirteen later identities retain separate current-coverage duties; the six
+integration gates remain open.
+
 The [first 200-issue proposal](roadmap-wave-1.md) links four per-issue appendices,
 a concrete source-fix versus qualification shortlist, existing work homes and a
 [33-edge scoped dependency register](roadmap-wave-1-dependencies.md). It
