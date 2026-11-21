@@ -5,13 +5,16 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import os
 import platform
 import re
+import threading
 import uuid
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal
 
 from . import launch_admission, locks, status_monitor_runtime, tracking, tracking_write
 from . import terminal_pair_progress
@@ -21,6 +24,22 @@ from .worktree_status_daemon import _is_safe_identity_token
 
 class NativeSeedTransportError(ValueError):
     """A provider transition and a native prompt cannot both be admitted."""
+
+
+_removal_transaction: ContextVar[tuple[int, int, Path] | None] = ContextVar("seed_removal_transaction", default=None)
+
+
+@contextmanager
+def removal_transaction(path: Path, *, record_paths: list[Path] | None = None) -> Iterator[None]:
+    """Own launch admission before the record lock through local teardown."""
+    with launch_admission.guard(path, timeout=2), ExitStack() as lifetime:
+        for owner_path in sorted({path, *(record_paths or ())}, key=str):
+            lifetime.enter_context(tracking._RecordLock(owner_path, require_sidecar=True))
+        token = _removal_transaction.set((os.getpid(), threading.get_ident(), path.resolve()))
+        try:
+            yield
+        finally:
+            _removal_transaction.reset(token)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,7 +116,7 @@ def _write(yaml_path: Path, seed: LaunchSeed) -> None:
     )
 
 
-def _record(args: dict):
+def _record(args: dict[str, Any]) -> tracking.WorktreeRecord:
     path = Path(args["yaml_path"])
     state_path(path)
     record = tracking.load_record(path)
@@ -139,7 +158,7 @@ def execution_leg_mutation(
         yield record
 
 
-def _apply_stage(args: dict) -> dict:
+def _apply_stage(args: dict[str, Any]) -> dict[str, Any]:
     from . import agent_policy
 
     path = Path(args["yaml_path"])
@@ -196,7 +215,7 @@ def _apply_stage(args: dict) -> dict:
         return {"seed": dataclasses.asdict(seed)}
 
 
-def _apply_take(args: dict) -> dict:
+def _apply_take(args: dict[str, Any]) -> dict[str, Any]:
     from . import agent_policy
 
     path = Path(args["yaml_path"])
@@ -222,7 +241,7 @@ def _apply_take(args: dict) -> dict:
         return {"seed": dataclasses.asdict(claimed)}
 
 
-def _apply_restore(args: dict) -> dict:
+def _apply_restore(args: dict[str, Any]) -> dict[str, Any]:
     path = Path(args["yaml_path"])
     with tracking._RecordLock(path, require_sidecar=True):
         _record(args)
@@ -239,7 +258,7 @@ def _apply_restore(args: dict) -> dict:
         return {"restored": True}
 
 
-def _apply_finish(args: dict) -> dict:
+def _apply_finish(args: dict[str, Any]) -> dict[str, Any]:
     path = Path(args["yaml_path"])
     with tracking._RecordLock(path, require_sidecar=True):
         record = _record(args)
@@ -280,7 +299,7 @@ def _remove_record_state(path: Path, target: Path, receipt: Path) -> None:
         raise
 
 
-def _apply_remove(args: dict) -> dict:
+def _apply_remove(args: dict[str, Any]) -> dict[str, Any]:
     path = Path(args["yaml_path"])
     target = state_path(path)
     receipt = terminal_pair_progress.receipt_path(path)
@@ -311,16 +330,16 @@ def _valid_birth_token(value: object) -> bool:
     return re.fullmatch(pattern, value) is not None
 
 
-def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
+def _dispatch(verb: str, args: dict[str, Any], *, min_version: int = 4) -> dict[str, Any]:
     if verb in {"launch_seed_stage", "launch_seed_take"}:
         min_version = max(min_version, 7)
     if verb == "launch_seed_stage" and args.get("creation_snapshot") is not None:
         min_version = max(min_version, 8)
     enabled = status_monitor_runtime._status_monitor_enabled()
 
-    def read_authority():
+    def read_authority() -> dict[str, Any] | None:
         data = locks.read_lock(status_monitor_runtime._monitor_lock_path())
-        if (verb == "launch_seed_remove"
+        if (verb == "launch_seed_remove" and data is not None
                 and tracking_write.endpoint_from_rendezvous(data, verb=verb, min_version=1)
                 and not tracking_write.endpoint_from_rendezvous(data, verb=verb, min_version=5)):
             pid = data.get("pid")
@@ -355,7 +374,7 @@ def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
 def stage(
     yaml_path: Path, *, kind: Literal["new", "resume"] | None = None, text: str | None = None,
     seed_id: str | None = None,
-    creation_snapshot: dict | None = None,
+    creation_snapshot: dict[str, Any] | None = None,
 ) -> LaunchSeed | None:
     from . import agent_policy
 
@@ -369,7 +388,7 @@ def stage(
 
 
 def take(yaml_path: Path, *, seed_id: str | None = None, kind: str | None = None,
-         handoff_id: str | None = None) -> dict:
+         handoff_id: str | None = None) -> dict[str, Any]:
     from . import agent_policy
 
     agent_policy.require_record(yaml_path)
@@ -380,28 +399,35 @@ def take(yaml_path: Path, *, seed_id: str | None = None, kind: str | None = None
     })
 
 
-def restore(yaml_path: Path, receipt: dict) -> dict:
+def restore(yaml_path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
     return _dispatch("launch_seed_restore", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed": receipt["seed"],
     })
 
 
-def finish(yaml_path: Path, receipt: dict) -> dict:
+def finish(yaml_path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
     return _dispatch("launch_seed_finish", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed": receipt["seed"],
     })
 
 
-def remove(yaml_path: Path, *, remove_record: bool = False) -> dict:
-    return _dispatch("launch_seed_remove", {
+def remove(yaml_path: Path, *, remove_record: bool = False) -> dict[str, Any]:
+    """Keep nested removal in its existing record transaction, without IPC."""
+    args = {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "remove_record": remove_record,
-    }, min_version=5)
+    }
+    if _removal_transaction.get() == (os.getpid(), threading.get_ident(), yaml_path.resolve()):
+        try:
+            return _apply_remove(args)
+        except ExecutionSpaceError as exc:
+            raise ValueError(str(exc)) from exc
+    return _dispatch("launch_seed_remove", args, min_version=5)
 
 
-def pending(yaml_path: Path, record=None) -> LaunchSeed | None:
+def pending(yaml_path: Path, record: tracking.WorktreeRecord | None = None) -> LaunchSeed | None:
     current = peek(yaml_path)
     if record is None:
         record = tracking.load_record(yaml_path)
@@ -410,14 +436,14 @@ def pending(yaml_path: Path, record=None) -> LaunchSeed | None:
     return current
 
 
-def claim_creation(yaml_path: Path) -> dict:
+def claim_creation(yaml_path: Path) -> dict[str, Any]:
     current = pending(yaml_path)
     if current is None or current.kind != "new":
         return {"seed": None}
     return take(yaml_path, seed_id=current.seed_id, kind="new")
 
 
-def creation_text(yaml_path: Path, record) -> str | None:
+def creation_text(yaml_path: Path, record: tracking.WorktreeRecord) -> str | None:
     current = peek(yaml_path)
     legacy = getattr(record, "pending_seed", None)
     if current is None or (legacy and record.pending_seed_revision > current.revision):
@@ -425,7 +451,7 @@ def creation_text(yaml_path: Path, record) -> str | None:
     return current.text if current.kind == "new" else None
 
 
-def settle_creation(yaml_path: Path, receipt: dict, result: dict) -> dict:
+def settle_creation(yaml_path: Path, receipt: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     from .pending_seed import nothing_typed
 
     if not receipt.get("seed"):
@@ -444,8 +470,10 @@ def settle_creation(yaml_path: Path, receipt: dict, result: dict) -> dict:
     }
 
 
-def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict]:
-    def apply(args: dict) -> dict:
+def _authority_checked(
+    handler: Callable[[dict[str, Any]], dict[str, Any]],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def apply(args: dict[str, Any]) -> dict[str, Any]:
         from . import agent_policy
         from repository_policy import AgentHostingError
 

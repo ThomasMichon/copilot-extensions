@@ -52,7 +52,7 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
         point = points.get(pr.pr_id) if isinstance(points, dict) else (
             data if data.get("pr_id") == pr.pr_id else None
         )
-    refs = {}
+    refs: dict[str, object] = {}
     unusable = False
     if isinstance(point, dict):
         if point.get("pr_id") != pr.pr_id:
@@ -65,10 +65,11 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
             unusable = True
         for field in ("local_ref", "published_ref", "lineage_ref"):
             ref = point.get(field)
-            if not isinstance(ref, str) or not ref:
+            if not isinstance(ref, str) or not ref or "\0" in ref:
                 unusable = True
             else:
                 try:
+                    ref.encode("utf-8")
                     result = git_ops.git(
                         "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
                         ref, cwd=cwd, check=False, isolated_repository=True,

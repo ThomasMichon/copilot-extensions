@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve actual foreign GitHub fork selection through capability-gated native author operations",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

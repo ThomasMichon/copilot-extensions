@@ -13295,7 +13295,7 @@ manually dispatched `PR rebase full` workflow on Linux and Windows:
 
 ```powershell
 $env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
-python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
 ```
 
 Use the exhaustive mode when changing replay authorization or its publication
@@ -13304,6 +13304,15 @@ The same manual lane covers exact operator-recovery previews, advanced live
 heads, backed-sync bookkeeping settlement, immutable source/lease races and
 ordinary stale-tip reconciliation against disposable Git repositories. It
 requires no live PR, credentials or effectful operator recovery.
+
+The same manual lane owns `test_pr_source_binding.py`: real Git source movement
+at fence acquisition, physical GitHub endpoint aliases, nonblocking completion
+admission, differently named foreign forks and a retained-history routing
+control, plus the small `test_pr_fork_source.py` provider-response contract.
+Its local focused run keeps the existing 30-second item and 300-second
+suite bounds. The native frontend's small capability/forwarding controls are
+`agent-pull-requests/tests/test_native_foreign_source.py`; they require no forge
+or installed-runtime mutation.
 
 Required pull-request CI is a fast regression gate, not the complete test
 inventory. Its design target is a wall time below five minutes under normal

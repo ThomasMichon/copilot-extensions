@@ -1,6 +1,8 @@
 """Exact-lease intentional rewrites through the public push-changes contract."""
 
 from dataclasses import replace
+from typing import Any
+from collections.abc import Iterator
 import contextlib
 import json
 import os
@@ -10,9 +12,11 @@ import sys
 
 import pytest
 
+from agent_procutil import no_window_kwargs
 from agent_worktrees import __main__ as cli
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, finalize_cli, git_ops, pr_ops, pr_publish, pr_rewrite, pr_state_cli, tracking
+from agent_worktrees import finalize, finalize_cli, git_ops, pr_authority, pr_ops, pr_publish, pr_rebase, pr_rewrite, pr_state_cli, tracking
+from agent_worktrees.tracking_lifecycle import create_new_record
 from agent_worktrees.providers.base import PullResult
 
 pytestmark = [
@@ -21,18 +25,18 @@ pytestmark = [
 ]
 
 
-def git(*args, cwd):
+def git(*args: str, cwd: str | Path) -> str:
     if Path(cwd).name.endswith(".git"):
         args = ("--git-dir", str(cwd), *args)
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
 
-def record_for(wid):
+def record_for(wid: str) -> Any:
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
 @pytest.mark.parametrize("native", ["active", "completed", "abandoned"])
-def test_persisted_native_pr_state_remains_truthful_and_live(pr_repo, native):
+def test_persisted_native_pr_state_remains_truthful_and_live(pr_repo: Any, native: str) -> None:
     _config, wid, _wt, _remote = pr_repo
     path = cfg.tracking_dir() / f"{wid}.yaml"
     record = record_for(wid)
@@ -45,7 +49,7 @@ def test_persisted_native_pr_state_remains_truthful_and_live(pr_repo, native):
     assert path.read_bytes() == before
 
 
-def test_existing_active_pr_can_refresh_ownership_and_rewrite(pr_repo, monkeypatch):
+def test_existing_active_pr_can_refresh_ownership_and_rewrite(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote = pr_repo
     assert pr_ops.create_pr(wid, config, title="Legacy publication")["success"]
     record = record_for(wid)
@@ -71,7 +75,7 @@ def test_existing_active_pr_can_refresh_ownership_and_rewrite(pr_repo, monkeypat
     assert git("rev-parse", record.pr.branch, cwd=remote) == git("rev-parse", "HEAD", cwd=wt)
 
 
-def test_explicit_rewrite_threads_configured_lock_deadlines(rebased_refspec_pr_repo, monkeypatch):
+def test_explicit_rewrite_threads_configured_lock_deadlines(rebased_refspec_pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import publication_deadline
 
     config, wid, wt, _remote, _old = rebased_refspec_pr_repo
@@ -80,21 +84,21 @@ def test_explicit_rewrite_threads_configured_lock_deadlines(rebased_refspec_pr_r
     calls = []
 
     @contextlib.contextmanager
-    def authority(**kwargs):
+    def authority(**kwargs: Any) -> Iterator[None]:
         calls.append(("authority", kwargs))
         yield
 
     @contextlib.contextmanager
-    def publish(cwd, **kwargs):
+    def publish(cwd: str | Path, **kwargs: Any) -> Iterator[None]:
         calls.append(("publish", kwargs))
         yield
 
     @contextlib.contextmanager
-    def metadata(worktree_id, **kwargs):
+    def metadata(worktree_id: str, **kwargs: Any) -> Iterator[None]:
         calls.append(("metadata", kwargs))
         yield
 
-    monkeypatch.setattr(pr_rewrite.pr_authority, "guard", authority)
+    monkeypatch.setattr(pr_authority, "guard", authority)
     monkeypatch.setattr(pr_publish, "publish_lock", publish)
     monkeypatch.setattr(pr_publish, "metadata_lock", metadata)
     assert finalize.push_changes(wid, config, rewrite_pr=True, dry_run=True)
@@ -104,12 +108,12 @@ def test_explicit_rewrite_threads_configured_lock_deadlines(rebased_refspec_pr_r
     assert ("metadata", {"project": config.repo_name, "timeout": wait}) in calls
 
 
-def test_create_pr_cli_reports_authority_timeout_as_json(pr_repo, monkeypatch, capfd):
+def test_create_pr_cli_reports_authority_timeout_as_json(pr_repo: Any, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     config, wid, wt, _remote = pr_repo
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.chdir(wt)
 
-    def timeout(*args, **kwargs):
+    def timeout(*args: Any, **kwargs: Any) -> None:
         raise TimeoutError("Timed out waiting for PR rewrite authority")
 
     monkeypatch.setattr(pr_ops, "create_pr", timeout)
@@ -119,7 +123,7 @@ def test_create_pr_cli_reports_authority_timeout_as_json(pr_repo, monkeypatch, c
     assert "PR rewrite authority" in payload["error"]
 
 
-def publish_and_rebase(pr_repo, scheme):
+def publish_and_rebase(pr_repo: Any, scheme: str) -> Any:
     config, wid, wt, remote = pr_repo
     repo = config.default_repo
     config = replace(config, repos={"ext": replace(repo, pr=replace(repo.pr, head_scheme=scheme))})
@@ -141,32 +145,47 @@ def publish_and_rebase(pr_repo, scheme):
 
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
-def test_explicit_rewrite_public_cli_real_rebase(rebased_pr_repo, scheme, monkeypatch):
+def test_explicit_rewrite_public_cli_real_rebase(rebased_pr_repo: Any, scheme: str, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote, old = rebased_pr_repo
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     rec = record_for(wid)
     rec.pr.number = 42
     tracking.save_record(rec)
     monkeypatch.setattr(pr_rewrite, "observe_pr",
-                        lambda config, pr: PullResult(head_sha=pr_publish._tip("origin", pr.branch, str(wt))))
+                        lambda config, pr: PullResult(head_sha=pr_publish._tip("origin", pr.branch, str(wt)) or ""))
     attribution = []
     monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
-    monkeypatch.setattr(pr_ops, "refresh_source_attribution",
-                        lambda *a: attribution.append(a[-1]) or "")
+    def attribute(*args: Any) -> str:
+        attribution.append(args[-1])
+        return ""
+
+    monkeypatch.setattr(pr_ops, "refresh_source_attribution", attribute)
     monkeypatch.chdir(wt)
     (wt / "squash.txt").write_text("intentional squash\n")
     git("add", "-A", cwd=wt)
     git("commit", "-m", "prepare intentional squash", cwd=wt)
     squashed, reason = git_ops.squash_branch("origin/master", "intentional squash", cwd=str(wt))
     assert squashed, reason
-    assert not finalize.push_changes(wid, config)
-    assert record_for(wid).pr.head_sha == old
+    automatic = git("rev-parse", "HEAD", cwd=wt)
+    assert not git_ops.is_commit_ancestor(old, automatic, cwd=str(wt))
+    assert finalize.push_changes(wid, config)
+    assert record_for(wid).pr.head_sha == automatic
+    assert pr_publish._tip("origin", rec.pr.branch, str(wt)) == automatic
+    retained = set(git(
+        "for-each-ref", "--format=%(objectname)",
+        f"{pr_rebase.BACKUP_NAMESPACE}/{rec.pr.branch}/", cwd=wt,
+    ).splitlines())
+    assert {old, automatic} <= retained
+    (wt / "squash.txt").write_text("explicitly amended squash\n")
+    git("add", "squash.txt", cwd=wt)
+    git("commit", "--amend", "--no-edit", cwd=wt)
     before = git("rev-parse", "HEAD", cwd=wt)
+    assert not git_ops.is_commit_ancestor(automatic, before, cwd=str(wt))
     args = cli.build_parser().parse_args(["push-changes", wid, "--rewrite-pr"])
     assert finalize_cli.cmd_push_changes(args) == 0
     rec = record_for(wid)
     assert rec.pr.head_sha == before
-    assert attribution == [before]
+    assert attribution == [automatic, before]
     assert pr_publish._tip("origin", rec.pr.branch, str(wt)) == before
     if scheme == "snapshot":
         assert git("rev-parse", rec.pr.branch, cwd=wt) == before
@@ -183,17 +202,17 @@ def test_explicit_rewrite_public_cli_real_rebase(rebased_pr_repo, scheme, monkey
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
 @pytest.mark.parametrize("during_push", [False, True])
-def test_explicit_rewrite_refuses_moved_remote(rebased_pr_repo, scheme, during_push, monkeypatch):
+def test_explicit_rewrite_refuses_moved_remote(rebased_pr_repo: Any, scheme: str, during_push: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote, old = rebased_pr_repo
     pr = record_for(wid).pr
     moved = git("rev-parse", "origin/master", cwd=wt)
     real_push = git_ops.push
 
-    def advance():
+    def advance() -> None:
         git("update-ref", f"refs/heads/{pr.branch}", moved, old, cwd=remote)
 
     if during_push:
-        def raced_push(*a, **k):
+        def raced_push(*a: Any, **k: Any) -> Any:
             advance()
             return real_push(*a, **k)
         monkeypatch.setattr(git_ops, "push", raced_push)
@@ -209,7 +228,7 @@ def test_explicit_rewrite_refuses_moved_remote(rebased_pr_repo, scheme, during_p
     "shared-head", "default-head", "closed", "untracked", "pushurl",
     "wrong-repo", "wrong-provider-pr", "closed-provider-pr", "merged-provider-pr",
 ])
-def test_explicit_rewrite_ownership_and_destination_guards(rebased_refspec_pr_repo, defect, monkeypatch):
+def test_explicit_rewrite_ownership_and_destination_guards(rebased_refspec_pr_repo: Any, defect: str, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     feature = rec.pr.branch
@@ -222,7 +241,7 @@ def test_explicit_rewrite_ownership_and_destination_guards(rebased_refspec_pr_re
     elif defect == "wrong-record-branch":
         rec.branch = "worktree/other"
     elif defect == "shared-head":
-        other = tracking.create_new_record(
+        other = create_new_record(
             "other", "worktree/other", str(wt.parent / "other"),
             rec.repo, "test", "linux", cfg.tracking_dir(),
         )
@@ -254,7 +273,7 @@ def test_explicit_rewrite_ownership_and_destination_guards(rebased_refspec_pr_re
     assert git("rev-parse", f"refs/heads/{feature}", cwd=remote) == old
 
 
-def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(rebased_snapshot_pr_repo, capsys):
+def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(rebased_snapshot_pr_repo: Any, capsys: pytest.CaptureFixture[str]) -> None:
     config, wid, wt, remote, old = rebased_snapshot_pr_repo
     rec = record_for(wid)
     assert finalize.push_changes(wid, config, rewrite_pr=True, dry_run=True)
@@ -272,7 +291,7 @@ def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(rebased_snapshot_
     assert record_for(wid).pr.head_sha == old
 
 
-def test_explicit_rewrite_uses_one_fresh_destination_snapshot(rebased_refspec_pr_repo, monkeypatch, capsys):
+def test_explicit_rewrite_uses_one_fresh_destination_snapshot(rebased_refspec_pr_repo: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     record = record_for(wid)
     before = record.yaml_path.read_bytes()
@@ -282,8 +301,8 @@ def test_explicit_rewrite_uses_one_fresh_destination_snapshot(rebased_refspec_pr
     snapshots = []
     repoint = False
 
-    def observed(name, *, cwd):
-        result = original(name, cwd=cwd)
+    def observed(name: str, *, cwd: str | Path) -> Any:
+        result = original(name, cwd=str(cwd))
         snapshots.append(result[2])
         if repoint and len(snapshots) == 3:
             git("remote", "set-url", name, str(other), cwd=wt)
@@ -303,7 +322,7 @@ def test_explicit_rewrite_uses_one_fresh_destination_snapshot(rebased_refspec_pr
         assert git("rev-parse", f"refs/heads/{record.pr.branch}", cwd=repository) == old
 
 
-def test_low_level_rewrite_requires_exact_lease(monkeypatch):
+def test_low_level_rewrite_requires_exact_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     monkeypatch.setattr(git_ops, "git", lambda *a, **k: calls.append(a))
     assert not git_ops.push("origin", "pr/x", cwd=".", allow_history_rewrite=True)
@@ -311,7 +330,7 @@ def test_low_level_rewrite_requires_exact_lease(monkeypatch):
 
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
-def test_explicit_rewrite_recorded_fork_and_repoint_refusal(rebased_pr_repo, scheme):
+def test_explicit_rewrite_recorded_fork_and_repoint_refusal(rebased_pr_repo: Any, scheme: str) -> None:
     config, wid, wt, remote, old = rebased_pr_repo
     rec = record_for(wid)
     feature = rec.pr.branch
@@ -332,7 +351,7 @@ def test_explicit_rewrite_recorded_fork_and_repoint_refusal(rebased_pr_repo, sch
     assert git("rev-parse", f"refs/heads/{feature}", cwd=remote) == old
 
 
-def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(rebased_refspec_pr_repo, monkeypatch):
+def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(rebased_refspec_pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     rec.repo = rec.repo.upper()
@@ -349,18 +368,18 @@ def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(rebased_refspe
         "print(json.dumps(pr_ops.set_pr(sys.argv[2],branch='feature/corrected-aaaa')))"
     )
 
-    def set_pr_process():
+    def set_pr_process() -> Any:
         env = dict(os.environ)
         env["PYTHONPATH"] = str(Path(pr_ops.__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
         result = subprocess.run(
             [sys.executable, "-c", script, str(cfg.tracking_dir()), wid],
             cwd=wt, env=env, capture_output=True, text=True, timeout=20,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
 
-    def provider_probe(repo, pr):
+    def provider_probe(repo: Any, pr: Any) -> Any:
         blocked = set_pr_process()
         assert not blocked["success"]
         assert "timed out" in blocked["error"].lower()
@@ -380,7 +399,7 @@ def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(rebased_refspe
     assert corrected.pr.head_sha == source
 
 
-def test_explicit_rewrite_configured_project_not_ambient(rebased_refspec_pr_repo, monkeypatch, capfd):
+def test_explicit_rewrite_configured_project_not_ambient(rebased_refspec_pr_repo: Any, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     ledger = cfg.tracking_dir()
     ambient = ledger.parent / "ambient"
@@ -394,6 +413,7 @@ def test_explicit_rewrite_configured_project_not_ambient(rebased_refspec_pr_repo
     ])
     assert finalize_cli.cmd_push_changes(args) == 0
     rec = tracking.load_record(ledger / f"{wid}.yaml")
+    assert rec.pr is not None
     response = json.loads(capfd.readouterr().out)
     assert response["status"] == rec.status
     assert rec.pr.head_sha != old
@@ -405,8 +425,11 @@ def test_explicit_rewrite_configured_project_not_ambient(rebased_refspec_pr_repo
     rec.pr.number = 42
     tracking.save_record(rec)
     observed = []
-    monkeypatch.setattr(pr_ops, "refresh_head_observation",
-                        lambda conf, record, pr, sha: observed.append(record.worktree_path) or "")
+    def observe(conf: Any, record: Any, pr: Any, sha: str) -> str:
+        observed.append(record.worktree_path)
+        return ""
+
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", observe)
     args = cli.build_parser().parse_args([
         "set-pr", git_ops.worktree_suffix(wid), "--state", "open", "--config", "selected-project.yaml", "--json",
     ])
@@ -416,7 +439,7 @@ def test_explicit_rewrite_configured_project_not_ambient(rebased_refspec_pr_repo
     assert observed == [str(wt)]
 
 
-def test_explicit_rewrite_refuses_manual_same_suffix_association_and_stale_save(rebased_refspec_pr_repo):
+def test_explicit_rewrite_refuses_manual_same_suffix_association_and_stale_save(rebased_refspec_pr_repo: Any) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     stale = record_for(wid)
     published = stale.pr.branch
@@ -441,7 +464,7 @@ def test_explicit_rewrite_refuses_manual_same_suffix_association_and_stale_save(
     assert git("rev-parse", f"refs/heads/{manual}", cwd=remote) == old
 
 
-def test_explicit_rewrite_legacy_ownership_refresh_preserves_published_history(pr_repo):
+def test_explicit_rewrite_legacy_ownership_refresh_preserves_published_history(pr_repo: Any) -> None:
     config, wid, wt, remote = pr_repo
     assert pr_ops.create_pr(wid, config, title="Add feature")["success"]
     rec = record_for(wid)
@@ -460,12 +483,12 @@ def test_explicit_rewrite_legacy_ownership_refresh_preserves_published_history(p
 
 
 @pytest.mark.parametrize("wid", ["test-wt-123456", "nodashid"])
-def test_explicit_rewrite_uses_canonical_creation_suffix(pr_repo, wid):
+def test_explicit_rewrite_uses_canonical_creation_suffix(pr_repo: Any, wid: str) -> None:
     config, previous_id, wt, remote = pr_repo
     new_path = wt.parent / wid
     git("branch", "-m", f"worktree/{wid}", cwd=wt)
     git("worktree", "move", str(wt), str(new_path), cwd=Path(config.default_repo.anchor))
-    tracking.create_new_record(
+    create_new_record(
         wid, f"worktree/{wid}", str(new_path), "ext", "test", "linux", cfg.tracking_dir(),
     )
     config, wid, wt, remote, old = publish_and_rebase((config, wid, new_path, remote), "refspec")
@@ -473,12 +496,12 @@ def test_explicit_rewrite_uses_canonical_creation_suffix(pr_repo, wid):
     assert finalize.push_changes(wid, config, rewrite_pr=True)
 
 
-def test_explicit_rewrite_ownership_generation_survives_stale_save(pr_repo, monkeypatch):
+def test_explicit_rewrite_ownership_generation_survives_stale_save(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote = pr_repo
     original = pr_publish.record_rewrite_ownership
     snapshots = []
 
-    def capture_before_stamp(config, record, pr, branch, sha, identity):
+    def capture_before_stamp(config: Any, record: Any, pr: Any, branch: str, sha: Any, identity: Any) -> Any:
         snapshots.append(record_for(wid))
         return original(config, record, pr, branch, sha, identity)
 
@@ -494,7 +517,7 @@ def test_explicit_rewrite_ownership_generation_survives_stale_save(pr_repo, monk
     assert rec.pr.rewrite_owner == f"{wid}:{rec.pr.branch}"
 
 
-def test_explicit_rewrite_rejects_same_record_sibling_head(rebased_refspec_pr_repo):
+def test_explicit_rewrite_rejects_same_record_sibling_head(rebased_refspec_pr_repo: Any) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     feature = rec.pr.branch
@@ -504,7 +527,7 @@ def test_explicit_rewrite_rejects_same_record_sibling_head(rebased_refspec_pr_re
     assert git("rev-parse", f"refs/heads/{feature}", cwd=remote) == old
 
 
-def test_explicit_rewrite_selected_moved_path_with_ambient_same_id(rebased_refspec_pr_repo, monkeypatch):
+def test_explicit_rewrite_selected_moved_path_with_ambient_same_id(rebased_refspec_pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, wt, remote, old = rebased_refspec_pr_repo
     ledger = cfg.tracking_dir()
     relocated = wt.parent.parent / "relocated"
@@ -514,7 +537,7 @@ def test_explicit_rewrite_selected_moved_path_with_ambient_same_id(rebased_refsp
     tracking.save_record(rec)
     ambient = ledger.parent / "ambient"
     ambient.mkdir()
-    other = tracking.create_new_record(
+    other = create_new_record(
         wid, f"worktree/{wid}", str(ambient), "ambient", "test", "linux", ambient,
     )
     other.status = "orphaned"
@@ -522,12 +545,13 @@ def test_explicit_rewrite_selected_moved_path_with_ambient_same_id(rebased_refsp
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: ledger if name == "ext" else ambient)
     assert finalize.push_changes(wid, config, rewrite_pr=True)
     updated = tracking.load_record(ledger / f"{wid}.yaml")
+    assert updated.pr is not None
     assert updated.pr.head_sha != old
     assert git("rev-parse", f"refs/heads/{updated.pr.branch}", cwd=remote) == updated.pr.head_sha
     assert tracking.load_record(ambient / f"{wid}.yaml").status == "orphaned"
 
 
-def test_explicit_rewrite_rejects_repointed_origin_with_same_slug_and_head(pr_repo):
+def test_explicit_rewrite_rejects_repointed_origin_with_same_slug_and_head(pr_repo: Any) -> None:
     config, wid, wt, remote = pr_repo
     git("remote", "set-url", "origin", remote.as_uri(), cwd=wt)
     config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
@@ -536,7 +560,8 @@ def test_explicit_rewrite_rejects_repointed_origin_with_same_slug_and_head(pr_re
     mirror.parent.mkdir(parents=True)
     git("clone", "--bare", str(remote), str(mirror), cwd=wt)
     git("remote", "set-url", "origin", mirror.as_uri(), cwd=wt)
-    assert pr_publish.push_slug("origin", cwd=str(wt)).lower() == rec.pr.repo.lower()
+    slug = pr_publish.push_slug("origin", cwd=str(wt))
+    assert slug is not None and slug.lower() == rec.pr.repo.lower()
     assert pr_publish._tip("origin", rec.pr.branch, str(wt)) == old
     assert not finalize.push_changes(wid, config, rewrite_pr=True)
     # Ordinary publication must not silently redirect a previously attested head either.
@@ -548,7 +573,7 @@ def test_explicit_rewrite_rejects_repointed_origin_with_same_slug_and_head(pr_re
     assert git("rev-parse", f"refs/heads/{rec.pr.branch}", cwd=mirror) == old
 
 
-def test_explicit_rewrite_cross_project_process_race_and_lease_generation(rebased_refspec_pr_repo, monkeypatch):
+def test_explicit_rewrite_cross_project_process_race_and_lease_generation(rebased_refspec_pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from test_pr_authority import run_writer
     from agent_worktrees import installer
 
@@ -564,7 +589,7 @@ def test_explicit_rewrite_cross_project_process_race_and_lease_generation(rebase
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: other_ledger if name == "alias" else ledger)
     monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
-    other = tracking.create_new_record(
+    other = create_new_record(
         "other", "worktree/other", str(wt), "alias", "test", "linux", other_ledger,
     )
     other.prs = [replace(rec.pr, branch="pr/unrelated-aaaa", pr_id="other-pr")]
@@ -572,7 +597,7 @@ def test_explicit_rewrite_cross_project_process_race_and_lease_generation(rebase
     snapshots = []
     actual_push = git_ops.push
 
-    def racing_push(*args, **kwargs):
+    def racing_push(*args: Any, **kwargs: Any) -> Any:
         # Executed after exclusivity authorization, immediately before real CAS.
         blocked = run_writer(root, other_ledger, "other", "save")
         assert not blocked["success"]
