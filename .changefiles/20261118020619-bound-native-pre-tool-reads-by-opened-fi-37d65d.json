@@ -1,0 +1,9 @@
+{
+  "comment": "Bound native pre-tool reads by opened-file bytes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

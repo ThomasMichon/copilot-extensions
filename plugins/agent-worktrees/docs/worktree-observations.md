@@ -636,6 +636,14 @@ resolver refreshes the association during that call. Changed sources, incomplete
 or changed cell observations and incompatible declarations retain original
 validation/policy. The default-installation emergency stop never governs a cell.
 This does not qualify installed or composed hook latency.
+The pre-tool declaration, kill-switch and source-proof inputs use the same
+bounded opened-file reader as native text facts. Its buffer contains the opened
+length plus one overflow byte, not the maximum permitted size for every small
+input. Oversized files and growth that fills that sentinel refuse prepared
+reuse. JSON and source-proof reads retain their original BOM detection; native
+text facts retain strict UTF-8 decoding. Each caller keeps its existing path
+eligibility, source hashing and original policy fallback. This bounds input
+work; it does not make managed guard observations reusable input witnesses.
 After guard or proof-dependency source changes, regenerate the shipped contract
 with `python tools/render-hook-read-policy.py`. Registered-consumer fixtures use
 the actual packaged declaration; literal comparator legs explicitly omit only

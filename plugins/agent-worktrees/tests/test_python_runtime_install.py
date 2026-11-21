@@ -384,6 +384,7 @@ def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[P
     root = owned / "repository"
     with pytest.MonkeyPatch.context() as patch:
         patch.syspath_prepend(str(repository / "plugins" / "agent-worktrees" / "scripts"))
+        patch.syspath_prepend(str(repository / "libs" / "installer-engine"))
         spec = importlib.util.spec_from_file_location(
             "backend_fixture_engine", repository / "libs/installer-engine/installer_engine.py",
         )
