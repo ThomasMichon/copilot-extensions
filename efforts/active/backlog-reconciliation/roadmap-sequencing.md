@@ -20,6 +20,14 @@ without changing those snapshots or duplicating the underlying research.
 The original issues, refinements and canonical effort Plans/Validation/
 Coordination retain whole acceptance and actual source/resource custody.
 
+The [current outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
+accounts for the next 32 identities in the already selected finite lane,
+bringing its register to 64 of 153. Existing research, actual owner conditions,
+prior completion and explicit interpretation/provenance/source gaps are
+different evidence classes. None adds a hard edge or priority to this
+historical proposal. The remaining 89 cohort identities and thirteen later
+identities stay separate; no implementation assignment follows.
+
 ## Select by evidence class before scheduling
 
 The following queues can advance independently under their own permissions.
