@@ -14,7 +14,7 @@ import yaml
 from agent_worktrees import claimant, context_cli, execution_spaces, finalize, finalize_cli
 from agent_worktrees import git_ops, retired_owner_finalization as recovery, tracking
 from agent_worktrees import status_monitor_runtime, tracking_write
-from agent_worktrees import output, sessions
+from agent_worktrees import output, session_liveness, sessions
 from agent_worktrees.tracking_claims import canonicalize_ref
 from pr_test_helpers import _git
 from test_local_worktree_authority import local_worktree  # noqa: F401
@@ -347,6 +347,7 @@ def orphaned(retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simpl
     retired.data["owner_ref"] = f"{retired.local_machine}/example/retired-parent"
     retired.ledger.write_text(yaml.safe_dump(retired.data), encoding="utf-8")
     monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **k: False)
+    monkeypatch.setattr(session_liveness, "session_liveness", lambda session_id: "dead")
     return retired
 
 
@@ -400,6 +401,7 @@ def test_orphaned_owner_repair_reports_fixes_then_plain_finalize_applies(
     ("live-terminal", "live terminal session"),
     ("unknown-terminal", "terminal-session absence cannot be proven"),
     ("live-controller-session", "controlling parent session is still live"),
+    ("unknown-controller-session", "cannot be proven inactive"),
 ])
 def test_orphaned_owner_repair_refuses_unproven_absence_without_writes(
     orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, fault: str, reason: str,
@@ -428,7 +430,8 @@ def test_orphaned_owner_repair_refuses_unproven_absence_without_writes(
     else:
         orphaned.data["parent_session"] = "11111111-2222-4333-8444-555555555555"
         orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
-        monkeypatch.setattr(sessions, "_session_entry_lock_state", lambda *a: (4242, []))
+        state = "live" if fault == "live-controller-session" else "unknown"
+        monkeypatch.setattr(session_liveness, "session_liveness", lambda session_id: state)
     before = orphaned.ledger.read_bytes()
     for extra in ((), ("--fix",)):
         code, report = _doctor(orphaned, *extra)

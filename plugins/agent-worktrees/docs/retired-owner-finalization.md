@@ -111,7 +111,8 @@ local configuration. The repair refuses if any of these is present:
 - the `worktree/<parent-id>` branch
 - a Git worktree registration for the parent
 - a live or unobservable parent terminal session
-- a live child `parent_session` or active controller session
+- a child `parent_session` or active controller session that session liveness
+  does not report as `dead` (a live or unknown state refuses)
 
 Missing or unreadable evidence also refuses; it never counts as proof of
 absence.

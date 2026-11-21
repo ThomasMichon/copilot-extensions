@@ -162,10 +162,16 @@ def _no_live_evidence(record: tracking.WorktreeRecord, owner) -> None:
         relation.controller_session_id for relation in record.controllers or ()
         if relation.state == "active"
     )
-    state_dir = sessions._session_state_dir()
+    from . import session_liveness
+
     for session_id in sorted(filter(None, session_ids)):
-        if sessions._session_entry_lock_state(state_dir, session_id)[0] is not None:
+        state = session_liveness.session_liveness(session_id)
+        if state == "live":
             raise OrphanedOwnerRefused("a controlling parent session is still live")
+        if state != "dead":
+            raise OrphanedOwnerRefused(
+                f"controlling parent session {session_id} cannot be proven inactive"
+            )
 
 
 def _owner_locality(
