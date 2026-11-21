@@ -257,6 +257,24 @@ management-transport survival and later bidirectional all-peer convergence.
 It is not a current implementation/home comparison or an addition to the 75
 earlier retained bindings. The 292-identity partition remains unchanged.
 
+The [manual-resume and roster-publication studies](journal/2026/11.21-manual-resume-and-publication-contracts.md)
+separately establish complete current #6677/#6748 contracts after their
+specific numerical-reference refusals are prospectively reconciled.
+Both have complete current author/editor/history and all-three-discussion
+qualification. The identified embedded #7937 original is separately qualified;
+its particular earlier numerical propagation is also reconciled before further
+affected reading. Partial prequalification display remains a deviation, not
+retrospective compliance. Actual linked-source/copy restrictions remain.
+
+These fifth and sixth selected current issue studies preserve no-auto-wake
+manual custody and actual headed pickup, the roster refresh OR plus
+stale-owner recovery, fresh producer generation and separate owner receipt/
+Manager confirmation. They are not current implementation/home proof or
+additional members of the 75 earlier bindings. Complete unchanged #6507/
+#6620 judgments are reused without another source trace; #6600's independent
+provenance gap and #11123's actual quarantine remain. The serial audit and
+292-identity partition are unchanged.
+
 ## Continuing exit
 
 Reconcile the selected issues' actual earlier research and current authored
