@@ -64,6 +64,12 @@ The [complete selected historical metadata audit](roadmap-historical-current-adm
 distinguishes 268 qualifying records from 24 actual provenance gaps and the
 additional #6237 enumeration gap. Current metadata is not the remaining
 per-issue authored-contract correspondence; the coverage gate stays open.
+Its [authored-delta continuation](roadmap-historical-current-admission.md#existing-metadata-authored-comparison)
+reuses existing observations to isolate five discussion changes and 23 exact
+earlier research correspondences. The finite #13862/#13873 delivery evidence
+retains incomplete receipt/carrier acceptance, actual keepers and every
+source/copy restriction; neither metadata equality nor source progress closes
+the current-coverage or other integration gates.
 
 The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
 adds 89 receipt/gap decisions to the preceding 64, accounting for all 153

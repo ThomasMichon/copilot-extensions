@@ -1482,6 +1482,12 @@ The [historical-assignment metadata audit](roadmap-historical-current-admission.
 accounts for all 292 selected historical identities: 268 qualifying metadata
 records and 24 provenance gaps, including one additional enumeration gap.
 This does not complete their authored-contract delta or clear actual copies.
+The [authored-delta follow-through](journal/2026/11.21-historical-authored-deltas-and-delivery.md)
+distinguishes five discussion-metadata changes from unchanged selected original
+fields, binds 23 original/discussion unions to actual earlier research, and
+credits finite #13862 source and #13873 reported receiving without closing
+their broader keepers. Older newly enumerated references are not new delivery.
+Actual provenance/copy gaps and all six roadmap gates remain.
 
 The [remaining fixed-cohort coverage register](roadmap-coverage-final-cohort.md)
 accounts for numeric positions 65-153 using existing research/control receipts

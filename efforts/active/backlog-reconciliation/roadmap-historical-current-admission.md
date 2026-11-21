@@ -7,6 +7,8 @@ Outside historical assignments: [fixed-cohort register](roadmap-coverage-reconci
 [remaining fixed cohort](roadmap-coverage-final-cohort.md) and
 [thirteen later contracts](roadmap-coverage-later-inflow.md).
 Evidence and continuation: [dated journal](journal/2026/11.21-current-inflow-and-admission-gaps.md).
+Authored-delta follow-through:
+[retained correspondence and new delivery](journal/2026/11.21-historical-authored-deltas-and-delivery.md).
 
 ## Selection and observation boundary
 
@@ -78,6 +80,103 @@ implementation; existing actual holds survive.
 7950,8370,8375,8377,8404,8490,8545,8552,8645,8679,8715,8729,8796,8873,8900,9030,9034,9096,9136,9163
 9227,9238,9281,9290,9295,9325,9334,9357
 ```
+
+## Existing-metadata authored comparison
+
+The current 292 records also have exact issue-identity correspondence with
+the earlier completed 417-identity metadata audit. Across those 292, the
+selected original fields match: issue ID, author, editor, last edit,
+created-edit flag and complete recorded edit-history metadata. This is not
+a comparison of body bytes, title text or product implementation.
+An earlier metadata audit is not a whole-original read receipt.
+
+Discussion metadata differs for five identities:
+
+| Issue | Actual difference and continuing scope |
+|---|---|
+| #2619 | The eighth comment is the campaign's already audited [formatting clarification](https://github.com/ThomasMichon/copilot-extensions/issues/2619#issuecomment-7059551828), not a new acceptance change or work item. Do not post it again. |
+| #3336 | One additional observed comment; the independent linked-source author gap remains. No discussion body is newly admitted. |
+| #6237 | Reported discussion count changes from 247 to 249, but only 100 comments are observed and pagination remains incomplete. This does not identify or admit the missing comments, or clear the source-author gap. |
+| #6812 | One additional observed comment; the independent linked-source author gap remains. |
+| #7028 | One additional observed, subsequently edited comment; actual source/copy and source-author restrictions remain. |
+
+These are five metadata deltas within the existing 292, not five newly
+researched contracts or additional excluded creators. Four retain actual
+admission gaps; #2619's specific change was already delivered.
+
+## Exact earlier research correspondence
+
+Twenty-three current original/discussion metadata unions match actual
+earlier admitted research records, rather than merely the older audit:
+
+```text
+54,688,954,2295,2312,2316,2335,2350,2423,2551,2612,2680
+2793,2830,2965,3114,3179,3296,3418,3581,4053,5768,5904
+```
+
+Retain their specific prior judgments and discriminators:
+
+- The [transport study](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+  keeps #54's native-first OR justified dynamic-loopback/rendezvous alternative,
+  the stricter #4040 Bridge policy-owner decision, and independently OPEN #5904.
+  Its additional #13698 timeline reference is the already delivered planning
+  route, not a transport implementation.
+- The [WinGet/configuration study](journal/2026/11.20-winget-venue-and-retained-contracts.md)
+  retains #688's actual evidence/owner conditions, #954's broad fleet venue
+  programme, #2350's positive activation alternatives, #2793's whole settings
+  mapping and #2612's incumbent mapping acceptance.
+- The [identity/custody study](journal/2026/11.20-independent-inference-identity-and-custody.md)
+  retains #2295/#2312/#2316/#2612/#3114/#3179/#5768 and the accepted
+  [#3296 planning versus claimant distinction](journal/2026/11.20-orphan-task-adoption-planning.md).
+  Review of a plan is not release of a caller, terminal, native or credential
+  owner's remaining obligation.
+- The [eight keeper judgments](journal/2026/11.20-idle-steering-and-existing-keepers.md#eight-complete-current-keeper-judgments)
+  retain #2335/#2423/#2551/#2680/#2965/#3418/#3581/#4053, including explicit
+  parks, released finite claims, literal transfer alternatives and
+  independently unfinished whole outcomes.
+- #2830 retains the original unexplained repeated-launch/blank-mux report,
+  owned-tree/native/retry/handoff/finalization obligations and four scoped
+  residual families. Acceptance of five #2633 watchdog clauses is not the
+  whole report's fulfillment.
+
+This correspondence reuses those admitted studies without another original,
+product-code or native trace. It changes no technical credit, owner, claim,
+source/copy restriction or issue state. Not finding direct metadata at the
+remaining navigation locators is not evidence that prior research is absent.
+Unestablished current correspondence remains a freshness/interpretation gap.
+
+## Newly observed references versus new delivery
+
+Different earlier event selection and enumeration can expose old timeline
+entries. They are not automatically new activity. The selected #3418/#3581
+commits date to November 10 and #3677's to October 23; #3556's observed rename
+dates to November 5. Their appearance does not justify another implementation
+trace or a claim that their earlier scope changed.
+
+The actual newer #6394 reference is merged #13862. Its complete qualified
+description records a separate bounded read-only history-observation slot and
+compatible fresh delivery while unresolved original receipts remain retained.
+An unresolved SDK send still fences another native call; malformed-history,
+legacy and context/input-effect controls remain. The 156 source/API cases are
+the implementing author's results, not campaign executions.
+
+The complete qualified #13873 description is a documentary follow-through.
+It reports a selected released receiver and a separate quiet-idle input that
+reached the model, while explicitly retaining `sdk_accepted` without complete
+consumption evidence and leaving V13734-1/G13734 unfinished. Neither source
+description establishes every frontend's adoption, complete duplicate-safe
+fallback or the separate carrier repair.
+
+Keep #6394's actual retained-publisher phase OR accepted follow-up alternative
+AND its public-gate condition, bounded claim and broader union. Keep #13734's
+separate carrier gap. These descriptions renew no implementation, native,
+runtime, deployment or resource authority for this research campaign.
+
+The specific #63 provenance recovery also remains incomplete: its earlier
+guard referred through #9048 to #8669, but actual copied-content applicability
+has not been established. Current authorship and numerical references alone
+do not clear that case; this is not a permanent ban on numerical citations.
+No protected original, source or containing copy was acquired.
 
 ## Continuing exit
 
