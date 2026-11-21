@@ -11238,6 +11238,13 @@ TOML/source-byte comparisons, pointer/reference inventory and in-process list/
 CLI diagnostics. The original native symlink case remains outside this packet.
 The existing editable-reference, artifact-inventory and standalone-consumer
 helpers stay hash-bound; no library is installed, rewritten or synchronized.
+The large-file protocol and source-AST subprocess-control adapters export
+23 and seven original cases respectively. These originals already mock the
+Git/process boundary; the adapters retain their exact test objects, parameter
+IDs and assertions. They exercise real batch/reference/diff parsing and launch,
+timeout and error handling in-process. All 44 original Git integration cases
+and six real scanner subprocess cases remain unchanged outside the packet.
+No native witness is replaced by a mock or used to infer native qualification.
 Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
 the source map's existing layout so independent hash updates can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.

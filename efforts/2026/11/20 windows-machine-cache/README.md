@@ -9,8 +9,8 @@ logons when user-bound DPAPI is unavailable.
 - **Slug:** `windows-machine-cache`
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-16
-- **Status:** Active
-- **Vision:** [independent cache](../../../visions/vault/README.md#independent-cache-and-standard-auth-providers)
+- **Status:** Done
+- **Vision:** [independent cache](../../../../visions/vault/README.md#independent-cache-and-standard-auth-providers)
 - **Umbrella issue:** [#13009](https://github.com/ThomasMichon/copilot-extensions/issues/13009)
 
 ## Guiding Intent
@@ -110,7 +110,7 @@ Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/windows/win3
 - [x] Land source, documentation and changefile through normal review and CI.
 
 ### Phase 3 - Release and acceptance
-- [ ] Confirm the implementation reaches the normal release branch.
+- [x] Confirm the implementation reaches the normal release branch.
 - [x] Record native noninteractive synthetic proof and remaining adopter-owned rollout gates.
 
 ## Validation Plan
@@ -244,3 +244,19 @@ unversioned-adapter compatibility for unreadable backends and unchanged
 production refusal. The remaining follow-up supplies real compiled
 version-resource/creation-floor and observer-refusal controls, plus source
 completion records; neither independently merged repair is replaced.
+
+### 2026-11-20 - Release confirmed; bounded source effort complete
+
+The normal Main release
+`e3b27e01febf4f7edbf58425011e2379f1c48d83` publishes `agent-vault`
+`0.1.313-dev1`, including the machine-copy implementation, packaged readiness
+declaration and `windows-machine-cache-v1` invocation capability. Release
+confirmation resolves the remaining source-plan checkbox; it is not inferred
+from ancestry of the original squash-merged implementation.
+
+The reviewed implementation and native source qualification remain the basis
+for this bounded source completion. Deployment, real credential custody,
+service transitions and any migration remain adopter-owned, with their own
+authority and acceptance records. The disclosed intermittent CurrentUser
+first-write observation is not reclassified as fixed, and no reboot,
+other-user execution or universal deployment claim is added by this archive.

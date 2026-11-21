@@ -84,6 +84,15 @@ instead of a broad `--fix`. This runs only YAML inspection for that project's
 exact record, never session backfill, lifecycle reconciliation, daemon repair
 or garbage collection. Add `--fix` only after reviewing the result.
 
+Finalize may refuse with "requires its original receiving allocation or proven
+local parent". If the parent's archived record still exists, use
+`finalize --recover-retired-owner`. If the parent worktree is permanently gone
+(no record, checkout or branch), run
+`doctor --repair-orphaned-owner <child-id> --json`. Review the evidence, then
+add `--fix` to remove only the child's `owner_ref`. Any remaining evidence, or
+a parent on another execution space, refuses the repair. After the fix, run
+plain `finalize`. See `docs/retired-owner-finalization.md` in this plugin.
+
 Legacy unquoted multiline `bound_agent` text additionally requires an explicit
 boundary: inspect the record, identify the first real field after that text,
 then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`

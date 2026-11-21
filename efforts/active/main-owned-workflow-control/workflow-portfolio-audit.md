@@ -1818,6 +1818,53 @@ declared build-data inputs under the current unit source contract. It remains
 unchanged and outside this admission; no fixture rewrite, new data exception
 or inferred eligibility is used to export it.
 
+Source #13834 merges at `2026-11-21T05:17:17Z` as
+`cbcd81463e3768a243a514e2b2aa7ef2fe120f99`. Copilot approval `6003027575`
+targets exact published head `40a7f5650e15bdd38e672c178457b2e2e7d9c730`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44869774098` and trusted metadata CI `44869774196` pass.
+Unit job `136741460108` freshly qualifies the complete packet from
+`05:12:56Z` to `05:15:39Z`, then uploads its evidence. Seven live scoped reads
+through the source merge-time verifier precede the normal managed Maintainer
+merge; no failing CI is bypassed. Closing references are empty and parent
+#6237 remains open. The full canonical parent is reread after merge and only
+this finite admission item is resolved. Continue the retained census and
+separately accepted workflow reductions; broader integration, native,
+every-release, whole-flow and retained-custody acceptance remain open.
+
+### November 21 Git protocol and scanner subprocess-control unit admission
+
+The original large-file suite collects 67 cases; ten exact original functions
+provide 23 already-mocked Git protocol controls. The original source-AST runner
+suite collects thirteen cases; three exact original functions provide seven
+already-mocked subprocess controls. Two thin adapters retain those function
+objects, every parameter identity and all assertions. All 44 actual Git cases
+and six real scanner subprocess cases remain unchanged outside the packet.
+Neither adapter replaces a native witness, exports a native fixture or changes
+the production guards.
+
+The Git controls exercise actual reference batching, duplicate elimination,
+annotated-tag identity versus commit peeling, lossless final-diff parsing,
+destination classification and malformed/missing object metadata refusals.
+The scanner controls retain exact interpreter/argv, working directory, output
+merging, Windows headless flags and the original 300-second child limit;
+timeout byte/text/absent diagnostics and launch failures execute in-process.
+All thirty pass the actual `UnitRun` effect auditor with zero prohibited
+effects and their own production call-phase coverage. Repository Python reads
+are exactly the two adapters, original modules and production modules.
+Focused audited development execution takes 1.718 seconds, not a canonical
+complete-packet timing.
+
+Positive admission adds thirty nodes, six source hashes and two targets:
+6,358 nodes, 1,016 sources and 426 targets. Every preceding node, source digest
+and target remains. Profile, 300-second packet budget, all 88 release-helper
+decisions, node-only compaction and file-size cap are unchanged. The manifest
+is 1,042,355 bytes. Both adapters pass whole-file strict typing on Linux and
+Windows targets and fatal Ruff checks. Complete current-head review and Linux
+source CI remain required. This is a bounded census increment, not a reduction
+in workflow invocations, native qualification, every-release observation or
+full-census acceptance. All existing owner gates and retained custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

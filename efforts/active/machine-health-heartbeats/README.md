@@ -78,10 +78,10 @@ the installed action's own child deadline and fresh-CLI fencing until the
 original owner settles a faulted native-client acknowledgement. Actual
 native-client death remains unqualified; acknowledgement injection is not
 process-death evidence. No provisioning or production enrollment is included.
-Continue source-only domain-probe design through the existing observation
-owners while the remaining native-death and adoption gates stay explicit.
-The [owner-bounded probe amendment](domain-probes.md) proposes one outbound
-SSH owner -> local slot -> age-qualified report flow; review precedes code.
+The [owner-bounded probe amendment](domain-probes.md) defines one outbound
+SSH owner -> local slot -> age-qualified report flow. Qualify the SSH provider first,
+then explicit collection-policy adoption and the age-qualified report flow.
+The remaining native-death, installed-provider and adoption gates stay explicit.
 Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
@@ -314,7 +314,7 @@ authority does not broaden the already-approved finite fixture-unit scope.
   local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
-- [ ] Review the [owner-bounded domain-probe amendment](domain-probes.md)
+- [x] Review the [owner-bounded domain-probe amendment](domain-probes.md)
   before expanding the SSH provider or collection policy.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
   existing owners and no remediation or new resident process.
@@ -373,6 +373,16 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-21 - Owner-bounded domain-probe plan reviewed
+- Merged #13823 as `d2996337f8c4ea8cef97dec026196e1fcbccaa4a` after
+  exact-head Copilot approval with no findings and all provider checks green.
+  Documentation consistency and whitespace checks passed. This is reviewed
+  intent only: the SSH observation contract, v3 collection policy and complete
+  consumer flow are not implemented or activated.
+- Re-read the parent Goal and open Plan/Validation items after merge. Continue
+  with the SSH provider first; no live route, existing job, credential,
+  receiving, carrier or rollout changes follow from this source gate.
 
 ### 2026-11-21 - Actual overlap, child deadline and settlement acknowledgement
 - Merged #13815 as `133e3217ba9ab9ba8453e5eb6896aa6ac2ffd69b` after
