@@ -23,6 +23,8 @@ import logging
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 from agent_procutil import no_window_flags
 
@@ -81,7 +83,7 @@ def load_claim_child_record(
     the lease mirror). A same-machine child that has no local record yields
     ``(None, True)`` -- judgeable, and gone.
     """
-    parsed = tracking.parse_claim_ref(ref)
+    parsed = tracking_claims.parse_claim_ref(ref)
     if parsed is None:
         return (None, False)
     if parsed.machine and parsed.machine != config.machine:
@@ -115,7 +117,8 @@ def repo_for_project(
     try:
         repos = getattr(config, "repos", None) or {}
         if project and project in repos:
-            return repos[project]
+            repo: cfg.RepoConfig = repos[project]
+            return repo
         if not project or project == getattr(config, "repo_name", None):
             return config.default_repo
     except Exception:
@@ -142,7 +145,7 @@ def child_branch_merged(
     checked against the LOCAL ``origin/<default>`` (no fetch), so a stale anchor
     spares rather than misjudges.
     """
-    parsed = tracking.parse_claim_ref(ref)
+    parsed = tracking_claims.parse_claim_ref(ref)
     if parsed is None:
         return None
     repo = repo_for_project(parsed.project, config)
@@ -163,7 +166,10 @@ def child_branch_merged(
         if verify.returncode != 0:
             return None  # branch ref gone -> can't prove -> spare
         from . import finalize as _finalize
-        if _finalize._is_content_on_upstream(branch, upstream, cwd=repo.anchor):
+        # Resolved through finalize (not finalize_ref) so its seam stays patchable.
+        if _finalize._is_content_on_upstream(  # type: ignore[attr-defined]
+            branch, upstream, cwd=repo.anchor,
+        ):
             return True
     except Exception:
         return None
@@ -181,7 +187,7 @@ def gone_of(ref: str) -> bool | None:
     return None if alive is None else (not alive)
 
 
-def safe_of(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+def safe_of(claim: tracking_claims.ResourceClaim, config: cfg.Config) -> bool | None:
     """Is the claim's resource **provably safe**? (tri-state, conservative).
 
     Only a ``worktree`` child is provable within agent-worktrees. A ``finalized``
@@ -246,7 +252,7 @@ def lease_disposition_of(
 
 
 def leaseable_settled(
-    claim: tracking.ResourceClaim, config: cfg.Config,
+    claim: tracking_claims.ResourceClaim, config: cfg.Config,
 ) -> bool | None:
     """Is a leaseable claim's resource **provably settled** via its lease mirror?
 
@@ -411,7 +417,7 @@ def pr_merged(ref: str) -> bool | None:
     return None
 
 
-def session_claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+def session_claim_gone(claim: tracking_claims.ResourceClaim, config: cfg.Config) -> bool | None:
     """Is a ``kind="session"`` claim's own Copilot session **provably gone**?
 
     A session claim's ref is self-referential (``format_claim_ref(machine,
@@ -419,14 +425,15 @@ def session_claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> boo
     holds the claim, not a child) so :func:`load_claim_child_record` resolves
     it correctly with no special-casing. Corroborated against a real PID
     check for that SPECIFIC session id (:func:`sessions.session_id_is_live`,
-    factored out of ``worktree_session_lock_state``'s "any session" check) --
-    never inferred from staleness/timestamps alone -- so a crashed/killed
-    session cannot wedge finalize forever, matching the invariant every other
-    claim kind already gets from this sweep. Cross-machine (or otherwise
+    factored out of ``worktree_session_lock_state``'s "any session" check),
+    so a crashed/killed session cannot wedge finalize forever, matching the
+    invariant every other claim kind already gets from this sweep. A live
+    process whose activity lease expired (:mod:`session_lease`) is also gone:
+    the claim is a lease, so an idle pane cannot pin it. Cross-machine (or otherwise
     unresolvable) is ``None`` (spare); the record itself being gone entirely
     is a stronger, positive "gone" signal than any per-session PID check.
     """
-    parsed = tracking.parse_claim_ref(claim.ref)
+    parsed = tracking_claims.parse_claim_ref(claim.ref)
     if parsed is None or not parsed.session:
         return None
     record, judgeable = load_claim_child_record(claim.ref, config)
@@ -434,11 +441,15 @@ def session_claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> boo
         return None
     if record is None:
         return True
-    from . import sessions
-    return not sessions.session_id_is_live(record, parsed.session)
+    from . import session_lease, sessions
+    if not sessions.session_id_is_live(record, parsed.session):
+        return True
+    # A live but idle session holds only a lease; expiry releases it without
+    # sessionEnd. Missing activity evidence stays live (False), never gone.
+    return session_lease.lease_expired(record, claim) is True
 
 
-def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+def claim_gone(claim: tracking_claims.ResourceClaim, config: cfg.Config) -> bool | None:
     """Tri-state **gone** verdict, dispatched by claim kind.
 
     A ``worktree`` claim reuses the same-machine claimant-liveness resolver
@@ -460,7 +471,7 @@ def claim_gone(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
     return None
 
 
-def claim_safe(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None:
+def claim_safe(claim: tracking_claims.ResourceClaim, config: cfg.Config) -> bool | None:
     """Tri-state **safe** verdict, dispatched by claim kind.
 
     A ``worktree`` claim proves safety from the child's record/branch
@@ -484,7 +495,10 @@ def claim_safe(claim: tracking.ResourceClaim, config: cfg.Config) -> bool | None
     return None
 
 
-def make_resolvers(config: cfg.Config):
+def make_resolvers(config: cfg.Config) -> tuple[
+    Callable[[tracking_claims.ResourceClaim], bool | None],
+    Callable[[tracking_claims.ResourceClaim], bool | None],
+]:
     """Return the ``(gone_of, safe_of)`` pair for :func:`tracking.sweep_abandoned_obligations`.
 
     Both resolvers now take the **claim** (not just its ref) and are bound to
@@ -500,9 +514,9 @@ def self_heal(
     record: tracking.WorktreeRecord,
     config: cfg.Config,
     *,
-    path=None,
+    path: Path | None = None,
     save: bool = True,
-) -> list[tracking.ResourceClaim]:
+) -> list[tracking_claims.ResourceClaim]:
     """Reclaim ``record``'s **own** blocking claims that are provably gone+safe.
 
     The never-wedge sweep applied to a single owner -- used by finalize's
@@ -514,6 +528,6 @@ def self_heal(
     unknown is spare.
     """
     g, s = make_resolvers(config)
-    return tracking.sweep_abandoned_obligations(
+    return tracking_claims.sweep_abandoned_obligations(
         record, gone_of=g, safe_of=s, save=save, path=path,
     )

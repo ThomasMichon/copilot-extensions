@@ -661,9 +661,13 @@ def _build_active_paths(
     # ADDITIVE (only ever ADDS a worktree to the active set), so a stale/false
     # bound hint can never hide a live mux/lock the checks above found, and a
     # never-reconciled record (hint None) is a no-op.
+    # Bound/bridge signals name no exact owning session, so the finalize
+    # lease latch cannot prove them expired: they always keep the path live.
+    unleased: set[str] = set()
     for rec in records:
         if rec.worktree_path and _fresh_bound_live_hint(rec) is True:
             active.add(sessions._normalize_path(rec.worktree_path))
+            unleased.add(rec.worktree_id)
     # #4272 bridge-lock layer: a bridge-owned Copilot writes a provable-liveness
     # ``bridge.lock`` carrying its worktree id, so union in every worktree with a
     # live one -- the cheap, cwd-independent, file-first successor to the
@@ -677,6 +681,11 @@ def _build_active_paths(
         for rec in records:
             if rec.worktree_path and rec.worktree_id in bridge_live:
                 active.add(sessions._normalize_path(rec.worktree_path))
+                unleased.add(rec.worktree_id)
+    from . import session_lease
+    session_lease.drop_expired_finalized(records, session_ctx.active_sessions, active, keep=lambda rec: (
+        rec.worktree_id in unleased
+        or _hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)))
     return active
 
 

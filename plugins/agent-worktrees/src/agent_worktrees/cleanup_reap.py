@@ -44,6 +44,10 @@ def _reap_locked(
     """Keep the responsibility fence through removal and record retirement."""
     warnings: list[str] = []
     failures = 0
+    from . import session_lease
+
+    if session_lease.release_expired_finalized(rec):
+        tracking.save_record(rec, tracking_path / f"{rec.worktree_id}.yaml")
     blocker = retirement_blocker(rec)
     if blocker is not None:
         return 1, [f"Cannot retire {rec.worktree_id}: {blocker.reason}"]
