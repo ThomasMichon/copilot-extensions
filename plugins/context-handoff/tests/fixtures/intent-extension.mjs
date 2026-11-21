@@ -34,6 +34,7 @@ const snapshot = /- Pinned snapshot: ([a-f0-9]{64}) -- 2 records/u.exec(replay.p
 assert.ok(snapshot);
 const reader = tools.find((tool) => tool.name === "read_intent_corpus");
 assert.ok(reader);
+assert.match(reader.description, /follow next only when the current step needs more source text/u);
 const segments = [];
 let cursor = {};
 do {

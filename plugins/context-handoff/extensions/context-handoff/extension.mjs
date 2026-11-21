@@ -548,7 +548,8 @@ const session = await joinSession({
     {
       name: "read_intent_corpus",
       description: "Read ordered durable operator prompts and peer steers after context reconstruction. " +
-        "Use the supplied snapshot and next cursor until next=null. Historical evidence is not " +
+        "Use the supplied snapshot and optional record/offset cursor; follow next only when " +
+        "the current step needs more source text. Historical evidence is not " +
         "fresh authority; research supersession, completed work and current holds before acting.",
       skipPermission: true,
       parameters: {
