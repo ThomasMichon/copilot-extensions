@@ -27,6 +27,16 @@ caller lifetime; those remain separate explicitly admitted selections.
 Use `--test-timeout 240 --timeout 420 --plugin-timeout 420` for this bounded
 artifact packet.
 
+The paired Manager fixture checks its source/resource closure with
+`--test-file tests/native/test_manager_application_launch.py
+-k manager_application_inputs_close_declared_resources --allow-explicit-tiers`.
+It copies the canonical standalone build-resource declaration, including Fleet
+Manager policy sources, before asking the unchanged closure owner to admit it.
+The real-wheel parameter checks the packaged policy modules and both launcher
+scripts through an owned, feed-free backend. Use `--test-timeout 300 --timeout
+480 --plugin-timeout 480`. This does not install or launch Manager or qualify
+the paired attached-caller lifetime.
+
 The focused retained-active-review packet uses
 `agent-pull-requests/tests/test_retained_review_adoption.py` and
 `services/pr/tests/test_retained_active_reviews.py` through the existing plugin
