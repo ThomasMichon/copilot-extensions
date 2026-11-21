@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve application publication from the running Worktrees version slot independently of the registry root.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
