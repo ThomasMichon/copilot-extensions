@@ -30,6 +30,14 @@ identities stay separate; no implementation assignment follows.
 
 ## Select by evidence class before scheduling
 
+The [selected integrated execution waves](roadmap-execution-waves.md) now
+compose six recently qualified P1 contributions and separate P2/qualification
+work. They reuse the exact current coverage classes and explicitly retain
+home, acceptance and metadata gaps. Their local precedences do not add
+cross-issue hard edges to the 145 historical rows or appoint implementers.
+The [dated journal](journal/2026/11.21-integrated-execution-waves.md) records
+actual #13931 delivery and the three changed historical metadata boundaries.
+
 The [later-inflow register](roadmap-coverage-later-inflow.md) preserves the
 independent dehydration subissues, native fixture debts, caller inventory,
 anchor scope and inventory intent. An actual OPEN delivery, an explicit
