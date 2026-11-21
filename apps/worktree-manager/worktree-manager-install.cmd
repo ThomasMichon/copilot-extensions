@@ -10,10 +10,14 @@ set "UV_FROZEN="
 set "PYTHONPATH="
 set "PYTHONHOME="
 set "VIRTUAL_ENV="
+set "UV_PYTHON="
+set "UV_PYTHON_PREFERENCE="
+set "UV_MANAGED_PYTHON="
+set "UV_NO_MANAGED_PYTHON="
 if not defined UV_CACHE_DIR for %%I in ("%SLOT%\..\..") do set "UV_CACHE_DIR=%%~fI\cache\uv"
 for %%F in (uv.lock .venv\pyvenv.cfg .venv\Scripts\python.exe) do (
     if not exist "%SLOT%\%%F" (
-        >&2 echo Application is not staged; run bin\setup --stage
+        >&2 echo Application is not staged; run the installer with --stage: "%SLOT%\install.cmd"
         exit /b 1
     )
 )

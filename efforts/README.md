@@ -37,6 +37,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Worktree Dehydration](active/worktree-dehydration/README.md) | Draft; external agenda placement/doctor, reversible checkout storage and automatic entry proposal | #13781; #13790 -> #13783 -> #13784 -> #13785; preserves existing data, lifecycle and roster owners; no implementation or rollout |
 | [Bridge Pending Queue Controls](active/bridge-pending-queue-controls/README.md) | Draft; outside-session queue inspection/reconciliation and read-only diagnosis before implementation | #13734; composes with author-owned #13770 without editing its files; normal rollout class preserves live queue/session exclusions |
 | [Orphan Task Adoption](active/orphan-task-adoption/README.md) | Draft; complete four-stage controller adoption for existing headless ACP and bare scripted tasks, planning only | #3443; preserves #7237's distinct relationship owner and all existing task/workspace/provider/credential custodians; no launch, takeover or rollout |
 | [Local Service Transport](active/local-service-transport/README.md) | Draft; native-first transport and independent complete rendezvous parser/cleanup plan | #54 and #5904 remain OPEN; preserves #4040's unresolved Bridge policy and all existing component/custody owners; no implementation or rollout |

@@ -73,6 +73,7 @@ from ..result_snapshot import (
 )
 from .sessions import _sse_event_stream
 from .live_message_receipts import router as receipt_router
+from .pending_queue import router as pending_queue_router
 from . import live_startup_controls
 
 #: A running turn with no activity for longer than this reads as "stalled".
@@ -84,6 +85,7 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/api/v1/live-sessions", tags=["live-sessions"])
 router.include_router(receipt_router)
+router.include_router(pending_queue_router, prefix="")
 
 
 class _RepresentedSession:

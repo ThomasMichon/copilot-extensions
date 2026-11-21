@@ -266,6 +266,8 @@ class QueueExecutionWakesMixin:
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+        from .unresolved_lineage import migrate as migrate_unresolved_lineage
+        migrate_unresolved_lineage(conn)
         conn.commit()
 
     def defer_execution_wake(

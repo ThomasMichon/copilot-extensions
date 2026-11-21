@@ -31,6 +31,11 @@ For `questions` and generation-qualified live `answer`, see the
 [live question answer contract](../../../docs/live-question-answers.md).
 Owned ACP answers and tool-permission decisions remain distinct.
 
+For body-free `pending-queue` inspection and explicit original-offer
+preparation, see [pending queue controls](../../../docs/pending-queue.md).
+Unlike `attention`, this reads backend inbox stages; native SDK queue and
+receiver-local notice coverage remain explicit unknowns.
+
 The service must be running (the `start` management operation) for HTTP client
 commands to work. Local version/contract disclosure does not contact it.
 
