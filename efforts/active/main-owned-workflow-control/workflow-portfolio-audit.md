@@ -815,6 +815,902 @@ This removes a demonstrated no-op allocation, not an invocation, required
 validation or measured review bottleneck. Main control adoption and natural
 no-runner acceptance remain separately owned.
 
+### November 20 identifier-validation contract closure
+
+The two identifier-labelled validations observed on #13603 share scanner
+implementation and secret-name inputs, but are **not interchangeable checks**.
+The safe outcome of this trace is to reject direct deletion, not to count
+another reduction.
+
+The source snapshot `0ada40974b994a50d1bdb48b9b75bad6da8ab081`, qualified
+historical Main `b954ebcb6cd329858341fd28ed1206ade6981bb9`, and subsequently
+observed Main `80816e7a336eb9ba8b143b6d4311c2f0e1a8b9eb` contain identical
+blobs for the two workflows, composite action, reporter and scanner below.
+This is byte-level contract continuity, not a claim that a controller commit
+is the triggering PR input or that later Main qualifies older native work.
+
+| Contract | Required publication validation | Trusted follow-up reporting |
+|---|---|---|
+| Producer | `workflow-lockdown-guard.yml`, `workflow-lockdown-guard` job, on Dev-targeting `pull_request_target` | `promote-trigger.yml`, `scan-and-report`, following non-cancelled PR CI with a PR association |
+| Trusted tooling | Checkout `github.workflow_sha`; fetch event base/head only as inert objects | Checkout `github.workflow_sha`; local `identifier-leak-guard` action fetches the event head as inert data |
+| Path selection | `--base BASE --git-ref HEAD`: three-dot Git diff, with full tracked-head fallback for unavailable/unrelated base | Paginated PR-files API, excluding removed paths, then `--paths-jsonl --git-ref`; no equivalent full-tree fallback |
+| Denylist | Same `FORBIDDEN_IDS_FACILITY` and `FORBIDDEN_IDS_WORK` names joined into the CI input; explicitly disables live sweep | Same secret names, joined by the composite action; does not explicitly disable live sweep |
+| Failure/reporting | Scanner failure fails the required job; the same step also enforces final-diff size | Reporter creates `identifier leak guard`, supplies detailed findings and idempotent per-head PR feedback, and reports infrastructure failures |
+| Missing configuration | Scanner returns zero when no identifiers are configured | Reporter returns neutral only when configuration is absent and prerequisites succeeded |
+| Epoch/refusal | Event base/head and required-job outcome; protected-path author check fails closed at the PR-files API cap | Rechecks current head before scanning/reporting and refuses stale feedback; metadata/fetch/setup/report failures cannot become reliable success |
+
+Both use Python 3.12 and the same scanner's inert-blob reader. Neither executes
+the PR tree in its privileged job. These commonalities do not establish equal
+path sets, event-time base/denylist identity, refusal behavior or feedback.
+No secret values were read.
+
+Actual old-head evidence is bounded: job `136075750551` in run `44672272599`
+passes the required identifier/final-diff publication step for
+`3cb189b8bf3497e515c03875ac2740ed01c25985`; custom Check Run `136077299280`
+for that same head reports success and nine scanned files. This demonstrates
+both paths were present, not that the required scanner's exact input set or
+denylist bytes were identical to the later reporting scan. A direct job-log
+read was refused because the response contained terminal escapes; no log
+filter or escape override is substituted for missing execution evidence.
+
+The November 20 live policy read confirms Dev ruleset `24152679` requires
+`workflow-lockdown-guard` and `source-attribution`. Classic protection
+separately requires app-15368 `PR gate (required check)`; `ci.yml`'s aggregate
+depends only on its source guards and units. Neither inspected mechanism
+requires the custom `identifier leak guard` context. This does **not** make its
+findings/feedback disposable: the required scanner's own CI failure message
+directs contributors to that custom check for details.
+
+Main-targeting PRs also have a distinct accepted-owner path in
+`base-branch-reminder.yml`: its scanner depends on successful Main admission
+and reuses the same composite action. Do not remove that path while narrowing
+Dev follow-up reporting. The completion workflow additionally retains Dev
+baseline maintenance and genuine-ancestry dispatch; retiring one scan job
+would not alone retire its workflow invocation.
+
+**Disposition:** retain both existing paths. A possible future integration
+would produce required enforcement and the existing per-head detailed report
+from one trusted scan, preserving final-diff size, fork isolation, missing/
+malformed-input behavior, head-movement refusal and Main admission. It needs
+an accepted CI/release-owner seam before shared workflow/action edits. Controls
+must prove those contracts before retiring the old Dev follow-up job, and an
+actual comparable event must establish any allocation/check reduction.
+No workflow, provider context, trigger, secret, native profile or Main control
+is changed by this read-only closure; no new run is requested.
+
+The subsequent job/check metadata read bounds cost without treating the custom
+check as a runner. Required job `136075750551` is created at `04:07:24Z`,
+starts at `04:07:26Z` and completes at `04:07:50Z`: two seconds to pickup and
+24 seconds of job allocation. Checkout occupies 19 reported seconds; the
+combined identifier/final-diff publication step has identical start/end
+seconds. That timestamp resolution does not establish zero scanner cost.
+Custom check `136077299280` likewise starts and ends at `04:11:34Z`, 224
+seconds after the required job completes; that gap is not execution duration
+or proven queue delay.
+
+Two completion-workflow runs overlap that custom-check timestamp:
+`44672686941` / scan job `136077100285` and `44672692649` / scan job
+`136077118612`. Each has a three-second created-to-start interval; their
+allocated scan/report jobs last 33 and 32 seconds, with composite-action
+steps lasting 15 and 13 seconds. Their other two jobs skip with zero steps.
+Both returned run records have empty PR associations, and both composite
+steps encompass `04:11:34Z`; metadata alone cannot assign this particular
+head's custom check to one of them. Do not count both as duplicate work for
+that head, subtract their combined allocation as a saving, or call the
+composite duration scanner-only time. The existing job-log refusal remains;
+no escape override, reconstructed event payload, new run or broader cohort
+query is substituted for missing association evidence.
+
+### November 20 scheduled-entrypoint census and stress-pair trace
+
+The operator retains the existing CI/release-owner boundary for the proposed
+identifier integration and directs continuation of the remaining audit.
+No shared workflow implementation or owner reassignment follows that choice.
+
+The pinned Source roster declares ten scheduled workflow files and eleven cron
+expressions; none of those expressions is repeated. All ten workflow blobs
+match the previously observed Main snapshot
+`80816e7a336eb9ba8b143b6d4311c2f0e1a8b9eb`. Job counts below are declarations,
+not observed allocations: conditions and matrices can change actual execution.
+
+| Workflow | Declared UTC cron | Declared jobs | Observed scheduled invocations |
+|---|---|---:|---:|
+| Dispatch PowerShell race exhaustive | `41 11 * * 2` | 2 | 1 |
+| Context Handoff exhaustive | `0 6 * * 1` | 1 | 1 |
+| Crash diagnostics stress | `37 10 * * *` | 2 | 8 |
+| Installation context full | `23 10 * * *` | 81 | 8 |
+| Module health watchdog | `17 8 * * *` | 1 | 8 |
+| Payload CWD contract | `27 11 * * 3` | 3 | 1 |
+| Purge consumed changefiles | `0 9 * * *` | 1 | 8 |
+| Stale branch sweep | `30 9 * * 1`; `17 * * * *` | 2 | 27 |
+| Windows coverage rotation | `41 9 * * *` | 4 | 8 |
+| ZDD singleton stress | `52 10 * * *` | 1 | 8 |
+
+The observation query is the paginated Actions run list with
+`event=schedule&created=2026-11-13..2026-11-20`, an inclusive calendar-date
+filter, not seven complete rolling days. Its 78 returned workflow invocations
+contain 39 successes, 31 failures, seven cancellations and one incomplete run.
+All report attempt one. Counts do not establish expected-cadence completeness,
+runner allocation/billing, failure causes or review throughput.
+
+The failure distribution is crash diagnostics eight, installation context
+five, purge eight, stale sweep one, Windows rotation one and ZDD eight.
+The seven cancellations belong to Windows rotation; the incomplete run belongs
+to installation context. These are retained observations, not qualified
+platform results, accepted flakes, permission to stop testing or evidence that
+a failing lane is redundant.
+
+The first bounded helper trace follows the two daily stress callers. Both
+declare a 15-minute job bound, but execute different obligations:
+
+- `crash-diagnostics-stress.yml` runs Node 20 with
+  `CONTEXT_HANDOFF_CRASH_DIAGNOSTICS_STRESS=1` and the complete
+  `plugins/context-handoff/tests/crash-diagnostics.test.mjs` selection,
+  separately on Linux and Windows.
+- `zdd-singleton-stress.yml` installs the seasoned pytest dependency under
+  Python 3.12 and selects `libs/zdd/tests`, exposing that package on
+  `PYTHONPATH`, on Linux only. It does not set the PR smoke-only flag.
+
+For actual scheduled head `bfb679c3061abf434f577ddd7705c121afd826f3`,
+the two workflow blobs match the traced Source definitions. Run `44795927319`
+has a successful Linux job `136495315296` and a failing Windows job
+`136495316140`; run `44796810328` fails its Linux job `136498363752`.
+In both failures, metadata identifies the suite-execution step, not setup,
+as failed. Annotations provide exit code one and an action-runtime deprecation
+warning, not a test assertion or causal explanation. Do not equate that
+warning with the failure or generalize Linux success to Windows.
+
+**Disposition:** the stress pair is not duplicate validation. Keep both
+platform selections, full-suite flags and bounds. Combining their files while
+retaining both daily cron expressions would still invoke a workflow twice;
+coalescing the timestamps or serializing their jobs changes timing, contention
+or isolation and needs a separately accepted contract. Neither is currently a
+proven invocation reduction.
+
+Repair ownership remains an open campaign item. The inspected #6142 is closed
+for portable repair construction and explicitly leaves live activation behind
+separate episode/authentication gates; it is not acceptance of these failures
+by an active repair worker. Keep the observed failures and unresolved signatures
+under #6237 and its existing remediation coordination rather than inventing a
+new repair scheduler, rerunning stress/native work or marking the coverage
+qualified. The other eight scheduled workflows still need their own bounded
+helper/consumer closure; this roster and two-caller trace do not complete that
+work.
+
+The subsequent full-context **admission** trace resolves the largest declared
+job-count ambiguity without executing a portfolio. In
+`installation-context-full.yml`, 80 job conditions explicitly require
+`workflow_dispatch`; only `exhaustive` admits the scheduled event. That job
+sets `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` and runs the
+`libs/installation-context/tests` selection under Python 3.12 with two xdist
+workers and a 90-minute job bound. The other selector interfaces, including
+the native Manager portfolios, remain manual and unchanged.
+
+Actual run `44794812448` at head
+`bfb679c3061abf434f577ddd7705c121afd826f3` has the same workflow blob
+`bb92b61a730da4a63a0c26af1a376e0839fd6a09` as the traced Source. Its
+job inventory contains 80 skipped jobs and one executing `exhaustive adapters`
+job, `136491478749`, still in progress at the read. All 80 skipped records
+have nonempty, distinct Check Run URLs; example `136491477228` is
+`Bridge selected snapshots (Windows)`.
+
+This identifies check-record overhead, **not** 80 runner allocations or
+80 redundant test executions. A dispatch-preserving layout change might
+remove those scheduled skipped records, but a simple file split could break
+the current workflow filename/portfolio input, selected job names or receipt
+consumers. A replacement must preserve those manual contracts and the
+scheduled exhaustive selection before removing anything. No throughput gain,
+workflow-invocation reduction, native result, owner transfer or authorization
+to redesign the held selectors follows from this observation. Full test/helper
+closure for this portfolio remains open.
+
+Following that scheduled flag into Source distinguishes the daily execution
+from the admitted unit packet, without collecting or running any test.
+`test_installation_context_posix.py`, `test_installation_mode_governance.py`
+and `test_snapshot_provenance.py` use
+`INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` to expand available adapter/
+reference-runner matrices; the provenance module also enables its exhaustive
+runner rows. Actual host availability still controls which adapters exist.
+These declarations are not proof that every host or matrix row executed.
+
+At Source `00e323313b8a7c49b7b5f7d5c04c61a129c6bdc3`, the
+`tools/promotion-unit-manifest.json` profile remains
+`copilot-extensions.promotion-units/v1`, with 5,710 nodes and the original
+300-second bound. It contains zero nodes under
+`libs/installation-context/tests/` and no source entries for that test
+directory. Therefore the scheduled full-context selection cannot be retired
+as a repeat of that declared unit packet. This is a bounded Source manifest
+comparison, not an audit of every other CI consumer or a live qualification of
+the later scheduled head.
+
+### November 20 periodic Linux rotation caller/report closure
+
+The census's `Windows coverage rotation` label is a workflow title, not a
+Windows result. The traced `windows-coverage-rotation.yml` explicitly disables
+its Windows `test` job with a literal false condition. Its active default
+scheduled portfolio selects nine Linux plugins through
+`tools/run_tests_in_devcontainer.py`. Native Windows container capacity remains
+unenrolled; no capacity probe, enrollment or Windows execution is performed.
+
+The `select` job resolves scheduled input to Dev, rejects newline-bearing ref
+inputs, checks out once and emits an immutable commit SHA. Every Linux matrix
+job consumes that SHA, so removing the selector job would lose the shared input
+identity even though part of its Windows-only work is currently unused.
+Manual focused scopes are mutually exclusive and separate from the default
+portfolio. Each Linux job has a 30-minute bound, invokes the declared hardened
+container wrapper without a test expression for ordinary scheduled runs, and
+retains execution logs, outcome, scope, profile/inventory hashes and owner
+metadata even on failure. Default full invocation is not evidence that
+explicit-tier, network, filesystem or native-platform prerequisites were
+provided.
+
+`tools/periodic-integration-inventory.json` names portfolio #1303 and
+plugin/platform specialists as the repair roles, retains the unenrolled
+residual families, and declares no promotion or required-PR dependency. The
+report job routes genuine Dev selection or Linux execution failure to the
+existing `periodic-linux-integration-failure` tracker. Manual non-Dev or focused
+inspection cannot silently file the shared default-portfolio failure.
+
+The one failed rotation in the bounded census is run `43472145295`, whose
+workflow head is `22cb3487722e637f17d6f6b78b6c5b4973b6c8c1`. Its workflow
+blob `fea91bb7cb383da7e1185f21f9c5bdaf592e8600` equals the traced Source.
+Its actual job inventory contains successful selection, nine Linux plugin
+jobs, one skipped Windows record and successful reporting. Agent Containers
+succeeds; the other eight Linux plugin jobs fail in the container-invocation
+step. This does not distinguish preparation failures from test assertions or
+qualify unavailable tiers.
+
+All nine retained artifact names identify Dev
+`4af7895e9f14c1e7d196ef59a3a5c52db7dfaf8c`, not the workflow's Main head.
+Open #7377 comment `6860150286` independently names that Dev input and exact
+run, proving the existing failure-report consumer received it. Artifact
+contents and individual test outcomes were not inspected, so neither the
+names nor the report substitute for packet/content validation or a repaired
+portfolio. No new failure issue, repair worker, rerun or #1303 Bash dependency
+is introduced.
+
+**Narrow unused-work candidate:** `tools/select_windows_rotation.py` computes
+two Tier A picks and one Tier B pick. The workflow's `plugins` output has only
+one consumer: the matrix of the literally disabled Windows job. The active
+Linux matrix instead uses its explicit nine-plugin/default or focused input
+list. Thus the current Windows-only calculation and its Python setup do not
+select executing scheduled Linux work. Retiring that preparation would still
+need to preserve the retained manual date/selector and future enrollment
+contracts. It would not remove the necessary SHA-selection job or a workflow
+invocation; any runner-time saving is unmeasured. Rank it below
+the proven repeated-Source-CI event seam rather than presenting it as the Root
+consolidation outcome.
+
+**Disposition:** retain the Linux default-full portfolio, its immutable Dev
+identity, artifact/reporting contract, explicit unavailable Windows state and
+existing #7377/#1303 repair path. Complete the canonical wrapper's actual
+selection/containment closure before proposing any coverage overlap removal;
+workflow naming, one Linux success, failed suites and skipped Windows records
+are not equivalence proof. Shared workflow ownership and every prior hold are
+unchanged.
+
+### November 20 periodic wrapper selection and containment closure
+
+Continue the preceding caller trace at source
+`130c8550beb4f477f3e3b2856f915f10b1217d2e`. The default scheduled call names
+one plugin, not `--changed`, an exact-node selection, a functional profile or
+an explicit-tier/host-state opt-in. The canonical wrapper and inner runner are
+`tools/run_tests_in_devcontainer.py` (blob
+`0178c78b0e25ca51b863b9caa57ddd7419aab945`) and
+`tools/run-plugin-tests.py` (blob
+`0d68750aa9d9b6b84a3798224c22e73e1ccfef13`).
+
+| Boundary | Actual source contract to preserve |
+|---|---|
+| Materialization | Copy current bytes of tracked paths into a fresh per-invocation bounded volume, never bind the live checkout. Untracked files require an explicit opt-in. Build a credential-free Git object closure and reject ancestor-path escapes. |
+| Outer isolation | The pinned test-isolation spec drops capabilities, forbids privilege escalation, uses a read-only root and bounded writable surfaces, and exposes no Docker socket. This is a Linux boundary, not Windows/native acceptance. |
+| Preparation | Invoke the same runner with `--prepare-only` while networking is available. It prepares dependencies without invoking pytest or importing test modules/conftests. Test-file/profile/JUnit options do not reach this pass. A failure prevents the test pass. |
+| Network transition | Inspect live network attachments, refuse host/shared namespaces or unknown shapes, and disconnect every attached network before pytest. Strip `--reinstall` after preparation so the offline pass does not deliberately rebuild the environment. |
+| Default selection | Recursively expand `test_*.py` while honoring each suite's pytest `norecursedirs`. Preserve special sequential groups and partitions. The portfolio plugin skips T3/T4 without explicit admission; default-full is therefore not an exhaustive/native claim. |
+| Inner containment | Use private mutable state roots, remove ordinary credential/host-profile inheritance, take the environment lease, and run source-command preflight plus process-tree/resource/deadline containment. Default mode does not select native-application or absolute-native qualification. |
+| Outcome and teardown | Propagate preparation/test failure; a teardown failure makes an otherwise successful run fail. Preserve a primary failure while reporting secondary teardown errors. Remove only this invocation's container and volume; debug retention is explicit. |
+
+The inner run retains item, group and plugin budgets plus process/memory/temp
+caps; plugin-specific defaults are not one universal timeout. The workflow's
+outer step deadline remains independent. No deadline, profile or admission
+change follows from this audit.
+
+The normal test pass calls dependency preparation again, but the existing
+source/dependency-fingerprint cache decides whether anything must be rebuilt.
+Two runner invocations are not two pytest executions: the online pass returns
+before pytest, whereas actual collection/execution occurs offline. Deleting
+that split or substituting `--collect-only` would change the network/import
+contract, not remove equivalent validation.
+
+The runner's optional JUnit mode requires a fresh plugin report directory and
+a report from each successful group. The wrapper does not export those files
+from its disposable volume; its default invocation returns status and streamed
+output. The preceding workflow/report/artifact observations therefore remain
+the evidence boundary. No retained artifact content, full collected-node
+inventory, cause of the eight failed Linux steps, or repair is qualified here.
+
+Existing source controls were read, not executed:
+`tools/test_run_tests_in_devcontainer.py` covers prepare/disconnect/run order,
+preparation failure, network refusals, offline-only options and teardown
+precedence; `tools/test_run_plugin_tests.py` covers directory-aware discovery,
+preparation without pytest, source-command refusal and budget accounting.
+These controls explain intended regressions; their presence is not a new
+test pass or live isolation proof.
+
+**Disposition:** the default Linux integration portfolio is not interchangeable
+with the positively admitted unit packet, explicit tiers, native Windows
+acceptance or its own dependency-preparation pass. Retain the existing
+#7377/#1303 failure ownership and every unenrolled residual. This closes the
+bounded wrapper/default-selection source trace, not portfolio-wide equivalence
+or a run/check reduction. No Docker/native test, workflow edit, rerun,
+installation, shared repair or cleanup was performed.
+
+### November 20 weekly test callers and inventory-only reduction candidate
+
+The remaining three weekly test-labelled entrypoints do not execute equivalent
+work. Their workflow blobs match the actual scheduled definitions observed
+within the preceding fixed census:
+
+| Workflow / observed run | Source contract and observation |
+|---|---|
+| Payload CWD / `44380974436`, head `3ff041fc383b182c2d00394db21cc8ac8022f4d9` | Blob `0eba3c9c9881b9b15a71502a31ffab8bb3ef550d`. Only routing-inventory job `135072791961` executes, from `19:28:57Z` to `19:29:00Z` on November 18. Its sole work step echoes that integration is unenrolled under #1303. Both Linux and Windows test jobs are literally disabled and skipped. |
+| Handoff exhaustive / `43895708345`, head `793a56b6c93638c7cd1cedf47df55a68d2580e9d` | Blob `b6aa63268b9e7385ade07196cfe2ce20eb675c5f`. Linux Node 20 selects `plugins/context-handoff/tests/exhaustive/*.test.mjs` under ten minutes. Job `133398568876` and its suite step succeed. |
+| Dispatch PowerShell race / `44164434445`, head `3d925e38178b01d23a3c38074c2306c254e631ee` | Blob `ef832923de8e925db56984fc5ca66badab869831`. Linux and Windows use the contained runner, set `AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1` and select the snapshot/activation modules under fifteen-minute job bounds. Jobs `134326600854` and `134326601239`, including both suite steps, succeed. |
+
+These are provider job/step observations, not independently inspected test
+reports, per-case skip counts or proof that all current Source cases ran.
+Neither Handoff nor Dispatch pins a Dev ref in checkout. Scheduled default-
+branch execution must not be relabelled the independently required scheduled
+Dev-integration acceptance.
+
+The Handoff source expands one exhaustive file. Its assertions include actual
+temporary Git repositories, concurrent stale-lock contenders, foreign-token
+preservation, PID/start-time distinctions, rebase/dirty-tree refusal and
+settlement polling. It imports the production Handoff implementation rather
+than implementing a Python unit substitute. This is a different selection
+from the daily crash-diagnostics file and the nine Linux Python plugin suites.
+Its old comment describing required JavaScript CI is not evidence that such a
+current required job exists; the inspected current `ci.yml` has no Handoff
+exhaustive selection.
+
+Dispatch's selected modules skip when `pwsh` is unavailable. Three real
+multi-process cases additionally require the workflow's opt-in: simultaneous
+snapshot publishers, reuse during a held build lock and cross-version
+activation ordering. Ordinary default-full Linux invocation does not set that
+opt-in, so selecting the same plugin is not equivalent coverage. Preserve
+real process boundaries, both platforms, availability/skip reporting and
+existing item/group/plugin limits. No native test was run by this audit.
+
+**Concrete invocation candidate:** Payload CWD's weekly schedule currently
+allocates a runner only to repeat a static unenrolled-routing notice. Removing
+that scheduled trigger, while retaining manual inventory and the disabled
+native recipes plus the explicit #1303 gap, would target an invocation rather
+than miscount skipped tests. The observed one-run job allocation is three
+seconds; setup/queue/billing and future cadence savings are not established.
+The inventory/notice consumer and portfolio owner must accept the replacement
+before a shared workflow change. This is not permission to enroll missing
+Linux/native work, erase its residual or make it required PR/release CI.
+The [bounded interface request](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-7048613971)
+is posted on the existing portfolio tracker; posting is not acceptance.
+
+The retained `tools/test_payload_cwd_ci_scope.py` still describes removed
+`test-runner-linux`/`test-runner-windows` CI jobs and an older standalone PR
+shape. It is not current coverage proof or an executable recipe to restore
+by habit. Its stale-source assertions and the unexecuted root-tools/native
+contracts remain with the existing #1303 owner; no integration execution,
+test rewrite or parallel repair assignment follows this finding.
+
+### November 20 maintenance helpers, publication refusal and label backstop
+
+The three remaining scheduled files perform distinct mutations or detection,
+not substitute test validation. Source helper inspection is pinned to
+`130c8550beb4f477f3e3b2856f915f10b1217d2e`; no maintenance helper was invoked,
+including in dry-run mode.
+
+| Workflow | Helper/consumer contract and observation |
+|---|---|
+| Module health watchdog | Main-only detection loads `check-module-size.py`, ranks tracked non-test Python by margin to its baseline/cap, and files at most the worst candidate within the threshold. Existing labelled issues deduplicate filing; lookup failure aborts filing without failing the script. It does not repair/decompose code or replace the changed-file size gate. Run `44778612400`, job `136435016352`, and `Detect and file` succeed; success alone proves neither a new issue nor a healthy whole corpus. |
+| Purge consumed changefiles | Trusted default-branch YAML uses the release environment/token and checks out Dev. It reads Main's persisted promotion boundary and removes only changefile names present there. Promotion's independent `changefile_existed_at` exclusion already prevents reapplying those bumps, so housekeeping is not release qualification. Publication retains staged/final path scope, required-check waiting, final head pinning and the existing owner-controlled merge path. |
+| Stale branch / label maintenance | Weekly branch deletion and hourly/event-driven exact label-policy reconciliation are separate jobs and concurrency groups. Main/manual/cron admission prevents the hourly label backstop from becoming an hourly branch-deletion sweep. The labels job checks out `github.workflow_sha`; its policy values remain private and are not read by this audit. |
+
+The corresponding workflow blobs match the observed run definitions:
+watchdog `59ec210af26769077a6b53a45040ebe1310f35ae` at run head
+`27a9ed1388a4ce57a743f2032fca6e753cbb3dcd`; purge
+`68363288fe33a0ef2b31616173f6765398db3058` at
+`81d6874fce4eda5c0b1abcd4325c93935315615c`; and stale/labels
+`3ee065ae9762650168ecd94b9bf73ee2828de099` at both
+`793a56b6c93638c7cd1cedf47df55a68d2580e9d` and
+`ddb05d27a2c171a70592d4ed6029f01290f85ef1`.
+Explicit mutable Main/Dev checkouts in those definitions are not proof that
+the helper bytes or tested source equal the workflow-run head. No checkout-log
+or helper-byte qualification is inferred from this workflow-blob match.
+
+Latest observed purge `44783630325`, job `136452574532`, fails at the purge
+step. Its actual failure annotation names outstanding generated cleanup
+PR #13117 and explicitly refuses another publication until the existing
+cleanup owner resolves it without changing merge gates. This is a concrete
+refusal signature, not proof all eight census failures have that cause,
+current PR-state readback, authority to take over the PR, or permission to
+disable required checks. Keep release/cleanup custody with #3336.
+
+The census's failed stale run `43942833225` executes both jobs: labels
+`133564576376` succeeds while branch sweep `133564576932` fails. Available
+annotations give exit one and platform/action notices, not the underlying
+branch-operation failure. Conversely, run `44739812373` executes only labels
+`136300318063`; branch sweep `136300320187` skips. The latter is not a
+successful branch-deletion run. Neither a green labels job nor an empty
+policy-supported no-op reveals current private policy/configuration or proves
+that any label was deleted.
+
+The branch helper refuses incomplete PR/branch inventories, protects the
+default branch and Dev, uses the latest same-repository PR record and expected
+head OID, rechecks open PRs, and performs compare-and-delete with an expected-
+OID lease. It only flags no-PR branches for human triage. The label helper
+uses casefolded exact names, validates the full paginated inventory before
+deleting, and redacts policy/backend details. These are separate ownership
+and mutation contracts; consolidating their names or permissions would not
+preserve them by itself.
+
+Existing source controls were read without execution: watchdog lookup/ranking
+controls, branch history/lease/error controls, the trusted pending-cleanup PR
+guard, and label-policy/workflow-scope controls. No issue status, branch, label,
+changefile, credential, protection, release or retained-resource state was
+modified. Read-only run/annotation lookup and the bounded portfolio interface
+request above are the only remote operations in this audit continuation.
+
+**Disposition:** retain daily detection, the consumed-only cleanup refusal and
+the weekly-branch/hourly-label distinction under their existing owners.
+Repair acceptance for the branch failure and outstanding cleanup remains open;
+no new remediation worker or cleanup execution is assigned. Bounded source
+selection/helper traces now cover all ten scheduled declarations, but complete
+per-case coverage, live mutation effects, repair acceptance, comparable
+before/after measurements and cross-lane equivalence remain unresolved.
+The inventory-only Payload CWD trigger is a concrete candidate awaiting
+acceptance, not an implemented saving. Shared scheduling would require explicit
+cadence, privilege, isolation and failure-owner preservation rather than merely
+coalescing cron strings.
+
+### November 20 managed review setup and retired trusted-CI entrypoint
+
+The checked-in `copilot-code-review.yml` is a manual setup declaration with
+the official `copilot-setup-steps` identity, empty permissions, literal hosted
+`ubuntu-latest` and one bounded echo step. It has no checkout, dependency
+installation or validation suite. Its blob
+`e4e9b375d839f3b791c128739f59da3c9d6051a4` matches the observed Main snapshot
+`80816e7a336eb9ba8b143b6d4311c2f0e1a8b9eb`. The native review service remains
+a separate provider-owned execution path, not another name for source CI.
+
+The bounded November 20 head query for the already-qualified #13603 head
+`ec75a9572219489fb8c32640ab3309612e786b4e` returns four runs: source CI,
+trusted lockdown, departed-source refresh and native review `44673903042`.
+The latter reports event `dynamic` and path
+`dynamic/agents/copilot-pull-request-reviewer`, not the checked-in setup
+workflow path. It contains one successful job `136081056365` with label
+`ubuntu-latest`. Its actual steps include the configured
+`Complete minimal review setup` inside the managed job, between the provider's
+user-configured-setup boundary steps. This is not a second setup-workflow run
+in that head/date cohort.
+
+The managed job is created at `04:21:56Z`, starts at `04:22:02Z` and completes
+at `04:24:22Z`. `Processing Request (Linux)` spans `04:22:18Z..04:24:18Z`.
+These give a six-second created-to-start interval and 140-second allocation
+for one successful review. They do not measure initial review-request latency,
+inference-only duration, provider throttling, quota availability or population
+throughput. No review request, canary, runner-route change or capacity probe
+was initiated by this lookup.
+
+The subsequent source-CI metadata read closes another part of this same head's
+ordering, not a new experiment. Run `44673870881`, attempt one, is created at
+`04:21:38Z` for `ec75a9572219489fb8c32640ab3309612e786b4e`.
+Units job `136080946976` and guards job `136080947236` both start at
+`04:21:41Z`, three seconds after creation. They complete at `04:24:32Z`
+and `04:25:20Z`, allocating 171 and 219 seconds respectively. Required
+aggregate job `136082289661` is created at `04:25:20Z`, starts three seconds
+later and completes at `04:25:25Z`. The three source-CI jobs therefore
+allocate 392 reported seconds in parallel/sequential composition; run
+creation to aggregate completion is 227 seconds, not their sum.
+
+The guard job's admitted Python type-contract step spans
+`04:22:14Z..04:24:04Z` (110 seconds); the whole-file strict ratchet takes
+seven reported seconds, and the unchanged full source AST guard group spans
+`04:24:12Z..04:25:00Z` (48 seconds). These step spans locate observed work,
+not proof that its checks or scope are redundant. The unit qualification step
+spans 145 seconds including its surrounding consumer work; the separately
+recorded 5,710-case execution takes 128.663 seconds. Do not equate that
+step/job span with test-only CPU time or infer a new reuse hit.
+
+Fresh approval `5987470930` targets this head at `04:24:23Z`, 62 seconds
+before the source-CI aggregate completes. Thus native review is not the last
+of these two observed gates in this sample. Merge at `04:28:00Z` is another
+155 seconds later, but that interval is not attributed to runner execution,
+review throttling or a human wait. This does not inventory every independent
+metadata/merge predicate or establish a controlled before/after improvement.
+A bounded source-only investigation of repeated work inside admitted guard
+consumers can proceed independently of the held workflow interfaces; no
+typing/AST omission, new cache/admission rule, deadline change or workflow
+edit follows from this timing observation. It is not a new prerequisite for
+the higher-ranked echo-only trigger reduction or accepted-owner one-scan work.
+
+The adjacent `trusted-ci.yml` now declares only `workflow_dispatch`, an
+empty-permission hosted routing-notice job and no PR/schedule subscription.
+Blob `9ae37ea076c2772e8f2768852a75a9d2f3d37a28` also matches that observed
+Main snapshot. Thus the original ledger's proposed retirement of its legacy
+automatic PR entrypoint is historical at this boundary, not a remaining
+automatic-invocation reduction to implement again. This source/adoption
+observation does not settle periodic integration's unenrolled residuals,
+earlier failed captures or actual self-hosted execution.
+
+The trusted-CI guard and its existing source controls retain the exact minimal
+review setup/runner exception and reject unrelated self-hosted routes.
+Controls were read, not rerun. Keep hosted review selection and the existing
+#7122/#3336 activation boundaries. Deleting a manual declaration or changing
+the review runner is not evidence of fewer redundant validations, additive
+capacity or improved review throughput.
+
+### November 21 admitted-type and changed-code boundary
+
+The source-only follow-up binds the inspected checker to the qualified
+`ec75a9572219489fb8c32640ab3309612e786b4e` input, rather than attributing its
+110-second step to a newer recipe. The current source and that head have
+identical blobs for `ci.yml`, `typecheck.py`, its project manifest, program
+partitioner, changed-code selector and source/bootstrap/catalog view modules.
+No checker, environment preparation, native fixture or performance probe was
+executed by this trace.
+
+The manifest declares 43 admitted strict projects and 33 pending projects.
+Forty admitted projects target Python 3.10 and three target Python 3.11; each
+declares Linux and Win32 analysis. Those are 86 declared project/target pairs
+before any materialized-program expansion, not 86 observed executions or
+interchangeable platform checks. The six declared requirements paths are not
+a count of installed environments: `environment_path` already shares by
+captured lock bytes, host interpreter version and host platform. `prepare`
+uses a lease and prepared marker, and returns without reinstalling a matching
+existing environment. Repeating its command is not evidence of repeating
+dependency installation.
+
+The two CI selectors also retain different admission. `--enforced` selects
+non-pending projects; `--new-code` selects changed physical files, including
+pending owners, and imposes whole-file strict checking plus existing complete
+program expansions. The recorded base `8ed2adb46b77a5072150d19e0ca8cea9e8eebd06`
+is the merge base of its pinned pair with `ec75a957...`. That static comparison
+contains Python edits to `tools/ci_pr_unit_reuse.py` and
+`tools/promotion_unit_tests/test_ci_pr_unit_lookup_timings.py`, both owned by
+pending `repository-tools`. The admitted cohort does not replace their strict
+ratchet. This source comparison is not a reconstructed event payload or a new
+runtime observation of the exact selected MyPy targets.
+
+Each checked program stages its own targets/configuration and preserves source,
+directory, output-membership and import-provider checks around execution.
+Independent/materialized consumers retain physical custody across program and
+target boundaries. Ordinary MyPy cache paths are shared per environment,
+analysis platform and target version; imported-source, guard-alias and payload
+overlays explicitly disable that cache. Their source-view/custody distinction
+must survive any proposed optimization, not become a cache-based omission.
+
+**Disposition:** retain the admitted pass and changed-code ratchet, original
+platform/version matrix, pending-owner accounting and freshness/refusal checks.
+The 110/7-second step observations do not prove duplicate qualification or
+identify per-project CPU cost. No persistent evidence cache, merged namespace,
+parallel checker, admission change or workflow edit is selected. This closes
+the proposed direct-deletion interpretation while leaving bounded source-only
+repeated-work analysis available under the existing typing owner and normal
+review; it does not add a prerequisite to the higher-priority trigger reductions.
+
+### November 21 fieldless-visitor dispatch candidate
+
+The full-source wrapper currently runs four independent guards concurrently;
+the observed 48-second group span cannot be assigned to any one worker.
+A bounded, read-only headless-guard profile locates most instrumented work in
+visitor dispatch/traversal. Repeated enclosing-source extraction accounts for
+only 69 calls and 0.01042 cumulative seconds, so a text cache is not selected.
+The previously rejected shared-child-edge cache is not revived.
+
+The source candidate specializes only an existing default generic binding for
+AST classes with empty fields. Each visitor still owns its existing dispatch
+table; there is no cross-file or persistent cache. Explicit leaf visitors,
+custom generic handlers and a replaced standard handler retain their original
+dispatch. Instance-specific children and malformed field metadata continue
+through the captured generic fallback. Every file is still read and parsed;
+the six detection rules, scope, allowances and ordered diagnostics are unchanged.
+No subprocess, network, installation, tree or history work is added by the
+production change.
+
+One bounded ABBA prototype comparison preserves all 4,220 text reads, 4,122
+parse inputs, 232 raw hits and ordered diagnostics. Individual whole-guard
+samples are 51.598/49.374/33.236/34.819 seconds (original/candidate/candidate/
+original); medians are 43.208 and 41.305 seconds, a local 4.4% reduction with
+substantial visible host variance. This is not controlled Actions latency,
+tail qualification, fewer pipeline runs or review-throughput evidence.
+
+After pulling forward, the actual implementation preserves all 4,285 current
+text reads, 4,185 parse inputs, 232 raw hits and zero ordered diagnostics against
+the unchanged Dev guard. That single equivalence pair takes 48.866/37.755
+seconds; its order/cache effects are not used as another speedup claim.
+The real guard CLI passes with thirteen adopting plugins. All 118 focused
+guard regressions, fatal Ruff checks and whole-file strict checks for both
+declared analysis platforms pass. The new performance regression also rejects
+the exact unmodified guard, rather than only testing the optimized implementation.
+
+Five pure regression cases and the guard's source/coverage target are positively
+admitted to the existing unit packet: 5,906 nodes, 967 sources and 411 coverage
+targets, preserving every prior entry/digest and the 300-second ceiling.
+The separate 113-case development suite remains unchanged. Current-head source
+review and the complete required Linux CI packet remain delivery gates.
+Clean-room provisioning and external native lifecycle execution are not changed
+by this AST-only candidate and are not represented by these unit observations.
+The separately tracked Windows packet gap (#13598) and all native/candidate/cleanup ownership
+remain separate; no grant, waiver, Main activation or runtime rollout follows.
+
+### November 20 path-gated audit-guard native boundary
+
+The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
+scheduled exhaustive lane. Its Dev-PR trigger lists exactly its workflow,
+`promotion_unit_effects.py`, the pure `test_effects.py` controls and
+`test_promotion_unit_effects_native.py`; it also supports manual dispatch.
+Two fixed hosted platform jobs check out the explicit PR head/workflow SHA
+without persisted credentials. Each six-minute job runs the two control files
+inside a caller-owned `Limits(wall_seconds=120)` boundary, parses JUnit to
+require the named interleaving case with no error/failure/skip, and rejects
+retained or still-present sandbox state after cleanup. This is not permission
+to widen any other native lane or alter required CI.
+
+The production guard stores its relative-open path stack in `threading.local`.
+The native test deliberately interleaves an outside and inside open with the
+same spelling but different directory descriptors, nests another open and
+asserts that only the outside write is refused and both thread-local stacks
+settle. Ordinary `run-promotion-unit-tests.py` explicitly refuses both
+`threading.Thread.start` and `_thread.start_new_thread`; its current manifest
+contains 26 pure effect-control nodes and no native thread-control node.
+That is a static packet-membership difference, not another packet execution.
+Do not delete the real interleaving simply because both lanes mention units
+or share the pure effect-control file.
+
+Workflow blob `0775dd686a43ce7c51359beb2fa08ba6d7f1d6f6` matches both the
+observed Main snapshot `80816e7a336eb9ba8b143b6d4311c2f0e1a8b9eb` and actual
+PR run `44313200971` at head
+`495b840f2c93e4a9c756a52fac3759c372b8560d`. Its Linux and Windows jobs
+`134832393516` and `134832393221` report successful qualification steps.
+The bounded run-list query reports twelve PR invocations in the same inclusive
+November 13-20 date filter, returning the latest five; no complete outcome
+distribution, repeated-input equivalence or measured saving is inferred.
+The read current Source helpers are not independently compared with that
+earlier run's helper bytes, so this is not fresh native qualification of
+current Source or any held Manager/installer profile.
+
+**Disposition:** retain the four-path event scope, actual interleaving and
+cleanup/no-skip assertions, both platform routes and original limits.
+The shared pure controls are not alone justification to remove the unique
+native obligation or broaden the actor-free unit tier. No run, rerun,
+dependency installation, profile change or implementation followed this
+read-only trace.
+
+### November 20 manual PR-replay selection
+
+`pr-rebase-full.yml` remains manual-only in Source and the observed Main
+snapshot; both use blob `795dd46b2cdb1d2cea207092c583a389b609eecf`.
+It declares separate Linux/Windows jobs, each bounded to 35 minutes. The
+contained Worktrees runner receives the literal owned-replay/recovery/rewrite/
+publication `-k` expression, `--allow-explicit-tiers`, both exhaustive-rebase
+and native-headless environment opt-ins, and explicit 1,800-second group and
+plugin bounds. Preserve that selection rather than inferring every test in
+the repository from the word `full`.
+
+The selected source includes real bare-Git publication/lease/replay controls,
+foreign-head and shared-default refusal, protected history/backups and stale
+or concurrent publication rejection. The Windows-only headless control
+separately requires two consoleless-parent observation cycles with actual
+descendants, no new/owned visible windows or foreground transitions, and no
+observer errors. Ordinary default-full selection lacks these opt-ins.
+Reading that source is not authorization to run its native helper, rebase a
+live PR, touch any retained history or repeat a held capture.
+
+The bounded workflow-run query for November 13-20 returns zero records.
+This proves only that query's observed absence, not that the lane never ran,
+is disposable, is currently qualified or has an accepted replacement. A
+manual-only definition with no run in that cohort supplies no demonstrated
+automatic invocation to remove. No replay, native observation or dispatch
+was performed.
+
+### November 20 current declaration delta
+
+The original October 18 pinned inventory remains a dated baseline, not the
+current roster. At Source `1480e24ab31a77c0f62821b7fd4c5670b74f9ffd`, Git lists
+33 workflow YAMLs plus the separate generated-workflow Markdown source,
+versus the baseline's 21 YAMLs. The twelve added declarations have five
+path-gated PR entrypoints, five path-gated `pr/**` push entrypoints and two
+manual-only controllers; each also supports manual dispatch. This is a
+source trigger inventory, not Main adoption, job expansion, actual execution
+or assurance/equivalence proof. The added native guard is traced above;
+the other eleven have the bounded first-hop map below, not complete product
+implementation or live qualification.
+No new scheduled declaration is inferred, and none of these counts is a
+claimed reduction or license to change another owner's lane.
+
+An independent directory/blob metadata read of observed Main
+`80816e7a336eb9ba8b143b6d4311c2f0e1a8b9eb` also lists 33 YAMLs and the same
+Markdown source. All twelve additions have matching workflow blobs there.
+Across the complete roster, only `base-branch-reminder.yml`, `ci.yml` and
+`validate-and-promote.yml` differ from this Source. This establishes declaration
+presence/identity at that dated Main snapshot, not current live branch state,
+helper/candidate compatibility, workflow execution or installed rollout.
+Do not silently substitute Source control bytes for those three different
+Main-owned definitions.
+
+### November 20 added-workflow first-hop map
+
+The bounded evidence pass reads the remaining eleven added workflow bodies at
+Source `1480e24ab31a77c0f62821b7fd4c5670b74f9ffd`, then at most one helper
+interface hop. The earlier parent traces own the ordinary contained runner.
+The table cites workflow-relative line ranges for the selectors and trust/
+evidence boundary. It reports declarations, not observed allocated jobs.
+
+| Workflow under `.github/workflows/` | Admission, platform and first-hop contract |
+|---|---|
+| `bootstrap-update-native-acceptance.yml` (53-319) | Path-gated Dev PR or manual; seven literal Linux/Windows jobs, including a Windows packet matrix and opt-in full-tree promotion copies. Explicit Manager bootstrap/update/input/provider/native files and prepared-Python handoff controls use the contained runner. Five-minute job bounds and source-byte assertions remain; inline copy qualification selects `push=False`, not a release publication request. |
+| `chat-container-qualification.yml` (23-65) | Path-gated PR or manual immutable candidate/base input; one Ubuntu job, twenty minutes. `run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 180` precedes `qualify_chat_container.py --python-base ...`. Digest-pinned base input and checkout validation are source contracts, not actual image/readiness proof. |
+| `historical-cleanup-native-acceptance.yml` (26-113) | Path-gated `pr/**` push or manual; three Linux/Windows jobs, twenty minutes. Explicit Worktrees historical-daemon/native/lazy-dispatch files, Manager historical command/runtime/provider/retirement/cleanup files and `tests/native/test_historical_index_registration_native.py` are selected. These are fixture/native qualification declarations, never permission to clean this host or retained Index state. |
+| `legacy-monitor-native-acceptance.yml` (37-96) | Path-gated `pr/**` push or manual; two Linux/Windows jobs, twenty minutes. Explicit anchor, installer-return, monitor retirement/preparation/grace/completion/handover selections retain file filters and a Windows-only native cutover step. Source-native monitor tests do not authorize a live monitor replacement. |
+| `maintainer-pr-completion.yml` (21-48) | Manual-only, one literally disabled `reconcile` job, five minutes. Trusted workflow-SHA checkout and read-only contents/PR/issues/check permissions; helper selects `maintainer_pr_completion.py --report-only`, optionally `--pr`. A helper's separate `--apply` capability is not selected or activated. |
+| `mcp-owner-exec.yml` (82-352) | Path-gated `pr/**` push or manual; Linux/Windows jobs, fifteen/ten minutes. Explicit Remote Driver headed/session-host, process suspended-handoff, ZDD private-Windows and MCP execution/custody/generation/native tests use the contained runner. Client preparation pins download hashes; JUnit/named artifacts retain seven-day evidence. Names containing `owner` describe execution custody, not an accepted repair claimant. |
+| `owned-budget-native-acceptance.yml` (16-71) | Path-gated `pr/**` push or manual; Linux/macOS jobs, fifteen minutes. Inline containment selects `libs/agent-procutil/tests/test_owned_budget_native.py`; Linux additionally selects the nested repair-probe timeout/reaping control. This is the `Borrowed budget native` job family, not a new grant to rerun an earlier held failure. |
+| `prepared-membership-native.yml` (32-184) | Path-gated `pr/**` push or manual; three literal jobs, including a Windows packet matrix. Explicit managed-session/pre-policy/shell-arguments/post-tool/IPC/status/transport selections qualify prepared membership, fallback, patch/write-policy and selected-cell production under ten-minute job bounds. Similar policy names do not prove packet overlap or authorize policy/runtime repair here. |
+| `python-selection-native.yml` (19-77) | Path-gated Dev PR or manual; one Windows job, five minutes, with Python 3.9/3.12 tooling. The contained runner selects installer admission and daemon Python-selection files with `-k real_python39`; XML requires exactly two admission and four daemon cases without errors/failures/skips. It does not qualify every older runtime or change their admission policy. |
+| `windows-qualification.yml` (18-144) | Typed manual request; Ubuntu admission and Windows execution, with separate immutable controller/candidate checkouts. Actor and triggering actor must match the repository owner on protected default-branch control. `windows_qualification_worker.py` handles `admit`, `execute`, `sanitize`; request-specific packet expansion is a later contract frontier, not resolved by one helper-interface read. Seven-day sanitized artifacts and the private index URL's name are visible; no URL value, request execution or capacity is obtained. |
+| `worktrees-roster-native.yml` (26-82) | Path-gated PR or manual; Linux/Windows jobs, twenty minutes. Explicit Worktrees client/feed/runtime/recovery files and Manager current-roster/resident-transport files select the cold-roster boundary. The workflow adds no separate retained artifact/report step; a source selection is not a current successful roster result. |
+
+Most test checkouts use the event/PR head SHA without persisted credentials;
+the report-only controller pins the workflow SHA, and the typed Windows
+controller separately admits its candidate. Literal conditions, matrix
+selectors, environment opt-ins, limits and result checks remain part of the
+contract; a shared runner/helper path is not equivalent validation.
+In particular, bootstrap's seven literal jobs expand to at most nine with its
+three-packet Windows matrix, including the gated promotion-copy job.
+Prepared membership declares thirteen Windows packets plus two non-matrix
+jobs, at most fifteen expanded jobs. These are maximum configuration shapes,
+not observed check records, allocations, test executions or current coverage.
+
+None of these eleven inspected workflow bodies names a failure-repair claimant
+or tracker. This is a source-declaration frontier, not proof no domain owner
+exists and not a transfer away from the existing component, portfolio, release
+or native owners. Repository-owner admission for a manual controller is not
+accepted failure custody. Correlate actual failures and accepted tracked
+ownership before closing the repair obligation; do not spawn a parallel repair
+worker or edit the workflow merely to manufacture an owner field.
+
+The inspected display names/job IDs do not match `PR gate (required check)`,
+`workflow-lockdown-guard` or `source-attribution` from the independent live Dev
+context readback below. This does not make the checks dispensable, waive
+contribution policy, or prove that existing source CI never invokes related
+actor-free controls. No test, collection, native/helper execution, dispatch,
+rerun, image build, installation or cleanup was performed by this source map.
+
+### November 20 required-context readback
+
+The read-only Dev classic-protection response requires `PR gate (required
+check)`, bound to app 15368, with non-strict status freshness. The active
+Dev workflow-lockdown ruleset `24152679` separately requires
+`workflow-lockdown-guard` and `source-attribution`, also non-strict.
+Other active Dev PR/review rulesets retain the separate approval/CODEOWNER
+contract; `24069919` specifies one approval and CODEOWNER review. The proposed
+separate CODEOWNER/completion-App layer `25505838` remains disabled. Classic
+review fields were null, not evidence that the separate review rule vanished.
+
+The default-branch ruleset `18553911` independently requires strict
+`main source gate` freshness. The branch-creation rule is separate again.
+This read mapped context and ref applicability, not bypass-actor eligibility,
+the complete author/reviewer contract or permission to merge/activate. A clean
+unit or native qualification result cannot substitute for these independent
+contexts, source review, accepted feedback or the resolved role. No rule,
+approval, environment, token or merge state was changed.
+
+### November 20 environment and credential-binding metadata
+
+The repository-scoped read-only API capture lists exactly two environments.
+`copilot` has an empty `protection_rules` list and null deployment-branch
+policy. `main-promotion` has only a `branch_policy` protection rule, with
+`protected_branches: true` and `custom_branch_policies: false`. Neither lists
+a required-reviewer or wait-timer rule. Both report `can_admins_bypass: true`;
+this field does not identify an eligible actor or grant this campaign bypass
+authority. Protected-branch admission is not a literal Main-only allowlist:
+the environment name alone cannot establish that narrower boundary. Keep
+workflow event/ref/trust checks and branch rules as separate contracts.
+
+The secret-name endpoints return six repository entries and one environment
+entry. No secret value was requested or returned. The `copilot` environment
+has no listed secrets; `main-promotion` lists only `APERTURE_RELEASE_TOKEN`.
+Repository and both environment variable-name lists are empty; no variable
+values were printed.
+
+| Listed binding | Declared workflow consumer frontier |
+|---|---|
+| Environment `APERTURE_RELEASE_TOKEN` | `promote-trigger.yml` / `refresh-module-baseline`; `purge-consumed-changefiles.yml` / `purge`; `validate-and-promote.yml` / `promote`, `publish-python-artifacts`, `record-promotion`. All five jobs explicitly bind `main-promotion`. |
+| Repository `COPILOT_GITHUB_TOKEN` | Generated `ci-failure-fix-attempt.lock.yml` activation, agent and detection declarations. |
+| Repository `MAINTAINER_REVIEW_PAT` | `workflow-lockdown-guard.yml` / `request-review`. |
+| Repository `FORBIDDEN_IDS_FACILITY`, `FORBIDDEN_IDS_WORK` | Identifier-scan declarations in `base-branch-reminder.yml`, `promote-trigger.yml` and `workflow-lockdown-guard.yml`. Values remain deliberately unread. |
+| Repository `FORBIDDEN_LABELS` | `stale-branch-sweep.yml` / `labels`; private policy content remains unread. |
+| Repository `WINDOWS_QUALIFICATION_INDEX_URL` | `windows-qualification.yml` / `windows`; presence does not qualify the index, platform or native result. |
+
+This is a parsed declaration/reference map over the current 33 YAML files,
+not an execution or proof of effective credential delivery. No YAML job
+declares the `copilot` environment. Optional generated declarations also
+reference `GH_AW_DEFAULT_OTLP_ENDPOINT`, `GH_AW_DEFAULT_OTLP_HEADERS`,
+`GH_AW_GITHUB_TOKEN`, `GH_AW_GITHUB_MCP_SERVER_TOKEN` and
+`GH_AW_CI_TRIGGER_TOKEN`; none appears in the queried repository/environment
+secret-name inventories. That observation does not prove a missing runtime
+credential or a failing path: conditional use, fallback and external/runtime
+configuration remain distinct. The automatic `GITHUB_TOKEN` reference is not
+a missing user-configured secret.
+
+The earlier dated Main snapshot `80816e7a336eb9ba8b143b6d4311c2f0e1a8b9eb`
+already matches the other workflow blobs. For the three source/Main blob
+differences, an additional read-only comparison confirms equal parsed
+workflow-permission, environment and secret-reference signatures:
+`base-branch-reminder.yml`, `ci.yml` and `validate-and-promote.yml`.
+This closes that binding-metadata discrepancy only, not behavioral equivalence
+of those differing workflow bodies or a claim about a newer moving Main.
+
+The repository Actions policy reports Actions enabled, `allowed_actions: all`,
+`sha_pinning_required: false`, default workflow permission `read` and
+`can_approve_pull_request_reviews: true`. Explicit workflow/job permissions
+remain separate: the metadata/maintenance/generated repair jobs declare
+selected write scopes, and `publish-python-artifacts` declares
+`attestations: write` and `id-token: write`. In particular, a read-scoped
+`GITHUB_TOKEN` declaration does not bound the independently supplied release
+token or review PAT. Secret names and update timestamps do not prove their
+actual principal, token kind, scopes, validity, custodian, rotation owner or
+authorized use. Those facts remain unknown where the existing owner/evidence
+does not establish them; no credential probing or repair was performed.
+
+No protection, permission, token, workflow, runtime or deployment was changed.
+This dated readback completes the bounded environment/name-binding audit, not
+Phase 0's complete in-flight release snapshot, failure-owner acceptance,
+native qualification or permission for Main activation or shared integration.
+
+### November 20 in-flight release-control snapshot
+
+The read-only repository-wide active-state inventory ran at
+20:03:17-20:03:39 UTC, followed by direct workflow inventories at
+20:04:05-20:05:14 UTC and job/artifact metadata at 20:05:34 UTC. It requested
+`queued`, `in_progress`, `waiting`, `pending` and `requested`, with page size
+100 and pagination, for `validate-and-promote.yml`, `promote-trigger.yml`
+and `purge-consumed-changefiles.yml`. These sequential reads are not an atomic
+provider snapshot and do not claim later settlement.
+
+| Observed release-control identity | State at capture |
+|---|---|
+| Promotion run `44806469374`, attempt 1 | `repository_dispatch`, Main controller SHA `42b96cbf8dbfd9fcdf14d3477bd6cd8009d3928a`; in progress, created 19:54:24 UTC. This controller SHA is not proof of the frozen Dev/candidate identity. |
+| Trigger runs `37642403020` and `37642383755`, attempt 1 | Reported queued since October 7 at 15:12:08 and 15:09:04 UTC, both Main SHA `b9fed24456b79d8c5236ebc7022404c5858bba53`. Age alone does not establish whether these are executable work, stale provider records or safe cancellation candidates. |
+| Direct purge workflow responses | Zero returned runs and zero totals for all five requested active states. This does not resolve its earlier failed publication or existing cleanup-PR custody. |
+
+The promotion's six returned jobs match its job total: admission job
+`136535518179` and candidate-freeze job `136536036272` succeeded; source units
+`136536609478`, Windows Resume `136536609494`, unsigned artifact construction
+`136536609511` and installed Manager TTY `136536609516` were in progress.
+The two listed artifact records are `14664122217` /
+`frozen-promotion-candidate` and `14662549743` /
+`promotion-admission-45e0996fd6f638a840120c1205c2d4c91146408e-22e299a9d84ceb8800b02f9996e0c21e35d9663b`.
+Names/existence are not verified candidate contents or result provenance;
+neither artifact was downloaded. The paginated open-PR query targeting Main
+returned an empty list at that capture, not a guarantee no publication PR can
+be created afterward.
+
+Completeness remains explicitly qualified. Repository-wide queued and
+in-progress responses returned 8/10 and 6/92 rows/totals respectively. The
+direct trigger in-progress response also returned zero rows with total 1,
+although its queued response returned both rows with total 2. Other direct
+workflow/state responses had matching row counts and totals. No cause is
+assigned to the mismatches: lifecycle races, filtering or provider behavior
+have not been distinguished. Do not equate missing rows with zero obligations
+or count the unmatched totals as known executable release jobs. This bounded
+inventory is evidence for the observed identities, not a global custody
+clearance or an exhaustive settled-release claim.
+
+Existing release/CI owners retain the controller, candidate and publication
+seams. No run was dispatched, retried, rerun, cancelled or watched to completion;
+no credentials, native grant, policy or owner changed. The natural active
+release is not a new campaign-authorized native attempt or proof that any
+earlier retained native/lifecycle failure has been resolved.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and
@@ -826,22 +1722,30 @@ returned 404. Inspect both protection mechanisms, not just one check list.
 Environment names `copilot` and `main-promotion` were observed. Secret values,
 environment-review settings, current credential custody, complete in-flight
 release obligations and all bypass applicability were not audited by that
-name-only read. Refresh authoritative policy and every affected caller before
-any cutover; this dated snapshot is not standing merge authority.
+name-only read. The November 20 section above adds environment protection and
+credential-name binding metadata without claiming actual credential custody.
+Refresh authoritative policy and every affected caller before any cutover;
+these dated snapshots are not standing merge authority.
 
 ## Prioritized candidate ledger
 
-Every row is a proposed investigation or slice, not permission to delete.
+The November 20 ranking below incorporates the bounded closure above. The
+October inventory counts remain dated observations, not current savings
+forecasts. A row is an investigation or accepted-owner interface, never
+permission to delete, retry native work or activate control. These priorities
+do not make broad Main ownership migration or new capacity a prerequisite for
+a safe reduction under existing gates.
 
-| Priority | Candidate | Evidence / open question | Replacement prerequisite and rollback |
+| Priority / state | Candidate | Evidence / open question | Existing prerequisite and rollback |
 |---|---|---|---|
-| 1 | Coalesce compatible trusted PR metadata events | 169 departure refresh runs overlap synchronize/edited entrypoints; closed events and all-base retargeting differ from Dev-only lockdown | Preserve shared-head departure refresh, closed/retarget/base-edit epochs, contexts and fork-safe inert-data processing. Restore original event path on any missing refresh or context. |
-| 2 | Retire duplicate legacy trusted-CI entry when integrated replacement is proven | 75 skipped invocations; #7122 already owns a pure existing-row backend selector, not CI activation | Confirm actual opt-in/admission state and accepted replacement coverage/aggregate semantics. Hosted remains default for unknown/unready/fork inputs. Restore the legacy path/hosted selection if admitted work or failure reporting is lost. |
-| 3 | Narrow promotion completion entrypoints after preserving PR scanning | 196 WR invocations; 47 skipped. The same workflow also owns PR identifier reporting and Dev baseline maintenance | Do not simply filter to Dev and lose PR scans. Reuse an existing trusted handler only after exact-head scanning, Dev freshness and reporting contracts pass. Restore original caller before disabling a broken replacement. |
-| 4 | Put qualified narrow Linux capacity to useful work | A pinned-source, pinned-image structural guard can be qualified independently of broad native CI | #7122/CI owner approves exact job, label, trust, tooling, resource and aggregate contracts. Actual Actions assignment and complete result required; image feasibility is not activation or capacity relief. Restore hosted execution for the affected row on failure. |
-| 5 | Reuse identical source qualification across CI/release | Source `full` invocations appear in multiple gates; generated consumers and artifact custody are distinct | Prove the complete exact-input tuple and required authoritative evidence. Keep native/platform/generated-output checks. Retain old gates until replacement is required and failure/rollback proof passes. |
-| 6 | Share deep-lane setup or a bounded scheduler | Ten schedules include seven distinct test lanes; setup/scheduler overlap does not prove coverage overlap | Preserve each selected test/marker/platform, cadence/fairness, containment limit and failure owner; avoid burst fanout. Restore individual entrypoints if any lane is missing or delayed beyond its accepted contract. |
-| 7 | Reconcile repair and housekeeping ownership | Watchdog, generated repair, purge and stale-branch operations are not validation suites | Record detection, repair claimant, release steward and escalation when automation is disabled. Do not activate a repair worker or widen credentials merely to consolidate. |
+| 1 - owner acceptance open | Remove only Payload CWD's weekly routing-notice trigger | One observed scheduled run allocates one three-second echo-only job; both native recipes are disabled. The specific #1303 request is posted, not accepted. | Existing portfolio/notice owner accepts retaining manual inventory, disabled native recipes and the explicit unenrolled gap. Restore only the schedule if an accepted notice consumer is lost; do not enroll or erase missing coverage. |
+| 2 - integration seam retained | Produce required identifier enforcement and detailed per-head feedback from one trusted scan | Shared scanner code is not equal input/admission/reporting semantics; direct deletion is refuted. The custom detailed check is not a named required context, but required-job diagnostics depend on it. | Existing CI/release owner accepts the one-scan interface. Preserve final-diff size, fork isolation, complete path/error semantics, head movement, Main admission and detailed feedback before retiring the old Dev follow-up job. Restore that job if any contract is lost. |
+| 3 - remaining event closure | Coalesce compatible edited/retarget metadata work beyond delivered synchronize consolidation | #7236 delivers the source synchronize reduction; independently qualified Main activation remains open. Closed events and all-base retargeting still differ from Dev-only lockdown. | Existing CI/release owner retains edited/retarget and control integration. Preserve metadata epochs, departed-source refresh, contexts and inert-data processing; do not infer acceptance from the earlier synchronize seam. Restore the affected original event path on missing refresh or context. |
+| 4 - broader reuse unproved | Reuse source/release evidence only across a fully compatible consumer boundary | Strict repeated source-PR unit reuse already landed in #8311 with one actual reuse hit. That does not justify omitting independent every-Main units, native consumers, generated output or artifact-custody checks. | #3336/portfolio owner retains candidate/result interfaces. Prove complete source/recipe/platform/dependency/run/attempt identity and all receiving refusals before any broader omission. Missing or incompatible evidence retains fresh execution. |
+| 5 - selectors remain distinct | Share deep-lane setup or a bounded scheduler without dropping coverage | All ten scheduled entrypoints have bounded traces; Handoff exhaustive, Dispatch races, crash diagnostics, periodic plugin suites and Windows/native lanes are not equivalent selections. | Existing component/portfolio/remediation owners accept each row, its cadence, containment and failure routing. Avoid burst fanout; restore individual entrypoints if a lane is missing or delayed beyond its accepted contract. |
+| Historical automatic entry retired | Do not implement trusted-CI PR retirement a second time | Current Source and the dated Main snapshot make `trusted-ci.yml` manual-only. Native Code Review remains a separate provider-owned execution, not a duplicate setup workflow. | Keep hosted review and its minimal setup contract. Manual declaration deletion or runner-route changes do not demonstrate another validation reduction. |
+| Separate held capacity track | Put qualified narrow Linux capacity to useful work only under its existing admission | A structural guard can be qualified independently, but feasibility is not an assigned Actions job, additive review capacity or current pool readiness. | Existing #7122/CI/controller and capacity owners retain job, label, trust, tooling, resource and aggregate authority. No new capacity/native grant follows this audit. Preserve hosted fallback and require real assignment/result before claiming offload. |
+| Existing repair custody | Reconcile repair and housekeeping ownership without taking over publication | Watchdog, generated repair, purge and stale-branch operations are not validation suites. The observed purge refusal already names an outstanding cleanup PR; no replacement publication is assigned. | Existing repair/release/cleanup owners retain their resources and merge gates. Do not activate a worker, widen credentials, cancel old queued records or pre-empt that PR merely to consolidate. |
 
 ## Ordered execution plan
 
@@ -861,9 +1765,11 @@ No implementation starts against this amendment before its normal review.
 Wave A's accepted bounded metadata/helper/event closure is recorded in
 [metadata-event-closure.md](metadata-event-closure.md). Current-head enforcement,
 old-head peer recovery and Main promotion refresh are distinct obligations,
-not duplicate policy checks. The first proposed production seam shares only
-the Dev synchronize entrypoint; exact CI/controller agreement and prospective
-event equivalence remain open before Wave B edits.
+not duplicate policy checks. The subsequently accepted source synchronize
+seam lands in #7236; its separate Main activation and live event/rollback
+acceptance remain open. That delivery does not accept edited/retarget or
+one-scan integration. Those interfaces remain with the existing CI/release
+owner, not a newly appointed campaign writer.
 
 The already accepted #3336 Phase 9 single-flight promotion work and parent
 Phase 5a Maintainer stewardship continue with their current owners. This plan
