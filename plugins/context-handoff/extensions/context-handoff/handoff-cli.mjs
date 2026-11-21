@@ -50,6 +50,7 @@ import { parseRecoveryLocator } from "./cutover-seed.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import { IntentCorpus } from "./intent-corpus.mjs";
 import { collectLocalIntentFacts, resolveIntentCwd } from "./intent-goal.mjs";
+import { formatIntentOutline } from "./intent-outline.mjs";
 import {
   checkHeadAlignment,
   storeHandoff, buildSeedForStored,
@@ -348,7 +349,7 @@ async function cmdConsume(args) {
   process.stdout.write(
     formatConsumeResult(consumed, {
       deferComplete,
-    }) + "\n\n" + JSON.stringify(consumed.intentContinuity, null, 2) + "\n",
+    }) + "\n\n" + formatIntentOutline(consumed.intentContinuity) + "\n",
   );
 }
 

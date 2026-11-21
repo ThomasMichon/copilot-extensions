@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import stat
 import subprocess
@@ -739,9 +740,16 @@ def test_bootstrap_discovery_is_pure_even_with_broken_transport(tmp_path: Path) 
     ).count("# copilot-extensions:recovery-source-contract=1") == 1
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is required")
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("failure", ["acquisition", "native"])
-def test_real_bootstrap_fresh_transport_and_exact_exit(tmp_path: Path, failure: str) -> None:
+def test_real_bootstrap_fresh_transport_and_exact_exit(
+    tmp_path: Path, failure: str, host_name: str,
+) -> None:
+    from test_bootstrap_ps1 import _fake_tools
+
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
     toolkit = tmp_path / "current"
     (toolkit / "tools").mkdir(parents=True)
     (toolkit / "tools/recover_source.py").write_text(
@@ -751,6 +759,27 @@ def test_real_bootstrap_fresh_transport_and_exact_exit(tmp_path: Path, failure: 
     path = tmp_path / "request.json"
     path.write_text(json.dumps(request()), encoding="utf-8")
     bootstrap = REPOSITORY / "worktree-manager/bootstrap.ps1"
+    tools = tmp_path / "launch-tools"
+    _fake_tools(tools, uv_exit=0, python_exit=0)
+    python = tools / ("fake-python.cmd" if os.name == "nt" else "fake-python")
+    python.write_text(
+        f'@echo off\r\n"{sys.executable}" %*\r\nexit /b %errorlevel%\r\n'
+        if os.name == "nt" else
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="utf-8",
+    )
+    poison_marker = tmp_path / "ambient-python-used"
+    for name in ("python", "python3", "py"):
+        poison = tools / (name + ".cmd" if os.name == "nt" else name)
+        poison.write_text(
+            f'@echo off\r\n>"{poison_marker}" echo ambient\r\nexit /b 91\r\n'
+            if os.name == "nt" else
+            f"#!/bin/sh\nprintf ambient > {shlex.quote(str(poison_marker))}\nexit 91\n",
+            encoding="utf-8",
+        )
+        poison.chmod(0o755)
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
     def quote(value: Path) -> str:
         return str(value).replace("'", "''")
     copy = (
@@ -769,15 +798,72 @@ def test_real_bootstrap_fresh_transport_and_exact_exit(tmp_path: Path, failure: 
         **os.environ, "WORKTREE_MANAGER_ROOT": str(tmp_path / "untouched"),
         "WORKTREE_MANAGER_BOOTSTRAP_REPO": "must-not-use-configured-transport",
         "WORKTREE_MANAGER_BOOTSTRAP_REF": "must-not-select-this-target",
+        "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+        "BOOTSTRAP_UV_VERSION_TRACE": str(tmp_path / "uv-version-calls"),
+        "TEMP": str(temporary), "TMP": str(temporary), "TMPDIR": str(temporary),
     }
     result = subprocess.run(
-        ["pwsh", "-NoProfile", "-Command", command], env=env,
+        [host, "-NoProfile", "-Command", command], env=env,
         capture_output=True, text=True, timeout=60,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == (41 if failure == "acquisition" else 23), result.stderr
     assert ("fresh-toolkit-request=" in result.stdout) == (failure == "native")
     assert not (tmp_path / "untouched").exists()
+    assert not poison_marker.exists()
+    assert len((tmp_path / "uv-version-calls").read_text(encoding="utf-8-sig").splitlines()) == 1
+
+
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("prerequisite", ["uv", "managed-python"])
+def test_recovery_requires_prepared_prerequisites_before_toolkit_acquisition(
+    tmp_path: Path, host_name: str, prerequisite: str,
+) -> None:
+    from test_bootstrap_ps1 import _fake_tools
+
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    trace = tmp_path / "uv-calls"
+    if prerequisite == "managed-python":
+        _fake_tools(tools, uv_exit=2, python_exit=0)
+        uv = tools / ("uv.cmd" if os.name == "nt" else "uv")
+        original = uv.read_text(encoding="utf-8")
+        uv.write_text(
+            f'@echo off\r\n>>"{trace}" echo %*\r\n' + original
+            if os.name == "nt" else
+            original.replace("#!/bin/sh\n", "#!/bin/sh\n"
+                             f'printf "%s\\n" "$*" >> {shlex.quote(str(trace))}\n', 1),
+            encoding="utf-8",
+        )
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
+    packet = tmp_path / "request.json"
+    packet.write_text(json.dumps(request()), encoding="utf-8")
+    root = tmp_path / "untouched"
+    environment = {
+        **os.environ, "PATH": str(tools), "WORKTREE_MANAGER_ROOT": str(root),
+        "TEMP": str(temporary), "TMP": str(temporary), "TMPDIR": str(temporary),
+    }
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File",
+         str(REPOSITORY / "worktree-manager/bootstrap.ps1"), "--recover-source", str(packet)],
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+    )
+    assert result.returncode != 0
+    assert "setup" in result.stderr.lower()
+    assert not root.exists()
+    assert not list(temporary.glob("source-recovery.*"))
+    if prerequisite == "uv":
+        assert not trace.exists()
+    else:
+        assert trace.read_text(encoding="utf-8-sig").splitlines() == [
+            "--version",
+            "python find --no-project --system --managed-python --no-python-downloads 3.11",
+        ]
 
 
 @pytest.mark.parametrize(("manager_exit", "engine_exit", "suite_exit"), [

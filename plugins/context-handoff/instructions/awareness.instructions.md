@@ -25,7 +25,8 @@ worktree may chain many handoffs until the objective is done.
 If your first user turn looks like `<lead> | Resume: /consume-handoff to take
 over | Recovery: context-handoff <kind>:<id>`, it is a **handoff seed** (a
 "handoff prompt"): a locator, never the brief. Run `/consume-handoff` to load
-the real continuation before anything else.
+the real continuation. Use its outline to select the sources the next step needs,
+not a full history reload.
 
 Whether a handoff cuts a successor over live or only stages a brief for a
 human: `mode` (`auto`/`manual-only`/`off`) in `.context-handoff/config.yaml`

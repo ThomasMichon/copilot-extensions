@@ -11204,6 +11204,12 @@ original analysis tests and the latter's original `guard` fixture. They admit
 The tracking-write checkout subprocess smoke and nine asyncio CLI subprocess
 cases remain unchanged in their original suites, outside the actor-free packet;
 unit admission neither replaces nor claims execution of those native cases.
+The install-contract guard adapter exports all nine original test functions
+from `tools/test_install_contract_guard.py`, retaining their 42 parameterized
+cases and assertions. These exercise the real lexical scanner, persistent-
+environment diagnostics and scan-path filter with synthetic text and paths;
+they do not execute PowerShell, access the registry or run runtime-retention
+checks. The broader install-contract integration suite remains separate.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored

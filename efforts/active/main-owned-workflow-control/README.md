@@ -600,11 +600,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and complete required Linux CI with freshly executed packet evidence.
   This closes only the bounded source admission, not full-census, every-release,
   native or workflow-consolidation acceptance.
-- [ ] Qualify and land the original sibling guard units through exact test
+- [x] Qualify and land the original sibling guard units through exact test
   objects: 91 tracking-write cases and twelve asyncio analysis cases, preserving
   both original suites and the ten explicit native subprocess residuals.
   Require unchanged previous admission, real per-case production call coverage,
   source closure, helper gates, packet budget and current-head source CI.
+  #13801 merges at `5ab627967b0a6a6555c9fbd680cc3b16c01292fc` after
+  exact-head Copilot approval and freshly executed complete required Linux CI.
+  Native residuals, every-release observation and full-census acceptance remain
+  separate.
+- [ ] Qualify and land all 42 original install-contract guard analysis cases
+  through exact original test objects, preserving the original suite and
+  production helper. Require closed source admission, real per-case guard call
+  coverage, unchanged prior packet contents, helper gates and 300-second
+  budget, then complete current-head source review and Linux CI. Broader
+  install-contract integration, native qualification, every-release observation
+  and full-census acceptance remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

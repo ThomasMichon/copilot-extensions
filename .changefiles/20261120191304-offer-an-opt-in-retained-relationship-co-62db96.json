@@ -1,0 +1,9 @@
+{
+  "comment": "Offer an opt-in retained-relationship compare-and-bind at the exact active head, with historical-only acceptance replay.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -36,8 +36,8 @@ if (process.env.FIXTURE_DELAYED_ID) {
     text = (await generate.handler({}, { sessionId: "fixture-bound-session" })).textResultForLlm;
   }
   assert.match(text, /Bound Goal/u);
-  assert.match(text, /Keep the bound mission/u);
-  assert.ok(text.includes(process.env.FIXTURE_BOUND_CWD.replaceAll("\\", "\\\\")));
+  assert.match(text, /Pinned snapshot/u);
+  assert.ok(text.includes(process.env.FIXTURE_BOUND_CWD));
 }
 await emit("session.context_cleared");
 // Bound mode off must win over launch mode auto, including the initial-load race.
@@ -52,7 +52,10 @@ await waitFor(() => session.sends.some((item) => item.prompt?.includes("<intent-
 assert.match(session.sends.at(-1).prompt, /Bound Goal/u);
 await writeFile(config, "mode: auto\n");
 await writeFile(join(process.env.COPILOT_HOME, "settings.json"), '{"contextManagementTools":false}');
+const beforeReset = session.sends.length;
 await emit("session.context_cleared");
+await waitFor(() => session.sends.slice(beforeReset).some((item) =>
+  item.prompt?.includes('<intent-continuity reason="context-cleared">')));
 // Explicit status settles the live config refresh before emergency pressure.
 await status.handler({ action: "status" }, {});
 const reads = globalThis.intentGoalReads;
@@ -64,5 +67,5 @@ await waitFor(() => globalThis.emergencyStored);
 assert.equal(globalThis.intentGoalReads, reads);
 assert.equal(globalThis.emergencyStored.cwd, process.env.FIXTURE_BOUND_CWD);
 assert.match(globalThis.emergencyStored.promptText, /cached-unqualified/u);
-assert.match(globalThis.emergencyStored.promptText, /"goal": null/u);
+assert.match(globalThis.emergencyStored.promptText, /current goal unqualified/u);
 await emit("session.shutdown");

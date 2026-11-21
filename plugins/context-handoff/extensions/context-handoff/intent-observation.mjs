@@ -1,4 +1,5 @@
 import { IntentCorpus, classifyIntent, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { formatIntentOutline } from "./intent-outline.mjs";
 
 export function registerIntentObservation(session, state, {
   createCorpus = (cwd) => new IntentCorpus(cwd),
@@ -81,6 +82,7 @@ export function registerIntentObservation(session, state, {
       const snapshot = corpus(cwd).snapshot();
       const page = snapshot ? corpus(cwd).page(snapshot.id) : null;
       const data = { status: pending.size ? "incomplete" : "available", goal, corpus: snapshot, page,
+        sessionId: session.sessionId || state.sessionId,
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE };
       cached.set(cwd, data);
       return data;
@@ -113,19 +115,13 @@ export function registerIntentObservation(session, state, {
       const unavailableReference = data.goal?.status === "unavailable" && data.goal?.ref;
       if (disposed || (!data.corpus?.count && !data.goal?.goal && !data.pendingInputs
           && data.status !== "unavailable" && !data.goal?.path && !unavailableReference)) return;
-      const firstPage = data.page;
       const prompt = [
         `<intent-continuity reason="${reason}">`,
-        INTENT_RESEARCH_DIRECTIVE,
-        JSON.stringify(data),
-        firstPage?.next
-          ? "Continue with read_intent_corpus using this snapshot and next cursor until next=null; " +
-            "history is not complete at this page."
-          : "This snapshot has no further pages. Verify the current Goal source before action.",
+        formatIntentOutline(data),
         "</intent-continuity>",
       ].join("\n\n");
       await session.send({ prompt, source: "system", mode: "immediate",
-        displayPrompt: "Canonical Goal and durable intent history" });
+        displayPrompt: "Goal and on-demand recovery pointers" });
       if (disposed || scopeChanged()) return;
       latest = { reason, ...data };
     }).catch(() => { startupPending = true; failures++; warn(); });
@@ -161,7 +157,7 @@ export function registerIntentObservation(session, state, {
         corpusPath: corpora.get(cwd)?.home ?? null,
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE,
         instruction: "Emergency cached pointers only; current Goal and corpus freshness are unqualified. " +
-          "Read the bound effort and retained corpus before action; cached pages may omit later inputs.",
+          "Consult relevant sources on demand; cached pages may omit later inputs.",
       };
     },
     replay,
