@@ -510,19 +510,37 @@ function Find-BootstrapUv {
     return $null
 }
 
-function Find-BootstrapPython([string]$Uv) {
+function Find-BootstrapPython {
+    param(
+        [string]$Uv,
+        [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Prepare'
+    )
     $ErrorActionPreference = 'Continue'
     $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
     $lookupExit = $LASTEXITCODE
     if ($lookupExit -eq 0) {
         $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
         if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
+            if ($Operation -eq 'Inspect') {
+                $selected = [string]$output[0]
+                $root = [IO.Path]::GetPathRoot($selected)
+                if (-not [IO.Path]::IsPathRooted($selected) -or -not $root -or
+                    ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+                        ($root -in @('\', '/') -or $root -match '^[A-Za-z]:$'))) {
+                    throw 'Manager managed Python inspection returned an invalid executable.'
+                }
+                return Resolve-BootstrapExecutable $selected
+            }
             return [string]$output[0]
         }
         throw 'Manager Python lookup returned an invalid executable.'
     }
     if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
         throw ('Manager managed Python lookup is blocked by operating-system policy: ' + ($lookup -join "`n"))
+    }
+    if ($Operation -eq 'Inspect') {
+        throw ('Recovery requires prepared uv-managed Python 3.11; run explicit Manager setup first. ' +
+            'No interpreter was installed. Lookup failed: ' + ($lookup -join "`n"))
     }
     & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
     if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
@@ -556,8 +574,11 @@ if ($args -ccontains '--recover-source' -or $args -ccontains '--describe-recover
         }
     } catch { }
     # Neither configured transport nor an installed dispatcher supplies this toolkit.
-    $python = Find-PhysicalBootstrapPython
-    if (-not $python) { throw 'Recovery requires an existing physical Python 3.11+; nothing was provisioned.' }
+    $uv = Find-BootstrapUv
+    if (-not $uv) {
+        throw 'Recovery requires uv 0.8.0+ on PATH and prepared uv-managed Python 3.11; run explicit Manager setup first. Nothing was provisioned.'
+    }
+    $python = Find-BootstrapPython $uv -Operation Inspect
     if (-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
         throw 'Recovery requires git; nothing was provisioned.'
     }
