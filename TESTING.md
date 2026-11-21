@@ -2044,15 +2044,17 @@ in its own sequential 180-second runner, separate from the independent consumer
 controls. No lifecycle sequence is split; the six-minute job limit and peak job
 concurrency are unchanged.
 
-Its first-party artifact jobs also run the repository continuity module's
-`normal_ssh_setup or setup_status` controls, including real Git source
-qualification and required request-pin capability. Each further dependent
-normal-setup job requires both its platform's artifact controls and explicit
-continuity case to succeed, prepares the declared engine/Manager dependencies,
-and runs `test_ssh_setup.py` and the whole
-`test_repository_ssh_setup_installed.py` sequence under the same 180-second
-runner/six-minute job limits. The latter builds the engine wheel with its
-packaged Source API and drives the actual Manager/engine handoff into synthetic
+The selected continuity SSH application jobs run the repository continuity
+module's `normal_ssh_setup or setup_status` controls after their installed
+lifecycle, including real Git source qualification and required request-pin
+capability. Each further dependent normal-setup job requires both its platform's
+artifact controls and explicit continuity case to succeed, prepares the declared
+engine/Manager dependencies, and runs `test_ssh_setup.py` and the whole
+`test_repository_ssh_setup_installed.py` sequence. Linux retains its 180-second
+phase bounds and six-minute job; Windows normal setup uses 240-second Source
+preparation, a 300-second lifecycle and a 12-minute job. That native sequence
+builds the engine wheel with its packaged Source API and drives the actual
+Manager/engine handoff into synthetic
 TLS enrollment and the complete Source application installer, repeat,
 wrong-scope preservation, selected update and exact native stop. The Manager
 and engine dependency support remain fixtures; this is not complete installed
