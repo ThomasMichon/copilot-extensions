@@ -39,8 +39,9 @@ _install_budget_guidance_package() {
     fi
     _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
     if [[ "$HAVE_UV" -eq 1 ]]; then
-        local uv_rc=0
-        invoke_uv_bootstrap_environment "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
+        local uv_rc=0 index_helper
+        index_helper="$(_budget_pip_index_helper)" || return 1
+        invoke_uv_bootstrap_environment "$VENV_PYTHON" -I "$(dirname "$index_helper")/installer_dependency_policy.py" \
             --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "${dependencies[@]}" "$PLUGIN_DIR" --quiet || uv_rc=$?
         for dependency in "${dependencies[@]}"; do _remove_budget_build_artifacts "$dependency" || return 1; done
         _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
@@ -332,6 +333,101 @@ _bootstrap_python() {
     resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt"
 }
 
+_budget_pip_index_helper() {
+    local helper="$SCRIPT_DIR/pip-index-config"
+    if [[ -f "$helper" ]] && ! grep -Fqx \
+        '<!-- VENDOR_POINTER: source=libs/installer-engine/installer_pip_index.py kind=file -->' "$helper"; then
+        printf '%s\n' "$helper"
+        return 0
+    fi
+    local canonical="$SCRIPT_DIR/../../../libs/installer-engine/installer_pip_index.py"
+    if [[ -z "$SOURCE_RUNTIME_IDENTITY" && -f "$helper" && -f "$canonical" &&
+          "$(basename "$(dirname "$PLUGIN_DIR")")" == plugins &&
+          -f "$PLUGIN_DIR/../../.github/plugin/marketplace.json" &&
+          -f "$SCRIPT_DIR/../../../tools/materialize_main.py" ]]; then
+        printf '%s\n' "$canonical"
+        return 0
+    fi
+    _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+    return 1
+}
+
+_budget_snapshot_path_unlinked() {
+    local base="$1" relative="$2" component
+    local -a components
+    [[ "$relative" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
+        ! "$relative" =~ (^|/)\.\.?(/|$) ]] || return 1
+    IFS=/ read -ra components <<< "$relative"
+    for component in "${components[@]}"; do
+        base="$base/$component"
+        [[ ! -L "$base" ]] || { _fail 'Linked source snapshot asset refused'; return 1; }
+    done
+}
+
+_materialize_budget_source_snapshot() {
+    local snapshot="$1" helper root operation source target extra directory previous="" index
+    local request="" request_target=""
+    local -a sources=() targets=() directories=() batch=()
+    helper="$(_budget_pip_index_helper)" || return 1
+    [[ "$helper" != "$SCRIPT_DIR/pip-index-config" ]] || return 0
+    root="$(cd "$PLUGIN_DIR/../.." && pwd)" || return 1
+    [[ -s "$SCRIPT_DIR/installer-source-assets.tsv" ]] || {
+        _fail 'The owning native source asset plan is unavailable'
+        return 1
+    }
+    [[ ! -L "$root/libs" && ! -L "$root/libs/installer-engine" &&
+        ! -L "$snapshot/scripts" && ! -L "$snapshot/libs" ]] || return 1
+    while IFS=$'\t' read -r operation source target extra; do
+        [[ -z "$extra" && "$target" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
+            ! "$target" =~ (^|/)\.\.?(/|$) ]] || return 1
+        _budget_snapshot_path_unlinked "$snapshot" "$target" || return 1
+        directories+=("$snapshot/${target%/*}")
+        case "$operation" in
+            copy)
+                _budget_snapshot_path_unlinked "$root" "$source" || return 1
+                [[ -f "$root/$source" && ( "$source" == "$target" ||
+                    ( "$target" == scripts/* && "$source" == libs/installer-engine/* ) ) ]] || return 1
+                sources+=("$source")
+                targets+=("$target")
+                ;;
+            request)
+                [[ "$target" == scripts/bootstrap-python-version.txt &&
+                    "$source" =~ ^cpython@3\.[0-9]+\.[0-9]+$ ]] || return 1
+                request="$source"
+                request_target="$target"
+                ;;
+            *) return 1 ;;
+        esac
+    done < "$SCRIPT_DIR/installer-source-assets.tsv"
+    mkdir -p "${directories[@]}" || return 1
+    # Ordinary same-name files share one native copy per destination directory.
+    for ((index=0; index<${#sources[@]}; index++)); do
+        source="${sources[index]}" target="${targets[index]}"
+        directory="$snapshot/${target%/*}"
+        if [[ "$directory" != "$previous" && ${#batch[@]} -gt 0 ]]; then
+            cp -p "${batch[@]}" "$previous/" || return 1
+            batch=()
+        fi
+        previous="$directory"
+        if [[ "${source##*/}" != "${target##*/}" ]]; then
+            cp -p "$root/$source" "$snapshot/$target" || return 1
+        else
+            batch+=("$root/$source")
+        fi
+    done
+    if [[ ${#batch[@]} -gt 0 ]]; then
+        cp -p "${batch[@]}" "$previous/" || return 1
+    fi
+    if [[ -n "$request" ]]; then
+        printf '%s\n' "$request" > "$snapshot/$request_target" || return 1
+    fi
+    for ((index=0; index<${#sources[@]}; index++)); do
+        _budget_snapshot_path_unlinked "$root" "${sources[index]}" || return 1
+        _budget_snapshot_path_unlinked "$snapshot" "${targets[index]}" || return 1
+        [[ -f "$snapshot/${targets[index]}" ]] || return 1
+    done
+}
+
 _source_runtime_identity() {
     local py
     py="$(_bootstrap_python)" || return 1
@@ -480,17 +576,16 @@ _ensure_uv() {
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local py idx helper site_prefix=""
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
     fi
+    py="$(_bootstrap_python)" || return 1
+    helper="$(_budget_pip_index_helper)" || return 1
+    idx="$(invoke_uv_bootstrap_environment "$py" -I -B "$helper" \
+        --uv "$(command -v uv)" --site-prefix "$site_prefix")" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 # Deploy the prepared-only binstub. The existing resolver selects the runtime;
@@ -547,6 +642,7 @@ STUBEOF
 
 __install_lock_link=""
 __install_lock_fd=""
+__owned_snapshot_tmp=""
 
 _install_lock_timeout() {
     local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
@@ -558,6 +654,10 @@ _install_lock_timeout() {
 }
 
 _exit_install_lock() {
+    if [[ -n "$__owned_snapshot_tmp" ]]; then
+        rm -rf -- "$__owned_snapshot_tmp"
+        __owned_snapshot_tmp=""
+    fi
     if [[ -n "$__install_lock_link" ]]; then
         local __owner
         __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
@@ -658,10 +758,12 @@ if [[ "$ACTION" == "stamp" ]]; then
         }
     else
     snap_tmp="$snap_dir.tmp-$$"
-    rm -rf -- "$snap_tmp"
-    mkdir -p "$snap_tmp"
+    mkdir -p "${snap_dir%/*}"
+    mkdir "$snap_tmp" || exit 1
+    __owned_snapshot_tmp="$snap_tmp"
     cp -a "$PLUGIN_DIR/." "$snap_tmp/"
     if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
+    _materialize_budget_source_snapshot "$snap_tmp" || exit 1
     procutil="$(_budget_procutil_source)" || exit 1
     if [[ ! -d "$snap_tmp/libs/agent-procutil" ]]; then
         mkdir -p "$snap_tmp/libs"
@@ -694,6 +796,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$(dirname "$snap_dir")"
     rm -rf -- "$snap_dir"
     mv "$snap_tmp" "$snap_dir"
+    __owned_snapshot_tmp=""
     if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
         printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$snap_dir/.payload-source"
     fi
@@ -754,7 +857,6 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
     exit 1
 fi
 
-_ensure_uv_index
 HAVE_UV=0
 if _ensure_uv; then HAVE_UV=1; fi
 
@@ -775,6 +877,7 @@ _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 
 _versioned_slot_clean || exit 1
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
+_ensure_uv_index
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     _step 'Creating managed Python venv via uv...'
     _versioned_slot_clean

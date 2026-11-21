@@ -111,6 +111,61 @@ publication and service/command launcher adoption retain their existing owners.
 After lookup, pass the selected absolute Python to the existing lifetime owner.
 Do not insert `uv run` between a shell and its caller-owned worker: that changes
 the worker's original-parent relationship and is not the same custody protocol.
+Budget's POSIX installer also uses that selected interpreter for the canonical
+`installer_pip_index.py` helper, never a PATH `pip` or `pip3`. Its
+`scripts/pip-index-config` file pointer lets already-installed source preparers
+include the helper without knowing a new asset-registry entry. The clean-room
+copier likewise expands pointers before stamping a standalone snapshot.
+The checkout reference form resolves its owning canonical reader and policy.
+Its first-session stamp remains Python- and uv-free. The installer consumes
+`installer-source-assets.tsv`, inert copy/request data projected by
+`tools/sync-installer-engine.py --only-source-snapshot-plans` from the existing
+SDK inventory, reader alias and Invocation bootstrap-request producer.
+Library entries use the source composer's existing artifact exclusions and
+enumerate ordinary files rather than recursively copying a developer's library
+directory. Stamping refuses a link at any declared source/destination path
+component, so later-added caches are not copied and checkout links cannot
+become dangling snapshot dependencies.
+Validated files are copied in directory batches, not one process per file.
+Ignored library lockfiles are excluded by the materializer's shared filter;
+failed stamping removes its newly created temporary snapshot before releasing
+the install lock, without touching earlier snapshots.
+This embeds the reader, policy family and deferred interpreter request before
+publishing the snapshot; explicit provision can then run after the checkout is
+removed. Source and materialized verification check that the plan still matches
+its producers. Prepared payloads do not search another installation for helpers.
+Existing uv environment/configuration defaults win, using the dependency-policy
+owner's discovery and TOML reader. Higher-priority named indexes shadow lower
+defaults; distinct unshadowed defaults remain effective. Only otherwise does the `global.index-url`
+bridge use `PIP_INDEX_URL` or pip's global/user/site/explicit-file order.
+The shared capture owner honors `UV_NO_SYSTEM_CONFIG` for system discovery
+and retention without suppressing user, project or explicit configuration.
+A true value requires the actual selected provider to report UV 0.11.16 or
+newer before discovery or retention; older supported UV versions otherwise
+ignore this option, so that combination refuses rather than changing feeds.
+The index-reader caller supplies that same provider through `--uv`.
+Qualification resolves the provider in its actual launch directory and captured
+environment, retaining that absolute executable when source retention changes
+the working directory. Provider-version failures remain actionable without
+printing configuration or captured subprocess output.
+Windows wrapper lookup normalizes enclosing PATH-entry quotes, while POSIX
+entries remain literal. Qualification shares the resolver's short-directory
+fallback for overlong Windows working directories. Configuration-disable and
+isolation flags accept the same boolish true spellings as uv.
+Explicit configuration files take precedence over discovery-disable flags.
+POSIX input paths preserve symlink/parent traversal, and pip's null-device
+configuration switch matches its literal spelling rather than normalized aliases.
+The installer passes a valid active venv/Conda site prefix as configuration data
+before isolating interpreter hints; it never executes that environment's Python.
+Discovery runs only for package construction, not completed-slot reuse.
+The [pip configuration rules](https://pip.pypa.io/en/stable/topics/configuration/)
+include macOS Application Support and XDG data locations, empty-XDG defaults,
+per-file inherited defaults, explicit-file user
+suppression and null-file disabling. Malformed or unreadable configuration
+refuses the bridge without printing feed values. It does not install pip,
+mutate configuration or acquire another Python. Legacy option aliases are
+normalized after parsing, so the last spelling in a section wins. A nonempty
+whitespace-only index environment value refuses instead of selecting another feed.
 The native installation-context transport controls exercise the actual
 uv-selection-to-direct-worker handoff, including a large literal request,
 nonzero exit, poisoned selection hints and an unavailable managed interpreter.
