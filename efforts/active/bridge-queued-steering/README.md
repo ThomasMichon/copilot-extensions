@@ -252,6 +252,26 @@ delivery from an SDK promise or a timer.
 
 ## Journal
 
+### 2026-11-21 - Retain POSIX descendant custody after root exit
+
+- Addressed the next review's valid exited-parent cleanup gap. POSIX passive
+  inventory now uses the existing finite owned-child executor, which retains
+  its unreaped root until the original group is retired. Async cancellation
+  joins that bounded owner instead of abandoning its worker; an unconfirmed
+  cleanup receipt is not replaced by a cancellation result. The strict
+  Windows Job-owned async path is unchanged.
+- The Windows-contained source packet passed 32 cases; four native POSIX cases
+  correctly skipped on that platform. Controlled cases preserve selected
+  owner/environment, nonzero and unavailable outcomes, bounded timeout, and
+  exact unconfirmed-cleanup exceptions after cancellation.
+- The existing Linux command-receiver lane now selects two pinned-process
+  cycles each for timeout and cancellation after the root has exited while
+  its descendant retains captured pipes. All three changed Python files passed
+  whole-file strict typing on Linux and Windows; headless-launch, module,
+  documentation, install-contract and exact source-binding checks passed.
+  Native POSIX results, current-head review and required CI remain completion gates.
+  No live runtime, deployment or native Copilot probe changed.
+
 ### 2026-11-21 - Qualify an empty successful startup inventory
 
 - Corrected the review's empty-registry edge case: ordinary startup now binds

@@ -21,6 +21,13 @@ independent fsynced receiver files for two origins and an explicit service
 route. This source evidence is not release, installed-service qualification or
 completion of the wider consumer-telemetry U3/U4 work.
 
+Its Linux Bridge selection also runs `tests/test_worktree_inventory_posix.py`.
+Two cycles each of timeout and cancellation pin the original root and
+pipe-holding descendant, observe root exit first, then require that exact
+descendant's exit after the existing finite owner settles. The same file
+contains controlled owner-selection and unconfirmed-cleanup propagation cases.
+These are contained child-process controls, not native Copilot or fleet adoption.
+
 The same native packet selects
 `agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
 `wall_cpu_tail` / incompatible-reader controls. JUnit properties named

@@ -42,6 +42,7 @@ async def test_inventory_crawl_uses_the_attributable_owner_not_a_project_path_co
     from agent_bridge import session_lifecycle_cli
 
     monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "linux")
+    monkeypatch.setattr(worktree_inventory, "os", SimpleNamespace(name="nt"))
     key = "inventory:source"
     config = AgentConfig(key, project="source")
     resolver = AgentResolver(
@@ -85,6 +86,7 @@ async def test_passive_inventory_timeout_and_cancellation_settle_the_owned_child
 ) -> None:
     from agent_bridge import session_lifecycle_cli
 
+    monkeypatch.setattr(worktree_inventory, "os", SimpleNamespace(name="nt"))
     calls: list[Any] = []
     async def communicate() -> tuple[bytes, bytes]:
         if calls:

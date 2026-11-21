@@ -600,6 +600,11 @@ Local inventory-only service reads select the attributable Worktrees installatio
 with explicit `--project` and `--passive` arguments, not a project-named PATH
 executable. Missing owners are unavailable; selected-owner environment, finite
 timeout and descendant cleanup remain part of that read.
+On POSIX, the existing finite owned-child executor retains the unreaped root
+until its original process group is retired, including when a descendant holds
+a captured pipe after root exit. Async cancellation joins that bounded owner
+through settlement rather than abandoning its worker or signaling a reused
+process-group ID. Windows retains the existing strict Job-owned async path.
 Daemon startup uses the same strict, selected-owner repository reader, including
 when no topology is configured. An unavailable or unqualified registry never
 falls back to a provisioning shim or an empty successful enumeration. Known
