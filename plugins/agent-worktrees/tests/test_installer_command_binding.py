@@ -31,6 +31,7 @@ def owned_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
     }), encoding="utf-8")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / ".copilot"))
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(payload))
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)

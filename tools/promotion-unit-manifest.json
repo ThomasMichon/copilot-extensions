@@ -2,6 +2,13 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_keeps_original_publication_identity[binding]",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_keeps_original_publication_identity[reservation]",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_does_not_authorize_changed_ownership[other-root]",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_does_not_authorize_changed_ownership[relative-root]",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_does_not_authorize_changed_ownership[source]",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_does_not_authorize_changed_ownership[installation]",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py::test_alias_does_not_authorize_changed_ownership[provider-source]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_cli_exit_status_without_network[violations0-0]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_cli_exit_status_without_network[violations1-1]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_native_policy_enforced_by_live_guard_without_network",
@@ -6612,6 +6619,7 @@
 "tools/promotion_unit_tests/test_bridge_session_inventory.py::test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
     ],
     "coverage_targets": [
+    "libs/payload-invocation/command_binding.py",
     "tools/check-dependency-age.py",
     "worktree-manager/scripts/picker-snapshot/install.py",
     "tools/dependency_age.py",
@@ -7844,7 +7852,7 @@
 "plugins/agent-dispatch/src/agent_dispatch/ordinary_agent_facts.py": "f4c781be45a3a08c71f769c58144bf5b86d2e04fc8767249e712748143149ddd",
 "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
 "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
-"libs/payload-invocation/command_lifecycle.py": "9fb653ecf0b59c1b08540b1d4c86a2b2dc59a7939bcae85a56bd05ed490f3296",
+"libs/payload-invocation/command_lifecycle.py": "af26cdc27a9bdc2f31c5a2e4779a60bc6c5450b7d7c3e558b6ebd8178c76f7fc",
 "libs/payload-invocation/python-catalog-inputs.json": "b02eed0e87c1bf9cd3eae9720eca0678c4391b670072b6194c0e6ec3755a05e3",
 "tools/promotion_unit_tests/test_typecheck_catalog.py": "7095a9a8a4a0be5a57bb91b66b5e828004c0a05964256bde381b0a63116c5fa4",
 "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
@@ -7857,7 +7865,7 @@
 "libs/payload-invocation/templates/catalog-multi-powershell.tmpl": "08e40cc3927ca60949049300f1fd73e0cdc62767ace7efa050c62b8409753122",
 "libs/payload-invocation/templates/powershell-shim.tmpl": "424c5289377d5008573c23b2237974eefdfc17c67713830a7d16ac99c74f30df",
 "libs/payload-invocation/templates/catalog-multi-posix.tmpl": "d3db605531b3945985fa5d2ff422d520b83a6901ec8efdacf1356e79ccacaff6",
-"libs/payload-invocation/command_binding.py": "783c14e3da2c21ab10e7e61ece68d6920ec5b273d04030d099c4b0c96b285864",
+"libs/payload-invocation/command_binding.py": "be326779d7ff71879c903337e9ab3ca1b41aee7f0be79e181f044a2efbeb7637",
 "tools/typecheck_catalog_views.py": "4f42cb747378ec1c165a857abc990470677ec77affcb1122da7d7511f27a8b44",
 "libs/payload-invocation/templates/catalog-python.tmpl": "c752063e0fa7c4ae6e344843055991498773870d78823e14a5d4f89edeaf93b6",
 "libs/payload-invocation/generate.py": "085f9fd1485998d574ff833698d2aed07b4fc649fc515154c72515db9cf10d48",
@@ -8102,6 +8110,7 @@
 "libs/agent-procutil/src/agent_procutil/daemon_observation.py": "371bf2a0cb27b57d8fd5c421099246c209d239801dcdfc15d16827c054fbe97d",
 "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py": "2a5607e7b5252cfa9d1121883a7dedc07637dd1eb3f7aac0d6c0217f971ec826",
 "worktree-manager/scripts/picker-snapshot/install.py": "7749f1be63c74cf546a0ce2d2549c3dfbdfc6813b8d154b48283b0995d4f90aa",
-"tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445"
+"tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445",
+"tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d"
     }
 }
