@@ -3,6 +3,23 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_uv_executable_fixture_units.py",
+      [
+        "test_windows_absolute_uv_selection_preserves_the_selected_target",
+        "test_missing_selected_uv_is_not_replaced_by_another_resolver",
+        "test_other_command_resolution_contracts_are_unchanged[False-/selected/uv]",
+        "test_other_command_resolution_contracts_are_unchanged[False-uv]",
+        "test_other_command_resolution_contracts_are_unchanged[True-relative/uv.exe]",
+        "test_other_command_resolution_contracts_are_unchanged[True-custom-uv]",
+        "test_an_absolute_non_native_wrapper_is_not_reinterpreted",
+        "test_sdk_projection_keeps_the_canonical_nontraversing_primitive",
+        "test_projection_uses_the_canonical_function_without_changing_other_configuration",
+        "test_projection_refuses_incomplete_or_reordered_markers[# native-executable:end\\n# native-executable:begin\\n]",
+        "test_projection_refuses_incomplete_or_reordered_markers[# native-executable:begin\\n]",
+        "test_projection_refuses_incomplete_or_reordered_markers[def select_uv_executable(path): pass\\n]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_uv_reference_fixture_units.py",
       [
         "test_symlink_scan_falls_back_without_native_symlink_support",
@@ -8696,6 +8713,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_uv_executable_fixture_units.py": "9c468cf8f61ded25396bdebd6185cb89ffef3c3ee3e9335e8a937b08c6dc10c5",
+    "tools/test_dependency_uv_executable.py": "6488e916ba2e46d43b86e9eae7dfcc618f281b4aa857e27d002013271c600c1e",
+    "tools/test_installer_dependency_policy.py": "94a8069e366c93e0116af10b837f1b47dfaea154e398a49920d1ee17933eb80f",
     "tools/promotion_unit_tests/test_uv_reference_fixture_units.py": "34ff0d430c9b2d9533cef8cb76964b5d8a002f727753577fb2a7d6e2a61963b5",
     "tools/test_uv_editable_ref.py": "4764ce3cd16c9344dc83951d54facde5ae3dbe8c767400d10d7733afc6e574a7",
     "tools/promotion_unit_tests/test_runtime_archive_closure_units.py": "86c9d1c8e90649b5a3d5523fe5df4f2ed4710b1f27817083c651faddfd893ef1",
