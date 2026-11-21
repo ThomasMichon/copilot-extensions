@@ -1434,12 +1434,66 @@ the exact unmodified guard, rather than only testing the optimized implementatio
 Five pure regression cases and the guard's source/coverage target are positively
 admitted to the existing unit packet: 5,906 nodes, 967 sources and 411 coverage
 targets, preserving every prior entry/digest and the 300-second ceiling.
-The separate 113-case development suite remains unchanged. Current-head source
-review and the complete required Linux CI packet remain delivery gates.
+The separate 113-case development suite remains unchanged. Local observations
+alone do not satisfy the separate current-head source-review and complete
+required Linux CI gates.
 Clean-room provisioning and external native lifecycle execution are not changed
 by this AST-only candidate and are not represented by these unit observations.
 The separately tracked Windows packet gap (#13598) and all native/candidate/cleanup ownership
 remain separate; no grant, waiver, Main activation or runtime rollout follows.
+
+Source #13787 merges at `2026-11-21T01:56:40Z` as
+`d72add0240b7cdd4929cb10c26eee4cac29bda50`. Approval `6001939540` targets the
+exact published head `131b6edfc3c38fb73523492d7d67a54cc1fc661f`; complete
+review/thread reads report no open findings. Required source CI `44852019392`
+passes guards, the unit consumer and its required aggregate. Unit job
+`136685335927` succeeds and uploads freshly executed evidence rather than
+claiming a reuse hit. Trusted lockdown and source attribution pass independently.
+The source merge-time verifier reads live policy/results and returns that exact
+head before the managed, role-authorized merge; no failing CI is bypassed.
+Closing references are empty and parent #6237 remains open.
+
+The canonical parent is reread after merge and only this finite source item is
+resolved. Release adoption, controlled whole-flow measurements, native
+qualification and retained workflow/repair/cleanup ownership remain open.
+The next source-only stretch is the existing unit-census/eligibility work, not
+another guard benchmark or an unaccepted workflow change.
+
+### November 21 original guard-unit admission
+
+The original guard suite has 59 test functions and 113 expanded cases. Its
+synthetic repository fixture redirects production roots but leaves the public
+headless allowlist bound to the checkout. A contrary matching allowance supplied
+only in memory makes an original spawn assertion fail. This is a fixture-input
+dependency, not a production policy defect or a prohibited unit-auditor read:
+the existing effect guard permits read-only public non-code inputs.
+
+The source correction binds that fixture's allowlist to its own temporary
+repository. One regression supplies the contrary checkout allowance in memory,
+invokes the original spawn assertion and requires zero checkout-allowlist reads.
+Removing only the fixture correction in memory makes that regression fail.
+No actual checkout allowance is edited. Whole-file strict typing preserves
+every original assertion and parameterization; its one dynamic class becomes
+a typed factory with the same actual runtime base and constructor, not a
+test-only substitute.
+
+The packet adapter exports the exact original test function and fixture
+objects, without copying assertions. Standalone and adapter execution each pass
+all 114 cases. A separate development observation uses the real `UnitRun`
+auditor, process/thread/sleep restrictions, temporary-only writes and coverage
+contexts: all 114 cases pass, report no prohibited effect, and each executes
+the production guard in its own call phase. The only observed repository code
+reads are the guard, original suite and adapter.
+
+Positive admission adds 114 exact nodes and two hash-bound source inputs:
+6,020 nodes, 969 sources and the same 411 production targets. Every prior node
+and source digest remains; profile and the 300-second budget are unchanged.
+The existing release-helper contract still requires all 88 decision targets.
+The focused observation is development evidence, not a complete promotion
+packet or a helper-coverage waiver. Normal current-head Linux CI and source
+review are still required. The Windows collection gap (#13598), release
+adoption, native/candidate acceptance and all workflow/cleanup owners remain
+separate. No workflow trigger, native grant, runtime or Main activation changes.
 
 ### November 20 path-gated audit-guard native boundary
 
