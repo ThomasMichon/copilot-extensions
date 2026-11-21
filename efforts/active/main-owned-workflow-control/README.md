@@ -618,13 +618,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and complete required Linux CI with freshly executed packet evidence. Broader
   install-contract integration, native qualification, every-release observation
   and full-census acceptance remain separate.
-- [ ] Qualify and land the original configuration-guard unit batch through
+- [x] Qualify and land the original configuration-guard unit batch through
   exact test/fixture objects: 89 cases across six suites, retaining the feed
   Git-path fixture, whole-checkout scan and package CLI smoke outside the packet.
   Preserve all original assertions, production guards, prior packet contents,
   source closure, actual per-case guard call coverage, helper gates and the
-  300-second budget. Require complete current-head source review and Linux CI;
-  broader integration, native, every-release and full-census gates remain open.
+  300-second budget. #13814 merges at
+  `cfd97a8ba7ca632ed771164d92f18275ee5da010` after exact-head Copilot approval
+  and complete required Linux CI with freshly executed packet evidence.
+  Broader integration, native, every-release and full-census gates remain open.
+- [ ] Qualify and land all 32 original Picker inbox-discipline cases through
+  exact test/fixture objects, preserving the original suite and AST guard.
+  Require closed source admission, real per-case guard call coverage,
+  unchanged prior packet contents, helper gates and the 300-second budget,
+  then complete current-head source review and Linux CI. Native Picker,
+  every-release, workflow-count and full-census acceptance remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

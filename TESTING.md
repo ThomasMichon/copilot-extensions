@@ -11218,6 +11218,14 @@ path, its whole-checkout scan and the package guard's real CLI smoke remain
 unchanged outside the packet. Version tests read the already hash-bound Chat
 initializer as data; they do not import or start Chat. Original assertions,
 parameter IDs and the production guards are unchanged.
+The Picker inbox-discipline adapter exports all 32 original cases and their
+original temporary-repository fixture. The real guard analyzes synthetic
+Python source, including aliases, scopes, branches, suppression comments and
+syntax errors; CLI argument handling runs in-process. No Picker, UI thread or
+native CLI starts. Actual effect-audited development execution reads only
+the adapter, original test module and production guard, with real guard
+call-phase coverage for every case. Full packet qualification remains a
+separate normal source-CI requirement.
 Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
 the source map's existing layout so independent hash updates can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
