@@ -11,6 +11,10 @@ on:
       - libs/agent-procutil/tests/test_daemon_python_selection.py
       - libs/installer-engine/bootstrap-uv.ps1
       - libs/installer-engine/bootstrap-uv.sh
+      - libs/installer-engine/installer_dependency_arguments.py
+      - libs/installer-engine/installer_dependency_config.py
+      - libs/installer-engine/installer_dependency_policy.py
+      - libs/installer-engine/installer_pip_index.py
       - libs/payload-invocation/generate.py
       - libs/payload-invocation/template_rendering.py
       - libs/payload-invocation/templates/posix-shim.tmpl
@@ -26,6 +30,7 @@ on:
       - plugins/budget-guidance/scripts/uninstall-runtime.ps1
       - plugins/budget-guidance/scripts/uninstall-runtime.sh
       - plugins/budget-guidance/tests/test_installers.py
+      - plugins/budget-guidance/tests/test_native_provider_policy.py
       - plugins/budget-guidance/tests/test_install_transaction_lock.py
       - plugins/budget-guidance/tests/test_managed_uninstall.py
 
@@ -81,15 +86,21 @@ jobs:
           --test-file tests/test_managed_uninstall.py
           --junit-dir qualification-evidence/budget-uninstall
           --allow-explicit-tiers -k ps1
+      - name: Qualify actual Windows provider version and retained-input launches
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_native_provider_policy.py
+          --junit-dir qualification-evidence/budget-provider
+          --allow-explicit-tiers -k native_uv_policy_qualification
       - name: Require actual command, installer, lock and uninstall controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16};
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall','budget-provider')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16,'budget-provider':2};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, nine installer, four prerequisite-lock and 16 uninstall controls passed without skips')"
+          print('29 command, nine installer, four prerequisite-lock, 16 uninstall and two native provider controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
