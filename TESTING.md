@@ -11232,6 +11232,12 @@ rewritten-history Git test and actual-checkout capability inventory remain
 unchanged outside the packet. Selected cases retain actual document parsing,
 lexical/AST scanning and in-process argument handling; no fixture text is
 executed. Each adapter, original test module and production guard is hash-bound.
+The vendored-library synchronization adapter exports eighteen original
+temporary-tree cases and the original `fake_repo` fixture. It retains real
+TOML/source-byte comparisons, pointer/reference inventory and in-process list/
+CLI diagnostics. The original native symlink case remains outside this packet.
+The existing editable-reference, artifact-inventory and standalone-consumer
+helpers stay hash-bound; no library is installed, rewritten or synchronized.
 Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
 the source map's existing layout so independent hash updates can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
