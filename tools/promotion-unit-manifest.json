@@ -2,6 +2,9 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+    "tools/promotion_unit_tests/test_manager_release_inputs.py::test_manager_release_refuses_before_mutation[manifest]",
+    "tools/promotion_unit_tests/test_manager_release_inputs.py::test_manager_release_refuses_before_mutation[digest]",
+    "tools/promotion_unit_tests/test_manager_release_inputs.py::test_manager_release_refuses_before_mutation[pristine]",
     "tools/promotion_unit_tests/test_large_file_protocol_guard_units.py::test_final_diff_uses_one_lossless_diff_and_one_metadata_batch",
     "tools/promotion_unit_tests/test_large_file_protocol_guard_units.py::test_final_diff_refuses_failed_or_incomplete_metadata",
     "tools/promotion_unit_tests/test_large_file_protocol_guard_units.py::test_publication_commit_resolution_batches_and_binds_each_reference",
@@ -6362,6 +6365,7 @@
     "tools/promotion_unit_tests/test_point_admission_contract.py::test_required_intake_route_receipts_selected_peer_scope_and_typed_union"
     ],
     "coverage_targets": [
+        "tools/application_footprint.py",
         "tools/check-large-files.py",
         "tools/run-source-ast-guards.py",
         "tools/check-vendored-libs-sync.py",
@@ -6790,6 +6794,7 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_manager_release_inputs.py": "11e1afa43e8563f96df6bf8e533345c7cf2282fd436723e24bb31d82d701201e",
         "tools/promotion_unit_tests/test_large_file_protocol_guard_units.py": "e24712151f80db8830985514db7bfebcca9280bed5070b796ee2082912b760eb",
         "tools/test_check_large_files.py": "ffd30349c0a73ed7fc99e64b7cdff8faa179f0bb7dfd1dbcb665c511f790c8df",
         "tools/check-large-files.py": "b78fe5fb96d01b2d98dd242d7e2ca9e3a84b26ad9039df4ab87be78984501cda",
