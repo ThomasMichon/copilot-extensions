@@ -3,6 +3,22 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_materializer_invocation_output_units.py",
+      [
+        "test_invocation_promotion_rebuilds_canonical_helpers_and_toolkit[False]",
+        "test_invocation_promotion_rebuilds_canonical_helpers_and_toolkit[True]",
+        "test_invocation_promotion_uses_the_version_stamped_candidate_root",
+        "test_invocation_source_check_accepts_stale_or_absent_outputs[False]",
+        "test_invocation_source_check_accepts_stale_or_absent_outputs[True]",
+        "test_invocation_materialized_equality_refuses_byte_drift[text]",
+        "test_invocation_materialized_equality_refuses_byte_drift[binary]",
+        "test_invocation_source_check_refuses_invalid_python",
+        "test_invocation_source_cli_keeps_check_and_source_modes_distinct",
+        "test_invocation_materializer_refuses_corrupt_writer_result",
+        "test_invocation_materializer_never_executes_candidate_tooling"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_materializer_invocation_boundary_units.py",
       [
         "test_invocation_promotion_refuses_foreign_manifest_before_writes",
@@ -8484,7 +8500,7 @@
     "tools/promotion_unit_tests/test_materializer_installer_asset_units.py": "33ecc25d74351cb1c23a249d1a461e74c5fb8dfaa9e66b757c39e4ba592b8752",
     "tools/promotion_unit_tests/test_materializer_uv_reference_units.py": "1ab9e05be6d68641a0df1db8960349aefa6dc4ab24415c4a50c57d17f379d776",
     "tools/promotion_unit_tests/test_materializer_pointer_units.py": "dad666e90ef19c669af857556cc2215b543b51965f6e7b4a78b45ee7a090fbd0",
-    "tools/test_materialize_main.py": "52e5d9d2a8182a8fdd753cd020d02e333fcbb6828e64865f43254fb996711568",
+    "tools/test_materialize_main.py": "94d8f1c543992bed7ef48d3e2f659af3bdb23464ec17f95beb326d6bb5dd0662",
     "tools/promotion_unit_tests/test_preview_release_units.py": "868c518cb89a065fe9d0c984892187c3350a24d4216be1289691b2115555c5ee",
     "tools/test_preview_release.py": "b36e512d6938aa000c1b29e29f5ed26cebfdda1387233198838d6521518c9c0f",
     "tools/preview_release.py": "8e13ce2c64e4e6b810e97644d1de61a37818eef853d8c8de9b6026dcc6577809",
@@ -9546,7 +9562,8 @@
     "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py": "2a5607e7b5252cfa9d1121883a7dedc07637dd1eb3f7aac0d6c0217f971ec826",
     "worktree-manager/scripts/picker-snapshot/install.py": "7749f1be63c74cf546a0ce2d2549c3dfbdfc6813b8d154b48283b0995d4f90aa",
     "tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445",
-    "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d"
+    "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d",
+    "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47"
   },
   "coverage_targets": [
     "tools/preview_release.py",

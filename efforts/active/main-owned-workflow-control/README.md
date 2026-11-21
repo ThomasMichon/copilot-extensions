@@ -903,7 +903,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13944 merges at `ee1c7951fa6b1db63e15d42fcadaddeba93b1939` after
   exact-head Copilot approval and complete required Linux CI with all 6,795
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land three exact original invocation-boundary controls:
+- [x] Qualify and land three exact original invocation-boundary controls:
   foreign-manifest refusal, escaping-output refusal and the materializer's
   invocation-owner callback. Preserve all 103 preceding original cases and
   all 59 residuals; bind copied canonical fixture data without executing it.
@@ -911,6 +911,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   per-case production call coverage, zero prohibited effects, all preceding
   node/hash/target/helper decisions, compact/flat-v1 contracts, the 300-second
   limit, strict typing, current-head review and complete Linux source CI.
+  Native, installed, release, full-census and whole-flow gates stay open.
+  #13947 merges at `8d563d86f9b4d7b4c551f57e85a3e8a7ea8929db` after
+  exact-head Copilot approval and complete required Linux CI with all 6,798
+  units freshly executed. Broader parent gates stay open.
+- [ ] Repair the reproduced incomplete invocation fixture with the three
+  missing entry modules and eight current build resources, preserving every
+  original assertion and parameterization. Satisfy the mandatory whole-file
+  strict ratchet without suppressions; retain equivalent runtime module
+  targets, native headlessness and the test interpreter floor. Qualify eleven
+  exact original output controls with closed sources, real per-case producer
+  coverage and zero prohibited effects; rerun all 117 mapped originals.
+  Preserve preceding nodes, every other source hash, all target/helper/
+  compact/flat-v1 contracts and the 300-second limit, then obtain current-head
+  review and complete Linux source CI. All 48 remaining originals stay outside,
+  including the four driver-refresh cases refused by the current explicit
+  build-data input contract. Do not widen that contract merely for admission.
   Native, installed, release, full-census and whole-flow gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
