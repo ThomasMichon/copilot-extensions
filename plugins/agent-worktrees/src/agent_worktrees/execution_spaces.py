@@ -395,9 +395,7 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config, child=record) is None:
                 if not retired_owner_authorized:
                     raise ExecutionSpaceError(
-                        "owned local record requires its original receiving allocation or proven local parent; "
-                        "if the parent worktree is permanently gone, run "
-                        f"'doctor --repair-orphaned-owner {record.worktree_id}'"
+                        "owned local record requires its original receiving allocation or proven local parent"
                     )
         return
     if reporting:

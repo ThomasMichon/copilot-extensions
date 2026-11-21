@@ -370,7 +370,7 @@ def test_orphaned_owner_repair_reports_fixes_then_plain_finalize_applies(
 ) -> None:
     original = orphaned.ledger.read_bytes()
     assert _run(orphaned, recover_retired_owner=None) == 1
-    assert "--repair-orphaned-owner" in capsys.readouterr().err
+    assert "proven local parent" in capsys.readouterr().err
     code, report = _doctor(orphaned)
     assert report["error"] is None
     assert (code, report["repairable"], report["repaired"]) == (0, True, False)

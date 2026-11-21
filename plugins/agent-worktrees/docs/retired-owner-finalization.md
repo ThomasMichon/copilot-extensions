@@ -77,7 +77,8 @@ the missing proof.
 
 Retired-owner recovery needs the parent's archived record. When the parent
 has no live or archived record, no checkout and no branch, plain finalization
-refuses and names a separate doctor repair:
+refuses ("requires its original receiving allocation or proven local
+parent"). Use the separate doctor repair:
 
 ```text
 <agent-worktrees> -p <child-project> doctor --repair-orphaned-owner <child-id> --json
