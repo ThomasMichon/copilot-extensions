@@ -3,6 +3,25 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_materializer_installer_asset_units.py",
+      [
+        "test_materialize_installer_engine_ref_into_copies_and_rewrites[agent-pull-requests]",
+        "test_materialize_installer_engine_ref_into_copies_and_rewrites[agent-dispatch]",
+        "test_materialize_installer_engine_ref_into_copies_and_rewrites[agent-index]",
+        "test_materialize_installer_engine_ref_into_reports_missing_canonical",
+        "test_materialize_installer_engine_ref_into_refuses_an_escaping_reference",
+        "test_materialize_installer_engine_ref_into_refuses_duplicate_source_lines",
+        "test_rewrite_to_local_refuses_duplicate_source_lines",
+        "test_rewrite_to_local_preserves_following_comment_lines",
+        "test_rewrite_to_local_preserves_trailing_same_line_comments",
+        "test_materialize_installer_engine_ref_into_skips_malformed_local_reference_for_registered_adopter",
+        "test_materialize_installer_engine_ref_into_preserves_following_comment_lines",
+        "test_materialize_launch_wrapper_assets_into_copies_manifested_files",
+        "test_materialize_launch_wrapper_assets_into_reports_missing_canonical_file",
+        "test_materialize_launch_wrapper_assets_into_refuses_escaping_source_dir"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_materializer_uv_reference_units.py",
       [
         "test_find_uv_editable_refs_only_returns_escaping_entries_regardless_of_editable",
@@ -8394,6 +8413,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_materializer_installer_asset_units.py": "33ecc25d74351cb1c23a249d1a461e74c5fb8dfaa9e66b757c39e4ba592b8752",
     "tools/promotion_unit_tests/test_materializer_uv_reference_units.py": "1ab9e05be6d68641a0df1db8960349aefa6dc4ab24415c4a50c57d17f379d776",
     "tools/promotion_unit_tests/test_materializer_pointer_units.py": "dad666e90ef19c669af857556cc2215b543b51965f6e7b4a78b45ee7a090fbd0",
     "tools/test_materialize_main.py": "52e5d9d2a8182a8fdd753cd020d02e333fcbb6828e64865f43254fb996711568",
