@@ -26,7 +26,7 @@ def test_managed_python_is_prepared_privately_before_downloads_are_disabled(
         "NATIVE_FIXTURE_OWNER": "original-owner",
     }
     deadline = time.monotonic() + 10
-    calls = []
+    calls: list[tuple[list[str | Path | None], Path, dict[str, str], float]] = []
 
     def run(
         arguments: Sequence[str | Path | None],
@@ -66,7 +66,7 @@ def test_failed_preparation_cannot_return_a_ready_environment(
     expired: bool,
 ) -> None:
     environment = {"UV_PYTHON_DOWNLOADS": "never"}
-    calls = []
+    calls: list[Sequence[str | Path | None]] = []
 
     def run(
         arguments: Sequence[str | Path | None],
@@ -90,6 +90,7 @@ def test_failed_preparation_cannot_return_a_ready_environment(
     assert environment == {"UV_PYTHON_DOWNLOADS": "never"}
 
 
+@pytest.mark.timeout(90)
 def test_generated_application_managed_selector_works_without_downloads(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     if uv is None:
