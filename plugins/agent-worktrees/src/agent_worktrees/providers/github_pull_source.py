@@ -91,10 +91,16 @@ def find(
     )
     if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
         raise ProviderError("GitHub did not return complete source-bound PR pages.")
-    candidates = [
-        pull for page in pages for data in page
-        if matches(pull := _pull(data), source, branch, provider.authority_endpoint(api_base))
-    ]
+    candidates = []
+    for page in pages:
+        for data in page:
+            if isinstance(data, dict) and data.get("state") == "closed":
+                head = data.get("head")
+                if not isinstance(head, dict) or head.get("repo") is None:
+                    continue
+            pull = _pull(data)
+            if matches(pull, source, branch, provider.authority_endpoint(api_base)):
+                candidates.append(pull)
     opened = [pull for pull in candidates if pull.state == "open" and not pull.merged]
     if len(opened) > 1:
         raise ProviderError("More than one open PR matches the exact source repository and branch.")
@@ -117,8 +123,9 @@ def create(
     )
     if not isinstance(data, dict) or type(data.get("number")) is not int or data["number"] <= 0:
         raise ProviderError("GitHub creation did not return a valid pull-request identity.")
-    receipt = PullResult(number=data["number"], url=source_text(data, "html_url"))
+    receipt = PullResult(number=data["number"])
     try:
+        receipt.url = source_text(data, "html_url")
         pull = _pull(data)
         base = source_object(data, "base")
         if (

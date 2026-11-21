@@ -137,9 +137,10 @@ def test_public_github_ssh_alias_shares_only_the_supported_head_fence(
 
 
 @pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("subdirectory", [False, True])
 def test_mark_complete_missing_owner_refuses_nonblocking_during_source_publication(
     native_source_owners: NativeOwners, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    explicit: bool,
+    explicit: bool, subdirectory: bool,
 ) -> None:
     from agent_worktrees import finalize_cli, pr_authority, worktree_identity
 
@@ -147,7 +148,9 @@ def test_mark_complete_missing_owner_refuses_nonblocking_during_source_publicati
     workspace = tmp_path / "external"
     git_ops.git("worktree", "add", "-b", "completion-admission", str(workspace), "HEAD",
                 cwd=caller.worktree_path)
-    monkeypatch.chdir(workspace)
+    directory = workspace / "nested" if subdirectory else workspace
+    directory.mkdir(exist_ok=True)
+    monkeypatch.chdir(directory)
     monkeypatch.setattr(cfg, "active_project", lambda: config.repo_name)
     monkeypatch.setattr(cfg, "project_name", lambda: config.repo_name)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id_from_cwd", _infer_worktree_id_from_cwd)
@@ -160,6 +163,7 @@ def test_mark_complete_missing_owner_refuses_nonblocking_during_source_publicati
     assert finalize_cli.cmd_mark_complete(args) == 0
     record = tracking.load_record(cfg.tracking_dir() / "external.yaml")
     assert record.status == "complete" and record.title == "Complete"
+    assert Path(record.worktree_path) == workspace.resolve()
 
 
 def test_complete_owner_lookup_scales_past_retained_history_and_invalidates_changes(

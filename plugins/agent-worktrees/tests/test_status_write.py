@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
+import subprocess
+from typing import Any
 
 import pytest
 import yaml
+from machine_transport import detect_platform
 
 from agent_worktrees import __main__ as main
-from agent_worktrees import tracking, worktree_identity
+from agent_worktrees import config as cfg, git_ops, record_io, tracking, worktree_identity
 
 
 @pytest.mark.parametrize("loader_name", ["SafeLoader", "CSafeLoader"])
 @pytest.mark.parametrize("assert_title", [False, True])
 def test_non_bmp_title_survives_cold_read_after_status_save(
-    status_env, monkeypatch, loader_name, assert_title,
-):
+    status_env: Path, monkeypatch: pytest.MonkeyPatch, loader_name: str, assert_title: bool,
+) -> None:
     loader = getattr(yaml, loader_name, None)
     if loader is None:
         pytest.skip(f"{loader_name} is unavailable")
@@ -30,7 +34,7 @@ def test_non_bmp_title_survives_cold_read_after_status_save(
         title=title if assert_title else None,
         summary="Unrelated status save",
     ) == 0
-    assert tracking._load_record_uncached(status_env).title == title
+    assert record_io.load_record_uncached(status_env).title == title
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -43,8 +47,8 @@ def test_non_bmp_title_survives_cold_read_after_status_save(
     ("x" * 40 + "\u2029history-suffix", "x" * 40 + "\u2029history-suffix"),
 ], ids=["normalized-boundary", "unicode-controls", "numeric", "next-line", "line-separator", "paragraph-separator"])
 def test_full_title_survives_ordinary_writer_history_export_and_short_display(
-    status_env, capfd, raw, expected,
-):
+    status_env: Path, capfd: pytest.CaptureFixture[str], raw: Any, expected: str,
+) -> None:
     import json
     from agent_worktrees import disposition_history, effort_focus, sessions, status_bar_cli
 
@@ -64,14 +68,14 @@ def test_full_title_survives_ordinary_writer_history_export_and_short_display(
     ) == 0
     loaded = tracking.load_record(status_env)
     assert loaded.title == expected and loaded.title_asserted
-    assert tracking._load_record_uncached(status_env).title == expected
+    assert record_io.load_record_uncached(status_env).title == expected
     assert loaded.active_effort == binding and loaded.status == record.status
     history = disposition_history.read(loaded.worktree_id, tracking_path=status_env.parent)
     assert [entry["title"] for entry in history] == ["old capped\u2026", expected]
     assert main._worktree_to_dict(loaded, session_ctx=sessions.SessionContext())["title"] == expected
     compact = status_bar_cli._resolve_segment_title(
         loaded, loaded.worktree_path,
-        main.git_ops.WorktreeStateInfo(state=main.git_ops.WorktreeState.UNUSED),
+        git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNUSED),
     )
     assert len(compact) <= 48 and compact.endswith("\u2026")
     assert tracking.load_record(status_env).title == expected
@@ -82,7 +86,7 @@ def test_full_title_survives_ordinary_writer_history_export_and_short_display(
     assert json.loads(capfd.readouterr().out)["history"][-1]["title"] == expected
 
 
-def test_over_bound_title_rejects_before_any_status_side_effect(status_env, capfd):
+def test_over_bound_title_rejects_before_any_status_side_effect(status_env: Path, capfd: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import disposition_history
 
     before = status_env.read_bytes()
@@ -95,13 +99,13 @@ def test_over_bound_title_rejects_before_any_status_side_effect(status_env, capf
     assert disposition_history.read("wt-status", tracking_path=status_env.parent) == []
 
 
-def test_full_title_caller_selects_the_qualified_receiver(status_env, monkeypatch):
+def test_full_title_caller_selects_the_qualified_receiver(status_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import tracking_write
 
     seen = []
     real_dispatch = tracking_write.dispatch
 
-    def dispatch(verb, payload, **kwargs):
+    def dispatch(verb: Any, payload: Any, **kwargs: Any) -> Any:
         seen.append((payload.get("retain_full_title"), kwargs.get("min_version")))
         return real_dispatch(verb, payload, **kwargs)
 
@@ -115,14 +119,14 @@ def test_full_title_caller_selects_the_qualified_receiver(status_env, monkeypatc
 @pytest.mark.parametrize("title", ["1234567890" * 6, "x" * 40 + "\u2028suffix"])
 @pytest.mark.parametrize("field", ["summary", "activity"])
 def test_non_title_write_avoids_prior_serializer_after_full_title(
-    status_env, monkeypatch, title, field,
-):
+    status_env: Path, monkeypatch: pytest.MonkeyPatch, title: str, field: Any,
+) -> None:
     import re
     from agent_worktrees import locks, tracking_write
 
     requests = []
 
-    def prior_receiver(kind, payload):
+    def prior_receiver(kind: Any, payload: Any) -> Any:
         requests.append(payload)
         result = tracking_write.compute(kind, payload)
         value = tracking.load_record(status_env).title or "null"
@@ -144,9 +148,10 @@ def test_non_title_write_avoids_prior_serializer_after_full_title(
         monkeypatch.setattr(main, "_status_monitor_enabled", lambda: False, raising=False)
         args = argparse.Namespace(worktree_id=None)
         assert main._cmd_status_write(args, summary=None, title=title) == 0
-        assert tracking._load_record_uncached(status_env).title == title
-        assert main._cmd_status_write(args, **{"summary": None, field: "Next work"}) == 0
-        assert tracking._load_record_uncached(status_env).title == title
+        assert record_io.load_record_uncached(status_env).title == title
+        updates: dict[str, Any] = {"summary": None, field: "Next work"}
+        assert main._cmd_status_write(args, **updates) == 0
+        assert record_io.load_record_uncached(status_env).title == title
         assert getattr(tracking.load_record(status_env), field) == "Next work"
         assert requests == []
     finally:
@@ -156,14 +161,18 @@ def test_non_title_write_avoids_prior_serializer_after_full_title(
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("title_only", [False, True])
 def test_legacy_title_entry_retains_full_current_and_new_history(
-    status_env, monkeypatch, existing, title_only,
-):
+    status_env: Path, monkeypatch: pytest.MonkeyPatch, existing: bool, title_only: bool,
+) -> None:
     from agent_worktrees import disposition_history, finalize_cli
 
     if not existing:
         status_env.unlink()
-    monkeypatch.setattr(finalize_cli.git_ops, "get_current_branch", lambda *_: "fixture-branch")
-    monkeypatch.setattr(finalize_cli.cfg, "project_name", lambda: "example")
+        def root_probe(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            assert args == ("rev-parse", "--show-toplevel")
+            return subprocess.CompletedProcess(args, 0, str(status_env.parent), "")
+        monkeypatch.setattr(git_ops, "git", root_probe)
+    monkeypatch.setattr(git_ops, "get_current_branch", lambda *_: "fixture-branch")
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
     title = "Identify the complete title-only source flow and retained history"
     assert finalize_cli.cmd_mark_complete(argparse.Namespace(
         worktree_id=None, title=title, title_only=title_only,
@@ -179,7 +188,7 @@ def test_legacy_title_entry_retains_full_current_and_new_history(
 
 
 @pytest.mark.parametrize("command", ["mark-complete", "push-changes"])
-def test_title_only_over_bound_refusal_has_no_record_or_history_effect(status_env, command):
+def test_title_only_over_bound_refusal_has_no_record_or_history_effect(status_env: Path, command: str) -> None:
     from agent_worktrees import disposition_history, finalize_cli
 
     args = main.build_parser().parse_args([command, "--title-only", "--title", "x" * 513])
@@ -193,7 +202,7 @@ def test_title_only_over_bound_refusal_has_no_record_or_history_effect(status_en
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_fresh_profile_cli_retains_full_title_in_record_history_and_list(tmp_path):
+def test_fresh_profile_cli_retains_full_title_in_record_history_and_list(tmp_path: Path) -> None:
     import json
     import os
     import sys
@@ -214,7 +223,7 @@ def test_fresh_profile_cli_retains_full_title_in_record_history_and_list(tmp_pat
     path = records / "fixture-title.yaml"
     record = tracking.WorktreeRecord(
         worktree_id="fixture-title", branch="worktree/fixture-title",
-        worktree_path=str(checkout), repo=project, machine="fixture", platform=main.cfg.detect_platform(),
+        worktree_path=str(checkout), repo=project, machine="fixture", platform=detect_platform(),
         started_at="", last_resumed_at="", resume_count=0, title="old", status="active",
         codename="fixture-title", completed_at=None,
     )
@@ -229,7 +238,7 @@ def test_fresh_profile_cli_retains_full_title_in_record_history_and_list(tmp_pat
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "COPILOT_AGENT_SESSION_ID"):
         env.pop(key, None)
 
-    def invoke(*args, expected=0):
+    def invoke(*args: Any, expected: int=0) -> Any:
         result = run_headless(
             [sys.executable, "-m", "agent_worktrees", "--project", project, *args],
             cwd=checkout, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
@@ -258,8 +267,8 @@ def test_fresh_profile_cli_retains_full_title_in_record_history_and_list(tmp_pat
 
 @pytest.mark.parametrize("json_output", [False, True])
 def test_maintenance_refusal_preserves_status_and_normal_output(
-    status_env, monkeypatch, capfd, json_output,
-):
+    status_env: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], json_output: Any,
+) -> None:
     import json
     from agent_worktrees import tracking_write
 
@@ -267,7 +276,7 @@ def test_maintenance_refusal_preserves_status_and_normal_output(
     record.codename = "fixture-status"
     tracking.save_record(record, status_env)
     before = status_env.read_bytes()
-    def held(*args, **kwargs):
+    def held(*args: Any, **kwargs: Any) -> None:
         raise tracking_write.ResidentRecoveryHeld("active maintenance")
     monkeypatch.setattr(tracking_write, "dispatch", held)
     assert main._cmd_status_write(
@@ -282,7 +291,7 @@ def test_maintenance_refusal_preserves_status_and_normal_output(
     assert status_env.read_bytes() == before
 
 
-def test_status_write_republishes_agenda_policy(status_env, monkeypatch):
+def test_status_write_republishes_agenda_policy(status_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import session_context, tracking_write
 
     published = []
@@ -291,7 +300,7 @@ def test_status_write_republishes_agenda_policy(status_env, monkeypatch):
         "publish_agenda_policy",
         lambda config, record: published.append(record.worktree_id),
     )
-    def held(*args, **kwargs):
+    def held(*args: Any, **kwargs: Any) -> None:
         raise tracking_write.ResidentRecoveryHeld("active maintenance")
     monkeypatch.setattr(tracking_write, "dispatch", held)
     main._cmd_status_write(
@@ -302,8 +311,8 @@ def test_status_write_republishes_agenda_policy(status_env, monkeypatch):
 
 
 def test_running_session_sees_enabled_agenda_default_after_status_write(
-    status_env, monkeypatch, tmp_path,
-):
+    status_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """An operator enabling ``agendas.default`` mid-session reaches the
     reminder hook through the next disposition write, without a restart."""
     import importlib.util
@@ -315,6 +324,7 @@ def test_running_session_sees_enabled_agenda_default_after_status_write(
     spec = importlib.util.spec_from_file_location(
         "nudge_status_running", Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py",
     )
+    assert spec is not None and spec.loader is not None
     nudge = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(nudge)
     record = tracking.load_record(status_env)
@@ -324,13 +334,13 @@ def test_running_session_sees_enabled_agenda_default_after_status_write(
     runtime = agent_home / ".agent-worktrees"
     monkeypatch.setattr(session_context, "_agenda_policy_roots", lambda: [runtime])
     config = SimpleNamespace(agenda_default="off")
-    monkeypatch.setattr(main.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(cfg, "load_config", lambda: config)
     env = {
         "AGENT_HOME": str(agent_home),
         "AGENT_WORKTREES_NUDGE_CALLS": "2", "AGENT_WORKTREES_NUDGE_MINUTES": "999",
     }
 
-    def reminders(start):
+    def reminders(start: Any) -> Any:
         return [
             nudge.decide(
                 {"toolName": "view", "cwd": str(tmp_path)}, env=env,
@@ -343,7 +353,7 @@ def test_running_session_sees_enabled_agenda_default_after_status_write(
     session_context.publish_agenda_policy(config, record)
     assert not any("driving-effort-agendas" in (out or "") for out in reminders(1000.0))
 
-    config.agenda_default = main.cfg.AGENDA_DEFAULT_EXPECTED
+    config.agenda_default = cfg.AGENDA_DEFAULT_EXPECTED
     assert main._cmd_status_write(
         argparse.Namespace(worktree_id=None), summary="Still working",
     ) == 0
@@ -352,7 +362,7 @@ def test_running_session_sees_enabled_agenda_default_after_status_write(
     assert "driving-effort-agendas" in (reminders(2000.0)[-1] or "")
 
 @pytest.fixture
-def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
+def status_env(tmp_path: Path, tmp_tracking_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     record = tracking.WorktreeRecord(
         worktree_id="wt-status",
         branch="worktree/wt-status",
@@ -370,8 +380,8 @@ def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     )
     path = tmp_tracking_dir / f"{record.worktree_id}.yaml"
     tracking.save_record(record, path)
-    monkeypatch.setattr(main.cfg, "load_config", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(main.cfg, "tracking_dir", lambda: tmp_tracking_dir)
+    monkeypatch.setattr(cfg, "load_config", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_tracking_dir)
     monkeypatch.setattr(
         worktree_identity,
         "_infer_worktree_id",
@@ -381,7 +391,7 @@ def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     return path
 
 
-def test_follow_up_reactivates_finalized_worktree(status_env):
+def test_follow_up_reactivates_finalized_worktree(status_env: Path) -> None:
     args = argparse.Namespace(worktree_id=None)
 
     assert main._cmd_status_write(
@@ -397,7 +407,7 @@ def test_follow_up_reactivates_finalized_worktree(status_env):
     assert record.summary == "Begin the next change"
 
 
-def test_summary_only_preserves_finalized_status(status_env):
+def test_summary_only_preserves_finalized_status(status_env: Path) -> None:
     args = argparse.Namespace(worktree_id=None)
 
     assert main._cmd_status_write(
@@ -411,7 +421,7 @@ def test_summary_only_preserves_finalized_status(status_env):
     assert record.completed_at == "2026-08-28T01:00:00"
 
 
-def test_activity_write_is_independent_of_summary_and_title(status_env):
+def test_activity_write_is_independent_of_summary_and_title(status_env: Path) -> None:
     """#3307 worktrees-pivot-ux-overhaul follow-up: --activity writes the
     current-sub-task field without disturbing summary/title, and stamps its
     own activity_at."""
@@ -436,7 +446,7 @@ def test_activity_write_is_independent_of_summary_and_title(status_env):
     assert record.activity_at is not None
 
 
-def test_paused_does_not_reactivate_finalized_worktree(status_env):
+def test_paused_does_not_reactivate_finalized_worktree(status_env: Path) -> None:
     """Unlike `follow_up=True`, `paused=True` is purely informational and
     must never flip a finalized worktree back to active."""
     args = argparse.Namespace(worktree_id=None)
@@ -454,7 +464,7 @@ def test_paused_does_not_reactivate_finalized_worktree(status_env):
     assert record.summary == "Leave this open on purpose"
 
 
-def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
+def test_unpaused_prints_an_explicit_confirmation(status_env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """`--unpaused` must print an explicit confirmation that the flag was
     cleared, not just the unrelated follow-up flag (`resolved`) -- otherwise
     it is indistinguishable from a write that never touched `paused` at
@@ -472,7 +482,7 @@ def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
     assert record.paused is False
 
 
-def test_every_status_write_requires_verb_v3_even_without_title(status_env, monkeypatch):
+def test_every_status_write_requires_verb_v3_even_without_title(status_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every full-record write must retain existing title and pause fields."""
     from agent_worktrees import tracking_write
 
@@ -480,7 +490,7 @@ def test_every_status_write_requires_verb_v3_even_without_title(status_env, monk
     captured_versions = []
     real_dispatch = tracking_write.dispatch
 
-    def _spy_dispatch(verb, payload, **kwargs):
+    def _spy_dispatch(verb: Any, payload: Any, **kwargs: Any) -> Any:
         captured_versions.append(kwargs.get("min_version"))
         return real_dispatch(verb, payload, **kwargs)
 
@@ -492,7 +502,7 @@ def test_every_status_write_requires_verb_v3_even_without_title(status_env, monk
     assert captured_versions == [3, 3]
 
 
-def test_status_history_disambiguates_pausing_from_unpausing(status_env, capsys):
+def test_status_history_disambiguates_pausing_from_unpausing(status_env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """`status --history`'s plain-text rendering must not show the same
     `(paused)` label for both a --paused and a --unpaused entry -- the
     `changed` field name alone can't distinguish set from clear."""
@@ -515,7 +525,7 @@ def test_status_history_disambiguates_pausing_from_unpausing(status_env, capsys)
     assert "\u23f8" not in paused_glyph_lines[1]
 
 
-def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkeypatch):
+def test_first_write_in_session_emits_stage_5_status_reported(status_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Stage 5 (status_reported): the first status-report write in a session
     marks "Copilot did something here"."""
     from agent_worktrees import activity
@@ -533,8 +543,8 @@ def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkey
 
 
 def test_second_write_in_same_session_does_not_duplicate_stage_5(
-    status_env, monkeypatch,
-):
+    status_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import activity
 
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-1")
@@ -547,7 +557,7 @@ def test_second_write_in_same_session_does_not_duplicate_stage_5(
     assert len(events) == 1
 
 
-def test_write_without_session_id_does_not_emit_stage_5(status_env, monkeypatch):
+def test_write_without_session_id_does_not_emit_stage_5(status_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import activity
 
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
@@ -558,7 +568,7 @@ def test_write_without_session_id_does_not_emit_stage_5(status_env, monkeypatch)
     assert activity.read_events(worktree_id="wt-status", event="status_reported") == []
 
 
-def test_ambiguous_write_outcome_is_reported_not_swallowed(status_env, monkeypatch):
+def test_ambiguous_write_outcome_is_reported_not_swallowed(status_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """agent-worktrees-authoritative-daemon Phase 3: a write whose daemon
     request was sent and then failed is genuinely ambiguous (the mutation may
     already be committed server-side) -- `_cmd_status_write` must surface
@@ -566,7 +576,7 @@ def test_ambiguous_write_outcome_is_reported_not_swallowed(status_env, monkeypat
     retry or swallow it (`tracking_write.dispatch`'s own contract)."""
     from agent_worktrees import tracking_write
 
-    def _raise(*_args, **_kwargs):
+    def _raise(*_args: Any, **_kwargs: Any) -> None:
         raise tracking_write.AmbiguousWriteOutcome("request sent, no response")
 
     monkeypatch.setattr(tracking_write, "dispatch", _raise)
