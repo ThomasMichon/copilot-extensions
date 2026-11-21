@@ -7,16 +7,21 @@ import math
 import os
 import re
 import stat
+import sys
 import threading
 import time
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Any, Callable, ContextManager, Iterable, Iterator, TypeVar, cast
+
+_T = TypeVar("_T")
 
 _construction_owners = threading.local()
 
 
-def checked(check_budget, operation, *args, **kwargs):
+def checked(
+    check_budget: Callable[[], object] | None, operation: Callable[..., _T], *args: Any, **kwargs: Any,
+) -> _T:
     if check_budget:
         check_budget()
     result = operation(*args, **kwargs)
@@ -26,8 +31,11 @@ def checked(check_budget, operation, *args, **kwargs):
 
 
 def versions_with_live_process(
-    root, *, versions, recorded, pids, running, probes, slot_of_path, versions_abs, check=None,
-):
+    root: Path, *, versions: Callable[..., Iterable[str]], recorded: Callable[..., set[str]],
+    pids: Callable[..., Iterable[int]], running: Callable[..., set[int]],
+    probes: Iterable[Callable[[int], object]], slot_of_path: Callable[[Any, str, set[str]], str | None],
+    versions_abs: str, check: Callable[[], object] | None = None,
+) -> set[str]:
     extra = {"check": check} if check else {}
     available = set(checked(check, versions, root, **extra))
     in_use = checked(check, recorded, root, available, **extra)
@@ -55,7 +63,9 @@ def normalize_windows_extended_path(target: str) -> str:
     return target
 
 
-def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool], check=None) -> set[int]:
+def running_pids(
+    root: Path, *, filename: str, alive: Callable[[int], bool], check: Callable[[], object] | None = None,
+) -> set[int]:
     """Filter the legacy running record through the caller's native liveness probe."""
     pids: set[int] = set()
     try:
@@ -72,11 +82,11 @@ def running_pids(root: Path, *, filename: str, alive: Callable[[int], bool], che
 
 
 def gc_protected_versions(
-    root: Path, keep, protect_pids: bool, link_name: str, *,
+    root: Path, keep: Iterable[str] | None, protect_pids: bool, link_name: str, *,
     selectors: tuple[str, str], current_version: Callable[[Path, str], str | None],
-    dev_claim: Callable[..., dict | None], dev_version: str,
+    dev_claim: Callable[..., dict[str, Any] | None], dev_version: str,
     live_versions: Callable[[Path], set[str] | None], running: Callable[[Path], set[int]],
-    versions: Callable[[Path], list[str]], check=None,
+    versions: Callable[[Path], list[str]], check: Callable[[], object] | None = None,
 ) -> set[str]:
     """Combine declared references, selectors, claims and current live consumers."""
     extra = {"check": check} if check else {}
@@ -96,7 +106,7 @@ def gc_protected_versions(
     claim = checked(check, dev_claim, root, strict=True)
     if claim is not None:
         protected.add(dev_version)
-        selected = claim.get("selected_generation")
+        selected = cast(str, claim.get("selected_generation"))
         if selected:
             protected.add(selected)
         previous = claim.get("previous_version")
@@ -139,17 +149,16 @@ def _windows_private_lease_file(
     import sys
     import uuid
 
+    if TYPE_CHECKING and sys.platform != "win32":  # narrows mypy only; never runs
+        raise AssertionError
     root, directory = _native_path(root), _native_path(directory)
 
     class Attributes(c.Structure):
         _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
 
-    class SidAttributes(c.Structure):
-        _fields_ = [("sid", w.LPVOID), ("attributes", w.DWORD)]
-
     kernel = c.WinDLL("kernel32", use_last_error=True)
     security = c.WinDLL("advapi32", use_last_error=True)
-    signatures = (
+    signatures: tuple[tuple[Any, str, list[type[Any]], type[Any]], ...] = (
         (kernel, "GetCurrentProcess", [], w.HANDLE),
         (kernel, "CloseHandle", [w.HANDLE], w.BOOL),
         (kernel, "LocalFree", [w.LPVOID], w.LPVOID),
@@ -185,7 +194,7 @@ def _windows_private_lease_file(
                 descriptor, 1, information, c.byref(text), None,
             ):
                 raise c.WinError(c.get_last_error())
-            return text.value
+            return cast(str, text.value)
         finally:
             if text:
                 kernel.LocalFree(c.cast(text, w.LPVOID))
@@ -333,12 +342,34 @@ def _windows_account_full_control(kind: int, flags: int, mask: int, sid: str, ac
     return kind == 0 and not flags & 8 and mask & 0x1F01FF == 0x1F01FF and sid == account
 
 
-def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
-    """Admit the current user/enabled owner groups and a non-public write DACL."""
+if os.name == "nt":
     import ctypes
     from ctypes import wintypes
+
+    # Reuse these structure types so repeated owner checks do not grow the
+    # ctypes pointer cache.
+    class SidAttributes(ctypes.Structure):
+        _fields_ = [("sid", wintypes.LPVOID), ("attributes", wintypes.DWORD)]
+
+    class Groups(ctypes.Structure):
+        _fields_ = [("count", wintypes.DWORD), ("entries", SidAttributes * 1)]
+
+    class AclSize(ctypes.Structure):
+        _fields_ = [("count", wintypes.DWORD), ("used", wintypes.DWORD),
+                    ("free", wintypes.DWORD)]
+
+    class Ace(ctypes.Structure):
+        _fields_ = [("kind", ctypes.c_ubyte), ("flags", ctypes.c_ubyte),
+                    ("size", wintypes.WORD), ("mask", wintypes.DWORD),
+                    ("sid", wintypes.DWORD)]
+
+
+def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
+    """Admit the current user/enabled owner groups and a non-public write DACL."""
     import msvcrt
 
+    if TYPE_CHECKING and sys.platform != "win32":  # narrows mypy only; never runs
+        raise AssertionError
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     security = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
@@ -361,25 +392,12 @@ def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
     security.GetAce.argtypes = (wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID))
     security.GetAce.restype = wintypes.BOOL
 
-    class SidAttributes(ctypes.Structure):
-        _fields_ = [("sid", wintypes.LPVOID), ("attributes", wintypes.DWORD)]
-
-    class Groups(ctypes.Structure):
-        _fields_ = [("count", wintypes.DWORD), ("entries", SidAttributes * 1)]
-
-    class AclSize(ctypes.Structure):
-        _fields_ = [("count", wintypes.DWORD), ("used", wintypes.DWORD), ("free", wintypes.DWORD)]
-
-    class Ace(ctypes.Structure):
-        _fields_ = [("kind", ctypes.c_ubyte), ("flags", ctypes.c_ubyte),
-                    ("size", wintypes.WORD), ("mask", wintypes.DWORD), ("sid", wintypes.DWORD)]
-
-    def sid_string(sid: int) -> str:
+    def sid_string(sid: int | wintypes.LPVOID) -> str:
         value = wintypes.LPWSTR()
         if not security.ConvertSidToStringSidW(sid, ctypes.byref(value)):
             raise ctypes.WinError(ctypes.get_last_error())
         try:
-            return value.value
+            return cast(str, value.value)
         finally:
             kernel.LocalFree(ctypes.cast(value, wintypes.LPVOID))
 
@@ -387,7 +405,7 @@ def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
     if not security.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)):
         raise ctypes.WinError(ctypes.get_last_error())
     try:
-        def token_info(kind: int) -> ctypes.Array:
+        def token_info(kind: int) -> ctypes.Array[ctypes.c_char]:
             size = wintypes.DWORD()
             security.GetTokenInformation(token, kind, None, 0, ctypes.byref(size))
             if ctypes.get_last_error() != 122:
@@ -422,7 +440,7 @@ def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
             if not security.GetAce(dacl, index, ctypes.byref(pointer)):
                 raise ctypes.WinError(ctypes.get_last_error())
             ace = ctypes.cast(pointer, ctypes.POINTER(Ace)).contents
-            sid = sid_string(pointer.value + Ace.sid.offset) if ace.kind == 0 else ""
+            sid = sid_string(cast(int, pointer.value) + Ace.sid.offset) if ace.kind == 0 else ""
             user_access |= _windows_account_full_control(ace.kind, ace.flags, ace.mask, sid, account)
             if ace.flags & 8 or ace.kind == 1:
                 continue
@@ -446,7 +464,7 @@ def _ownership_key(root: Path, version: str) -> tuple[int, str, str]:
 
 @contextmanager
 def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
-                       poll_interval: float = 0.05):
+                       poll_interval: float = 0.05) -> Iterator[int]:
     """Yield a borrowed descriptor under exclusive construction ownership.
 
     This is an installer-facing Python primitive, not a shell acquire/release
@@ -477,11 +495,11 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
         finally:
             owners.remove(key)
 
-def _publication_lease(root: Path, *, timeout: float = 60.0):
+def _publication_lease(root: Path, *, timeout: float = 60.0) -> ContextManager[int]:
     return _kernel_lease(root, "selectors", kind="publication", shared=False, timeout=timeout)
 
 @contextmanager
-def batch_removal_custody(root: Path, versions: list[str]):
+def batch_removal_custody(root: Path, versions: list[str]) -> Iterator[None]:
     """Hold all candidate guards before acquiring the single selector guard.
 
     The installation owner must validate selection, artifact ownership and live
@@ -510,7 +528,7 @@ def batch_removal_custody(root: Path, versions: list[str]):
         yield
 
 @contextmanager
-def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool = False):
+def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool = False) -> Iterator[bool]:
     owns_construction = _ownership_key(root, version) in getattr(_construction_owners, "keys", ())
     if owns_construction and not allow_construction_owner:
         yield False
@@ -534,7 +552,7 @@ def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool =
 @contextmanager
 def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
                   timeout: float = 60.0, poll_interval: float = 0.05,
-                  open_lock: Callable[[Path, str], int] | None = None):
+                  open_lock: Callable[[Path, str], int] | None = None) -> Iterator[int]:
     import hashlib
 
     if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version):
@@ -573,6 +591,8 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
             from ctypes import wintypes
             import msvcrt
 
+            if TYPE_CHECKING and sys.platform != "win32":  # narrows mypy only; never runs
+                raise AssertionError
             class Overlapped(ctypes.Structure):
                 _fields_ = [
                     ("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
@@ -594,27 +614,29 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
             handle = msvcrt.get_osfhandle(fd)
             overlapped = Overlapped()
 
-            def try_lock():
+            def try_lock() -> None:
                 flags = 1 | (0 if shared else 2)  # fail immediately; exclusive
                 if not kernel.LockFileEx(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
                     raise ctypes.WinError(ctypes.get_last_error())
 
-            def unlock():
+            def unlock() -> None:
                 if not kernel.UnlockFileEx(handle, 0, 1, 0, ctypes.byref(overlapped)):
                     raise ctypes.WinError(ctypes.get_last_error())
 
-            def is_busy(exc):
+            def is_busy(exc: OSError) -> bool:
                 return exc.winerror == 33  # ERROR_LOCK_VIOLATION
         else:
             import fcntl
 
-            def try_lock():
+            if TYPE_CHECKING and sys.platform == "win32":  # narrows mypy only; never runs
+                raise AssertionError
+            def try_lock() -> None:
                 mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
                 fcntl.flock(fd, mode | fcntl.LOCK_NB)
 
             # Final close preserves inherited guardian custody; LOCK_UN would
             # also unlock the guardian's copy of the open file description.
-            def is_busy(exc):
+            def is_busy(exc: OSError) -> bool:
                 return exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}
         deadline = time.monotonic() + timeout
         while True:
@@ -650,7 +672,7 @@ _REFERENCES_SCHEMA = "copilot-extensions.runtime-references"
 _REFERENCES_LIMIT = 65536
 
 
-def _reference_versions(versions) -> list[str]:
+def _reference_versions(versions: Iterable[str]) -> list[str]:
     if not isinstance(versions, (list, tuple)) or len(versions) > 64:
         raise ValueError("runtime references require a bounded list of slot names")
     for version in versions:
@@ -669,7 +691,7 @@ def _reference_owner(owner: str) -> None:
 
 
 def _read_runtime_reference_state(
-    root: Path, *, allow_transaction: bool = False, check=None,
+    root: Path, *, allow_transaction: bool = False, check: Callable[[], object] | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, str] | None]:
     path = _native_path(root) / _REFERENCES_FILE
     try:
@@ -698,7 +720,7 @@ def _read_runtime_reference_state(
     ):
         raise ValueError("runtime reference evidence changed while reading")
 
-    def unique(pairs):
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         values = {}
         for key, value in pairs:
             if key in values:
@@ -738,7 +760,7 @@ def _read_runtime_reference_state(
     return value["owners"], transaction
 
 
-def read_runtime_references(root: Path, *, check=None) -> dict[str, list[str]]:
+def read_runtime_references(root: Path, *, check: Callable[[], object] | None = None) -> dict[str, list[str]]:
     """Read durable deletion barriers; only absence means no references.
 
     Readers deciding deletion already hold publication custody. Atomic replace
@@ -772,7 +794,7 @@ def _write_runtime_reference_state(
         temporary.unlink(missing_ok=True)
 
 
-def reference_transaction_custody(root: Path, *, timeout: float = 60.0):
+def reference_transaction_custody(root: Path, *, timeout: float = 60.0) -> ContextManager[int]:
     """Serialize a consumer's complete reference reconciliation for this root."""
     return _kernel_lease(
         root, "owners", kind="reference-transaction", shared=False, timeout=timeout,
@@ -846,7 +868,7 @@ def _recover_runtime_reference_transaction(root: Path) -> None:
 def begin_runtime_reference_transaction(
     root: Path, owner: str, *, timeout: float = 0.0, poll_interval: float = 0.05,
     recover_foreign: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Fence deletion until this lifecycle atomically publishes its references.
 
     A pending record survives process death. Existing readers reject its version

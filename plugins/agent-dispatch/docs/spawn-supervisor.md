@@ -635,7 +635,8 @@ agent-dispatch supervise daemon-status [--machine M] [--env E]
 ```
 
 - **`register`** writes a durable **registration** row (kind ∈
-  `supervised-lane | schedule | emitter | evaluator`, plus a `spec` — the config
+  `supervised-lane | placed-supervised-lane | schedule | emitter | evaluator`,
+  plus a `spec` — the config
   the unit's runtime consumes — scoped to a `machine`+`env`) and **emits the
   handle**; it does *not* start the loop. The id is the caller's `--id` or a value
   **derived deterministically** from `(kind, machine, env, spec)`, so
@@ -1329,6 +1330,74 @@ Three properties define it:
   (default no-op → the local path is unchanged). When no host is live, the task is
   skipped for the cycle **without a reservation**, so an all-asleep pool never
   burns spawn attempts toward the dead-letter bound.
+
+### Optional placement ordering (`fleet.placement_provider`)
+
+A fleet lane can let an external provider order a **managed** subset of its
+pool each cycle. The lane declares only a provider name and the managed hosts:
+
+```yaml
+fleet:
+  pool: [devbox-1, linux-cde, devbox-2]
+  origin: orchestrator
+  placement_provider: {name: devbox, hosts: [devbox-1, devbox-2]}
+```
+
+`hosts` must be a non-empty, duplicate-free subset of `fleet.pool`; other pool
+hosts are **unmanaged**. Both render paths (`to_supervise_args` and the daemon's
+registration spec) emit `supervise --placement-provider '<json>'`.
+
+The declaration never names what runs. The supervisor host looks `name` up in
+its own trusted file, `placement-providers.json` in the agent-dispatch install
+directory (`AGENT_DISPATCH_PLACEMENT_PROVIDERS` overrides the path):
+
+```json
+{"providers": {"devbox": {"argv": ["python", "/opt/order.py"], "timeout_seconds": 10}}}
+```
+
+Each entry has exactly `argv` (non-empty strings) and `timeout_seconds`
+(0 < t <= 300). The timeout is the whole-call budget, including process-tree
+cleanup. An unknown name, a missing or invalid entry, or invalid `hosts`
+refuses the lane at registration or startup; nothing runs.
+
+**Protocol (version 1).** stdin is `{"version": 1, "candidates": [...]}` with
+the full managed host set; stdout must be `{"version": 1, "ordered": [...]}`,
+a duplicate-free ordered subset of the candidates. A managed host that is not
+in `ordered` takes no work this cycle.
+
+**Ordering.** Before liveness and before any reservation, unmanaged hosts keep
+their configured positions and the managed positions are refilled in provider
+order. Pool `[W1, CDE, W2]` with `ordered: [W2, W1]` tries `[W2, CDE, W1]`.
+
+- **At most one call per lane per cycle**, made lazily for the full managed set
+  and reused for every task in that cycle. There is no background sampler and no
+  cross-cycle cache. Each lane runs in its own supervise process, so a slow
+  provider slows only its own lane.
+- **Failure** (start error, nonzero exit, timeout, bad JSON or version, unknown
+  or duplicate ids) disables only the managed hosts for that cycle; unmanaged
+  hosts stay eligible. When no eligible host remains, the task defers without a
+  reservation or spent attempt and retries next cycle.
+- **Hard pins.** A pin to an unmanaged host never calls the provider. A pin to a
+  managed host uses this cycle's single result: it starts only when the host is
+  in `ordered` and live; otherwise it defers and never moves to another host.
+- A lane without `placement_provider` never calls a provider and behaves as
+  before. The legacy environment-variable lane path does not support it.
+
+**Adoption and rollback (mixed versions).** A placement lane registers under
+its own kind, `placed-supervised-lane`, not `supervised-lane`. The registration
+validator requires `fleet.placement_provider` for that kind and refuses it on
+any other kind, so the requirement cannot be stored or run as an ordinary lane.
+A supervisor daemon or coordinator that predates placement treats the kind as
+unknown: the coordinator refuses to store it, and the daemon logs
+`skipping registration` and launches nothing. Such a lane stays down instead of
+running without its provider. Its declaration also fails on an older parser,
+which rejects the unknown `fleet` key.
+
+Upgrade every supervisor host and its coordinator first, then add
+`placement_provider` to declarations. Before a rollback, remove
+`placement_provider` (the lane returns to `supervised-lane`), or accept that the
+placement lane stays down until the upgrade returns. Direct registrations use
+`supervise register --kind placed-supervised-lane --spec '<json>'`.
 
 ### Headless-fleet body (`--headless`) — the reliable remote embodiment
 

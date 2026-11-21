@@ -2,6 +2,11 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_headless_leaf_dispatch.py::test_default_fieldless_nodes_avoid_generic_field_walks",
+        "tools/promotion_unit_tests/test_headless_leaf_dispatch.py::test_custom_generic_handler_still_receives_fieldless_nodes",
+        "tools/promotion_unit_tests/test_headless_leaf_dispatch.py::test_explicit_leaf_handler_keeps_dispatch_priority",
+        "tools/promotion_unit_tests/test_headless_leaf_dispatch.py::test_cached_fieldless_binding_preserves_instance_children",
+        "tools/promotion_unit_tests/test_headless_leaf_dispatch.py::test_replaced_standard_generic_handler_is_not_bypassed",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_preserves_full_origin_and_reuses_windows_owner",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_resumes_each_existing_windows_crash_window[staging]",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_resumes_each_existing_windows_crash_window[release]",
@@ -5905,6 +5910,7 @@
         "tools/promotion_unit_tests/test_point_admission_contract.py::test_required_intake_route_receipts_selected_peer_scope_and_typed_union"
     ],
     "coverage_targets": [
+        "tools/check-headless-launch.py",
         "plugins/agent-index/src/agent_index/reindex_intake.py",
         "plugins/agent-index/src/agent_index/indexing/point_service_contract.py",
         "plugins/agent-index/src/agent_index/server.py",
@@ -6317,6 +6323,8 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py"
     ],
     "sources": {
+        "tools/check-headless-launch.py": "8665e86d86b20ceb73e7f7f7123d39a0a8f31f563fb1196a44013bf3513748d2",
+        "tools/promotion_unit_tests/test_headless_leaf_dispatch.py": "234f32cc58c9b6a6276d2bb6f959086aa14ea4cd493479b12a0b95d024dc1180",
         "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "12e1aaa430c7db6f96f003bc836023d54a16113f6f800fccde1f3943ded01684",
         "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py": "549224017c93c0413ed8a2f475f441fe3d2a2537d35e7c615acf53e40779483e",
         "tools/promotion_unit_tests/test_point_executor_context.py": "0ff786a6d5733e324399ba0e64f4b486a81f2a75492ff19db2c3b76182762a22",
@@ -6438,7 +6446,7 @@
         "worktree-manager/scripts/installer_source_build.py": "013cdcd93345013963afcb108a7651234cef1b8eb1cad76ce0e287bac7441f53",
         "worktree-manager/scripts/installer_source_wheel_cache.py": "9a6e596226cb3349af8cc27db9044438418c9499b6a42a990046675ce0fdf4a6",
         "worktree-manager/scripts/versioned_runtime.py": "d5c979655797b4acd39799862f810fe79ac172b5e9c29d51c0d1a9f70dae78e2",
-        "worktree-manager/scripts/versioned_runtime_leases.py": "4ce2e4bab16fd4b8d7581178cf5ded249321040c362b9a1f7ef08bc39d4b4efa",
+        "worktree-manager/scripts/versioned_runtime_leases.py": "79c0794661884afab43558cb815bc7807e77a0ecf01a813350aa05f960a0e26b",
         "worktree-manager/scripts/versioned_runtime_source.py": "d846d7d2aebc4abd1a112454ee1775b11ed58033870dc7bf7594ca0f7bed8981",
         "tools/promotion_unit_tests/test_core_release_delivery_contract.py": "dbdc9b8156808e7e18f7dcf66fe6fff8957a85e4e8eeed7144e9af9a20a4527f",
         "tools/core_runtime_profile.py": "bd32966b50d92cb58651d7fdb0d07723679ea887730c2468928c9863b8f15390",
@@ -6641,7 +6649,7 @@
         "libs/versioned-runtime/versioned_runtime.py": "d5c979655797b4acd39799862f810fe79ac172b5e9c29d51c0d1a9f70dae78e2",
         "libs/versioned-runtime/versioned_runtime_cache.py": "c6e2d8825df5c44b9db64c550950c7f520c1a7ab6d588db292fc40ec8253663a",
         "libs/versioned-runtime/versioned_runtime_construction.py": "48433749cb757be6ae9bf36c770adc4697865874da1c2424fea841704be67e96",
-        "libs/versioned-runtime/versioned_runtime_leases.py": "4ce2e4bab16fd4b8d7581178cf5ded249321040c362b9a1f7ef08bc39d4b4efa",
+        "libs/versioned-runtime/versioned_runtime_leases.py": "79c0794661884afab43558cb815bc7807e77a0ecf01a813350aa05f960a0e26b",
         "libs/versioned-runtime/versioned_runtime_publication.py": "ef762e65eb6403c580013ac24808f068e5fc02913035489bbd068c8bf3bae7fc",
         "libs/versioned-runtime/versioned_runtime_source.py": "d846d7d2aebc4abd1a112454ee1775b11ed58033870dc7bf7594ca0f7bed8981",
         "libs/versioned-runtime/versioned_runtime_identity.py": "b7d03abc0ab610cf5bd15ca630b3c251aa3bf386f44ee04507340605172a5cfc",
