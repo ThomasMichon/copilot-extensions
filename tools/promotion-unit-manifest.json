@@ -2,6 +2,9 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_cli_exit_status_without_network[violations0-0]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_cli_exit_status_without_network[violations1-1]",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_native_policy_enforced_by_live_guard_without_network",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_local_file_urls_only_exempt_attributable_canonical_sources",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals[[tool.uv]\\nconstraint-dependencies = [\"new>=1\"]-constraint-dependencies]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_new_uv_resolution_inputs_cannot_hide_unseasoned_literals[[tool.uv]\\noverride-dependencies = [\"new==1\"]-override-dependencies]",
@@ -6609,6 +6612,7 @@
 "tools/promotion_unit_tests/test_bridge_session_inventory.py::test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
     ],
     "coverage_targets": [
+    "tools/check-dependency-age.py",
     "worktree-manager/scripts/picker-snapshot/install.py",
     "tools/dependency_age.py",
     "tools/check-no-internal-identifiers.py",
@@ -7049,7 +7053,7 @@
     "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
     ],
     "sources": {
-"tools/promotion_unit_tests/test_dependency_age_release_units.py": "87542408a4f2bc9195eb34514ac5a83cfe1f34bca08212a9e9ea598c64534269",
+"tools/promotion_unit_tests/test_dependency_age_release_units.py": "89e7ddec666215751fac9a0bf84194d77567c776905ae3b80a4503090209d89a",
 "tools/test_dependency_age.py": "b019c533b68d607844044ca7647308ff37e0d746ddbb04e6c0a689157f0f6dc5",
 "tools/promotion_unit_tests/test_identifier_git_protocol_units.py": "ef063a19d9d58f39db2065129f5478df764b3dc7bfbb7876c6d74ddec1bbe6c4",
 "tools/test_check_no_internal_identifiers.py": "3ae7cddea5248d019a43fe014d85fff60258ede94e2668ca8d15f7d495a08fde",
@@ -8097,6 +8101,7 @@
 "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py": "b2691f3fa0791e9ab3a0190729083c8671093b55c37c01298bd79be6f503936f",
 "libs/agent-procutil/src/agent_procutil/daemon_observation.py": "371bf2a0cb27b57d8fd5c421099246c209d239801dcdfc15d16827c054fbe97d",
 "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py": "2a5607e7b5252cfa9d1121883a7dedc07637dd1eb3f7aac0d6c0217f971ec826",
-"worktree-manager/scripts/picker-snapshot/install.py": "7749f1be63c74cf546a0ce2d2549c3dfbdfc6813b8d154b48283b0995d4f90aa"
+"worktree-manager/scripts/picker-snapshot/install.py": "7749f1be63c74cf546a0ce2d2549c3dfbdfc6813b8d154b48283b0995d4f90aa",
+"tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445"
     }
 }
