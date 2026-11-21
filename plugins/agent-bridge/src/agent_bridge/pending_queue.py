@@ -9,6 +9,7 @@ from . import compatible_inbox, pending_queue_notice
 from .db import Database
 from .inbox_custody import handoff_stage
 from .live_delivery_state import LiveDeliveryState
+from .pending_queue_schema import PREDICATE, require_schema
 from .runtime_custody import RuntimeCustodyError
 
 SCHEMA = "agent-bridge.pending-queue"
@@ -41,6 +42,7 @@ def inspect(
         raise RuntimeCustodyError("Queue inspection requires bounded page arguments")
     now = time.time()
     with db._runtime_transaction(write=False) as conn:
+        require_schema(conn)
         target = conn.execute(
             "SELECT session_id,worktree_id,status,updated_at,turn_state,pid,process_started_at "
             "FROM live_sessions WHERE session_id=?",
@@ -59,8 +61,7 @@ def inspect(
             "SELECT id,session_id,created_at,delivered_at,consumed_at,handoff_started_at,"
             "outcome,handoff_json IS NOT NULL AS retained,consumption_tracked,"
             "claimed_at,kind,delivery FROM live_messages "
-            "WHERE session_id=? AND id>? AND consumed_at IS NULL "
-            "AND disposition_json IS NULL AND kind NOT LIKE 'control:%' "
+            f"WHERE session_id=? AND id>? AND {PREDICATE} "
             "ORDER BY id LIMIT ?",
             (session_id, after, limit + 1),
         ).fetchall()

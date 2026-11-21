@@ -10,6 +10,7 @@ import uuid
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .inbox_custody import InboxConsumer, handoff_stage, observed_time, original_handoff
+from .pending_queue_schema import PREDICATE, require_schema
 from .runtime_custody import RuntimeCustodyError, encode
 
 if TYPE_CHECKING:
@@ -145,6 +146,7 @@ def reconcile_offers(
         raise RuntimeCustodyError("Offer reconciliation requires bounded page arguments")
     now = time.time()
     with db._runtime_transaction(write=True) as conn:
+        require_schema(conn)
         require_live(conn, session_id, now)
         target = conn.execute(
             "SELECT worktree_id FROM live_sessions WHERE session_id=?", (session_id,),
@@ -165,8 +167,7 @@ def reconcile_offers(
         rows = conn.execute(
             "SELECT id,delivery,kind,handoff_json,runtime_custody_json,claimed_at,"
             "handoff_started_at,delivered_at,outcome FROM live_messages "
-            "WHERE session_id=? AND id>? AND consumed_at IS NULL "
-            "AND disposition_json IS NULL AND kind NOT LIKE 'control:%' "
+            f"WHERE session_id=? AND id>? AND {PREDICATE} "
             "ORDER BY id LIMIT ?", (session_id, after, limit),
         ).fetchall()
         prepared = []

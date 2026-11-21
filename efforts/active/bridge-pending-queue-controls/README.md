@@ -236,6 +236,23 @@ refusal without inventing a second delivery authority.
 
 ## Journal
 
+### 2026-11-20 - Bound unresolved-page database work
+
+- An output limit alone does not bound a history scan or temporary sort under
+  the shared database lock. Added a schema-managed partial `(session_id, id)`
+  index with the same unresolved-original predicate used by both operations.
+- Ordinary writable preparation adds only this derived index. Durable schema
+  version and message/receipt state are unchanged; an unprepared read-only
+  database refuses the optional page rather than performing an unbounded scan.
+- The focused packet now passes 41 tests. Both actual operations select the
+  matching index without a temporary sort over 10,000 settled fixture rows
+  and execute their page in fewer than 1,000 SQLite VM steps. Legacy read-only
+  refusal and receipt-preserving writable preparation pass.
+- The expanded twelve-file whole-file strict ratchet passes Python 3.10
+  analysis for Linux and Windows at the actual managed-publication merge base.
+  Current-head re-review, required CI, merge and running qualification remain
+  open; no native latency or live queue effect is claimed.
+
 ### 2026-11-20 - Backend command implementation begun
 
 - The finite plan passed review and merged as #13774 before implementation.
@@ -247,7 +264,7 @@ refusal without inventing a second delivery authority.
 - Added a disjoint metadata-only backend inspection path and bounded original
   offer preparation through the existing compatible inbox owner. This does
   not implement a second native sender or clear a receiver-local notice.
-  Running SDK/notice coverage remains explicitly unavailable; live sufficiency
+  Current SDK/notice-set coverage remains unavailable; live sufficiency
   still awaits the containing release and authorized rollout.
 - Kept a bounded, expiring diagnostic projection of the existing emitted hook
   notice separate from backend receipts and the unobservable native SDK queue.

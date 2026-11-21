@@ -15,6 +15,13 @@ read the next page. Pages are fresh observations, not a frozen census. An
 empty page means no unresolved backend records in that page's selection, not
 an empty SDK queue or model consumption.
 
+The writable database owner prepares an additive partial `(session_id, id)`
+index for unresolved ordinary originals. Both page operations use that same
+predicate, avoiding settled-history scans and sorting under the database lock.
+An older read-only database without the index refuses this optional operation
+until ordinary writable preparation; unrelated reads and the durable schema
+version/receipts are unchanged. Inspection never builds the index itself.
+
 The version-1 JSON contract is `agent-bridge.pending-queue`. It reports original
 message IDs, admission/handoff/SDK stages, registration freshness, turn state,
 current consumer incarnation and an independently fresh delivery-attention

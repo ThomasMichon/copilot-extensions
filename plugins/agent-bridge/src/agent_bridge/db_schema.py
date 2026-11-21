@@ -69,6 +69,7 @@ class _SchemaMixin:
         from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
         from .creation_writer_schema import ensure_schema as ensure_creation_writer_schema
         from .creation_writer_schema import validate_schema as validate_creation_writer_schema
+        from .pending_queue_schema import ensure_schema as ensure_pending_queue_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -154,6 +155,7 @@ class _SchemaMixin:
                     self._migrate(conn, current)
             self._ensure_current_columns(conn)
             prepare_message_contracts(conn)
+            ensure_pending_queue_schema(conn)
             validate_schema(conn)
             validate_inbox_schema(conn)
             validate_consumer_schema(conn)
