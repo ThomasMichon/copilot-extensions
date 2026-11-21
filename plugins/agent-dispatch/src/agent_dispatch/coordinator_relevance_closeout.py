@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Literal
 from .queue_relevance_acknowledgement import finish as finish_closeout
 from .review_closeout_submission import ABANDON, SUBMIT
+from . import reservation_owner_closeout as reservation_owner
 
 from .queue import TaskQueue
 from .queue_records import TaskError
@@ -17,7 +18,7 @@ from .task_closeout_authority import (
     require_closeout_fencing,
     resolve_closeout_authority,
 )
-from .task_relevance_contract import CLOSEOUT_PROTOCOL
+from .task_relevance_contract import CLOSEOUT_PROTOCOL, RESERVATION_OWNER
 
 
 class CloseoutBody(BaseModel):
@@ -74,6 +75,13 @@ def register_closeout_routes(
                 current = authorize(request, task_id, arguments)
                 if (body.finish_action or ABANDON) != current.get("finish_action", ABANDON):
                     raise TaskError("negotiated closeout action changed; custody retained")
+                if (current.get("resource_binding") or {}).get("state") == RESERVATION_OWNER:
+                    if body.finish_action != SUBMIT or getattr(request.state, "task_scope", None) is None:
+                        raise TaskError("reservation closeout requires original worker submission")
+                    if not finish:
+                        return envelope(reservation_owner.prepare(queue, task_id, arguments, authority_guard))
+                    result = guard(lambda: reservation_owner.finish(queue, task_id, arguments, authority_guard))
+                    return envelope({key: result[key] for key in ("id", "status", "generation")})
                 if finish:
                     if body.finish_action != SUBMIT:
                         result = guard(lambda: queue.finish_relevance_closeout(
