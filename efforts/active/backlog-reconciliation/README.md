@@ -410,6 +410,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [passive-roster and delivery-frontier unit](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md)
+records #13833's reviewed merge/parent return and two separately acknowledged
+source-request completions. It proposes #11298's finite passive-provider
+source completion through #11433 and current causal/regression correspondence,
+subject to final qualification and tracker judgment. #2619's broader
+event-driven efficiency and #13789's default CLI request remain distinct and
+OPEN. A complete pinned 456-identity metadata pass and fifteen newly
+discriminating delivery descriptions do not clear content/copy or custody
+holds. All incumbent check states and six roadmap gates remain; the complete
+23:40 PT census is 898 whole open, 169 above fixed 729.
+
 The [source-fulfillment and inflow unit](journal/2026/11.20-source-fulfillment-and-new-inflow.md)
 resumes research after the independent queue-controls effort's reviewed
 closeout #13820. It proposes finite source completions for #13765 through
@@ -5180,6 +5191,18 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [passive-roster source map](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md#proposed-source-completion-passive-current-roster-freshness)
+distinguishes per-project collection age, passive no-demand reads, safe
+consumers and non-demanding change publication from whole-program efficiency
+or installed/native acceptance. Selected current functions and existing
+regression controls were read, not run; a qualified two-file later delta
+preserves the relevant callbacks without granting cleanup authority.
+Reviewed publication and the actual final issue/roster/source-PR check unit
+precede any #11298 acknowledgment or `COMPLETED` transition. The complete
+898-open observation, metadata-only admission gaps, all 43 incumbent states
+and independent source/resource holds remain; no prospective subtraction
+or broader parent completion is claimed.
 
 The [source-compatibility completion record](journal/2026/11.20-source-compatibility-fulfillment.md)
 maps three whole original contracts to actual merged/current source and
