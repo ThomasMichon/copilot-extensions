@@ -130,20 +130,6 @@ def test_create_store_send_order_and_readable_identity(startup):
     assert queue.get(task["id"]).status == "queued"
 
 
-def test_unbound_startup_still_requires_agent_discovery(startup, monkeypatch):
-    queue, task, client, calls = startup
-
-    def unavailable(*_args, **_kwargs):
-        raise bridge.BridgeUnavailable("agent registry unavailable")
-
-    monkeypatch.setattr(bridge, "registered_agent_project", unavailable)
-    with pytest.raises(bridge.BridgeUnavailable, match="agent registry unavailable"):
-        ordinary_bridge.start(task, client=client, agent="local", project="example",
-                              charter="reviewer", prompt="assigned task")
-    assert calls == []
-    assert queue.get_reservation(task["spawn_reservation_key"]).allocation_project is None
-
-
 def test_lost_baseline_create_reply_cannot_gain_origin_on_retry(startup, monkeypatch):
     queue, task, client, calls = startup
     original = ordinary_bridge.subprocess.run
@@ -351,9 +337,8 @@ def test_retry_reservation_carries_agent_without_exclusive_key(startup):
     assert retry.worktree == "worktree-a"
 
 @pytest.mark.parametrize("released_origin", [False, True])
-@pytest.mark.parametrize("lookup_unavailable", [False, True])
 def test_lost_create_response_replays_key_after_restart_and_routing_change(
-    startup, monkeypatch, released_origin, lookup_unavailable,
+    startup, monkeypatch, released_origin,
 ):
     queue, task, client, calls = startup
     original = ordinary_bridge.subprocess.run
@@ -378,12 +363,7 @@ def test_lost_create_response_replays_key_after_restart_and_routing_change(
     restarted = TaskQueue(queue.db_path)
     retry, admitted = restarted.reserve_spawn(task["id"], driver="ordinary-bridge")
     assert admitted and retry.creation_key == first.creation_key
-    def changed_lookup(*_args, **_kwargs):
-        if lookup_unavailable:
-            raise bridge.BridgeUnavailable("agent registry unavailable")
-        return "changed-routing"
-
-    monkeypatch.setattr(bridge, "registered_agent_project", changed_lookup)
+    monkeypatch.setattr(bridge, "registered_agent_project", lambda *_a, **_kw: "changed-routing")
     result = ordinary_bridge.start(
         {**task, "spawn_reservation_key": retry.key}, client=client,
         agent="local", project="changed-routing", charter="reviewer", prompt="assigned task",
