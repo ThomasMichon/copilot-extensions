@@ -410,6 +410,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [fleet-authority current contract](journal/2026/11.21-fleet-authority-current-contract.md)
+reconciles #6617's particular numerical-reference refusal before a fresh
+qualified complete original/all-eight-discussion study. All five authority,
+notification, restricted-execution, centralization and placement clauses remain
+with their existing owners. Earlier source reports and later auditability
+selection do not establish current placement, native enrollment or whole-home
+fulfillment. Actual #13948 delivery is recorded; the latest complete census
+remains 900 open, 171 above the fixed target.
+
 The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
 records three independently qualified merged-description reports: sixty
 additional original cases through 27 exact objects, with 103 of 165 mapped
