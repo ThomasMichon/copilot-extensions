@@ -410,6 +410,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [specific correspondence follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
+recovers #6082's actual incomplete copied-source boundary and ten other
+particular retained controls, leaving #6888/#7208 correspondence explicit.
+It also records actual #13935 planning delivery and two bounded source-unit
+reports without claiming whole-current reads, new source admission, technical
+completion, issue effects or a changed numerical checkpoint.
+
 The [roadmap planning assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
 compares the actual #13934 integrated-plan review and exact public-register/
 current-census identity join with all six planning conditions. It resolves

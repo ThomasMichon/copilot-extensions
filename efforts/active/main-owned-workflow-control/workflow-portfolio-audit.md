@@ -3072,6 +3072,26 @@ not native or installed materialization. No workflow-count, reuse, controlled
 timing or review-throughput gain is credited. Broader full-census/every-release,
 accepted-owner, lifecycle and comparable whole-flow gates remain open.
 
+Source #13937 merges at `2026-11-21T17:34:53Z` as
+`ad90cdaa21ea958e3ada7e6f169a14fd44f087a4`. Copilot approval `6006978129`
+at `17:31:37Z` names exact head
+`2958586721649f71b9b78dbde63fe247ecdf9685`; complete review and thread
+readback finds no finding or omitted page. Required source CI `44930300084`
+and trusted metadata CI `44930300271` succeed. Actual unit job `136925248734`
+freshly executes all 6,735 cases with 35 deselections in 125.40 pytest seconds
+and 143.143 packet seconds. Lookup takes 644 ms; no reuse saving is credited.
+The existing packet-only selector omits the AST scanner group, not a workflow
+invocation or the required unit aggregate.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. The full canonical parent is
+reread and only this finite source leaf is resolved. Scoped managed
+synchronization retains the published head and advances to the actual merge
+without conflict, reset, stash, peer edit or resource release. Continue the
+remaining original-source census; broader acceptance and retained custody
+remain unchanged.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

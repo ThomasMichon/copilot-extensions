@@ -26,6 +26,13 @@ claiming another current whole-original/home study or source-hold release.
 Its proof scopes are distinct from new technical studies or whole-home
 qualification; existing actual source/copy and ownership conditions remain.
 
+The [specific correspondence follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
+locates #6082's actual incomplete copied-source return and ten other
+particular historical controls without increasing the 75 bindings.
+#6888/#7208 correspondence and all current whole-home/admission gaps remain.
+The separately reviewed #13935 planning acceptance does not turn these
+receipts or the serial metadata audit into new current authored unions.
+
 ## Selection and observation boundary
 
 The later [integrated-wave comparison](roadmap-execution-waves.md#counted-coverage-not-technical-completion)
