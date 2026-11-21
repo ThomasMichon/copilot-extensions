@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -25,9 +27,6 @@ NO_WINDOW = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))[
     "project"
 ]["version"]
-
-pytestmark = pytest.mark.guard
-
 
 def _copy_payload(target: Path) -> None:
     def ignore(directory: str, names: list[str]) -> set[str]:
@@ -51,10 +50,11 @@ def _copy_payload(target: Path) -> None:
         materialize_main = importlib.import_module("materialize_main")
     finally:
         sys.path[:] = previous
-    changes = materialize_main.materialize_uv_editable_ref_into(
+    changes = materialize_main.materialize_file_pointers(target, canonical_root=PLUGIN.parents[1])
+    changes.extend(materialize_main.materialize_uv_editable_ref_into(
         source_consumer_dir=PLUGIN, dest_consumer_dir=target,
         canonical_root=PLUGIN.parents[1],
-    )
+    ))
     if (PLUGIN / "payload-invocation.json").is_file():
         changes.extend(materialize_main.materialize_installer_engine_ref_into(
             source_consumer_dir=PLUGIN, dest_consumer_dir=target,
@@ -72,6 +72,34 @@ def _copy_payload(target: Path) -> None:
     )
 
 
+def _isolate_global_pip_files(helper: Path, configuration: Path) -> None:
+    """Relocate only the copied reader's platform-global file provider."""
+    source = helper.read_text(encoding="utf-8")
+    marker = 'if __name__ == "__main__":'
+    assert source.count(marker) == 1
+    override = (
+        "def _global_files(_environment: object, _platform: str) -> list[Path]:\n"
+        f"    return [Path({str(configuration)!r})]\n\n\n"
+    )
+    helper.write_text(source.replace(marker, override + marker), encoding="utf-8")
+
+
+def _resolved_uv_defaults(output: str, native: ModuleType) -> list[str]:
+    projection = native._projection(output, "PipInstallSettings")
+    settings = native._fields(native._body(projection["settings"], "PipSettings"))
+    locations = native._fields(native._body(settings["index_locations"], "IndexLocations"))
+    body = native._body(locations["indexes"], "", "[", "]")
+    defaults: list[str] = []
+    while body.strip():
+        item, end = native.dependencies._balanced(body, body.index("{"), "{", "}")
+        fields = native._fields(item)
+        if fields["default"] == "true":
+            defaults.append(native._index_url(fields["url"])[0])
+        body = body[end:].strip().removeprefix(",")
+    return defaults
+
+
+@pytest.mark.guard
 def test_installers_recommend_supported_version_flag() -> None:
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -82,6 +110,7 @@ def test_installers_recommend_supported_version_flag() -> None:
     assert "Try: budget-guidance version" not in powershell
 
 
+@pytest.mark.guard
 def test_package_installers_retain_quiet_native_output_with_explicit_failure() -> None:
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -125,6 +154,15 @@ if args[:2] == ["python", "find"]:
     print(base)
     raise SystemExit(0)
 if "--show-settings" in args:
+    if os.environ.get("TEST_EXPECT_UV_DEFAULT_INDEX"):
+        assert os.environ.get("UV_DEFAULT_INDEX") == os.environ["TEST_EXPECT_UV_DEFAULT_INDEX"]
+    if os.environ.get("TEST_EXPECT_UV_CONFIG_INDEX"):
+        assert "UV_DEFAULT_INDEX" not in os.environ
+        with open(os.environ["UV_CONFIG_FILE"], encoding="utf-8") as config:
+            assert os.environ["TEST_EXPECT_UV_CONFIG_INDEX"] in config.read()
+    if os.environ.get("TEST_EXPECT_UV_DEFAULT_INDEX") or os.environ.get("TEST_EXPECT_UV_CONFIG_INDEX"):
+        with open(os.environ["TEST_UV_INDEX_LOG"], "a", encoding="utf-8") as log:
+            log.write("configured-index-observed\\n")
     print("PipInstallSettings {\\n settings: PipSettings {\\n"
           " index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
           " exclude_newer: ExcludeNewer {\\n"
@@ -367,6 +405,7 @@ def test_native_retry_after_failure_publishes_clean_slot(native_failed_install_s
         assert (state.old / "live").read_text() == "untouched"
 
 
+@pytest.mark.guard
 def test_posix_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     source = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     assert source.index('bootstrap-python-version.txt" Prepare') < source.index(
@@ -376,6 +415,7 @@ def test_posix_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     assert "Python fallback" not in source
 
 
+@pytest.mark.guard
 def test_powershell_installer_is_uv_first_when_ambient_python_is_absent() -> None:
     source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     assert source.index("Get-BootstrapPython -Prepare") < source.index(
@@ -485,12 +525,85 @@ def test_powershell_self_stage_preserves_spaced_paths_and_force(tmp_path: Path) 
 
 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX installer coverage")
-def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(tmp_path: Path) -> None:
+@pytest.mark.parametrize("feed_policy", [
+    "pip-config", "uv-config", "active-venv", "active-conda", "global-config",
+])
+def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, feed_policy: str,
+) -> None:
     assert BASH
-    _, env = _fake_uv_environment(tmp_path)
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "tools"))
+    registry = importlib.import_module("installer_engine_ref")
+    monkeypatch.setitem(registry.STANDALONE_NATIVE_EXTRA_FILES, "plugins/budget-guidance", (
+        "bootstrap-uv.ps1", "bootstrap-uv.sh",
+    ))
+    fake_bin, env = _fake_uv_environment(tmp_path)
+    for variable in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE", "UV_NO_CONFIG",
+                     "PIP_INDEX_URL", "VIRTUAL_ENV", "CONDA_PREFIX"):
+        env.pop(variable, None)
+    pip_log, index_log = tmp_path / "ambient-pip.log", tmp_path / "uv-index.log"
+    index = "https://configured.example/a%2Fb/simple"
+    config = tmp_path / "pip.conf"
+    config.write_text(f"[global]\nindex-url = {index}\n", encoding="utf-8")
+    uv_config = tmp_path / "uv.toml"
+    uv_config.write_text("", encoding="utf-8")
+    env.update({
+        "PIP_CONFIG_FILE": str(config), "TEST_PIP_LOG": str(pip_log),
+        "TEST_EXPECT_UV_DEFAULT_INDEX": index, "TEST_UV_INDEX_LOG": str(index_log),
+        "UV_CONFIG_FILE": str(uv_config),
+    })
+    global_config = tmp_path / "global-pip.conf"
+    global_index = index if feed_policy == "global-config" else "https://global.example/simple"
+    global_config.write_text(f"[global]\nindex-url = {global_index}\n", encoding="utf-8")
+    if feed_policy == "uv-config":
+        uv_config.write_text(f'[[index]]\nurl = "{index}"\ndefault = true\n', encoding="utf-8")
+        env.pop("TEST_EXPECT_UV_DEFAULT_INDEX")
+        env.update({
+            "UV_CONFIG_FILE": str(uv_config), "TEST_EXPECT_UV_CONFIG_INDEX": index,
+            "PIP_INDEX_URL": "https://not-selected.example/simple",
+        })
+        actual_uv = shutil.which("uv")
+        assert actual_uv, "The configured-index control requires uv"
+        resolved = subprocess.run(
+            [actual_uv, "pip", "install", "--python", BASE_PYTHON,
+             "--show-settings", "budget-guidance"],
+            cwd=tmp_path, env={
+                "PATH": env["PATH"], "HOME": env["HOME"], "USERPROFILE": env["USERPROFILE"],
+                "UV_CONFIG_FILE": str(uv_config), "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+                "UV_OFFLINE": "1", "UV_PYTHON_DOWNLOADS": "never",
+                "PIP_INDEX_URL": "https://not-selected.example/simple",
+            },
+            capture_output=True, text=True, timeout=30,
+        )
+        assert resolved.returncode == 0, resolved.stdout + resolved.stderr
+        monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "libs/installer-engine"))
+        native = importlib.import_module("installer_native_feed")
+        assert _resolved_uv_defaults(resolved.stdout + resolved.stderr, native) == [index]
+    else:
+        active = tmp_path / "active-environment"
+        active.mkdir()
+        if feed_policy != "active-conda":
+            (active / "pyvenv.cfg").write_text("home = /unusable-python\n", encoding="utf-8")
+            env["VIRTUAL_ENV"] = str(active)
+        else:
+            (active / "conda-meta").mkdir()
+            env["CONDA_PREFIX"] = str(active)
+        if feed_policy in ("active-venv", "active-conda"):
+            (active / "pip.conf").write_text(f"[global]\nindex-url = {index}\n", encoding="utf-8")
+        if feed_policy != "pip-config":
+            env["PIP_CONFIG_FILE"] = str(tmp_path / "missing-pip.conf")
+        env["TEST_ASSERT_CLEAN_UV"] = "1"
+    for name in ("pip", "pip3"):
+        command = fake_bin / name
+        command.write_text('#!/bin/sh\nprintf touched >> "$TEST_PIP_LOG"\nexit 91\n', encoding="utf-8")
+        command.chmod(0o755)
     install_dir = Path(env["HOME"]) / ".budget-guidance"
     payload = tmp_path / "budget-guidance"
     _copy_payload(payload)
+    assert (payload / "scripts/pip-index-config").read_bytes() == (
+        PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    ).read_bytes()
+    _isolate_global_pip_files(payload / "scripts/pip-index-config", global_config)
 
     result = subprocess.run(
         [BASH, str(payload / "scripts" / "install.sh"), "install", "--install-dir", str(install_dir)],
@@ -505,6 +618,400 @@ def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(tmp_path: Path
 
     assert result.returncode == 0, result.stdout
     assert (install_dir / "current-version").is_file()
+    assert not pip_log.exists(), "The installer launched an unrelated PATH pip"
+    observations = index_log.read_text(encoding="utf-8").splitlines()
+    assert observations and set(observations) == {"configured-index-observed"}
+    if feed_policy != "uv-config":
+        selected = (install_dir / "current-version").read_bytes()
+        completion = install_dir / "versions" / selected.decode().strip() / ".install-complete.json"
+        completed_before = completion.read_bytes()
+        index_before = index_log.read_bytes()
+        invalid = tmp_path / "invalid-pip.conf"
+        invalid.write_text("invalid configuration\n", encoding="utf-8")
+        reused = subprocess.run(
+            [BASH, str(payload / "scripts/install.sh"), "install", "--install-dir", str(install_dir)],
+            cwd=tmp_path, env={**env, "PIP_CONFIG_FILE": str(invalid)},
+            capture_output=True, text=True, timeout=120,
+        )
+        assert reused.returncode == 0, reused.stdout + reused.stderr
+        assert (install_dir / "current-version").read_bytes() == selected
+        assert completion.read_bytes() == completed_before
+        assert index_log.read_bytes() == index_before
+        assert not pip_log.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX real uv system-config coverage")
+def test_real_uv_system_config_disable_is_preserved_in_retained_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uv = shutil.which("uv")
+    assert uv, "The retained-settings control requires uv"
+    version = subprocess.run([uv, "--version"], capture_output=True, text=True, timeout=30)
+    parsed = re.match(r"^uv ([0-9]+)\.([0-9]+)\.([0-9]+)(?:\s|$)", version.stdout)
+    assert version.returncode == 0 and parsed, version.stdout + version.stderr
+    if tuple(map(int, parsed.group(1, 2, 3))) < (0, 11, 16):
+        pytest.skip("Selected uv predates UV_NO_SYSTEM_CONFIG; older-provider refusal is tested separately")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "uv.toml").write_text("", encoding="utf-8")
+    user = tmp_path / "user/uv/uv.toml"
+    user.parent.mkdir(parents=True)
+    user.write_text("", encoding="utf-8")
+    system = tmp_path / "system/uv/uv.toml"
+    system.parent.mkdir(parents=True)
+    index = "https://system.example/simple"
+    system.write_text(f'[[index]]\nurl = "{index}"\ndefault = true\n', encoding="utf-8")
+    env = {
+        "PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"),
+        "USERPROFILE": str(tmp_path / "home"), "XDG_CONFIG_HOME": str(tmp_path / "user"),
+        "XDG_CONFIG_DIRS": str(tmp_path / "system"), "UV_OFFLINE": "1",
+        "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_PYTHON_DOWNLOADS": "never",
+    }
+    original = subprocess.run(
+        [uv, "pip", "install", "--python", BASE_PYTHON, "--show-settings", "example-package>=1"],
+        cwd=project, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert original.returncode == 0, original.stdout + original.stderr
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "libs/installer-engine"))
+    native = importlib.import_module("installer_native_feed")
+    assert _resolved_uv_defaults(original.stdout + original.stderr, native) == [index]
+    with native.dependencies.retain_uv_install(
+        uv, ["--python", BASE_PYTHON, "example-package>=1"],
+        env={**env, "UV_NO_SYSTEM_CONFIG": "1"}, cwd=project,
+    ) as retained:
+        configuration = Path(retained.environment["UV_CONFIG_FILE"]).read_text(encoding="utf-8")
+        assert index not in configuration
+
+
+@pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX clean-room snapshot coverage")
+def test_posix_cleanroom_snapshot_provisions_without_index_environment(tmp_path: Path) -> None:
+    assert BASH
+    _, env = _fake_uv_environment(tmp_path)
+    for variable in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "PIP_INDEX_URL", "VIRTUAL_ENV", "CONDA_PREFIX"):
+        env.pop(variable, None)
+    uv_config = tmp_path / "uv.toml"
+    uv_config.write_text("", encoding="utf-8")
+    env.update(UV_CONFIG_FILE=str(uv_config), PIP_CONFIG_FILE=os.devnull)
+    scenario = PLUGIN.parents[1] / "tools/clean-room/scenarios/budget-guidance-solo/scenario.sh"
+    source = scenario.read_text(encoding="utf-8")
+    marker = "<<'PY'\n"
+    start = source.index(marker, source.index('capture "copy-candidate"')) + len(marker)
+    recipe = source[start:source.index("\nPY\nthen", start)]
+    fresh = tmp_path / "candidate"
+    fresh.mkdir()
+    copied = subprocess.run(
+        [BASE_PYTHON, "-I", "-B", "-", str(PLUGIN.parents[1]), str(fresh)],
+        input=recipe, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert copied.returncode == 0, copied.stdout + copied.stderr
+    payload = fresh / "plugins/budget-guidance"
+    root = Path(env["HOME"]) / ".budget-guidance"
+    stamped = subprocess.run(
+        [BASH, str(payload / "scripts/install.sh"), "stamp"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert stamped.returncode == 0, stamped.stdout + stamped.stderr
+    snapshot = Path((root / "payload-dir").read_text(encoding="utf-8").strip())
+    assert (snapshot / "scripts/pip-index-config").read_bytes() == (
+        PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    ).read_bytes()
+    shutil.rmtree(fresh)
+    provisioned = subprocess.run(
+        [BASH, str(snapshot / "scripts/install.sh"), "provision"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert provisioned.returncode == 0, provisioned.stdout + provisioned.stderr
+    assert (root / "current-version").read_text().strip() == VERSION
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable search semantics")
+@pytest.mark.parametrize("lookup", [
+    "relative-command", "relative-path", "empty-path-entry", "symlink-command", "symlink-path",
+])
+def test_system_flag_pins_provider_in_actual_launch_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lookup: str,
+) -> None:
+    from contextlib import contextmanager
+    from collections.abc import Iterator
+
+    parent, child = tmp_path / "parent", tmp_path / "child"
+    for base, version in ((parent, "0.8.0"), (child, "0.11.16")):
+        executable = base / "bin/uv"
+        executable.parent.mkdir(parents=True)
+        executable.write_text(f"#!/bin/sh\nprintf 'uv {version}\\n'\n", encoding="utf-8")
+        executable.chmod(0o755)
+    monkeypatch.chdir(parent)
+    source = PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    spec = importlib.util.spec_from_file_location("installer_pip_index", source)
+    assert spec and spec.loader
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    configuration = reader._dependency_policy()._configuration
+    uv, path, cwd = (
+        ("bin/uv", "/missing", child) if lookup == "relative-command"
+        else ("uv", "bin", child) if lookup == "relative-path"
+        else ("uv", "", child / "bin")
+    )
+    expected = str(child / "bin/uv")
+    if lookup.startswith("symlink-"):
+        physical = tmp_path / "physical"
+        (physical / "nested").mkdir(parents=True)
+        (physical / "bin").mkdir()
+        shutil.copy2(child / "bin/uv", physical / "bin/uv")
+        (child / "bin/uv").write_text("#!/bin/sh\nprintf 'uv 0.8.0\\n'\n", encoding="utf-8")
+        (child / "link").symlink_to(physical / "nested", target_is_directory=True)
+        expected = str(child / "link" / ".." / "bin" / "uv")
+        uv = "link/../bin/uv" if lookup == "symlink-command" else "uv"
+        path = "/missing" if lookup == "symlink-command" else "link/../bin"
+        cwd = child
+    environment = {"UV_NO_SYSTEM_CONFIG": "1", "PATH": path}
+
+    @contextmanager
+    def retain(selected: str, _arguments: list[str], **options: object) -> Iterator[str]:
+        assert options["env"] == environment
+        yield selected
+
+    with configuration.retain_local_exclusions(
+        retain, uv, [], excluded_local_packages=(), error_type=ValueError,
+        env=environment, cwd=cwd,
+    ) as selected:
+        assert selected == expected
+        assert subprocess.check_output([selected, "--version"], env=environment, text=True) == "uv 0.11.16\n"
+    configuration.require_system_config_provider(
+        uv, environment, cwd=cwd, error_type=ValueError,
+    )
+    with pytest.raises(ValueError, match="0.11.16"):
+        configuration.require_system_config_provider(
+            "bin/uv", environment, cwd=parent, error_type=ValueError,
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink and parent traversal")
+def test_posix_explicit_uv_config_preserves_physical_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    spec = importlib.util.spec_from_file_location("installer_pip_index", source)
+    assert spec and spec.loader
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    logical, physical = tmp_path / "logical", tmp_path / "physical"
+    logical.mkdir()
+    (physical / "nested").mkdir(parents=True)
+    (logical / "link").symlink_to(physical / "nested", target_is_directory=True)
+    (logical / "uv.toml").write_text("", encoding="utf-8")
+    (physical / "uv.toml").write_text(
+        '[[index]]\nurl = "https://physical.example/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    for key in ("UV_NO_SYSTEM_CONFIG", "UV_INDEX_URL", "UV_DEFAULT_INDEX"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(logical / "link" / ".." / "uv.toml"))
+    monkeypatch.setenv("UV_NO_CONFIG", "yes")
+    monkeypatch.setenv("PIP_INDEX_URL", "https://not-selected.example/simple")
+    assert reader.main() == 0
+    output = capsys.readouterr()
+    assert output.out == output.err == ""
+
+
+@pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX checkout reference coverage")
+@pytest.mark.parametrize("operation", [
+    "install", "stamp", "stamp-artifacts", "stamp-linked-file", "stamp-linked-parent",
+    "stamp-missing-source", "missing-reader",
+])
+def test_posix_checkout_reader_reference_and_stamped_closure(
+    tmp_path: Path, operation: str,
+) -> None:
+    assert BASH
+    is_stamp = operation.startswith("stamp")
+    _, env = _fake_uv_environment(tmp_path)
+    for variable in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "PIP_INDEX_URL", "VIRTUAL_ENV", "CONDA_PREFIX"):
+        env.pop(variable, None)
+    uv_config = tmp_path / "uv.toml"
+    uv_config.write_text("", encoding="utf-8")
+    env.update(UV_CONFIG_FILE=str(uv_config), PIP_CONFIG_FILE=os.devnull)
+    checkout = tmp_path / "checkout"
+    files = subprocess.check_output(
+        ["git", "-C", str(PLUGIN.parents[1]), "ls-files", "-z", "--",
+         "plugins/budget-guidance", "libs", "tools", ".github/plugin/marketplace.json"],
+        timeout=30,
+    )
+    for raw in files.split(b"\0"):
+        if not raw:
+            continue
+        relative = Path(os.fsdecode(raw))
+        target = checkout / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PLUGIN.parents[1] / relative, target)
+    roster = checkout / ".github/plugin/marketplace.json"
+    catalog = json.loads(roster.read_bytes())
+    catalog["plugins"] = [entry for entry in catalog["plugins"] if entry["name"] == "budget-guidance"]
+    roster.write_text(json.dumps(catalog), encoding="utf-8")
+    payload = checkout / "plugins/budget-guidance"
+    if not is_stamp:
+        staged = tmp_path / "bootstrap-ready"
+        shutil.copytree(payload, staged)
+        previous = sys.path.copy()
+        sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
+        try:
+            materializer = importlib.import_module("materialize_main")
+        finally:
+            sys.path[:] = previous
+        for prepare in (
+            materializer.materialize_uv_editable_ref_into,
+            materializer.materialize_installer_engine_ref_into,
+            materializer.materialize_payload_invocation_into,
+        ):
+            changes = prepare(
+                source_consumer_dir=payload, dest_consumer_dir=staged, canonical_root=checkout,
+            )
+            assert not any(line.startswith("SKIP ") for line in changes), changes
+        assert (staged / "scripts/pip-index-config").read_text().startswith("<!-- VENDOR_POINTER:")
+        shutil.rmtree(payload)
+        staged.rename(payload)
+    if operation == "missing-reader":
+        (payload / "scripts/pip-index-config").unlink()
+    root = Path(env["HOME"]) / ".budget-guidance"
+    stamp_env = env
+    if is_stamp:
+        native_bin = tmp_path / "native-bin"
+        native_bin.mkdir()
+        for name in ("bash", "dirname", "basename", "sed", "head", "tr", "grep", "mkdir", "rm",
+                     "ln", "readlink", "id", "cut", "stat", "wc", "mktemp",
+                     "uname", "sort", "sleep", "date", "cat", "awk", "cp", "mv", "chmod"):
+            executable = shutil.which(name)
+            assert executable
+            (native_bin / name).symlink_to(executable)
+        for name in ("realpath", "sha256sum", "shasum"):
+            if executable := shutil.which(name):
+                (native_bin / name).symlink_to(executable)
+        stamp_env = {**env, "PATH": str(native_bin)}
+        assert not (payload / "scripts/bootstrap-uv.sh").exists()
+        assert not (payload / "scripts/bootstrap-python-version.txt").exists()
+    if operation == "stamp-artifacts":
+        for library in ("agent-procutil", "zdd"):
+            source = checkout / "libs" / library
+            for name in (".venv", "build", "dist", "__pycache__", "stale.egg-info",
+                         ".pytest_cache", ".ruff_cache", ".test-runs"):
+                artifact = source / name / "excluded"
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text("must not enter the snapshot", encoding="utf-8")
+            (source / "stale.pyc").write_bytes(b"excluded bytecode")
+            (source / "uv.lock").write_text("ignored local resolver state", encoding="utf-8")
+        previous = sys.path.copy()
+        sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
+        try:
+            planner = importlib.import_module("materialize_installer_engine")
+            plans = planner.native_snapshot_plans(checkout)
+        finally:
+            sys.path[:] = previous
+        assert plans[payload / "scripts/installer-source-assets.tsv"] == (
+            payload / "scripts/installer-source-assets.tsv"
+        ).read_text(encoding="utf-8")
+    elif operation == "stamp-linked-file":
+        source = checkout / "libs/agent-procutil/src/agent_procutil/__init__.py"
+        target = checkout / "linked-source.py"
+        source.rename(target)
+        source.symlink_to(target)
+    elif operation == "stamp-linked-parent":
+        source = checkout / "libs/agent-procutil/src/agent_procutil"
+        target = checkout / "linked-package"
+        source.rename(target)
+        source.symlink_to(target, target_is_directory=True)
+    elif operation == "stamp-missing-source":
+        (checkout / "libs/agent-procutil/src/agent_procutil/__init__.py").unlink()
+    if operation == "stamp":
+        for name in ("cp", "mkdir", "dirname"):
+            executable = shutil.which(name)
+            assert executable
+            wrapper = native_bin / name
+            wrapper.unlink()
+            wrapper.write_text(
+                f"#!{BASH}\nprintf '%s\\n' {name} >> '{tmp_path / 'native-work'}'\n"
+                f"exec '{executable}' \"$@\"\n", encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
+    result = subprocess.run(
+        [BASH, str(payload / "scripts/install.sh"), "stamp" if is_stamp else "install"],
+        cwd=tmp_path, env=stamp_env, capture_output=True, text=True, timeout=120,
+    )
+    if operation.startswith("stamp-linked-") or operation == "stamp-missing-source":
+        assert result.returncode != 0
+        if operation.startswith("stamp-linked-"):
+            assert "Linked source snapshot asset refused" in result.stdout + result.stderr
+        assert not (root / "payload-dir").exists()
+        assert not (root / "current-version").exists()
+        assert not list((root / "snapshots").glob("*.tmp-*"))
+        repeated = subprocess.run(
+            [BASH, str(payload / "scripts/install.sh"), "stamp"], cwd=tmp_path, env=stamp_env,
+            capture_output=True, text=True, timeout=120,
+        )
+        assert repeated.returncode != 0
+        assert not list((root / "snapshots").glob("*.tmp-*"))
+        return
+    if operation == "missing-reader":
+        assert result.returncode != 0
+        assert "index reader is not prepared" in result.stdout + result.stderr
+        assert not (root / "current-version").exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    if operation == "stamp":
+        work = (tmp_path / "native-work").read_text().splitlines()
+        assert work.count("cp") < 45, work
+        assert work.count("mkdir") < 20, work
+        assert work.count("dirname") < 20, work
+        import time
+
+        for name in ("cp", "mkdir", "dirname"):
+            wrapper = native_bin / name
+            wrapper.unlink()
+            executable = shutil.which(name)
+            assert executable
+            wrapper.symlink_to(executable)
+        hook_home = tmp_path / "hook-home"
+        hook_home.mkdir()
+        started = time.monotonic()
+        timed = subprocess.run(
+            [BASH, str(payload / "scripts/bootstrap-check.sh")],
+            cwd=tmp_path, env={
+                **stamp_env, "HOME": str(hook_home), "USERPROFILE": str(hook_home),
+                "COPILOT_HOME": str(hook_home / ".copilot"),
+                "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_EXTENSIONS_CONTEXT": "",
+                "TMPDIR": str(tmp_path),
+            },
+            capture_output=True, text=True, timeout=2,
+        )
+        assert timed.returncode == 0, timed.stdout + timed.stderr
+        assert timed.stdout == "{}"
+        assert (hook_home / ".budget-guidance/payload-dir").is_file()
+        assert (hook_home / ".local/bin/budget-guidance").is_file()
+        assert time.monotonic() - started < 2
+    if is_stamp:
+        snapshot = Path((root / "payload-dir").read_text().strip())
+        assert not (root / "current-version").exists()
+        assert (Path(env["HOME"]) / ".local/bin/budget-guidance").is_file()
+        assert (snapshot / "scripts/bootstrap-python-version.txt").read_text() == "cpython@3.13.12\n"
+        assert (snapshot / "scripts/bootstrap-uv.sh").is_file()
+        for path in (snapshot / "libs").rglob("*"):
+            assert not path.is_symlink()
+            assert not any(part in {
+                ".venv", "build", "dist", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
+            } or part.endswith(".egg-info") for part in path.relative_to(snapshot / "libs").parts)
+            assert path.suffix not in {".pyc", ".pyo"}
+            assert path.name != "uv.lock"
+        assert (snapshot / "scripts/pip-index-config").read_bytes() == (
+            checkout / "libs/installer-engine/installer_pip_index.py"
+        ).read_bytes()
+        assert (snapshot / "scripts/installer_dependency_config.py").read_bytes() == (
+            checkout / "libs/installer-engine/installer_dependency_config.py"
+        ).read_bytes()
+        shutil.rmtree(checkout)
+        provisioned = subprocess.run(
+            [BASH, str(snapshot / "scripts/install.sh"), "provision"],
+            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
+        )
+        assert provisioned.returncode == 0, provisioned.stdout + provisioned.stderr
+    assert (root / "current-version").read_text().strip() == VERSION
 
 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX installer coverage")
@@ -839,6 +1346,7 @@ def test_closed_wheel_uv_off_path_refuses_before_construction(tmp_path: Path) ->
     assert not (home / ".local/bin").exists()
 
 
+@pytest.mark.guard
 def test_windows_compatibility_wrapper_does_not_provision_on_launch() -> None:
     wrapper = _compatibility_powershell_wrapper()
     assert "runtime is not prepared" in wrapper

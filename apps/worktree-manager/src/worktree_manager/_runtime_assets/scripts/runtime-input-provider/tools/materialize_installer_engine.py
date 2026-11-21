@@ -2,12 +2,93 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 import json
 import shutil
 import stat
+from collections.abc import Iterable
 from pathlib import Path
 
 import installer_engine_ref as ier
+import uv_editable_ref as uer
+
+
+def native_snapshot_plans(repo: Path) -> dict[Path, str]:
+    """Project existing asset and Invocation owners into inert cold-stamp data."""
+    outputs: dict[Path, str] = {}
+    for consumer in ier.native_adopter_dirs(repo):
+        installer = consumer / "scripts/install.sh"
+        if not installer.is_file() or "installer-source-assets.tsv" not in installer.read_text("utf-8"):
+            continue
+        rows = []
+        for source, target in derived_file_pairs(repo, repo, copied_consumer=(consumer, consumer)):
+            if source.suffix in {".py", ".sh"}:
+                rows.append(("copy", source.relative_to(repo).as_posix(), target.relative_to(consumer).as_posix()))
+        aliases = ier.NATIVE_SOURCE_ALIASES.get(consumer.relative_to(repo).as_posix(), {})
+        for name, canonical_name in aliases.items():
+            source = repo / "libs/installer-engine" / canonical_name
+            if problem := derived_path_problem(source, repo, required=True):
+                raise ValueError(problem)
+            rows.append(("copy", source.relative_to(repo).as_posix(), f"scripts/{name}"))
+        pending = [consumer]
+        libraries: set[Path] = set()
+        while pending:
+            current = pending.pop()
+            for entry in uer.read_uv_sources(current).values():
+                if not isinstance(entry, dict) or "path" not in entry:
+                    continue
+                raw_path = entry["path"]
+                if not isinstance(raw_path, str):
+                    raise ValueError("native source plan requires literal library paths")
+                library = Path(raw_path).name
+                source = current / raw_path
+                canonical = repo / "libs" / library
+                if (
+                    not uer.is_safe_lib_name(library)
+                    or uer._find_symlinked_ancestor(source, repo.resolve()) is not None
+                    or source.resolve() not in {canonical.resolve(), (current / "libs" / library).resolve()}
+                    or not canonical.is_dir()
+                ):
+                    raise ValueError("native source plan requires an owned canonical library reference")
+                source = canonical.resolve()
+                if source not in libraries:
+                    libraries.add(source)
+                    from materialize_main import _ignore
+
+                    directories = [source]
+                    while directories:
+                        directory = directories.pop()
+                        entries = sorted(directory.iterdir())
+                        ignored = _ignore(str(directory), [path.name for path in entries])
+                        for path in entries:
+                            if path.name in ignored:
+                                continue
+                            if path.is_symlink():
+                                raise ValueError("native source plan refuses nested library links")
+                            if path.is_dir():
+                                directories.append(path)
+                            elif path.is_file():
+                                relative = path.relative_to(repo).as_posix()
+                                rows.append(("copy", relative, relative))
+                            else:
+                                raise ValueError("native source plan requires ordinary library files")
+                    pending.append(source)
+        spec = importlib.util.spec_from_file_location(
+            "_native_snapshot_request",
+            Path(__file__).resolve().parents[1] / "libs/payload-invocation/bootstrap_python.py",
+        )
+        assert spec and spec.loader
+        bootstrap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        manifest = consumer / "payload-invocation.json"
+        for target, content in bootstrap.expected_files(manifest, json.loads(manifest.read_bytes())).items():
+            rows.append(("request", content.rstrip("\n"), target.relative_to(consumer).as_posix()))
+        if any("\t" in value or "\r" in value or "\n" in value for row in rows for value in row):
+            raise ValueError("native source plan fields must be single-line paths or requests")
+        outputs[consumer / "scripts/installer-source-assets.tsv"] = "".join(
+            "\t".join(row) + "\n" for row in sorted(rows)
+        )
+    return outputs
 
 
 def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
@@ -84,7 +165,7 @@ def derived_file_pairs(
         declaration = ier.human_output_entrypoint(consumer).with_suffix(".human-output.json")
         if declaration.exists() or declaration.is_symlink():
             consumers.setdefault(consumer, set()).add(ier.HUMAN_HELPER)
-    pairs = []
+    pairs: list[tuple[Path, Path]] = []
     for consumer, names in sorted(consumers.items()):
         if copied_consumer is not None:
             if consumer != copied_consumer[0]:
@@ -324,6 +405,7 @@ def materialize_ref_into(
             if any(line.startswith("SKIP") for line in refreshed):
                 return log
         support_assets = []
+        support_ready = False
         for name in support_names:
             source_asset = canonical.parent / name
             dest_asset = dest_engine.parent / name
@@ -339,8 +421,8 @@ def materialize_ref_into(
             for source_asset, dest_asset in support_assets:
                 if not dest_asset.exists():
                     shutil.copyfile(source_asset, dest_asset)
-            support_assets = None
-        if support_assets is not None:
+            support_ready = True
+        if not support_ready:
             continue
 
         try:
@@ -379,7 +461,7 @@ def materialize_ref_into(
 
 
 def validate_human_output_sources(
-    canonical_root: Path, *, consumers=None,
+    canonical_root: Path, *, consumers: Iterable[Path] | None = None,
 ) -> frozenset[Path]:
     """Validate original declarations before any owner mutates a same-root tree."""
     if consumers is None:

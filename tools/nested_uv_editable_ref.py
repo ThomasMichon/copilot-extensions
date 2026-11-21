@@ -68,10 +68,7 @@ def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
 
 
 def _ignore(_dir: str, names: list[str]) -> set[str]:
-    """Mirrors ``materialize_main.py``'s own ``_ignore``."""
-    return {n for n in names if n in {
-        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
-    } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
+    return uer.materialization_ignored_names(names)
 
 
 def rewrite_nested_uv_editable_entry(

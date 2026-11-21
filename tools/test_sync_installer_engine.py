@@ -239,7 +239,11 @@ def test_installer_action_identity_uses_existing_progress_helpers(
             "agent-worktrees", "agent-codespaces",
         }:
             deferred = "explicit setup" if plugin == "agent-index" else "first use"
-            cases.append(("running", f"{plugin} stamp; runtime deferred to {deferred}"))
+            message = (
+                "budget-guidance stamp; explicit runtime provision required" if plugin == "budget-guidance"
+                else f"{plugin} stamp; runtime deferred to {deferred}"
+            )
+            cases.append(("running", message))
         if initializer:
             cases.append(("running", f"{plugin} init"))
         if powershell and plugin == "agent-bridge":
@@ -436,7 +440,10 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
-    for asset in (*contract.FILES, *contract.support_files(origin)):
+    extras = {
+        name for files in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for name in files
+    }
+    for asset in (*contract.FILES, *contract.support_files(origin), *sorted(extras)):
         (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(origin / asset, canonical / asset)
 
@@ -453,6 +460,7 @@ def test_real_engine_fixture_retains_nested_support_assets(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"fixture {asset}\n", encoding="utf-8")
     monkeypatch.setattr(contract, "support_files", lambda _: ("nested/support.py",))
+    monkeypatch.setattr(contract, "STANDALONE_NATIVE_EXTRA_FILES", {})
     monkeypatch.setattr(f"{__name__}.REPO", origin)
     destination = tmp_path / "output"
     _copy_real_installer_engine(destination)

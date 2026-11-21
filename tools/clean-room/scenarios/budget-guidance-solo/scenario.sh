@@ -55,7 +55,7 @@ source, fresh = map(Path, sys.argv[1:])
 sys.path.insert(0, str(source / "tools"))
 from launch_wrapper_assets_ref import load_manifest_groups
 from materialize_main import (
-    materialize_installer_engine_ref_into, materialize_payload_invocation_into,
+    materialize_file_pointers, materialize_installer_engine_ref_into, materialize_payload_invocation_into,
     materialize_uv_editable_ref_into,
 )
 
@@ -63,6 +63,9 @@ ignore = shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache", "
 plugin = source / "plugins/budget-guidance"
 candidate = fresh / "plugins/budget-guidance"
 shutil.copytree(plugin, candidate, ignore=ignore)
+results = materialize_file_pointers(candidate, canonical_root=source)
+if any(line.startswith("SKIP ") for line in results):
+    raise RuntimeError(results)
 for assets in load_manifest_groups(plugin, manifest_name="packaged-assets.json"):
     destination = assets.payload_dir(plugin_dir=candidate)
     destination.mkdir(parents=True, exist_ok=True)

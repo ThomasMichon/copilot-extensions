@@ -19,15 +19,16 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
+from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
+from typing import Any
 
 from standalone_consumers import STANDALONE_CONSUMERS
 
-try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
-    # 3.10 support floor -- see worktree_manager.source_config's own
-    # identical fallback for the established pattern.
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+if sys.version_info >= (3, 11):
+    import tomllib as tomllib
+else:
     import tomli as tomllib
 
 REPO = Path(__file__).resolve().parent.parent
@@ -139,7 +140,7 @@ def iter_consumer_dirs() -> list[tuple[str, Path]]:
     return out
 
 
-def _read_pyproject(consumer_dir: Path) -> dict:
+def _read_pyproject(consumer_dir: Path) -> dict[str, Any]:
     pyproject = consumer_dir / "pyproject.toml"
     if pyproject.is_symlink() or not pyproject.is_file():
         return {}
@@ -149,7 +150,9 @@ def _read_pyproject(consumer_dir: Path) -> dict:
         raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
 
 
-def read_uv_sources(consumer_dir: Path, *, data: dict | None = None) -> dict:
+def read_uv_sources(
+    consumer_dir: Path, *, data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Read declared sources, refusing unreadable or malformed manifests."""
     pyproject = consumer_dir / "pyproject.toml"
     if data is None:
@@ -166,7 +169,7 @@ def read_uv_sources(consumer_dir: Path, *, data: dict | None = None) -> dict:
     return sources
 
 
-def _direct_local_requirements(data: dict) -> list[str]:
+def _direct_local_requirements(data: dict[str, Any]) -> list[str]:
     project = data.get("project", {})
     build = data.get("build-system", {})
     if not isinstance(project, dict) or not isinstance(build, dict):
@@ -304,7 +307,7 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
 
 
 def find_uv_editable_refs(
-    consumer_dir: Path, *, data: dict | None = None, resolve_symlinks: bool = True,
+    consumer_dir: Path, *, data: dict[str, Any] | None = None, resolve_symlinks: bool = True,
 ) -> list[tuple[str, str, str, bool]]:
     """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
     whose ``path`` escapes ``consumer_dir``'s own root -- the `uv`-editable
@@ -331,7 +334,9 @@ def find_uv_editable_refs(
     checks for directly via ``.is_symlink()``)."""
     pyproject = consumer_dir / "pyproject.toml"
     sources = read_uv_sources(consumer_dir, data=data)
-    resolve = Path.resolve if resolve_symlinks else lambda path: Path(os.path.abspath(path))
+    def resolve(path: Path) -> Path:
+        return path.resolve() if resolve_symlinks else Path(os.path.abspath(path))
+
     consumer_root = resolve(consumer_dir)
     out: list[tuple[str, str, str, bool]] = []
     for name, entry in sources.items():
@@ -405,11 +410,11 @@ def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
         return str(min(links)) if links else None
     except OSError:
         pass  # Preserve pathlib's existing scan-error handling.
-    for entry in sorted(tree.rglob("*")):
-        if skip_test_runs and ".test-runs" in entry.relative_to(tree).parts:
+    for fallback in sorted(tree.rglob("*")):
+        if skip_test_runs and ".test-runs" in fallback.relative_to(tree).parts:
             continue
-        if entry.is_symlink():
-            return str(entry.relative_to(tree))
+        if fallback.is_symlink():
+            return str(fallback.relative_to(tree))
     return None
 
 
@@ -598,6 +603,14 @@ def rewrite_uv_source_to_editable(pyproject_path: Path, lib: str, relpath: str) 
     pyproject_path.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
 
 
+def materialization_ignored_names(names: list[str]) -> set[str]:
+    """Keep copying, native plans and canonical-tree comparison on one filter."""
+    return {name for name in names if name in {
+        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
+        "build", "dist", "uv.lock",
+    } or name.endswith((".pyc", ".pyo", ".egg-info"))}
+
+
 def _file_hashes(root: Path) -> dict[str, str]:
     """Relative-path -> sha256 for every real file anywhere under ``root``
     (recursively), ignoring only generated/ephemeral artifacts
@@ -615,21 +628,13 @@ def _file_hashes(root: Path) -> dict[str, str]:
     *located* under a directory named e.g. ``build`` would have every
     file's ``.parts`` match that ancestor name too, silently emptying the
     whole result and making any two trees compare as falsely equal."""
-    ignored_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs", "build", "dist"}
     out: dict[str, str] = {}
     if not root.is_dir():
         return out
     for f in root.rglob("*"):
-        if ".test-runs" in f.relative_to(root).parts:
+        if materialization_ignored_names(list(f.relative_to(root).parts)):
             continue
         if not f.is_file():
-            continue
-        rel_parts = set(f.relative_to(root).parts)
-        if (
-            ignored_dirs & rel_parts
-            or any(part.endswith(".egg-info") for part in rel_parts)
-            or f.suffix in (".pyc", ".pyo")
-        ):
             continue
         out[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out
@@ -654,10 +659,10 @@ def convert_to_uv_editable(
     *,
     repo: Path,
     libs_dir: Path,
-    consumer_dir_of,
-    find_symlinked_ancestor,
-    remove_path,
-    is_pointer_copy,
+    consumer_dir_of: Callable[[str], Path],
+    find_symlinked_ancestor: Callable[[Path, Path], Path | None],
+    remove_path: Callable[[Path], None],
+    is_pointer_copy: Callable[[Path], bool],
 ) -> tuple[Path, str]:
     """Convert ``<consumer's own dir>/libs/<lib>`` into the `uv`-editable
     canonical-reference form (vendor-pointer-generalization effort, Phase
