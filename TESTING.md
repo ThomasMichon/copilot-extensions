@@ -1215,6 +1215,13 @@ cases without skips. The synthetic version controls remain separate.
 This is source-consumer qualification, not an installed runtime, public PATH
 repair, a Python-free OS, production daemon launch or full setup acceptance.
 The ordinary focused hosted controller does not provision this old interpreter.
+The Budget job in the same workflow also requires direct native dependency-policy
+qualification and retention with real uv: an overlong working directory and a
+real `uv.cmd` wrapper on a spaced, quoted PATH. These controls record real
+processes without replacing their execution, require the selected provider,
+successful exits, closed capture pipes and removal of retained copies, and
+preserve original fixture inputs. They retain the existing five-minute job
+limit; local non-Windows skips are not native qualification.
 
 Dispatch's `--test-file tests/test_pool_startup_client.py --test-file
 tests/test_ordinary_pool_startup.py --test-file tests/test_workspace_continuity.py

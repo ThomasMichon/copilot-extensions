@@ -5,13 +5,66 @@ from __future__ import annotations
 import os
 import json
 import re
-from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 _Error = type[Exception]
 _Balanced = Callable[[str, int, str, str], tuple[str, int]]
 _Pairs = Callable[[list[str]], Iterable[tuple[str, str]]]
+
+
+def uv_launch_path(
+    uv: str, environment: Mapping[str, str], cwd: Path | None, *,
+    error_type: _Error, windows: bool = False,
+) -> str:
+    """Resolve captured PATH entries against the actual OS launch directory."""
+    base = Path.cwd() if cwd is None else cwd.absolute()
+    if os.path.dirname(uv):
+        return str((base / uv).absolute())
+    for entry in os.get_exec_path(dict(environment)):
+        if windows and entry.startswith('"') and entry.endswith('"'):
+            entry = entry[1:-1]
+        selected = str((base / entry / uv).absolute())
+        if os.path.isfile(selected) and os.access(selected, os.X_OK):
+            return selected
+    raise error_type("Cannot qualify UV_NO_SYSTEM_CONFIG support: selected UV is unavailable")
+
+
+def uv_process_cwd(cwd: Path | None, *, windows: bool) -> Path | None:
+    if not windows:
+        return cwd
+    actual = Path(os.path.abspath(cwd or Path.cwd()))
+    return Path(actual.anchor) if len(str(actual)) >= 260 else cwd
+
+
+def immutable_install_arguments(
+    arguments: Iterable[str], pairs: Sequence[tuple[str, str]], *, error_type: _Error,
+) -> list[str]:
+    if any(option in ("-e", "--editable") for option, _ in pairs):
+        raise error_type("deployed runtimes require non-editable immutable versioned slots")
+    if any(option == "--link-mode" and value != "copy" for option, value in pairs):
+        raise error_type("deployed runtimes require copied installation artifacts")
+    result = list(arguments)
+    if not any(option == "--link-mode" for option, _ in pairs):
+        result.extend(["--link-mode", "copy"])
+    return result
+
+
+def merge_config(high: Mapping[str, object], low: Mapping[str, object]) -> dict[str, object]:
+    """Apply UV's recursive table and ordered-list precedence without doing I/O."""
+    result = dict(low)
+    for key, value in high.items():
+        previous = result.get(key)
+        if isinstance(value, dict) and isinstance(previous, dict):
+            result[key] = merge_config(cast(dict[str, object], value), cast(dict[str, object], previous))
+        elif isinstance(value, list) and isinstance(previous, list):
+            result[key] = [*cast(list[object], value), *cast(list[object], previous)]
+        else:
+            result[key] = value
+    return result
+
 
 def captured_environment(
     env: Mapping[str, str], *, windows: bool, error_type: _Error,
@@ -89,7 +142,7 @@ def uv_command(
     argument_pairs: _Pairs,
     value_options: Collection[str],
 ) -> tuple[list[str], Path | None]:
-    if not windows or len(os.path.abspath(cwd or Path.cwd())) < 260:
+    if uv_process_cwd(cwd, windows=windows) == cwd:
         return [uv, "pip", operation, *arguments], cwd
     retained = []
     directory_supplied = False

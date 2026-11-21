@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time as clock
 import types
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
+from collections.abc import Callable, Iterable, Iterator, Mapping, Set
 from contextlib import contextmanager
 from datetime import date, datetime, time
 from pathlib import Path, PureWindowsPath
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
         check_compile_projection as check_compile_projection,
         cutoff_arguments as cutoff_arguments,
         cutoff_value as cutoff_value,
+        immutable_install_arguments as immutable_install_arguments,
+        merge_config as merge_config,
         package_cutoffs as package_cutoffs,
         resolver_configuration as resolver_configuration,
     )
@@ -166,23 +168,48 @@ if not TYPE_CHECKING:
     check_compile_projection = _arguments.check_compile_projection
     cutoff_arguments = _arguments.cutoff_arguments
     cutoff_value = _arguments.cutoff_value
+    immutable_install_arguments = _arguments.immutable_install_arguments
+    merge_config = _arguments.merge_config
     package_cutoffs = _arguments.package_cutoffs
     resolver_configuration = _arguments.resolver_configuration
 
 _WINDOWS = os.name == "nt"
+_TRUE_VALUES = {"y", "yes", "t", "true", "on", "1"}
+_FALSE_VALUES = {"n", "no", "f", "false", "off", "0"}
 
 
-def immutable_install_arguments(
-    arguments: Iterable[str], pairs: Sequence[tuple[str, str]], *, error_type: _Error,
-) -> list[str]:
-    if any(option in ("-e", "--editable") for option, _ in pairs):
-        raise error_type("deployed runtimes require non-editable immutable versioned slots")
-    if any(option == "--link-mode" and value != "copy" for option, value in pairs):
-        raise error_type("deployed runtimes require copied installation artifacts")
-    result = list(arguments)
-    if not any(option == "--link-mode" for option, _ in pairs):
-        result.extend(["--link-mode", "copy"])
-    return result
+def require_system_config_provider(
+    uv: str, environment: Mapping[str, str], *, deadline: float | None = None,
+    error_type: _Error, cwd: Path | None = None,
+) -> str:
+    """Do not reinterpret an option that the selected UV would silently ignore."""
+    flag = environment.get("UV_NO_SYSTEM_CONFIG")
+    if flag is None:
+        return uv
+    if flag.lower() not in _TRUE_VALUES | _FALSE_VALUES:
+        raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")
+    if flag.lower() in _FALSE_VALUES:
+        return uv
+    if not uv:
+        raise error_type("UV_NO_SYSTEM_CONFIG requires its selected UV provider")
+    if not _WINDOWS:
+        uv = _arguments.uv_launch_path(uv, environment, cwd, error_type=error_type)
+    elif not Path(uv).is_absolute():
+        uv = _arguments.uv_launch_path(uv, environment, None, windows=True, error_type=error_type)
+        uv = select_uv_executable(uv, error_type=error_type)
+    try:
+        result = subprocess.run(
+            [uv, "--version"], env=dict(environment),
+            cwd=_arguments.uv_process_cwd(cwd, windows=_WINDOWS), capture_output=True, text=True,
+            timeout=remaining_timeout(deadline, error_type=error_type, cap=30),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if _WINDOWS else 0,
+        )
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
+        raise error_type("Cannot qualify UV_NO_SYSTEM_CONFIG support") from exc
+    version = re.fullmatch(r"uv ([0-9]+)\.([0-9]+)\.([0-9]+)(?: \([^\r\n]*\))?\s*", result.stdout)
+    if result.returncode or version is None or tuple(map(int, version.group(1, 2, 3))) < (0, 11, 16):
+        raise error_type("UV_NO_SYSTEM_CONFIG requires UV 0.11.16 or newer")
+    return uv
 
 
 _content_path = Path(__file__).with_name("installer_retained_content.py")
@@ -252,6 +279,8 @@ def prepare_uv_install(
     settings_timeout: float, headless: int, value_options: Set[str],
 ) -> list[str]:
     remaining_timeout(deadline, error_type=error_type)
+    uv = select_uv(uv)
+    uv = require_system_config_provider(uv, environment, cwd=cwd, deadline=deadline, error_type=error_type)
     if native_target and environment.get("UV_PYTHON_PLATFORM"):
         raise error_type("native source lock export cannot override its selected target")
     if operation in ("compile", "source-compile"):
@@ -261,7 +290,6 @@ def prepare_uv_install(
         **({"operation": operation} if operation != "install" else {}),
     )
     remaining_timeout(deadline, error_type=error_type)
-    uv = select_uv(uv)
     probe_arguments = [arg for arg in arguments if arg != "--quiet" and not re.fullmatch(r"-q+", arg)]
     native_operation = "compile" if operation == "source-compile" else operation
     command, probe_cwd = uv_command(
@@ -391,8 +419,10 @@ def report_cleanup_error(error: BaseException) -> None:
 
 
 def native_retained_path(path: _Path) -> str:
+    if os.name != "nt":
+        return str(Path(path).absolute())
     value = os.path.abspath(path)
-    if os.name != "nt" or value.startswith("\\\\?\\"):
+    if value.startswith("\\\\?\\"):
         return value
     return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
 
@@ -501,6 +531,16 @@ def retain_local_exclusions(
     names = tuple(re.sub(r"[-_.]+", "-", name).lower() for name in excluded_local_packages)
     if len(set(names)) != len(names):
         raise error_type("excluded local packages contain duplicate names")
+    environment = retained_options.get("env")
+    environment = captured_environment(
+        os.environ if environment is None else environment, windows=_WINDOWS, error_type=error_type,
+    )
+    retained_options["env"] = environment
+    uv = select_uv_executable(uv, error_type=error_type)
+    uv = require_system_config_provider(
+        uv, environment, cwd=retained_options.get("cwd"),
+        deadline=retained_options.get("deadline"), error_type=error_type,
+    )
     if not names:
         with retain(uv, arguments, **retained_options) as transaction:
             yield transaction
@@ -597,14 +637,18 @@ def config_inputs(
     argument_pairs: _Pairs, toml: _Toml, error_type: _Error,
 ) -> list[tuple[Path, bool]]:
     pairs = dict(argument_pairs(arguments))
-    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):
-        return []
     explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
     if explicit:
         return [(base / explicit, False)]
+    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in _TRUE_VALUES:
+        return []
+    system_flag = environment.get("UV_NO_SYSTEM_CONFIG")
+    if system_flag is not None and system_flag.lower() not in _TRUE_VALUES | _FALSE_VALUES:
+        raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")
+    no_system = system_flag is not None and system_flag.lower() in _TRUE_VALUES
     candidates = []
     project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
-    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
+    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in _TRUE_VALUES:
         for directory in (project, *project.parents):
             uv = directory / "uv.toml"
             manifest = directory / "pyproject.toml"
@@ -623,7 +667,7 @@ def config_inputs(
     if os.name == "nt":
         if environment.get("APPDATA"):
             candidates.append((Path(environment["APPDATA"]) / "uv" / "uv.toml", False))
-        if environment.get("SYSTEMDRIVE"):
+        if not no_system and environment.get("SYSTEMDRIVE"):
             candidates.append((
                 Path(environment["SYSTEMDRIVE"] + "\\") / "ProgramData" / "uv" / "uv.toml", False,
             ))
@@ -632,15 +676,16 @@ def config_inputs(
             Path(environment.get("HOME") or Path.home()) / ".config"
         )) / "uv" / "uv.toml"
         candidates.append((user, False))
-        system = Path("/etc/uv/uv.toml")
-        for config_directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
-            if not config_directory:
-                break
-            candidate = base / config_directory / "uv" / "uv.toml"
-            if candidate.is_file():
-                system = candidate
-                break
-        candidates.append((system, False))
+        if not no_system:
+            system = Path("/etc/uv/uv.toml")
+            for config_directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
+                if not config_directory:
+                    continue
+                candidate = base / config_directory / "uv" / "uv.toml"
+                if candidate.is_file():
+                    system = candidate
+                    break
+            candidates.append((system, False))
     return [(path, is_project) for path, is_project in candidates if path.is_file()]
 
 
@@ -943,16 +988,3 @@ def private_retained_root(parent: Path, *, error_type: _Error, name: str = "inpu
     finally:
         kernel.LocalFree(descriptor)
     return root
-
-
-def merge_config(high: Mapping[str, object], low: Mapping[str, object]) -> dict[str, object]:
-    result = dict(low)
-    for key, value in high.items():
-        previous = result.get(key)
-        if isinstance(value, dict) and isinstance(previous, dict):
-            result[key] = merge_config(cast(dict[str, object], value), cast(dict[str, object], previous))
-        elif isinstance(value, list) and isinstance(previous, list):
-            result[key] = [*cast(list[object], value), *cast(list[object], previous)]
-        else:
-            result[key] = value
-    return result

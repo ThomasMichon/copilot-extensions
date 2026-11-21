@@ -71,6 +71,9 @@ STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-worktrees": ("bootstrap-uv.ps1",),
     "plugins/budget-guidance": ("bootstrap-uv.ps1", "bootstrap-uv.sh"),
 }
+NATIVE_SOURCE_ALIASES = {
+    "plugins/budget-guidance": {"pip-index-config": "installer_pip_index.py"},
+}
 
 
 def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
