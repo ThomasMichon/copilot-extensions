@@ -362,28 +362,11 @@ def cmd_backfill_sessions(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
-    if getattr(args, "repair_orphaned_owner", None) is not None:
-        from .orphaned_owner_repair import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "recovery_report", None) is not None:
-        from .recovery_doctor import targeted_report
-        return targeted_report(args)
-    if (
-        getattr(args, "repair_machine_record", None) is not None
-        or getattr(args, "from_machine", None) is not None
-        or getattr(args, "to_machine", None) is not None
-    ):
-        from .machine_record_repair import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "guest_distribution", None) is not None:
-        from .guest_environment_cli import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "repair_creation", None) is not None or getattr(args, "seed_id", None):
-        from .creation_tail_repair import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "repair_record", None) is not None or getattr(args, "bound_agent_end_field", None):
-        from .tracking_yaml_repair import targeted_doctor
-        return targeted_doctor(args)
+    from .doctor_dispatch import dispatch_targeted
+
+    targeted_status = dispatch_targeted(args)
+    if targeted_status is not None:
+        return targeted_status
     from . import health
 
     apply = getattr(args, "fix", False)

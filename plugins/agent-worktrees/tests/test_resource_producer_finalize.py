@@ -2,35 +2,44 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+from collections.abc import Callable
+
 import json
 import os
 from dataclasses import replace
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import time
 
 import pytest
+from machine_transport import detect_platform
 
 from conftest import _published_seed_environment, _seed_directory
 from conftest import git_only_mux as _git_only_mux
-from agent_worktrees import config as cfg, finalize, tracking
-from test_resource_producer import absence, call
+from agent_worktrees import activity, config as cfg, finalize, procs, tracking
+from agent_worktrees.tracking_claims import format_claim_ref
+from test_resource_producer import absence as _absence, call as _call
 from test_transitive_finalize_integration import MACHINE, PROJECT, _env, _git, _save_worktree
+
+absence = cast(Callable[..., dict[str, Any]], _absence)
+call = cast(Callable[..., dict[str, Any]], _call)
 
 
 @pytest.fixture(scope="session")
-def _final_owner_seed(tmp_path_factory):
+def _final_owner_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     with _seed_directory(tmp_path_factory, "resource-producer-finalize") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
-                _env.__wrapped__(seed, patch, _git_only_mux.__wrapped__(patch))
-        return seed
+                getattr(_env, "__wrapped__")(seed, patch, getattr(_git_only_mux, "__wrapped__")(patch))
+        return Path(seed)
 
 
-def _copy_final_owner(seed, root, monkeypatch):
-    monkeypatch.setattr(cfg.socket, "gethostname", lambda: MACHINE)
+def _copy_final_owner(seed: Path, root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, cfg.Config]:
+    monkeypatch.setattr(socket, "gethostname", lambda: MACHINE)
     for name in ("anchor", "origin.git"):
         shutil.copytree(seed / name, root / name, copy_function=shutil.copyfile)
     records = root / f".{PROJECT}" / "worktrees"
@@ -40,7 +49,7 @@ def _copy_final_owner(seed, root, monkeypatch):
     monkeypatch.setattr(cfg, "install_dir", lambda: root / ".agent-worktrees")
     _git("remote", "set-url", "origin", str(root / "origin.git"), cwd=root / "anchor")
     config = cfg.Config(
-        srcroot=str(root), machine=MACHINE, platform=cfg.detect_platform(),
+        srcroot=str(root), machine=MACHINE, platform=detect_platform(),
         repo_name=PROJECT, repos={PROJECT: cfg.RepoConfig(
             anchor=str(root / "anchor"), worktree_root=str(root),
             default_branch="base", remote="origin",
@@ -60,22 +69,22 @@ def _copy_final_owner(seed, root, monkeypatch):
 
 
 @pytest.fixture
-def final_owner(tmp_path, monkeypatch, _final_owner_seed, git_only_mux):
+def final_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _final_owner_seed: Path, git_only_mux: None) -> tuple[Path, Path, cfg.Config]:
     return _copy_final_owner(_final_owner_seed, tmp_path, monkeypatch)
 
 
-def _reserve(path, config):
+def _reserve(path: Path, config: cfg.Config) -> dict[str, Any]:
     return call(path, "reserve", {"kind": "container", "namespace": "raw-resource", "recovery": {}},
-                ref=tracking.format_claim_ref(config.machine, config.repo_name, "owner"))
+                ref=format_claim_ref(config.machine, config.repo_name, "owner"))
 
 
-def _owner_snapshot(root):
+def _owner_snapshot(root: Path) -> dict[Path, bytes]:
     return {path.relative_to(root): path.read_bytes()
             for path in root.rglob("*") if path.is_file()}
 
 
 @pytest.mark.parametrize("attempt", range(2))
-def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, tmp_path, attempt, git_only_mux):
+def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed: Path, tmp_path: Path, attempt: int, git_only_mux: None) -> None:
     from agent_worktrees import claim_providers
 
     seed = _final_owner_seed
@@ -113,7 +122,7 @@ def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, 
                 assert not copied.samefile(seed / relative)
                 assert relative.name != "alternates"
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(cfg.socket, "gethostname", lambda: MACHINE)
+        patch.setattr(socket, "gethostname", lambda: MACHINE)
         patch.setattr(cfg, "tracking_dir", lambda: first_path.parent)
         patch.setattr(cfg, "project_dir", lambda name=None: first_path.parent.parent)
         patch.setattr(cfg, "install_dir", lambda: first_root / ".agent-worktrees")
@@ -145,7 +154,7 @@ def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, 
 @pytest.mark.parametrize("mode", ["off", "warn", "block"])
 @pytest.mark.parametrize("abandon", [False, True])
 @pytest.mark.parametrize("allocation_started", [False, True])
-def test_real_finalize_blocks_initially_empty_owner_after_reserve(final_owner, monkeypatch, mode, abandon, allocation_started):
+def test_real_finalize_blocks_initially_empty_owner_after_reserve(final_owner: tuple[Path, Path, cfg.Config], monkeypatch: pytest.MonkeyPatch, mode: str, abandon: bool, allocation_started: bool) -> None:
     _, path, config = final_owner
     assert tracking.load_record(path).resources == []
     monkeypatch.setenv("AGENT_WORKTREES_OBLIGATION_GATE", mode)
@@ -159,10 +168,10 @@ def test_real_finalize_blocks_initially_empty_owner_after_reserve(final_owner, m
     assert current.status == "active" and current.resources[0].is_unsettled
 
 
-def test_actual_final_locked_gate_rejects_late_producer(final_owner, monkeypatch):
+def test_actual_final_locked_gate_rejects_late_producer(final_owner: tuple[Path, Path, cfg.Config], monkeypatch: pytest.MonkeyPatch) -> None:
     _, path, config = final_owner
     check = finalize._assert_obligations_settled
-    def initial_check(record, *args, **kwargs):
+    def initial_check(record: Any, *args: Any, **kwargs: Any) -> Any:
         assert check(record, *args, **kwargs) is True
         assert _reserve(path, config)["ok"]
         return True
@@ -172,7 +181,7 @@ def test_actual_final_locked_gate_rejects_late_producer(final_owner, monkeypatch
     assert tracking.load_record(path).resources[0].is_unsettled
 
 
-def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
+def test_confirmed_close_then_actual_finalize(final_owner: tuple[Path, Path, cfg.Config], monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import claim_providers
 
     _, path, config = final_owner
@@ -185,15 +194,18 @@ def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
     monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
     assert finalize.validate_and_finalize("owner", config) is True
     current = tracking.load_record(path)
-    assert current.status == "finalized" and current.resources[0].producer["phase"] == "closed"
+    producer = current.resources[0].producer
+    assert isinstance(producer, dict)
+    assert current.status == "finalized" and producer["phase"] == "closed"
 
 
-def test_retained_artifact_allows_actual_finalize_without_removing_bytes(final_owner, monkeypatch):
+def test_retained_artifact_allows_actual_finalize_without_removing_bytes(final_owner: tuple[Path, Path, cfg.Config], monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import claim_providers
-    from test_resource_producer_retention import retention
+    from test_resource_producer_retention import retention as _retention
+    retention = cast(Callable[..., dict[str, Any]], _retention)
 
     root, path, config = final_owner
-    owner_ref = tracking.format_claim_ref(config.machine, config.repo_name, "owner")
+    owner_ref = format_claim_ref(config.machine, config.repo_name, "owner")
     reserved = call(path, "reserve", {
         "kind": "artifact", "namespace": "scratch", "lifetime": "artifact-owned",
         "recovery": {"allocation": "fixture"},
@@ -219,14 +231,15 @@ def test_retained_artifact_allows_actual_finalize_without_removing_bytes(final_o
     assert finalize.validate_and_finalize("owner", config) is True
     record = tracking.load_record(path)
     assert record.status == "finalized" and not record.resources[0].is_unsettled
-    assert record.resources[0].producer["phase"] == "retained"
+    producer = record.resources[0].producer
+    assert isinstance(producer, dict) and producer["phase"] == "retained"
     assert diagnostic.read_text() == "bounded useful evidence"
 
 
 @pytest.mark.parametrize("layout", ["legacy", "legacy-exported", "managed"])
 def test_completed_finalize_retains_agenda_without_an_archive_dependency(
-    final_owner, monkeypatch, layout,
-):
+    final_owner: tuple[Path, Path, cfg.Config], monkeypatch: pytest.MonkeyPatch, layout: str,
+) -> None:
     from agent_worktrees import repos, worktree_data_store
 
     root, path, config = final_owner
@@ -257,12 +270,12 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
     if layout == "legacy-exported":
         skill = Path(__file__).resolve().parents[2] / "efforts/skills/driving-effort-agendas"
 
-        def invoke(script, *args, request=None):
+        def invoke(script: Any, *args: Any, request: Any=None) -> Any:
             result = subprocess.run(
                 [sys.executable, "-B", str(skill / "scripts" / script), *args],
                 input=json.dumps(request) if request is not None else None,
                 capture_output=True, text=True, timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
             )
             assert result.returncode == 0, result.stderr
             return json.loads(result.stdout)
@@ -296,17 +309,17 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
     else:
         member.write_bytes(b"synthetic agenda bytes, not a live database")
     original_member = member.read_bytes()
-    descriptor_root = path.parent.parent / "worktree-state"
+    descriptor_root = path.parent / record.worktree_id / "worktree-data"
     before = {
         item: item.read_bytes()
         for item in descriptor_root.rglob("*") if item.is_file()
     }
-    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda *_a: None)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda *_a: None)
     monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_a: None)
     monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_a: None)
     events = []
     monkeypatch.setattr(
-        finalize.activity, "log_event", lambda kind, **data: events.append((kind, data)),
+        activity, "log_event", lambda kind, **data: events.append((kind, data)),
     )
 
     assert finalize.validate_and_finalize("owner", config) is True
@@ -339,7 +352,7 @@ def test_completed_finalize_retains_agenda_without_an_archive_dependency(
         assert not observed.live_authority
 
 
-def test_separate_process_producer_waits_for_lock_then_refuses_finalizing(final_owner):
+def test_separate_process_producer_waits_for_lock_then_refuses_finalizing(final_owner: tuple[Path, Path, cfg.Config]) -> None:
     root, path, config = final_owner
     signal = root / "producer-entered"
     code = """

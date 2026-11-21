@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import argparse
 import importlib
 import json
@@ -15,6 +17,7 @@ from native_shell_support import run_headless
 from agent_worktrees import worktree_data_cli as cli
 from agent_worktrees import config as cfg, project_state
 from agent_worktrees import __main__ as main
+from agent_worktrees import front_door_cli
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -22,17 +25,17 @@ pytestmark = [
 ]
 
 
-def parse(*argv: str):
+def parse(*argv: str) -> Any:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     cli.add_parsers(parser.add_subparsers(dest="command", required=True))
     return parser.parse_args(list(argv))
 
 
 def test_capability_discovery_and_invalid_selection_never_read_project_state(
-    monkeypatch, capsys,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        cli.cfg, "project_name", lambda: pytest.fail("capability query resolved project data"),
+        cfg, "project_name", lambda: pytest.fail("capability query resolved project data"),
     )
     args = parse("worktree-data-read", "--capabilities", "--json")
     assert args.func(args) == 0
@@ -51,9 +54,9 @@ def test_capability_discovery_and_invalid_selection_never_read_project_state(
     ["--store-id", "a" * 32], ["--creation-nonce", "nonce"], ["--placement-generation", "1"],
 ])
 def test_project_inventory_rejects_point_selectors_before_resolving_project(
-    monkeypatch, capsys, selector: list[str],
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], selector: list[str],
 ) -> None:
-    monkeypatch.setattr(cli.cfg, "project_name", lambda: pytest.fail("invalid request read owner"))
+    monkeypatch.setattr(cfg, "project_name", lambda: pytest.fail("invalid request read owner"))
     args = parse("worktree-data-read", "--inventory", "--json", *selector)
     assert args.func(args) == 1
     value = json.loads(capsys.readouterr().out)
@@ -61,7 +64,7 @@ def test_project_inventory_rejects_point_selectors_before_resolving_project(
 
 
 def test_project_inventory_wire_overflow_is_one_explicit_failure(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
@@ -90,13 +93,13 @@ def test_project_inventory_wire_overflow_is_one_explicit_failure(
         "--domain", "credentials", "--lane", "main", "--store-id", "a" * 32,
     ],
 ])
-def test_invalid_or_incomplete_contract_is_rejected_by_actual_parser(argv) -> None:
+def test_invalid_or_incomplete_contract_is_rejected_by_actual_parser(argv: Any) -> None:
     with pytest.raises(SystemExit) as failed:
         parse(*argv)
     assert failed.value.code == 2
 
 
-def test_absent_project_is_explicit_not_an_empty_registration(capsys) -> None:
+def test_absent_project_is_explicit_not_an_empty_registration(capsys: pytest.CaptureFixture[str]) -> None:
     argv = ["worktree-data-read", "--worktree", "exact", "--json"]
     assert cli.project_unavailable(argv, "No selected project\x1b\ud800") == 1
     output = capsys.readouterr()
@@ -113,9 +116,9 @@ def test_absent_project_is_explicit_not_an_empty_registration(capsys) -> None:
     "worktree-data-read", "worktree-observations", "agenda-read",
 ])
 def test_root_missing_project_preserves_each_owner_error_envelope(
-    monkeypatch, capsys, command: str,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], command: str,
 ) -> None:
-    monkeypatch.setattr(main.front_door_cli, "resolve_invocation_project", lambda *args: False)
+    monkeypatch.setattr(front_door_cli, "resolve_invocation_project", lambda *args: False)
     monkeypatch.setattr(
         main, "_ensure_cluster_loaded", lambda: pytest.fail("missing project loaded cluster"),
     )
@@ -154,7 +157,7 @@ sys.exit(main.main(["--project",sys.argv[2],*sys.argv[3:]]))
     )),
 ])
 def test_efforts_payload_initializes_the_actual_allocated_store(
-    tmp_path: Path, monkeypatch, capsys, aliased: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], aliased: bool,
 ) -> None:
     project, worktree = "sample-project", "machine-20300101-123456-abcd"
     nonce, store = "0123456789abcdef", "a" * 32
@@ -214,7 +217,7 @@ def test_efforts_payload_initializes_the_actual_allocated_store(
 
 
 def test_real_root_cli_refuses_cross_project_record_without_allocating(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, foreign = "sample-project", "other-project"
     worktree, nonce = "machine-20300101-123456-abcd", "0123456789abcdef"
@@ -241,12 +244,12 @@ def test_real_root_cli_refuses_cross_project_record_without_allocating(
     assert value["schema"] == cli.SCHEMA and value["ok"] is False
     assert value["error"]["code"] == "identity-conflict" and "data" not in value
     assert record.read_bytes() == original
-    assert not (root / "worktree-state").exists()
+    assert not (root / "worktrees" / worktree).exists()
     assert not cfg.project_dir(foreign).exists()
 
 
 def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = "sample-project"
     worktree = "machine-20300101-123456-abcd"
@@ -266,7 +269,7 @@ def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
         "machine": "sample-machine", "platform": "linux",
     }), encoding="utf-8")
 
-    def invoke(command: str, *argv: str, code: int = 0, inventory: bool = False):
+    def invoke(command: str, *argv: str, code: int = 0, inventory: bool = False) -> Any:
         result = run_headless(
             [sys.executable, "-c", CHILD, str(tmp_path), project, command,
              *([] if inventory else ["--worktree", worktree]), "--json", *argv],
@@ -278,7 +281,7 @@ def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
         assert value["schema"] == cli.SCHEMA and value["version"] == cli.VERSION
         return value
 
-    def bytes_by_path():
+    def bytes_by_path() -> Any:
         return {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
     original = bytes_by_path()
@@ -289,7 +292,7 @@ def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
     created = invoke("worktree-data-allocate", *allocation)
     placement = created["data"]
     home = Path(placement["state_home"])
-    assert home.is_dir() and home.is_relative_to(root / "worktree-state")
+    assert home.is_dir() and home.is_relative_to(root / "worktrees")
     assert list(home.iterdir()) == []
     assert placement["state_home_allocated"] is True
     assert placement["store_content_validated"] is False
@@ -317,7 +320,7 @@ def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
     assert inventory["data"]["repository_identity"] == f"network:example.invalid/{project}"
     assert inventory["data"]["worktrees"] == [retained["data"]]
     assert bytes_by_path() == retired
-    descriptor = root / "worktree-state" / worktree / "descriptor.json"
+    descriptor = root / "worktrees" / worktree / "worktree-data" / "descriptor.json"
     descriptor.write_bytes(b"{")
     broken = invoke("worktree-data-read", "--store-id", store, code=1)
     assert broken["ok"] is False and "availability" not in broken

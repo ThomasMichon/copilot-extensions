@@ -103,16 +103,16 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/efforts/completion-gate.md",
         "renderedBytes": 4733,
-        "renderedSha256": "9be5711368b99c1690ac1392e7b2cbd4d42fae8d4a4006bf9250edfd8594a8c1"
+        "renderedSha256": "b1bd0e126fb03dace6d41a099a06c2f1ca30c19f575be746e4a4049eac438833"
       },
       "plugin": "efforts@copilot-extensions",
-      "pluginVersion": "0.2.5-dev1",
+      "pluginVersion": "0.2.6-dev1",
       "renderedBytes": 1397,
-      "renderedSha256": "724801f6d8763914c49a872b2edd902cc0698761fc96446fea6aca3ab99ac399",
+      "renderedSha256": "2c6190bce97978ff1a9289e759779db3e6a8675d352b28370a5d3b0dafcd6d24",
       "sourceId": "completion-gate",
       "template": "instructions/completion-gate.instructions.md",
       "templateBytes": 3982,
-      "templateSha256": "85b5588491ab067cba92d818867a483c2c3960deb2efaad3e4aafe8034c503ec"
+      "templateSha256": "bff16ee735154f6f4d3e9192bd1202df09236e86c0aca676258821d00a25b10b"
     }
   ],
   "schema": "copilot-extensions.context-projections",

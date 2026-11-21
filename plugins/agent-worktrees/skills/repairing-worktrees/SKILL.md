@@ -143,6 +143,13 @@ unbound. The bridge trims selector padding when comparing or looking up a
 profile, not by rewriting persisted text. Stored text is data, never recovery
 instructions; metadata repair remains a separate owner-mediated operation.
 
+## Checkout-local agenda history
+
+For a checkout retained by legacy `.effort-agenda` history, use the
+[targeted agenda doctor](../../docs/worktree-data.md#targeted-agenda-doctor)
+before cleanup. Report first; explicit repair preserves complete history and
+retires only the exact fenced source. General `doctor --fix` never migrates it.
+
 ## A New worktree exists but creation setup was interrupted
 
 A failed prompt-staging response can leave the original checkout and retained
