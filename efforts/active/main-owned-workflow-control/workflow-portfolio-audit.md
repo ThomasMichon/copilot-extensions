@@ -2717,7 +2717,7 @@ retains the published head and advances to the actual merge without conflict,
 reset, stash, peer edit or resource release. Broader native, every-release,
 full-census, accepted-owner and whole-flow gates remain open.
 
-### November 21 remaining guard census and bridge-contract unit cohort
+### November 21 remaining guard census and original changefile cohort
 
 The remaining 28 version-bump cases retain actual Git/process contracts,
 including native symlink controls; they remain unchanged outside the packet.
@@ -2726,32 +2726,36 @@ the current source contract. Do not copy those inputs into surrogate Python
 fixtures, substitute a weaker assertion or expand admission merely to increase
 the count. Their separate workflow/consumer obligations remain open.
 
-The bridge-contract adapter exports five exact original test objects, retaining
-ten original expanded identities and assertions. Three delimiter controls
-refuse before any object read. The other seven exercise actual local-only
-commit availability, bounded/headless timeout propagation, cached repeated
-evidence and supported/unsupported Git-version handling with the process
-boundary mocked. No real Git child, registry capture or installed actor runs.
-The 46 other original cases remain outside this admission, not silently
-classified as unit-safe or deleted.
+The ten original local Git evidence cases are already exported by
+`test_local_git_evidence_control_units.py`; a second adapter would repeat
+the same original functions and parameterizations under different node names.
+They are not a new admission. Preserve that existing mapping and its 46
+outside-packet original cases without restoring the retired registry CI gate.
 
-Development collection proves exact object identity and matching original
-parameter suffixes. Effect auditing passes all ten cases in 1.672 seconds,
-with positive call-phase coverage in the real Git-evidence helper for every
-case, zero prohibited effects and six observed Python reads, all hash-bound.
+The changefile adapter exports seven exact original test objects and the
+original autouse isolation fixture. Original assertions cover serial writes
+and reads, empty input, unreadable-file diagnostics, multiple paired intents,
+mismatched/invalid intent refusal and actual CLI list output. Writes stay
+inside fixture-owned temporary state. No Git child, registry capture or
+installed actor runs. The eighth original case requires real reader threads
+and stays unchanged outside this actor-free admission.
+
+Development collection proves exact object/fixture identity and matching
+original case names. Effect auditing passes all seven cases in 1.344 seconds,
+with positive call-phase coverage in the real changefile implementation for
+every case, zero prohibited effects and three source-bound Python reads.
 Focused Ruff and whole-file strict typing pass the new adapter on Linux and
 Windows without suppressions.
 
-Only the adapter source binding is new; the original suite, checker and
-transitive production readers are already bound and remain byte-identical.
+The adapter and original suite bindings are new; the existing production
+implementation remains byte-identical and already source-bound.
 All 6,640 prior unit nodes retain their order and source hashes; 440 production
 coverage targets, 89 helper decisions and the 300-second limit are unchanged.
-The resulting 6,650-node, 1,054-source manifest retains compact-v2 storage at
-765,702 bytes and unchanged flat-v1 normalization/evidence.
+The resulting 6,647-node, 1,055-source manifest retains compact-v2 storage at
+765,299 bytes and unchanged flat-v1 normalization/evidence.
 
 Current-head review and complete required Linux source CI remain outstanding.
-The retired bridge registry CI gate is not restored. These units do not prove
-real Git behavior, broader native/every-release/full-census acceptance,
+These units do not prove threaded behavior, broader native/every-release/full-census acceptance,
 workflow-count reduction, reuse savings or controlled whole-flow improvement.
 
 ### November 20 path-gated audit-guard native boundary

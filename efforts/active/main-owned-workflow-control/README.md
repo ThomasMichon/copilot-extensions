@@ -801,12 +801,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Copilot approval and complete required Linux CI with all 6,640 units freshly
   executed under the unchanged budget.
   Broader native, release, full-census and whole-flow gates remain separate.
-- [ ] Qualify and land ten original bridge-contract guard cases through five
-  exact test objects, preserving the 46 other original cases and all existing
+- [ ] Qualify and land seven original serial changefile cases and their
+  original isolation fixture, preserving the real threaded residual and all existing
   unit identities, source bindings, coverage targets, helper decisions and
   limits. Require actual per-case production call coverage, effect auditing,
-  strict typing, current-head review and complete Linux source CI. Do not
-  restore the retired registry CI gate or claim native Git validation.
+  strict typing, current-head review and complete Linux source CI. The ten
+  original local Git evidence cases are already mapped; do not duplicate them
+  or restore the retired registry CI gate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
