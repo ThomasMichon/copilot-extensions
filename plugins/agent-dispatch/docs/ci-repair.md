@@ -123,6 +123,14 @@ and workspace passed to Bridge. A refusal before this point writes no attempt.
 Concurrent admission or a changed task, reservation or lane cannot replace the
 observation. It neither qualifies the producer nor permits replay.
 
+If another connection commits during this pre-write read, the coordinator
+rechecks admission once in a fresh transaction **before** calling Bridge. A
+second stale read can defer only the same empty, unclaimed reservation after
+the reservation owner checks under its write lock. `outcome: deferred` permits
+ordinary scheduling of a new reservation, never a transport replay. Changed
+custody, a write/commit error of unknown outcome, or a lost transport reply
+does not take this retry path.
+
 Only the originating attempt can record `accepted` with its returned staging
 handle, or `unknown` when the call does not establish acceptance. A lost
 coordinator or unavailable settlement store can leave `pending` indefinitely:

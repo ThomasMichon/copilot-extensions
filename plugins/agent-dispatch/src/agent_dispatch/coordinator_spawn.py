@@ -382,7 +382,7 @@ def register_spawn_routes(
         if reserved and task and task.source == "ci-repair":
             # CI bodies launch inside the trusted coordinator, never the
             # caller-selected supervisor factory. Return no launch permission.
-            from .ci_launch_observation import ObservationConflict
+            from .ci_launch_observation import ObservationConflict, ObservationDeferred
             from .ci_repair_spawn import make_ci_repair_spawn
             from .coordinator_execution_sender import CoordinatorExecutionSender
             registration = queue.get_registration(task.origin_ref) if task.origin_ref else None
@@ -399,10 +399,14 @@ def register_spawn_routes(
                 )
                 ok, handle = spawn(asdict(task))
             except ObservationConflict as exc:
+                deferred = isinstance(exc, ObservationDeferred)
                 return {
                     "reserved": False,
                     "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
-                    "coordinator_launch": {"ok": False, "retryable": False, "error": str(exc)},
+                    "coordinator_launch": {
+                        "ok": False, "retryable": deferred, "error": str(exc),
+                        **({"outcome": "deferred"} if deferred else {}),
+                    },
                 }
             except (TaskError, ValueError, KeyError, OSError) as exc:
                 ok, handle = False, {"error": str(exc)}
