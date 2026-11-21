@@ -11258,8 +11258,9 @@ local-only availability, cache reuse, bounded/headless probes, unsupported-Git
 refusal and controlled timeout diagnostics. The original 83 native/schema/
 policy residuals remain outside the packet. No registry validation gate is
 restored, and no Git command, registry capture or baseline refresh executes.
-Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
-the source map's existing layout so independent hash updates can merge cleanly.
+Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
+while retaining the source map's existing layout so independent hash updates
+can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
 Whitespace does not change the canonical manifest digest; do not raise the
 cap or remove admitted cases to accommodate formatting.

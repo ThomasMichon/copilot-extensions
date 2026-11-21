@@ -1900,12 +1900,18 @@ prohibited effects and their own production call-phase coverage. Repository
 Python reads close over exactly nine source files. Focused audited development
 execution takes 1.750 seconds, not a canonical complete-packet timing.
 
-Positive admission adds eleven nodes, eight new source hashes and one target:
-6,369 nodes, 1,024 sources and 427 targets. The existing Git evidence helper
+Positive admission adds eleven nodes, eight new source hashes and one target.
+After reconciling intervening Dev admissions, the packet has 6,389 nodes,
+1,031 sources and 434 targets. The existing Git evidence helper
 retains its admitted hash and coverage target. Every preceding node, source
 digest and target remains, with the same profile, 300-second packet budget,
-all 88 release-helper decisions, node-only compaction and file-size cap.
-The manifest is 1,044,972 bytes. Both adapters pass whole-file strict typing
+all 88 release-helper decisions and file-size cap. The combined data would
+occupy 1,049,341 bytes with the preceding node indentation. Removing only
+those node-entry indentation spaces yields 1,023,785 bytes with exactly the
+same decoded manifest and canonical data digest; the source map keeps its
+existing layout. No node, source, target or guard is removed to meet the cap.
+Rebased exact-object collection and actual effect-audited execution pass all
+eleven cases again in 1.359 development seconds. Both adapters pass whole-file strict typing
 for Linux and Windows targets and fatal Ruff checks. Complete current-head
 review and Linux source CI remain required. This is a bounded census
 increment, not fewer workflow invocations, native qualification, every-release
