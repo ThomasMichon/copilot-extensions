@@ -17,9 +17,11 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 from . import fragment_registry, host_restore, ssh_profile
 from . import explore as explore_mod
@@ -116,6 +118,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_fleet_targets(args: argparse.Namespace) -> int:
+    import yaml
+
     from . import fleet
 
     try:
@@ -129,7 +133,7 @@ def _cmd_fleet_targets(args: argparse.Namespace) -> int:
     except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
         print(f"[FAIL] cannot describe static fleet targets: {exc}", file=sys.stderr)
         return 2
-    except fleet.yaml.YAMLError:
+    except yaml.YAMLError:
         print("[FAIL] cannot describe static fleet targets: invalid source YAML", file=sys.stderr)
         return 2
     return 0
@@ -332,6 +336,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("names", nargs="*", help="Host aliases to probe.")
     verify.set_defaults(func=_cmd_verify)
 
+    from .health_observation import add_parser as add_observation_parser
+
+    add_observation_parser(sub)
+
     explore = sub.add_parser(
         "explore",
         help="Introspect a reachable SSH target: its checked-out repos + locations, "
@@ -458,11 +466,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .gateway_provider import add_parser as add_gateway_provider_parser
 
-    add_gateway_provider_parser(sub)
+    cast(
+        "Callable[[argparse._SubParsersAction[argparse.ArgumentParser]], None]",
+        add_gateway_provider_parser,
+    )(sub)
 
     from .gateway_authorization import add_parser as add_gateway_authorization_parser
 
-    add_gateway_authorization_parser(sub)
+    cast(
+        "Callable[[argparse._SubParsersAction[argparse.ArgumentParser]], None]",
+        add_gateway_authorization_parser,
+    )(sub)
 
     from .copilot_plugins import target_repo
     target_repo_parser = sub.add_parser(
@@ -510,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     if not hasattr(args, "func"):
         parser.print_help()
         return 1
-    return args.func(args)
+    return cast(Callable[[argparse.Namespace], int], args.func)(args)
 
 
 if __name__ == "__main__":
