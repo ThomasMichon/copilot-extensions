@@ -2211,6 +2211,62 @@ indentation from eight spaces to four restores 1,515 bytes of headroom:
 source-map layout. No cap, deadline, eligibility or helper rule is weakened.
 The corrected head requires fresh review and complete current-head source CI.
 
+Source #13892 merges at `2026-11-21T12:24:04Z` as
+`9f80675a62572da526244ecdf899e701ecbc5192`. The old-head cap finding is fixed
+without dropping data and its thread is resolved. After the first corrected-
+head review wait times out, an explicit reviewer request obtains approval
+`6005147661` at `12:22:02Z` for exact head
+`023c1270ac72b1875282550ea977df1828126dee`. Complete review/thread reads
+confirm no active finding and no omitted page. The earlier cancelled source
+run `44902111301` is not counted as complete required CI.
+
+Corrected-head source CI `44902410780` and trusted metadata CI `44902409179`
+both complete successfully. Unit job `136840903072` freshly qualifies the
+packet from `12:08:59Z` to `12:12:13Z`, then uploads evidence. Its actual log
+reports 6,550 passed and 35 deselected in 156.72 pytest seconds and 176.480
+packet seconds, under the unchanged 300-second budget. Lookup takes 491 ms
+before fresh execution. These are natural observations, not controlled
+before/after timing or a workflow-count reduction.
+
+Seven fresh scoped verifier reads precede the managed Maintainer merge,
+without bypassing failing CI. Closing references are empty and parent #6237
+stays open. The full canonical parent is reread and only the finite 42-case
+leaf is resolved. Pull-forward initially refuses replaying the two-commit
+source against its squash merge. All five owned paths match the actual merge;
+the only tree differences are unrelated already-upstream peer documents.
+A retained published-head backup and empty-range rebase safely preserve both
+before the scoped managed sync succeeds. No reset, stash, peer edit or
+resource release is used. Continue retained source work and accepted
+reductions; broader native, every-release, full-census, whole-flow and custody
+acceptance remain open.
+
+### November 21 mocked metadata-transport unit admission
+
+Four more exact original functions add seven already-mocked transport cases
+to the dependency-age adapter: 133 of the unchanged original suite's 203
+cases are selected, with all 70 residuals unchanged outside the packet.
+The cases retain CA/registry/TLS argument handling, insecure environment
+refusal, bounded malformed/error responses and authoritative-public-URL
+selection. Their original command, subprocess-result and default-fetch mocks
+remain intact. No npm, network, registry or installer process executes, and
+no original assertion, fixture or production policy changes.
+
+The real collector verifies exact original objects and all parameter IDs.
+Actual `UnitRun` execution passes all seven additions in 1.969 development
+seconds with zero prohibited effects, production call-phase coverage for
+every case and twelve already hash-bound Python reads. The existing
+parameter-strategy warning remains visible.
+
+Admission adds only seven nodes and updates the existing adapter digest:
+6,557 nodes, 1,048 sources, 437 targets and all 89 release-helper decisions.
+Every preceding node/source/target entry, profile and the 300-second packet
+budget remain. The current unindented-node/four-space-target/source-map
+layout is preserved; 1,047,934 bytes leaves 642 bytes under the unchanged
+1 MiB cap. No cap, deadline, helper or eligibility rule is weakened.
+Complete current-head review and Linux source CI remain required.
+This is not installed/native, every-release, full-census, workflow-count
+or whole-flow qualification. Existing owners and custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
