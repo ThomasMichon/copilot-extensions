@@ -5,6 +5,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -22,6 +23,19 @@ from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_records import TaskError
 from agent_dispatch.script_worker import ScriptTaskRuntime
 from agent_dispatch.supervisor import Supervisor
+
+
+@pytest.mark.parametrize(("running", "gone"), [(False, True), (True, False), (None, False)])
+def test_windows_exit_with_visible_process_object(
+    monkeypatch: pytest.MonkeyPatch, running: bool | None, gone: bool,
+) -> None:
+    from agent_dispatch import cutover_process
+
+    monkeypatch.setattr(scripts, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(companion, "_process_exists", lambda _: True)
+    monkeypatch.setattr(cutover_process, "_identity_running", lambda pid, birth: running)
+    assert scripts.exact_script_exit(42, "123") is gone
+    assert not scripts.exact_script_exit(42, "unqualified")
 
 
 def test_owned_process_exit_not_failure_delivery_closes_assignment(
@@ -73,6 +87,11 @@ def test_owned_process_exit_not_failure_delivery_closes_assignment(
                 assert api.post(url, json=expected, headers={"Authorization": "Bearer control"}).status_code == 409
                 child.stdin.close()
                 assert child.wait(timeout=10) == 0
+                if sys.platform == "win32":
+                    # Popen still holds the exited process object.
+                    parsed = scripts._parse_script_body_handle(handle)
+                    assert parsed and companion.process_start_token(child.pid) == parsed[2]
+                    assert scripts.exact_script_exit(child.pid, parsed[2])
                 for bad in ({"worker_id": "other"}, {"generation": 99}, {"session_handle": handle+" "}):
                     response = api.post(url, json={**expected, **bad}, headers={"Authorization": "Bearer control"})
                     assert response.status_code == 409

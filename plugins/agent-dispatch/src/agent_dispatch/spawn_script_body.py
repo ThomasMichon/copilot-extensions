@@ -137,8 +137,11 @@ def exact_script_exit(pid: int, start_token: str | None) -> bool:
     if not start_token:
         return False
     if os.name == "nt":
-        current = companion._windows_start_token(pid)
-        return bool(current and start_token.isdecimal() and current != start_token)
+        from .cutover_process import _identity_running
+
+        # An exited Windows process object keeps its creation time while
+        # another handle is open. Only a definite exit/identity mismatch counts.
+        return start_token.isdecimal() and _identity_running(pid, start_token) is False
     if not sys.platform.startswith("linux"):
         return False
     # Use one kernel process snapshot, not a second PID read for zombie state.
