@@ -13723,6 +13723,9 @@ on dirty/ahead/active/fetch/late-merge failures, launch-admission contention,
 legacy single-repository effects and both Resume environment protocols.
 Knowledge-side Sync also reloads fetched harness policy through the active
 command cache and revalidates the pair before any plugin write.
+Its real-pair fixture uses the receiving worktree namespace and the current
+keyword-bearing config-loader contract; receiving-subject validation remains
+real rather than being bypassed by the fixture.
 Changed synchronization targets require a retry, and incomplete saved bindings
 cannot downgrade to single-repository success.
 Narrow remote refspecs still refresh the selected default branch; a deleted
