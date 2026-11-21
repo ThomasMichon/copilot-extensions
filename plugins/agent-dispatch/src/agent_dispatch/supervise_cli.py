@@ -30,7 +30,8 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from . import __version__
 from .client_authority import (
@@ -42,18 +43,22 @@ from .logging_setup import configure_file_logging
 from .supervisor_registration import registration_scope as _registration_scope
 from .supervisor_status_io import runtime_status_path as _supervisor_runtime_status_path
 
+if TYPE_CHECKING:
+    from .client import DispatchClient
+    from .spawn_factories import SpawnFn
 
-def _proxy(name: str):
+
+def _proxy(name: str) -> Callable[..., Any]:
     """Delegate to ``agent_dispatch.__main__.<name>`` via ``_resolve_cli_module``."""
 
-    def _fn(*args, **kwargs):
+    def _fn(*args: Any, **kwargs: Any) -> Any:
         return getattr(_resolve_cli_module(required=name), name)(*args, **kwargs)
 
     return _fn
 
 
 _client = _proxy("_client")
-_emit = _proxy("_emit")
+_emit: Callable[..., int] = _proxy("_emit")
 _scope_repo = _proxy("_scope_repo")
 _spawn_route = _proxy("_spawn_route")
 _parse_label_max_attempts = _proxy("_parse_label_max_attempts")
@@ -100,7 +105,7 @@ def _write_supervisor_cycle_start(
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
 
-def _write_supervisor_progress(scope: str, progress: dict) -> None:
+def _write_supervisor_progress(scope: str, progress: dict[str, Any]) -> None:
     from .companion import process_start_token
     from .supervisor_status_io import write_progress
 
@@ -110,13 +115,13 @@ def _write_supervisor_progress(scope: str, progress: dict) -> None:
     )
 
 
-def _read_supervisor_runtime_status(scope: str) -> tuple[dict | None, str | None]:
+def _read_supervisor_runtime_status(scope: str) -> tuple[dict[str, Any] | None, str | None]:
     from .supervisor_status_io import read_status
 
     return read_status(_supervisor_runtime_status_path(scope))
 
 
-def _validate_spec_charter_mode(spec: dict) -> None:
+def _validate_spec_charter_mode(spec: dict[str, Any]) -> None:
     """Reject a raw ``--spec`` dict combining ``charter`` with any CLI/script
     embody mode -- the same check the flag-based path applies, since a raw
     ``--spec`` bypasses that path entirely and would otherwise persist a
@@ -149,7 +154,7 @@ def _validate_spec_charter_mode(spec: dict) -> None:
         )
 
 
-def _build_registration_spec(args: argparse.Namespace) -> dict:
+def _build_registration_spec(args: argparse.Namespace) -> dict[str, Any]:
     """Assemble the ``spec`` dict a registration stores from the register args.
 
     An explicit ``--spec`` (inline JSON or ``@path``) is used verbatim for any
@@ -168,20 +173,20 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
                     f"supervise register: could not read --spec file {raw[1:]!r}: {exc}"
                 ) from exc
         try:
-            spec = json.loads(text)
+            loaded = json.loads(text)
         except ValueError as exc:
             raise SystemExit(f"supervise register: bad --spec JSON: {exc}") from exc
-        if not isinstance(spec, dict):
+        if not isinstance(loaded, dict):
             raise SystemExit("supervise register: --spec must be a JSON object")
-        _validate_spec_charter_mode(spec)
-        return spec
+        _validate_spec_charter_mode(loaded)
+        return loaded
 
     kind = getattr(args, "kind", None) or "supervised-lane"
     if kind not in ("supervised-lane", "evaluator"):
         raise SystemExit(f"supervise register: --spec is required for kind {kind!r}")
 
     all_repos = bool(getattr(args, "all_repos", False))
-    spec: dict = {}
+    spec: dict[str, Any] = {}
     if all_repos:
         spec["all_repos"] = True
     else:
@@ -352,7 +357,9 @@ def _spawn_supervisor_daemon_detached(
         return False
 
 
-def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env: str) -> dict:
+def _ensure_supervisor_daemon(
+    args: argparse.Namespace, machine: str | None, env: str,
+) -> dict[str, Any]:
     """Ensure a singleton supervisor daemon is running for this (machine, env).
 
     ``--machine`` names the work's target, not permission to become that host.
@@ -367,7 +374,7 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
     from . import remote_dispatch
     from .config import run_dir
     from .single_instance import is_locked, lock_path_for, read_holder_pid
-    from .supervisor_daemon import supervisor_lease_scope
+    from .supervisor_registration import supervisor_lease_scope
 
     if remote_dispatch.is_peer_machine(machine):
         local = remote_dispatch.local_machine()
@@ -397,8 +404,10 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
 
 
-@daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
-def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_argv=None) -> int:
+@daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")  # type: ignore[misc]
+def _cmd_supervise_serve(
+    args: argparse.Namespace, *, source_guard: Any = None, source_argv: list[str] | None = None,
+) -> int:
     """``supervise serve`` -- run the singleton supervisor daemon (foreground).
 
     One master per (machine, env): reads the registration registry and runs each
@@ -408,15 +417,16 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
     if source_guard is None and getattr(args, "source_candidate", None) is not None:
         from .supervisor_source import entry
 
-        return entry(args)
+        return int(entry(args))  # type: ignore[no-untyped-call]
     from .supervisor_profile import configure_master_profile, take_master_profile
-    profile_binding = take_master_profile(source_argv)
+    profile_binding = take_master_profile(source_argv)  # type: ignore[no-untyped-call]
     readiness_identity = profile_binding.identity if profile_binding else None
     # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
     from . import procutil
-    from .supervisor_daemon import SupervisorDaemon, supervisor_lease_scope
+    from .supervisor_daemon import SupervisorDaemon
+    from .supervisor_registration import _self_update_settings, supervisor_lease_scope
 
     procutil.relocate_off_payload()
     # This daemon normally runs headless (pythonw.exe, no console) -- without
@@ -441,7 +451,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
             file=sys.stderr,
         )
 
-    declared_source = None
+    declared_source: Callable[[], Any] | None = None
     if not getattr(args, "no_declared", False):
         from . import registrar_discovery
         from .pool_source_snapshot import read_supervisor_declarations
@@ -457,7 +467,6 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
 
         declared_source = registrar_discovery.read_legacy_env_profiles
 
-    from .supervisor_daemon import _self_update_settings
     from .client_authority import target_cli_args
     from .config import load_config
 
@@ -490,12 +499,14 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
             self_update_cooldown=_su_cooldown,
             self_update_argv=source_argv or (list(sys.argv[1:]) if _su_enabled else None),
         )
-        configure_master_profile(daemon, profile_binding)
+        configure_master_profile(daemon, profile_binding)  # type: ignore[no-untyped-call]
         admission = None
         if source_guard is not None:
             from .supervisor_source import configure_admission
 
-            admission = configure_admission(daemon, args, source_guard, clients)
+            admission = configure_admission(  # type: ignore[no-untyped-call]
+                daemon, args, source_guard, clients,
+            )
 
         def _on_cycle_start(cycle_id: int, started_at: float) -> None:
             daemon.queue_cycle_start(cycle_id, started_at, lambda cycle, timestamp: _write_supervisor_cycle_start(
@@ -504,7 +515,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
                 readiness_identity=readiness_identity,
             ))
 
-        def _on_cycle(summary) -> None:
+        def _on_cycle(summary: Any) -> None:
             daemon.queue_final_status(summary, lambda completed: _write_supervisor_runtime_status(
                 supervisor_lease_scope(machine, env), completed,
             ))
@@ -518,7 +529,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
                     file=sys.stderr,
                 )
 
-        return daemon.serve(
+        return int(daemon.serve(
             once=getattr(args, "once", False),
             single_instance=not getattr(args, "no_single_instance", False),
             on_cycle=_on_cycle,
@@ -527,7 +538,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
                 supervisor_lease_scope(machine, env), progress,
             ),
             **({"source_admission": admission} if admission is not None else {}),
-        )
+        ))
 
 
 def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
@@ -536,10 +547,7 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     from .config import overrides_path, run_dir
     from .overrides import load_overrides, overridden_off_ids
     from .single_instance import is_locked, lock_path_for
-    from .supervisor_daemon import (
-        registration_override_ids,
-        supervisor_lease_scope,
-    )
+    from .supervisor_registration import registration_override_ids, supervisor_lease_scope
 
     machine, env = _registration_scope(args)
     scope = supervisor_lease_scope(machine, env)
@@ -604,7 +612,7 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
                 action, args.id, reason=getattr(args, "reason", None)
             )
             try:
-                result = remote_dispatch.browse_remote(machine, argv)
+                result = remote_dispatch.browse_remote(str(machine), argv)
             except remote_dispatch.RemoteDispatchUnavailable as exc:
                 print(
                     f"agent-dispatch: supervise override {action} on "
@@ -616,10 +624,10 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
                 sys.stdout.write(result.stdout)
             if result.returncode != 0:
                 diagnosis = remote_dispatch.diagnose_remote_failure(
-                    machine, result.returncode, result.stderr
+                    str(machine), result.returncode, result.stderr
                 )
                 print(f"agent-dispatch: {diagnosis}", file=sys.stderr)
-            return result.returncode
+            return int(result.returncode)
     path = overrides_path()
     try:
         if action == "disable":
@@ -650,13 +658,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         "serve": _cmd_supervise_serve, "daemon-status": _cmd_supervise_daemon_status,
         "override": _cmd_supervise_override,
     }
-    if handler := handlers.get(sub):
-        return handler(args)
+    if handler := handlers.get(str(sub or "")):
+        return int(handler(args))
 
-    return _run_supervise(args)
+    return int(_run_supervise(args))
 
 
-@daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
+@daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")  # type: ignore[misc]
 def _run_supervise(args: argparse.Namespace) -> int:
     configure_file_logging("supervisor")
     from .supervisor_pool_allocator import allocation_enabled, launch_scope
@@ -665,7 +673,7 @@ def _run_supervise(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"agent-dispatch supervise: {exc}", file=sys.stderr)
         return 2
-    from .supervisor import (
+    from .supervisor import (  # type: ignore[attr-defined]
         Supervisor,
         make_embody_spawn,
         make_headless_spawn,
@@ -725,84 +733,25 @@ def _run_supervise(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if getattr(args, "placement_provider", None) and not pool:
+        print("agent-dispatch supervise: --placement-provider requires --pool", file=sys.stderr)
+        return 2
     capacity_gate = None
     redrive_fn = None
+    spawn_fn: SpawnFn
     if pool:
-        from . import remote_dispatch
-        from .fleet import FleetSpawner
+        from .supervise_fleet_lane import build_fleet_lane
 
-        origin = getattr(args, "origin", None) or remote_dispatch.local_machine()
-        if not origin:
-            print(
-                "agent-dispatch supervise --pool: could not resolve this machine's "
-                "alias for fleet bodies to report back to; pass --origin <alias>.",
-                file=sys.stderr,
-            )
-            return 2
-        # Fleet bodies are headless by default too (the `--headless` flag remains an
-        # explicit force); only `--embody-backend cli` makes fleet bodies CLI.
-        fleet_headless = bool(getattr(args, "headless", False)) or backend != "cli"
-        if charter and not fleet_headless:
-            print(
-                "agent-dispatch supervise: --charter is only supported for a "
-                "headless fleet lane today -- drop --embody-backend cli, or "
-                "drop --charter.",
-                file=sys.stderr,
-            )
-            return 2
-        if disposable_cli_labels:
-            print(
-                "agent-dispatch supervise: --disposable-cli-label is supported "
-                "only for local worker bodies.",
-                file=sys.stderr,
-            )
-            return 2
-        if backend == "script" or script_labels:
-            print(
-                "agent-dispatch supervise: the script embodiment is supported "
-                "only for local (non-pool) worker bodies.",
-                file=sys.stderr,
-            )
-            return 2
-        if getattr(args, "no_pair", False):
-            print(
-                "agent-dispatch supervise: --no-pair is supported only for "
-                "local worker bodies.",
-                file=sys.stderr,
-            )
-            return 2
-        fleet = FleetSpawner(
-            pool,
-            origin=origin,
-            route=_spawn_route(args),
-            headless=fleet_headless,
-            agent=getattr(args, "headless_agent", None) or "task-worker",
-            charter=getattr(args, "charter", None),
-            all_repos=all_repos,
-            verify_timeout=getattr(args, "verify_timeout", 0) or 0,
+        lane = build_fleet_lane(
+            args, pool, route=_spawn_route, backend=backend, all_repos=all_repos,
+            headless_labels=headless_labels, cli_labels=cli_labels,
+            script_labels=script_labels, disposable_cli_labels=disposable_cli_labels,
         )
-        spawn_fn = fleet
-        capacity_gate = fleet.can_spawn
-        if headless_labels or cli_labels or script_labels:
-            print(
-                "agent-dispatch supervise: per-label --headless-label/--cli-label/"
-                "--script-label are ignored in fleet (--pool) mode; the whole pool is "
-                f"{'headless' if fleet_headless else 'CLI'} "
-                "(set --embody-backend to change).",
-                file=sys.stderr,
-            )
-        body = "headless agent-bridge ACP" if fleet_headless else "CLI-embodied"
-        print(
-            f"agent-dispatch supervise: fleet mode -- pool={','.join(fleet.pool)} "
-            f"origin={origin} body={body}",
-            file=sys.stderr,
-        )
-        # Preflight only a headless fleet lane: a CLI-embodied fleet body is a
-        # worktree autopilot, not an agent-bridge agent.
-        _preflight_agent = (
-            (getattr(args, "headless_agent", None) or "task-worker") if fleet_headless else None
-        )
-        _preflight_pool = list(fleet.pool)
+        if isinstance(lane, int):
+            return lane
+        spawn_fn, capacity_gate = lane.spawner, lane.spawner.can_spawn
+        _preflight_agent: str | None = lane.preflight_agent
+        _preflight_pool: list[str] | None = lane.preflight_pool
     else:
         # Local (non-fleet) spawn: hand the worker its coordinator routing intent
         # (discovery for the default local coordinator, or the --shared moniker);
@@ -927,7 +876,8 @@ def _run_supervise(args: argparse.Namespace) -> int:
             print(_warning, file=sys.stderr)
     from .client import ResolvingDispatchClient
 
-    with ResolvingDispatchClient(lambda: _client(args, ensure=False)) as c:
+    with ResolvingDispatchClient(lambda: _client(args, ensure=False)) as resolving:
+        c = cast("DispatchClient", resolving)
         evaluator = None
         spec_path = getattr(args, "evaluator", None)
         if spec_path:
@@ -993,7 +943,9 @@ def _run_supervise(args: argparse.Namespace) -> int:
         if profile:
             from .supervisor_lane_status import serve_classic
 
-            serve_classic(sup, args.interval, Path(profile), profile_generation, _on_cycle)
+            serve_classic(  # type: ignore[no-untyped-call]
+                sup, args.interval, Path(profile), profile_generation, _on_cycle,
+            )
         else:
             sup.serve(interval=args.interval, on_cycle=_on_cycle)
     return 0

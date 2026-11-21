@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from .loop_commands import _resolve_cli_module
 from .registrations import RegistrationKind
 
 
-def register_supervise_commands(sub, *, handler=None, reservations=True) -> None:
+def register_supervise_commands(
+    sub: Any, *, handler: Callable[..., int] | None = None, reservations: bool = True,
+) -> None:
     if handler is None:
         handler = _resolve_cli_module()._cmd_supervise
     p = sub.add_parser(
@@ -50,6 +54,7 @@ def register_supervise_commands(sub, *, handler=None, reservations=True) -> None
     p.add_argument("--once", action="store_true")
     p.add_argument("--pool")
     p.add_argument("--origin")
+    p.add_argument("--placement-provider", metavar="JSON", help="fleet placement declaration {name, hosts}; the argv and timeout come from the host's trusted placement-providers.json")
     p.add_argument("--headless", action="store_true")
     p.add_argument("--evaluator", metavar="SPEC")
     p.add_argument("--evaluator-ref")
@@ -159,7 +164,8 @@ def build_profile_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_supervisor_arguments(arguments) -> argparse.Namespace:
-    if arguments[:1] == ["supervise"]:
+def parse_supervisor_arguments(arguments: Sequence[str]) -> argparse.Namespace:
+    if list(arguments[:1]) == ["supervise"]:
         return build_profile_parser().parse_args(arguments)
-    return _resolve_cli_module().build_parser().parse_args(arguments)
+    namespace: argparse.Namespace = _resolve_cli_module().build_parser().parse_args(arguments)
+    return namespace

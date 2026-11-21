@@ -16,25 +16,26 @@ from __future__ import annotations
 from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
 from pathlib import Path
 
+import argparse
 import json
 import os
 import platform
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .companion import CompanionResolution
 from .procutil import no_window_kwargs
-from .registrations import RegistrationKind
+from .registrations import RegistrationKind, has_placement_provider
 
 
 class UnsupportedKind(RuntimeError):
     """A registration whose kind the daemon cannot yet run in a subprocess."""
 
 
-def registration_scope(args):
+def registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
     """Resolve the existing pool override or the master's machine/environment."""
     from .supervisor_pool_allocator import launch_scope
     from . import remote_dispatch
@@ -151,7 +152,9 @@ def _self_update_settings() -> tuple[bool, float, float]:
     return enabled, poll, cooldown
 
 
-def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str], *, profile_binding=None) -> None:
+def _spawn_self_update_successor(
+    python_path: Any, respawn_argv: list[str], *, profile_binding: Mapping[str, str] | None = None,
+) -> None:
     """Fire-and-forget spawn of a successor daemon from *python_path*.
 
     ``python_path`` is the newer version's own interpreter (resolved by
@@ -202,7 +205,7 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str], *, p
     )
 
 
-def _spec_fingerprint(reg: dict) -> str:
+def _spec_fingerprint(reg: dict[str, Any]) -> str:
     """A stable fingerprint of a registration's runtime-relevant identity.
 
     Changes only when the ``kind``, ``spec``, or explicit runtime revision
@@ -210,7 +213,7 @@ def _spec_fingerprint(reg: dict) -> str:
     -- not on unrelated ``updated_at`` churn.
     """
     if reg.get("managed_launch_digest"):
-        return reg["managed_launch_digest"]
+        return str(reg["managed_launch_digest"])
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
@@ -228,14 +231,14 @@ def _spec_fingerprint(reg: dict) -> str:
     )
 
 
-def _runtime_equivalence_fingerprint(reg: dict) -> str:
+def _runtime_equivalence_fingerprint(reg: dict[str, Any]) -> str:
     """Fingerprint effective behavior, filling omitted lane defaults."""
     kind = str(reg.get("kind") or "")
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
     spec.pop("pool_definition", None)
-    if kind in {RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR}:
+    if kind in {*RegistrationKind.LANES, RegistrationKind.EVALUATOR}:
         defaults = {
             "labels": [],
             "max_concurrent": 1,
@@ -290,7 +293,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
     )
 
 
-def registration_logical_ids(reg: dict) -> set[str]:
+def registration_logical_ids(reg: dict[str, Any]) -> set[str]:
     """Stable names that can identify one unit across legacy/direct sources."""
 
     result = {
@@ -309,12 +312,12 @@ def registration_logical_ids(reg: dict) -> set[str]:
     return result
 
 
-def registration_override_logical_ids(reg: dict) -> set[str]:
+def registration_override_logical_ids(reg: dict[str, Any]) -> set[str]:
     """Logical names suitable for an override token, excluding the concrete id."""
     return registration_logical_ids(reg) - {str(reg.get("id") or "")}
 
 
-def registration_override_ids(reg: dict) -> set[str]:
+def registration_override_ids(reg: dict[str, Any]) -> set[str]:
     """Concrete and logical override tokens that apply to one registration."""
     from .overrides import logical_override_id
 
@@ -332,13 +335,13 @@ def registration_override_ids(reg: dict) -> set[str]:
 class DesiredRegistrationSet:
     """One reconciled desired set plus source-migration diagnostics."""
 
-    registrations: dict[str, dict] = field(default_factory=dict)
+    registrations: dict[str, dict[str, Any]] = field(default_factory=dict)
     deduplicated: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     replacements: dict[str, str] = field(default_factory=dict)
 
 
-def _pool_policy_equivalent(direct: dict, declared: dict) -> bool:
+def _pool_policy_equivalent(direct: dict[str, Any], declared: dict[str, Any]) -> bool:
     """Never let runtime-equivalent launch flags erase an explicit pool policy."""
     spec = direct.get("spec") or {}
     if "pool_definition" not in direct and "pool_definition" not in spec:
@@ -356,7 +359,7 @@ def _pool_policy_equivalent(direct: dict, declared: dict) -> bool:
 
 
 def merge_registration_sources(
-    direct: Iterable[dict], declared: Iterable[dict]
+    direct: Iterable[dict[str, Any]], declared: Iterable[dict[str, Any]]
 ) -> DesiredRegistrationSet:
     """Merge direct and declared registrations without duplicate children.
 
@@ -398,7 +401,7 @@ def merge_registration_sources(
     return result
 
 
-def _lane_flags(spec: dict) -> list[str]:
+def _lane_flags(spec: dict[str, Any]) -> list[str]:
     """The ``supervise`` lane flags shared by the supervised-lane and evaluator
     kinds (both drive the embody supervisor loop over a lane)."""
     argv: list[str] = []
@@ -440,6 +443,15 @@ def _lane_flags(spec: dict) -> list[str]:
             argv += ["--origin", str(fleet["origin"])]
         if fleet.get("headless"):
             argv.append("--headless")
+        if fleet.get("placement_provider") is not None:
+            from .fleet_placement import PlacementConfigError, declaration_argv
+
+            try:
+                argv += declaration_argv(fleet["placement_provider"], [str(h) for h in fleet["pool"]])
+            except PlacementConfigError as exc:
+                raise UnsupportedKind(str(exc)) from exc
+    elif fleet.get("placement_provider") is not None:
+        raise UnsupportedKind("fleet.placement_provider requires a non-empty fleet.pool")
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
     if spec.get("restricted_worker") is not None:
@@ -475,10 +487,10 @@ def _lane_flags(spec: dict) -> list[str]:
 
 
 def build_command(
-    reg: dict,
+    reg: dict[str, Any],
     *,
     python: str | None = None,
-    materialize: Callable[[str, dict], str] | None = None,
+    materialize: Callable[[str, dict[str, Any]], str] | None = None,
     target_args: tuple[str, ...] = (),
 ) -> list[str]:
     """Build the subprocess argv that runs one registration.
@@ -503,7 +515,7 @@ def build_command(
     spec = reg.get("spec") or {}
     base = [python or sys.executable, "-m", "agent_dispatch", *target_args]
 
-    def _need_materialize(name: str, payload: dict) -> str:
+    def _need_materialize(name: str, payload: dict[str, Any]) -> str:
         if materialize is None:
             raise UnsupportedKind(
                 f"registration kind {kind!r} needs a spec file but no materializer "
@@ -511,7 +523,14 @@ def build_command(
             )
         return materialize(name, payload)
 
-    if kind == RegistrationKind.SUPERVISED_LANE:
+    if kind in RegistrationKind.LANES:
+        # The placement requirement travels only under its own kind, which a
+        # pre-placement daemon refuses as unknown; never run either mismatch.
+        if has_placement_provider(spec) != (kind == RegistrationKind.PLACED_LANE):
+            raise UnsupportedKind(
+                "fleet.placement_provider requires, and is required by, the "
+                f"{RegistrationKind.PLACED_LANE!r} kind"
+            )
         scope = []
         if reg.get("machine") and reg.get("env"):
             scope = ["--registration-machine", str(reg["machine"]), "--registration-env", str(reg["env"])]
@@ -571,7 +590,7 @@ class ProcHandle(Protocol):
 class Launcher(Protocol):
     """Starts a registration's subprocess and returns its handle."""
 
-    def launch(self, reg: dict, cmd: list[str]) -> ProcHandle: ...
+    def launch(self, reg: dict[str, Any], cmd: list[str]) -> ProcHandle: ...
 
 
 class SubprocessLauncher:
@@ -580,9 +599,9 @@ class SubprocessLauncher:
     def __init__(self, *, cwd: str | None = None):
         self.cwd = cwd
 
-    def launch(self, reg: dict, cmd: list[str]) -> ProcHandle:
+    def launch(self, reg: dict[str, Any], cmd: list[str]) -> ProcHandle:
         root = Path(os.path.abspath(self.cwd or Path(__file__).parent))
-        return spawn_instance(
+        handle: ProcHandle = spawn_instance(
             cmd,
             instance=DaemonInstanceSpec(
                 "agent-dispatch-registration", root,
@@ -592,6 +611,7 @@ class SubprocessLauncher:
             cwd=str(root) if self.cwd else self.cwd,
             **no_window_kwargs(),
         )
+        return handle
 
 
 @dataclass
@@ -601,7 +621,7 @@ class ManagedUnit:
     registration_id: str
     kind: str
     fingerprint: str
-    registration: dict = field(default_factory=dict)
+    registration: dict[str, Any] = field(default_factory=dict)
     companion_resolution: CompanionResolution | None = None
     proc: ProcHandle | None = None
     started_at: float = 0.0

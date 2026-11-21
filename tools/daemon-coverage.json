@@ -381,6 +381,7 @@
       "t:core_native_feed_resolution.py::_serve::serve_forever": 1,
       "r:plugins/efforts/skills/driving-effort-agendas/scripts/agenda_publish.py::_invoke::create_subprocess_exec": 1,
       "wm:agenda_transport.py::_owned_process::Popen": 1,
+      "d:fleet_placement.py::_capture_posix::Popen": 1,
       "r:plugins/customizing-copilot/scripts/run-skill-selection-spike.mjs::<script>::fork": 1,
       "r:plugins/customizing-copilot/scripts/skill-selection-host.mjs::<script>::fork": 1,
       "r:plugins/agent-bridge/scripts/daemon_instances.ps1::<script>::Process.Start": 1,

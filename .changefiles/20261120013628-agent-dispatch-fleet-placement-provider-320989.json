@@ -1,0 +1,9 @@
+{
+  "comment": "agent-dispatch: add optional fleet.placement_provider -- a trusted, host-configured provider orders a managed subset of a fleet pool once per cycle before reservation; failures disable only managed hosts; placement lanes register as the placed-supervised-lane kind so pre-placement supervisors skip them instead of downgrading",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}
