@@ -42,6 +42,12 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
         assert result("host-a") is DriverMatch.MATCH
         assert columns <= {"id", "owner", "owner_session_id", "completed_by"}
         conn.set_authorizer(None)
+        conn.execute("""UPDATE spawn_reservations SET conclusion_detail='{"session":"other"}'""")
+        assert result("host-b") is DriverMatch.UNKNOWN
+        conn.execute("UPDATE spawn_reservations SET conclusion_detail=NULL")
+        conn.execute("UPDATE tasks SET owner='host-c/tree',owner_session_id='unrelated'")
+        assert result("host-b") is DriverMatch.UNKNOWN
+        conn.execute("UPDATE tasks SET owner=NULL,owner_session_id='native-id'")
         conn.execute("UPDATE tasks SET completed_by='host-c/other-tree' WHERE id=?", (task.id,))
         assert result("host-b") is DriverMatch.UNKNOWN
         conn.execute("UPDATE tasks SET completed_by='host-a/tree' WHERE id=?", (task.id,))

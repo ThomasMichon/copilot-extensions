@@ -10,6 +10,7 @@ from .bridge_remote import normalize_host
 from .current_driver_lookup import DriverMatch
 from .ordinary_agent_facts import identity
 from .queue_records import TaskError
+from .supervisor_conclusion import _conclusion_retry_payload
 from .tracking import machine_from_owner
 
 _INDEX = "idx_pending_conclusion_workspace_v1"
@@ -75,20 +76,24 @@ def _hosts(conn: sqlite3.Connection, row: sqlite3.Row) -> set[str]:
     elif session.startswith("local-body:"):
         bridge = session.removeprefix("local-body:")
     owner = row["owner"] or ""
-    if row["worktree"] == owner.partition("/")[2] and (machine := machine_from_owner(owner)):
-        hosts.add(normalize_host(machine))
+    checkpoint = _conclusion_retry_payload({"conclusion_detail": row["conclusion_detail"]})
+    retry_native = checkpoint.get("acp_session_id")
+    if retry_native and not session:
+        return set()
     if session:
         native = session
         if bridge is not None:
             native = _bridge_native(row, bridge)
             if not native:
                 return set()
+        if retry_native and retry_native != native:
+            return set()
         if row["owner_session_id"] in (session, native):
-            worker = row["completed_by"] or owner
-            if worker and worker.partition("/")[2] != row["worktree"]:
-                return set()
-            if machine := machine_from_owner(worker):
-                hosts.add(normalize_host(machine))
+            for worker in (row["completed_by"], owner):
+                if worker and worker.partition("/")[2] != row["worktree"]:
+                    return set()
+                if machine := machine_from_owner(worker):
+                    hosts.add(normalize_host(machine))
         attachments = conn.execute(
             "SELECT machine FROM task_attachments "
             "WHERE task_id=? AND session_id IN (?,?) AND worktree_id=? AND machine IS NOT NULL "
@@ -99,6 +104,10 @@ def _hosts(conn: sqlite3.Connection, row: sqlite3.Row) -> set[str]:
                 return set()
             if isinstance(machine, str) and machine.strip():
                 hosts.add(normalize_host(machine))
+        if not hosts and (owner or row["completed_by"]) and row["owner_session_id"] not in (
+            session, native,
+        ):
+            return set()
     if not hosts and row["creating_host"]:
         hosts.add(normalize_host(row["creating_host"]))
     return hosts
@@ -118,7 +127,7 @@ def pending_workspace_conclusion(
         )
         candidates.execute(
             f"SELECT r.task_id,r.worktree,r.session_handle,r.execution_machine,r.creating_host,"  # noqa: S608 -- fixed SQL
-            f"r.driver,r.agent_info,t.owner,t.completed_by,t.owner_session_id,"
+            f"r.driver,r.agent_info,r.conclusion_detail,t.owner,t.completed_by,t.owner_session_id,"
             f"a.session_id receipt_bridge,a.native_session_id receipt_native,"
             f"a.worktree_id receipt_tree,a.task_id receipt_task"
             f" FROM spawn_reservations AS r INDEXED BY {_INDEX}"
