@@ -198,7 +198,9 @@ def test_refusal_preserves_registry_bytes_and_source(source: Path, registry: Pat
     assert {p.name: p.read_bytes() for p in source.iterdir() if p.is_file()} == files
 
 
-def test_plan_never_clones_registers_or_executes(source: Path, registry: Path, monkeypatch) -> None:
+def test_plan_never_clones_registers_or_executes(
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     before = registry.read_bytes()
     monkeypatch.setattr(bootstrap, "acquire", lambda *a: pytest.fail("plan acquired"))
     monkeypatch.setattr(protocol, "run", lambda *a, **k: pytest.fail("plan executed"))
@@ -207,7 +209,9 @@ def test_plan_never_clones_registers_or_executes(source: Path, registry: Path, m
     assert registry.read_bytes() == before
 
 
-def test_no_trust_stops_before_even_check(source: Path, registry: Path, monkeypatch) -> None:
+def test_no_trust_stops_before_even_check(
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bootstrap, "_terminal", lambda: False)
     monkeypatch.setattr(protocol, "_call", lambda *a: pytest.fail("untrusted repository code"))
     assert bootstrap.command([URL, "--target", str(source), "--apply"]) == 1
