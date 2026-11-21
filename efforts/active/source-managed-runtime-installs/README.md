@@ -17,6 +17,11 @@ Fleet Manager is an independently selected application, not a dependency of
 Fleet Manager by its assigned role (for example, controller). Installing
 Worktrees, requesting a Python extra, or running on the planning machine must
 not select Fleet for the target. Selection alone does not start a service.
+Use the bound knowledge repository's Fleet service-role bindings as the
+installation opt-in. A binding selects its target machine, not its provider's
+host. The planner and its read-only explanation must agree on the target,
+source configuration and matching roles. Invalid or unreadable required
+policy is unresolved, not evidence that the app is disabled.
 Worktrees consumes an available OpenSSH profile as `ssh <machine>`. It does
 not choose an SSH driver, configure a route, or install Fleet to connect.
 An SSH profile may use `agent-ssh` as its `ProxyCommand`; direct profiles

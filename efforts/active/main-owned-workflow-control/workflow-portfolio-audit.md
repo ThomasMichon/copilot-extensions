@@ -1591,6 +1591,89 @@ native execution, every-release observation or full-census acceptance.
 The ten previously retained sibling-scanner native cases, #13598, workflow-owner
 decisions and all native/candidate/custody holds remain separate and unchanged.
 
+Source #13808 merges at `2026-11-21T03:38:58Z` as
+`cc8196e947b856f7ccb5150974054ae8edc59776`. Copilot approval `6002598629`
+targets exact published head `5242e36f0530b679c293b08c6292fa6eab970372`;
+complete review/thread reads contain no active findings. Required source CI
+`44861624869` passes, including unit job `136716078749` freshly qualifying the
+exact-input packet from `03:32:41Z` to `03:35:25Z` and uploading its evidence.
+Trusted lockdown, attribution and identifier enforcement pass separately.
+The source merge-time verifier performs seven live scoped reads and returns
+the exact head before the managed, role-authorized merge; no failing CI is
+bypassed. Closing references are empty and parent #6237 remains open.
+After rereading the full canonical parent, only this bounded source census
+item is resolved. Continue the retained census and separately accepted workflow
+reductions; every-release, broader integration, native/candidate and whole-flow
+acceptance remain open.
+
+### November 21 configuration guard-unit admission
+
+Six complete original suites collect 92 cases. Exact-original adapters map
+89: feed neutrality 20, runtime resolution 19, action pins twelve, compiler
+version ten, package-tree exclusion seven and version consistency 21.
+The two workflow-directory fixtures are exported unchanged. Collection compares
+every original parameter identity with its adapter and checks original test/
+fixture object identity.
+
+Three original cases remain outside the packet: the feed scanner's fixture
+that writes a synthetic `.git` path, its actual whole-checkout scan, and the
+package-tree guard's real CLI subprocess smoke. The actual auditor refuses the
+Git-path fixture; its input and assertions are preserved, not renamed or
+weakened to admit it. No positive-admission rule is changed. The earlier ten
+sibling-scanner native subprocess residuals remain unchanged as well.
+
+The other cases operate on synthetic text or temporary fixture files through
+the real production guards. All 89 pass the actual `UnitRun` effect auditor,
+with zero prohibited effects and each case reaching its own guard during its
+call phase. Repository Python reads are the six adapters, six original suites,
+six production guards, and the already hash-bound standalone-consumer helper
+and Chat initializer. The latter is read as fixture data, not imported or
+executed. All original suites and production files remain unchanged.
+
+Positive admission adds 89 nodes, eighteen source hashes and six targets:
+6,254 nodes, 998 sources and 420 targets. All 6,165 current-base nodes, 980 source
+digests and 414 targets remain, with the same profile, 300-second budget and
+all 88 release-helper decision targets. All six adapters pass whole-file strict
+typing on Linux and Windows targets and fatal Ruff checks. Focused audited
+development execution is not complete-packet qualification; normal current-head
+source review and full Linux CI remain required. This is a bounded census
+increment, not fewer workflow invocations, broader/native execution,
+every-release observation or full-census acceptance. #13598 and the existing
+workflow, native/candidate and retained-custody owners remain separate.
+
+The first hosted head `71d0bc765ea9e4bfd58ebc838b8740dfde06404e` passes
+full unit qualification, but both source and trusted guards correctly reject
+the four-space-indented manifest at 1,049,359 bytes against the unchanged
+1,048,576-byte cap. Two-space serialization reduces it to 1,018,663 bytes.
+Direct comparison proves identical decoded contents and canonical manifest
+digest; every node, source hash, target, budget and helper obligation remains.
+This fixes the caused guard failure without a size exemption, reduced coverage
+or altered eligibility. The changed head still requires fresh review and
+complete required CI.
+
+Concurrent Dev changes subsequently advance three existing admitted source
+hashes: Worktrees resource relationships, the native process-runtime archive
+and the native versioned-runtime script. The safe backed replay retains every
+current Dev hash and all 89 owned additions, with no changed original guard
+test or helper. The only replay conflict is the manifest's indentation change;
+its resolution uses the current-base admission plus the owned additions, then
+two-space serialization. Counts, limits and file size remain unchanged.
+Prior-head review and CI do not qualify these new complete packet inputs;
+fresh exact-head review and full required CI remain mandatory.
+
+Another concurrent Dev change updates seven existing source hashes, including
+the imported standalone-consumer helper, and adds two Fleet source inputs
+without changing the original node/target inventories or limits. The second
+backed replay preserves those inputs and all 89 additions. The batch is
+re-observed against that actual dependency: all 89 cases pass with no prohibited
+effects and own-guard call coverage, reading the same twenty repository files.
+No prior complete-packet result is reused as current qualification.
+To avoid repeating source-map whitespace conflicts, final compaction changes
+only the node-list indentation; source-map and other field layout remain as
+on Dev. The manifest is 1,024,599 bytes with identical decoded admission to
+the current-base union. The cap, all 88 helper decisions and the 300-second
+budget remain enforced. This is not a new schema or eligibility exception.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

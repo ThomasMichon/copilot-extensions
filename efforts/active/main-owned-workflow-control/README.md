@@ -609,13 +609,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and freshly executed complete required Linux CI.
   Native residuals, every-release observation and full-census acceptance remain
   separate.
-- [ ] Qualify and land all 42 original install-contract guard analysis cases
+- [x] Qualify and land all 42 original install-contract guard analysis cases
   through exact original test objects, preserving the original suite and
   production helper. Require closed source admission, real per-case guard call
   coverage, unchanged prior packet contents, helper gates and 300-second
-  budget, then complete current-head source review and Linux CI. Broader
+  budget, then complete current-head source review and Linux CI. #13808 merges
+  at `cc8196e947b856f7ccb5150974054ae8edc59776` after exact-head Copilot approval
+  and complete required Linux CI with freshly executed packet evidence. Broader
   install-contract integration, native qualification, every-release observation
   and full-census acceptance remain separate.
+- [ ] Qualify and land the original configuration-guard unit batch through
+  exact test/fixture objects: 89 cases across six suites, retaining the feed
+  Git-path fixture, whole-checkout scan and package CLI smoke outside the packet.
+  Preserve all original assertions, production guards, prior packet contents,
+  source closure, actual per-case guard call coverage, helper gates and the
+  300-second budget. Require complete current-head source review and Linux CI;
+  broader integration, native, every-release and full-census gates remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

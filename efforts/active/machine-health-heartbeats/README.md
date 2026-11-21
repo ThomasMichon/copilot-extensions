@@ -72,9 +72,12 @@ replacement/rollback and exact cleanup. Its first native run exposed an empty
 no-job readback value; #13794 merged the source fix and regression checks.
 The next opt-in packet now proves disabled-pair publisher-exit recovery,
 persistent late-start coalescing, actual unwritable-store staging refusal and
-the unchanged manager startup deadline; source review is next.
-Active-collection overlap, collector-child deadline and unknown native-client
-cleanup recovery remain open, without provisioning or production enrollment.
+the unchanged manager startup deadline; #13803 merged that qualification.
+The next three-case packet proves a second start during actual collection,
+the installed action's own child deadline and fresh-CLI fencing until the
+original owner settles a faulted native-client acknowledgement. Actual
+native-client death remains unqualified; acknowledgement injection is not
+process-death evidence. No provisioning or production enrollment is included.
 Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
@@ -363,7 +366,39 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
 
+### 2026-11-21 - Actual overlap, child deadline and settlement acknowledgement
+- Three focused native cases pass in 75.38 seconds, or 82.61 seconds including
+  runner preparation and exact cleanup. The previous seven settled cases were
+  not rerun without changed behavior. Twenty-two portable/listener controls
+  pass, with eleven explicit platform/optional-producer skips; strict checks
+  cover all three touched Python files on Linux and Windows, and lint and all
+  thirteen installation contracts pass.
+- While the real installed collector waits for a loopback response, a second
+  native start preserves its active PID and invocation. Exactly one request and
+  one successful observation revision result. The finite timer remains loaded
+  for result readback, with both triggers outside this manual check.
+- Stalling only the disposable installed collection child's entry exercises the
+  unchanged production action and native deadlines. The action returns 124,
+  the manager reports exit failure rather than its own startup timeout, the
+  child is gone and the store bytes remain unchanged.
+- A real successful native reload with deliberately withheld settlement
+  acknowledgement retains the durable fence. A fresh installed CLI refuses,
+  and the reference owner reports its pending transaction. Original-owner
+  cleanup then permits fresh-CLI disabled recovery and final reference release.
+  This is fault-injected acknowledgement qualification, not actual client death.
+- Initial fixture assumptions about unloaded result retention and reading
+  references during a pending transaction were corrected without weakening
+  production readback or recovery fences. Failed and successful runs all retain
+  their exact cleanup evidence. No parent platform, hourly, carrier or preference
+  acceptance item closes, and no activation or receiving hold changes.
+
 ### 2026-11-21 - Native interruption, storage and late-start controls
+- Merged #13803 as `77fbc8d0c7a29556d5418d985bcdbbf603ca34ec` after
+  exact-head Copilot approval, no review findings and all required CI green.
+  The complete rebased seven-case native packet passed in 224.66 seconds, or
+  230 seconds including preparation and exact cleanup. Twelve portable
+  controls, strict Linux/Windows checks, lint and all installation contracts
+  passed; Windows native skips are not Linux evidence.
 - Two real publisher-exit cases pass through fresh installed CLI processes after
   the first unit file is durably published. Convergence completes the approved
   disabled pair and retains its runtime reference; explicit removal clears the

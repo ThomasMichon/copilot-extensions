@@ -507,6 +507,8 @@ def test_application_resource_projection_retains_companions_and_metadata_not_dir
     for name in ("native.cs", "pyproject.toml", "requirements.txt", "uv.lock"):
         _write(tmp_path / prefix / name, "fixture")
     (tmp_path / prefix / "not-a-file.cs").mkdir()
+    expected.update("_runtime_assets/scripts/runtime-source-tools/fleet_role_policy/" + name
+                    for name in ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py"))
     assert set(module.application_resources(tmp_path, "worktree_manager")) == expected
     assert set(application_resources(tmp_path, "worktree_manager")) == {
         "worktree_manager/" + name for name in expected
