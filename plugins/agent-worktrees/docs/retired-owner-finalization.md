@@ -113,6 +113,10 @@ local configuration. The repair refuses if any of these is present:
 - a live or unobservable parent terminal session
 - a child `parent_session` or active controller session that session liveness
   does not report as `dead` (a live or unknown state refuses)
+- an active controller relation that does not name the missing owner itself
+  (its machine, project and worktree ID), including a session-only relation,
+  or controller metadata the record loader marked opaque; ended relations are
+  ignored
 
 Missing or unreadable evidence also refuses; it never counts as proof of
 absence.
@@ -142,7 +146,9 @@ parent-ID lock can leave an empty lock file behind, the same residue as
 ordinary record removal. It removes only the `owner_ref` line, and
 verifies that no other field changed. Next to the record it writes the exact
 original bytes to a private `<id>.yaml.orphaned-owner-<digest>.bak`, plus a
-`.json` audit file containing the evidence and a UTC timestamp. The repair
+`.json` audit file containing the evidence and a UTC timestamp. A retry after
+an interrupted repair reuses an existing audit file only when its version,
+action, worktree ID and backup name match; the timestamp may differ. The repair
 never touches the checkout, branch, other records or session state, and never
 creates a parent record. Afterwards, the normal finalization gates apply to
 the unowned child, including the content, publication and session checks. The

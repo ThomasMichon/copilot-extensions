@@ -173,11 +173,21 @@ def _no_live_evidence(record: tracking.WorktreeRecord, owner: ClaimRef) -> None:
         raise OrphanedOwnerRefused("parent terminal-session absence cannot be proven") from exc
     if terminal:
         raise OrphanedOwnerRefused("parent still has a live terminal session")
+    if record.controller_metadata_opaque:
+        raise OrphanedOwnerRefused("child controller metadata is opaque")
     session_ids = {getattr(record, "parent_session", None)}
-    session_ids.update(
-        relation.controller_session_id for relation in record.controllers or ()
-        if relation.state == "active"
-    )
+    owner_key = (owner.machine, owner.project, owner.worktree_id)
+    for relation in record.controllers or ():
+        if relation.state != "active":
+            continue
+        controller = _parse_claim_ref(relation.controller_ref) if relation.controller_ref else None
+        if controller is None or (
+            controller.machine, controller.project, controller.worktree_id,
+        ) != owner_key:
+            raise OrphanedOwnerRefused(
+                "an active controller relation names something other than the missing owner"
+            )
+        session_ids.add(relation.controller_session_id)
     from . import session_liveness
 
     for session_id in sorted(filter(None, session_ids)):
@@ -333,11 +343,29 @@ def prove(record_id: str) -> dict[str, Any]:
     }
 
 
-def _write_private(path: Path, content: bytes) -> None:
+_AUDIT_IDENTITY = ("version", "action", "worktree_id", "backup")
+
+
+def _same_audit(existing: bytes, content: bytes) -> bool:
+    """A retried audit matches when its identity fields agree; ``repaired_at`` may differ."""
+    try:
+        old, new = json.loads(existing), json.loads(content)
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return (
+        isinstance(old, dict) and isinstance(new, dict)
+        and all(old.get(key) == new.get(key) for key in _AUDIT_IDENTITY)
+    )
+
+
+def _write_private(path: Path, content: bytes, *, audit: bool = False) -> None:
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        if path.is_symlink() or path.read_bytes() != content:
+        if path.is_symlink():
+            raise ValueError(f"existing audit file {path.name} cannot be verified") from None
+        existing = path.read_bytes()
+        if existing != content and not (audit and _same_audit(existing, content)):
             raise ValueError(f"existing audit file {path.name} cannot be verified") from None
         return
     with os.fdopen(descriptor, "wb") as handle:
@@ -375,7 +403,7 @@ def apply(record_id: str) -> dict[str, Any]:
             "worktree_id": record_id, "project": current["project"],
             "repaired_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "backup": backup.name, "evidence": current["evidence"],
-        }, indent=2, sort_keys=True).encode("utf-8"))
+        }, indent=2, sort_keys=True).encode("utf-8"), audit=True)
         tracking._atomic_write(path, current["fixed"])
     return {**current, "backup": backup.name, "audit": audit.name}
 

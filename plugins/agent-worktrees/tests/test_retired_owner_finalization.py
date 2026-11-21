@@ -710,3 +710,51 @@ def test_orphaned_owner_repair_holds_parent_lock_through_final_proof(
         assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
     else:
         assert (code, report["repaired"]) == (0, True)
+
+
+@pytest.mark.parametrize("controller", ["owner", "foreign", "anonymous-session"])
+def test_orphaned_owner_repair_checks_active_controller_relations(
+    orphaned: SimpleNamespace, controller: str,
+) -> None:
+    relation: dict[str, Any] = {
+        "kind": "worktree", "source": "owner-ref", "state": "active",
+        "relation_revision": 1, "created_at": "2026-01-01T00:00:00+00:00",
+        "controller_ref": {
+            "owner": orphaned.data["owner_ref"],
+            "foreign": f"{orphaned.local_machine}/example/other-parent",
+        }.get(controller),
+    }
+    if controller == "anonymous-session":
+        relation.update(kind="session", source="parent-session", controller_session_id="session-1")
+        del relation["controller_ref"]
+    orphaned.data.update(controllers=[relation], controller_revision=1)
+    orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
+    assert not tracking.load_record(orphaned.ledger).controller_metadata_opaque
+    code, report = _doctor(orphaned)
+    if controller == "owner":
+        assert (code, report["error"], report["repairable"]) == (0, None, True)
+    else:
+        assert code == 1 and "active controller relation" in report["error"]
+
+
+@pytest.mark.parametrize("audit", ["matching", "mismatched"])
+def test_orphaned_owner_repair_retry_accepts_only_matching_audit(
+    orphaned: SimpleNamespace, audit: str,
+) -> None:
+    import hashlib
+
+    before = orphaned.ledger.read_bytes()
+    stem = f"{orphaned.ledger.name}.orphaned-owner-{hashlib.sha256(before).hexdigest()[:16]}"
+    (orphaned.ledger.parent / f"{stem}.bak").write_bytes(before)
+    (orphaned.ledger.parent / f"{stem}.json").write_text(json.dumps({
+        "version": 1, "action": "remove-orphaned-owner-ref",
+        "worktree_id": orphaned.checkout.name if audit == "matching" else "another-child",
+        "backup": f"{stem}.bak", "repaired_at": "2000-01-01T00:00:00+00:00",
+    }), encoding="utf-8")
+    code, report = _doctor(orphaned, "--fix")
+    if audit == "matching":
+        assert (code, report["repaired"]) == (0, True)
+        assert tracking.load_record(orphaned.ledger).owner_ref is None
+    else:
+        assert code == 1 and "cannot be verified" in report["error"]
+        assert orphaned.ledger.read_bytes() == before
