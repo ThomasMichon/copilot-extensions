@@ -6,5 +6,6 @@
     "load_manifest": "fb854da02fba14cad3cbc170d80b3e63f4a373aee3655876f8abe01b96972d9a",
     "render": "d323ee255e86e2bf5dbb55e3a8d484f236c3a9a41ac5298fd38aca120b5e8917",
     "expected_files": "4bddaf04ee35a91ec18a697eaefee65d548f17350120f7fd76daee7a03f401f3"
-  }
+  },
+  "template_renderer": "d4037e9e95a8b5e1bcc1e60826e5acdcf2bb4dab4a3507fb6e434f420d3bedac"
 }

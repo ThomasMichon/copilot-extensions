@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 from typing import Any
 
 import pytest
@@ -82,6 +83,45 @@ def test_uv_launcher_is_materialized_with_prepared_exact_environment(tmp_path: P
         assert "UV_WORKING_DIR" in text and "UV_WORKING_DIRECTORY" in text
         assert "runtime is not prepared; run the owning scripts/install." in text
     assert (plugin / "scripts/bootstrap-python-version.txt").read_bytes() == b"cpython@3.13.12\n"
+
+
+@pytest.mark.parametrize(("manifest_name", "payload_directory"), [
+    ("launch-wrapper-assets.json", "scripts/libs/payload-invocation"),
+    ("packaged-assets.json", "scripts/runtime-input-provider/libs/payload-invocation"),
+    ("packaged-assets.json", "scripts/runtime-source-tools/libs/payload-invocation"),
+], ids=["launch-wrapper", "input-provider", "source-tools"])
+def test_packaged_invocation_renders_without_checkout(
+    tmp_path: Path, manifest_name: str, payload_directory: str,
+) -> None:
+    record = json.loads((ROOT / "worktree-manager" / manifest_name).read_bytes())
+    groups = record.get("groups", [record])
+    group = next(item for item in groups if item["payloadDir"] == payload_directory)
+    packaged = tmp_path / "packaged" / payload_directory
+    packaged.mkdir(parents=True)
+    for name in group["files"]:
+        (packaged / name).write_bytes((ROOT / group["canonicalDir"] / name).read_bytes())
+    spec = importlib.util.spec_from_file_location("_packaged_invocation", packaged / "generate.py")
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    previous = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(generator)
+        source, _, plugin = _candidate(tmp_path / "fixture")
+        manifest = plugin / "payload-invocation.json"
+        for launcher in ("direct", "uv"):
+            data = json.loads(manifest.read_bytes())
+            data.update(pythonLauncher=launcher, bootstrapPython="3.13.12")
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            parsed = generator.load_manifest(manifest, canonical_root=source)
+            output = generator.render("@@RUNTIME_PYTHON_POSIX@@", parsed)
+            if launcher == "uv":
+                assert output.endswith('"$AGENT_RT_PY" python')
+            else:
+                assert output == '"$AGENT_RT_PY"'
+    finally:
+        sys.dont_write_bytecode = previous
+    assert not list(packaged.rglob("__pycache__"))
 
 
 @pytest.mark.parametrize("selection", [

@@ -15,6 +15,7 @@ from tools.typecheck_source_views import (
 
 PREFIX = "libs/payload-invocation/"
 PRODUCER = PREFIX + "generate.py"
+RENDERER = PREFIX + "template_rendering.py"
 TEMPLATE = PREFIX + "templates/catalog-python.tmpl"
 DECLARATION = PREFIX + "python-catalog-inputs.json"
 MEMBERS = tuple(PREFIX + name for name in (
@@ -145,13 +146,17 @@ def catalog_inputs(
     inputs = tuple((path, _read(root, path)) for path in (*members, DECLARATION))
     sources = dict(inputs)
     declaration = json.loads(sources[DECLARATION], object_pairs_hook=_pairs)
-    if not isinstance(declaration, dict) or set(declaration) != {"kind", "module", "functions"}:
+    if not isinstance(declaration, dict) or set(declaration) != {
+        "kind", "module", "functions", "template_renderer",
+    }:
         raise SourceViewError("Invalid closed catalog declaration")
     if declaration["kind"] != "in-process-catalog-v1":
         raise SourceViewError("Unknown catalog recipe")
     tree = _parse(sources[PRODUCER], PRODUCER)
     if declaration["module"] != _shape(tree):
         raise SourceViewError("Catalog module/validator/renderer binding changed")
+    if declaration["template_renderer"] != _shape(_parse(sources[RENDERER], RENDERER)):
+        raise SourceViewError("Catalog template renderer binding changed")
     functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     if len(functions) != sum(isinstance(n, ast.FunctionDef) for n in tree.body):
         raise SourceViewError("Duplicate catalog producer function")

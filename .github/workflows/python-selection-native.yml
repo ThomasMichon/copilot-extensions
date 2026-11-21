@@ -12,6 +12,7 @@ on:
       - libs/installer-engine/bootstrap-uv.ps1
       - libs/installer-engine/bootstrap-uv.sh
       - libs/payload-invocation/generate.py
+      - libs/payload-invocation/template_rendering.py
       - libs/payload-invocation/templates/posix-shim.tmpl
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py

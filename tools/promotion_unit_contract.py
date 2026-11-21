@@ -43,6 +43,8 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "plugins/agent-worktrees/payload-invocation.json",
     "tools/manager_application_provider.json",
     "tools/typecheck-projects.json",
+    "worktree-manager/launch-wrapper-assets.json",
+    "worktree-manager/packaged-assets.json",
     "fleet-manager/containers/gateway/Dockerfile",
     "fleet-manager/containers/gateway/Dockerfile.dockerignore",
 })
