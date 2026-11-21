@@ -164,7 +164,10 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
     (directory / "config.json").write_text(json.dumps(
         {"schema_version": 1, "mode": "disabled"} if mode == "disabled" else {
             "schema_version": 1, "mode": "command",
-            "command": {"argv": [sys.executable, "-I", "receiver.py", mode]},
+            "command": {"argv": [
+                sys.executable, "-I", "receiver.py", mode,
+                *(["98"] if mode == "reading" else []),
+            ]},
         }
     ), encoding="utf-8")
     db = Database(tmp_path / "sessions.db")
@@ -187,6 +190,7 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
     app.state.session_manager = manager
     app.state.db = db
     identifiers = iter(range(49))
+    settlement_wait_ns = 0
     try:
         with TestClient(app) as client:
             def operation() -> None:
@@ -198,6 +202,16 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
 
             cold = helper.measure(operation, 1)
             measured = helper.measure(operation, 48)
+            if mode == "reading":
+                settlement_start = time.perf_counter_ns()
+                deadline = time.monotonic() + 5.0
+                witness = root / "settled.json"
+                while not witness.exists() and time.monotonic() < deadline:
+                    time.sleep(.005)
+                settlement_wait_ns = time.perf_counter_ns() - settlement_start
+                owner = manager._consumer_telemetry.owner
+                assert witness.exists(), owner.stats() if owner is not None else "no receiver owner"
+                assert json.loads(witness.read_text(encoding="utf-8"))["records"] == 98
     finally:
         start = time.perf_counter_ns()
         close(manager)
@@ -220,6 +234,8 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
         "version": 1, "source": "agent-bridge", "mode": mode,
         "boundary": "authenticated stopped-session HTTP stop; 49 distinct sessions",
         "cold_operation": cold, "measurement": measured, "shutdown_wall_ns": shutdown_ns,
+        "receiver_settlement_wait_ns": settlement_wait_ns,
+        "receiver_settlement_outside_producer_measurement": True,
         "readback_records": len(rows),
         "fsync_confirmed_records": receiver_cost["records"] if receiver_cost is not None else None,
         "producer_counters": owner.stats() if owner is not None else {},

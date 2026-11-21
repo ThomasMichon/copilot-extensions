@@ -243,6 +243,13 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   metadataReady.finally(() => { metadataSettled = true; });
   const refreshMetadata = metadataRefresher(state, resolveCurrentMetadata, Date.now, { log: extLog });
   async function heartbeat() {
+    ensureBridgeEndpoint();
+    endpoint.refresh();
+    state.base = endpoint.ep.base;
+    state.token = endpoint.ep.token;
+    if (adoptSessionId(state, session.sessionId)) {
+      for (const entry of state.readinessTasks.values()) entry.controller.abort();
+    }
     if (metadataSettled) {
       refreshMetadata().then((filled) => {
         if (!filled) return undefined;
@@ -621,44 +628,43 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     // that renames it can fold it in. A failed lookup registers without them.
 
     if (!state.token) {
-      extLog("no local agent-bridge auth token found; not registering (ok)");
-    } else {
-      // Initial registration + periodic heartbeat. The heartbeat is the liveness
-      // signal (refreshes updated_at); the bridge reaps rows that go stale, so an
-      // ungraceful CLI exit is handled even if deregister never runs.
-      register().catch((e) => extLog(`initial register failed: ${e.message}`));
-      state.heartbeat = setInterval(() => {
-        heartbeat().catch(() => {});
-      }, HEARTBEAT_MS);
-      // Don't let the heartbeat timer keep the CLI process alive on shutdown.
-      if (state.heartbeat.unref) state.heartbeat.unref();
-      // Decoupled represented-event flusher (Phase 5): drains the queue the event
-      // handler fills, off the CLI event loop, best-effort. Unref'd so it never
-      // pins the process open on exit.
-      state.flusher = setInterval(() => {
-        flushEvents().catch(() => {});
-      }, FLUSH_MS);
-      if (state.flusher.unref) state.flusher.unref();
-      // Delivery inbox poll (Phase 2): checks the bridge for messages to inject.
-      // Always ticking; delivers unless the session is muted (/peer), so the mute
-      // takes effect at runtime with no restart. Off the event loop, unref'd,
-      // best-effort.
-      state.inboxPoll = setInterval(() => {
-        pollInbox().catch(() => {});
-        pollControls().catch(() => {});
-        pollQuestionAnswers().catch(() => {});
-        if (!state.observingDelivery && state.registered) {
-          state.observingDelivery = true;
-          const sid = state.sessionId;
-          publishDeliveryAttention({
-            sid, attention: state.deliveryAttention, identity: processIdentity(),
-            muted: !state.deliveryEnabled, request: retainedBridgeRequest,
-            isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
-          }).catch(() => {}).finally(() => { state.observingDelivery = false; });
-        }
-      }, INBOX_POLL_MS);
-      if (state.inboxPoll.unref) state.inboxPoll.unref();
+      extLog("no local agent-bridge auth token found; heartbeat will retry registration");
     }
+    // Initial registration + periodic heartbeat. The heartbeat is the liveness
+    // signal (refreshes updated_at); the bridge reaps rows that go stale, so an
+    // ungraceful CLI exit is handled even if deregister never runs.
+    register().catch((e) => extLog(`initial register failed: ${e.message}`));
+    state.heartbeat = setInterval(() => {
+      heartbeat().catch(() => {});
+    }, HEARTBEAT_MS);
+    // Don't let the heartbeat timer keep the CLI process alive on shutdown.
+    if (state.heartbeat.unref) state.heartbeat.unref();
+    // Decoupled represented-event flusher (Phase 5): drains the queue the event
+    // handler fills, off the CLI event loop, best-effort. Unref'd so it never
+    // pins the process open on exit.
+    state.flusher = setInterval(() => {
+      flushEvents().catch(() => {});
+    }, FLUSH_MS);
+    if (state.flusher.unref) state.flusher.unref();
+    // Delivery inbox poll (Phase 2): checks the bridge for messages to inject.
+    // Always ticking; delivers unless the session is muted (/peer), so the mute
+    // takes effect at runtime with no restart. Off the event loop, unref'd,
+    // best-effort.
+    state.inboxPoll = setInterval(() => {
+      pollInbox().catch(() => {});
+      pollControls().catch(() => {});
+      pollQuestionAnswers().catch(() => {});
+      if (!state.observingDelivery && state.registered) {
+        state.observingDelivery = true;
+        const sid = state.sessionId;
+        publishDeliveryAttention({
+          sid, attention: state.deliveryAttention, identity: processIdentity(),
+          muted: !state.deliveryEnabled, request: retainedBridgeRequest,
+          isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
+        }).catch(() => {}).finally(() => { state.observingDelivery = false; });
+      }
+    }, INBOX_POLL_MS);
+    if (state.inboxPoll.unref) state.inboxPoll.unref();
   } catch (e) {
     extLog(`init error (degrading, session unaffected): ${e.message}`);
   }

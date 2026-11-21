@@ -46,10 +46,14 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         topology_warnings: list[str] | None = None,
         local_execution_space: str | None = None,
         resolved_local_identity: tuple[str | None, str] | None = None,
+        inventory_sources: dict[str, AgentConfig] | None = None,
+        repository_inventory_unavailable: bool = False,
     ) -> None:
         from . import agent_registry as compat
 
         self._agents = agents
+        self.inventory_sources = dict(inventory_sources or {})
+        self.repository_inventory_unavailable = repository_inventory_unavailable
         self.remote_acp_catalog: RemoteAcpCatalog | None = None
         self._machines = machines
         self._topology_errors = list(topology_errors or [])

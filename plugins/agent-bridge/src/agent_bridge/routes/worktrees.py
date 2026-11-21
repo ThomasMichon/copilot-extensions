@@ -30,7 +30,7 @@ from ..session_manager import (
 from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 from .worktree_entry import WorktreeEntry as _WorktreeEntry
 from .worktree_reporting import reported_machine
-from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, is_option_unsupported, validate_inventory
+from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, inventory_window, is_option_unsupported, worktree_sources
 from .worktree_refresh import is_classify_unsupported as _is_classify_unsupported
 from .worktree_probe import (
     find_worktree_entry as _find_cached_worktree_entry,  # noqa: F401 -- native resume shares this owner boundary
@@ -294,7 +294,7 @@ class WorktreeDiscoveryCache:
         if resolver is None or not self._refresh.current(epoch):
             return
         eligible = [
-            (name, cfg) for name, cfg in resolver.agents.items()
+            (name, cfg) for name, cfg in worktree_sources(resolver).items()
             if cfg.project and cfg.worktree_discovery
         ]
         results = await asyncio.gather(
@@ -312,23 +312,9 @@ class WorktreeDiscoveryCache:
         self._sync_sources(self._resolver if self._resolver is not None else resolver)
         if not self._refresh.current(epoch):
             return
-        updated = dict(self._cache)
-        errors: dict[str, str | None] = {}
-        observations: dict[str, float] = {}
-        for (name, _), result in zip(eligible, results):
-            if isinstance(result, BaseException):
-                log.warning("Worktree discovery failed for %s: %s", name, result)
-                errors[name] = (
-                    str(result) if isinstance(result, DiscoveryReadError) else "source-read-failed"
-                )
-            else:
-                updated[name] = result
-                errors[name] = None
-                observed = getattr(result, "observed", None)
-                if observed is not None:
-                    observations[name] = observed
-        self._cache = updated
-        self._refresh.published(epoch, errors, observed=observations)
+        self._cache = self._refresh.update_results(
+            epoch, self._cache, [name for name, _ in eligible], results,
+        )
 
     async def _crawl_agent(
         self,
@@ -373,16 +359,27 @@ class WorktreeDiscoveryCache:
                 host = target.host or config.host
                 user = target.user or config.ssh_user
 
+        inventory_only = agent_name in (getattr(resolver, "inventory_sources", None) or {})
+        read_started = time.monotonic()
+
         async def _run(args: list[str], *, timeout: float | None = None) -> tuple[str | None, str]:
+            nonlocal read_started
+            read_started = time.monotonic()
             if is_local:
+                if inventory_only:
+                    from .worktree_inventory import read
+
+                    return await read(
+                        project, args, timeout=_CMD_TIMEOUT if timeout is None else timeout,
+                    )
                 return await _run_local_ex(project, args, timeout=timeout)
             return await _run_ssh_ex(
                 host=host, user=user, project=project, args=args,
                 timeout=timeout,
             )
 
-        legacy_args = ["list", "--json", "--mux-details", *(["--fresh"] if fresh else [])]
-        if not classify or agent_name in self._classify_unsupported:
+        legacy_args = ["list", "--json", *(["--passive"] if inventory_only else ["--mux-details"]), *(["--fresh"] if fresh else [])]
+        if not classify or inventory_only or agent_name in self._classify_unsupported:
             raw, stderr = await _run(legacy_args)
             if raw is None:
                 if fresh and is_option_unsupported(stderr, "--fresh"):
@@ -390,8 +387,8 @@ class WorktreeDiscoveryCache:
                         self._fresh_unsupported.add(agent_name)
                     raise DiscoveryReadError("source-refresh-unsupported")
                 raise DiscoveryReadError("source-read-failed")
-            observed = validate_inventory(raw, fresh=fresh)
-            return ObservedRows(_parse_worktree_list(raw, agent_name), observed)
+            observed, valid_until = inventory_window(raw, fresh=fresh, read_started=read_started)
+            return ObservedRows(_parse_worktree_list(raw, agent_name), observed, valid_until)
 
         # worktree-finality-and-obligations (Phase 5): --classify is included
         # so the crawl carries the canonical closure descriptor through to
@@ -437,8 +434,8 @@ class WorktreeDiscoveryCache:
                 raise DiscoveryReadError("source-refresh-unsupported")
             raise DiscoveryReadError("source-read-failed")
 
-        observed = validate_inventory(raw, fresh=fresh)
-        return ObservedRows(_parse_worktree_list(raw, agent_name), observed)
+        observed, valid_until = inventory_window(raw, fresh=fresh, read_started=read_started)
+        return ObservedRows(_parse_worktree_list(raw, agent_name), observed, valid_until)
 
     async def _loop(self, resolver: AgentResolver) -> None:
         first_pass = True
@@ -751,6 +748,15 @@ async def list_worktrees(
     sessions_by_wt: dict[str, list[Any]] = {}
     mgr = getattr(request.app.state, "session_manager", None)
     resolver = getattr(request.app.state, "resolver", None)
+    from ..local_session_catalog import REPOSITORY_INVENTORY_UNAVAILABLE
+
+    if getattr(resolver, "repository_inventory_unavailable", False):
+        metadata = {
+            **metadata, "completeness": "incomplete",
+            "repository_inventory": {
+                "availability": "unavailable", "reason": REPOSITORY_INVENTORY_UNAVAILABLE,
+            },
+        }
     if mgr is not None:
         for session in mgr.list_sessions():
             wt_id = getattr(session.target, "worktree_id", None)

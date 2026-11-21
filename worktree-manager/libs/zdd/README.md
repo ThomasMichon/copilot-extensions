@@ -105,11 +105,18 @@ synthetic; only the final recorder child and durable write execute for real.
 
 ### `zdd.routing` -- the routing table (no proxy)
 
-A file-based, client-read routing table (`active.json`) that decouples *which
+A file-based, client-read routing table (`active.json`) decouples *which
 port is live* from static config. Short-lived clients re-read it every
 invocation; the daemon publishes its endpoint on startup and flips
 `active`/`previous` atomically on cutover. Readers self-heal: a dead `active`
 falls back to `previous`, then to the caller's static config.
+
+On Windows, routing readers share delete access so a retained reader can finish
+its original snapshot while publication replaces the pathname. Publication
+prefers write-through rename; a sharing conflict can use native file replacement
+followed by an explicit replacement-file flush. A failed post-replacement flush
+remains a typed uncertain commit, never a claim that the old route is unchanged
+or permission to kill a possibly published successor.
 
 Why a table rather than a front proxy: a proxy holding a stable port is itself a
 long-lived process you must update, which re-introduces the very downtime it was

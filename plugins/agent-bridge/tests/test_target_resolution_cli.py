@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
+
 import json
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -64,6 +66,127 @@ def _workspace(owner: Any="owner", path: Any="/workspace/demo") -> Any:
         "kind": "worktree", "handle": "workspace", "owner": owner, "project": "demo",
         "worktree": {"id": "workspace", "path": path},
     }
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_sessions_complete_catalog_retains_every_inventory_kind_without_hydration(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    from agent_bridge.session_maintenance_cli import _cmd_sessions
+
+    client = _client(
+        _workspace(),
+        {"kind": "live", "handle": "anchor-native", "registration": {"worktree_id": None}},
+        {"kind": "session_host", "handle": "standalone-host"},
+        {"kind": "managed", "handle": "managed-native"},
+    )
+    client_calls = []
+
+    def get_client(**kwargs: Any) -> Any:
+        client_calls.append(kwargs)
+        return client
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
+    _cmd_sessions(Namespace(json=json_output, status=None, owned_only=False, all_sources=json_output))
+    output = capsys.readouterr().out
+    expected = {
+        ("worktree", "workspace"), ("live", "anchor-native"),
+        ("session_host", "standalone-host"), ("managed", "managed-native"),
+    }
+    if json_output:
+        result = json.loads(output)
+        assert {(item["kind"], item["handle"]) for item in result["targets"]} == expected
+        assert result["sources"]["worktrees"]["completeness"] == "complete"
+    else:
+        assert all(f"{handle}  [{kind}]" in output for kind, handle in expected)
+    assert client.calls == []
+    assert client_calls == [{"ensure": True}]
+
+
+def test_sessions_status_selection_retains_source_evidence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_bridge.session_maintenance_cli import _cmd_sessions
+
+    client = _client(
+        {"kind": "managed", "handle": "owned", "session": {"status": "idle"}},
+        {"kind": "live", "handle": "cli", "registration": {"status": "live", "turn_state": "idle"}},
+        _workspace(),
+    )
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    _cmd_sessions(Namespace(json=True, status="idle", all_sources=True))
+    result = json.loads(capsys.readouterr().out)
+    assert [item["handle"] for item in result["targets"]] == ["owned", "cli"]
+    assert result["sources"]["extension"]["availability"] == "available"
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("status", ["stopped", "ended", "failed"])
+@pytest.mark.parametrize("json_output", [False, True])
+def test_explicit_terminal_status_includes_historical_managed_sessions_once(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    status: str, json_output: bool,
+) -> None:
+    from agent_bridge.session_maintenance_cli import _cmd_sessions
+
+    retained = {"session_id": "history", "status": status}
+    client = _client(
+        {"kind": "managed", "handle": "existing", "session": {"session_id": "existing", "status": status}},
+        {"kind": "managed", "handle": "live", "session": {"session_id": "live", "status": "idle"}},
+    )
+    calls = []
+
+    def sessions(**kwargs: Any) -> list[dict[str, str]]:
+        calls.append(kwargs)
+        return [retained, {"session_id": "existing", "status": status}]
+
+    client.list_sessions = sessions
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    _cmd_sessions(Namespace(json=json_output, status=status, all_sources=json_output))
+    output = capsys.readouterr().out
+    if json_output:
+        result = json.loads(output)
+        assert [row["handle"] for row in result["targets"]] == ["existing", "history"]
+        assert result["sources"]["managed"]["availability"] == "available"
+    else:
+        assert output.splitlines() == ["existing  [managed]", "history  [managed]"]
+    assert calls == [{"status": status}]
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("owned_only", [False, True])
+def test_sessions_json_default_and_owned_only_preserve_the_legacy_contract(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    owned_only: bool,
+) -> None:
+    from agent_bridge.session_maintenance_cli import _cmd_sessions
+
+    calls = []
+    def sessions(**kwargs: Any) -> list[dict[str, str]]:
+        calls.append(kwargs)
+        return [{"session_id": "original"}]
+
+    client = SimpleNamespace(
+        list_sessions=sessions,
+        list_targets=lambda **kwargs: pytest.fail("explicit legacy selection must not query inventory"),
+    )
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    _cmd_sessions(Namespace(json=True, status="stopped", owned_only=owned_only))
+    assert json.loads(capsys.readouterr().out) == [{"session_id": "original"}]
+    assert calls == [{"status": "stopped"}]
+
+
+def test_sessions_cannot_silently_report_legacy_rows_as_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge.session_maintenance_cli import _cmd_sessions
+
+    client = _client()
+    client.list_targets = lambda **kwargs: (_ for _ in ()).throw(BridgeClientError(426, "unsupported"))
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    with pytest.raises(BridgeClientError) as refused:
+        _cmd_sessions(Namespace(json=True, status=None, all_sources=True))
+    assert refused.value.status == 426
 
 
 def test_read_workspace_without_row_hydrates_without_resume() -> None:

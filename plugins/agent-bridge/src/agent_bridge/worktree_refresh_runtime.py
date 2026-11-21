@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import asdict
+from typing import Any, NoReturn, cast
 
 from zdd.private_protocol import PrivateIPCError, Refusal
 
@@ -17,7 +18,7 @@ _FIELDS = (
 )
 
 
-def _validate(value: object) -> dict:
+def _validate(value: object) -> dict[str, Any]:
     if (
         type(value) is not dict or set(value) != {*_FIELDS, "sources"}
         or any(type(value[key]) is not int or value[key] < 0 for key in ("epoch", "generation"))
@@ -35,22 +36,30 @@ def _validate(value: object) -> dict:
     for name, source in value["sources"].items():
         if (
             type(name) is not str or not name or type(source) is not dict
-            or set(source) != {"generation", "updated", "diagnostic"}
+            or set(source) not in (
+                {"generation", "updated", "diagnostic"},
+                {"generation", "updated", "diagnostic", "valid_until"},
+            )
             or type(source["generation"]) is not int or source["generation"] < 0
             or (source["updated"] is not None and (
                 type(source["updated"]) not in (int, float)
                 or not math.isfinite(source["updated"]) or source["updated"] < 0
             ))
             or (source["diagnostic"] is not None and type(source["diagnostic"]) is not str)
+            or ("valid_until" in source and (
+                type(source["valid_until"]) not in (int, float)
+                or not math.isfinite(source["valid_until"])
+                or source["updated"] is None or source["valid_until"] < source["updated"]
+            ))
         ):
             raise PrivateIPCError(Refusal.AUTHORITY)
     wire = _encode(value)
     if len(wire) > 65536:
         raise PrivateIPCError(Refusal.SIZE)
-    return json.loads(wire)
+    return cast(dict[str, Any], json.loads(wire))
 
 
-def capture_refresh(owner: WorktreeRefreshOwner) -> dict:
+def capture_refresh(owner: WorktreeRefreshOwner) -> dict[str, Any]:
     if (
         type(owner) not in (WorktreeRefreshOwner, FrozenRefresh)
         or any(task is not None for task in (owner.task, owner._live_task))
@@ -58,9 +67,16 @@ def capture_refresh(owner: WorktreeRefreshOwner) -> dict:
         or (owner._warm_holder is not None and not owner._warm_holder.done())
     ):
         raise PrivateIPCError(Refusal.AUTHORITY)
+    sources = {}
+    for name, source in owner.sources.items():
+        fields = asdict(source)
+        if source.valid_until is None:
+            # Keep deadline-free snapshots readable by older receivers.
+            fields.pop("valid_until")
+        sources[name] = fields
     return _validate({
         **{key: getattr(owner, key) for key in _FIELDS},
-        "sources": {name: asdict(source) for name, source in owner.sources.items()},
+        "sources": sources,
     })
 
 
@@ -81,19 +97,19 @@ class FrozenRefresh(WorktreeRefreshOwner):
         if self.token is not None or _encode(capture_refresh(self)) != self._wire:
             raise PrivateIPCError(Refusal.AUTHORITY)
 
-    def sync_sources(self, *args, **kwargs):
+    def sync_sources(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
-    def bind(self, *args, **kwargs):
+    def bind(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
-    def ensure(self, *args, **kwargs):
+    def ensure(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
-    def warm(self, *args, **kwargs):
+    def warm(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
-    def published(self, *args, **kwargs):
+    def published(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
     async def close(self) -> None:

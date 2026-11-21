@@ -148,6 +148,15 @@ Its lifecycle retries only custodian settlement, never native retirement or
 an ambiguous resume. The worker holds an ambiguously closed pin until original
 process exit instead of guessing whether another resume is safe. Shutdown closes
 work admission and waits for settlement, not a discarded handle or false success.
+
+Incoming writer admission distinguishes cleanup of that finite custodian from
+the original predecessor's lifetime. Once the identity-bound original exit is
+confirmed, unsettled custodian cleanup does not veto an otherwise selected
+incoming writer acquiring the exclusive credential-work lease. A live or
+unconfirmed original still blocks admission. The custodian reference is retained
+and settlement continues; shutdown still waits for full cleanup. Neither a
+health response nor the exited discovery predecessor can override another
+generation's occupied writer lease.
 Pending recovery prevents new writer acquisition or further cold
 attempts, but never suppresses successor detection: an already-ready generation
 still closes admission, drains admitted work and transfers its writer before
