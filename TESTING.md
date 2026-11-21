@@ -11226,6 +11226,12 @@ native CLI starts. Actual effect-audited development execution reads only
 the adapter, original test module and production guard, with real guard
 call-phase coverage for every case. Full packet qualification remains a
 separate normal source-CI requirement.
+The effort/vision structure and marketplace-isolation adapters export seven
+and seventeen original temporary-document cases respectively. The original
+rewritten-history Git test and actual-checkout capability inventory remain
+unchanged outside the packet. Selected cases retain actual document parsing,
+lexical/AST scanning and in-process argument handling; no fixture text is
+executed. Each adapter, original test module and production guard is hash-bound.
 Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
 the source map's existing layout so independent hash updates can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.

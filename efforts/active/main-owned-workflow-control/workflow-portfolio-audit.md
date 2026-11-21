@@ -1724,6 +1724,49 @@ not fewer workflow invocations, native Picker behavior, every-release
 observation or full-census acceptance. #13598 and the workflow, native/
 candidate and retained-custody owners remain separate and unchanged.
 
+Source #13826 merges at `2026-11-21T04:54:21Z` as
+`082cc04be63bc7d255a39eff3cd6e4428acfffa2`. Copilot approval `6002925775`
+targets exact published head `e2b6b6718ff017db34afea5c381f65a2cc17db84`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44867950529` and trusted metadata CI `44867950786` pass.
+Unit job `136735766588` freshly qualifies the complete packet from
+`04:49:55Z` to `04:51:53Z`, then uploads its evidence. Seven live scoped reads
+through the source merge-time verifier precede the normal managed Maintainer
+merge; no failing CI is bypassed. Closing references are empty and parent
+#6237 remains open. After rereading the full canonical parent, only this
+bounded admission item is resolved. Continue the retained census and separately
+accepted workflow reductions; broader integration, native, every-release,
+whole-flow and retained-custody acceptance remain open.
+
+### November 21 temporary-document guard-unit admission
+
+The effort/vision structure and marketplace-isolation suites collect 26
+original cases. Two thin adapters export 24 exact original functions and
+parameter identities: seven structure cases and seventeen isolation cases.
+The actual rewritten-history Git test and whole-checkout capability inventory
+remain unchanged outside the packet. No original assertion, fixture or
+production guard changes.
+
+Selected cases create temporary fixture trees and exercise actual document
+schema checks, lexical/AST detection, path selection and in-process argument
+handling. Shell, PowerShell and JavaScript snippets are parsed as data, not
+launched. All 24 pass the real `UnitRun` effect auditor with zero prohibited
+effects and actual call-phase coverage in each case's own production guard.
+Each selection opens only its adapter, original suite and guard. Focused
+development observations take 1.032 and 1.641 seconds, not canonical packet
+or native timing.
+
+Positive admission adds 24 nodes, six source hashes and two coverage targets:
+6,310 nodes, 1,007 sources and 423 targets. Every preceding node, source digest
+and target remains. Profile, 300-second budget, all 88 release-helper
+decisions, node-only compaction and the file-size cap are unchanged. The
+manifest is 1,033,116 bytes. Both adapters pass whole-file strict typing on
+Linux and Windows targets and fatal Ruff checks. Complete current-head
+review and Linux source CI remain required. This is a bounded census
+increment, not fewer workflow invocations, a full-checkout inventory pass,
+native execution, every-release or whole-campaign acceptance. Existing
+workflow, native/candidate, #13598 and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
