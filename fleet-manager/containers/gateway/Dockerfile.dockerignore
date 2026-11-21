@@ -73,6 +73,7 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/_windows_parent_job.py
 !libs/agent-procutil/src/agent_procutil/async_foreground.py
 !libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py
+!libs/agent-procutil/src/agent_procutil/command_pipe.py
 !libs/agent-procutil/src/agent_procutil/daemon.py
 !libs/agent-procutil/src/agent_procutil/daemon_broker.py
 !libs/agent-procutil/src/agent_procutil/daemon_instances.py

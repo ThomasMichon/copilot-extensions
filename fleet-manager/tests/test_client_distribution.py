@@ -369,6 +369,7 @@ def test_regular_wheel_application_installs_an_inert_client(
     digest = "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest()
     profile = {
         "component": "fleet-manager",
+        "roots": ["fleet-manager"],
         "release": {"identity": "source:" + identity.source_commit,
                     "sha256": "sha256:" + identity.assembly_hash},
         "wheels": [{
