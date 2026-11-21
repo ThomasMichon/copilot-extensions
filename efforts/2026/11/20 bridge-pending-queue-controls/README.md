@@ -29,10 +29,11 @@ or an attention response.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs targeting `dev`
 - **Created:** 2026-11-20
-- **Status:** Active
-- **Vision:** [Bridge inspectable delivery decisions](../../../visions/plugins/agent-bridge/README.md#inspectable-delivery-decisions)
+- **Status:** Done
+- **Completed:** 2026-11-20
+- **Vision:** [Bridge inspectable delivery decisions](../../../../visions/plugins/agent-bridge/README.md#inspectable-delivery-decisions)
 - **Umbrella issue:** #13734
-- **Related effort:** [Bridge Queued Steering](../bridge-queued-steering/README.md)
+- **Related effort:** [Bridge Queued Steering](../../../active/bridge-queued-steering/README.md)
 
 ## Guiding Intent
 
@@ -65,9 +66,9 @@ before choosing a remedy.
   prerequisite: proceed independently with the disjoint pieces. Preserve an
   actual overlapping-file gap rather than editing those files or posting
   additional coordination notes.
-- The parent effort README remains with that in-flight PR. This separate,
-  indexed home captures the newly assigned command/diagnosis scope without
-  changing the parent's files or claiming its broader acceptance.
+- The parent effort and #13770 retain their original ownership. This separate,
+  indexed home captures the command/diagnosis scope without changing the
+  parent's files or claiming its broader acceptance.
 - The separately reported carrier handshake, exact model-input receipts,
   duplicate-safe timed fallback and broader #6394/#10765 outcomes retain
   their actual owners and gates. A command or successful source fixture does
@@ -164,7 +165,7 @@ not additional operator requirements.
 
 - [x] Find the actual overlapping PR and publish a non-overlap coordination
   note, leaving its author, branch, files and delivery responsibility intact.
-- [ ] Inspect the selected live state read-only and trace the existing inbox,
+- [x] Inspect the selected live state read-only and trace the existing inbox,
   notice, SDK submission and receipt owners; record the actual causal boundary
   and which observations are unavailable.
 - [x] Review this finite command/diagnosis plan before implementation.
@@ -179,7 +180,7 @@ not additional operator requirements.
   owner, preserving original IDs/order, mute, serialization, receipt
   monotonicity and unknown native effects. Do not resend bodies, rewind
   cursors, forge consumption or silently clear uncertainty.
-- [ ] Compose with #13770's selected consumer behavior without editing its
+- [x] Compose with #13770's selected consumer behavior without editing its
   files; preserve supported old/current runtime behavior. Implement distinct
   causal fixes that the diagnosis establishes outside that PR's coverage,
   without further owner contact or coordination notes.
@@ -188,40 +189,40 @@ not additional operator requirements.
 
 ### Phase 3 - Deliver and verify
 
-- [ ] Pass focused source/API and command/provider controls, relevant
+- [x] Pass focused source/API and command/provider controls, relevant
   lint/type/contract checks, current-head review and every required CI gate.
-- [ ] Merge this slice and identify its containing ordinary release
+- [x] Merge this slice and identify its containing ordinary release
   separately from the other author's PR and the source merge.
-- [ ] Complete authorized normal rollout and selected running-state
+- [x] Complete authorized normal rollout and selected running-state
   verification without live queue replay/drain or session replacement.
   Ask first if the actual deployment risks terminating all agents.
-- [ ] Resolve every finite Plan/Validation item or transfer an independent
+- [x] Resolve every finite Plan/Validation item or transfer an independent
   remaining adoption obligation to a named accepted objective before
   closeout; retain the broader parent and carrier outcomes.
 
 ## Validation Plan
 
-- [ ] Current read-only observations distinguish actual backend inbox,
+- [x] Current read-only observations distinguish actual backend inbox,
   receiver notice/SDK stage, attention and registry state. Missing visibility
   remains unknown, not zero or model-consumption proof.
-- [ ] The actual CLI/provider inspection path covers pending and empty queues,
+- [x] The actual CLI/provider inspection path covers pending and empty queues,
   exact target/registration changes, active/idle/resumed/muted receivers,
   stale observations, unavailable or unsupported runtime and bounded
   pagination/output without submitting or settling any work.
-- [ ] Reconciliation has a useful positive owned-fixture case and explicit
+- [x] Reconciliation has a useful positive owned-fixture case and explicit
   unsafe/unsupported controls. It preserves original message IDs/order and
   cannot duplicate a submission when an idle wake races it, replay an
   uncertain native effect or fabricate consumption.
-- [ ] Structured output and documentation describe real executing-runtime
+- [x] Structured output and documentation describe real executing-runtime
   support; compatibility refusal is not an implicit successful empty queue
   or a requirement to update every peer together.
-- [ ] Existing receipt, mute, send serialization, normal messaging and
+- [x] Existing receipt, mute, send serialization, normal messaging and
   #13770 composition controls retain their original semantics. Test helpers
   keep finite containment, caller-owned deadlines and exact cleanup.
-- [ ] The final diff is disjoint from #13770's eight files and passes
+- [x] The final diff is disjoint from #13770's eight files and passes
   ordinary review/CI. No simulated test or author-reported result is called
   native model acceptance.
-- [ ] Source merge, containing release, authorized installation and actual
+- [x] Source merge, containing release, authorized installation and actual
   selected running behavior are reported separately. No excluded live queue
   operation, session replacement or outside-normal-deployment restart occurs.
 
@@ -234,76 +235,37 @@ native work. Reuse an existing queue/consumer seam where possible; any needed
 boundary expansion must advertise supported semantics and retain old-peer
 refusal without inventing a second delivery authority.
 
+## Completion evidence and retained boundaries
+
+This Done judgment covers the independent queue-control and read-only diagnosis
+slice, not the related effort's broader receiving guarantees.
+
+- Source #13780 merged after current-head approval and all required CI.
+  Ordinary promotion #13799 contains the reviewed implementation. The actual
+  receiving-host inventory reports Bridge payload, selected runtime and
+  running version at `0.9.505-dev1` / `0.9.505.dev1`; the native CLI successfully
+  negotiates and reads `agent-bridge.pending-queue` v1 for the original target.
+- The focused source/API packet passed 41 controls. Additional owned-fixture
+  controls cover active/idle resumed consumers, old-incarnation refusal and
+  exact-original isolation from a worktree successor. No runtime behavior
+  changes accompany those final controls.
+- Successive bounded read-only pages identify historical SDK acceptance and an
+  original uncertain handoff, with no unstarted offer observed in that reading.
+  They are fresh pages, not an atomic SDK census. The original uncertain work
+  remains unchanged; no production reconciliation or input was submitted.
+- Native SDK queue/consumption and the absence of a local hook notice remain
+  unproven where the contract says unavailable. This is not a native
+  idle-to-model-delivery pass for #13770 or closure of the broader #13734
+  receiving outcome; those existing parent gates remain with their owners.
+- The normal whole-suite request reported a separate Dispatch legacy-master
+  post-install failure. Bridge's changed component is live-qualified, **not
+  the ordinary full update**. Existing
+  [P13617/V13617/G13617](../../../active/installer-upgrade-recovery/README.md#retained-legacy-supervisor-transition---13617)
+  and [U13617](../../../active/installer-upgrade-recovery/acceptance.md#u13617---retained-legacy-supervisor)
+  under #10377 remain unchecked and owned separately. No version-current
+  repeat was used to erase that failure, and no master preparation, handoff,
+  process action or claim release is credited to this slice.
+
 ## Journal
 
-### 2026-11-20 - Keep schema bootstrap within its module boundary
-
-- Moved the existing exact-native column validator into the cohesive
-  live-message schema owner alongside unresolved-original index preparation.
-  The bootstrap retains its existing compatibility export and invocation;
-  no validation condition or receipt semantics changed.
-- The changed-file hard module-size check passes without raising a baseline.
-  The same 41 focused tests and twelve-file Linux/Windows strict typing
-  analyses pass after extraction. Current-head CI and re-review still precede
-  merge; source approval does not establish release or live adoption.
-
-### 2026-11-20 - Bound unresolved-page database work
-
-- An output limit alone does not bound a history scan or temporary sort under
-  the shared database lock. Added a schema-managed partial `(session_id, id)`
-  index with the same unresolved-original predicate used by both operations.
-- Ordinary writable preparation adds only this derived index. Durable schema
-  version and message/receipt state are unchanged; an unprepared read-only
-  database refuses the optional page rather than performing an unbounded scan.
-- The focused packet now passes 41 tests. Both actual operations select the
-  matching index without a temporary sort over 10,000 settled fixture rows
-  and execute their page in fewer than 1,000 SQLite VM steps. Legacy read-only
-  refusal and receipt-preserving writable preparation pass.
-- The expanded twelve-file whole-file strict ratchet passes Python 3.10
-  analysis for Linux and Windows at the actual managed-publication merge base.
-  Current-head re-review, required CI, merge and running qualification remain
-  open; no native latency or live queue effect is claimed.
-
-### 2026-11-20 - Backend command implementation begun
-
-- The finite plan passed review and merged as #13774 before implementation.
-- Traced the distinct owners: delivery attention observes pending native
-  questions/permissions and mute, while the pending hook observes a local
-  offered-but-not-submitted set. Neither is a backend inbox census. The
-  existing retained ledger separately records offers, started attempts,
-  SDK acceptance and consumption.
-- Added a disjoint metadata-only backend inspection path and bounded original
-  offer preparation through the existing compatible inbox owner. This does
-  not implement a second native sender or clear a receiver-local notice.
-  Current SDK/notice-set coverage remains unavailable; live sufficiency
-  still awaits the containing release and authorized rollout.
-- Kept a bounded, expiring diagnostic projection of the existing emitted hook
-  notice separate from backend receipts and the unobservable native SDK queue.
-  An older notice or changed consumer cannot establish a current pending set.
-- The contained command/API and existing delivery-state packet passed 38 tests,
-  including original-offer preparation racing normal polling, unchanged
-  uncertain receipts, mute and strict old-provider refusal. The changed
-  nine-file strict typing cohort passed for both Python 3.10 analysis targets,
-  Linux and Windows; this is not native Windows execution or project admission.
-- Required changed-Python lint, documentation consistency and the installation
-  contract guard passed. Whole-project Bridge typing remains pending under
-  #9807; its broader probe stops at duplicate spike module names. A moving
-  base also selected unrelated files, so the passing changed-code ratchet is
-  explicitly pinned to this implementation's actual base.
-- Source review/CI, merge, containing release, authorized installation and the
-  selected running-state observations remain open.
-
-### 2026-11-20 - Non-overlapping assignment captured
-
-- Found actual OPEN #13770, read its qualified complete description and
-  preserved its P13734-1/2 custody. Published and read back the separate
-  queue-command coordination note.
-- Captured the additional diagnosis/command assignment, later no-overlap
-  clarification and normal-deployment class with their live-effect
-  exclusions. Restored the parent's unpublished local amendment to its
-  unchanged incumbent content; the newly assigned intent lives here.
-- Captured the later independent-execution instruction: no further owner
-  contact or coordination notes; retain #13770's files and responsibility
-  while building the disjoint necessary pieces.
-- No command implementation, live queue operation, installation or deployment
-  is claimed by this plan.
+- [2026-11-20 - Source delivery and release](journal/2026/11.20%20Source%20delivery.md)
