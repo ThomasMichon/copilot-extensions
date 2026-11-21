@@ -84,12 +84,27 @@ The required `InvokeCaptured` callback accepts `FilePath` and `ArgList` and
 returns exactly one object with integer `ExitCode` and string `Stdout` and
 `Stderr`. The caller must supply its existing bounded, contained process owner;
 the provider introduces no launcher, Job escape or timeout implementation.
+The additive `IsolateSelection` option requires that callback to also declare
+and apply `Environment`: null-valued entries remove inherited child variables.
+It isolates Python selection and active-environment hints for each uv child,
+without changing the original caller or its configured uv storage, mirrors,
+cache and download policy. Older callbacks remain supported without the option;
+requesting isolation with one refuses before any child executes.
+The existing Versioned Runtime `Invoke-Hidden` implements these child-only
+null/removal semantics for bounded and ordinary capture.
 Process-start/custody failures propagate. OS-policy refusal never selects
 another uv or system Python. Returned Python is a selection, not executable,
 profile, application or removal admission: the existing owner still validates
 the helper and any required outside-removable-root closure before execution.
 Explicit interpreter handoffs, guest policy-before-setup, uv prerequisite
 publication and service/command launcher adoption retain their existing owners.
+After lookup, pass the selected absolute Python to the existing lifetime owner.
+Do not insert `uv run` between a shell and its caller-owned worker: that changes
+the worker's original-parent relationship and is not the same custody protocol.
+The native installation-context transport controls exercise the actual
+uv-selection-to-direct-worker handoff, including a large literal request,
+nonzero exit, poisoned selection hints and an unavailable managed interpreter.
+They do not enable any production command or catalog.
 
 The retained-source constructor checks build-tool containment using resolved
 physical paths and the shared Windows extended-path normalization. Equivalent

@@ -3,9 +3,17 @@ function Resolve-UvBootstrapPython {
     param(
         [Parameter(Mandatory)][string]$RequestFile,
         [Parameter(Mandatory)][scriptblock]$InvokeCaptured,
-        [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Inspect'
+        [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Inspect',
+        [switch]$IsolateSelection
     )
 
+    $callbackParameters = $InvokeCaptured.Ast.ParamBlock
+    if ($IsolateSelection -and ($null -eq $callbackParameters -or
+        -not @($callbackParameters.Parameters | Where-Object {
+            $_.Name.VariablePath.UserPath -ieq 'Environment'
+        }).Count)) {
+        throw 'Bootstrap uv capture must accept child Environment overrides without changing the caller environment.'
+    }
     $requestRoot = [IO.Path]::GetPathRoot($RequestFile)
     if (-not [IO.Path]::IsPathRooted($RequestFile) -or -not $requestRoot -or
         ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
@@ -38,7 +46,16 @@ function Resolve-UvBootstrapPython {
     # The caller retains its deadline, containment, cancellation and stream owner.
     $invoke = {
         param([string[]]$Arguments)
-        $result = & $InvokeCaptured -FilePath $uv -ArgList $Arguments
+        $options = @{FilePath=$uv; ArgList=$Arguments}
+        if ($IsolateSelection) {
+            $options.Environment = @{
+                UV_PYTHON = $null; UV_PYTHON_PREFERENCE = $null
+                UV_MANAGED_PYTHON = $null; UV_NO_MANAGED_PYTHON = $null
+                VIRTUAL_ENV = $null; CONDA_PREFIX = $null
+                PYTHONPATH = $null; PYTHONHOME = $null
+            }
+        }
+        $result = & $InvokeCaptured @options
         if ($null -eq $result -or $result -is [array] -or
             ($result.ExitCode -isnot [int] -and $result.ExitCode -isnot [long]) -or
             $result.ExitCode -lt [int]::MinValue -or $result.ExitCode -gt [int]::MaxValue -or
