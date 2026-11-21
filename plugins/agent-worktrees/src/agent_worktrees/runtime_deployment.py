@@ -93,15 +93,15 @@ def start_published_application() -> int:
 @contextmanager
 def application_publication() -> Iterator[None]:
     """Complete application startup through the original command owner's lease."""
-    from . import _command_binding as binding, config
+    from . import _command_binding as binding
     from ._build_info import BUILD_INFO
     from .runtime_candidate import _native
 
     environment = Path(sys.prefix).resolve()
-    root = config.install_dir().resolve()
-    slot = root / "versions" / environment.parent.name
-    if environment.name != ".venv" or not _native(slot / ".venv").samefile(environment):
+    slot = environment.parent
+    if environment.name != ".venv" or slot.parent.name != "versions" or not environment.is_dir():
         raise RuntimeError("Application publication requires its installed version slot")
+    root = slot.parent.parent
     declaration = json.loads(_native(slot / "application.json").read_text(encoding="utf-8"))
     construction = declaration["construction"]
     content = manifest_bytes({

@@ -231,6 +231,7 @@ def application_deployment(request, monkeypatch):
     from agent_worktrees import _installation_context as primitive, config
 
     home, root = request.getfixturevalue("owned_install")
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
     owner = home / ".copilot/installed-plugins/example/agent-worktrees"
     arguments = dict(payload_root=owner, plugin_id="agent-worktrees", legacy_root=root)
     binding.write_legacy_manifest(
@@ -264,7 +265,10 @@ def application_deployment(request, monkeypatch):
     })
     monkeypatch.setattr(deployment, "version", lambda _name: "1.0.0")
     monkeypatch.setattr(sys, "prefix", str(environment))
-    monkeypatch.setattr(config, "install_dir", lambda: root)
+    # Registry state is independent of the physical application installation.
+    registry = home / "custom-registry"
+    registry.mkdir()
+    monkeypatch.setattr(config, "install_dir", lambda: registry)
     monkeypatch.setattr(binding, "_load_primitive", lambda _owner: primitive)
     monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", str(owner))
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
