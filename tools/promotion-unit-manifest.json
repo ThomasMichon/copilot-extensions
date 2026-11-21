@@ -6867,7 +6867,7 @@
         "tools/promotion_unit_tests/test_powershell_adapter.py": "51ca5df518c38ed02556d8082a40a17f7e6e9460de5336cf703505bf2185852f",
         "tools/promotion_unit_tests/test_qualification.py": "6960b5d63b84579df6b6bd0ca7ddc16f776cb56704707ffb8c328df5ea1af223",
         "tools/promotion_unit_tests/test_related_acquisition.py": "3638804575afcd080c715b8eeefca8a9ed437e723c41a5161f642fdcc2cba62a",
-        "tools/promotion_unit_tests/test_release_build_admission.py": "8b5cea6b15cd12110d201eadd3f69404b9322405e5fd732ffb2e56ff5879f58a",
+        "tools/promotion_unit_tests/test_release_build_admission.py": "abdbb7d92ee97e56a35de7786f80ba588f2364c3cafd486f6ae9ff041bba3156",
         "tools/promotion_unit_tests/test_release_controller_shell.py": "1b69a06dd230c1f63040fccbf71b1e0fd12e6d3078e8794d5baf7eeb61b9b4c8",
         "tools/promotion_unit_tests/test_release_dynamic_decisions.py": "961ee6951789981ce9bb975dab62093d548942c5cc1df0762fc9fe74284c40db",
         "tools/promotion_unit_tests/test_release_evidence.py": "f2c4e15201454cc0793555ef0a0efe5411f0c6974b32c5baa8a68fddf8af2393",

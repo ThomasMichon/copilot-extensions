@@ -236,7 +236,8 @@ def test_ordinary_static_package_needs_no_runtime_resources(tmp_path: Path) -> N
         (STATIC_BUILD + '[project]\nname = "ordinary"\nversion = "1.0"\n').encode(),
     )
     data, admitted = resources.build_inputs(tmp_path, root=None)
-    assert data["project"]["name"] == "ordinary"
+    project = data["project"]
+    assert isinstance(project, dict) and project["name"] == "ordinary"
     assert admitted == {}
 
 
