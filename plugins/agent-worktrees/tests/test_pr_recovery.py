@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +18,7 @@ pytestmark = pytest.mark.timeout(180)
 
 
 @pytest.fixture(scope="session")
-def _advanced_pr_seed(tmp_path_factory, _pr_repo_seed):
+def _advanced_pr_seed(tmp_path_factory: pytest.TempPathFactory, _pr_repo_seed: Any) -> Path:
     with _seed_directory(tmp_path_factory, "recovery-advanced") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
@@ -24,29 +26,38 @@ def _advanced_pr_seed(tmp_path_factory, _pr_repo_seed):
                 first = pr_ops.create_pr(wid, config, title="Owned change")
                 assert first["success"], first
                 _advance_upstream(config)
+        assert isinstance(seed, Path)
         return seed
 
 
 @pytest.fixture
-def pr_repo(tmp_path, monkeypatch, _advanced_pr_seed):
+def pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _advanced_pr_seed: Any) -> Any:
     """Copy actual published history and setup-only upstream advancement."""
     return _copy_pr_repo(_advanced_pr_seed, tmp_path, monkeypatch)
 
 
 @pytest.fixture
-def legacy_pr_repo(tmp_path, monkeypatch, _pr_repo_seed):
+def legacy_pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _pr_repo_seed: Any) -> Any:
     return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
 
 
-def _git(*args, cwd):
+def _git(*args: str, cwd: str | Path) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
 
-def _record(wid):
+def _record(wid: str) -> Any:
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
-def _advance_upstream(config):
+def _backup_heads(path: Path, branch: str) -> dict[str, str]:
+    rows = _git(
+        "for-each-ref", "--format=%(refname:strip=-1) %(objectname)",
+        f"{pr_rebase.BACKUP_NAMESPACE}/{branch}/", cwd=path,
+    ).splitlines()
+    return dict(row.split() for row in rows)
+
+
+def _advance_upstream(config: Any) -> None:
     anchor = Path(config.default_repo.anchor)
     (anchor / "upstream.txt").write_text("new upstream work\n")
     _git("add", "upstream.txt", cwd=anchor)
@@ -54,7 +65,7 @@ def _advance_upstream(config):
     _git("push", "origin", "master", cwd=anchor)
 
 
-def _prepare(pr_repo, *, legacy=False):
+def _prepare(pr_repo: Any, *, legacy: bool=False) -> Any:
     config, wid, path, remote = pr_repo
     if not legacy:
         published = _record(wid).pr
@@ -73,8 +84,8 @@ def _prepare(pr_repo, *, legacy=False):
 
 @pytest.mark.parametrize("iteration", range(2))
 def test_advanced_recovery_copy_preserves_publication_and_private_upstream(
-    pr_repo, _advanced_pr_seed, iteration, tmp_path, monkeypatch,
-):
+    pr_repo: Any, _advanced_pr_seed: Any, iteration: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config, wid, path, remote = pr_repo
     record = _record(wid)
     assert cfg.load_config() is config
@@ -135,8 +146,8 @@ def test_advanced_recovery_copy_preserves_publication_and_private_upstream(
 
 @pytest.mark.parametrize("legacy", [False, True])
 def test_recovery_setup_preserves_original_title_branch_and_legacy_publication(
-    legacy, request, monkeypatch,
-):
+    legacy: bool, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = request.getfixturevalue("legacy_pr_repo" if legacy else "pr_repo")
     config, wid, path, remote = repo
     before = _record(wid).pr
@@ -144,7 +155,7 @@ def test_recovery_setup_preserves_original_title_branch_and_legacy_publication(
     create = pr_ops.create_pr
     calls = []
 
-    def publish(*args, **kwargs):
+    def publish(*args: Any, **kwargs: Any) -> Any:
         calls.append(kwargs)
         return create(*args, **kwargs)
 
@@ -170,14 +181,14 @@ def test_recovery_setup_preserves_original_title_branch_and_legacy_publication(
     assert _git("rev-parse", "HEAD", cwd=path) == old
 
 
-def _point(path, *, pending=False):
+def _point(path: Path, *, pending: Any=False) -> Any:
     checkpoint = pr_recovery._pending_path(str(path)) if pending else pr_recovery._path(str(path))
     data = json.loads(checkpoint.read_text(encoding="utf-8"))
     return data["checkpoints"][data["latest"]] if data.get("version") == 2 else data
 
 
 @pytest.mark.guard
-def test_recovery_selects_only_the_live_pr_for_the_current_branch():
+def test_recovery_selects_only_the_live_pr_for_the_current_branch() -> None:
     older = tracking.PRRecord(state="open", branch="pr/older")
     newer = tracking.PRRecord(state="open", branch="pr/newer")
     finished = tracking.PRRecord(state="merged", branch="pr/finished")
@@ -192,8 +203,8 @@ def test_recovery_selects_only_the_live_pr_for_the_current_branch():
 
 
 @pytest.mark.guard
-def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
-    config = SimpleNamespace(default_repo=SimpleNamespace(
+def test_backup_failure_prevents_rebase_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    config: Any = SimpleNamespace(default_repo=SimpleNamespace(
         remote="origin", default_branch="main", worktree_root=str(tmp_path),
     ))
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
@@ -205,7 +216,7 @@ def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(git_ops, "ref_exists", lambda *_, **__: True)
     monkeypatch.setattr(git_ops, "rebase", lambda *_, **__: pytest.fail("must not rebase"))
 
-    def fail(*_, **__):
+    def fail(*_: Any, **__: Any) -> None:
         raise OSError("backup unavailable")
 
     monkeypatch.setattr(pr_recovery, "prepare", fail)
@@ -215,8 +226,8 @@ def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize("checkout_head", [False, True], ids=["worktree", "private-head"])
 def test_backed_sync_publishes_legacy_pr_without_replay_journals(
-    legacy_pr_repo, monkeypatch, capsys, checkout_head,
-):
+    legacy_pr_repo: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], checkout_head: Any,
+) -> None:
     config, wid, path, remote, branch, old = _prepare(legacy_pr_repo, legacy=True)
     if checkout_head:
         _git("checkout", "-B", branch, old, cwd=path)
@@ -254,11 +265,11 @@ def test_backed_sync_publishes_legacy_pr_without_replay_journals(
     assert published.patch_id
 
 
-def test_sync_aborts_before_rebase_when_backup_cannot_be_written(pr_repo, monkeypatch):
+def test_sync_aborts_before_rebase_when_backup_cannot_be_written(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, _, _, old = _prepare(pr_repo)
     original = pr_rebase._git_bytes
 
-    def fail_backup(*args, **kwargs):
+    def fail_backup(*args: Any, **kwargs: Any) -> Any:
         if args[:1] == ("update-ref",):
             raise git_ops.GitError(["git", *args], 1, "backup storage unavailable")
         return original(*args, **kwargs)
@@ -269,7 +280,7 @@ def test_sync_aborts_before_rebase_when_backup_cannot_be_written(pr_repo, monkey
     assert not pr_recovery._path(str(path)).exists()
 
 
-def test_recovery_point_survives_abort_and_distinguishes_repeated_syncs(pr_repo):
+def test_recovery_point_survives_abort_and_distinguishes_repeated_syncs(pr_repo: Any) -> None:
     config, wid, path, _, _, old = _prepare(pr_repo)
     first = pr_recovery.prepare(
         wid, f"worktree/{wid}", "origin/master", _record(wid), cwd=str(path),
@@ -291,7 +302,7 @@ def test_recovery_point_survives_abort_and_distinguishes_repeated_syncs(pr_repo)
     assert finalize.push_changes(wid, config)
 
 
-def test_recovery_ref_writes_ignore_inherited_foreign_git_context(pr_repo, monkeypatch):
+def test_recovery_ref_writes_ignore_inherited_foreign_git_context(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, remote, _, old = _prepare(pr_repo)
     record = _record(wid)
     foreign = remote.parent / "foreign.git"
@@ -311,7 +322,7 @@ def test_recovery_ref_writes_ignore_inherited_foreign_git_context(pr_repo, monke
     )
 
 
-def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo, _advanced_pr_seed):
+def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo: Any, _advanced_pr_seed: Any) -> None:
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     seed_record = _advanced_pr_seed / "tracking" / f"{wid}.yaml"
     seed_tracking = seed_record.read_bytes()
@@ -331,7 +342,7 @@ def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo, _ad
     assert _git("--git-dir", str(_advanced_pr_seed / "remote.git"), "show-ref", cwd=path) == seed_refs
 
 
-def test_another_live_pr_checkpoint_does_not_replace_older_publication_authority(pr_repo):
+def test_another_live_pr_checkpoint_does_not_replace_older_publication_authority(pr_repo: Any) -> None:
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     assert git_collab.sync_forward(wid, config)
     completed = _point(path)
@@ -352,7 +363,7 @@ def test_another_live_pr_checkpoint_does_not_replace_older_publication_authority
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
 
 
-def test_backup_never_refreshes_concurrent_remote_lease(pr_repo):
+def test_backup_never_refreshes_concurrent_remote_lease(pr_repo: Any) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     assert git_collab.sync_forward(wid, config)
     other = remote.parent / "reviewer"
@@ -371,7 +382,7 @@ def test_backup_never_refreshes_concurrent_remote_lease(pr_repo):
     assert _point(path)["published_head"] == old
 
 
-def test_pre_sync_reset_cannot_launder_unrelated_source_into_rewrite_authority(pr_repo):
+def test_pre_sync_reset_cannot_launder_unrelated_source_into_rewrite_authority(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _git("reset", "--hard", _record(wid).pr.base_sha, cwd=path)
     (path / "unrelated.txt").write_text("unrelated replacement\n")
@@ -383,26 +394,32 @@ def test_pre_sync_reset_cannot_launder_unrelated_source_into_rewrite_authority(p
     assert _git("rev-parse", "HEAD", cwd=path) == unrelated
     assert _git("rev-parse", point["local_ref"], cwd=path) == unrelated
     assert _git("rev-parse", point["published_ref"], cwd=path) == old
-    assert not finalize.push_changes(wid, config)
-    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+    pending = pr_recovery._pending_path(str(path)).read_bytes()
+    monkeypatch.setattr(pr_rebase, "_save", lambda *_: pytest.fail("unproved sync must not be attested"))
+    assert finalize.push_changes(wid, config)
+    assert not pr_recovery._path(str(path)).exists()
+    assert pr_recovery._pending_path(str(path)).read_bytes() == pending
+    assert _backup_heads(path, branch) == {"published": old, "remote": old, "source": unrelated}
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == unrelated
+    assert _record(wid).pr.head_sha == unrelated
 
 
 @pytest.mark.parametrize("interpose", ["before-rebase", "after-rebase"])
 def test_interposed_head_mutation_cannot_be_attested_as_the_rebase_result(
-    pr_repo, monkeypatch, interpose,
-):
+    pr_repo: Any, monkeypatch: pytest.MonkeyPatch, interpose: str,
+) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     original_prepare = pr_recovery.prepare
     original_rebase = git_ops.rebase
 
-    def mutate(target):
+    def mutate(target: str) -> None:
         _git("reset", "--hard", target, cwd=path)
         (path / "interposed.txt").write_text("unrelated replacement\n")
         _git("add", "interposed.txt", cwd=path)
         _git("commit", "-m", "interposed replacement", cwd=path)
 
     if interpose == "before-rebase":
-        def prepare(*args, **kwargs):
+        def prepare(*args: Any, **kwargs: Any) -> Any:
             point = original_prepare(*args, **kwargs)
             mutate(point.target_head)
             return point
@@ -410,7 +427,7 @@ def test_interposed_head_mutation_cannot_be_attested_as_the_rebase_result(
         monkeypatch.setattr(pr_recovery, "prepare", prepare)
         monkeypatch.setattr(git_ops, "rebase", lambda *_, **__: pytest.fail("must not rebase"))
     else:
-        def rebase(target, **kwargs):
+        def rebase(target: str, **kwargs: Any) -> Any:
             assert original_rebase(target, **kwargs)
             mutate(target)
             return True
@@ -420,14 +437,21 @@ def test_interposed_head_mutation_cannot_be_attested_as_the_rebase_result(
     assert not pr_recovery._path(str(path)).exists()
     point = _point(path, pending=True)
     assert _git("rev-parse", point["local_ref"], cwd=path) == old
-    assert not finalize.push_changes(wid, config)
-    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+    pending = pr_recovery._pending_path(str(path)).read_bytes()
+    source = _git("rev-parse", "HEAD", cwd=path)
+    monkeypatch.setattr(pr_rebase, "_save", lambda *_: pytest.fail("interposed sync must not be attested"))
+    assert finalize.push_changes(wid, config)
+    assert not pr_recovery._path(str(path)).exists()
+    assert pr_recovery._pending_path(str(path)).read_bytes() == pending
+    assert _backup_heads(path, branch) == {"published": old, "remote": old, "source": source}
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == source
+    assert _record(wid).pr.head_sha == source
 
 
 @pytest.mark.parametrize("failure", ["conflict", "checkpoint-write"])
 def test_failed_repeated_sync_preserves_completed_authority_after_reflog_expiry(
-    pr_repo, monkeypatch, failure,
-):
+    pr_repo: Any, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     assert git_collab.sync_forward(wid, config)
     completed = _point(path)
@@ -442,7 +466,7 @@ def test_failed_repeated_sync_preserves_completed_authority_after_reflog_expiry(
     else:
         original = tracking._atomic_write
 
-        def fail_completed(path, data):
+        def fail_completed(path: Path, data: Any) -> Any:
             if path.name == "agent-worktrees-pr-recovery.json":
                 raise OSError("completed checkpoint write failed")
             return original(path, data)
@@ -457,7 +481,7 @@ def test_failed_repeated_sync_preserves_completed_authority_after_reflog_expiry(
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
 
 
-def test_backup_is_not_authority_for_another_association_or_unrelated_tip(pr_repo):
+def test_backup_is_not_authority_for_another_association_or_unrelated_tip(pr_repo: Any) -> None:
     config, wid, path, _, branch, old = _prepare(pr_repo)
     assert git_collab.sync_forward(wid, config)
     record = _record(wid)
@@ -476,7 +500,7 @@ def test_backup_is_not_authority_for_another_association_or_unrelated_tip(pr_rep
     assert _git("rev-parse", f"origin/{branch}", cwd=path) == old
 
 
-def test_corrupt_checkpoint_is_reported_without_publication(pr_repo, capsys):
+def test_corrupt_checkpoint_is_reported_without_publication(pr_repo: Any, capsys: pytest.CaptureFixture[str]) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     assert git_collab.sync_forward(wid, config)
     pr_recovery._path(str(path)).write_text('{"version": 1, "local_head": []}', encoding="utf-8")

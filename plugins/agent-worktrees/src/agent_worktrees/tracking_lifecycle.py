@@ -3,18 +3,14 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from . import source_path_admission
 
 if TYPE_CHECKING:
     from . import tracking
     from .receiving_allocation import ReceivingAllocation
     from .worktree_machine_identity import WorktreeMachineIdentity
-
-
-def _tracking():
-    from . import tracking as tracking_mod
-
-    return tracking_mod
 
 
 class SessionLifecycleError(ValueError):
@@ -36,7 +32,7 @@ def yielded_head_session(record: tracking.WorktreeRecord) -> str | None:
     return latest.session_id if entry is not None and entry.state == "yielded" else None
 
 
-def listing_head_session(record: tracking.WorktreeRecord, row: dict) -> str | None:
+def listing_head_session(record: tracking.WorktreeRecord, row: dict[str, Any]) -> str | None:
     """The head a worktree listing shows: the resolved head, else a yielded one
     (marked ``head_yielded`` on *row*: resumable until a successor registers)."""
     head = getattr(record, "resolved_head_session", None)
@@ -109,7 +105,7 @@ def _next_lifecycle_revision(
             continue
         entry.relation_revision = record.lifecycle_revision
         dirty.add(session_id)
-    record._session_projection_dirty = dirty
+    setattr(record, "_session_projection_dirty", dirty)
     return record.lifecycle_revision
 
 
@@ -122,7 +118,7 @@ def _append_head_transition(
     at: str | None = None,
     related_session_ids: tuple[str, ...] = (),
 ) -> tracking.HeadTransition:
-    tracking = _tracking()
+    from . import tracking
     if session_id is not None and record.session_entry(session_id) is None:
         raise SessionLifecycleError(
             f"session {session_id} is not tracked on worktree {record.worktree_id}"
@@ -181,7 +177,7 @@ def open_handoff(
     save: bool = True,
     live_cutover: bool = False,
 ) -> tracking.SessionHandoff:
-    tracking = _tracking()
+    from . import tracking
     if not token:
         raise SessionLifecycleError("handoff token must not be empty")
     predecessor = record.session_entry(predecessor_id)
@@ -237,7 +233,7 @@ def link_handoff(
     linked_at: str | None = None,
     save: bool = True,
 ) -> tracking.SessionHandoff:
-    tracking = _tracking()
+    from . import tracking
     successor = record.session_entry(successor_id)
     if successor is None:
         raise SessionLifecycleError(
@@ -318,7 +314,7 @@ def associate_handoff_candidate(
     associated_at: str | None = None,
     save: bool = True,
 ) -> tracking.SessionHandoff:
-    tracking = _tracking()
+    from . import tracking
     successor = record.session_entry(session_id)
     if successor is None:
         raise SessionLifecycleError(
@@ -442,7 +438,7 @@ def set_head_session(
     *,
     save: bool = True,
 ) -> None:
-    tracking = _tracking()
+    from . import tracking
     entry = record.session_entry(session_id)
     if entry is None or entry.state != "active":
         raise SessionLifecycleError(
@@ -463,7 +459,7 @@ def conclude_session(
     handoff_token: str | None = None,
     save: bool = True,
 ) -> None:
-    tracking = _tracking()
+    from . import tracking
     if state not in tracking._CONCLUDED_SESSION_STATES:
         raise SessionLifecycleError(
             f"conclude state must be one of {tracking._CONCLUDED_SESSION_STATES}, got {state!r}"
@@ -517,7 +513,7 @@ def link_succession(
     handoff_token: str | None = None,
     save: bool = True,
 ) -> None:
-    tracking = _tracking()
+    from . import tracking
     pred = record.session_entry(predecessor_id)
     succ = record.session_entry(successor_id)
     if pred is None:
@@ -562,6 +558,7 @@ def link_succession(
         tracking.save_record(record)
 
 
+@source_path_admission.creation
 def create_new_record(
     worktree_id: str,
     branch: str,
@@ -591,7 +588,7 @@ def create_new_record(
     receiving_allocation: ReceivingAllocation | None = None,
     creation_nonce: str | None = None,
 ) -> tracking.WorktreeRecord:
-    tracking = _tracking()
+    from . import tracking
     from .tracking_controller_relations import (
         _derive_initial_controller_relations,
         _mark_controller_projection_dirty,
@@ -668,6 +665,7 @@ def create_new_record(
     return record
 
 
+@source_path_admission.creation
 def create_new_record_if_absent(
     worktree_id: str,
     branch: str,
@@ -686,7 +684,7 @@ def create_new_record_if_absent(
     machine_identity_factory: Callable[[], WorktreeMachineIdentity | None] | None = None,
     pair_kind: str | None = None,
 ) -> tuple[tracking.WorktreeRecord, bool]:
-    tracking = _tracking()
+    from . import tracking
     path = tracking_path / f"{worktree_id}.yaml"
     tracking_path.mkdir(parents=True, exist_ok=True)
     with tracking._RecordLock(path, require_sidecar=True):
@@ -723,6 +721,6 @@ def create_new_record_if_absent(
             creation_nonce=secrets.token_hex(8),
         )
         tracking._save_record_unlocked(record, path)
-    record._loaded_from = path
+    setattr(record, "_loaded_from", path)
     tracking._flush_session_projections(record)
     return record, True

@@ -89,10 +89,12 @@ def capabilities(config: cfg.Config, repository: str) -> dict[str, Any]:
         raise ValueError("Author target needs a registered repository PR binding")
     pr = resolution.repo_config.pr
     supported = pr.enabled and pr.provider == "azure-devops"
+    qualified_create = pr.enabled and pr.provider in ("azure-devops", "github")
     return {
         "schema": SCHEMA, "version": 1, "repo": repository, "provider": pr.provider,
         "operations": {
-            "qualified-create": supported,
+            "qualified-create": qualified_create,
+            "foreign-source-repo": pr.enabled and pr.provider == "github",
             "metadata-update": pr.enabled and pr.provider in ("azure-devops", "github", "gitea"),
             "source-push": supported, "remote-evidence": False,
             "worker-policy-config": pr.enabled and pr.provider in ("azure-devops", "github"),
@@ -103,7 +105,7 @@ def capabilities(config: cfg.Config, repository: str) -> dict[str, Any]:
             "thread-reopen": supported,
             "local-source-complete": pr.enabled and pr.provider in ("github", "gitea", "azure-devops"),
         },
-        "source_adapter": "reachable-workspace" if supported else None,
+        "source_adapter": "reachable-workspace" if qualified_create else None,
         "completion_authority": "target-repository-policy",
     }
 

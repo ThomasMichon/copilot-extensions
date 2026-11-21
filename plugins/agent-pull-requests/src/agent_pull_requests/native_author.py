@@ -106,14 +106,19 @@ def capability(args: Any, prefix: list[str], operation: str | None = None) -> di
 def create_options(args: Any, prefix: list[str]) -> list[str]:
     workspace = getattr(args, "source_workspace", None)
     expected = getattr(args, "expected_head", None)
+    source_repo = getattr(args, "source_repo", None)
+    source_options = [f"--source-repo={source_repo}"] if source_repo else []
     if bool(workspace) != bool(expected):
         raise ValueError("--source-workspace and --expected-head must be supplied together")
     if not workspace:
-        if getattr(args, "body_file", None) or config_options(args):
-            capability(args, prefix, "qualified-create")
-        return config_options(args)
-    capability(args, prefix, "qualified-create")
-    return [f"--source-workspace={workspace}", f"--expected-head={expected}", *config_options(args)]
+        if source_repo or getattr(args, "body_file", None) or config_options(args):
+            capability(args, prefix, "foreign-source-repo" if source_repo else "qualified-create")
+        return [*source_options, *config_options(args)]
+    declared = capability(args, prefix, "qualified-create")
+    if source_repo and declared["operations"].get("foreign-source-repo") is not True:
+        raise ValueError("Selected Worktrees runtime does not advertise foreign-source-repo; no creation attempted")
+    return [f"--source-workspace={workspace}", f"--expected-head={expected}",
+            *source_options, *config_options(args)]
 
 
 def readiness_failure(repo: str, number: int, error: str, *,
@@ -137,7 +142,9 @@ def run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
 
 def _run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
     if args.command == "author-capabilities":
-        return 0, {**capability(args, prefix), "frontend": {"worker-policy-config": True}}
+        return 0, {**capability(args, prefix), "frontend": {
+            "worker-policy-config": True, "foreign-source-repo": True,
+        }}
     if args.command == "ready" and args.number < 1:
         raise ValueError("--number must be positive")
     operation = {"update": "metadata-update", "push": "source-push", "ready": "draft-ready"}[args.command]

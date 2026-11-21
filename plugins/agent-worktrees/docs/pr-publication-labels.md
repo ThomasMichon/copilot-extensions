@@ -29,7 +29,7 @@ An originating caller need not configure every target repository. Supply a
 per-command policy instead (repeat `--publication-label` for multiple labels):
 
 ```text
-agent-worktrees create-pr --repo example/project --from-branch contributor:topic --publication-origin control-plane --publication-label source:control-plane
+agent-worktrees create-pr --repo example/project --from-branch contributor:topic --source-repo contributor/source-fork --publication-origin control-plane --publication-label source:control-plane
 agent-worktrees push-changes --publication-origin control-plane --publication-label source:control-plane
 ```
 

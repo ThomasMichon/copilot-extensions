@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import shutil
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, TypeVar, cast
 
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, pr_ops, tracking
+from agent_worktrees import git_ops, pr_ops, pr_publish, tracking
+from agent_worktrees.tracking_lifecycle import create_new_record
 from agent_worktrees.pr_contract import PRSnapshot
 from agent_worktrees.providers import (
     ProviderError,
@@ -18,13 +22,25 @@ from agent_worktrees.providers import (
     attribution,
     base,
 )
+PrRepo = tuple[cfg.Config, str, Path, Path]
+T = TypeVar("T")
+
+
+def _present(value: T | None) -> T:
+    assert value is not None
+    return value
+
+
+def _capture(result: T, output: dict[str, Any], **fields: Any) -> T:
+    output.update(fields)
+    return result
 
 # ---------------------------------------------------------------------------
 # base: credential resolution + registry + scope builder
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def provider_record_repo(tmp_path, monkeypatch):
+def provider_record_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PrRepo:
     tracking_dir = tmp_path / "tracking"
     tracking_dir.mkdir()
     config = cfg.Config(
@@ -37,7 +53,7 @@ def provider_record_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_dir)
     monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
     wid = "provider-record-test"
-    tracking.create_new_record(
+    create_new_record(
         wid, f"worktree/{wid}", str(tmp_path / "worktree"),
         "ext", "test", "linux", tracking_dir,
     )
@@ -45,22 +61,22 @@ def provider_record_repo(tmp_path, monkeypatch):
 
 
 class TestResolveToken:
-    def test_token_env(self, monkeypatch):
+    def test_token_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MY_TOKEN", "secret123")
         prcfg = cfg.PRConfig(token_env="MY_TOKEN")
         assert base.resolve_token(prcfg) == "secret123"
 
-    def test_token_command_precedence(self, monkeypatch):
+    def test_token_command_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MY_TOKEN", "from-env")
         # `echo` is portable across the Windows (cmd.exe) and POSIX shells the
         # test may run under; `printf` is not a cmd.exe builtin.
         prcfg = cfg.PRConfig(token_env="MY_TOKEN", token_command="echo cmd-tok")
         assert base.resolve_token(prcfg) == "cmd-tok"
 
-    def test_none_when_unset(self):
+    def test_none_when_unset(self) -> None:
         assert base.resolve_token(cfg.PRConfig()) is None
 
-    def test_command_failure_falls_back_to_env(self, monkeypatch):
+    def test_command_failure_falls_back_to_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MY_TOKEN", "env-tok")
         prcfg = cfg.PRConfig(token_env="MY_TOKEN", token_command="exit 3")
         assert base.resolve_token(prcfg) == "env-tok"
@@ -69,7 +85,7 @@ class TestResolveToken:
 class TestAccountTokenForSlug:
     """The gh-ops half of repo-scoped identity (v1: github-only)."""
 
-    def test_explicit_config_token_wins(self, monkeypatch):
+    def test_explicit_config_token_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # An explicit vault/env binding always wins -- no account lookup, no gh.
         monkeypatch.setenv("MY_TOKEN", "vault-tok")
         monkeypatch.setattr(
@@ -79,7 +95,7 @@ class TestAccountTokenForSlug:
         prcfg = cfg.PRConfig(provider="github", token_env="MY_TOKEN")
         assert base.account_token_for_slug("example-org/proj", prcfg) == "vault-tok"
 
-    def test_github_resolves_account_token(self, monkeypatch):
+    def test_github_resolves_account_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
             lambda slug, **kwargs: "host-acct",
@@ -95,7 +111,7 @@ class TestAccountTokenForSlug:
         prcfg = cfg.PRConfig(provider="github")
         assert base.account_token_for_slug("example-org/proj", prcfg) == "gh-tok"
 
-    def test_owner_is_active_account_uses_ambient_auth(self, monkeypatch):
+    def test_owner_is_active_account_uses_ambient_auth(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # When the repo's account IS the active gh account, don't mint/inject a
         # `--user` token (it can be stale and 401) -- fall through to None so the
         # provider uses gh's dynamic ambient auth. Regression for the pr-* 401.
@@ -114,7 +130,7 @@ class TestAccountTokenForSlug:
         prcfg = cfg.PRConfig(provider="github")
         assert base.account_token_for_slug("example-org/proj", prcfg) is None
 
-    def test_cross_account_still_mints_user_token(self, monkeypatch):
+    def test_cross_account_still_mints_user_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A genuinely different owner still mints that account's token so the PR
         # authenticates as the owning identity.
         monkeypatch.setattr(
@@ -131,7 +147,7 @@ class TestAccountTokenForSlug:
         prcfg = cfg.PRConfig(provider="github")
         assert base.account_token_for_slug("example-org/proj", prcfg) == "minted"
 
-    def test_non_github_provider_is_none(self, monkeypatch):
+    def test_non_github_provider_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # v1 is github-only: other providers keep ambient-auth behavior.
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
@@ -140,14 +156,14 @@ class TestAccountTokenForSlug:
         prcfg = cfg.PRConfig(provider="gitea")
         assert base.account_token_for_slug("example-org/proj", prcfg) is None
 
-    def test_github_no_account_is_none(self, monkeypatch):
+    def test_github_no_account_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug", lambda slug, **kwargs: None,
         )
         prcfg = cfg.PRConfig(provider="github")
         assert base.account_token_for_slug("", prcfg) is None
 
-    def test_github_account_without_gh_token_is_none(self, monkeypatch):
+    def test_github_account_without_gh_token_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # An unconfigured owner hint without a token retains legacy behavior.
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
@@ -164,50 +180,49 @@ class TestAccountTokenForSlug:
 
 
 class TestGetProvider:
-    def test_known_providers(self):
+    def test_known_providers(self) -> None:
         assert base.get_provider("gitea").name == "gitea"
         assert base.get_provider("github").name == "github"
         assert base.get_provider("azure-devops").name == "azure-devops"
 
-    def test_unknown_raises(self):
+    def test_unknown_raises(self) -> None:
         with pytest.raises(ProviderError, match="Unknown PR provider"):
             base.get_provider("bitbucket")
 
 
 class TestRunCli:
-    def test_resolves_pathext_shim(self, monkeypatch):
+    def test_resolves_pathext_shim(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A Windows batch shim (az -> az.cmd) is resolvable only via PATHEXT;
         # run_cli must resolve it via shutil.which, not hand the bare name to
         # CreateProcess (which only appends .exe -> WinError 2).
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
-            base.shutil, "which",
+            shutil, "which",
             lambda name, path=None: r"C:\tools\az.cmd" if name == "az" else None)
         monkeypatch.setattr(
-            base.subprocess, "run",
-            lambda args, **kw: (captured.__setitem__("argv0", args[0]),
-                                subprocess.CompletedProcess(args, 0, "ok", ""))[1])
+            subprocess, "run",
+            lambda args, **kw: _capture(subprocess.CompletedProcess(args, 0, "ok", ""), captured, argv0=args[0]))
         r = base.run_cli(["az", "--version"])
         assert captured["argv0"] == r"C:\tools\az.cmd"
         assert r.returncode == 0
 
-    def test_never_raises_on_spawn_failure(self, monkeypatch):
+    def test_never_raises_on_spawn_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A missing exe / spawn error must become a returncode=127 result, never
         # an exception that aborts an unrelated command (create-pr's git work).
         secret = "synthetic-secret-value"
-        monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
+        monkeypatch.setattr(shutil, "which", lambda name, path=None: None)
 
-        def boom(args, **kw):
+        def boom(args: Any, **kw: Any) -> Any:
             raise FileNotFoundError(2, "The system cannot find the file specified")
 
-        monkeypatch.setattr(base.subprocess, "run", boom)
+        monkeypatch.setattr(subprocess, "run", boom)
         r = base.run_cli(["definitely-missing", "--token", secret])
         assert r.returncode == 127
         assert "cannot find the file" in r.stderr
         assert secret not in repr(r.args)
         assert r.args == ["definitely-missing", "--token", "[REDACTED]"]
 
-    def test_timeout_becomes_sanitized_result(self, monkeypatch):
+    def test_timeout_becomes_sanitized_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         secret = "synthetic-secret-value"
         argv = [
             "curl",
@@ -215,12 +230,12 @@ class TestRunCli:
             f"Authorization: token {secret}",
             "https://example.com/api",
         ]
-        monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
+        monkeypatch.setattr(shutil, "which", lambda name, path=None: None)
 
-        def timeout(args, **kw):
+        def timeout(args: Any, **kw: Any) -> Any:
             raise subprocess.TimeoutExpired(cmd=args, timeout=kw["timeout"])
 
-        monkeypatch.setattr(base.subprocess, "run", timeout)
+        monkeypatch.setattr(subprocess, "run", timeout)
         result = base.run_cli(argv, timeout=7)
 
         assert result.returncode == 124
@@ -228,12 +243,12 @@ class TestRunCli:
         assert secret not in repr(result.args)
         assert result.args[2] == "Authorization: [REDACTED]"
 
-    def test_success_result_does_not_retain_secret_argv(self, monkeypatch):
+    def test_success_result_does_not_retain_secret_argv(self, monkeypatch: pytest.MonkeyPatch) -> None:
         secret = "synthetic-secret-value"
         argv = ["provider", "--token", secret, "query"]
-        monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
+        monkeypatch.setattr(shutil, "which", lambda name, path=None: None)
         monkeypatch.setattr(
-            base.subprocess,
+            subprocess,
             "run",
             lambda args, **kw: subprocess.CompletedProcess(args, 0, "ok", ""),
         )
@@ -245,7 +260,7 @@ class TestRunCli:
         assert secret not in repr(result.args)
         assert result.args == ["provider", "--token", "[REDACTED]", "query"]
 
-    def test_utf8_output_and_input_survive_any_locale(self):
+    def test_utf8_output_and_input_survive_any_locale(self) -> None:
         """Provider CLIs speak UTF-8 (Copilot review bodies carry emoji): the output
         decodes and a piped body round-trips whatever the locale code page is, and
         an undecodable byte is replaced rather than failing the read."""
@@ -260,7 +275,7 @@ class TestRunCli:
 
 
 class TestScopeFromResult:
-    def test_builds_scope_and_templates_labels(self):
+    def test_builds_scope_and_templates_labels(self) -> None:
         prcfg = cfg.PRConfig(api_base="https://h/gitea", labels=("auto-merge", "source:{machine}"))
         scope = base.scope_from_create_result(
             {"repo": "o/r", "branch": "feature/x", "default_branch": "master"},
@@ -278,25 +293,25 @@ class TestScopeFromResult:
 # ---------------------------------------------------------------------------
 
 class TestAttribution:
-    def test_build_and_parse_round_trip(self):
+    def test_build_and_parse_round_trip(self) -> None:
         marker = attribution.build_marker(
             "wt-123", machine="anomalous-potato", session="sess-9", head="abc123",
         )
-        fields = attribution.parse_marker(f"Some body\n\n{marker}\n")
+        fields = _present(attribution.parse_marker(f"Some body\n\n{marker}\n"))
         assert fields == {
             "worktree": "wt-123", "machine": "anomalous-potato",
             "session": "sess-9", "head": "abc123",
         }
 
-    def test_append_replaces_existing_marker(self):
+    def test_append_replaces_existing_marker(self) -> None:
         m1 = attribution.build_marker("wt-1")
         m2 = attribution.build_marker("wt-2")
         body = attribution.append_marker("Hello", m1)
         body = attribution.append_marker(body, m2)
         assert body.count("agent-worktrees:source") == 1
-        assert attribution.parse_marker(body)["worktree"] == "wt-2"
+        assert _present(attribution.parse_marker(body))["worktree"] == "wt-2"
 
-    def test_parse_none_when_absent(self):
+    def test_parse_none_when_absent(self) -> None:
         assert attribution.parse_marker("no marker here") is None
 
 
@@ -305,7 +320,7 @@ class TestMayPublishCodename:
     helper both codename-marker publish call sites use (rounds 8/14/17/22/
     32/34)."""
 
-    def test_built_in_publishes_regardless_of_explicit_opt_in(self):
+    def test_built_in_publishes_regardless_of_explicit_opt_in(self) -> None:
         assert attribution.may_publish_codename(
             codename_source="built-in", source_attribution_configured=False,
         ) is True
@@ -313,7 +328,7 @@ class TestMayPublishCodename:
             codename_source="built-in", source_attribution_configured=True,
         ) is True
 
-    def test_custom_requires_explicit_opt_in(self):
+    def test_custom_requires_explicit_opt_in(self) -> None:
         assert attribution.may_publish_codename(
             codename_source="custom", source_attribution_configured=False,
         ) is False
@@ -321,7 +336,7 @@ class TestMayPublishCodename:
             codename_source="custom", source_attribution_configured=True,
         ) is True
 
-    def test_missing_codename_source_never_publishes(self):
+    def test_missing_codename_source_never_publishes(self) -> None:
         # round-32 finding: explicit opt-in only bypasses the built-in/
         # custom ALLOCATION distinction, never provenance itself -- a
         # legacy record with no codename_source at all must never publish,
@@ -333,7 +348,7 @@ class TestMayPublishCodename:
             codename_source=None, source_attribution_configured=True,
         ) is False
 
-    def test_unrecognized_codename_source_never_publishes(self):
+    def test_unrecognized_codename_source_never_publishes(self) -> None:
         # round-12 finding: checked as `== "built-in"`, never the inverted
         # `!= "custom"` shape -- an unrecognized/malformed stored value
         # (a typo, a future value, hand-edited YAML) must fail closed
@@ -347,7 +362,7 @@ class TestMayPublishCodename:
 class TestValidateEffectiveHead:
     """pr-attribution-codenames Phase 5: branch-name leak class."""
 
-    def test_true_attribution_is_always_a_noop(self):
+    def test_true_attribution_is_always_a_noop(self) -> None:
         # source_attribution: true already accepts full raw exposure -- any
         # head is fine, including one containing the worktree id.
         attribution.validate_effective_head(
@@ -357,7 +372,7 @@ class TestValidateEffectiveHead:
             source_attribution=True,
         )
 
-    def test_safe_default_pattern_passes(self):
+    def test_safe_default_pattern_passes(self) -> None:
         attribution.validate_effective_head(
             "pr/my-change-abcd",
             worktree_id="atlas-core-20260101-abcd",
@@ -371,7 +386,7 @@ class TestValidateEffectiveHead:
             source_attribution="codename",
         )
 
-    def test_raw_worktree_id_in_head_is_blocked(self):
+    def test_raw_worktree_id_in_head_is_blocked(self) -> None:
         with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
             attribution.validate_effective_head(
                 "worktree/atlas-core-20260101-abcd",
@@ -380,7 +395,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_machine_name_in_head_is_blocked(self):
+    def test_machine_name_in_head_is_blocked(self) -> None:
         with pytest.raises(attribution.BranchLeakError, match="machine name"):
             attribution.validate_effective_head(
                 "user/atlas-core/my-change",
@@ -391,7 +406,7 @@ class TestValidateEffectiveHead:
 
     def test_recorded_machine_in_head_is_blocked_even_if_live_machine_differs(
         self,
-    ):
+    ) -> None:
         # A renamed/migrated machine: the live config machine no longer
         # matches the head's embedded identity, but the worktree's originally
         # RECORDED machine still does -- both must be checked.
@@ -403,7 +418,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_multi_machine_tuple_with_no_match_passes(self):
+    def test_multi_machine_tuple_with_no_match_passes(self) -> None:
         attribution.validate_effective_head(
             "pr/my-change-abcd",
             worktree_id="wt-abcd",
@@ -411,7 +426,7 @@ class TestValidateEffectiveHead:
             source_attribution=False,
         )
 
-    def test_empty_machine_in_tuple_is_ignored(self):
+    def test_empty_machine_in_tuple_is_ignored(self) -> None:
         # A record with no machine recorded yet (or in tests, an empty
         # string) must not accidentally match every branch name.
         attribution.validate_effective_head(
@@ -421,7 +436,7 @@ class TestValidateEffectiveHead:
             source_attribution=False,
         )
 
-    def test_machine_match_is_case_insensitive(self):
+    def test_machine_match_is_case_insensitive(self) -> None:
         with pytest.raises(attribution.BranchLeakError, match="machine name"):
             attribution.validate_effective_head(
                 "user/Test/reused-head",
@@ -430,7 +445,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_worktree_id_match_is_case_insensitive(self):
+    def test_worktree_id_match_is_case_insensitive(self) -> None:
         with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
             attribution.validate_effective_head(
                 "worktree/ATLAS-CORE-20260101-ABCD",
@@ -439,7 +454,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_unresolved_template_marker_is_blocked(self):
+    def test_unresolved_template_marker_is_blocked(self) -> None:
         with pytest.raises(
             attribution.BranchLeakError, match="unresolved template marker"
         ):
@@ -450,7 +465,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_unresolved_format_spec_variant_is_blocked(self):
+    def test_unresolved_format_spec_variant_is_blocked(self) -> None:
         # pr_head_name renders head_pattern with str.format(**tokens), which
         # accepts conversion/format-spec variants like `{machine!s}` and
         # substitutes the SAME underlying value -- the defensive unresolved-
@@ -465,7 +480,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_unresolved_nested_format_spec_is_blocked(self):
+    def test_unresolved_nested_format_spec_is_blocked(self) -> None:
         # str.format's mini-language allows a NESTED replacement field
         # inside a format spec (`{machine:{width}}`) -- a regex cannot
         # reliably recognize this, but the parser str.format itself uses
@@ -482,7 +497,7 @@ class TestValidateEffectiveHead:
 
     def test_unresolved_field_nested_inside_a_non_risky_fields_spec_is_blocked(
         self,
-    ):
+    ) -> None:
         # Formatter.parse only returns TOP-LEVEL field names -- a field
         # nested inside a DIFFERENT (non-risky) field's format_spec, e.g.
         # `{slug:{machine}}` (machine nested inside slug's spec), is not
@@ -498,7 +513,7 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
-    def test_blocked_under_codename_mode_too(self):
+    def test_blocked_under_codename_mode_too(self) -> None:
         # codename mode is still "not true" -- a raw identifier reaching the
         # branch name defeats the whole point of the codename marker.
         with pytest.raises(attribution.BranchLeakError):
@@ -509,7 +524,7 @@ class TestValidateEffectiveHead:
                 source_attribution="codename",
             )
 
-    def test_empty_head_is_a_noop(self):
+    def test_empty_head_is_a_noop(self) -> None:
         attribution.validate_effective_head(
             "", worktree_id="wt-abcd", machine="atlas-core",
             source_attribution=False,
@@ -519,24 +534,24 @@ class TestValidateEffectiveHead:
 class TestAuditSourceAttributionRisk:
     """pr-attribution-codenames Phase 5: config-only migration audit."""
 
-    def test_true_attribution_has_no_findings(self):
+    def test_true_attribution_has_no_findings(self) -> None:
         assert attribution.audit_source_attribution_risk(
             source_attribution=True, head_pattern="user/{machine}/{slug}",
         ) == []
 
-    def test_safe_pattern_has_no_findings(self):
+    def test_safe_pattern_has_no_findings(self) -> None:
         assert attribution.audit_source_attribution_risk(
             source_attribution=False, head_pattern="pr/{slug}-{suffix}",
         ) == []
 
-    def test_risky_pattern_flagged_when_false(self):
+    def test_risky_pattern_flagged_when_false(self) -> None:
         findings = attribution.audit_source_attribution_risk(
             source_attribution=False, head_pattern="user/{machine}/{slug}",
         )
         assert len(findings) == 1
         assert "{machine}" in findings[0]
 
-    def test_risky_format_spec_variant_flagged(self):
+    def test_risky_format_spec_variant_flagged(self) -> None:
         # A pattern using `{machine!s}` or `{machine:>10}` renders to the
         # SAME leaking value via str.format as the bare `{machine}` form --
         # the audit must not silently pass it as safe.
@@ -545,7 +560,7 @@ class TestAuditSourceAttributionRisk:
         )
         assert len(findings) == 1
 
-    def test_risky_nested_format_spec_flagged(self):
+    def test_risky_nested_format_spec_flagged(self) -> None:
         # {machine:{width}} nests a replacement field inside the format
         # spec -- a regex cannot reliably recognize this, but the audit
         # (via string.Formatter) must still flag it.
@@ -554,7 +569,7 @@ class TestAuditSourceAttributionRisk:
         )
         assert len(findings) == 1
 
-    def test_risky_field_nested_inside_non_risky_fields_spec_flagged(self):
+    def test_risky_field_nested_inside_non_risky_fields_spec_flagged(self) -> None:
         # `{slug:{machine}}` -- machine is nested inside a DIFFERENT
         # (non-risky) field's format_spec, not a top-level parse result.
         # The static audit must recurse into every format_spec to catch it.
@@ -563,7 +578,7 @@ class TestAuditSourceAttributionRisk:
         )
         assert len(findings) == 1
 
-    def test_risky_pattern_flagged_when_absent(self):
+    def test_risky_pattern_flagged_when_absent(self) -> None:
         # An omitted key parses to None (never seen by attribution.py itself
         # once a Config normalizes it), but the audit must flag it exactly
         # like an explicit false, with a distinguishing message.
@@ -573,7 +588,7 @@ class TestAuditSourceAttributionRisk:
         assert len(findings) == 1
         assert "absent" in findings[0]
 
-    def test_absent_key_message_reflects_codename_default(self):
+    def test_absent_key_message_reflects_codename_default(self) -> None:
         # Round-5 review finding: codename-attribution-by-default flipped
         # the runtime default from False to "codename" -- the omitted-key
         # message must describe THAT default, and its remedy must match
@@ -588,7 +603,7 @@ class TestAuditSourceAttributionRisk:
         assert "codename" in findings[0]
         assert "migrate to source_attribution: true or codename" not in findings[0]
 
-    def test_absent_key_with_safe_head_pattern_has_no_findings(self):
+    def test_absent_key_with_safe_head_pattern_has_no_findings(self) -> None:
         # Phase 2 (round-20 finding): the audit already short-circuits to
         # zero findings whenever `head_pattern_leak_risk` itself is empty,
         # regardless of `source_attribution`'s value -- an absent-key repo
@@ -599,7 +614,7 @@ class TestAuditSourceAttributionRisk:
             source_attribution=None, head_pattern="pr/{slug}-{suffix}",
         ) == []
 
-    def test_worktree_id_token_is_never_flagged(self):
+    def test_worktree_id_token_is_never_flagged(self) -> None:
         # {worktree_id} is not part of pr_head_name's actual rendering
         # contract (only prefix/slug/suffix/username/machine are) -- a
         # pattern containing it raises inside str.format and falls back to
@@ -611,7 +626,7 @@ class TestAuditSourceAttributionRisk:
         )
         assert findings == []
 
-    def test_risky_pattern_flagged_under_codename_mode(self):
+    def test_risky_pattern_flagged_under_codename_mode(self) -> None:
         findings = attribution.audit_source_attribution_risk(
             source_attribution="codename", head_pattern="{machine}/{slug}",
         )
@@ -623,7 +638,7 @@ class TestAuditSourceAttributionRisk:
         assert "migrate to source_attribution: true or codename" not in findings[0]
         assert "true" in findings[0]
 
-    def test_worktree_id_alongside_machine_only_flags_machine(self):
+    def test_worktree_id_alongside_machine_only_flags_machine(self) -> None:
         findings = attribution.audit_source_attribution_risk(
             source_attribution=False, head_pattern="{machine}/{worktree_id}",
         )
@@ -635,7 +650,7 @@ class TestAuditSourceAttributionRisk:
 # Gitea provider (curl seam mocked)
 # ---------------------------------------------------------------------------
 
-def _proc(stdout="", returncode=0, stderr=""):
+def _proc(stdout: str = "", returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=[], returncode=returncode,
                                        stdout=stdout, stderr=stderr)
 
@@ -644,11 +659,11 @@ class _NoSleep:
     """Stand-in for the ``time`` module so retry backoff doesn't slow tests."""
 
     @staticmethod
-    def sleep(_seconds):
+    def sleep(_seconds: float) -> None:
         return None
 
 
-def _label_endpoint(args, label_post, applied, id_name):
+def _label_endpoint(args: list[str], label_post: dict[str, Any], applied: set[int], id_name: dict[int, str]) -> subprocess.CompletedProcess[str]:
     """Fake the ``/issues/{n}/labels`` endpoint for both POST and verify-GET.
 
     POST captures the attached ids (into ``label_post`` + ``applied``); the
@@ -668,7 +683,7 @@ def _label_endpoint(args, label_post, applied, id_name):
 
 
 class TestGiteaProvider:
-    def test_observe_head_uses_server_date(self, monkeypatch):
+    def test_observe_head_uses_server_date(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
         payload = json.dumps({"number": 42, "head": {"sha": "abc"}})
@@ -690,13 +705,13 @@ class TestGiteaProvider:
         assert observed.head_sha == "abc"
         assert observed.observed_at == "2026-09-05T06:01:02+00:00"
 
-    def test_publish_source_marker_creates_issue_comment(self, monkeypatch):
+    def test_publish_source_marker_creates_issue_comment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
-        captured = {}
+        captured: dict[str, Any] = {}
         provider = gitea.GiteaProvider()
 
-        def fake_curl(method, url, token, *, payload=None):
+        def fake_curl(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             captured.update(method=method, url=url, token=token, payload=payload)
             return 200, "{}"
 
@@ -708,13 +723,13 @@ class TestGiteaProvider:
         assert captured["method"] == "POST"
         assert captured["payload"] == {"body": "updated"}
 
-    def test_combined_status_state_maps_gitea_states(self, monkeypatch):
+    def test_combined_status_state_maps_gitea_states(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # #225: the combined commit status is normalized onto the pr_contract
         # vocabulary (failure/error -> failure; pending/warning -> pending; etc).
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
 
-        def make(state, statuses=(("x",),)):
+        def make(state: str, statuses: Any = (("x",),)) -> Any:
             body = json.dumps({"state": state,
                                "statuses": [{"id": 1}] if statuses else []})
             monkeypatch.setattr(prov, "_curl",
@@ -732,7 +747,7 @@ class TestGiteaProvider:
         make("pending", statuses=())
         assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == "none"
 
-    def test_combined_status_state_best_effort_on_error(self, monkeypatch):
+    def test_combined_status_state_best_effort_on_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A non-200 or malformed status read never breaks the snapshot -> "".
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
@@ -740,12 +755,12 @@ class TestGiteaProvider:
         assert prov._combined_status_state("o/r", "sha", "https://h/gitea", "t") == ""
         assert prov._combined_status_state("o/r", "", "https://h/gitea", "t") == ""  # no sha
 
-    def test_head_contained_in_base_detects_merged_content(self, monkeypatch):
+    def test_head_contained_in_base_detects_merged_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # #1375/#1703: 0 commits ahead => base already contains head => merged.
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
 
-        def curl(state_body):
+        def curl(state_body: Any) -> Any:
             monkeypatch.setattr(prov, "_curl", lambda m, u, t, **kw: (200, state_body))
 
         curl(json.dumps({"total_commits": 0}))
@@ -759,7 +774,7 @@ class TestGiteaProvider:
         assert prov.head_contained_in_base(
             "o/r", "master", "abc", api_base="https://h/gitea", token="t") is True
 
-    def test_head_contained_in_base_unknown_on_error_or_missing(self, monkeypatch):
+    def test_head_contained_in_base_unknown_on_error_or_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
         # Missing base/head -> None (never self-heal on nothing).
@@ -770,19 +785,19 @@ class TestGiteaProvider:
         assert prov.head_contained_in_base(
             "o/r", "master", "abc", api_base="https://h/gitea", token="t") is None
 
-    def test_head_contained_in_base_unsupported_on_github_and_azure(self):
+    def test_head_contained_in_base_unsupported_on_github_and_azure(self) -> None:
         from agent_worktrees.providers import azure_devops, github
         assert github.GitHubProvider().head_contained_in_base("o/r", "main", "abc") is None
         assert azure_devops.AzureDevOpsProvider().head_contained_in_base(
             "o/r", "main", "abc") is None
 
-    def test_create_pull_parses_url_and_number(self, monkeypatch):
+    def test_create_pull_parses_url_and_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/42",
                             "number": 42, "state": "open"})
         calls = []
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             calls.append(args)
             return _proc(stdout=body + "\n201")
 
@@ -796,20 +811,20 @@ class TestGiteaProvider:
         # POSTs to the pulls endpoint with the token header.
         assert any("/repos/o/r/pulls" in a for call in calls for a in call)
 
-    def test_create_pull_requires_token(self):
+    def test_create_pull_requires_token(self) -> None:
         from agent_worktrees.providers import gitea
         scope = PRScope(repo="o/r", head="h", base="b", title="T",
                         api_base="https://h/gitea")
         with pytest.raises(ProviderError, match="needs a token"):
             gitea.GiteaProvider().create_pull(scope, token=None)
 
-    def test_create_pull_requires_api_base(self):
+    def test_create_pull_requires_api_base(self) -> None:
         from agent_worktrees.providers import gitea
         scope = PRScope(repo="o/r", head="h", base="b", title="T")
         with pytest.raises(ProviderError, match="api_base"):
             gitea.GiteaProvider().create_pull(scope, token="tok")
 
-    def test_http_error_raises(self, monkeypatch):
+    def test_http_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         monkeypatch.setattr(gitea, "run_cli",
                             lambda args, **kw: _proc(stdout="boom\n422"))
@@ -818,7 +833,7 @@ class TestGiteaProvider:
         with pytest.raises(ProviderError, match="HTTP 422"):
             gitea.GiteaProvider().create_pull(scope, token="tok")
 
-    def test_get_pull_merged_sets_flag_and_state(self, monkeypatch):
+    def test_get_pull_merged_sets_flag_and_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Gitea reports a squash-merged PR as state "closed" + merged: true.
         from agent_worktrees.providers import gitea
         body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/9",
@@ -830,7 +845,7 @@ class TestGiteaProvider:
         assert res.merged is True
         assert res.state == "merged"
 
-    def test_get_pull_open_is_not_merged(self, monkeypatch):
+    def test_get_pull_open_is_not_merged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/9",
                            "number": 9, "state": "open", "merged": False})
@@ -841,7 +856,7 @@ class TestGiteaProvider:
         assert res.merged is False
         assert res.state == "open"
 
-    def test_get_pull_closed_unmerged_is_not_merged(self, monkeypatch):
+    def test_get_pull_closed_unmerged_is_not_merged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # The #1151 shape: closed without merging -- must NOT read as merged.
         from agent_worktrees.providers import gitea
         body = json.dumps({"html_url": "https://h/gitea/o/r/pulls/9",
@@ -853,7 +868,7 @@ class TestGiteaProvider:
         assert res.merged is False
         assert res.state == "closed"
 
-    def test_apply_labels_paginates_label_lookup(self, monkeypatch):
+    def test_apply_labels_paginates_label_lookup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A label past the first label-list page must still resolve + attach.
         # Gitea returns one page (default 30) per GET; we page with limit=50.
         # Page 1 is a FULL page (50 labels) that does NOT contain the target;
@@ -863,11 +878,11 @@ class TestGiteaProvider:
 
         page1 = [{"name": f"x{i}", "id": i} for i in range(1, 51)]   # full page
         page2 = [{"name": "source:mantis-counter", "id": 228}]            # short -> stop
-        label_post: dict = {}
-        applied: set = set()
+        label_post: dict[str, Any] = {}
+        applied: set[int] = set()
         id_name = {228: "source:mantis-counter"}
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             url = next((a for a in args if isinstance(a, str)
                         and a.startswith("http")), "")
             if "/pulls" in url:
@@ -886,14 +901,14 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["source:mantis-counter"])
+                        labels=("source:mantis-counter",))
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42
         # The page-2 label id was resolved and attached.
         assert label_post == {"labels": [228]}
         assert res.label_error == ""
 
-    def test_apply_labels_retries_transient_page_failure(self, monkeypatch):
+    def test_apply_labels_retries_transient_page_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Regression (#1161 / observed #1319): a *single* transient failure on
         # the label-list page that carries source:<machine> (always page 2)
         # used to make _all_labels return a partial map, silently dropping the
@@ -904,12 +919,12 @@ class TestGiteaProvider:
         page1 = [{"name": "auto-merge", "id": 189}] + \
             [{"name": f"x{i}", "id": i} for i in range(1, 50)]   # full page (50)
         page2 = [{"name": "source:mantis-counter", "id": 228}]
-        label_post: dict = {}
-        applied: set = set()
+        label_post: dict[str, Any] = {}
+        applied: set[int] = set()
         id_name = {189: "auto-merge", 228: "source:mantis-counter"}
         page2_attempts = {"n": 0}
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             url = next((a for a in args if isinstance(a, str)
                         and a.startswith("http")), "")
             if "/pulls" in url:
@@ -931,14 +946,14 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:mantis-counter"])
+                        labels=("auto-merge", "source:mantis-counter"))
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42
         assert page2_attempts["n"] == 2  # retried once
         assert label_post == {"labels": [189, 228]}  # both, sorted
         assert res.label_error == ""
 
-    def test_apply_labels_reattaches_until_verified(self, monkeypatch):
+    def test_apply_labels_reattaches_until_verified(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # The #1326 race: the attach POST returns 200, but the brand-new PR's
         # labels don't reflect on the first read-back. The apply must re-POST
         # and re-verify until the labels are actually present -- "applied" means
@@ -948,12 +963,12 @@ class TestGiteaProvider:
         page1 = [{"name": "auto-merge", "id": 189},
                  {"name": "source:anomalous-potato", "id": 216}]
         id_name = {189: "auto-merge", 216: "source:anomalous-potato"}
-        label_post: dict = {}
-        applied: set = set()
+        label_post: dict[str, Any] = {}
+        applied: set[int] = set()
         verify_reads = {"n": 0}
         posts = {"n": 0}
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             url = next((a for a in args if isinstance(a, str)
                         and a.startswith("http")), "")
             method = args[args.index("-X") + 1] if "-X" in args else "GET"
@@ -986,19 +1001,19 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:anomalous-potato"])
+                        labels=("auto-merge", "source:anomalous-potato"))
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42
         assert posts["n"] == 2          # re-POSTed after the first didn't stick
         assert res.label_error == ""    # eventually verified present
 
-    def test_apply_labels_surfaces_error_on_persistent_failure(self, monkeypatch):
+    def test_apply_labels_surfaces_error_on_persistent_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # When a label-list page fails on every retry, _all_labels must NOT
         # silently return a partial map; create_pull surfaces label_error so the
         # dropped label is visible rather than mysterious. The PR still opens.
         from agent_worktrees.providers import gitea
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             url = next((a for a in args if isinstance(a, str)
                         and a.startswith("http")), "")
             if "/pulls" in url:
@@ -1013,24 +1028,24 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:mantis-counter"])
+                        labels=("auto-merge", "source:mantis-counter"))
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert res.number == 42            # PR still created
         assert "label lookup failed" in res.label_error
         assert "503" in res.label_error
 
-    def test_apply_labels_reports_label_absent_from_repo(self, monkeypatch):
+    def test_apply_labels_reports_label_absent_from_repo(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A configured label that simply doesn't exist in the repo (e.g. a
         # source:<machine> not yet created) is reported, and the labels that DO
         # resolve are still attached.
         from agent_worktrees.providers import gitea
 
         page1 = [{"name": "auto-merge", "id": 189}]
-        label_post: dict = {}
-        applied: set = set()
+        label_post: dict[str, Any] = {}
+        applied: set[int] = set()
         id_name = {189: "auto-merge"}
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             url = next((a for a in args if isinstance(a, str)
                         and a.startswith("http")), "")
             if "/pulls" in url:
@@ -1049,19 +1064,19 @@ class TestGiteaProvider:
         monkeypatch.setattr(gitea, "run_cli", fake_run)
         scope = PRScope(repo="o/r", head="feature/x", base="master", title="T",
                         body="B", api_base="https://h/gitea",
-                        labels=["auto-merge", "source:ghost"])
+                        labels=("auto-merge", "source:ghost"))
         res = gitea.GiteaProvider().create_pull(scope, token="tok")
         assert label_post == {"labels": [189]}        # resolved one still attached
         assert "labels not found" in res.label_error
         assert "source:ghost" in res.label_error
 
-    def test_remove_label_resolves_id_and_deletes(self, monkeypatch):
+    def test_remove_label_resolves_id_and_deletes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
         prov = gitea.GiteaProvider()
         calls = []
 
-        def fake_retry(method, url, token, *, payload=None):
+        def fake_retry(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             calls.append((method, url, token, payload))
             if method == "GET" and "page=1" in url:
                 return 200, json.dumps([{"name": "do-not-merge", "id": 321}])
@@ -1080,12 +1095,12 @@ class TestGiteaProvider:
         assert len(delete_calls) == 1
         assert delete_calls[0][1].endswith("/repos/o/r/issues/42/labels/321")
 
-    def test_remove_label_404_is_success(self, monkeypatch):
+    def test_remove_label_404_is_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
         prov = gitea.GiteaProvider()
 
-        def fake_retry(method, url, token, *, payload=None):
+        def fake_retry(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             if method == "GET" and "page=1" in url:
                 return 200, json.dumps([{"name": "do-not-merge", "id": 321}])
             if method == "GET" and "page=2" in url:
@@ -1099,12 +1114,12 @@ class TestGiteaProvider:
             "o/r", 42, "do-not-merge", api_base="https://h/gitea", token="tok",
         ) == ""
 
-    def test_remove_label_hard_error_surfaces(self, monkeypatch):
+    def test_remove_label_hard_error_surfaces(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
         prov = gitea.GiteaProvider()
 
-        def fake_retry(method, url, token, *, payload=None):
+        def fake_retry(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             if method == "GET" and "page=1" in url:
                 return 200, json.dumps([{"name": "do-not-merge", "id": 321}])
             if method == "GET" and "page=2" in url:
@@ -1127,7 +1142,7 @@ class TestGiteaProvider:
 
 class TestGitHubProvider:
     @pytest.fixture
-    def passed_admin_checks(self, monkeypatch):
+    def passed_admin_checks(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github_required_checks
 
         monkeypatch.setattr(
@@ -1139,13 +1154,13 @@ class TestGitHubProvider:
             lambda *args, **kwargs: kwargs["expected_head_sha"] or "a" * 40,
         )
 
-    def test_observe_head_uses_server_date(self, monkeypatch):
+    def test_observe_head_uses_server_date(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
         payload = json.dumps({"number": 42, "head": {"sha": "abc"}})
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake(args, **kwargs):
+        def fake(args: Any, **kwargs: Any) -> Any:
             captured["args"] = args
             return _proc(
                 stdout=(
@@ -1170,12 +1185,12 @@ class TestGitHubProvider:
         assert observed.observed_at == "2026-09-05T06:01:02+00:00"
         assert captured["args"][2:4] == ["--hostname", "github.example"]
 
-    def test_resolve_fork_owner_success(self, monkeypatch):
+    def test_resolve_fork_owner_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             captured["args"] = args
             captured["env"] = kw.get("env")
             return _proc(stdout="octocat\n")
@@ -1192,7 +1207,7 @@ class TestGitHubProvider:
         # with, not just be accepted and ignored.
         assert captured["env"] is not None
 
-    def test_resolve_fork_owner_failure_returns_none(self, monkeypatch):
+    def test_resolve_fork_owner_failure_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
         monkeypatch.setattr(
@@ -1201,14 +1216,14 @@ class TestGitHubProvider:
 
         assert github.GitHubProvider().resolve_fork_owner() is None
 
-    def test_resolve_fork_owner_blank_login_returns_none(self, monkeypatch):
+    def test_resolve_fork_owner_blank_login_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
         monkeypatch.setattr(github, "run_cli", lambda args, **kw: _proc(stdout="  \n"))
 
         assert github.GitHubProvider().resolve_fork_owner() is None
 
-    def test_ensure_fork_delegates_to_resolve_fork_owner_then_posts(self, monkeypatch):
+    def test_ensure_fork_delegates_to_resolve_fork_owner_then_posts(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ensure_fork's refactor must still: resolve the login first (via
         resolve_fork_owner), THEN issue the mutating POST -- and the SAME
         token must flow to both calls."""
@@ -1216,7 +1231,7 @@ class TestGitHubProvider:
 
         calls = []
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             calls.append((list(args), kw.get("env")))
             if "user" in args:
                 return _proc(stdout="octocat\n")
@@ -1240,7 +1255,7 @@ class TestGitHubProvider:
         # Both calls authenticated with the SAME token.
         assert calls[0][1] == calls[1][1]
 
-    def test_ensure_fork_rejects_post_response_owner_mismatch(self, monkeypatch):
+    def test_ensure_fork_rejects_post_response_owner_mismatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A concurrent ambient-auth identity switch between the GET
         (resolve_fork_owner) and this POST can create the fork under a
         DIFFERENT login than the GET saw -- the POST response's own
@@ -1248,7 +1263,7 @@ class TestGitHubProvider:
         rather than silently return a clone_url for the wrong account."""
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             if "user" in args:
                 return _proc(stdout="alice\n")
             return _proc(stdout=json.dumps({
@@ -1260,10 +1275,10 @@ class TestGitHubProvider:
 
         assert github.GitHubProvider().ensure_fork("o/r") is None
 
-    def test_ensure_fork_rejects_post_response_missing_owner(self, monkeypatch):
+    def test_ensure_fork_rejects_post_response_missing_owner(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             if "user" in args:
                 return _proc(stdout="octocat\n")
             return _proc(stdout=json.dumps({"clone_url": "https://x/o/r.git"}))
@@ -1272,12 +1287,12 @@ class TestGitHubProvider:
 
         assert github.GitHubProvider().ensure_fork("o/r") is None
 
-    def test_ensure_fork_never_posts_when_owner_unresolvable(self, monkeypatch):
+    def test_ensure_fork_never_posts_when_owner_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The POST that actually creates/verifies the fork must never run
         when the non-mutating login resolution already failed."""
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             if "user" in args:
                 return _proc(returncode=1, stderr="no auth")
             raise AssertionError("POST must not run when login resolution failed")
@@ -1286,10 +1301,10 @@ class TestGitHubProvider:
 
         assert github.GitHubProvider().ensure_fork("o/r") is None
 
-    def test_ensure_fork_post_failure_returns_none(self, monkeypatch):
+    def test_ensure_fork_post_failure_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kw):
+        def fake_run(args: Any, **kw: Any) -> Any:
             if "user" in args:
                 return _proc(stdout="octocat\n")
             return _proc(returncode=1, stderr="gh: HTTP 403")
@@ -1298,12 +1313,12 @@ class TestGitHubProvider:
 
         assert github.GitHubProvider().ensure_fork("o/r") is None
 
-    def test_publish_source_marker_creates_pr_comment(self, monkeypatch):
+    def test_publish_source_marker_creates_pr_comment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             captured.update(args=args, kwargs=kwargs)
             return _proc()
 
@@ -1314,14 +1329,14 @@ class TestGitHubProvider:
         ) == ""
         assert captured["args"][-2:] == ["--body", "updated"]
 
-    def test_publish_source_marker_rejects_copilot_mention(self, monkeypatch):
+    def test_publish_source_marker_rejects_copilot_mention(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Asking the @copilot cloud coding agent to act as the PR's own
         # submitter is bad etiquette and invokes the wrong bot -- the
         # provider must refuse before it ever reaches `gh`, regardless of
         # any shell-level hook.
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             raise AssertionError("gh must not be invoked for a rejected mention")
 
         monkeypatch.setattr(github, "run_cli", fake_run)
@@ -1331,14 +1346,14 @@ class TestGitHubProvider:
                 "o/r", 42, "please see @copilot for details"
             )
 
-    def test_publish_source_marker_allows_real_handle_mention(self, monkeypatch):
+    def test_publish_source_marker_allows_real_handle_mention(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # "@copilot-extensions" is a real handle, not a mention of the
         # cloud coding agent -- must not be rejected.
         from agent_worktrees.providers import github
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             captured.update(args=args)
             return _proc()
 
@@ -1349,7 +1364,7 @@ class TestGitHubProvider:
         ) == ""
         assert captured["args"][-1] == "filed against @copilot-extensions"
 
-    def test_create_pull_parses_number_from_url(self, monkeypatch):
+    def test_create_pull_parses_number_from_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -1360,10 +1375,10 @@ class TestGitHubProvider:
         assert res.url == "https://github.com/o/r/pull/7"
         assert res.number == 7
 
-    def test_create_pull_rejects_copilot_mention_in_title(self, monkeypatch):
+    def test_create_pull_rejects_copilot_mention_in_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             raise AssertionError("gh must not be invoked for a rejected mention")
 
         monkeypatch.setattr(github, "run_cli", fake_run)
@@ -1371,10 +1386,10 @@ class TestGitHubProvider:
         with pytest.raises(ProviderError, match="@copilot"):
             github.GitHubProvider().create_pull(scope, token=None)
 
-    def test_create_pull_rejects_copilot_mention_in_body(self, monkeypatch):
+    def test_create_pull_rejects_copilot_mention_in_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             raise AssertionError("gh must not be invoked for a rejected mention")
 
         monkeypatch.setattr(github, "run_cli", fake_run)
@@ -1385,7 +1400,7 @@ class TestGitHubProvider:
         with pytest.raises(ProviderError, match="@copilot"):
             github.GitHubProvider().create_pull(scope, token=None)
 
-    def test_create_pull_allows_real_handle_mention(self, monkeypatch):
+    def test_create_pull_allows_real_handle_mention(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # "@copilot-extensions" is a real handle, not a mention of the
         # cloud coding agent -- title/body referencing it must not be
         # rejected.
@@ -1404,15 +1419,15 @@ class TestGitHubProvider:
         assert res.url == "https://github.com/o/r/pull/7"
         assert res.number == 7
 
-    def test_get_pull_merged_state_sets_flag(self, monkeypatch):
+    def test_get_pull_merged_state_sets_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # gh reports a merged PR as state MERGED.
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         body = json.dumps({"url": "https://github.com/o/r/pull/7",
                            "number": 7, "state": "MERGED", "headRefOid": "deadbeef"})
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc(stdout=body))[1],
+            lambda args, **kw: _capture(_proc(stdout=body), captured, args=args),
         )
         res = github.GitHubProvider().get_pull("o/r", 7)
         assert res.merged is True
@@ -1424,7 +1439,7 @@ class TestGitHubProvider:
         assert res.head_sha == "deadbeef"
         assert "headRefOid" in captured["args"][captured["args"].index("--json") + 1]
 
-    def test_get_pull_null_head_ref_oid_normalizes_to_empty_string(self, monkeypatch):
+    def test_get_pull_null_head_ref_oid_normalizes_to_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # headRefOid is nullable (e.g. GitHub can no longer resolve the head
         # ref) -- str(None) would otherwise produce the truthy string
         # "None", letting an invalid boundary silently pass as a real head
@@ -1438,23 +1453,23 @@ class TestGitHubProvider:
         assert res.head_sha == ""
 
     @pytest.mark.parametrize("raw, expected", [("dev", "dev"), (None, ""), ("__missing__", "")])
-    def test_get_pull_reports_the_base_branch(self, monkeypatch, raw, expected):
+    def test_get_pull_reports_the_base_branch(self, monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: str) -> None:
         """The PR's base (``baseRefName``) comes back from the same lightweight call;
         null or absent is "" (unknown), never the string "None"."""
         from agent_worktrees.providers import github
         payload = {"url": "https://github.com/o/r/pull/7", "number": 7, "state": "MERGED"}
         if raw != "__missing__":
             payload["baseRefName"] = raw
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc(stdout=json.dumps(payload)))[1],
+            lambda args, **kw: _capture(_proc(stdout=json.dumps(payload)), captured, args=args),
         )
         res = github.GitHubProvider().get_pull("o/r", 7)
         assert res.base_ref == expected
         assert "baseRefName" in captured["args"][captured["args"].index("--json") + 1]
 
-    def test_get_pull_closed_is_not_merged(self, monkeypatch):
+    def test_get_pull_closed_is_not_merged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         body = json.dumps({"url": "https://github.com/o/r/pull/7",
                            "number": 7, "state": "CLOSED"})
@@ -1464,19 +1479,19 @@ class TestGitHubProvider:
         assert res.merged is False
         assert res.state == "closed"
 
-    def test_get_pull_honors_explicit_host(self, monkeypatch):
+    def test_get_pull_honors_explicit_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # #4086 review (agent-worktrees claims find --live): get_pull is now
         # relied on for cross-project fleet scans, where a candidate's own
         # project may target a GitHub Enterprise host different from the
         # invoking project's ambient GH_HOST -- gh pr view has no --hostname
         # flag (same as gh pr merge above), so GH_HOST is the only pin.
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         body = json.dumps({"url": "https://ghe.example.com/o/r/pull/7",
                            "number": 7, "state": "OPEN"})
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc(stdout=body))[1],
+            lambda args, **kw: _capture(_proc(stdout=body), captured, env=kw.get("env")),
         )
         res = github.GitHubProvider().get_pull(
             "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
@@ -1485,15 +1500,15 @@ class TestGitHubProvider:
         assert captured["env"]["GH_TOKEN"] == "tok"
         assert res.state == "open"
 
-    def test_merge_pull_squash_prefers_normal_when_admin_allowed(self, monkeypatch, passed_admin_checks):
+    def test_merge_pull_squash_prefers_normal_when_admin_allowed(self, monkeypatch: pytest.MonkeyPatch, passed_admin_checks: None) -> None:
         # pr-merge --now tries a protected squash merge first, even when
         # a configured admin fallback is allowed, and deletes the branch (safe --
         # finalize/pr-complete verify a merged PR against the tracked record's
         # own head_sha, never the live remote branch).
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             captured["args"] = args
             return _proc(returncode=0)
 
@@ -1505,28 +1520,28 @@ class TestGitHubProvider:
         assert "--squash" in a and "--admin" not in a
         assert "--delete-branch" in a
 
-    def test_merge_pull_delete_source_branch_false_omits_flag(self, monkeypatch):
+    def test_merge_pull_delete_source_branch_false_omits_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         github.GitHubProvider().merge_pull(
             "o/r", 7, squash=True, delete_source_branch=False, expected_head_sha="a" * 40,
         )
         assert "--delete-branch" not in captured["args"]
 
-    def test_merge_pull_passes_match_head_commit(self, monkeypatch, passed_admin_checks):
+    def test_merge_pull_passes_match_head_commit(self, monkeypatch: pytest.MonkeyPatch, passed_admin_checks: None) -> None:
         # The stale-PR-object safety net (ThomasMichon/copilot-extensions#4949):
         # when pr-merge --now resolves a locally tracked pushed head, it must
         # reach gh as --match-head-commit <sha> so GitHub's own merge endpoint
         # refuses rather than silently merges a stale view of the PR.
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         err = github.GitHubProvider().merge_pull(
             "o/r", 7, squash=True, admin=True, expected_head_sha="deadbeef",
@@ -1536,18 +1551,18 @@ class TestGitHubProvider:
         assert "--match-head-commit" in a
         assert a[a.index("--match-head-commit") + 1] == "deadbeef"
 
-    def test_normal_merge_pins_discovered_head_when_admin_allowed(self, monkeypatch, passed_admin_checks):
+    def test_normal_merge_pins_discovered_head_when_admin_allowed(self, monkeypatch: pytest.MonkeyPatch, passed_admin_checks: None) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=True)
         assert "--match-head-commit" in captured["args"]
         assert captured["args"][captured["args"].index("--match-head-commit") + 1] == "a" * 40
 
-    def test_enable_auto_merge_passes_match_head_commit(self, monkeypatch):
+    def test_enable_auto_merge_passes_match_head_commit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Same stale-PR-object safety net as merge_pull, but for the
         # NATIVE-AUTO-MERGE path (the default, prefer_auto_merge=True):
         # auto-merge can complete immediately rather than only arm, so it
@@ -1556,10 +1571,10 @@ class TestGitHubProvider:
         # level, so a regression that stops actually forwarding the flag
         # into `gh pr merge --auto` would be caught.
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         err = github.GitHubProvider().enable_auto_merge(
             "o/r", 7, squash=True, expected_head_sha="deadbeef",
@@ -1570,38 +1585,38 @@ class TestGitHubProvider:
         assert a[a.index("--match-head-commit") + 1] == "deadbeef"
 
     def test_enable_auto_merge_omits_match_head_commit_when_not_given(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         github.GitHubProvider().enable_auto_merge("o/r", 7, squash=True)
         assert "--match-head-commit" not in captured["args"]
 
-    def test_merge_pull_no_admin_omits_admin_flag(self, monkeypatch):
+    def test_merge_pull_no_admin_omits_admin_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         assert github.GitHubProvider().merge_pull(
             "o/r", 7, squash=True, admin=False, expected_head_sha="a" * 40,
         ) == ""
         assert "--admin" not in captured["args"]
 
-    def test_merge_pull_honors_explicit_host(self, monkeypatch):
+    def test_merge_pull_honors_explicit_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # gh pr merge has no --hostname flag -- GH_HOST is the only way to pin
         # it to an explicit api_base, matching get_repo_policy's host so a
         # merge never targets a different host than the permission check did.
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, env=kw.get("env")),
         )
         github.GitHubProvider().merge_pull(
             "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
@@ -1609,7 +1624,7 @@ class TestGitHubProvider:
         assert captured["env"]["GH_HOST"] == "ghe.example.com"
         assert captured["env"]["GH_TOKEN"] == "tok"
 
-    def test_merge_pull_surfaces_error(self, monkeypatch):
+    def test_merge_pull_surfaces_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -1619,11 +1634,11 @@ class TestGitHubProvider:
         assert "not mergeable" in err
         assert "o/r#7" in err
 
-    def test_close_pull_builds_gh_close_args(self, monkeypatch):
+    def test_close_pull_builds_gh_close_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             captured["args"] = args
             return _proc(returncode=0)
 
@@ -1632,11 +1647,11 @@ class TestGitHubProvider:
         assert err == ""
         assert captured["args"] == ["gh", "pr", "close", "7", "--repo", "o/r"]
 
-    def test_close_pull_posts_comment_before_closing(self, monkeypatch):
+    def test_close_pull_posts_comment_before_closing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         calls = []
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             calls.append(args)
             return _proc(returncode=0)
 
@@ -1650,7 +1665,7 @@ class TestGitHubProvider:
         ]
         assert calls[1] == ["gh", "pr", "close", "7", "--repo", "o/r"]
 
-    def test_close_pull_rejects_a_copilot_mention_in_comment(self, monkeypatch):
+    def test_close_pull_rejects_a_copilot_mention_in_comment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         from agent_worktrees.providers.base import ProviderError
 
@@ -1662,11 +1677,11 @@ class TestGitHubProvider:
             github.GitHubProvider().close_pull("o/r", 7, comment="hey @copilot")
 
     def test_close_pull_comment_failure_is_a_warning_close_still_proceeds(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[2] == "comment":
                 return _proc(returncode=1, stderr="comment forbidden")
             return _proc(returncode=0)
@@ -1676,7 +1691,7 @@ class TestGitHubProvider:
         assert "comment post failed" in result
         assert "comment forbidden" in result
 
-    def test_close_pull_surfaces_close_failure(self, monkeypatch):
+    def test_close_pull_surfaces_close_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -1686,15 +1701,15 @@ class TestGitHubProvider:
         assert "already closed" in err
         assert "o/r#7" in err
 
-    def test_enable_auto_merge_builds_auto_squash_no_admin(self, monkeypatch):
+    def test_enable_auto_merge_builds_auto_squash_no_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # #225: native auto-merge is `--auto --squash`, never `--admin` (it must
         # wait on required checks, not bypass them); deletes the branch by
         # default once the eventual merge lands (same safety reasoning as
         # merge_pull).
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             captured["args"] = args
             return _proc(returncode=0)
 
@@ -1706,31 +1721,31 @@ class TestGitHubProvider:
         assert "--auto" in a and "--squash" in a
         assert "--admin" not in a and "--delete-branch" in a
 
-    def test_enable_auto_merge_delete_source_branch_false_omits_flag(self, monkeypatch):
+    def test_enable_auto_merge_delete_source_branch_false_omits_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, args=args),
         )
         github.GitHubProvider().enable_auto_merge(
             "o/r", 7, delete_source_branch=False,
         )
         assert "--delete-branch" not in captured["args"]
 
-    def test_enable_auto_merge_honors_explicit_host(self, monkeypatch):
+    def test_enable_auto_merge_honors_explicit_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc())[1],
+            lambda args, **kw: _capture(_proc(), captured, env=kw.get("env")),
         )
         github.GitHubProvider().enable_auto_merge(
             "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
         )
         assert captured["env"]["GH_HOST"] == "ghe.example.com"
 
-    def test_enable_auto_merge_surfaces_error(self, monkeypatch):
+    def test_enable_auto_merge_surfaces_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -1740,20 +1755,20 @@ class TestGitHubProvider:
         assert "auto-merge disabled" in err
         assert "o/r#7" in err
 
-    def test_enable_auto_merge_unsupported_on_gitea_and_azure(self):
+    def test_enable_auto_merge_unsupported_on_gitea_and_azure(self) -> None:
         from agent_worktrees.providers import azure_devops, gitea
         assert "does not support native auto-merge" in \
             gitea.GiteaProvider().enable_auto_merge("o/r", 7)
         assert "does not support native auto-merge" in \
             azure_devops.AzureDevOpsProvider().enable_auto_merge("o/r", 7)
 
-    def test_pull_review_gate_no_review_required(self, monkeypatch):
+    def test_pull_review_gate_no_review_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # reviewDecision anything other than REVIEW_REQUIRED -> ordinary
         # auto-merge is fine; never even looks at rulesets.
         from agent_worktrees.providers import github
         calls = []
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             calls.append(args)
             return _proc(stdout=json.dumps(
                 {"reviewDecision": "", "baseRefName": "main"}
@@ -1764,10 +1779,10 @@ class TestGitHubProvider:
         assert result == (False, None)
         assert len(calls) == 1  # only the `pr view` read, no rulesets lookup
 
-    def test_pull_review_gate_bypassable_ruleset(self, monkeypatch):
+    def test_pull_review_gate_bypassable_ruleset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[:3] == ["gh", "pr", "view"]:
                 return _proc(stdout=json.dumps(
                     {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
@@ -1787,10 +1802,10 @@ class TestGitHubProvider:
         result = github.GitHubProvider().pull_review_gate("o/r", 7)
         assert result == (True, True)
 
-    def test_pull_review_gate_non_bypassable_ruleset(self, monkeypatch):
+    def test_pull_review_gate_non_bypassable_ruleset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[:3] == ["gh", "pr", "view"]:
                 return _proc(stdout=json.dumps(
                     {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
@@ -1807,13 +1822,13 @@ class TestGitHubProvider:
         result = github.GitHubProvider().pull_review_gate("o/r", 7)
         assert result == (True, False)
 
-    def test_pull_review_gate_unknown_when_no_rulesets_apply(self, monkeypatch):
+    def test_pull_review_gate_unknown_when_no_rulesets_apply(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Required review, but no `pull_request`-typed ruleset covers it (e.g.
         # classic branch protection instead) -- unknown, never an affirmative
         # bypass.
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[:3] == ["gh", "pr", "view"]:
                 return _proc(stdout=json.dumps(
                     {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
@@ -1826,10 +1841,10 @@ class TestGitHubProvider:
         result = github.GitHubProvider().pull_review_gate("o/r", 7)
         assert result == (True, None)
 
-    def test_pull_review_gate_unknown_when_rules_read_fails(self, monkeypatch):
+    def test_pull_review_gate_unknown_when_rules_read_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[:3] == ["gh", "pr", "view"]:
                 return _proc(stdout=json.dumps(
                     {"reviewDecision": "REVIEW_REQUIRED", "baseRefName": "main"}
@@ -1840,7 +1855,7 @@ class TestGitHubProvider:
         result = github.GitHubProvider().pull_review_gate("o/r", 7)
         assert result == (True, None)
 
-    def test_pull_review_gate_false_when_pr_view_fails(self, monkeypatch):
+    def test_pull_review_gate_false_when_pr_view_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -1849,7 +1864,7 @@ class TestGitHubProvider:
         result = github.GitHubProvider().pull_review_gate("o/r", 7)
         assert result == (False, None)
 
-    def test_get_repo_policy_reads_settings_and_protection(self, monkeypatch):
+    def test_get_repo_policy_reads_settings_and_protection(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # #225: adopt-time research reads repo merge settings + branch protection.
         from agent_worktrees.providers import github
 
@@ -1866,7 +1881,7 @@ class TestGitHubProvider:
             "required_status_checks": {"contexts": ["ci"]},
         })
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[:2] == ["gh", "api"] and args[-1].endswith("/protection"):
                 return _proc(stdout=prot_json)
             return _proc(stdout=repo_json)
@@ -1880,7 +1895,7 @@ class TestGitHubProvider:
         assert pol.has_required_status_checks is True
         assert pol.dismiss_stale_reviews is True
 
-    def test_get_repo_policy_reads_dismiss_stale_reviews_false(self, monkeypatch):
+    def test_get_repo_policy_reads_dismiss_stale_reviews_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # copilot-extensions#2060: a repo whose protection explicitly leaves
         # dismiss_stale_reviews off must surface that confirmed False.
         from agent_worktrees.providers import github
@@ -1893,7 +1908,7 @@ class TestGitHubProvider:
             },
         })
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[-1].endswith("/protection"):
                 return _proc(stdout=prot_json)
             return _proc(stdout=repo_json)
@@ -1902,11 +1917,11 @@ class TestGitHubProvider:
         pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
         assert pol.dismiss_stale_reviews is False
 
-    def test_get_repo_policy_no_protection_is_ungated(self, monkeypatch):
+    def test_get_repo_policy_no_protection_is_ungated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         repo_json = json.dumps({"allow_squash_merge": True})
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[-1].endswith("/protection"):
                 return _proc(returncode=1, stderr="Not Found")
             return _proc(stdout=repo_json)
@@ -1919,14 +1934,14 @@ class TestGitHubProvider:
         assert pol.dismiss_stale_reviews is False
 
     def test_get_repo_policy_protection_unreadable_leaves_dismiss_unknown(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A non-"Not Found" failure (e.g. a permission error) must NOT be
         # read as a confirmed non-dismissing policy -- leave it unknown.
         from agent_worktrees.providers import github
         repo_json = json.dumps({"allow_squash_merge": True})
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[-1].endswith("/protection"):
                 return _proc(returncode=1, stderr="Forbidden")
             return _proc(stdout=repo_json)
@@ -1935,7 +1950,7 @@ class TestGitHubProvider:
         pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
         assert pol.dismiss_stale_reviews is None
 
-    def test_get_repo_policy_read_failure_unsupported(self, monkeypatch):
+    def test_get_repo_policy_read_failure_unsupported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -1943,19 +1958,19 @@ class TestGitHubProvider:
         pol = github.GitHubProvider().get_repo_policy("o/r")
         assert pol.supported is False and "gone" in pol.error
 
-    def test_get_repo_policy_unsupported_on_gitea_and_azure(self):
+    def test_get_repo_policy_unsupported_on_gitea_and_azure(self) -> None:
         # Gitea needs a token to read anything (no ambient CLI auth like `gh`);
         # azure-devops has no settings-read primitive at all today.
         from agent_worktrees.providers import azure_devops, gitea
         assert gitea.GiteaProvider().get_repo_policy("o/r").supported is False
         assert azure_devops.AzureDevOpsProvider().get_repo_policy("o/r").supported is False
 
-    def test_get_repo_policy_viewer_permission_github(self, monkeypatch):
+    def test_get_repo_policy_viewer_permission_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # #<role-aware-pr-policy>: the acting identity's own permission level
         # rides the same repos/<repo> read -- no second call.
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             return _proc(stdout=json.dumps({
                 "permissions": {
                     "admin": False, "maintain": False, "push": True,
@@ -1968,8 +1983,8 @@ class TestGitHubProvider:
         assert pol.viewer_permission == "write"
 
     def test_get_repo_policy_viewer_permission_github_missing_is_unknown(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli", lambda args, **kw: _proc(stdout=json.dumps({})),
@@ -1978,13 +1993,13 @@ class TestGitHubProvider:
         assert pol.viewer_permission == ""
 
     def test_get_repo_policy_viewer_permission_github_rejects_non_bool(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A malformed truthy-but-non-bool value (e.g. "false" the string) must
         # never be read as granted access.
         from agent_worktrees.providers import github
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             return _proc(stdout=json.dumps({
                 "permissions": {"admin": "false", "push": "false", "pull": 1},
             }))
@@ -1993,10 +2008,10 @@ class TestGitHubProvider:
         pol = github.GitHubProvider().get_repo_policy("o/r")
         assert pol.viewer_permission == ""
 
-    def test_get_repo_policy_viewer_permission_gitea(self, monkeypatch):
+    def test_get_repo_policy_viewer_permission_gitea(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             body = json.dumps({
                 "permissions": {"admin": False, "push": True, "pull": True},
             })
@@ -2009,11 +2024,11 @@ class TestGitHubProvider:
         assert pol.supported is True
         assert pol.viewer_permission == "write"
 
-    def test_get_repo_policy_gitea_reads_allow_rebase_field(self, monkeypatch):
+    def test_get_repo_policy_gitea_reads_allow_rebase_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Gitea's field is `allow_rebase` (not GitHub's `allow_rebase_merge`).
         from agent_worktrees.providers import gitea
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             body = json.dumps({"allow_rebase": True})
             return _proc(stdout=f"{body}\n200")
 
@@ -2024,11 +2039,11 @@ class TestGitHubProvider:
         assert pol.allow_rebase is True
 
     def test_get_repo_policy_viewer_permission_gitea_rejects_non_bool(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from agent_worktrees.providers import gitea
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             body = json.dumps({"permissions": {"admin": "false", "push": 1}})
             return _proc(stdout=f"{body}\n200")
 
@@ -2038,14 +2053,14 @@ class TestGitHubProvider:
         )
         assert pol.viewer_permission == ""
 
-    def test_get_repo_policy_gitea_no_token_unsupported(self):
+    def test_get_repo_policy_gitea_no_token_unsupported(self) -> None:
         from agent_worktrees.providers import gitea
         pol = gitea.GiteaProvider().get_repo_policy(
             "o/r", api_base="https://gitea.example",
         )
         assert pol.supported is False
 
-    def test_get_repo_policy_gitea_reads_dismiss_stale_approvals(self, monkeypatch):
+    def test_get_repo_policy_gitea_reads_dismiss_stale_approvals(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # copilot-extensions#2060: Gitea's branch_protections read is
         # best-effort and only attempted when a default_branch is given.
         from agent_worktrees.providers import gitea
@@ -2053,7 +2068,7 @@ class TestGitHubProvider:
         repo_body = json.dumps({"allow_rebase": True})
         prot_body = json.dumps({"dismiss_stale_approvals": True})
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             url = args[args.index("-X") + 2]
             if "/branch_protections/" in url:
                 return _proc(stdout=f"{prot_body}\n200")
@@ -2066,12 +2081,12 @@ class TestGitHubProvider:
         )
         assert pol.dismiss_stale_reviews is True
 
-    def test_get_repo_policy_gitea_no_protection_rule_is_ungated(self, monkeypatch):
+    def test_get_repo_policy_gitea_no_protection_rule_is_ungated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
 
         repo_body = json.dumps({"allow_rebase": True})
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             url = args[args.index("-X") + 2]
             if "/branch_protections/" in url:
                 return _proc(stdout="not found\n404")
@@ -2086,15 +2101,15 @@ class TestGitHubProvider:
         assert pol.dismiss_stale_reviews is False
 
     def test_get_repo_policy_gitea_protection_unreadable_leaves_dismiss_unknown(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A non-404 failure (e.g. a permission error) must not be read as a
         # confirmed non-dismissing policy -- leave it unknown.
         from agent_worktrees.providers import gitea
 
         repo_body = json.dumps({"allow_rebase": True})
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             url = args[args.index("-X") + 2]
             if "/branch_protections/" in url:
                 return _proc(stdout="forbidden\n403")
@@ -2108,8 +2123,8 @@ class TestGitHubProvider:
         assert pol.dismiss_stale_reviews is None
 
     def test_get_repo_policy_gitea_without_default_branch_leaves_dismiss_unknown(
-        self, monkeypatch,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # Binding-absent (no default_branch given) -> no protection read at
         # all, same conservative "unknown" default as before this fix.
         from agent_worktrees.providers import gitea
@@ -2124,14 +2139,14 @@ class TestGitHubProvider:
         )
         assert pol.dismiss_stale_reviews is None
 
-    def test_get_repo_policy_honors_explicit_host(self, monkeypatch):
+    def test_get_repo_policy_honors_explicit_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # An explicit api_base (GHE) must be the host BOTH gh calls target --
         # otherwise viewer_permission would describe the wrong host's access.
         from agent_worktrees.providers import github
 
         seen_hosts = []
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             assert args[:3] == ["gh", "api", "--hostname"]
             seen_hosts.append(args[3])
             if args[-1].endswith("/protection"):
@@ -2146,7 +2161,7 @@ class TestGitHubProvider:
         assert seen_hosts == ["ghe.example.com", "ghe.example.com"]
 
 
-    def test_merge_pull_unsupported_on_gitea_and_azure(self):
+    def test_merge_pull_unsupported_on_gitea_and_azure(self) -> None:
         # Direct merge (pr-merge --now) is GitHub-only today; the other
         # providers return a non-empty "unsupported" message, never "".
         from agent_worktrees.providers import azure_devops as azure
@@ -2155,7 +2170,7 @@ class TestGitHubProvider:
             err = prov.merge_pull("o/r", 7)
             assert err and "does not support" in err
 
-    def test_close_pull_unsupported_on_gitea_and_azure(self):
+    def test_close_pull_unsupported_on_gitea_and_azure(self) -> None:
         # pr-abandon is GitHub-only today; the other providers return a
         # non-empty "unsupported" message, never "" (a caller must never
         # read an empty string as a successful close).
@@ -2168,11 +2183,11 @@ class TestGitHubProvider:
     # -- get_snapshot (the #277 fix: pr-watch/pr-status/pr-ready on GitHub) --
 
     @staticmethod
-    def _snapshot_dispatch(*, pr, reviews_pages=None, status=None, check_runs=None):
+    def _snapshot_dispatch(*, pr: Any, reviews_pages: Any = None, status: Any = None, check_runs: Any = None) -> Any:
         """Build a run_cli fake dispatching the snapshot's gh api reads by URL."""
         reviews_pages = reviews_pages or [[]]
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             url = args[-1] if len(args) > 2 else ""
             if "/reviews" in url:
                 # page is 1-based in the query string; default to last (empty).
@@ -2194,7 +2209,7 @@ class TestGitHubProvider:
 
         return fake
 
-    def test_get_snapshot_maps_pr_and_review_fields(self, monkeypatch):
+    def test_get_snapshot_maps_pr_and_review_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         pr = {
             "state": "open", "merged": False, "mergeable": True,
@@ -2226,7 +2241,7 @@ class TestGitHubProvider:
         # numeric cursor works (a submitted-review high-water mark)
         assert snap.max_review_id == 11
 
-    def test_get_snapshot_merged_pr_is_closed_and_merged(self, monkeypatch):
+    def test_get_snapshot_merged_pr_is_closed_and_merged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         pr = {"state": "closed", "merged": True, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
@@ -2235,7 +2250,7 @@ class TestGitHubProvider:
         snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
         assert snap.pr_state == "closed" and snap.merged is True
 
-    def test_get_snapshot_mergeable_null_is_none(self, monkeypatch):
+    def test_get_snapshot_mergeable_null_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GitHub computes mergeable async; null on a fresh PR -> None (unknown).
         from agent_worktrees.providers import github
         pr = {"state": "open", "merged": False, "mergeable": None,
@@ -2245,7 +2260,7 @@ class TestGitHubProvider:
         snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
         assert snap.mergeable is None
 
-    def test_get_snapshot_paginates_reviews(self, monkeypatch):
+    def test_get_snapshot_paginates_reviews(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         pr = {"state": "open", "merged": False, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
@@ -2261,7 +2276,7 @@ class TestGitHubProvider:
         assert len(snap.reviews) == 101
         assert snap.reviews[-1].id == 101 and snap.reviews[-1].state == "APPROVED"
 
-    def test_get_snapshot_accepts_pending_review_without_submission_time(self, monkeypatch):
+    def test_get_snapshot_accepts_pending_review_without_submission_time(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         pr = {"state": "open", "merged": False, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
@@ -2283,8 +2298,8 @@ class TestGitHubProvider:
          "state": "CHANGES_REQUESTED", "submitted_at": None},
     ])
     def test_get_snapshot_rejects_malformed_review_on_later_page(
-        self, monkeypatch, malformed,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, malformed: Any,
+    ) -> None:
         from agent_worktrees.providers import github
         pr = {"state": "open", "merged": False, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
@@ -2297,11 +2312,11 @@ class TestGitHubProvider:
         with pytest.raises(ProviderError):
             github.GitHubProvider().get_snapshot("o/r", 7, token="t")
 
-    def test_combined_checks_state_failure_dominates(self, monkeypatch):
+    def test_combined_checks_state_failure_dominates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         prov = github.GitHubProvider()
 
-        def checks(status_state, runs):
+        def checks(status_state: str, runs: Any) -> Any:
             return self._snapshot_dispatch(
                 pr={}, status={"state": status_state,
                                "statuses": [{"id": 1, "state": status_state}]},
@@ -2324,7 +2339,7 @@ class TestGitHubProvider:
             "success", [{"status": "completed", "conclusion": "skipped"}]))
         assert prov._combined_checks_state("o/r", "sha", "t") == "success"
 
-    def test_combined_checks_state_none_configured_is_explicit(self, monkeypatch):
+    def test_combined_checks_state_none_configured_is_explicit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Confirmed empty lists never fire checks_failed, but can allow consent.
         from agent_worktrees.providers import github
         prov = github.GitHubProvider()
@@ -2334,11 +2349,11 @@ class TestGitHubProvider:
         assert prov._combined_checks_state("o/r", "sha", "t") == "none"
         assert prov._combined_checks_state("o/r", "", "t") == ""  # no sha
 
-    def test_get_snapshot_http_error_transient_vs_permanent(self, monkeypatch):
+    def test_get_snapshot_http_error_transient_vs_permanent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         from agent_worktrees.providers.base import ProviderError
 
-        def fail(detail):
+        def fail(detail: str) -> Any:
             return lambda args, **kw: _proc(returncode=1, stderr=detail)
 
         monkeypatch.setattr(github, "run_cli", fail("gh: HTTP 503 Service Unavailable"))
@@ -2351,12 +2366,12 @@ class TestGitHubProvider:
             github.GitHubProvider().get_snapshot("o/r", 7, token="t")
         assert ei2.value.transient is False
 
-    def test_request_review_posts_requested_reviewers(self, monkeypatch):
+    def test_request_review_posts_requested_reviewers(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             captured["args"] = args
             captured["env"] = kwargs.get("env")
             return _proc()
@@ -2377,7 +2392,7 @@ class TestGitHubProvider:
         assert "reviewers[]=copilot-pull-request-reviewer[bot]" in args
         assert captured["env"].get("GH_TOKEN") == "t"
 
-    def test_request_review_reports_failure_without_raising(self, monkeypatch):
+    def test_request_review_reports_failure_without_raising(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
         monkeypatch.setattr(
@@ -2391,10 +2406,10 @@ class TestGitHubProvider:
         assert result.requested is False
         assert "404" in result.error
 
-    def test_request_review_unmapped_reviewer_is_unsupported(self, monkeypatch):
+    def test_request_review_unmapped_reviewer_is_unsupported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def boom(args, **kw):
+        def boom(args: Any, **kw: Any) -> Any:
             raise AssertionError("gh must not be invoked for an unmapped reviewer")
 
         monkeypatch.setattr(github, "run_cli", boom)
@@ -2404,10 +2419,10 @@ class TestGitHubProvider:
         assert result.supported is False
         assert result.requested is False
 
-    def test_request_review_no_reviewer_configured_is_unsupported(self, monkeypatch):
+    def test_request_review_no_reviewer_configured_is_unsupported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def boom(args, **kw):
+        def boom(args: Any, **kw: Any) -> Any:
             raise AssertionError("gh must not be invoked with no reviewer configured")
 
         monkeypatch.setattr(github, "run_cli", boom)
@@ -2420,24 +2435,25 @@ class TestGitHubProvider:
 class TestAzureDevOpsProvider:
     @pytest.mark.parametrize("observed", [False, True, None, "true"])
     @pytest.mark.parametrize("lookup", [False, True])
-    def test_pull_reads_retain_only_observed_boolean_draft(self, monkeypatch, observed, lookup):
+    def test_pull_reads_retain_only_observed_boolean_draft(self, monkeypatch: pytest.MonkeyPatch, observed: Any, lookup: bool) -> None:
         from agent_worktrees.providers import azure_devops as azure
 
-        payload = {"pullRequestId": 7, "status": "active", "isDraft": observed}
+        payload: Any = {"pullRequestId": 7, "status": "active", "isDraft": observed}
         if lookup:
             payload = [payload]
         monkeypatch.setattr(azure, "run_cli", lambda *args, **kw: _proc(stdout=json.dumps(payload)))
         provider = azure.AzureDevOpsProvider()
-        read = provider.find_pull_by_head if lookup else provider.get_pull
-        pull = read(
-            "project/repo", "topic" if lookup else 7, api_base="https://dev.azure.com/example",
+        pull = (
+            provider.find_pull_by_head("project/repo", "topic", api_base="https://dev.azure.com/example")
+            if lookup else provider.get_pull("project/repo", 7, api_base="https://dev.azure.com/example")
         )
+        assert pull is not None
         assert pull.draft is (observed if type(observed) is bool else None)
 
-    def test_publish_source_marker_creates_thread(self, monkeypatch):
+    def test_publish_source_marker_creates_thread(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
         provider = azure_devops.AzureDevOpsProvider()
         monkeypatch.setattr(
@@ -2468,7 +2484,7 @@ class TestAzureDevOpsProvider:
         assert captured["method"] == "POST"
         assert json.loads(captured["payload"])["comments"][0]["content"] == "updated"
 
-    def test_get_pull_completed_is_merged(self, monkeypatch):
+    def test_get_pull_completed_is_merged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Azure status "completed" == merged; canonicalize state to "merged".
         from agent_worktrees.providers import azure_devops as azure
         body = json.dumps({
@@ -2487,11 +2503,11 @@ class TestAzureDevOpsProvider:
         ("refs/heads/dev", "dev"), ("refs/heads/release/1.0", "release/1.0"), (None, ""),
         ("__missing__", ""),
     ])
-    def test_get_pull_reports_the_target_branch(self, monkeypatch, raw, expected):
+    def test_get_pull_reports_the_target_branch(self, monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: str) -> None:
         """ADO's ``targetRefName`` is a full ref: the base is its branch name; null or
         absent is "" (unknown)."""
         from agent_worktrees.providers import azure_devops as azure
-        payload = {"status": "completed", "lastMergeSourceCommit": {"commitId": "h"}}
+        payload: dict[str, Any] = {"status": "completed", "lastMergeSourceCommit": {"commitId": "h"}}
         if raw != "__missing__":
             payload["targetRefName"] = raw
         monkeypatch.setattr(azure, "run_cli", lambda args, **kw: _proc(stdout=json.dumps(payload)))
@@ -2499,7 +2515,7 @@ class TestAzureDevOpsProvider:
             "proj/repo", 5, api_base="https://dev.azure.com/org")
         assert res.base_ref == expected
 
-    def test_observe_head_remains_unsupported(self, monkeypatch):
+    def test_observe_head_remains_unsupported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Azure has no separate server-clock observation endpoint; delegating
         # to get_pull() would silently violate observe_head's observed_at
         # contract for generic callers (pr_ops.py's post-push observation
@@ -2513,7 +2529,7 @@ class TestAzureDevOpsProvider:
             azure.AzureDevOpsProvider().observe_head(
                 "proj/repo", 5, api_base="https://dev.azure.com/org")
 
-    def test_get_pull_abandoned_and_active(self, monkeypatch):
+    def test_get_pull_abandoned_and_active(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops as azure
         for status, exp_state in (("abandoned", "closed"), ("active", "open")):
             monkeypatch.setattr(
@@ -2533,17 +2549,17 @@ class TestEnsureCliReady:
     doesn't hit an interactive extension-install prompt under automation."""
 
     @staticmethod
-    def _have_az(monkeypatch, azure):
-        monkeypatch.setattr(azure.shutil, "which", lambda name: "az")
+    def _have_az(monkeypatch: pytest.MonkeyPatch, azure: Any) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: "az")
 
-    def test_missing_az_reports_gap(self, monkeypatch):
+    def test_missing_az_reports_gap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops as azure
-        monkeypatch.setattr(azure.shutil, "which", lambda name: None)
+        monkeypatch.setattr(shutil, "which", lambda name: None)
         ok, msg = azure.ensure_cli_ready()
         assert ok is False
         assert "az" in msg and "azure-devops" in msg
 
-    def test_extension_already_present(self, monkeypatch):
+    def test_extension_already_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops as azure
         self._have_az(monkeypatch, azure)
         monkeypatch.setattr(azure, "run_cli", lambda args, **kw: _proc(returncode=0))
@@ -2551,12 +2567,12 @@ class TestEnsureCliReady:
         assert ok is True
         assert "already installed" in msg
 
-    def test_installs_when_missing(self, monkeypatch):
+    def test_installs_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops as azure
         self._have_az(monkeypatch, azure)
         calls = []
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             calls.append(args)
             # `extension show` fails (absent); `extension add` succeeds.
             return _proc(returncode=1) if "show" in args else _proc(returncode=0)
@@ -2567,12 +2583,12 @@ class TestEnsureCliReady:
         assert "installed the 'azure-devops' extension" in msg
         assert any("add" in a for a in calls)
 
-    def test_install_false_reports_without_mutating(self, monkeypatch):
+    def test_install_false_reports_without_mutating(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops as azure
         self._have_az(monkeypatch, azure)
         added = []
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if "add" in args:
                 added.append(args)
             return _proc(returncode=1)
@@ -2583,11 +2599,11 @@ class TestEnsureCliReady:
         assert "missing" in msg
         assert added == []  # never attempts an install in report-only mode
 
-    def test_install_failure_is_reported(self, monkeypatch):
+    def test_install_failure_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import azure_devops as azure
         self._have_az(monkeypatch, azure)
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             return _proc(returncode=1) if "show" in args else _proc(
                 returncode=2, stderr="boom")
 
@@ -2604,27 +2620,27 @@ class TestEnsureCliReady:
 @dataclass
 class _FakeProvider:
     name: str = "gitea"
-    captured: dict | None = None
+    captured: dict[str, Any] | None = None
     observed_draft: bool | None = None
     creates: int = 0
 
-    def authority_endpoint(self, api_base=""):
+    def authority_endpoint(self, api_base: str = "") -> str:
         return api_base
 
-    def create_pull(self, scope, *, token=None):
+    def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         self.creates += 1
         self.captured = {"scope": scope, "token": token}
         return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open",
                           draft=self.observed_draft)
 
-    def get_pull(self, repo, number, *, api_base="", token=None):
+    def get_pull(self, repo: str, number: int, *, api_base: str = "", token: str | None = None) -> PullResult:
         return PullResult(url="", number=number, draft=self.observed_draft)
 
-    def remove_label(self, repo, number, label, *, api_base="", token=None):
+    def remove_label(self, repo: str, number: int, label: str, *, api_base: str = "", token: str | None = None) -> str:
         return ""
 
-    def mark_ready(self, repo, number, *, api_base="", token=None, title="",
-                   wip_title_prefixes=()):
+    def mark_ready(self, repo: str, number: int, *, api_base: str = "", token: str | None = None, title: str = "",
+                   wip_title_prefixes: tuple[str, ...] = ()) -> str:
         return ""
 
 
@@ -2639,23 +2655,23 @@ class _FakeReadyProvider:
     name: str = "gitea"
     snapshot: PRSnapshot | None = None
     mark_ready_error: str = ""
-    removed: dict | None = None
-    marked_ready: dict | None = None
+    removed: dict[str, Any] | None = None
+    marked_ready: dict[str, Any] | None = None
 
-    def create_pull(self, scope, *, token=None):
+    def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open")
 
-    def get_pull(self, repo, number, *, api_base="", token=None):
+    def get_pull(self, repo: str, number: int, *, api_base: str = "", token: str | None = None) -> PullResult:
         return PullResult(url=f"https://h/gitea/{repo}/pulls/{number}",
                           number=number, state="open")
 
-    def get_snapshot(self, repo, number, *, api_base="", token=None):
+    def get_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None) -> PRSnapshot:
         if self.snapshot is not None:
             return self.snapshot
         return PRSnapshot(pr_state="open")
 
-    def mark_ready(self, repo, number, *, api_base="", token=None, title="",
-                   wip_title_prefixes=()):
+    def mark_ready(self, repo: str, number: int, *, api_base: str = "", token: str | None = None, title: str = "",
+                   wip_title_prefixes: tuple[str, ...] = ()) -> str:
         self.marked_ready = {
             "repo": repo, "number": number, "api_base": api_base,
             "token": token, "title": title,
@@ -2663,7 +2679,7 @@ class _FakeReadyProvider:
         }
         return self.mark_ready_error
 
-    def remove_label(self, repo, number, label, *, api_base="", token=None):
+    def remove_label(self, repo: str, number: int, label: str, *, api_base: str = "", token: str | None = None) -> str:
         self.removed = {
             "repo": repo, "number": number, "label": label,
             "api_base": api_base, "token": token,
@@ -2672,7 +2688,7 @@ class _FakeReadyProvider:
 
 
 class TestCreatePRAutoOpen:
-    def _open_record(self, wid, config, *, body=None, attribution=None):
+    def _open_record(self, wid: str, config: cfg.Config, *, body: str | None = None, attribution: cfg.SourceAttribution | None = None) -> dict[str, Any]:
         record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         target = tracking.PRRecord(
             state="creating", branch="feature/add-feature", repo="o/r",
@@ -2691,7 +2707,7 @@ class TestCreatePRAutoOpen:
         )
         return result
 
-    def _enable_open(self, config, *, source_attribution=False):
+    def _enable_open(self, config: cfg.Config, *, source_attribution: cfg.SourceAttribution = False) -> cfg.Config:
         import dataclasses
         repo = config.repos["ext"]
         pr = dataclasses.replace(
@@ -2703,7 +2719,7 @@ class TestCreatePRAutoOpen:
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
         )
 
-    def test_auto_open_records_pr_and_embeds_marker(self, pr_repo, monkeypatch):
+    def test_auto_open_records_pr_and_embeds_marker(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config, source_attribution=True)
@@ -2721,19 +2737,19 @@ class TestCreatePRAutoOpen:
 
         # The worktree auto-recorded the PR (no manual set-pr).
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec.active_pr().number == 99
-        assert rec.active_pr().url == "https://h/gitea/ext/pulls/99"
+        assert _present(rec.active_pr()).number == 99
+        assert _present(rec.active_pr()).url == "https://h/gitea/ext/pulls/99"
 
         # The PR body carries the source-worktree attribution marker.
-        scope = fake.captured["scope"]
-        fields = attribution.parse_marker(scope.body)
+        scope = _present(fake.captured)["scope"]
+        fields = _present(attribution.parse_marker(scope.body))
         assert fields["worktree"] == wid
-        assert fields["machine"] == "test"
+        assert fields["machine"] == rec.execution_machine
         # Labels templated with the machine.
-        assert "source:test" in scope.labels
-        assert fake.captured["token"] == "tok"
+        assert f"source:{rec.execution_machine}" in scope.labels
+        assert _present(fake.captured)["token"] == "tok"
 
-    def test_auto_open_omits_marker_by_default(self, pr_repo, monkeypatch):
+    def test_auto_open_omits_marker_by_default(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
@@ -2745,10 +2761,10 @@ class TestCreatePRAutoOpen:
 
         assert res["success"] is True
         assert res["pr_opened"] is True
-        assert attribution.parse_marker(fake.captured["scope"].body) is None
-        assert fake.captured["scope"].body == ""
+        assert attribution.parse_marker(_present(fake.captured)["scope"].body) is None
+        assert _present(fake.captured)["scope"].body == ""
 
-    def test_no_attribution_overrides_repo_opt_in(self, pr_repo, monkeypatch):
+    def test_no_attribution_overrides_repo_opt_in(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config, source_attribution=True)
@@ -2761,12 +2777,12 @@ class TestCreatePRAutoOpen:
         )
 
         assert res["success"] is True
-        assert attribution.parse_marker(fake.captured["scope"].body) is None
-        assert fake.captured["scope"].body == "Hello"
+        assert attribution.parse_marker(_present(fake.captured)["scope"].body) is None
+        assert _present(fake.captured)["scope"].body == "Hello"
 
     def test_codename_mode_embeds_codename_and_encrypted_identity(
-        self, provider_record_repo, monkeypatch, keyed_identity_payload,
-    ):
+        self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, keyed_identity_payload: dict[str, Any],
+    ) -> None:
         """Initial PR publication sends identity through the cipher, not raw fields."""
         from agent_worktrees import providers
         config, wid, _wt, _ = provider_record_repo
@@ -2785,20 +2801,20 @@ class TestCreatePRAutoOpen:
         res = self._open_record(wid, config)
 
         assert res["success"] is True
-        body = fake.captured["scope"].body
-        fields = attribution.parse_marker(body)
+        body = _present(fake.captured)["scope"].body
+        fields = _present(attribution.parse_marker(body))
         assert fields["codename"] == "harbor-lattice"
         assert set(fields) == {"codename", "enc"}
         assert keyed_identity_payload["worktree_id"] == wid
-        assert keyed_identity_payload["machine"] == rec.machine
+        assert keyed_identity_payload["machine"] == rec.execution_machine
         assert keyed_identity_payload["head"]
         assert wid not in body
         for raw_field in ("worktree=", "machine=", "session=", "head="):
             assert raw_field not in body
 
     def test_bare_config_default_publishes_codename_marker_end_to_end(
-        self, pr_repo, monkeypatch,
-    ):
+        self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Round-18 acceptance criterion: widening ``create_pr``'s/
         ``_finish_auto_open``'s/``_push_existing_feature``'s ``attribution``
         parameter typing (``bool | None`` -> ``SourceAttribution | None``)
@@ -2838,13 +2854,13 @@ class TestCreatePRAutoOpen:
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True
-        body = fake.captured["scope"].body
-        fields = attribution.parse_marker(body)
+        body = _present(fake.captured)["scope"].body
+        fields = _present(attribution.parse_marker(body))
         assert fields == {"codename": "amber-thicket"}
 
     def test_initial_publish_codename_mode_provenance_gating_blocks_custom(
-        self, pr_repo, monkeypatch,
-    ):
+        self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """The initial create-pr publish must apply the SAME provenance
         gating as the refresh path (round-17 finding): a `codename_source:
         "custom"` record under the IMPLICIT default must not publish. The
@@ -2867,12 +2883,12 @@ class TestCreatePRAutoOpen:
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True
-        body = fake.captured["scope"].body
+        body = _present(fake.captured)["scope"].body
         assert attribution.parse_marker(body) is None
 
     def test_codename_mode_backfills_a_missing_codename(
-        self, provider_record_repo, monkeypatch,
-    ):
+        self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """If the worktree has no assigned codename yet (a pre-Phase-2 or
         never-touched record), `codename` mode must backfill one via the
         same `ensure_codename` first-touch path `resolve`/`resume`/
@@ -2891,15 +2907,15 @@ class TestCreatePRAutoOpen:
         res = self._open_record(wid, config)
 
         assert res["success"] is True
-        fields = attribution.parse_marker(fake.captured["scope"].body)
+        fields = _present(attribution.parse_marker(_present(fake.captured)["scope"].body))
         assert fields is not None
         assert fields["codename"]
         rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec_after.codename == fields["codename"]
 
     def test_codename_backfill_failure_degrades_to_skip_not_crash(
-        self, provider_record_repo, monkeypatch,
-    ):
+        self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """`ensure_codename` can raise (notably `TimeoutError` if its
         cross-process allocation lock can't be acquired in time) -- this is
         opening a PR, so a backfill failure must degrade to "no marker on
@@ -2914,7 +2930,7 @@ class TestCreatePRAutoOpen:
         fake = _FakeProvider()
         monkeypatch.setattr(providers, "get_provider", lambda name: fake)
 
-        def _boom(*a, **k):
+        def _boom(*a: Any, **k: Any) -> Any:
             raise TimeoutError("lock contended")
         monkeypatch.setattr(codename_tracking, "ensure_codename", _boom)
 
@@ -2922,13 +2938,13 @@ class TestCreatePRAutoOpen:
 
         assert res["success"] is True
         assert res.get("pr_opened") is True
-        assert attribution.parse_marker(fake.captured["scope"].body) is None
+        assert attribution.parse_marker(_present(fake.captured)["scope"].body) is None
         rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec_after.codename is None
 
     def test_codename_mode_skip_strips_a_stale_marker_from_the_body(
-        self, provider_record_repo, monkeypatch,
-    ):
+        self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """When codename mode skips publishing (a MALFORMED, not merely
         missing, codename -- a missing one is now backfilled and
         published), any pre-existing source marker already present in the
@@ -2950,15 +2966,15 @@ class TestCreatePRAutoOpen:
         res = self._open_record(wid, config, body=body)
 
         assert res["success"] is True
-        assert attribution.parse_marker(fake.captured["scope"].body) is None
-        assert "stale-worktree-id" not in fake.captured["scope"].body
-        assert "agent-worktrees:source" not in fake.captured["scope"].body
+        assert attribution.parse_marker(_present(fake.captured)["scope"].body) is None
+        assert "stale-worktree-id" not in _present(fake.captured)["scope"].body
+        assert "agent-worktrees:source" not in _present(fake.captured)["scope"].body
         rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec_after.active_pr().attribution_head == ""
+        assert _present(rec_after.active_pr()).attribution_head == ""
 
     def test_attribution_disabled_strips_a_stale_marker_from_the_body(
-        self, provider_record_repo, monkeypatch,
-    ):
+        self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """With attribution disabled entirely, a pre-existing source marker
         in the caller-supplied body must also be stripped."""
         from agent_worktrees import providers
@@ -2973,12 +2989,12 @@ class TestCreatePRAutoOpen:
         res = self._open_record(wid, config, body=body)
 
         assert res["success"] is True
-        assert attribution.parse_marker(fake.captured["scope"].body) is None
-        assert "stale-worktree-id" not in fake.captured["scope"].body
+        assert attribution.parse_marker(_present(fake.captured)["scope"].body) is None
+        assert "stale-worktree-id" not in _present(fake.captured)["scope"].body
 
     def test_codename_mode_skips_marker_for_a_malformed_codename(
-        self, pr_repo, monkeypatch,
-    ):
+        self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A tampered/corrupted codename (e.g. containing whitespace or an
         HTML-comment-closing sequence) must never be interpolated into the
         marker as-is -- validate it first, and skip the marker (never fall
@@ -2996,12 +3012,12 @@ class TestCreatePRAutoOpen:
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True
-        assert attribution.parse_marker(fake.captured["scope"].body) is None
-        assert "agent-worktrees:source" not in fake.captured["scope"].body
+        assert attribution.parse_marker(_present(fake.captured)["scope"].body) is None
+        assert "agent-worktrees:source" not in _present(fake.captured)["scope"].body
 
     def test_codename_mode_skip_does_not_record_attribution_head(
-        self, pr_repo, monkeypatch,
-    ):
+        self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """When codename mode skips the marker (a MALFORMED codename -- a
         missing one is now backfilled and published instead), the PR
         record's `attribution_head` must stay unset -- setting it would
@@ -3021,11 +3037,11 @@ class TestCreatePRAutoOpen:
 
         assert res["success"] is True
         rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec_after.active_pr().attribution_head == ""
+        assert _present(rec_after.active_pr()).attribution_head == ""
 
     def test_codename_mode_skips_marker_for_a_non_string_codename(
         self,
-    ):
+    ) -> None:
         """A tracking record whose `codename` field somehow isn't even a
         string (dataclass fields aren't runtime-type-checked) must not
         crash `is_valid_handle` -- the same `isinstance` guard used at both
@@ -3040,7 +3056,7 @@ class TestCreatePRAutoOpen:
         # This is exactly what a naive `codename and is_valid_handle(codename)`
         # check would do -- crash instead of treating it as invalid.
         with pytest.raises(TypeError):
-            codename_mod.is_valid_handle(non_string_codename)
+            codename_mod.is_valid_handle(cast(Any, non_string_codename))
         # The guard actually used in pr_ops.py short-circuits safely.
         assert not (
             isinstance(non_string_codename, str)
@@ -3048,8 +3064,8 @@ class TestCreatePRAutoOpen:
         )
 
     @pytest.mark.parametrize("observed", [None, False, True])
-    def test_auto_open_draft_marks_scope_draft(self, pr_repo, monkeypatch, observed):
-        config, wid, _wt, _ = pr_repo
+    def test_auto_open_draft_marks_scope_draft(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, observed: bool | None) -> None:
+        config, wid, wt, remote = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _FakeProvider(observed_draft=observed)
@@ -3059,11 +3075,16 @@ class TestCreatePRAutoOpen:
         assert res["success"] is True
         assert res["draft"] is (True if observed is None else observed)
         # Native draft: the scope carries draft=True (no do-not-merge label).
-        assert fake.captured["scope"].draft is True
-        assert pr_ops.HOLD_LABEL not in fake.captured["scope"].labels
+        assert _present(fake.captured)["scope"].draft is True
+        assert pr_ops.HOLD_LABEL not in _present(fake.captured)["scope"].labels
+        scope = _present(fake.captured)["scope"]
+        assert scope.head_identity == pr_publish._identity(str(remote), str(wt))
+        assert scope.expected_head_sha == git_ops.git(
+            "--git-dir", str(remote), "rev-parse", f"refs/heads/{res['branch']}", cwd=wt,
+        ).stdout.strip()
 
     @pytest.mark.parametrize("open_pr", [None, False])
-    def test_retry_retains_observed_draft_without_opening_again(self, pr_repo, monkeypatch, open_pr):
+    def test_retry_retains_observed_draft_without_opening_again(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, open_pr: bool | None) -> None:
         config, wid, wt, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -3076,7 +3097,7 @@ class TestCreatePRAutoOpen:
         assert retry["success"] and retry["number"] == first["number"]
         assert retry["draft"] is True and fake.creates == 1
 
-    def test_auto_open_hold_is_deprecated_alias_for_draft(self, pr_repo, monkeypatch):
+    def test_auto_open_hold_is_deprecated_alias_for_draft(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # --hold is retained as a deprecated alias for --draft.
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
@@ -3087,10 +3108,10 @@ class TestCreatePRAutoOpen:
         res = pr_ops.create_pr(wid, config, title="Add feature", hold=True)
         assert res["success"] is True
         assert res["draft"] is True
-        assert fake.captured["scope"].draft is True
-        assert pr_ops.HOLD_LABEL not in fake.captured["scope"].labels
+        assert _present(fake.captured)["scope"].draft is True
+        assert pr_ops.HOLD_LABEL not in _present(fake.captured)["scope"].labels
 
-    def test_no_open_skips_provider(self, pr_repo, monkeypatch):
+    def test_no_open_skips_provider(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
 
@@ -3102,14 +3123,14 @@ class TestCreatePRAutoOpen:
         assert res["pr_open_skipped"] == "--no-open"
         assert fake.creates == 0
 
-    def test_provider_failure_is_non_fatal(self, pr_repo, monkeypatch):
+    def test_provider_failure_is_non_fatal(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
 
         fake = _FakeProvider()
 
-        def _fail(scope, *, token=None):
+        def _fail(scope: PRScope, *, token: str | None = None) -> Any:
             raise ProviderError("gitea exploded")
 
         monkeypatch.setattr(fake, "create_pull", _fail)
@@ -3119,7 +3140,7 @@ class TestCreatePRAutoOpen:
         assert res["pr_opened"] is False
         assert "gitea exploded" in res["pr_open_error"]
 
-    def test_no_attribution_omits_marker(self, pr_repo, monkeypatch):
+    def test_no_attribution_omits_marker(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import attribution as attr
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
@@ -3129,11 +3150,11 @@ class TestCreatePRAutoOpen:
 
         pr_ops.create_pr(wid, config, title="Add feature", body="Hello",
                          attribution=False)
-        scope = fake.captured["scope"]
+        scope = _present(fake.captured)["scope"]
         assert attr.parse_marker(scope.body) is None
         assert scope.body == "Hello"
 
-    def _ready_config(self, pr_repo):
+    def _ready_config(self, pr_repo: PrRepo) -> tuple[cfg.Config, str]:
         import dataclasses
         config, wid, _wt, _ = pr_repo
         repo = config.repos["ext"]
@@ -3147,12 +3168,12 @@ class TestCreatePRAutoOpen:
         )
         return config, wid
 
-    def _track_pr(self, wid, config):
+    def _track_pr(self, wid: str, config: cfg.Config) -> None:
         pr_ops.set_pr(
             wid, url="https://h/gitea/o/r/pulls/99", number=99, provider="gitea",
         )
 
-    def test_pr_ready_undrafts_draft_pr(self, provider_record_repo, monkeypatch):
+    def test_pr_ready_undrafts_draft_pr(self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         self._track_pr(wid, config)
@@ -3166,14 +3187,14 @@ class TestCreatePRAutoOpen:
         assert res["transition"] == "undraft"
         assert res["was_draft"] is True
         # The un-draft primitive was invoked with the snapshot title + binding.
-        assert fake.marked_ready["repo"] == "o/r"
-        assert fake.marked_ready["number"] == 99
-        assert fake.marked_ready["title"] == "WIP: Add feature"
-        assert fake.marked_ready["wip_title_prefixes"] == ("wip:", "[wip]")
+        assert _present(fake.marked_ready)["repo"] == "o/r"
+        assert _present(fake.marked_ready)["number"] == 99
+        assert _present(fake.marked_ready)["title"] == "WIP: Add feature"
+        assert _present(fake.marked_ready)["wip_title_prefixes"] == ("wip:", "[wip]")
         # It must NOT touch the legacy hold label on the draft path.
         assert fake.removed is None
 
-    def test_pr_ready_errors_when_mark_ready_fails(self, provider_record_repo, monkeypatch):
+    def test_pr_ready_errors_when_mark_ready_fails(self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         self._track_pr(wid, config)
@@ -3187,7 +3208,7 @@ class TestCreatePRAutoOpen:
         assert res["success"] is False
         assert "un-draft failed" in res["error"]
 
-    def test_pr_ready_errors_when_not_draft(self, provider_record_repo, monkeypatch):
+    def test_pr_ready_errors_when_not_draft(self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # A no-op must never masquerade as success (issue #2779).
         config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -3204,7 +3225,7 @@ class TestCreatePRAutoOpen:
         assert fake.marked_ready is None
         assert fake.removed is None
 
-    def test_pr_ready_removes_legacy_hold_label(self, provider_record_repo, monkeypatch):
+    def test_pr_ready_removes_legacy_hold_label(self, provider_record_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # Backward-compat: a non-draft PR carrying the retired do-not-merge hold
         # label is released by removing the label (the equivalent transition).
         config, wid = self._ready_config(provider_record_repo)
@@ -3231,13 +3252,13 @@ class TestCreatePRAutoOpen:
 
 
 class TestAutoOpenDefault:
-    def test_auto_open_is_opt_in(self):
+    def test_auto_open_is_opt_in(self) -> None:
         from agent_worktrees.config import _parse_pr
         assert cfg.PRConfig().auto_open is False
         assert _parse_pr({"provider": "gitea"}).auto_open is False
         assert _parse_pr({"auto_open": True}).auto_open is True
 
-    def test_create_pr_skips_provider_by_default(self, pr_repo, monkeypatch):
+    def test_create_pr_skips_provider_by_default(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # Local authority resolution for reservation is not a forge create.
         import dataclasses
         config, wid, _wt, _ = pr_repo
@@ -3258,7 +3279,7 @@ class TestAutoOpenDefault:
 
 
 class TestHeadSchemeConfig:
-    def test_defaults_to_refspec(self):
+    def test_defaults_to_refspec(self) -> None:
         from agent_worktrees.config import _parse_pr
         # #1899: refspec is the default scheme (missing key + dataclass default).
         assert cfg.PRConfig().head_scheme == "refspec"
@@ -3267,7 +3288,7 @@ class TestHeadSchemeConfig:
         assert pr.head_scheme == "refspec"
         assert pr.head_pattern == ""
 
-    def test_parses_refspec_and_pattern(self):
+    def test_parses_refspec_and_pattern(self) -> None:
         from agent_worktrees.config import _parse_pr
         pr = _parse_pr({
             "head_scheme": "refspec",
@@ -3276,7 +3297,7 @@ class TestHeadSchemeConfig:
         assert pr.head_scheme == "refspec"
         assert pr.head_pattern == "user/{username}/{slug}-{suffix}"
 
-    def test_unknown_scheme_falls_back_to_snapshot(self):
+    def test_unknown_scheme_falls_back_to_snapshot(self) -> None:
         from agent_worktrees.config import _parse_pr
         # A garbage value falls back to the compatible snapshot scheme, NOT the
         # refspec default (#1899) -- a typo must not silently break pushes in a
@@ -3290,7 +3311,7 @@ class TestHeadSchemeConfig:
 # Provider PR-state reconciliation + rerun auto-open (issues #1163, #1167)
 # ---------------------------------------------------------------------------
 
-def _g(*args: str, cwd) -> str:
+def _g(*args: str, cwd: Path) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
 
@@ -3304,7 +3325,7 @@ class _StatefulFakeProvider:
         self._next = 100
         self.pull_states: dict[int, str] = {}   # number -> state get_pull reports
         self.create_calls = 0
-        self.captured: list = []
+        self.captured: list[PRScope] = []
 
     def authority_endpoint(self, api_base: str = "") -> str:
         # Mirrors GiteaProvider.authority_endpoint's own contract: the
@@ -3324,7 +3345,7 @@ class _StatefulFakeProvider:
         # would add nothing no current test asserts on.
         return ""
 
-    def create_pull(self, scope, *, token=None):
+    def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         self.create_calls += 1
         n = self._next
         self._next += 1
@@ -3334,7 +3355,7 @@ class _StatefulFakeProvider:
             url=f"https://h/gitea/ext/pulls/{n}", number=n, state="open",
         )
 
-    def get_pull(self, repo, number, *, api_base="", token=None):
+    def get_pull(self, repo: str, number: int, *, api_base: str = "", token: str | None = None) -> PullResult:
         return PullResult(
             url=f"https://h/gitea/ext/pulls/{number}", number=number,
             state=self.pull_states.get(number, "open"),
@@ -3348,8 +3369,8 @@ class TestCreatePRCodenameAttributionPolicyPreflight:
     "codename" attribution."""
 
     def _custom_wordlist_config(
-        self, config, tmp_path, *, source_attribution_configured: bool,
-    ):
+        self, config: cfg.Config, tmp_path: Path, *, source_attribution_configured: bool,
+    ) -> cfg.Config:
         import dataclasses
         from agent_worktrees.codename_config import CodenameConfig
         repo = config.repos["ext"]
@@ -3367,7 +3388,7 @@ class TestCreatePRCodenameAttributionPolicyPreflight:
             repos={"ext": dataclasses.replace(repo, pr=pr, codename=codename_cfg)},
         )
 
-    def test_preflight_blocks_before_any_push(self, pr_repo, tmp_path):
+    def test_preflight_blocks_before_any_push(self, pr_repo: PrRepo, tmp_path: Path) -> None:
         config, wid, wt_path, _ = pr_repo
         config = self._custom_wordlist_config(
             config, tmp_path, source_attribution_configured=False,
@@ -3389,7 +3410,7 @@ class TestCreatePRCodenameAttributionPolicyPreflight:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.prs == []
 
-    def test_explicit_opt_in_bypasses_preflight(self, pr_repo, tmp_path, monkeypatch):
+    def test_explicit_opt_in_bypasses_preflight(self, pr_repo: PrRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, wt_path, _ = pr_repo
         config = self._custom_wordlist_config(
             config, tmp_path, source_attribution_configured=True,
@@ -3397,7 +3418,7 @@ class TestCreatePRCodenameAttributionPolicyPreflight:
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True
 
-    def test_pr_inactive_repo_never_preflighted(self, pr_repo, tmp_path):
+    def test_pr_inactive_repo_never_preflighted(self, pr_repo: PrRepo, tmp_path: Path) -> None:
         # round-22 finding: the gate only applies to PR-active repos --
         # this fixture's config already has pr.enabled True via pr_repo, so
         # simulate the inactive case directly against check_allocation_policy
@@ -3414,7 +3435,7 @@ class TestCreatePRReconcile:
     deciding to reuse its branch -- an externally-merged PR (whose local state
     is stale ``open``) must not be reused/force-pushed (#1163)."""
 
-    def _enable_open(self, config, *, source_attribution=False):
+    def _enable_open(self, config: cfg.Config, *, source_attribution: cfg.SourceAttribution = False) -> cfg.Config:
         # codename-attribution-by-default: this class tests reconciliation,
         # not attribution -- pin source_attribution off (matching
         # TestCreatePRAutoOpen's own pattern) so the new implicit
@@ -3432,7 +3453,7 @@ class TestCreatePRReconcile:
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
         )
 
-    def test_merged_active_pr_is_reconciled_not_reused(self, pr_repo, monkeypatch):
+    def test_merged_active_pr_is_reconciled_not_reused(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, wt_path, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -3469,7 +3490,7 @@ class TestCreatePRReconcile:
         assert rec.prs[1].state == "open"
         assert rec.prs[1].branch == "feature/second-feature-aaaa"
 
-    def test_open_active_pr_still_reused_when_provider_agrees(self, pr_repo, monkeypatch):
+    def test_open_active_pr_still_reused_when_provider_agrees(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # Reconciliation must NOT break the legitimate iterate-an-open-PR path:
         # when the provider confirms the active PR is still open, the branch is
         # reused (force-with-lease) and no second PR is opened.
@@ -3498,7 +3519,7 @@ class TestCreatePRReconcile:
         assert fake.create_calls == 1                       # provider not re-called
         assert rec.prs[0].number == n1
 
-    def test_stale_merged_and_pruned_branch_not_reused(self, pr_repo, monkeypatch):
+    def test_stale_merged_and_pruned_branch_not_reused(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # #1984: the provider state query can RACE the merge (the PR is merged a
         # beat after the query) or the provider can be briefly unreachable, so
         # the reconcile leaves the record stale at 'open'. If the host deleted
@@ -3550,7 +3571,7 @@ class TestCreatePRReconcile:
         assert rec.prs[1].state == "open"
         assert rec.prs[1].branch == "feature/second-feature-aaaa"
 
-    def test_present_remote_branch_still_reused(self, pr_repo, monkeypatch):
+    def test_present_remote_branch_still_reused(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # The #1984 guard must be surgical: when the active PR is live AND its
         # branch still exists on the remote, the legitimate iterate path is
         # untouched (branch reused, no duplicate PR) even if a new title is
@@ -3587,7 +3608,7 @@ class TestRerunAutoOpen:
     auto-open for a still-pending PR and surface an already-opened PR's number,
     so the agent never opens a duplicate (#1167)."""
 
-    def _enable_open(self, config):
+    def _enable_open(self, config: cfg.Config) -> cfg.Config:
         import dataclasses
         repo = config.repos["ext"]
         pr = dataclasses.replace(
@@ -3598,7 +3619,7 @@ class TestRerunAutoOpen:
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
         )
 
-    def test_rerun_opens_pending_pr(self, pr_repo, monkeypatch):
+    def test_rerun_opens_pending_pr(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, _wt_path, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -3622,9 +3643,9 @@ class TestRerunAutoOpen:
         assert fake.create_calls == 1
 
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        assert rec.active_pr().number == r2["number"]
+        assert _present(rec.active_pr()).number == r2["number"]
 
-    def test_rerun_surfaces_existing_pr_no_duplicate(self, pr_repo, monkeypatch):
+    def test_rerun_surfaces_existing_pr_no_duplicate(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, _wt_path, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
@@ -3645,7 +3666,7 @@ class TestRerunAutoOpen:
         assert r2["pr_opened"] is True
         assert fake.create_calls == 1                       # no duplicate PR opened
 
-    def test_no_open_says_why_and_still_reports_an_existing_pr(self, pr_repo, monkeypatch):
+    def test_no_open_says_why_and_still_reports_an_existing_pr(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         """``--no-open`` opens and changes nothing on the provider (it still reads the
         tracked PR's state, so a merged PR's branch is never reused): a first run records why no PR was
         opened, and a re-run on an already-open PR still reports it (never "none")."""
@@ -3666,7 +3687,7 @@ class TestRerunAutoOpen:
         assert r3["pr_existing"] is True
         assert fake.create_calls == 1
 
-    def test_auto_open_off_says_so(self, pr_repo, monkeypatch):
+    def test_auto_open_off_says_so(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         config, wid, _wt_path, _ = pr_repo  # pr.auto_open is off here
 
         fake = _FakeProvider()
@@ -3676,7 +3697,7 @@ class TestRerunAutoOpen:
         assert res["pr_open_skipped"] == "pr.auto_open is off"
         assert fake.creates == 0
 
-    def test_rerun_after_external_merge_opens_fresh_pr(self, pr_repo, monkeypatch):
+    def test_rerun_after_external_merge_opens_fresh_pr(self, pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch) -> None:
         # #1336: a feature branch whose PR merged externally (auto-merge), with
         # a new commit added on that branch, must open a FRESH PR on re-run --
         # never surface the merged PR as if freshly opened. create-pr returns
@@ -3732,11 +3753,11 @@ class TestRerunAutoOpen:
 class TestAzureDevOpsCapabilities:
     ORG = "https://dev.azure.com/org"
 
-    def _prov(self):
+    def _prov(self) -> Any:
         from agent_worktrees.providers import azure_devops as azure
         return azure, azure.AzureDevOpsProvider()
 
-    def test_get_snapshot_maps_votes_and_mergestatus(self, monkeypatch):
+    def test_get_snapshot_maps_votes_and_mergestatus(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         show = {
             "status": "active",
@@ -3765,7 +3786,7 @@ class TestAzureDevOpsCapabilities:
         assert effective_verdict(snap.reviews, snap.head_sha, snap.author) == \
             "CHANGES_REQUESTED"
 
-    def test_get_snapshot_autocomplete_marker(self, monkeypatch):
+    def test_get_snapshot_autocomplete_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         show = {"status": "active", "mergeStatus": "queued",
                 "autoCompleteSetBy": {"id": "x"}, "reviewers": []}
@@ -3775,7 +3796,7 @@ class TestAzureDevOpsCapabilities:
         assert "auto-complete" in snap.labels
         assert snap.mergeable is None  # queued -> not yet known
 
-    def test_get_snapshot_completed_is_merged(self, monkeypatch):
+    def test_get_snapshot_completed_is_merged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.setattr(
             azure, "run_cli",
@@ -3784,13 +3805,12 @@ class TestAzureDevOpsCapabilities:
         snap = prov.get_snapshot("proj/repo", 5, api_base=self.ORG, token="t")
         assert snap.merged is True and snap.pr_state == "closed"
 
-    def test_request_auto_complete_no_bypass_sets_autocomplete(self, monkeypatch):
+    def test_request_auto_complete_no_bypass_sets_autocomplete(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             azure, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args),
-                                _proc(stdout="{}"))[1])
+            lambda args, **kw: _capture(_proc(stdout="{}"), captured, args=args))
         err = prov.request_auto_complete(
             "proj/repo", 5, api_base=self.ORG, token="t",
             automerge_label="auto-complete", squash=True,
@@ -3803,16 +3823,15 @@ class TestAzureDevOpsCapabilities:
         assert a[a.index("--delete-source-branch") + 1] == "true"
         assert "--status" not in a  # auto-complete path, not direct completion
 
-    def test_request_auto_complete_bypass_completes_directly(self, monkeypatch):
+    def test_request_auto_complete_bypass_completes_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # ADO rejects --bypass-policy with --auto-complete, so a bypass request
         # is a DIRECT completion (--status completed --bypass-policy), never
         # --auto-complete.
         azure, prov = self._prov()
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             azure, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args),
-                                _proc(stdout="{}"))[1])
+            lambda args, **kw: _capture(_proc(stdout="{}"), captured, args=args))
         err = prov.request_auto_complete(
             "proj/repo", 5, api_base=self.ORG, token="t",
             bypass_policy=True, bypass_reason="self")
@@ -3823,14 +3842,14 @@ class TestAzureDevOpsCapabilities:
         assert a[a.index("--bypass-policy-reason") + 1] == "self"
         assert "--auto-complete" not in a  # mutually exclusive with bypass
 
-    def test_request_auto_complete_failure(self, monkeypatch):
+    def test_request_auto_complete_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.setattr(azure, "run_cli",
                             lambda args, **kw: _proc(returncode=1, stderr="no perms"))
         err = prov.request_auto_complete("proj/repo", 5, api_base=self.ORG, token="t")
         assert "no perms" in err
 
-    def test_list_open_pulls(self, monkeypatch):
+    def test_list_open_pulls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.setattr(
             azure, "run_cli",
@@ -3838,7 +3857,7 @@ class TestAzureDevOpsCapabilities:
                 [{"pullRequestId": 3}, {"pullRequestId": 9}])))
         assert prov.list_open_pulls("proj/repo", api_base=self.ORG, token="t") == (3, 9)
 
-    def test_get_comment_threads_filters_system(self, monkeypatch):
+    def test_get_comment_threads_filters_system(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         payload = {"value": [
             {"id": 1, "status": "active", "threadContext": {"filePath": "/a.py"},
@@ -3861,14 +3880,14 @@ class TestAzureDevOpsCapabilities:
         assert [t.id for t in res.active] == [1]
         assert res.threads[0].comments[0].content == "fix"
 
-    def test_get_comment_threads_uses_aad_when_no_pat(self, monkeypatch):
+    def test_get_comment_threads_uses_aad_when_no_pat(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.delenv("AZURE_DEVOPS_EXT_PAT", raising=False)
         payload = {"value": [{"id": 1, "status": "active",
                               "comments": [{"author": {"displayName": "R"},
                                             "content": "x", "commentType": "text"}]}]}
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if args[:2] == ["az", "account"]:
                 return _proc(stdout="aad-tok\n")
             assert any("Bearer aad-tok" in a for a in args)
@@ -3878,11 +3897,13 @@ class TestAzureDevOpsCapabilities:
         res = prov.get_comment_threads("proj/repo", 5, api_base=self.ORG, token=None)
         assert res.supported is True and [t.id for t in res.threads] == [1]
 
-    def test_resolve_threads_patches_closed(self, monkeypatch):
+    def test_resolve_threads_patches_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         calls = []
-        monkeypatch.setattr(azure, "run_cli",
-                            lambda args, **kw: (calls.append((args, kw)), _proc(stdout="\n200"))[1])
+        def capture_call(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append((args, kwargs))
+            return _proc(stdout="\n200")
+        monkeypatch.setattr(azure, "run_cli", capture_call)
         err = prov.resolve_threads("proj/repo", 5, api_base=self.ORG, token="pat",
                                    thread_ids=(11, 12))
         assert err == "" and len(calls) == 2
@@ -3892,13 +3913,13 @@ class TestAzureDevOpsCapabilities:
 
 
 class TestGiteaThreads:
-    def test_get_comment_threads(self, monkeypatch):
+    def test_get_comment_threads(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
         reviews = [{"id": 7}]
         comments = [{"user": {"login": "rev"}, "body": "please fix", "path": "a.py"}]
 
-        def fake_curl(method, url, token, *, payload=None):
+        def fake_curl(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             if url.endswith("/reviews"):
                 return 200, json.dumps(reviews)
             if "/reviews/7/comments" in url:
@@ -3912,15 +3933,15 @@ class TestGiteaThreads:
         assert res.threads[0].status == "active"
         assert res.threads[0].comments[0].content == "please fix"
 
-    def test_resolve_threads_reports_unsupported(self):
+    def test_resolve_threads_reports_unsupported(self) -> None:
         from agent_worktrees.providers import gitea
         err = gitea.GiteaProvider().resolve_threads("o/r", 3, token="t")
         assert "not exposed by the Gitea REST API" in err
 
-    def test_request_auto_complete_applies_label(self, monkeypatch):
+    def test_request_auto_complete_applies_label(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
-        called = {}
+        called: dict[str, Any] = {}
         monkeypatch.setattr(prov, "add_label",
                             lambda repo, number, label, *, api_base="", token=None:
                             (called.update(repo=repo, label=label), "")[1])
@@ -3930,12 +3951,12 @@ class TestGiteaThreads:
 
 
 class TestGitHubThreads:
-    def test_request_auto_complete_applies_endpoint_bound_label(self, monkeypatch):
+    def test_request_auto_complete_applies_endpoint_bound_label(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
-            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1])
+            lambda args, **kw: _capture(_proc(), captured, args=args))
         err = github.GitHubProvider().request_auto_complete(
             "o/r",
             3,
@@ -3952,7 +3973,7 @@ class TestGitHubThreads:
         assert "repos/o/r/issues/3/labels" in a
         assert a[a.index("-f") + 1] == "labels[]=auto-merge"
 
-    def test_get_comment_threads_graphql(self, monkeypatch):
+    def test_get_comment_threads_graphql(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         gql = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [
             {"id": "T1", "isResolved": False, "isOutdated": False, "path": "a.py",
@@ -3967,7 +3988,7 @@ class TestGitHubThreads:
         assert [t.status for t in res.threads] == ["active", "resolved"]
         assert [t.id for t in res.active] == [1]
 
-    def test_resolve_threads_mutates_unresolved(self, monkeypatch):
+    def test_resolve_threads_mutates_unresolved(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         gql = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [
             {"id": "T1", "isResolved": False,
@@ -3977,7 +3998,7 @@ class TestGitHubThreads:
         ]}}}}}
         mutations = []
 
-        def fake(args, **kw):
+        def fake(args: Any, **kw: Any) -> Any:
             if "resolveReviewThread" in " ".join(args):
                 mutations.append(args)
                 return _proc(stdout='{"data":{}}')
@@ -3993,7 +4014,7 @@ class TestGitHubThreads:
 # ---------------------------------------------------------------------------
 
 class TestGitHubReviewerOps:
-    def test_get_diff_returns_provider_output(self, monkeypatch):
+    def test_get_diff_returns_provider_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -4002,7 +4023,7 @@ class TestGitHubReviewerOps:
         assert result.supported is True
         assert result.diff == "diff --git a/x b/x\n"
 
-    def test_get_diff_failure_is_reported(self, monkeypatch):
+    def test_get_diff_failure_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         monkeypatch.setattr(
             github, "run_cli",
@@ -4011,28 +4032,28 @@ class TestGitHubReviewerOps:
         assert result.supported is True
         assert "no such PR" in result.error
 
-    def test_post_comment_posts_body(self, monkeypatch):
+    def test_post_comment_posts_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
             lambda args, **kw: (captured.update(args=args), _proc())[1])
         assert github.GitHubProvider().post_comment("o/r", 3, "nice work", token="t") == ""
         assert captured["args"][-2:] == ["--body", "nice work"]
 
-    def test_post_comment_rejects_copilot_mention(self, monkeypatch):
+    def test_post_comment_rejects_copilot_mention(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             raise AssertionError("gh must not be invoked for a rejected mention")
 
         monkeypatch.setattr(github, "run_cli", fake_run)
         with pytest.raises(ProviderError, match="@copilot"):
             github.GitHubProvider().post_comment("o/r", 3, "ask @copilot", token="t")
 
-    def test_submit_review_approve(self, monkeypatch):
+    def test_submit_review_approve(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
             lambda args, **kw: (captured.update(args=args), _proc())[1])
@@ -4042,9 +4063,9 @@ class TestGitHubReviewerOps:
         assert "--approve" in captured["args"]
         assert captured["args"][-2:] == ["--body", "LGTM"]
 
-    def test_submit_review_request_changes(self, monkeypatch):
+    def test_submit_review_request_changes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             github, "run_cli",
             lambda args, **kw: (captured.update(args=args), _proc())[1])
@@ -4053,10 +4074,10 @@ class TestGitHubReviewerOps:
         assert err == ""
         assert "--request-changes" in captured["args"]
 
-    def test_submit_review_rejects_copilot_mention(self, monkeypatch):
+    def test_submit_review_rejects_copilot_mention(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: Any, **kwargs: Any) -> Any:
             raise AssertionError("gh must not be invoked for a rejected mention")
 
         monkeypatch.setattr(github, "run_cli", fake_run)
@@ -4064,14 +4085,14 @@ class TestGitHubReviewerOps:
             github.GitHubProvider().submit_review(
                 "o/r", 3, event="COMMENTED", body="cc @copilot", token="t")
 
-    def test_submit_review_unknown_event_reports_error(self, monkeypatch):
+    def test_submit_review_unknown_event_reports_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import github
         err = github.GitHubProvider().submit_review("o/r", 3, event="bogus", token="t")
         assert "unknown review event" in err
 
 
 class TestGiteaReviewerOps:
-    def test_get_diff_returns_body(self, monkeypatch):
+    def test_get_diff_returns_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
         monkeypatch.setattr(prov, "_curl",
@@ -4080,17 +4101,17 @@ class TestGiteaReviewerOps:
         assert result.supported is True
         assert result.diff == "diff --git a/x b/x\n"
 
-    def test_get_diff_needs_token(self):
+    def test_get_diff_needs_token(self) -> None:
         from agent_worktrees.providers import gitea
         result = gitea.GiteaProvider().get_diff("o/r", 3, api_base="https://h", token=None)
         assert result.supported is False
 
-    def test_post_comment_creates_issue_comment(self, monkeypatch):
+    def test_post_comment_creates_issue_comment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake_curl(method, url, token, *, payload=None):
+        def fake_curl(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             captured.update(method=method, url=url, payload=payload)
             return 201, "{}"
 
@@ -4100,12 +4121,12 @@ class TestGiteaReviewerOps:
         ) == ""
         assert captured["payload"] == {"body": "nice work"}
 
-    def test_submit_review_maps_event_vocabulary(self, monkeypatch):
+    def test_submit_review_maps_event_vocabulary(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.providers import gitea
         prov = gitea.GiteaProvider()
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def fake_curl(method, url, token, *, payload=None):
+        def fake_curl(method: str, url: str, token: str, *, payload: Any = None) -> Any:
             captured.update(method=method, url=url, payload=payload)
             return 200, "{}"
 
@@ -4117,7 +4138,7 @@ class TestGiteaReviewerOps:
         assert err == ""
         assert captured["payload"] == {"event": "REQUEST_CHANGES", "body": "fix it"}
 
-    def test_submit_review_unknown_event_reports_error(self):
+    def test_submit_review_unknown_event_reports_error(self) -> None:
         from agent_worktrees.providers import gitea
         err = gitea.GiteaProvider().submit_review(
             "o/r", 3, event="bogus", api_base="https://h", token="t"
@@ -4128,20 +4149,20 @@ class TestGiteaReviewerOps:
 class TestAzureDevOpsReviewerOps:
     ORG = "https://dev.azure.com/org"
 
-    def _prov(self):
+    def _prov(self) -> Any:
         from agent_worktrees.providers import azure_devops as azure
         return azure, azure.AzureDevOpsProvider()
 
-    def test_get_diff_is_unsupported(self):
+    def test_get_diff_is_unsupported(self) -> None:
         _, prov = self._prov()
         result = prov.get_diff("proj/repo", 5, api_base=self.ORG, token="pat")
         assert result.supported is False
 
-    def test_post_comment_creates_thread(self, monkeypatch):
+    def test_post_comment_creates_thread(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.setattr(prov, "_auth_header",
                             lambda token: ("Authorization: ******", ""))
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             prov, "_rest_call",
             lambda method, url, auth, payload=None: (
@@ -4153,13 +4174,13 @@ class TestAzureDevOpsReviewerOps:
         ) == ""
         assert json.loads(captured["payload"])["comments"][0]["content"] == "nice work"
 
-    def test_submit_review_approve_casts_vote(self, monkeypatch):
+    def test_submit_review_approve_casts_vote(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.setattr(prov, "_auth_header",
                             lambda token: ("Authorization: ******", ""))
         monkeypatch.setattr(prov, "_rest_call",
                             lambda method, url, auth, payload=None: (201, "{}"))
-        captured = {}
+        captured: dict[str, Any] = {}
         monkeypatch.setattr(
             azure, "run_cli",
             lambda args, **kw: (captured.update(args=args), _proc())[1])
@@ -4169,14 +4190,14 @@ class TestAzureDevOpsReviewerOps:
         assert err == ""
         assert captured["args"][-2:] == ["--vote", "approve"]
 
-    def test_submit_review_commented_casts_no_vote(self, monkeypatch):
+    def test_submit_review_commented_casts_no_vote(self, monkeypatch: pytest.MonkeyPatch) -> None:
         azure, prov = self._prov()
         monkeypatch.setattr(prov, "_auth_header",
                             lambda token: ("Authorization: ******", ""))
         monkeypatch.setattr(prov, "_rest_call",
                             lambda method, url, auth, payload=None: (201, "{}"))
 
-        def fail_run(args, **kw):
+        def fail_run(args: Any, **kw: Any) -> Any:
             raise AssertionError("COMMENTED must not cast a vote")
 
         monkeypatch.setattr(azure, "run_cli", fail_run)
@@ -4185,7 +4206,7 @@ class TestAzureDevOpsReviewerOps:
         )
         assert err == ""
 
-    def test_submit_review_unknown_event_reports_error(self):
+    def test_submit_review_unknown_event_reports_error(self) -> None:
         _, prov = self._prov()
         err = prov.submit_review(
             "proj/repo", 5, event="bogus", api_base=self.ORG, token="pat"
@@ -4193,13 +4214,13 @@ class TestAzureDevOpsReviewerOps:
         assert "unknown review event" in err
 
 
-def test_no_pr_opened_is_explained_even_without_a_tracked_pr():
+def test_no_pr_opened_is_explained_even_without_a_tracked_pr() -> None:
     """An untracked worktree (no record, so no target PR) still says why no PR was opened."""
-    from types import SimpleNamespace
-
-    kw = dict(title="t", body="", worktree_id="w", head_sha="h", draft=False, attribution=None)
     for open_pr, auto_open, why in ((False, True, "--no-open"), (None, False, "pr.auto_open is off")):
-        result = {}
-        pr_ops._finish_auto_open(result, None, None, None, open_pr=open_pr,
-                                 prcfg=SimpleNamespace(auto_open=auto_open), **kw)
+        result: dict[str, Any] = {}
+        pr_ops._finish_auto_open(
+            result, cast(cfg.Config, None), None, None, open_pr=open_pr,
+            prcfg=cfg.PRConfig(auto_open=auto_open), title="t", body="", worktree_id="w",
+            head_sha="h", draft=False, attribution=None,
+        )
         assert result == {"pr_open_skipped": why}
