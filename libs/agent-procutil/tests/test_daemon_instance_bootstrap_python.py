@@ -48,7 +48,7 @@ def test_explicit_bootstrap_python_runs_transient_transport_without_path(
         "Rename-Item Function:\\Start-DaemonInstanceWorker Start-OriginalWorker; "
         "function Start-DaemonInstanceWorker { param([hashtable]$State) "
         "Start-OriginalWorker $State; "
-        "$script:selected=$State.process.StartInfo.FileName }; "
+        "$script:selected=$State.selectedExecutable }; "
         "$reply=Invoke-DaemonInstanceRequest @{command='reconcile-contract'} -Transient; "
         "@{selected=$script:selected;reply=$reply;"
         "hint=$env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON;"

@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve one recorded failed-unstarted update launch under exclusive native custody while retaining its journal.",
+  "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

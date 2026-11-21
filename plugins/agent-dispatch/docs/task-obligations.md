@@ -33,11 +33,23 @@ The object contains:
 | `queue_identity` | Durable identity of the original queue, independent of endpoint configuration |
 | `assignment` | Exact event id and worker from a direct claim or protected allocator workspace attachment; otherwise null |
 | `relationship` | Original retained request for a protected assignment, when present |
+| `pool_placement` | On a current-incarnation lookup, null or `{assignment, workspace}`. Assignment identifies the pool by registration ID, machine and environment; workspace identifies the assigned machine/worktree, or is null when no matching workspace is recorded. |
 | `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
 | `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
 | `closeout` | Optional, currently revalidated original-assignment readiness evidence; otherwise null or absent |
 | `release_outcome` | `completed`, `unassigned_queued`, `relevance_closeout_ready`, or null |
+
+`claimant TASK` reports that pool assignment through suspension and submission.
+`resolved_from: assignment` identifies the recorded workspace, even if its
+claim has closed for finalization and the execution `owner` has cleared.
+`claimed` and `worker_id` still describe execution ownership. Without matching
+workspace evidence the command keeps its owner/target fallback. A historical
+event lookup, queued task or terminal task does not advertise an active placement;
+the original pool and relationship records remain available for inspection.
+Older responses without `pool_placement` retain the owner/target lookup and
+omit `pool_assignment` rather than claiming the task has no pool.
+None of these display fields authorize wake, capacity reuse or finalization.
 
 `completed` reports the existing authoritative `COMPLETED` state. This preserves
 the current behavior of tasks without required verification, whose completion
@@ -749,6 +761,34 @@ Every invocation reacquires evidence; later advancement still needs its own
 fresh observation and atomic checks. Both the existing completion refusal and
 its rollback-resistant SQLite enforcement remain in effect. The task claim,
 workspace, result proposal and native capacity remain retained.
+
+### Completion origin evidence
+
+`completion_origins.preparation_origins` classifies each retained proposal by
+its immutable acquisition event in the same queue and task. It checks the
+proposal's sealed request ID, workspace, worker and incarnation binding
+against the acquisition. An unmatched proposal is returned with a null origin;
+it is **not** absence or permission to ignore it. The SQL projection
+`PREPARATION_ORIGINS` is available for transaction and persisted-guard consumers.
+The projection does not mark a proposal discharged, change its contents, or
+select which proposal may advance.
+
+A successful `detach_agent` may include an additive `completion_origin_v1` in
+its existing recovery receipt. It is captured inside the verified detachment
+transaction, before clearing the native and advancing the generation. It binds
+a completed, ungoverned CLI or ordinary-Bridge pool submission to its actual
+completion audit event, queue, reservation, original worker/native, generation,
+completion time, and digest of the stored result and reference. No result body
+is copied. No field is emitted for an unqualified attachment, an ambiguous
+completion, or an enriched result. Old receipts are not backfilled.
+
+`completion_origins.exact_detached_completion` is a read-only evidence check
+inside the caller's queue transaction. It requires the same terminal outcome,
+the matching detach receipt and attachment, the immediately preceding pool
+generation, the exact retired native, and byte-identical result and reference
+(including absence). Its positive answer describes a past completion, **not**
+an execution permit or a waiver of caller identity/generation checks. It does
+not itself change completion routing or the submission guards.
 
 ### Internal guarded submission advancement
 

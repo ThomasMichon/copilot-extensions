@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from .attention import Cursor
 from .conversation_journal import ConversationJournal
@@ -24,8 +24,10 @@ if TYPE_CHECKING:
     from .attention_acquisition import AttentionInputs
     from .generation_cache import GenerationCache
     from .workspace_operations import WorkspaceOperations
+    from .watch_replay_store import ReplayStore
 
 _T = TypeVar("_T")
+Document = dict[str, Any]
 
 
 class WorkspaceRetention:
@@ -43,24 +45,29 @@ class WorkspaceRetention:
 
     @contextmanager
     def request(
-        self, operation: str, payload: dict, *, expires_at: int, checkpoint: Callable[[], None],
+        self, operation: str, payload: Document, *, expires_at: int, checkpoint: Callable[[], None],
     ) -> Iterator[int | None]:
-        owner = self.workspace.store
+        owner: ReplayStore = self.workspace.store
         if not owner.terminal_retention or operation in (
             "capabilities", "events", "receipt", "retained-comment",
         ):
             yield None
             return
+        if operation == "inspect":
+            from .workspace_retained_review import available
+            if available(self.workspace, expires_at=expires_at, checkpoint=checkpoint):
+                yield None
+                return
         scope = _scope({**self.workspace.scope, "number": payload.get("number")})
         identity = _digest(scope)
         with self._condition:
             self._active[identity] = self._active.get(identity, 0) + 1
         try:
-            def admit(document: dict) -> int | None:
+            def admit(document: Document) -> int | None:
                 if "terminal_retention" not in document:
                     return None
                 if operation not in ("load", "sync"):
-                    return require_live(document, scope)
+                    return require_live(document, scope, recorded_body=operation in ("lookup", "chunk"))
                 record = ConversationJournal(document["conversations"])._find(
                     conversation_key(scope, owner.namespace),
                 )
@@ -78,15 +85,15 @@ class WorkspaceRetention:
                 self._condition.notify_all()
 
     def guarded(
-        self, scope: dict, operation: Callable[[], _T], *, expires_at: int,
+        self, scope: Document, operation: Callable[[], _T], *, expires_at: int,
         checkpoint: Callable[[], None], epoch: int | None, generation_id: str | None = None,
     ) -> _T:
-        owner = self.workspace.store
+        owner: ReplayStore = self.workspace.store
         if not owner.terminal_retention:
             return operation()
 
-        def guarded(document: dict) -> _T:
-            require_live(document, scope, epoch=epoch, generation_id=generation_id)
+        def guarded(document: Document) -> _T:
+            require_live(document, scope, epoch=epoch, generation_id=generation_id, recorded_body=True)
             return operation()
 
         return owner._review_transaction(
@@ -94,12 +101,13 @@ class WorkspaceRetention:
         )
 
     def publish(
-        self, generation: dict, cache: GenerationCache, *, expected_current: str | None, expires_at: int,
+        self, generation: Document, cache: GenerationCache, *, expected_current: str | None, expires_at: int,
         checkpoint: Callable[[], None], attention: AttentionInputs | None,
         comment_mappings: bool, target: ObservationTarget,
-    ) -> tuple[dict, dict]:
+    ) -> tuple[Document, Document]:
         """Terminal evidence is never published as another body-bearing generation."""
-        workspace, owner = self.workspace, self.workspace.store
+        workspace = self.workspace
+        owner: ReplayStore = workspace.store
         if not workspace.conversations or workspace.retention_target is None:
             raise TerminalAdmissionClosed("terminal workspace embedding is not qualified")
         observation = ConversationStore(owner).observe_workspace(
@@ -113,7 +121,7 @@ class WorkspaceRetention:
         if not generation["complete"]:
             return {"status": "not_published", "effects": "none"}, observation
 
-        def publish(document: dict, commit: Callable[[], None]) -> dict:
+        def publish(document: Document, commit: Callable[[], None]) -> Document:
             previous = copy.deepcopy(document["terminal_retention"]["generations"])
             bind_generation(document, generation, observation["cursor"])
             owner._validate_owner(document)  # Reserve metadata before cache IO.
@@ -130,17 +138,21 @@ class WorkspaceRetention:
         return publication, observation
 
     def materialize(
-        self, cache: GenerationCache, scope: dict, generation_id: str | None, *, expires_at: int,
+        self, cache: GenerationCache, scope: Document, generation_id: str | None, *, expires_at: int,
         checkpoint: Callable[[], None], epoch: int | None,
-    ) -> tuple[dict, bytes]:
-        owner = self.workspace.store
+    ) -> tuple[Document, bytes]:
+        owner: ReplayStore = self.workspace.store
+        materialized = cast(
+            "Callable[[GenerationCache, Document, str | None], tuple[Document, bytes]]",
+            self.workspace._materialized,
+        )
         if not owner.terminal_retention:
-            return self.workspace._materialized(cache, scope, generation_id)
+            return materialized(cache, scope, generation_id)
 
-        def read(document: dict) -> tuple[dict, bytes]:
-            require_live(document, scope, epoch=epoch, generation_id=generation_id)
-            descriptor, data = self.workspace._materialized(cache, scope, generation_id)
-            require_live(document, scope, epoch=epoch, generation_id=descriptor["id"])
+        def read(document: Document) -> tuple[Document, bytes]:
+            require_live(document, scope, epoch=epoch, generation_id=generation_id, recorded_body=True)
+            descriptor, data = materialized(cache, scope, generation_id)
+            require_live(document, scope, epoch=epoch, generation_id=descriptor["id"], recorded_body=True)
             return descriptor, data
 
         return owner._review_transaction(
@@ -148,9 +160,9 @@ class WorkspaceRetention:
         )
 
     def drain(
-        self, scope: dict, cursor: Cursor, *, expires_at: int,
+        self, scope: Document, cursor: Cursor, *, expires_at: int,
         checkpoint: Callable[[], None], deadline: float, lifecycle_checkpoint: Callable[[], None],
-    ) -> dict:
+    ) -> Document:
         """Internal owner call; joining this object does not qualify foreign readers."""
         scope = _scope(scope)
         if type(deadline) not in (int, float) or not math.isfinite(deadline):
@@ -158,7 +170,7 @@ class WorkspaceRetention:
         if not callable(lifecycle_checkpoint):
             raise ValueError("actual exclusive workspace lifecycle checkpoint required")
         lifecycle_checkpoint()
-        owner = self.workspace.store
+        owner: ReplayStore = self.workspace.store
         selected = TerminalRetentionStore(owner)
         selected.inspect(scope, cursor, expires_at=expires_at, checkpoint=checkpoint)
         identity = _digest(scope)
@@ -173,7 +185,7 @@ class WorkspaceRetention:
             if time.monotonic() >= deadline:
                 raise TimeoutError("terminal workspace drain incomplete")
 
-            def drained(document: dict) -> dict:
+            def drained(document: Document) -> Document:
                 lifecycle_checkpoint()
                 row = selected.selected(document, scope, cursor)
                 row["drain"] = "drained"
@@ -184,14 +196,14 @@ class WorkspaceRetention:
             )
 
     def compact_recovery(
-        self, scope: dict, cursor: Cursor, policies: dict, *, expires_at: int,
+        self, scope: Document, cursor: Cursor, policies: Document, *, expires_at: int,
         checkpoint: Callable[[], None], deadline: float, lifecycle_checkpoint: Callable[[], None],
-    ) -> dict:
+    ) -> Document:
         """Rejoin actual admitted work; a prior persisted drain is not exclusion."""
         from .terminal_recovery import TerminalRecoveryStore, compact
 
         scope, policies = _scope(scope), copy.deepcopy(policies)
-        owner = self.workspace.store
+        owner: ReplayStore = self.workspace.store
         TerminalRecoveryStore(owner)
 
         def current() -> None:
@@ -208,7 +220,7 @@ class WorkspaceRetention:
             if self._active.get(_digest(scope), 0):
                 raise TerminalAdmissionClosed("terminal workspace drain must be rejoined")
 
-            def retire(document: dict) -> dict:
+            def retire(document: Document) -> Document:
                 current()
                 result = compact(document, scope, cursor, policies)
                 current()
@@ -217,16 +229,17 @@ class WorkspaceRetention:
             return owner._review_transaction(retire, expires_at=expires_at, checkpoint=current)
 
     def retire_cache(
-        self, scope: dict, cursor: Cursor, *, expires_at: int,
+        self, scope: Document, cursor: Cursor, *, expires_at: int,
         checkpoint: Callable[[], None], deadline: float, lifecycle_checkpoint: Callable[[], None],
-    ) -> dict:
+    ) -> Document:
         """Resume one terminal epoch; delivery and unknown effects remain independent."""
         from dataclasses import asdict
         from .generation_cache import GenerationCache
         from .terminal_cache_retirement import TerminalCacheRetirementStore
 
         scope = _scope(scope)
-        workspace, owner = self.workspace, self.workspace.store
+        workspace = self.workspace
+        owner: ReplayStore = workspace.store
         selected = TerminalCacheRetirementStore(owner)
 
         def current() -> None:
@@ -244,14 +257,14 @@ class WorkspaceRetention:
             if self._active.get(_digest(scope), 0):
                 raise TerminalAdmissionClosed("terminal workspace drain must be rejoined")
 
-            def retire(document: dict, commit: Callable[[], None]) -> dict:
+            def retire(document: Document, commit: Callable[[], None]) -> Document:
                 _, progress = selected.selected(document, scope, cursor)
 
-                def fenced():
+                def fenced() -> None:
+                    # The existing replay transaction keeps the selected epoch stable.
                     owner.check_current(expires_at, current)
-                    selected.selected(document, scope, cursor)
 
-                def capture(ids, pointer):
+                def capture(ids: list[str], pointer: str | None) -> Document:
                     row = {
                         "scope": copy.deepcopy(scope), "cursor": asdict(cursor),
                         "generation_ids": ids, "current_id": pointer, "stage": "captured",

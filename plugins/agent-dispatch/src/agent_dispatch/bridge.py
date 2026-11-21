@@ -34,7 +34,7 @@ from .bridge_agent_registry import (
 from .procutil import (
     agent_bridge_launch_prefix,
     no_window_kwargs,
-    run_ssh_command,
+    run_ssh_command as run_ssh_command,
 )
 from .worker_charter import OPERATING_PROCEDURES_CHARTER_NAME
 from .startup_process import StartupOutcomeUnknown as StartupOutcomeUnknown, run_startup
@@ -159,7 +159,7 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
     )
 
 
-def _record_is_direct_spawn_target(record: dict | None) -> bool:
+def _record_is_direct_spawn_target(record: dict[str, object] | None) -> bool:
     """Whether an agent-bridge metadata record is a first-class direct target."""
     if not isinstance(record, dict):
         return True
@@ -182,7 +182,7 @@ def _spawn_worker_via_worktree(
     wait: bool,
     json_output: bool,
     timeout: float | None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Embody a bound-charter worker by worktree handle, not by charter target.
 
     Phase 4 of agent-bridge-worktree-native-agents: a charter is a spawn
@@ -320,7 +320,7 @@ def spawn_worker(
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Spawn a worker agent via agent-bridge to claim + execute ``task_id``.
 
     Runs either:
@@ -487,7 +487,7 @@ def spawn_or_resume_worker(
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Resume a carried bridge session when safe, otherwise create one.
 
     Unknown liveness and a live session that rejects the prompt both fail

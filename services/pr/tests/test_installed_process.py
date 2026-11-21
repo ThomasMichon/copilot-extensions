@@ -328,7 +328,7 @@ def _compact_terminal_mapping(
             checkpoint=current, deadline=deadline, lifecycle_checkpoint=current,
         )
         assert not list(operations.cache.generations.glob("*.json"))
-        return cast(dict[str, Any], result)
+        return result
 
 
 @pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled,terminal_mapping_enabled,terminal_state", [
@@ -353,6 +353,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     from agent_pull_requests.workspace_tools import WorkspaceTools
 
     workspace_errors: list[Exception] = []
+
+    class ExpectedWorkspaceRefusal(AssertionError):
+        def __init__(self, response: dict[str, Any], discovery_refused: bool) -> None:
+            self.response, self.discovery_refused = response, discovery_refused
+            super().__init__("expected workspace refusal")
+
     invoke: Callable[..., Awaitable[Any]] = WorkspaceTools.invoke
 
     async def diagnostic_invoke(self: Any, *args: Any, **kwargs: Any) -> Any:
@@ -369,6 +375,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         state = tmp_path / "replay"
         status = state / "service-status.json"
         calls = tmp_path / "native-calls"
+        terminal_snapshot = tmp_path / "native-terminal.json"
         proof, access = tmp_path / "service.pem", tmp_path / "access"
         evidence_path = tmp_path / "workspace-evidence.json"
         generation_id = ""
@@ -398,9 +405,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             "assert sys.argv[5]=='--json';"
             "assert sys.argv[6]=='--credential-command';"
             f"pathlib.Path({str(calls)!r}).open('a').write('read\\n');"
+            f"terminal=pathlib.Path({str(terminal_snapshot)!r});"
+            "terminal=json.loads(terminal.read_text()) if terminal.exists() else {};"
             f"value=dict({snapshot!r});"
             "number=int(sys.argv[4]);"
             "value.update(pr=number,pr_state='closed' if number==1 else 'open',merged=number==1);"
+            "value.update(terminal if number==42 else {});"
             "print(json.dumps(value))"
         )
         flags: ProcessFlags = {
@@ -586,23 +596,39 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     raise AssertionError(f"{operation} remained busy")
 
                 async def workspace(
-                    operation: str, payload: dict[str, Any],
+                    operation: str, payload: dict[str, Any], *, expected_refusal: str | None = None,
                 ) -> dict[str, Any]:
                     from agent_pull_requests import workspace_cli
                     from agent_pull_requests.watch_replay_binding import ReplayBinding
                     from agent_pull_requests.workspace_client import WorkspaceClient
                     from agent_pull_requests.workspace_tools import WorkspaceTools
-                    from fleet_manager.gateway_service_caller import ServiceCaller
+                    from fleet_manager.gateway_service_caller import ServiceCaller, ServiceResponse
                     responses: list[dict[str, Any]] = []
+                    discovery_refused = False
 
                     class DiagnosticCaller(ServiceCaller):
-                        async def request(self, *args: Any, **kwargs: Any) -> Any:
-                            response = await super().request(*args, **kwargs)
-                            if response.status != 200:
-                                responses.append({
-                                    "status": response.status,
-                                    "body": response.body[:4096].decode("utf-8", errors="replace"),
-                                })
+                        async def request(
+                            self, method: str, request_target: str, **kwargs: Any,
+                        ) -> ServiceResponse:
+                            nonlocal discovery_refused
+                            response = await super().request(method, request_target, **kwargs)
+                            if (
+                                expected_refusal is not None and not discovery_refused
+                                and response.status == 200 and request_target.endswith("/capabilities")
+                            ):
+                                discovery_refused = True
+                                response = ServiceResponse(
+                                    503, (("content-type", "application/json"),),
+                                    b'{"error":"workspace_owner_unavailable"}',
+                                )
+                            recorded: dict[str, Any] = {
+                                "target": request_target, "status": response.status,
+                                "body": response.body[:4096].decode("utf-8", errors="replace")
+                                if response.status != 200 else "",
+                            }
+                            if expected_refusal is not None and request_target.endswith("/" + expected_refusal):
+                                recorded["request"] = json.loads(kwargs["body"])["request"]
+                            responses.append(recorded)
                             return response
 
                     async def caller_access() -> str:
@@ -629,6 +655,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         arguments += ["--request", str(request)]
                     for _ in range(100):
                         errors_before = len(workspace_errors)
+                        responses_before = len(responses)
                         code = await asyncio.to_thread(
                             workspace_cli.main, arguments,
                             host=cast(Any, WorkspaceTools)(client),
@@ -636,13 +663,25 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         output = capsys.readouterr()
                         if code == 0:
                             return cast(dict[str, Any], json.loads(output.out))
+                        attempt = responses[responses_before:]
+                        if expected_refusal is not None:
+                            refused = next((value for value in attempt if (
+                                value["target"] == "/api/v2/review/project/" + expected_refusal
+                                and value["status"] == 503
+                                and json.loads(value["body"]) == {"error": "workspace_owner_unavailable"}
+                            )), None)
+                            if refused is not None and any(
+                                value["target"] == "/api/v2/review/project/capabilities"
+                                and value["status"] == 200 for value in attempt
+                            ):
+                                raise ExpectedWorkspaceRefusal(refused, discovery_refused)
                         if (
                             operation in {"capabilities", "events", "inspect", "materialize", "retained-comment"}
                             and len(workspace_errors) > errors_before
                             and getattr(workspace_errors[-1], "http_status", None) == 503
                         ):
-                            # The observer holds a nonblocking store lock briefly.
-                            # Retry only effect-free reads, never load/sync/allocation.
+                            # Discovery can race the observer's store lock even
+                            # when the requested lookup is expected to refuse.
                             await asyncio.sleep(0.05)
                             continue
                         raise AssertionError((output.out, output.err, workspace_errors, responses[-5:]))
@@ -652,6 +691,8 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     "request_id": "original", "issued_at": time.time(),
                     "number": 1, "until": ["merged"],
                 }
+                if terminal_enabled:
+                    original["deadline_at"] = time.time() + 60
                 receipt = await send("register", original)
                 assert await send("register", original) == receipt
                 for _ in range(100):
@@ -783,6 +824,30 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         assert terminal_result["descriptor"] is None
                         cursor = terminal_result["conversation"]["cursor"]
                         pending = await send("pending")
+                        # Workspace evidence cannot complete a native-only watch.
+                        assert not any(
+                            value["registration_id"] == terminal_receipt["registration_id"]
+                            for value in pending["events"]
+                        )
+                        staged_terminal = terminal_snapshot.with_suffix(".tmp")
+                        staged_terminal.write_text(json.dumps({
+                            "pr_state": "closed", "merged": terminal_state == "completed",
+                        }))
+                        staged_terminal.replace(terminal_snapshot)
+
+                        async def observed_terminal() -> dict[str, Any]:
+                            while True:
+                                value = await send("pending")
+                                if any(
+                                    event["registration_id"] == terminal_receipt["registration_id"]
+                                    for event in value["events"]
+                                ):
+                                    return value
+                                await asyncio.sleep(.01)
+
+                        pending = await asyncio.wait_for(
+                            observed_terminal(), max(0, cast(float, terminal_original["deadline_at"]) - time.time()),
+                        )
                         terminal_event = next(
                             value for value in pending["events"]
                             if value["registration_id"] == terminal_receipt["registration_id"]
@@ -914,9 +979,18 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         }))["result"]
                         assert before_reopen["current"]["state"] == terminal_outcome
                         failures = len(workspace_errors)
-                        with pytest.raises(AssertionError):
-                            await workspace("materialize", {"number": 42, "generation_id": generation_id})
+                        with pytest.raises(ExpectedWorkspaceRefusal) as refused:
+                            await workspace(
+                                "materialize", {"number": 42, "generation_id": generation_id},
+                                expected_refusal="lookup",
+                            )
+                        assert refused.value.discovery_refused
+                        assert refused.value.response["target"] == "/api/v2/review/project/lookup"
+                        assert refused.value.response["request"]["number"] == 42
+                        assert refused.value.response["request"]["generation_id"] == generation_id
                         assert len(workspace_errors) > failures
+                        assert getattr(workspace_errors[-1], "code", None) == "workspace_unavailable"
+                        assert getattr(workspace_errors[-1], "http_status", None) == 503
                         assert getattr(workspace_errors[-1], "outcome_unknown", None) is False
                         evidence["sections"]["pull_request"]["data"]["status"] = "active"
                         save_evidence(8)

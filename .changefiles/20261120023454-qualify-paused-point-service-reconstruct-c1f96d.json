@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify paused point-service reconstruction and explicit sealed native recovery",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

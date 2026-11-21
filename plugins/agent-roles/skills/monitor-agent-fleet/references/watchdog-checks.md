@@ -121,6 +121,33 @@ Do not count all waiting as waste.
 
 Report wait time by class with its evidence, not one blended idle figure.
 
+## Drive posture
+
+The charter records a drive posture. `conservative` is the default and
+applies the table above as written. `relentless` applies only when the
+operator explicitly grants it. Under relentless posture, also classify each of
+these as waste:
+
+- An agent set to work with an open root that idles with no required wait.
+- A hold without a recorded specific reason. A hold is kept only with a
+  recorded reason: clear resource contention, or lifting it would worsen a
+  known issue or outage. Report every other hold for operator review; holds
+  are lifted only by the operator's direction. Record who lifted which hold,
+  when and the source.
+- A blocker without an assigned owner who diagnoses its root cause and drives
+  the fix (see [graduated repair](repair-escalation.md#every-blocker-has-an-owner)).
+- An unanswered question that has a goal-advancing option, when the charter's
+  answer scope grants that class (see
+  [pending input](pending-input.md#goal-advancing-option-scope-relentless-posture));
+  otherwise report it as waste for the operator.
+
+Relentless posture changes what counts as waste and how soon the monitor acts.
+It never widens authority. Steers still need the steering scope or the
+standing goal-establishment authority, otherwise they are recommendations.
+Required waits stay required, exploratory agents keep the light touch, and the
+monitor never lifts an operator-set hold itself. An all-work hold still means
+hold.
+
 ## Steer directly or escalate
 
 Steer directly, within the charter's steering scope, when the correction

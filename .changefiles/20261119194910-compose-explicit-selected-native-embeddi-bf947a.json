@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicit selected native embedding pairs and stored-vector-qualified coverage without enabling ordinary point application",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

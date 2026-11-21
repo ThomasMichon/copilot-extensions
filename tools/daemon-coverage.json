@@ -369,6 +369,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "t:dispatch_bridge_ipc_trial.py::main::Popen": 1,
       "m:owner_bootstrap.py::_windows_start::Popen": 1,
       "t:run-manager-runtime-acceptance.py::_runtime_group::Popen": 1,
       "t:runtime_source_capture.py::_capture::Popen": 1,
@@ -380,6 +381,7 @@
       "t:core_native_feed_resolution.py::_serve::serve_forever": 1,
       "r:plugins/efforts/skills/driving-effort-agendas/scripts/agenda_publish.py::_invoke::create_subprocess_exec": 1,
       "wm:agenda_transport.py::_owned_process::Popen": 1,
+      "d:fleet_placement.py::_capture_posix::Popen": 1,
       "r:plugins/customizing-copilot/scripts/run-skill-selection-spike.mjs::<script>::fork": 1,
       "r:plugins/customizing-copilot/scripts/skill-selection-host.mjs::<script>::fork": 1,
       "r:plugins/agent-bridge/scripts/daemon_instances.ps1::<script>::Process.Start": 1,
@@ -401,7 +403,6 @@
       "t:windows_normal_process_lifetime.py::_launcher::Popen": 1,
       "t:windows_normal_process_lifetime.py::_worker::Popen": 1,
       "t:mcp_bootstrap_lifetime.py::caller::Popen": 1,
-      "r:plugins/agent-worktrees/scripts/pre-tool-hook.ps1::<script>::Process.Start": 1,
       "r:plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-worktrees/scripts/managed-session.ps1::<script>::Process.Start": 1,
       "t:windows_broker_protocol_acceptance.py::negative_topology::Popen": 1,

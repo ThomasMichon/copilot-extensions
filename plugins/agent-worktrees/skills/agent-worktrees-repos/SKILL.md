@@ -249,9 +249,13 @@ If the repo has no local path but has a remote, suggest cloning it.
 <agent-worktrees catalog argv[0]> repos sync copilot-extensions            # fast-forward just that one repo
 ```
 
-`sync` only fast-forwards the default branch and **skips** any repo whose
-working tree is dirty or whose checkout is on a non-default branch — it
-never force-updates or creates merge commits. Naming one or more repos
+`sync` only fast-forwards the default branch and **skips** dirty or detached
+checkouts. A successful local Git read of no configured remotes yields an
+intentional local-only skip before branch switching or fetch; a failed read
+or a configured-remote failure remains an error. For remote-backed clean
+checkouts, the repository-declared default branch takes precedence over the
+registry and can repair branch drift. Sync never force-updates or creates
+merge commits. Naming one or more repos
 (`repos sync <repo> [<repo> ...]`) narrows the sync to exactly those,
 combinable with `--tag`/`--class` -- **names must come first** (positionals
 before flags): `--tag`'s value runs to the next `--`-flag (to keep an

@@ -39,6 +39,29 @@ clears the manifest. Returning to identical manifest bytes cannot revive an old
 binding. Neither table has a cursor, source lease, completion marker or repair
 authority.
 
+Each `PreparedApplication` also binds a fresh, one-shot batch plan in the existing
+prepared rows. Its `batch-plan/v2` marker and plan-specific `batch-ref/v1` namespace are
+separate from legacy `batch` rows, so even an already-running old journal cannot
+delete or overwrite them. Different preparations retain independent plans;
+rebinding an already-bound handle and changing a retained batch both refuse.
+Plans retain only compact references to shared, content-addressed
+`batch-payload/v1` bytes in the same journal. Identical retries do not duplicate
+full chunk/metadata payloads. Batch serialization sorts object keys recursively,
+including metadata nested inside lists, without changing list or checkpoint order.
+Equivalent metadata insertion orders therefore share the same payload.
+Each read qualifies both the reference and the
+referenced payload's digest under one parent-checked SQLite snapshot.
+Batch reads/writes and the
+pre-publication checkpoint check verify that plan binding in the same SQLite
+transaction as cache access. Exact vector pairs remain shared under the unchanged
+pending-parent incarnation. Bare journal round-trips keep their existing behavior
+when no application plan is bound.
+An unbound handle cannot write batches or reset a plan while an application
+binding exists; those checks share the mutation's SQLite transaction.
+Direct binding on a fresh journal only appends an isolated namespace: it cannot
+revoke an active publisher's plan, including during native writes. All namespaces
+remain subordinate to the pending parent's existing retirement triggers.
+
 The journal can bind a completed component envelope for subordinate cache work.
 The explicit [native component application](component-ledger.md#explicit-native-application)
 can supply `component_selection`, a frozen subset of acquired upsert identities.
@@ -131,16 +154,55 @@ pending payload, target rows and parent incarnation remain unchanged. The
 default journal constructor still requires its supplied manifest to match the
 original pending manifest, even after this explicit binding.
 
-Binding does not invoke preparation or native application. The existing
-`PreparedApplication` and `PreparedComponentApplication` constructors do not
-consume this explicit point binding yet. No application, task acknowledgement,
-pending retirement, cursor advance, executor admission or capability
-advertisement follows from retention, composition or binding. Application and
-completion still need their own owner-qualified transition and per-target
-applied/higher-covered proof. Ordinary recovery is not that transition.
+Binding alone does not invoke preparation or native application.
+`PreparedApplication` can explicitly consume the candidate by supplying both
+`point_claim` and `component_selection`, with `full=False`. It deep-copies the
+manifest, including nested metadata, before validation and file selection.
+It validates the selected domain against the whole claim's typed scope, then uses
+`for_point_application()` to recompose and bind every exact target before
+resetting batches or calling an embedding client. Selection narrows chunking,
+not the complete candidate or claim. Missing observations, changed claims,
+scope/family mismatches, candidate changes and dirty domains refuse before
+changing existing preparation. Recomposition holds no native-domain exclusion;
+short native checks precede it. Whole-claim recomposition uses one existing
+journal read snapshot with batches of at most 200 keys and constant-time target
+membership; it does not open a connection per target. Raw payloads stream from
+that snapshot and are released after validation rather than collected for the
+whole claim. Equal-version comparison retains canonical-content digests, not
+another copy of every historical body; only the selected candidate content is
+retained for output.
+For every source-aware preparation, the journal acquires its SQLite writer
+transaction before entering native exclusion for the final clean check and
+fresh plan insertion. SQLite contention therefore holds no native fence.
+Plans are never replaced, even through direct journal calls. Preparation inside
+an already-owned native writer, reader or operation refuses before journal
+binding, so callbacks cannot hold native exclusion across recomposition or
+embedding. Native exclusion does not cover ordinary target recomposition,
+chunking or embedding.
+
+Point preparation uses the same subordinate journal, batch plan, checkpoint
+snapshot and exact vector cache. Its existing coverage/vector readers receive
+the explicit scope; reusable native vectors still need matching receipts and
+actual indexed bytes. Preparation uses the existing WAL-aware path-index
+connection for coverage reads; committed journal work does not require the WAL
+to be empty. Side-effect-free qualification still uses immutable reads and
+refuses nonempty WALs. Neither mode writes coverage or repairs indices.
+Chunking and embedding remain outside native writer exclusion.
+Restart can reuse completed model pairs without changing canonical rows, file
+checkpoints, source state, pending work or the parked queue claim.
+Default preparation still refuses point envelopes, and
+the separate explicit
+[typed-claim application and completion](component-ledger.md#explicit-native-application)
+compose point-domain publication and whole-claim qualification through their
+existing owners. No native application, task acknowledgement, pending retirement,
+cursor advance, executor admission or capability advertisement follows from
+preparation alone. Ordinary recovery is not either explicit transition.
 `tests/test_prepared_points.py` covers restart, exact-target completeness,
 conflicts and stale parents; `tests/test_azure_devops_points.py` connects the
 named-version HTTP mock reader to this retention path and proves body reuse.
+`tests/test_point_prepared_application.py` qualifies actual native point-domain
+preparation, interrupted-pair reuse, input refusals, coverage-qualified native
+vector reuse and unchanged publication/completion boundaries.
 
 ## Failure and compatibility boundaries
 

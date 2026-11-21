@@ -253,8 +253,7 @@ def test_only_qualified_review_causes_become_actions(
 
 @pytest.mark.parametrize("reviews", [
     [verdict(dismissed=True, commit_id=HEAD)],
-    [verdict(dismissed=True), verdict(id=10, commit_id=HEAD)],
-    [verdict(commit_id=HEAD), verdict(id=10, dismissed=True)],
+    [verdict(dismissed=True, state="DISMISSED", commit_id=HEAD)],
 ])
 def test_dismissed_review_diagnostic_does_not_invent_a_verdict_or_order(
     tmp_path: Path, reviews: list[dict[str, Any]],
@@ -269,11 +268,123 @@ def test_dismissed_review_diagnostic_does_not_invent_a_verdict_or_order(
     assert selected[1].path.read_bytes() == before
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("matching_head", [False, True])
+@pytest.mark.parametrize("history_state", ["APPROVED", "DISMISSED"])
+def test_independent_verdict_survives_dismissed_history_refresh_and_restart(
+    tmp_path: Path, reverse: bool, matching_head: bool, history_state: str,
+) -> None:
+    selected = setup(tmp_path, provider="github" if history_state == "DISMISSED" else "gitea")
+    historical = verdict(dismissed=True, state=history_state)
+    independent = verdict(id=10, commit_id=HEAD if matching_head else OLD)
+    reviews = [historical, independent]
+    if reverse:
+        reviews.reverse()
+    observe(selected, head_sha=OLD, reviews=reviews)
+    selected[0][0] = 1100
+    observe(selected, reviews=reviews)
+    before = selected[1].path.read_bytes()
+    first = request(selected)
+    assert selected[1].path.read_bytes() == before
+    if matching_head:
+        assert first["unavailable"] == [{"pr": 7, "reason": "reviewed-base-unknown"}]
+        assert not first["next_actions"]
+    else:
+        row = first["next_actions"][0]
+        assert row["action"] == "new_verdict" and row["review"]["id"] == 10
+        assert row["review_basis"] == "observed-before-candidate"
+        assert row["pending_since"] == 1100 and row["cause"]["since"] == 1100
+    selected[0][0] = 1200
+    observe(selected, reviews=reviews)
+    store = ReplayStore(
+        selected[1].root, "test", clock=selected[1].clock, repository_cache=True,
+        repository_continuing=True, repository_activity=True,
+    )
+    projection = RepositoryProjection(store, (selected[2],))
+    restored: Selection = (
+        selected[0], store, selected[2], projection, RepositorySubscriptions(projection),
+    )
+    before = store.path.read_bytes()
+    current = request(restored)
+    assert current["unavailable"] == first["unavailable"]
+    assert [(row["review"], row["cause"], row["pending_since"])
+            for row in current["next_actions"]] == [
+        (row["review"], row["cause"], row["pending_since"]) for row in first["next_actions"]
+    ]
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("changes", [
+    {"submitted_at": "unknown"}, {"commit_id": ""}, {"state": "unknown"},
+    {"id": 0}, {"submitted_at": "1970-01-01T01:00:00Z"},
+    {"state": "DISMISSED", "commit_id": ""},
+])
+def test_malformed_selected_dismissed_review_still_blocks_independent_verdict(
+    tmp_path: Path, reverse: bool, changes: dict[str, Any],
+) -> None:
+    selected = setup(tmp_path)
+    reviews = [verdict(dismissed=True, **changes), verdict(id=10, commit_id=HEAD)]
+    if reverse:
+        reviews.reverse()
+    observe(selected, reviews=reviews)
+    result = request(selected)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-activity-unavailable"}]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_new_independent_verdict_cannot_borrow_dismissed_candidate_basis(
+    tmp_path: Path, reverse: bool,
+) -> None:
+    selected = setup(tmp_path)
+    historical = verdict(dismissed=True)
+    observe(selected, head_sha=OLD, reviews=[historical])
+    reviews = [historical, verdict(id=10)]
+    if reverse:
+        reviews.reverse()
+    observe(selected, reviews=reviews)
+    result = request(selected)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-order-unavailable"}]
+
+
+def test_every_independent_verdict_needs_original_candidate_evidence(tmp_path: Path) -> None:
+    selected = setup(tmp_path)
+    historical, known = verdict(dismissed=True), verdict(id=10)
+    observe(selected, head_sha=OLD, reviews=[historical, known])
+    observe(selected, reviews=[
+        historical, known,
+        verdict(id=11, commit_id="d" * 40, submitted_at="1970-01-01T00:00:30Z"),
+    ])
+    before = selected[1].path.read_bytes()
+    result = request(selected)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-order-unavailable"}]
+    assert selected[1].path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_same_review_identity_cannot_supply_independent_dismissal_evidence(
+    tmp_path: Path, reverse: bool,
+) -> None:
+    selected = setup(tmp_path)
+    reviews = [verdict(dismissed=True), verdict(commit_id=HEAD)]
+    if reverse:
+        reviews.reverse()
+    observe(selected, reviews=reviews)
+    result = request(selected)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-activity-unavailable"}]
+
+
 @pytest.mark.parametrize("changes, action, unavailable", [
     ({"reviews": [verdict(dismissed=True, user="other")]}, "initial_verdict", None),
     ({"reviews": [verdict(dismissed=True, state="PENDING")]}, "initial_verdict", None),
     ({"reviews": [verdict(dismissed=True)], "mergeable": False}, "rebase", None),
     ({"reviews": [verdict(dismissed=True)], "reviews_complete": False},
+     None, "review-activity-unavailable"),
+    ({"reviews": [verdict(dismissed=True, state="DISMISSED")], "reviews_complete": False},
      None, "review-activity-unavailable"),
     ({"reviews": [verdict(dismissed=True)], "author": ""}, None, "author-unavailable"),
 ])

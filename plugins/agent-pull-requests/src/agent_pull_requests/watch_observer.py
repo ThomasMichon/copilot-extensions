@@ -14,7 +14,7 @@ from .watch_provider import command_path, fetch_snapshot
 from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
 from single_instance_lease import OperationLockedError
-from .repository_contract import RepositoryIdentity
+from .repository_contract import RepositoryBackpressure, RepositoryIdentity
 from pathlib import Path
 from typing import Protocol, TypedDict, TypeVar, cast
 from .repository_native import (
@@ -38,20 +38,11 @@ class _LegacyProjection(Protocol):
     def plans(
         self, inventories: dict[str, Document], *, expires_at: int, checkpoint: Checkpoint | None,
     ) -> dict[TargetKey, ObservationTarget]: ...
+    def members(self, *, expires_at: int, checkpoint: Checkpoint | None) -> frozenset[TargetKey]: ...
     def apply_facts(
         self, inventories: dict[str, Document], snapshots: dict[TargetKey, Document | None], *,
         observed_at: int, expires_at: int, checkpoint: Checkpoint | None,
     ) -> Document: ...
-
-
-class _Inventory(Protocol):
-    def __call__(
-        self, binding: NativeObservationBinding, *, checkpoint: Checkpoint, _qualified: bool = False,
-    ) -> Document: ...
-
-
-class _Qualify(Protocol):
-    def __call__(self, binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None: ...
 
 
 class _SnapshotConfig(TypedDict, total=False):
@@ -130,6 +121,7 @@ class ReplayObserver:
                 Callable[[ReplayStore, tuple[RepositoryIdentity, ...]], RepositoryProjection], RepositoryProjection,
             )(store, identities) if identities else None
         self._repository_cursor = 0
+        self._repository_reconcile_cursor = 0
         self._query_cursors: dict[str, int] = {}
         self._cycle = threading.Lock()
 
@@ -189,8 +181,11 @@ class ReplayObserver:
             self.store.check_current(expires_at, checkpoint)
 
         prepared: dict[TargetKey, Document | None] = {}
+        inventoried = False
+        backpressured = False
 
         def capture(target: ObservationTarget, snapshot: PRSnapshot | None) -> None:
+            nonlocal backpressured
             key = (target.account, target.repo, target.number)
             try:
                 prepared[key] = normalized(
@@ -199,12 +194,24 @@ class ReplayObserver:
                 ) if snapshot is not None else None
             except (ValueError, TypeError):
                 prepared[key] = None
+            if backpressured and not inventoried:
+                return
+            try:
+                self._disk_call(lambda: repositories.apply_facts(
+                    {}, {key: prepared[key]}, observed_at=observed_at, **authority,
+                ), **authority)
+            except RepositoryBackpressure:
+                if inventoried:
+                    raise
+                backpressured = True
+            if inventoried:
+                prepared.pop(key)
 
         for binding in self.bindings.values():
             if binding.repository_identity is None:
                 continue
             try:
-                cast(_Qualify, qualify_native)(binding, checkpoint=check)
+                qualify_native(binding, checkpoint=check)
                 qualified.add((binding.account, binding.repo))
             except RepositoryNativeUnsupported:
                 raise
@@ -227,7 +234,7 @@ class ReplayObserver:
             if (binding.account, binding.repo) not in qualified:
                 continue
             try:
-                inventories[binding.account] = cast(_Inventory, fetch_inventory)(
+                inventories[binding.account] = fetch_inventory(
                     binding, checkpoint=check, _qualified=True,
                 )
             except RepositoryNativeUnsupported:
@@ -243,36 +250,60 @@ class ReplayObserver:
         )
         repository_targets = self._disk_call(lambda: repositories.plans(inventories, **authority), **authority)
         seen = set(prepared)
-
-        def publish() -> None:
-            self._disk_call(lambda: repositories.apply_facts(
-                inventories, prepared, observed_at=observed_at, **authority,
-            ), **authority)
-            prepared.clear()
-
         while len(prepared) > _MAX_REPOSITORY_READS:
             batch = {key: prepared.pop(key) for key in list(prepared)[:_MAX_REPOSITORY_READS]}
             self._disk_call(lambda: repositories.apply_facts(
                 inventories, batch, observed_at=observed_at, **authority,
             ), **authority)
-        publish()
+        self._disk_call(lambda: repositories.apply_facts(
+            inventories, prepared, observed_at=observed_at, **authority,
+        ), **authority)
+        prepared.clear()
+        inventoried = True
         keys = sorted(key for key in repository_targets if key not in seen and key[:2] in qualified)
         if keys:
-            start = self._repository_cursor % len(keys)
-            selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
-            self._repository_cursor = (start + len(selected)) % len(keys)
+            current_keys = self._disk_call(lambda: repositories.members(**authority), **authority)
+            members = [key for key in keys if key in current_keys]
+            reconcile = [key for key in keys if key not in current_keys]
+            member_start = self._repository_cursor % len(members) if members else 0
+            reconcile_start = self._repository_reconcile_cursor % len(reconcile) if reconcile else 0
+            members = (members[member_start:] + members[:member_start])[:_MAX_REPOSITORY_READS]
+            reconcile = (reconcile[reconcile_start:] + reconcile[:reconcile_start])[:_MAX_READS]
+            selected: list[TargetKey] = []
+            width = max(1, _MAX_READS - 1)
+            for offset in range(0, len(members), width):
+                selected.extend(members[offset:offset + width])
+                index = offset // width
+                if index < len(reconcile):
+                    selected.append(reconcile[index])
+            selected.extend(reconcile[(len(members) + width - 1) // width:])
+            selected = selected[:_MAX_REPOSITORY_READS]
+            member_keys = set(members)
+            completed = [0, 0]
+
+            def progress(target: ObservationTarget, snapshot: PRSnapshot | None) -> None:
+                key = (target.account, target.repo, target.number)
+                completed[0 if key in member_keys else 1] += 1
+                capture(target, snapshot)
+
             targets = [repository_targets[key] for key in selected]
-            result = self._consume(targets, cache_keys=set(selected), on_read=capture, **authority)
+            try:
+                result = self._consume(targets, cache_keys=set(selected), on_read=progress, **authority)
+            finally:
+                if members:
+                    self._repository_cursor = member_start + max(1, completed[0])
+                if reconcile:
+                    self._repository_reconcile_cursor = reconcile_start + max(1, completed[1])
             if result["status"] != "observed":
                 return result
             for name in totals:
                 totals[name] += result[name]
-            publish()
         return {"status": "observed", **totals}
 
     def _observe_filtered(self, *, expires_at: int, checkpoint: Checkpoint | None) -> Document:
         from .filtered_native import population
         from .repository_native import RepositoryNativeUnavailable
+        deadline = time.monotonic() + max(0, expires_at - self.store.clock())
         authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
         repositories = cast(FilteredProjection, self.repositories)
         def check() -> None:
@@ -312,10 +343,12 @@ class ReplayObserver:
                     raise Withdrawn()
             try:
                 offset = self._query_cursors.get(key, 0)
-                self._query_cursors[key] = (offset + 1) % 64
+                def captured() -> None:
+                    self._query_cursors[key] = (offset + 1) % 64
                 scan = population(
                     binding, demand["filter"], root=self.store.root,
                     checkpoint=interested, start_checkpoint=starting, query_offset=offset,
+                    deadline=deadline, on_capture=captured,
                 )
             except Withdrawn:
                 continue

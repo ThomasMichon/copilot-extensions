@@ -678,9 +678,11 @@ def test_source_mutation_during_build_cannot_relabel_wheels(
 def test_complete_source_profile_includes_exact_pinned_third_party_and_transitive_extra(
     adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
     tmp_path: Path, built_wheels: FixtureBuilder, record_algorithm: str,
+    *, as_provider: bool = False,
 ) -> None:
     manifest = source[0] / "libs" / "helper" / "pyproject.toml"
-    manifest.write_text(manifest.read_text().replace('metrics=[]', 'metrics=["fixture-registry>=1"]'))
+    if not as_provider:
+        manifest.write_text(manifest.read_text().replace('metrics=[]', 'metrics=["fixture-registry>=1"]'))
     source = _selected_identity(source[0])
     path = tmp_path / "fixture_registry-1.0-py3-none-any.whl"
     path.write_bytes(_encoded({
@@ -693,6 +695,8 @@ def test_complete_source_profile_includes_exact_pinned_third_party_and_transitiv
     record = candidate.record()
     record["pins"] = [{"name": "fixture-registry", "version": "1.0", "hashes": [digest]}]
     record["requirements_sha256"] = "sha256:" + hashlib.sha256(requirements).hexdigest()
+    if as_provider:
+        record["provider_roots"] = ["fixture-registry"]
     candidate = replace(candidate, canonical=json.dumps(record).encode(), requirements=requirements)
     with completion.retain_source_profile(
         candidate, third_party={path.name: path}, **arguments(toolchain),
@@ -701,6 +705,18 @@ def test_complete_source_profile_includes_exact_pinned_third_party_and_transitiv
         assert wheels["fixture-registry"]["sha256"] == digest
         assert wheels["fixture-helper"]["selected_extras"] == ["metrics"]
         assert set(wheels) == {"fixture-source", "fixture-helper", "agent-procutil", "fixture-registry"}
+        if as_provider:
+            assert selected.profile.record()["roots"] == ["fixture-source==1.0.0", "fixture-registry"]
+
+
+def test_source_completion_keeps_independent_provider_root_in_actual_wheel_profile(
+    adopter: Adopter, source: Source, target: Target, toolchain: ToolchainLock,
+    tmp_path: Path, built_wheels: FixtureBuilder,
+) -> None:
+    test_complete_source_profile_includes_exact_pinned_third_party_and_transitive_extra(
+        adopter, source, target, toolchain, tmp_path, built_wheels,
+        record_algorithm="sha256", as_provider=True,
+    )
 
 
 @pytest.mark.parametrize("record_algorithm", ["sha384", "sha512"])

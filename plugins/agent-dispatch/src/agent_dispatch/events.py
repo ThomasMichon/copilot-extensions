@@ -11,6 +11,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .consumer_telemetry import ConsumerTelemetry
 
 DEFAULT_MAX_QUEUE = 1000
 
@@ -18,8 +22,10 @@ DEFAULT_MAX_QUEUE = 1000
 class EventBus:
     """Fan-out of coordinator task events to any number of SSE subscribers."""
 
+    _consumer_telemetry: ConsumerTelemetry
+
     def __init__(self, *, max_queue: int = DEFAULT_MAX_QUEUE):
-        self._subscribers: set[asyncio.Queue[dict]] = set()
+        self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._max_queue = max_queue
 
@@ -27,7 +33,7 @@ class EventBus:
         """Record the running loop (called from the app lifespan startup)."""
         self._loop = loop
 
-    def publish(self, event: dict) -> None:
+    def publish(self, event: dict[str, Any]) -> None:
         """Thread-safe publish: schedule fan-out on the bound loop.
 
         A no-op until the loop is bound (e.g. events raised before startup).
@@ -37,7 +43,7 @@ class EventBus:
             return
         loop.call_soon_threadsafe(self._fanout, event)
 
-    def _fanout(self, event: dict) -> None:
+    def _fanout(self, event: dict[str, Any]) -> None:
         for q in list(self._subscribers):
             try:
                 q.put_nowait(event)
@@ -45,8 +51,8 @@ class EventBus:
                 pass  # slow subscriber: drop rather than block producers
 
     async def subscribe(
-        self, *, ready_frame: dict | None = None, keepalive: float | None = None
-    ) -> AsyncIterator[dict]:
+        self, *, ready_frame: dict[str, Any] | None = None, keepalive: float | None = None
+    ) -> AsyncIterator[dict[str, Any]]:
         """Yield events published after subscription, until the caller stops.
 
         ``ready_frame``, when given, is yielded immediately once this queue is
@@ -58,7 +64,7 @@ class EventBus:
         fix). Opt-in only: a caller that passes ``None`` (every existing
         consumer) sees no behavior change at all.
         """
-        q: asyncio.Queue[dict] = asyncio.Queue(maxsize=self._max_queue)
+        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._max_queue)
         self._subscribers.add(q)
         try:
             if ready_frame is not None:
@@ -79,7 +85,7 @@ class EventBus:
         return len(self._subscribers)
 
 
-def sse_format(event: dict) -> str:
+def sse_format(event: dict[str, Any]) -> str:
     """Render an event as a Server-Sent-Events frame."""
     event_type = event.get("type", "message")
     return f"event: {event_type}\ndata: {json.dumps(event)}\n\n"

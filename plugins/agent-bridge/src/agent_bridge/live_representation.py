@@ -43,9 +43,11 @@ from bisect import bisect_right
 from collections import deque
 from functools import wraps
 from threading import Event, Lock
-from typing import Any
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
+from collections.abc import Callable
 
 from .events import EventLog, SseEvent
+from process_telemetry.emission import LEGACY
 from .live_turn_state import (
     derive_turn_state as derive_turn_state,
 )
@@ -226,26 +228,26 @@ def translate_sdk_event(
             return []
         success = bool(d.get("success"))
         status = "completed" if success else "failed"
-        content: list[str] = []
+        tool_content: list[str] = []
         result = d.get("result")
         if isinstance(result, dict):
             text = _text(result.get("detailedContent")) or _text(
                 result.get("content")
             )
             if text is not None:
-                content.append(text)
+                tool_content.append(text)
         if not success:
             err = d.get("error")
             if isinstance(err, dict):
                 msg = _text(err.get("message"))
                 if msg is not None:
-                    content.append(msg)
+                    tool_content.append(msg)
         return [(
             "tool_call_update",
             _out({
                 "tool_call_id": tool_call_id,
                 "status": status,
-                "content": content,
+                "content": tool_content,
                 "raw_output": None,
             }),
         )]
@@ -383,7 +385,7 @@ _MARKER_VALUE_MAX = 80
 
 
 def progress_from_events(
-    raw_events: list[dict], prior: dict | None, *, ts: float,
+    raw_events: list[dict[str, Any]], prior: dict[str, Any] | None, *, ts: float,
 ) -> dict[str, object] | None:
     """Fold a represented session's own milestone lines into its progress beat.
 
@@ -433,7 +435,7 @@ def progress_from_events(
             pr=(prior or {}).get("pr"), ts=ts,
         )
         if (prior or {}).get("markers"):
-            resumed["markers"] = dict(prior["markers"])
+            resumed["markers"] = dict(cast(dict[str, Any], prior)["markers"])
         return resumed
     merged = dict((prior or {}).get("markers") or {})
     for key, value in markers.items():
@@ -456,9 +458,15 @@ class MergePendingError(RuntimeError):
     the caller should retry rather than validate references against it."""
 
 
-def _store_operation(method):
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _store_operation(
+    method: Callable[Concatenate[LiveEventStore, _P], _R],
+) -> Callable[Concatenate[LiveEventStore, _P], _R]:
     @wraps(method)
-    def owned(self, *args, **kwargs):
+    def owned(self: LiveEventStore, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         with self._operation_lock:
             self._operations += 1
         try:
@@ -466,7 +474,7 @@ def _store_operation(method):
         finally:
             with self._operation_lock:
                 self._operations -= 1
-    return owned
+    return cast("Callable[Concatenate[LiveEventStore, _P], _R]", owned)
 
 
 class LiveEventStore:
@@ -478,7 +486,8 @@ class LiveEventStore:
     path; ``EventLog`` itself guards appends and SSE reads internally.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, telemetry_legacy: bool = True) -> None:
+        self._telemetry_legacy = telemetry_legacy
         self._logs: dict[str, EventLog] = {}
         # Per-session dedup of already-ingested SDK event ids (the set gives O(1)
         # membership; the deque bounds it FIFO). Guarded by ``_lock``.
@@ -539,6 +548,7 @@ class LiveEventStore:
                     worktree_id=worktree_id,
                     telemetry_source="represented",
                 )  # db=None -> in-memory only
+                log.bind_consumer_telemetry(LEGACY if self._telemetry_legacy else None)
                 self._logs[session_id] = log
             elif worktree_id is not None:
                 log.set_telemetry_identity(worktree_id=worktree_id)
@@ -774,7 +784,7 @@ class LiveEventStore:
 TurnReply = dict[str, Any]
 
 
-class MergedIds(dict):
+class MergedIds(dict[int, int]):
     """A merged-away log's id map (its id -> the merged log's id), complete when
     published and never changed after, with a prefix-max index over its sorted
     ids so :func:`merged_cursor` bisects instead of scanning the whole map on
@@ -825,7 +835,7 @@ class MergeFollowingLog:
     def _follow(self, cursor: int) -> tuple[EventLog, int]:
         original = cursor
         pending = self._moved is not None and cursor == self._moved[0]
-        if pending:
+        if pending and self._moved is not None:
             cursor = self._moved[1]  # not advanced since the last merge: already in self._log's numbering
         current = self._store.get(self._session_id) or self._log
         if current is not self._log:
@@ -840,15 +850,17 @@ class MergeFollowingLog:
             cursor = self._moved[1]
         return current, cursor
 
-    async def wait_for_events_snapshot(self, cursor: int, *, timeout: float):
+    async def wait_for_events_snapshot(
+        self, cursor: int, *, timeout: float,
+    ) -> tuple[str | None, list[SseEvent]]:
         log, cursor = self._follow(cursor)
         return await log.wait_for_events_snapshot(cursor, timeout=timeout)
 
-    async def wait_for_events(self, cursor: int, *, timeout: float):
+    async def wait_for_events(self, cursor: int, *, timeout: float) -> list[SseEvent]:
         log, cursor = self._follow(cursor)
         return await log.wait_for_events(cursor, timeout=timeout)
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._store.get(self._session_id) or self._log, name)
 
     @property
@@ -920,7 +932,7 @@ async def await_turn_reply(
         # the cursor translated to each merged numbering, before waiting again.
         while log.merged_into is not None:
             merged_log = log.merged_into[0]
-            cursor = translate_merged_cursor(log, merged_log, cursor)
+            cursor = cast(int, translate_merged_cursor(log, merged_log, cursor))
             log = merged_log
         remaining = deadline - time.monotonic()
         if remaining <= 0:

@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from http.client import HTTPException
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
 from typing import Any, cast
 
 from .client import BridgeClientError, BridgeConnectionError
@@ -181,11 +187,67 @@ def resolve_workspace(
     return None
 
 
+def discover_mux(session: str, pin: str) -> dict[str, Any]:
+    """Query the selected runtime's Driver; a mux pin is never a route."""
+    from agent_procutil import no_window_kwargs
+
+    observation: dict[str, Any] = {"availability": "unavailable", "route": "unresolved"}
+    root = os.environ.get("PSMUX_DATA_DIR", "")
+    namespace = os.environ.get("COPILOT_DRIVER_PSMUX_NAMESPACE")
+    if not Path(root).is_absolute() or namespace is None or not re.fullmatch(r"\$[0-9]{1,20}:[0-9]{1,20}", pin):
+        return {**observation, "reason": "explicit_scope_required"}
+    env = dict(os.environ, PSMUX_DATA_DIR=root, COPILOT_DRIVER_PSMUX_NAMESPACE=namespace)
+    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent_remote_driver.mux_observation"]
+
+    def query(mode: str, payload: bytes) -> tuple[int, dict[str, Any]]:
+        child = subprocess.run(
+            [*argv, mode], input=payload, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=5, env=env, **no_window_kwargs(),
+        )
+        if len(child.stdout) > 4096:
+            raise ValueError("oversized")
+        body = json.loads(child.stdout)
+        if not (isinstance(body, dict) and body.get("contract") == "copilot-driver.mux-observation"
+                and type(body.get("version")) is int and body["version"] == 1):
+            raise ValueError("unsupported")
+        return child.returncode, body
+
+    try:
+        code, declaration = query("--describe-contract", b"")
+        operations = declaration.get("operations")
+        if code != 0 or not isinstance(operations, list) or "psmux-observe-pinned" not in operations:
+            return {**observation, "reason": "pinned_read_unsupported"}
+        code, report = query("--observe", json.dumps({
+            "version": 1, "session": session, "expected_incarnation": pin,
+        }).encode("utf-8"))
+        if not (
+            report.get("operation") == "psmux-observe-pinned" and report.get("session") == session
+            and report.get("namespace") == namespace and report.get("expected_incarnation") == pin
+        ):
+            raise ValueError("unconfirmed")
+        if code == 0 and report.get("status") == "present" and report.get("incarnation") == pin:
+            observation.update(
+                availability="observed", session=session, namespace=namespace,
+                incarnation=pin, reason="agent_route_unverified",
+            )
+        elif code == 3 and report.get("status") == "unknown" and report.get("reason") in (
+            "different-incarnation", "missing-rendezvous", "changed-rendezvous", "native-query-unavailable",
+        ):
+            observation["reason"] = report["reason"]
+        else:
+            raise ValueError("unconfirmed")
+    except (OSError, ValueError, RecursionError, subprocess.TimeoutExpired):
+        observation["reason"] = "unconfirmed_owner_report"
+    return observation
+
+
 def command(args: Any) -> None:
     """List the typed union, preserving source availability in JSON output."""
     from . import __main__ as core
 
     result = core._get_client(ensure=False).list_targets(refresh=args.refresh)
+    if getattr(args, "discover_mux", None):
+        result = {**result, "sources": {**result["sources"], "pinned_mux": discover_mux(*args.discover_mux)}}
     if args.json:
         core._json_out(result)
         return
@@ -196,6 +258,8 @@ def command(args: Any) -> None:
             print(f"  Owner: {item['owner']}  Project: {item.get('project') or '-'}")
             print(f"  Path: {workspace.get('path') or '-'}")
     for source, observation in result["sources"].items():
+        if source == "pinned_mux" and observation.get("availability") == "observed":
+            print(f"[OBSERVED] mux {observation['session']} {observation['incarnation']}; agent route unresolved")
         if observation.get("availability") == "unavailable" or (
             observation.get("completeness") not in {None, "complete"}
         ):

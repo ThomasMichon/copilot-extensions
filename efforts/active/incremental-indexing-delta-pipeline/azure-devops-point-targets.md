@@ -283,6 +283,222 @@ to its original build. Supported rollback preserves those records and refuses
 unsupported point operations without preventing unrelated legacy operations.
 No v1 form, legacy source or stored content is retired by this proposal.
 
+### Configured executor ownership before caller migration
+
+The explicit service binding and native service count controls compose the
+owners. The reusable configured executor context now supplies production
+connector/model ownership; the embedding application still selects it
+explicitly. This is not a serialized selector or a blanket v2 execution declaration.
+This is an **agent-recommended implementation refinement** of the composition
+gate below, not new source activation or rollout authority.
+
+Keep the existing `build_app(point_service_factory=...)` and `PointService`
+boundaries. Supply a production context that binds the existing configured
+Azure DevOps point acquisition caller to its exact `IndexConfig`, `PointScope`,
+query/recovery scope and finite row budget. The embedding application supplies
+the connector selection and embedding policy explicitly; do not discover a
+source, credential, model or engine from a different runtime or ambient default.
+Reuse `EmbeddingRuntime`'s owned-client and deferred-readiness policy rather
+than introducing another lifecycle manager. Acquire fresh connector/model
+resources on context entry, close partial construction on failure, and keep
+them alive until the existing joined worker/service shutdown settles.
+
+Opening this context must not fetch provider data, start an embedding engine,
+activate parked work, repair state or bootstrap a point domain. Reject an
+invalid binding before dispatch. Request model readiness only for actual
+missing embeddings, not for covered targets or completed retries; stop only
+engines this context actually started. Existing explicit callers that already
+own connector/client lifetimes remain supported unchanged.
+
+Qualify the production context through the existing service fixture instead of
+reconstructing its executor in the test. Cover paused startup, exact-scope
+intake, one admitted named-target execution, higher-covered completion with
+eligibility-only requests and no body acquisition or model work, and entirely
+local completed-task retry. Also cover lazy readiness, partial-construction
+cleanup and joined shutdown. Keep small lifecycle contracts in unit CI and
+real native owner execution in the existing opt-in lane; do not repeat the corpus-size
+matrix merely to prove this resource-ownership change.
+
+This step leaves health and intake receipts' execution declarations unchanged.
+A subsequent caller-migration step must separately select the actual point
+binding and explicit reader, declare point/v2/paged semantics truthfully, and
+exercise missing support and provider rollback before enabling a new wire
+caller. Neither an owned executor nor callable metadata alone establishes
+that a running service's selected binding and reader satisfy those semantics.
+
+### Selected executor and qualified-reader composition
+
+This reviewed **agent-recommended refinement** stays inside the existing
+`build_app(point_service_factory=...)` / `PointService` Python binding. Compose
+the configured executor above with the existing
+`indexing.component_read.read_component` owner as one explicit selection, not
+two independently supplied callables whose metadata happens to agree. This
+contract changes no health, intake receipts, queue eligibility, HTTP routes or
+other wire form. The explicit
+[paired implementation](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
+realizes the selection independently of later wire-caller migration.
+
+The configured selection binds one `IndexConfig`, exact `PointScope`,
+application/recovery scope and finite qualification row budget. Its resource
+context supplies both the actual executor and a named-path reader closed over
+that same binding. `PointService` must validate agreement with its own configured
+domain and scope before installing the pair; reject missing, conflicting or
+partially constructed selections before dispatch or reader exposure. Keep the
+existing executor-only constructor and caller-owned context behavior unchanged,
+but do not treat that alternative as qualified reader support. Select either
+the existing executor-only context or the paired context, never silently prefer
+one when both are supplied. No package-version check, callable attribute or
+separate capability registry substitutes for composing these owners.
+
+The reader takes only a named component path within that selected binding; it
+cannot override the domain, source, application scope or budget per call.
+Delegate every result to `read_component` under its existing domain operation:
+canonical typed identity, current ordering/native content, path checkpoint and
+routed-model evidence must agree. Return its component-specific `ComponentRead`,
+including applied version, deletion and `named-target-only` coverage, unchanged.
+Unknown paths, changed receipts/scopes and incomplete or conflicting evidence
+remain explicit refusals, never an empty legacy-shaped success. Do not retain
+an earlier qualification as permission for a later read.
+
+Open only existing native state needed by this operation through its current
+owners; do not prepare schemas/indexes, create native model registrations, repair coverage,
+enumerate a discussion or invoke acquisition/embedding readiness for a read.
+Configuring in-memory model-table routing must validate existing retained bindings,
+not create or repair native tables.
+Keep thread-affine native handles within their owning operation and close them
+on success or refusal. Paused intake/recovery is not application evidence:
+starting or reading must neither activate retained work nor acknowledge it.
+Reads may qualify already-applied state while execution is paused, but refuse
+once shutdown closes admission. Join any admitted reads as well as workers
+before closing the selected context's resources, including cancellation paths.
+
+Qualify this composition through the existing native service fixture rather
+than a test-only executor/reader pair. Cover one admitted exact execution
+followed by the selected qualified read, an ordered deletion, a fresh paused
+reopen, stale/missing application evidence and wrong binding/receipt refusals.
+Prove no provider requests, model readiness or preparation from reader entry;
+retain existing legacy-domain and unselected-route refusal controls. Add focused
+pure controls for mutually exclusive contexts, binding mismatch, partial setup
+and joined reader shutdown. Reuse the bounded opt-in native lane, without
+repeating the unrelated-corpus-size matrix or adding native effects to unit CI.
+
+This pair is only an in-process composition prerequisite. Execution remains
+explicitly activated, every other read surface remains unsupported, and
+ordinary health/intake declarations remain legacy-only. Before any new wire
+caller or support advertisement, separately review the actual running-service
+declaration and missing-support/provider-rollback contract against the selected
+pair and the read-path inventory above. Missing paired support must preserve
+retained v2 state and unrelated legacy operations; it must never trigger legacy
+acquisition of a point claim or reinterpret component data as combined content.
+
+### Running-service declaration and provider rollback
+
+This **agent-recommended refinement**, reviewed in PR #13707, expands the
+receiver only. It follows the
+[service-contract evolution pattern](../../../docs/patterns/service-contract-evolution.md)
+and uses the existing `/health` response from the actual running application,
+not another discovery command, registry or preflight process. The
+[receiver implementation](../../../plugins/agent-index/docs/component-ledger.md#running-point-service-declaration)
+adds the declaration and a pure optional requirement validator, without
+opting an existing client into it. No new caller, request field, read
+route, activation endpoint or automatic recovery is admitted by this step.
+
+Keep `indexing_contract` and its v1 execution meaning unchanged. Its v2 intake
+list means durable retention, not point execution. Use one independent,
+optional `point_service_contract` object with stable identity
+`agent-index.point-service` and integer `version: 1`. Version 1 describes only
+the selected in-process paired executor and named-component reader:
+
+| Declaration | Meaning |
+|-------------|---------|
+| `paired: true` | The application's selected `PointService` successfully entered and installed the qualified executor/reader composition above; factory presence, arbitrary callable pairs, executor-only selection and callable metadata do not suffice |
+| `scope_fingerprint` | SHA-256 of UTF-8 bytes from the existing complete point-scope receipt serialization; binds source, family, account and every `PointBinding` field without listing endpoint/account/query values in health |
+| `representation: "point-components"`, `representation_version: 1`, `coverage: "named-target-only"` | Exact component semantics, never a complete item/discussion or current collection |
+| `hints_versions: [2]`, `read_boundary: "in-process-only"` | Selected typed-target execution and the existing Python reader; not general v2 engine support, HTTP reads or `AcquisitionPage`/`SnapshotPage` qualification |
+| `state`, `failed`, `execution_admitted`, `read_admitted` | Current lifecycle/admission observations, separate from structural support and never activation or applied-content evidence |
+
+Use the existing receipt scope serialization unchanged, including its JSON
+encoding defaults; version any future incompatible fingerprint encoding rather
+than guessing equivalence. The fingerprint is a nonsecret equality selector,
+not authentication or an application certificate. Preserve the existing
+service identity beside this object. Consumers must select the same running
+peer through existing discovery, invalidate observations on peer/generation
+change, and compare the complete expected scope before choosing this feature.
+Never infer support from package-version equality or a newer installed slot.
+
+Only a fully entered, selected paired context can publish `paired: true` and
+its scope/semantics. Missing, passive, not-yet-started, partially constructed,
+executor-only or stopped bindings report `paired: false`, both admission flags
+false and a specific unavailable reason; they must not retain an earlier
+positive selection. When health remains available without such a binding, use
+`state: "unavailable"` (or `"stopped"` after stop); a startup exception still
+fails startup rather than manufacturing successful legacy fallback.
+A paired service starts in `state: "paused"` with execution
+not admitted; its already-applied named reads may be admitted. Explicit
+activation can report `"active"`. Failure reports `"failed"` and closes
+execution admission without inventing read failure or clearing retained work;
+read admission follows the actual reader lifecycle. Pause/drain closes both
+admissions and reports `"draining"`; stop reports `"stopped"` without support.
+Drain rollback restores only the existing lifecycle behavior, never activation
+of reconstructed or failed work. Keep the explicit failure observation distinct
+through the separate `failed` flag when drain temporarily closes admission.
+
+Build the declaration from the runner's installed live selection and lifecycle,
+not the factory or module-global intake helper. Reading health must not open
+native stores, acquire a source lock, certify rows, fetch provider data, request
+model readiness, prepare state or start work. A declaration says which owners
+are selected, not that any target is applied, the provider is currently eligible
+or a model is ready. Existing effect-side scope, domain, governance, budget,
+recovery and per-read qualification remain mandatory after discovery. A stale
+positive health response cannot bypass pause, shutdown or a changed binding.
+
+Expand this receiver declaration before a separate caller-migration review.
+Until that review, existing hinted intake still parks v2 under its current
+rules; no caller gains execution guarantees by sending the old request form.
+Future callers requiring this selection accept only version 1 with all required
+semantics, matching scope and suitable admission. Missing, malformed,
+out-of-range, unpaired or mismatched declarations mean unsupported point
+requirements: refuse that operation before sending an effectful new request,
+with the actual missing contract and supported recovery (select a capable
+service, or wait for explicit retained-state inspection/activation). Unknown
+additive declaration fields may be ignored; unknown required versions or
+changed field meanings may not. Do not retry an uncertain accepted request
+under legacy syntax or reinterpret it as a combined-document acquisition.
+
+Support old callers on the expanded provider unchanged, and support rollback
+to the current pre-declaration provider by this explicit feature-level refusal,
+not by rejecting legacy indexing/search or preventing runtime replacement.
+Retain v2 claims, pending parents, correlations and uncertain outcomes across
+rollback; an old executor must neither dequeue them nor enrich/relabel their
+evidence. Restoring a capable provider starts paused and uses the existing
+retained-recovery owner. Keep older-than-source-layout binaries excluded from
+the isolated point directory under the existing lifecycle rule. No old form or
+retained revision is retired here; any future retirement requires a separately
+reviewed upgrade/rollback window and disposition of unresolved work.
+
+Qualify the eventual declaration through the real HTTP serialization seam:
+old caller/new provider retains legacy health/intake meaning; new selection on
+a paired provider sees the exact scope and named-only/in-process semantics;
+new caller/prior provider and provider rollback refuse the optional requirement
+without effects, legacy starvation or loss of retained v2 work. Cover missing,
+malformed and unsupported declarations, passive/unselected/executor-only and
+partial startup, paused/active/failure/drain/rollback/stop transitions, changed
+peer/scope and stale positive observations. Pure lifecycle/reader-selection
+contracts and small HTTP fixtures belong in required unit CI; reuse the existing
+opt-in native service/reopen lane to prove retained-state and per-read guards.
+Do not repeat the corpus-size matrix, introduce live-provider calls or move
+native work into unit CI. The contract was reviewed before implementation;
+wire callers, broader paged acquisition, activation and rollout remain separate.
+
+### Request-bound required admission
+
+The [receiver-first request refinement](point-required-admission.md) carries an
+optional point requirement onto the existing strict hinted intake and confirms
+its selected-peer/scope admission in the receipt. This separately reviewed
+contract must precede implementation and caller migration: pre-declaration
+providers already accept the old v2 form as retained-only work, so health
+discovery alone cannot preserve required semantics across rollback.
+
 ## Implementation and validation gate
 
 1. Implement the shared typed-target intake, version-aware queue selection and

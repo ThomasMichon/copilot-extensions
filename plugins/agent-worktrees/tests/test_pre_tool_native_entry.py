@@ -1,4 +1,4 @@
-"""Opt-in native pre-entry contract; the legacy Python entry remains supported."""
+"""Opt-in native pre-entry contract; uncertain tool callbacks never start Python."""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 pytestmark = pytest.mark.skipif(
@@ -18,9 +19,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload", "keys-shadow-response", "read-compatibility-home", "active-compatibility-home", "write-cwd", "write-cwd-fallback"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "case-flag", "case-payload", "read-compatibility-home", "active-compatibility-home"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
-def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
+def test_native_entry_keeps_uncertain_input_off_python(case: str, native_shell: str, tmp_path: Path) -> None:
     shell = shutil.which(native_shell)
     if shell is None:
         pytest.skip(f"{native_shell} is unavailable")
@@ -28,7 +29,8 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in (
-        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1", "hook_policy_process.py",
+        "pre-tool-hook.ps1", "post-tool-hook.ps1", "hook-facts.ps1",
+        "managed-session.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1",
         "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
@@ -39,7 +41,12 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     (scripts / "hook-read-policy.json").write_text(json.dumps(contract), encoding="utf-8")
     (scripts / "managed-session.ps1").write_text(
         (SCRIPTS / "managed-session.ps1").read_text(encoding="utf-8")
-        + "\nfunction Test-ManagedWorktreesSession { return $true }\n",
+        + (
+            "\nfunction Test-PreparedManagedWorktreesSession { return $false }\n"
+            if case == "context" else
+            "\nfunction Test-PreparedManagedWorktreesSession { return $true }\n"
+        )
+        + "function Test-ManagedWorktreesSession { throw 'compatibility admission requested' }\n",
         encoding="utf-8",
     )
     observed = tmp_path / "python-ran"
@@ -65,15 +72,6 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         env.pop("PRETOOL_KILLSWITCH_STATE_FILE")
         if case == "active-compatibility-home":
             flag.write_text('{"active":true}', encoding="utf-8")
-    if case in {"write-cwd", "write-cwd-fallback"}:
-        cwd_marker = tmp_path / "policy-cwd"
-        (scripts / "hook_policy_process.py").write_text(
-            "import base64,json,os,sys\nfrom pathlib import Path\n"
-            + "Path(" + repr(str(observed)) + ").write_text(base64.b64decode(sys.stdin.readline()).decode('utf-8'))\n"
-            + "Path(" + repr(str(cwd_marker)) + ").write_text(os.getcwd())\n"
-            + "print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture Python path'}))\n",
-            encoding="utf-8",
-        )
     if case == "guard-drift":
         with (scripts / "anchor_write_guard.py").open("a", encoding="utf-8") as output:
             output.write("\n# changed guard implementation\n")
@@ -108,25 +106,6 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         contract.write_text("[" + contract.read_text(encoding="utf-8") + "]", encoding="utf-8")
     elif case == "non-utf8-environment":
         env["PYTHONIOENCODING"] = "cp1252"
-    if case in {
-        "old-client", "empty-policy", "array-response", "invalid-decision-response",
-        "invalid-context-response", "policy-error", "malformed-response", "keys-shadow-response",
-    }:
-        action = {
-            "old-client": "if sys.argv[1] == 'preToolUse': print('{}')\n",
-            "empty-policy": "",
-            "array-response": "import json\nprint(json.dumps([{'permissionDecision':'allow'}]))\n",
-            "invalid-decision-response": "import json\nprint(json.dumps({'permissionDecision':'invalid'}))\n",
-            "invalid-context-response": "import json\nprint(json.dumps({'additionalContext':[]}))\n",
-            "policy-error": "print('private native diagnostic',file=sys.stderr)\nraise SystemExit(3)\n",
-            "malformed-response": "print('{private-native-response-text')\n",
-            "keys-shadow-response": "import json\nprint(json.dumps({'Keys': [], 'unexpected': True}))\n",
-        }[case]
-        (scripts / "hook_client.py").write_text(
-            "import sys\nfrom pathlib import Path\n"
-            + "Path(" + repr(str(observed)) + ").write_text(sys.stdin.read())\n" + action,
-            encoding="utf-8",
-        )
     payload = {"toolName": "view" if case in {
         "read", "read-compatibility-home", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
         "future-flag-contract", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract",
@@ -135,13 +114,6 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
         payload["ToolName"] = "view"
     original = json.dumps(payload, ensure_ascii=False, indent=2)
     command = "& '" + str(scripts / "pre-tool-hook.ps1").replace("'", "''") + "'"
-    if case == "write-cwd-fallback":
-        command = (
-            "function global:Set-Location { param([string]$LiteralPath) "
-            "if ($LiteralPath -eq $env:USERPROFILE) { throw 'unavailable home' }; "
-            "[void]$ExecutionContext.SessionState.Path.SetLocation($LiteralPath) }; "
-            + command
-        )
     if case in {"read-compatibility-home", "active-compatibility-home"}:
         shutil.copytree(scripts, home / ".agent-worktrees" / "bin")
         command = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]["powershell"]
@@ -151,46 +123,21 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         input=original, capture_output=True, text=True, encoding="utf-8", env=env,
-        cwd=home, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        cwd=home, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    if case == "policy-error":
-        assert "private native diagnostic" not in result.stderr
-    if case == "malformed-response":
-        assert "private-native-response-text" not in result.stderr
-        assert "private-native-response-text" not in result.stdout
-    python_required = case not in {"read", "active", "context", "read-compatibility-home", "active-compatibility-home"}
-    assert observed.exists() is python_required, (result.stdout, result.stderr)
-    if python_required:
-        assert json.loads(observed.read_text(encoding="utf-8")) == payload
-        reply = json.loads(result.stdout)
-        if case in {
-            "old-client", "empty-policy", "array-response", "invalid-decision-response",
-            "invalid-context-response", "policy-error", "malformed-response", "keys-shadow-response",
-        }:
-            assert "permissionDecision" not in reply
-            assert "agent-worktrees" in reply["additionalContext"]
-            assert "not authorization" in reply["additionalContext"]
-        else:
-            assert reply["permissionDecision"] == "deny"
-            assert reply["permissionDecisionReason"] == "fixture Python path"
-    elif case == "context":
+    assert not observed.exists(), (result.stdout, result.stderr)
+    if case not in {"read", "active", "read-compatibility-home", "active-compatibility-home"}:
         reply = json.loads(result.stdout)
         assert "permissionDecision" not in reply
-        assert "installation-context validation" in reply["additionalContext"]
+        assert "not authorization" in reply["additionalContext"]
     else:
         assert result.stdout == ""
-    if case in {"write-cwd", "write-cwd-fallback"}:
-        expected_cwd = home if case == "write-cwd" else Path(scripts.anchor)
-        assert Path(cwd_marker.read_text()) == expected_cwd
 
 
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("invalid_context", [False, True])
-def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_context, tmp_path):
-    import sysconfig
-    import agent_procutil
-
+def test_native_entry_never_bootstraps_cell_validation(native_shell: str, invalid_context: bool, tmp_path: Path) -> None:
     shell = shutil.which(native_shell)
     if shell is None:
         pytest.skip(f"{native_shell} is unavailable")
@@ -198,11 +145,12 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("pre-tool-hook.ps1", "managed-session.ps1", "hook_policy_process.py", "resolve-runtime.ps1"):
+    for name in ("pre-tool-hook.ps1", "post-tool-hook.ps1", "hook-facts.ps1", "managed-session.ps1"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     (scripts / "managed-session.ps1").write_text(
         (SCRIPTS / "managed-session.ps1").read_text(encoding="utf-8")
-        + "\nfunction Test-ManagedWorktreesSession { return $true }\n",
+        + "\nfunction Test-PreparedManagedWorktreesSession { return $false }\n"
+        + "function Test-ManagedWorktreesSession { throw 'compatibility admission requested' }\n",
         encoding="utf-8",
     )
     shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
@@ -217,7 +165,7 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     home = tmp_path / "home"
     home.mkdir()
     durable = tmp_path / "durable"
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW}
+    flags = no_window_kwargs()
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
          str(scripts / "installation-context" / "installation-context.ps1"),
@@ -233,24 +181,6 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
     context = json.loads(result.stdout)
-    root = Path(context["pluginRoot"])
-    runtime = root / "versions" / "1.0.0"
-    ambient = tmp_path / "ambient"
-    for target in (runtime, ambient):
-        created = subprocess.run(
-            [str(interpreter), "-m", "venv", "--without-pip", str(target)],
-            capture_output=True, text=True, timeout=10, **flags,
-        )
-        assert created.returncode == 0, (created.stdout, created.stderr)
-    site = runtime / "Lib" / "site-packages"
-    (site / "fixture-runtime.pth").write_text(
-        sysconfig.get_path("purelib") + "\n" + str(Path(agent_procutil.__file__).parents[1]) + "\n",
-        encoding="utf-8",
-    )
-    (runtime / ".install-complete.json").write_text(json.dumps({
-        "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
-    }), encoding="utf-8")
-    (root / "current-version").write_text("1.0.0\n", encoding="utf-8")
     pointer = Path(context["installReceipt"])
     if invalid_context:
         receipt = json.loads(pointer.read_text(encoding="utf-8"))
@@ -260,19 +190,7 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     for name in ("AGENT_RT_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT", "PYTHONPATH"):
         env.pop(name, None)
     env.update(HOME=str(home), USERPROFILE=str(home), COPILOT_PLUGIN_ROOT=str(payload),
-               COPILOT_EXTENSIONS_CONTEXT=str(pointer),
-               PATH=str(ambient / "Scripts") + os.pathsep + env.get("PATH", ""))
-    available = subprocess.run(
-        [str(ambient / "Scripts" / "python.exe"), "-c", "import agent_procutil"],
-        capture_output=True, text=True, env=env, timeout=10, **flags,
-    )
-    assert available.returncode != 0, "ambient Python must lack the owned worker dependency"
-    available = subprocess.run(
-        [str(runtime / "Scripts" / "python.exe"), "-c",
-         "from agent_procutil.owned_process import require_caller_owned_support; require_caller_owned_support()"],
-        capture_output=True, text=True, env=env, timeout=10, **flags,
-    )
-    assert available.returncode == 0, (available.stdout, available.stderr)
+               COPILOT_EXTENSIONS_CONTEXT=str(pointer))
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")],
         input=json.dumps({"toolName": "view", "toolArgs": {"path": "fixture.txt"}}),
@@ -280,17 +198,14 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     )
     assert result.returncode == 0, result.stderr
     reply = json.loads(result.stdout)
-    if invalid_context:
-        assert "permissionDecision" not in reply
-        assert "installation-context validation" in reply["additionalContext"]
-        assert "not authorization" in reply["additionalContext"]
-        assert not observed.exists()
-    else:
-        assert reply == {"additionalContext": "validated cell policy"}, result.stderr
-        assert Path(observed.read_text()).is_relative_to(runtime)
+    assert "permissionDecision" not in reply
+    assert "not authorization" in reply["additionalContext"]
+    assert not observed.exists()
 
 
-def test_ps7_pre_tool_json_engine_parity_and_first_use(tmp_path, capsys):
+def test_ps7_pre_tool_json_engine_parity_and_first_use(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     shell = shutil.which("pwsh")
     if shell is None:
         pytest.skip("pwsh is unavailable")
@@ -352,7 +267,7 @@ foreach ($raw in @('[]','{"value":','{}{}')) {
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(script)],
             input="\n".join(inputs), text=True, encoding="utf-8", capture_output=True,
-            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10, **no_window_kwargs(),
             env={**os.environ, "JSON_VARIANT": variant},
         )
         elapsed = time.perf_counter() - started

@@ -13,11 +13,34 @@ from agent_bridge import worktree_native_resume
 from agent_bridge.session_status import SessionStatus
 from agent_bridge.routes import worktrees
 from agent_bridge.session_host.host_index import HostRecord
-from agent_bridge.session_manager import Session
+from agent_bridge.session_manager import Session, SessionManager
 from test_worktree_metadata import metadata_boundary as metadata_boundary  # noqa: F401
 from test_worktree_native_resume import boundary as boundary  # noqa: F401
 
 pytestmark = pytest.mark.contract("agent_bridge.target_inventory")
+
+
+@pytest.mark.asyncio
+async def test_first_target_lookup_and_restart_after_index_loss(metadata_boundary: Any, tmp_path: Any) -> None:
+    from agent_bridge.client import BridgeClientError
+    from agent_bridge.target_resolution_cli import resolve_workspace
+
+    root = tmp_path / "new-hosts"
+    state = metadata_boundary.request.app.state
+    for restarting in (False, True):
+        state.session_manager = SessionManager(metadata_boundary.db, session_host_state_dir=str(root))
+        observed = await worktree_native_resume.list_targets(metadata_boundary.request)
+        client = SimpleNamespace(list_targets=lambda: observed)
+        if restarting:
+            assert observed["sources"]["session_host"]["reason"] == "inventory_missing"
+            with pytest.raises(BridgeClientError) as refused:
+                resolve_workspace(client, "new-project")
+            assert refused.value.status == 503
+            assert not (root / "index.json").exists()
+        else:
+            assert observed["sources"]["session_host"]["availability"] == "available"
+            assert resolve_workspace(client, "new-project") is None
+            (root / "index.json").unlink()
 
 
 @pytest.mark.asyncio

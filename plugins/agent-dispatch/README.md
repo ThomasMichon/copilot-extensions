@@ -15,6 +15,11 @@ coordinator, capture or a schedule. Its selected runtime ships the optional
 [hourly reporting declaration and protocol](../../libs/process-telemetry/hourly-reporting.md);
 unknown coverage is not service health or an active-agent count.
 
+The optional [consumer telemetry command](docs/consumer-telemetry-command.md)
+routes existing lifecycle and producer-fence observations to an independently
+owned receiver through explicit coordinator admission. It preserves legacy
+sinks and does not install a daemon or choose a backend.
+
 Sustained role charters that may use Dispatch as one adapter, such as
 sustained pull-request review (`agent-roles:review-pull-requests`) and fleet
 progress monitoring (`agent-roles:monitor-agent-fleet`), live in the separate
@@ -64,6 +69,11 @@ It preserves failure and attachment history and never rearms completed work.
 For bounded task evidence and distinct assignment-detach, Proposed/Queued
 reset and original-wake reconciliation, see [task recovery](docs/task-recovery.md).
 These controls do not stop agents, erase unknown sends or authorize live recovery.
+
+Task-backed context handoffs retain an exact creator binding in existing task
+metadata. Their nonblocking terminal hook and explicit `handoff-claim` retry use
+the actual task owner and guarded native settlement; unbound legacy tasks stay
+protected. See the [creator-claim contract](../context-handoff/docs/creator-claim-closeout.md).
 
 The optional [execution handoff construction APIs](docs/execution-handoff.md)
 define the effect-adapter boundary and durable queue-level admission closure.

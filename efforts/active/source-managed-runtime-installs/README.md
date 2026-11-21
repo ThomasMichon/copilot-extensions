@@ -12,6 +12,21 @@
 
 ## Goal
 
+Fleet Manager is an independently selected application, not a dependency of
+`agent-worktrees`. The bound knowledge repository opts a target machine into
+Fleet Manager by its assigned role (for example, controller). Installing
+Worktrees, requesting a Python extra, or running on the planning machine must
+not select Fleet for the target. Selection alone does not start a service.
+Worktrees consumes an available OpenSSH profile as `ssh <machine>`. It does
+not choose an SSH driver, configure a route, or install Fleet to connect.
+An SSH profile may use `agent-ssh` as its `ProxyCommand`; direct profiles
+work without it. Profile and driver setup remain outside Worktrees.
+
+Recover Bridge's potential agent catalog from independent registered and provider
+sources, distinguishing discovery from verified reachability. Preserve surviving
+mux sessions and session hosts across version changes: reattach only to the
+verified original; never create a replacement as a side effect of recovery.
+
 Complete the source-managed runtime installation and wheel-first acceptance
 for an addressed inventory of installed services and tools, including Manager,
 through small, independently validated contributions. Select immutable,
@@ -133,6 +148,16 @@ this Goal: ordinary updates are foreground-owned and cancellable, while accepted
 service setup/start and its retained process/runtime tree have independent
 ownership. Preserve the complete installation goal and all other acceptance
 rows; a documentation merge does not qualify this new behavior.
+
+The [legacy first-use receiving proposal](legacy-first-use-foreground.md)
+maps fixed `provision -Wait` to the ordinary foreground contract. Its finite
+foundation construction and provisioning follow the caller, with honest
+interruption and recovery rather than manufactured completion when an ordinary
+receipt is missing. Explicit background execution and independently accepted
+service setup/start retain their separate contracts. Reviewed receiving-owner
+intent precedes producer and test migration; existing source, custody, native
+qualification and deployment holds remain unchanged. The operator selection
+is retained [verbatim](inception-transcript.md#legacy-first-use-foreground-mapping).
 
 The [latest construction and cutoff direction](fast-construction-and-outgoing-cutoff.md)
 requires the existing quick-copy, pure UV/wheel-backed environment and simple
@@ -672,10 +697,33 @@ other protected work.
 
 ## Plan
 
+- [ ] Decouple Worktrees' `fleet-ssh`, `fleet-review`, development dependency
+  and `application-sources` metadata from the Fleet distribution. Preserve
+  explicitly configured SSH and review behavior through the provider's
+  supported interface, without importing Fleet from another app's environment
+  or relaxing review authorization. Select standalone Fleet from the target's
+  knowledge-owned role policy, not from Worktrees or an ambient host role.
+  Move outbound-only enrollment and reconnect to the explicitly selected
+  connectivity provider before removing its current Worktrees entry. Preserve
+  the enrolled identity and existing state; provider absence must not cause
+  re-enrollment, state loss, or a fallback connection.
+
 **Reviewed consolidated acceptance (#11708).** Existing checked foundations below retain only their
 recorded evidence; the open rows are finite work, not new completion claims.
 The [disposition map](finite-scope.md) identifies replaced gate families and
 preserves the complete pre-amendment record.
+
+### Installed portfolio recovery and reversal
+
+- [x] Recover a recorded Dispatch wake through a separately installed Bridge
+  (#13581). With the queue withheld, the original wake receipt survived both
+  installed candidate directions on Windows. An ambiguous admission stayed
+  unknown until the original journal returned, with no second prompt. This
+  qualifies historical admission only, not discovery or a live session route.
+- [ ] Qualify [cold discovery and survivor-only reattachment](shadow-observation.md#bridge-discovery-from-zero)
+  independently of receipt recovery. Start with an empty Bridge database and
+  an original mux session absent from it. Compare inventory and verified routes
+  separately; count prohibited effects on success and failure.
 
 ### Manager-owned application footprints
 
@@ -843,6 +891,8 @@ adoption. Other completed source slices remain credited in the
   outcomes, execution-mode exclusivity and bounded manual continuation through
   stale/unsupported old state; do not replay uncertain work or require old-runtime
   approval.
+  The [legacy first-use foreground receiving contract](legacy-first-use-foreground.md)
+  specializes this open row; receiver support precedes caller/test migration.
 - [ ] P4bP: Connect the inventory's remaining actual installation publishers to
   that owner, preserving canonical native options, publication admission, healthy
   use and exact source identity. Do not make unrelated cold-cell/custom-root,
@@ -871,6 +921,31 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+- [ ] Build and stage Worktrees without a Fleet distribution or source input.
+  Inspect its wheel metadata, including extras. With the same Worktrees build
+  and two target-role assignments, only the opted-in target should request the
+  separately staged Fleet app. A known nonmatching role excludes Fleet;
+  unreadable required policy is unresolved, not a grant. Exercise optional
+  SSH and review callers both without their provider and with an explicitly
+  configured provider. No live setup, role reassignment or service start.
+  Exercise the same Worktrees operation with a direct SSH alias and a
+  proxy-backed alias: only the destination changes in Worktrees' invocation.
+  An SSH failure must propagate without attempting driver setup or falling
+  back to a different route.
+  Also exercise an opted-in target with no Worktrees installed or selected:
+  the target role alone must request Fleet. Upgrade and reverse selection
+  from a previously selected Fleet extra must preserve enrollment identity
+  and existing state without implicitly installing or removing Fleet.
+  At each transition verify reconnection with the original fixture key when
+  the provider is available. With it absent, verify no new key, enrollment,
+  state rewrite or fallback connection.
+
+The [legacy first-use foreground controls](legacy-first-use-foreground.md#validation-plan-agent-recommended)
+specialize P4bD and L1-L6 with finite caller custody, truthful interruption,
+the admission/start kill window, compatible peers and separately accepted
+service work. They remain implementation and qualification obligations, not
+credit from this proposal or from an ordinary contained diagnostic.
 
 The [protected native handoff controls](protected-native-installation.md#validation-plan)
 add incoming trust/custody, pre-write refusal, substitution, finite outcome and

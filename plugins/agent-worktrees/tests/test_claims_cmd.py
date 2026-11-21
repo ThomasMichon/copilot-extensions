@@ -5,12 +5,19 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import socket
 from contextlib import redirect_stdout
+from pathlib import Path
+from typing import Any
+
+from machine_transport import detect_platform
 
 import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_providers, claims_owner
+from agent_worktrees import activity, peer_launch_adapter, tracking_claims, tracking_lifecycle
+from agent_worktrees._peer_launch import ContextRefused
 from agent_worktrees import config as cfg
 from agent_worktrees import state_root
 from agent_worktrees import tracking
@@ -19,7 +26,7 @@ from agent_worktrees import worktree_identity
 
 # --- parser + registration --------------------------------------------------
 
-def test_claims_parser_optional_id():
+def test_claims_parser_optional_id() -> None:
     args = m.build_parser().parse_args(["claims"])
     assert args.command == "claims"
     assert args.target == []
@@ -27,14 +34,14 @@ def test_claims_parser_optional_id():
     assert args2.target == ["wt-x"] and args2.json is True
 
 
-def test_claims_release_parser():
+def test_claims_release_parser() -> None:
     args = m.build_parser().parse_args(
         ["claims", "release", "m/p/wt-B", "--remove"])
     assert args.target == ["release", "m/p/wt-B"]
     assert args.remove is True
 
 
-def test_claims_mirror_status_parser():
+def test_claims_mirror_status_parser() -> None:
     args = m.build_parser().parse_args(
         ["claims", "mirror-status", "task", "task-1", "--status", "released",
          "--holder", "agent-dispatch"])
@@ -43,12 +50,12 @@ def test_claims_mirror_status_parser():
     assert args.claim_holder == "agent-dispatch"
 
 
-def test_claims_registered():
+def test_claims_registered() -> None:
     assert m.COMMAND_MAP["claims"] is m.cmd_claims
     assert m._WORKTREE_VERBS.get("claims") == "claims"
 
 
-def test_claims_owner_parser():
+def test_claims_owner_parser() -> None:
     args = m.build_parser().parse_args(
         ["claims", "owner", "codespace", "cs-one", "--json", "--all-states"])
     assert args.target == ["owner", "codespace", "cs-one"]
@@ -57,7 +64,7 @@ def test_claims_owner_parser():
 
 # --- _dispatch_assigned_tasks degradation -----------------------------------
 
-def test_inbound_unavailable_without_dispatch(monkeypatch):
+def test_inbound_unavailable_without_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({}, ()))
     res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
@@ -65,7 +72,7 @@ def test_inbound_unavailable_without_dispatch(monkeypatch):
     assert "not installed" in res["reason"]
 
 
-def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
+def test_inbound_parses_dispatch_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from agent_worktrees import claim_providers as cp
     provider = cp.ClaimProviderManifest(
         namespace="dispatch-task", plugin="agent-dispatch@marketplace",
@@ -81,9 +88,9 @@ def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
         })
         stderr = ""
 
-    captured = {}
+    captured: dict[str, Any] = {}
 
-    def _run(provider, *, callback_args, legacy_command, timeout, cwd=None):
+    def _run(provider: claim_providers.ClaimProviderManifest, *, callback_args: tuple[str, ...], legacy_command: tuple[str, ...], timeout: float, cwd: str | None=None) -> _Proc:
         captured["provider"] = provider.plugin
         captured["callback_args"] = callback_args
         captured["legacy_command"] = legacy_command
@@ -106,7 +113,7 @@ def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
     }
 
 
-def test_inbound_handles_dispatch_error(monkeypatch):
+def test_inbound_handles_dispatch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import claim_providers as cp
     provider = cp.ClaimProviderManifest(
         namespace="dispatch-task", plugin="agent-dispatch@marketplace",
@@ -128,7 +135,7 @@ def test_inbound_handles_dispatch_error(monkeypatch):
     assert res["available"] is False and res["reason"] == "boom"
 
 
-def test_inbound_refuses_unsafe_identity(monkeypatch):
+def test_inbound_refuses_unsafe_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """A machine/worktree_id containing a cmd.exe metacharacter must never
     reach the resolved argv (claim-provider-pattern effort review finding)."""
     from agent_worktrees import claim_providers as cp
@@ -144,7 +151,7 @@ def test_inbound_refuses_unsafe_identity(monkeypatch):
     assert called["n"] == 0
 
 
-def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch):
+def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch: pytest.MonkeyPatch) -> None:
     """Explicit-context calls must rebind through peer-launch and preserve cwd."""
     from agent_worktrees import claim_providers as cp
     provider = cp.ClaimProviderManifest(
@@ -153,11 +160,11 @@ def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch):
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({"dispatch-task": provider}, ()))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
-    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: True)
+    monkeypatch.setattr(peer_launch_adapter, "explicit_context", lambda: True)
     monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
-    captured = {}
+    captured: dict[str, Any] = {}
 
-    def fake_run(peer, *args, **kwargs):
+    def fake_run(peer: str, *args: Any, **kwargs: Any) -> _Proc:
         captured["peer"] = peer
         captured["args"] = args
         captured["cwd"] = kwargs.get("cwd")
@@ -168,7 +175,7 @@ def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch):
         stdout = json.dumps({"assigned": [], "owned": []})
         stderr = ""
 
-    monkeypatch.setattr(cp.peer_launch_adapter, "run", fake_run)
+    monkeypatch.setattr(peer_launch_adapter, "run", fake_run)
     res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "D:\\repo")
     assert res["available"] is True
     assert captured == {
@@ -178,7 +185,7 @@ def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch):
     }
 
 
-def test_inbound_refusal_does_not_fallback_to_legacy(monkeypatch):
+def test_inbound_refusal_does_not_fallback_to_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import claim_providers as cp
     provider = cp.ClaimProviderManifest(
         namespace="dispatch-task", plugin="agent-dispatch@marketplace",
@@ -186,11 +193,11 @@ def test_inbound_refusal_does_not_fallback_to_legacy(monkeypatch):
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({"dispatch-task": provider}, ()))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
-    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: True)
+    monkeypatch.setattr(peer_launch_adapter, "explicit_context", lambda: True)
     monkeypatch.setattr(
-        cp.peer_launch_adapter,
+        peer_launch_adapter,
         "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(cp.peer_launch_adapter.ContextRefused("refused")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(ContextRefused("refused")),
     )
     monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
     res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
@@ -199,37 +206,45 @@ def test_inbound_refusal_does_not_fallback_to_legacy(monkeypatch):
 
 # --- cmd_claims end-to-end --------------------------------------------------
 
-def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
+def _seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, owner_ref: str | None=None, resources: list[tracking_claims.ResourceClaim] | None=None) -> Path:
     tdir = tmp_path / "worktrees"
     tdir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tdir)
     wdir = tmp_path / "wt-A"
     wdir.mkdir(exist_ok=True)
-    rec = tracking.create_new_record(
+    monkeypatch.setattr(socket, "gethostname", lambda: "anomalous-potato")
+    rec = tracking_lifecycle.create_new_record(
         "wt-A", "worktree/wt-A", str(wdir), "test-chamber",
-        "anomalous-potato", "wsl", tdir, owner_ref=owner_ref,
+        "anomalous-potato", detect_platform(), tdir, owner_ref=owner_ref,
     )
     if resources:
         for c in resources:
-            tracking.add_resource_claim(rec, c, save=False)
+            tracking_claims.add_resource_claim(rec, c, save=False)
         tracking.save_record(rec, tdir / "wt-A.yaml")
     # config + inference stubs
     import types
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine="anomalous-potato"))
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path if name in (None, "test-chamber") else tmp_path / str(name))
+    (wdir / ".agent-worktrees").mkdir()
+    (wdir / ".agent-worktrees" / "machines.yaml").write_text("machines: {}\n", encoding="utf-8")
+    owner_config = cfg.Config(
+        srcroot=str(tmp_path), machine="anomalous-potato", platform=detect_platform(),
+        repo_name="test-chamber",
+        repos={"test-chamber": cfg.RepoConfig(anchor=str(wdir), worktree_root=str(tmp_path))},
+    )
     monkeypatch.setattr(
         cfg, "load_project_config",
-        lambda name, **kwargs: cfg.Config(
-            srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name=name,
-            repos={"test-chamber": cfg.RepoConfig(
-                anchor=str(wdir), worktree_root=str(tmp_path / "trees"),
-            )},
-        ),
+        lambda name, **kwargs: owner_config,
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.config_authority.load_project_authority_config",
+        lambda name, **kwargs: owner_config,
     )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "test-chamber", False, False, True)
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         lambda config: state_root.CoordinationReadiness(
             True, "ready", ready_root),
@@ -241,8 +256,8 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
     return tdir
 
 
-def test_claims_json_outbound_and_owner(monkeypatch, tmp_path, capfd):
-    claim = tracking.ResourceClaim(
+def test_claims_json_outbound_and_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    claim = tracking_claims.ResourceClaim(
         kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B",
         created_at="2026-07-31T00:00:00")
     _seed(tmp_path, monkeypatch,
@@ -258,11 +273,11 @@ def test_claims_json_outbound_and_owner(monkeypatch, tmp_path, capfd):
     assert out["inbound"]["available"] is False
 
 
-def test_claims_show_includes_abandoned_resource(monkeypatch, tmp_path, capfd):
+def test_claims_show_includes_abandoned_resource(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     # Validation Plan "Claim-free": an abandoned claim (reclaimed by the
     # never-wedge sweep) must remain visible in the ledger's audit detail --
     # it is excluded from held-claims counting, not hidden from inspection.
-    claim = tracking.ResourceClaim(
+    claim = tracking_claims.ResourceClaim(
         kind="codespace", ref="anomalous-potato/copilot-extensions/cs-orphan",
         created_at="2026-07-31T00:00:00", state="abandoned")
     _seed(tmp_path, monkeypatch, resources=[claim])
@@ -276,7 +291,7 @@ def test_claims_show_includes_abandoned_resource(monkeypatch, tmp_path, capfd):
     )
 
 
-def test_claims_empty_ledger_json(monkeypatch, tmp_path, capfd):
+def test_claims_empty_ledger_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(target=[], json=True))
     assert rc == 0
@@ -286,15 +301,15 @@ def test_claims_empty_ledger_json(monkeypatch, tmp_path, capfd):
 
 
 def test_claims_inspection_reports_unready_without_mutation(
-    monkeypatch,
-    tmp_path,
-    capfd,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     _seed(tmp_path, monkeypatch)
     path = tmp_path / "worktrees" / "wt-A.yaml"
     before = path.read_bytes()
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         lambda config: _blocked_readiness(),
     )
@@ -307,7 +322,7 @@ def test_claims_inspection_reports_unready_without_mutation(
     assert path.read_bytes() == before
 
 
-def test_claims_missing_worktree(monkeypatch, tmp_path):
+def test_claims_missing_worktree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tdir = tmp_path / "worktrees"
     tdir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tdir)
@@ -319,8 +334,8 @@ def test_claims_missing_worktree(monkeypatch, tmp_path):
     assert rc == 1
 
 
-def test_claims_human_output(monkeypatch, tmp_path):
-    claim = tracking.ResourceClaim(
+def test_claims_human_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    claim = tracking_claims.ResourceClaim(
         kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")
     _seed(tmp_path, monkeypatch, resources=[claim])
     buf = io.StringIO()
@@ -335,18 +350,19 @@ def test_claims_human_output(monkeypatch, tmp_path):
 
 # --- claims owner -----------------------------------------------------------
 
-def _seed_project_record(tmp_path, monkeypatch, project, worktree_id, resources):
+def _seed_project_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project: str, worktree_id: str, resources: list[tracking_claims.ResourceClaim]) -> tracking.WorktreeRecord:
     root = tmp_path / project
     tdir = root / "worktrees"
     tdir.mkdir(parents=True, exist_ok=True)
     wdir = root / worktree_id
     wdir.mkdir(exist_ok=True)
-    rec = tracking.create_new_record(
+    monkeypatch.setattr(socket, "gethostname", lambda: "example-machine")
+    rec = tracking_lifecycle.create_new_record(
         worktree_id, f"worktree/{worktree_id}", str(wdir), project,
-        "example-machine", "wsl", tdir,
+        "example-machine", detect_platform(), tdir,
     )
     for claim in resources:
-        tracking.add_resource_claim(rec, claim, save=False)
+        tracking_claims.add_resource_claim(rec, claim, save=False)
     tracking.save_record(rec, tdir / f"{worktree_id}.yaml")
     monkeypatch.setattr(
         "agent_worktrees.installer.read_projects_registry",
@@ -359,17 +375,17 @@ def _seed_project_record(tmp_path, monkeypatch, project, worktree_id, resources)
     return rec
 
 
-def test_find_claim_owners_across_registered_projects(monkeypatch, tmp_path):
+def test_find_claim_owners_across_registered_projects(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed_project_record(
         tmp_path, monkeypatch, "proj-a", "wt-a",
-        [tracking.ResourceClaim(kind="codespace", ref="cs-one", state="active")],
+        [tracking_claims.ResourceClaim(kind="codespace", ref="cs-one", state="active")],
     )
     _seed_project_record(
         tmp_path, monkeypatch, "proj-b", "wt-b",
         [
-            tracking.ResourceClaim(kind="codespace", ref="cs-one", state="at-rest",
+            tracking_claims.ResourceClaim(kind="codespace", ref="cs-one", state="at-rest",
                                    note="kept warm"),
-            tracking.ResourceClaim(kind="codespace", ref="cs-two", state="released"),
+            tracking_claims.ResourceClaim(kind="codespace", ref="cs-two", state="released"),
         ],
     )
 
@@ -384,10 +400,10 @@ def test_find_claim_owners_across_registered_projects(monkeypatch, tmp_path):
         "codespace", "cs-two", include_released=True)[0]["state"] == "released"
 
 
-def test_claims_owner_json_exit_codes(monkeypatch, tmp_path, capfd):
+def test_claims_owner_json_exit_codes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed_project_record(
         tmp_path, monkeypatch, "proj-a", "wt-a",
-        [tracking.ResourceClaim(kind="codespace", ref="cs-one")],
+        [tracking_claims.ResourceClaim(kind="codespace", ref="cs-one")],
     )
     _seed_project_record(tmp_path, monkeypatch, "proj-b", "wt-b", [])
 
@@ -404,10 +420,10 @@ def test_claims_owner_json_exit_codes(monkeypatch, tmp_path, capfd):
     assert out["owners"] == []
 
 
-def test_find_claim_owners_skips_bad_records(monkeypatch):
+def test_find_claim_owners_skips_bad_records(monkeypatch: pytest.MonkeyPatch) -> None:
     class BadClaim:
         @property
-        def kind(self):
+        def kind(self) -> None:
             raise ValueError("bad claim")
 
     class BadRecord:
@@ -422,11 +438,11 @@ def test_find_claim_owners_skips_bad_records(monkeypatch):
 
 # --- same_worktree_family ----------------------------------------------------
 
-def test_same_worktree_family_identical_id_is_family():
+def test_same_worktree_family_identical_id_is_family() -> None:
     assert claims_owner.same_worktree_family("wt-a", "wt-a") is True
 
 
-def test_same_worktree_family_direct_parent_child(monkeypatch, tmp_path):
+def test_same_worktree_family_direct_parent_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # wt-child's owner_ref names wt-parent -- a worktree wt-parent created.
     _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-parent", [])
     child = _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-child", [])
@@ -437,7 +453,7 @@ def test_same_worktree_family_direct_parent_child(monkeypatch, tmp_path):
     assert claims_owner.same_worktree_family("wt-child", "wt-parent") is True
 
 
-def test_same_worktree_family_transitive_grandchild(monkeypatch, tmp_path):
+def test_same_worktree_family_transitive_grandchild(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-grandparent", [])
     parent = _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-parent", [])
     parent.owner_ref = "example-machine/proj-a/wt-grandparent#session"
@@ -450,14 +466,14 @@ def test_same_worktree_family_transitive_grandchild(monkeypatch, tmp_path):
 
 
 def test_same_worktree_family_unrelated_worktrees_are_not_family(
-    monkeypatch, tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-a", [])
     _seed_project_record(tmp_path, monkeypatch, "proj-b", "wt-b", [])
     assert claims_owner.same_worktree_family("wt-a", "wt-b") is False
 
 
-def test_same_worktree_family_degrades_safe_on_bad_records(monkeypatch):
+def test_same_worktree_family_degrades_safe_on_bad_records(monkeypatch: pytest.MonkeyPatch) -> None:
     class BadRecord:
         worktree_id = "wt-a"
         owner_ref = None
@@ -471,16 +487,16 @@ def test_same_worktree_family_degrades_safe_on_bad_records(monkeypatch):
 
 # --- claims release ---------------------------------------------------------
 
-def _release_args(ref, *, remove=False, json_=True):
+def _release_args(ref: str, *, remove: bool=False, json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["release", ref], remove=remove, release_worktree=None,
         json=json_)
 
 
-def test_claims_release_marks_released(monkeypatch, tmp_path, capfd):
+def test_claims_release_marks_released(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+          resources=[tracking_claims.ResourceClaim(kind="worktree", ref=ref)])
     rc = m.cmd_claims(_release_args(ref))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -492,10 +508,10 @@ def test_claims_release_marks_released(monkeypatch, tmp_path, capfd):
     assert rec.live_resources == []
 
 
-def test_claims_release_remove_drops_entry(monkeypatch, tmp_path, capfd):
+def test_claims_release_remove_drops_entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+          resources=[tracking_claims.ResourceClaim(kind="worktree", ref=ref)])
     rc = m.cmd_claims(_release_args(ref, remove=True))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -504,32 +520,32 @@ def test_claims_release_remove_drops_entry(monkeypatch, tmp_path, capfd):
     assert rec.resources == []
 
 
-def test_claims_release_unknown_ref(monkeypatch, tmp_path):
+def test_claims_release_unknown_ref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(
+          resources=[tracking_claims.ResourceClaim(
               kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")])
     rc = m.cmd_claims(_release_args("anomalous-potato/copilot-extensions/wt-Z"))
     assert rc == 1
 
 
-def test_claims_release_missing_ref(monkeypatch, tmp_path):
+def test_claims_release_missing_ref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(
         target=["release"], remove=False, release_worktree=None, json=True))
     assert rc == 2
 
 
-def _annotate_args(ref, *, note="", json_=True):
+def _annotate_args(ref: str, *, note: str="", json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["annotate", ref], note=note, release_worktree=None, json=json_)
 
 
-def test_claims_annotate_updates_existing_note(monkeypatch, tmp_path, capfd):
+def test_claims_annotate_updates_existing_note(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     """Update an existing claim's note without release + re-add
     (copilot-extensions#2631)."""
     ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="worktree", ref=ref, note="")])
+          resources=[tracking_claims.ResourceClaim(kind="worktree", ref=ref, note="")])
     rc = m.cmd_claims(_annotate_args(ref, note="linked to PR #3705"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -539,10 +555,10 @@ def test_claims_annotate_updates_existing_note(monkeypatch, tmp_path, capfd):
     assert rec.resources[0].note == "linked to PR #3705"
 
 
-def test_claims_annotate_overwrites_prior_note_and_logs_event(monkeypatch, tmp_path, capfd):
+def test_claims_annotate_overwrites_prior_note_and_logs_event(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="worktree", ref=ref, note="auto-claimed")])
+          resources=[tracking_claims.ResourceClaim(kind="worktree", ref=ref, note="auto-claimed")])
     rc = m.cmd_claims(_annotate_args(ref, note="now linked to PR #3705"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -551,23 +567,23 @@ def test_claims_annotate_overwrites_prior_note_and_logs_event(monkeypatch, tmp_p
     assert rec.resources[0].note == "now linked to PR #3705"
 
 
-def test_claims_annotate_requires_note(monkeypatch, tmp_path):
+def test_claims_annotate_requires_note(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+          resources=[tracking_claims.ResourceClaim(kind="worktree", ref=ref)])
     rc = m.cmd_claims(_annotate_args(ref, note=""))
     assert rc == 2
 
 
-def test_claims_annotate_unknown_ref(monkeypatch, tmp_path):
+def test_claims_annotate_unknown_ref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(
+          resources=[tracking_claims.ResourceClaim(
               kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")])
     rc = m.cmd_claims(_annotate_args("anomalous-potato/copilot-extensions/wt-Z", note="x"))
     assert rc == 1
 
 
-def test_claims_annotate_missing_ref(monkeypatch, tmp_path):
+def test_claims_annotate_missing_ref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(
         target=["annotate"], note="x", release_worktree=None, json=True))
@@ -576,12 +592,12 @@ def test_claims_annotate_missing_ref(monkeypatch, tmp_path):
 
 # --- claims add -------------------------------------------------------------
 
-def _add_args(kind, ref, *, note="", json_=True):
+def _add_args(kind: str, ref: str, *, note: str="", json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["add", kind, ref], note=note, release_worktree=None, json=json_)
 
 
-def _blocked_readiness():
+def _blocked_readiness() -> state_root.CoordinationReadiness:
     root = state_root.StateRoot(
         None,
         "knowledge_repo",
@@ -607,16 +623,16 @@ def _blocked_readiness():
     ["worktree", "codespace", "container", "ssh", "workdir", "pr", "task"],
 )
 def test_claims_add_rejects_unready_coordination_without_mutation(
-    kind,
-    monkeypatch,
-    tmp_path,
-    capfd,
-):
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     _seed(tmp_path, monkeypatch)
     path = tmp_path / "worktrees" / "wt-A.yaml"
     before = path.read_bytes()
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         lambda config: _blocked_readiness(),
     )
@@ -628,7 +644,7 @@ def test_claims_add_rejects_unready_coordination_without_mutation(
     assert path.read_bytes() == before
 
 
-def test_claims_add_journals_active_claim(monkeypatch, tmp_path, capfd):
+def test_claims_add_journals_active_claim(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="example-web"))
     assert rc == 0
@@ -642,13 +658,13 @@ def test_claims_add_journals_active_claim(monkeypatch, tmp_path, capfd):
     assert c.is_unsettled and c.created_at  # active + timestamped
 
 
-def test_claims_add_rejects_unknown_kind(monkeypatch, tmp_path):
+def test_claims_add_rejects_unknown_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_args("gizmo", "x"))
     assert rc == 2
 
 
-def test_claims_add_dedups_by_ref(monkeypatch, tmp_path, capfd):
+def test_claims_add_dedups_by_ref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     m.cmd_claims(_add_args("codespace", "cs-blue"))
     capfd.readouterr()
@@ -659,27 +675,27 @@ def test_claims_add_dedups_by_ref(monkeypatch, tmp_path, capfd):
 
 # --- claims mirror-status (#2584 follow-up) ---------------------------------
 
-def _mirror_args(kind, ref, *, status="active", holder=None, json_=True):
+def _mirror_args(kind: str, ref: str, *, status: str | None="active", holder: str | None=None, json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["mirror-status", kind, ref], status=status,
         claim_holder=holder, json=json_)
 
 
-def test_claims_mirror_status_requires_status(monkeypatch, tmp_path):
+def test_claims_mirror_status_requires_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     rc = m.cmd_claims(_mirror_args("task", "task-1", status=None))
     assert rc == 2
 
 
-def test_claims_mirror_status_rejects_non_task_kind(monkeypatch, tmp_path):
+def test_claims_mirror_status_rejects_non_task_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     rc = m.cmd_claims(_mirror_args("codespace", "cs-1"))
     assert rc == 2
 
 
-def test_claims_mirror_status_success(monkeypatch, tmp_path, capfd):
+def test_claims_mirror_status_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import task_claim_registry
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def _fake_set(ref, status, *, holder="agent-dispatch", config=None, settings=None):
+    def _fake_set(ref: str, status: str, *, holder: str="agent-dispatch", config: cfg.Config | None=None, settings: dict[str, Any] | None=None) -> bool:
         seen.update(ref=ref, status=status, holder=holder)
         return True
 
@@ -692,7 +708,7 @@ def test_claims_mirror_status_success(monkeypatch, tmp_path, capfd):
     assert seen == {"ref": "task-1", "status": "released", "holder": "w"}
 
 
-def test_claims_mirror_status_failure_is_nonzero(monkeypatch, tmp_path, capfd):
+def test_claims_mirror_status_failure_is_nonzero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import task_claim_registry
     monkeypatch.setattr(task_claim_registry, "set_task_claim_status",
                         lambda ref, status, **kw: False)
@@ -702,7 +718,7 @@ def test_claims_mirror_status_failure_is_nonzero(monkeypatch, tmp_path, capfd):
     assert out["mirrored"] is False
 
 
-def test_claims_add_rejects_finalizing_owner(monkeypatch, tmp_path, capfd):
+def test_claims_add_rejects_finalizing_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     path = tmp_path / "worktrees" / "wt-A.yaml"
     rec = tracking.load_record(path)
@@ -715,7 +731,7 @@ def test_claims_add_rejects_finalizing_owner(monkeypatch, tmp_path, capfd):
     assert tracking.load_record(path).resources == []
 
 
-def test_claims_add_allows_finalized_owner(monkeypatch, tmp_path, capfd):
+def test_claims_add_allows_finalized_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     """``finalized`` is not terminal (docs/worktree-lifecycle.md): a resumed,
     already-finalized worktree may still accept a new outbound claim, which
     reopens it to `active` (worktree-finality-and-obligations Phase 2)."""
@@ -735,8 +751,8 @@ def test_claims_add_allows_finalized_owner(monkeypatch, tmp_path, capfd):
 
 
 def test_claims_add_reopen_surfaces_earlier_finalize_release_trail(
-    monkeypatch, tmp_path, capfd
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """worktree-finality-and-obligations Phase 2: reopening a finalized
     worktree via `claims add` reports exactly what the earlier finalize's
     `release_all_resources` cascade let go, since reopening does not restore
@@ -746,7 +762,7 @@ def test_claims_add_reopen_surfaces_earlier_finalize_release_trail(
     rec = tracking.load_record(path)
     rec.status = "finalized"
     rec.last_finalize_released = [
-        tracking.ResourceClaim(
+        tracking_claims.ResourceClaim(
             kind="codespace", ref="cs-old", state="released", note="idle box"),
     ]
     tracking.save_record(rec, path)
@@ -760,8 +776,8 @@ def test_claims_add_reopen_surfaces_earlier_finalize_release_trail(
 
 
 def test_claims_add_reopen_empty_trail_when_nothing_was_released(
-    monkeypatch, tmp_path, capfd
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     _seed(tmp_path, monkeypatch)
     path = tmp_path / "worktrees" / "wt-A.yaml"
     rec = tracking.load_record(path)
@@ -774,7 +790,7 @@ def test_claims_add_reopen_empty_trail_when_nothing_was_released(
     assert out["released_by_earlier_finalize"] == []
 
 
-def test_claims_add_missing_operands(monkeypatch, tmp_path):
+def test_claims_add_missing_operands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(
         target=["add", "codespace"], note="", release_worktree=None, json=True))
@@ -782,8 +798,8 @@ def test_claims_add_missing_operands(monkeypatch, tmp_path):
 
 
 def test_claims_add_ambiguous_write_outcome_is_reported_not_swallowed(
-    monkeypatch, tmp_path, capfd
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """agent-worktrees-authoritative-daemon Phase 3: a write whose daemon
     request was sent and then failed is genuinely ambiguous -- the command
     must surface `AmbiguousWriteOutcome` as a reported failure, never
@@ -792,7 +808,7 @@ def test_claims_add_ambiguous_write_outcome_is_reported_not_swallowed(
 
     tdir = _seed(tmp_path, monkeypatch)
 
-    def _raise(*_args, **_kwargs):
+    def _raise(*_args: Any, **_kwargs: Any) -> None:
         raise tracking_write.AmbiguousWriteOutcome("request sent, no response")
 
     monkeypatch.setattr(tracking_write, "dispatch", _raise)
@@ -806,13 +822,13 @@ def test_claims_add_ambiguous_write_outcome_is_reported_not_swallowed(
 
 # --- claims add --owner-ref (cross-project resolution, 3b-wiring/2) ----------
 
-def _add_ownerref_args(kind, ref, owner_ref, *, note="", json_=True):
+def _add_ownerref_args(kind: str, ref: str, owner_ref: str | None, *, note: str="", json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["add", kind, ref], note=note, release_worktree=None,
         claim_owner_ref=owner_ref, json=json_)
 
 
-def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
+def _seed_ownerref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine: str="anomalous-potato") -> Path:
     """Seed a borrowing-worktree record in ITS OWN project dir, and point the
     'current' cwd at a DIFFERENT project (the daemon-cwd gotcha)."""
     import types
@@ -820,11 +836,12 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
     owner_proj_dir = tmp_path / ".example-web"
     owner_wt_dir = owner_proj_dir / "worktrees"
     owner_wt_dir.mkdir(parents=True, exist_ok=True)
-    wdir = tmp_path / "borrower"
+    wdir = tmp_path / "wt-borrower"
     wdir.mkdir(exist_ok=True)
-    tracking.create_new_record(
+    monkeypatch.setattr(socket, "gethostname", lambda: machine)
+    tracking_lifecycle.create_new_record(
         "wt-borrower", "worktree/wt-borrower", str(wdir), "example-web",
-        machine, "wsl", owner_wt_dir,
+        machine, detect_platform(), owner_wt_dir,
     )
     # The 'current' project (daemon cwd) is a different one entirely.
     cur_tdir = tmp_path / ".dotfiles" / "worktrees"
@@ -834,19 +851,24 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
                         lambda name=None: tmp_path / f".{name}")
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine=machine))
+    (wdir / ".agent-worktrees").mkdir()
+    (wdir / ".agent-worktrees" / "machines.yaml").write_text("machines: {}\n", encoding="utf-8")
+    owner_config = cfg.Config(
+        srcroot=str(tmp_path), machine=machine, platform=detect_platform(), repo_name="example-web",
+        repos={"example-web": cfg.RepoConfig(anchor=str(wdir), worktree_root=str(tmp_path))},
+    )
     monkeypatch.setattr(
         "agent_worktrees.config.load_project_config",
-        lambda name, **kwargs: cfg.Config(
-            srcroot=str(tmp_path), machine=machine, platform="wsl", repo_name=name,
-            repos={"example-web": cfg.RepoConfig(
-                anchor=str(wdir), worktree_root=str(tmp_path / "trees"),
-            )},
-        ),
+        lambda name, **kwargs: owner_config,
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.config_authority.load_project_authority_config",
+        lambda name, **kwargs: owner_config,
     )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "example-web", False, False, True)
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         lambda config: state_root.CoordinationReadiness(
             True, "ready", ready_root),
@@ -857,7 +879,7 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
     return owner_wt_dir
 
 
-def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_path, capfd):
+def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
         "codespace", "cs-xyz", "anomalous-potato/example-web/wt-borrower", note="borrow"))
@@ -872,7 +894,7 @@ def test_claims_add_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_pat
     assert not list((tmp_path / ".dotfiles" / "worktrees").glob("*.yaml"))
 
 
-def test_claims_add_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd):
+def test_claims_add_owner_ref_cross_machine_defers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
         "codespace", "cs-remote", "other-box/example-web/wt-borrower"))
@@ -886,15 +908,15 @@ def test_claims_add_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd)
 
 
 def test_claims_add_owner_ref_cannot_bypass_coordination_gate(
-    monkeypatch,
-    tmp_path,
-    capfd,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     path = owner_wt_dir / "wt-borrower.yaml"
     before = path.read_bytes()
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         lambda config: _blocked_readiness(),
     )
@@ -912,21 +934,21 @@ def test_claims_add_owner_ref_cannot_bypass_coordination_gate(
 
 
 def test_claims_add_owner_ref_uses_owner_project_readiness(
-    monkeypatch,
-    tmp_path,
-    capfd,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     path = owner_wt_dir / "wt-borrower.yaml"
     before = path.read_bytes()
-    ambient_config = m.cfg.load_project_config("provider")
-    owner_config = m.cfg.load_project_config("example-web")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: ambient_config)
+    ambient_config = cfg.load_project_config("provider")
+    owner_config = cfg.load_project_config("example-web")
+    monkeypatch.setattr(cfg, "load_config", lambda: ambient_config)
     monkeypatch.setattr(
-        m.cfg, "load_project_config", lambda name, **kwargs: owner_config
+        cfg, "load_project_config", lambda name, **kwargs: owner_config
     )
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         lambda config: (
             _blocked_readiness()
@@ -959,14 +981,14 @@ def test_claims_add_owner_ref_uses_owner_project_readiness(
 
 
 def test_claims_add_succeeds_after_binding_is_repaired(
-    monkeypatch,
-    tmp_path,
-    capfd,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     _seed(tmp_path, monkeypatch)
     blocked = {"value": True}
 
-    def readiness(config):
+    def readiness(config: cfg.Config) -> state_root.CoordinationReadiness:
         if blocked["value"]:
             return _blocked_readiness()
         root = state_root.StateRoot(
@@ -980,7 +1002,7 @@ def test_claims_add_succeeds_after_binding_is_repaired(
         return state_root.CoordinationReadiness(True, "ready", root)
 
     monkeypatch.setattr(
-        m.state_root_mod,
+        state_root,
         "coordination_readiness",
         readiness,
     )
@@ -993,13 +1015,13 @@ def test_claims_add_succeeds_after_binding_is_repaired(
     assert [claim.ref for claim in rec.resources] == ["existing-resource"]
 
 
-def test_claims_add_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
+def test_claims_add_owner_ref_rejects_unqualified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args("codespace", "cs-x", "just-an-id"))
     assert rc == 2
 
 
-def test_claims_add_owner_ref_missing_record(monkeypatch, tmp_path):
+def test_claims_add_owner_ref_missing_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_ownerref_args(
         "codespace", "cs-x", "anomalous-potato/example-web/no-such-wt"))
@@ -1008,14 +1030,14 @@ def test_claims_add_owner_ref_missing_record(monkeypatch, tmp_path):
 
 # --- claims settle ----------------------------------------------------------
 
-def _settle_args(ref, *, released=False, json_=True):
+def _settle_args(ref: str, *, released: bool=False, json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["settle", ref], released=released, release_worktree=None, json=json_)
 
 
-def test_claims_settle_marks_at_rest(monkeypatch, tmp_path, capfd):
+def test_claims_settle_marks_at_rest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="codespace", ref="cs-blue")])
+          resources=[tracking_claims.ResourceClaim(kind="codespace", ref="cs-blue")])
     rc = m.cmd_claims(_settle_args("cs-blue"))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -1026,29 +1048,29 @@ def test_claims_settle_marks_at_rest(monkeypatch, tmp_path, capfd):
     assert c.is_live  # at-rest is still held
 
 
-def test_claims_settle_released(monkeypatch, tmp_path, capfd):
+def test_claims_settle_released(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="codespace", ref="cs-blue")])
+          resources=[tracking_claims.ResourceClaim(kind="codespace", ref="cs-blue")])
     rc = m.cmd_claims(_settle_args("cs-blue", released=True))
     assert rc == 0
     rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
     assert rec.resources[0].state == "released"
 
 
-def test_claims_settle_unknown_ref(monkeypatch, tmp_path):
+def test_claims_settle_unknown_ref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="codespace", ref="cs-blue")])
+          resources=[tracking_claims.ResourceClaim(kind="codespace", ref="cs-blue")])
     rc = m.cmd_claims(_settle_args("cs-red"))
     assert rc == 1
 
 
-def _settle_ownerref_args(ref, owner_ref, *, released=False, json_=True):
+def _settle_ownerref_args(ref: str, owner_ref: str | None, *, released: bool=False, json_: bool=True) -> argparse.Namespace:
     return argparse.Namespace(
         target=["settle", ref], released=released, release_worktree=None,
         claim_owner_ref=owner_ref, json=json_)
 
 
-def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_path, capfd):
+def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     # First journal an active claim onto the borrowing record via owner-ref.
     m.cmd_claims(_add_ownerref_args(
@@ -1064,7 +1086,7 @@ def test_claims_settle_owner_ref_lands_on_cross_project_record(monkeypatch, tmp_
     assert rec.resources[0].state == "at-rest" and not rec.resources[0].is_unsettled
 
 
-def test_claims_settle_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd):
+def test_claims_settle_owner_ref_cross_machine_defers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_settle_ownerref_args(
         "cs-remote", "other-box/example-web/wt-borrower"))
@@ -1073,13 +1095,13 @@ def test_claims_settle_owner_ref_cross_machine_defers(monkeypatch, tmp_path, cap
     assert out.get("deferred") is True and out["reason"] == "cross-machine-owner"
 
 
-def test_claims_settle_owner_ref_rejects_unqualified(monkeypatch, tmp_path):
+def test_claims_settle_owner_ref_rejects_unqualified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _seed_ownerref(tmp_path, monkeypatch)
     rc = m.cmd_claims(_settle_ownerref_args("cs-x", "just-an-id"))
     assert rc == 2
 
 
-def test_claims_add_then_settle_roundtrip(monkeypatch, tmp_path, capfd):
+def test_claims_add_then_settle_roundtrip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     m.cmd_claims(_add_args("codespace", "cs-blue"))
     capfd.readouterr()
@@ -1090,10 +1112,10 @@ def test_claims_add_then_settle_roundtrip(monkeypatch, tmp_path, capfd):
 
 # --- activity.log_event instrumentation (#3113) -----------------------------
 
-def test_claims_add_logs_claim_added(monkeypatch, tmp_path, capfd):
+def test_claims_add_logs_claim_added(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     logged = []
-    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="example-web"))
     assert rc == 0
     assert logged == [(("claim_added",), {
@@ -1101,12 +1123,12 @@ def test_claims_add_logs_claim_added(monkeypatch, tmp_path, capfd):
         "state": "active", "reopened": False})]
 
 
-def test_claims_release_logs_claim_released(monkeypatch, tmp_path, capfd):
+def test_claims_release_logs_claim_released(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     ref = "anomalous-potato/copilot-extensions/wt-B"
     _seed(tmp_path, monkeypatch,
-          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+          resources=[tracking_claims.ResourceClaim(kind="worktree", ref=ref)])
     logged = []
-    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_release_args(ref))
     assert rc == 0
     assert logged == [(("claim_released",), {
@@ -1114,12 +1136,12 @@ def test_claims_release_logs_claim_released(monkeypatch, tmp_path, capfd):
         "action": "released"})]
 
 
-def test_claims_settle_logs_claim_settled(monkeypatch, tmp_path, capfd):
+def test_claims_settle_logs_claim_settled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     _seed(tmp_path, monkeypatch)
     m.cmd_claims(_add_args("codespace", "cs-blue"))
     capfd.readouterr()
     logged = []
-    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_settle_args("cs-blue"))
     assert rc == 0
     assert logged == [(("claim_settled",), {

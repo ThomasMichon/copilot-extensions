@@ -46,10 +46,26 @@ replace a different binding.
 `initialize_source_store(config, point_scope=hints.scope)` additionally
 bootstraps the configured empty content/model schemas through the existing
 writer and dirty/effect/clean protocol. It requires distinct configured tables
-and matching model IDs. Receipt decisions, native schema validation and creation
+and matching model IDs. The same receipt retains a versioned `point_models` map:
+the content table and each configured model ID's distinct vector table and
+positive integer dimension. This map is first saved only under the existing
+writer while both retained and native table inventories are empty. Receipt saves
+hold the same existing exclusion across the current-ownership read and atomic
+publication and cannot drop or replace a retained map. A bare
+`initialize_source_layout` has no model configuration and retains no map.
+Prepared point tables missing that map are not adopted.
+
+Receipt decisions, native schema validation and creation
 share one existing source-domain operation, so a concurrent initializer cannot
 lend it a stale empty-state decision. Reopening retains the same receipt and
-tables; missing configured tables in an already prepared domain, changed vector
+tables and requires the complete same model/table/dimension mapping, including
+same-dimension model swaps. Registration through any `MultiModelStore` facade
+checks the retained content/model binding before returning even a cached model.
+Unknown IDs, aliases, changed dimensions and content-table collisions refuse.
+Model name/revision, query policy and engine placement do not define this table
+ownership; embedding coverage and profile-policy owners still qualify their
+changes. No model addition, table rebinding or legacy conversion is implied.
+Missing configured tables in an already prepared domain, changed vector
 schemas or a content table with the wrong schema/role refuse rather than being
 added or converted. An interrupted bootstrap remains
 dirty and requires its existing recovery owner; initialization does not replay
@@ -80,7 +96,152 @@ private schema writer. Explicit scoped reads support the
 through applied-version qualification. Explicit
 [ledger/index preparation](component-ledger.md) now forwards that same exact
 selection through its existing owners and budgets, without admitting ordinary
-data writers. Qualified point application and every v2 executor/producer remain unsupported.
+data writers.
+
+`VectorTable.preflight_point_upsert` and
+`MultiModelStore.preflight_point_vectors` inspect current canonical input only,
+under an already-owned matching source writer and explicit `point_scope`.
+They reject another family/scope, including empty input; both connection URIs
+must resolve to the domain, and distinct prepared content/vector tables must
+match their expected schemas. The vector chunk-ID index needs zero uncovered
+physical rows; nonempty input also reserves room below the existing segment cap.
+Canonical fields are compared once through the prepared chunk-ID index.
+The canonical table handle opened during binding is reused for that lookup;
+an open failure propagates without the generic create-table fallback.
+
+Preflight returns selected raw canonical fields at that read boundary, not a
+durable receipt, model-to-table ownership proof or permission to write.
+It performs no content/vector mutation, index preparation or writer acquisition.
+The ordinary mutation APIs still refuse point domains.
+Selected reads retain their separate explicit prepared-index path.
+
+`VectorTable.upsert_point` and `MultiModelStore.upsert_point_vectors` provide a
+separate, explicit native vector effect under an **already-owned** exact scoped
+writer. Registered handles retain the configured model ID. Every call, including
+empty input and cached handles, rechecks the current receipt's content/model
+table and dimension binding. An unbound direct handle refuses. The call repeats
+the current preflight, reading canonical input once, and writes through the exact
+qualified vector handle without the generic open/create fallback. Missing
+indices, uncovered tails and exhausted segment capacity refuse before effects.
+Its nested existing writer latches post-effect failures even when the caller
+catches them; no implicit retry or rollback is provided.
+
+This effect neither publishes applied-version/embedding coverage nor maintains
+indices, cleans stale chunks, writes path checkpoints or completes claims. Those
+remain the composing application's existing owners. A caller must budget and
+perform existing index upkeep before another nonempty selected write. The
+returned row count is not an application certificate. Ordinary vector APIs,
+prepared point publication and all frontdoors remain disabled.
+
+`ContentStore.upsert_point` and `MultiModelStore.upsert_point_content` expose the
+corresponding native canonical effect under that same already-owned exact
+writer. The current receipt must bind the canonical role and every model table;
+the complete native/retained inventories, schemas and connection paths must
+agree. No cached handle or failed open can select another table or create a
+replacement. The only permitted auxiliary table is the existing component
+ordering ledger, qualified through its own retained identity/version,
+metadata-bearing schema and prepared zero-tail point index. Canonical effects
+neither change that ledger nor adopt arbitrary auxiliary or model tables.
+Both canonical chunk-ID/file-path indices, any already-present
+source index and every bound vector chunk-ID index must be prepared with zero
+uncovered physical rows. Every table that will change needs a reserved segment.
+Identical raw fields retain the canonical timestamp and table version; identical
+duplicate inputs coalesce, while conflicting duplicates or an existing ID with
+another source refuse. Raw comparisons use the existing bounded indexed lookup,
+not decoded metadata or a corpus scan.
+
+Before any effect, selected vector-ID reads also reject duplicate/failed reads
+and qualify all bound models, not just those registered on the calling facade.
+The existing provenance updater then maintains source/language labels through
+those exact prepared vector handles without changing embeddings. A caught
+canonical add or later model-projection failure latches the outer writer dirty
+and uncertain. There is no implicit repair or retry.
+
+Canonical and vector effects still do not compare provider versions, remove
+obsolete IDs, qualify embedding coverage, update indices/FTS, publish path
+checkpoints or complete work. The composing application must order versions
+before replacement and retain store-before-checkpoint recovery. Raw indexed
+reads and native effects are selected-ID bounded; table/fragment metadata
+inspection is not constant work or proof of the large-corpus acceptance gate.
+
+`store.file_projection.require_file_projection_capacity` accepts an optional
+exact point scope only under its already-owned source writer. It qualifies the
+receipt-bound canonical/model inventory and optional ordering ledger through
+the same native owner, without trusting or changing caller caches. Replacements
+must all belong to the selected family; their nonnegative row counts replace
+that family's existing occupancy at each path. Other families at that path
+remain in the final count. A deletion contributes zero replacement rows.
+The prepared zero-tail `file_path` index is required even for an empty replacement
+set. Selected paths bound current candidates across all families before
+calculating final occupancy, including for deletions.
+Each queried path and its projected final count must fit the
+positive integer row budget. This read-only preflight requires no reserved
+mutation segment and performs no preparation, row mutation or ledger write.
+The default legacy path is unchanged. The composing selected application must
+run this preflight inside its writer before effects; this helper does not
+enable that application or establish provider ordering.
+
+`indexing.embedding_batch.embed_and_store_pairs` also accepts an explicit
+`point_scope` in its existing bounded mode. The caller must already own the
+matching writer and supply coverage, the complete retained model-profile map
+and an after-store preparation callback. Native table/ledger qualification and
+zero-tail vector indices are checked before inference; current raw canonical
+input and selected family are checked before routing. Task-local qualified
+handles ignore caller caches without changing them. Default pair/batch calls
+and canonical content remain unchanged.
+
+Routing, missing-pair selection, prepared-vector callbacks, lazy readiness and
+work counters retain their existing owners. Only missing routed pairs use the
+selected native vector effect, followed by receipt invalidation, explicitly
+budgeted index preparation and stored-vector verification. Selected
+`EmbeddingCoverage.record` requires the existing writer, requalifies model/table
+and canonical input through the native owner, and compares actual indexed
+vectors before opening its SQLite receipt writer. Failed or incomplete reads
+cannot publish coverage. A caught post-effect pair/preparation/publication
+failure anywhere after an earlier effect, including later batch-input or
+model-selection checks, latches the enclosing native writer uncertain. The
+nested writer covers the complete pair invocation, not only individual writes;
+there is no implicit
+retry or recovery. A successful reopen can reuse qualified unchanged pairs
+without inference or native row writes.
+
+This is selected pair composition, not complete component application. It does
+not acquire or order provider versions, replace canonical content, remove stale
+IDs, retain applied versions, advance path/source checkpoints or complete a
+claim. Preparation remains the outside-exclusion owner's responsibility when
+that policy is required; passing a prepared-vector callback avoids inference
+inside this already-owned writer. Ordinary application, point producers and v2
+execution remain disabled.
+
+`store.point_reconciliation.reconcile_point_file` separately provides bounded
+stale-ID cleanup under an already-owned exact point writer. It reuses the native
+table qualification and raw file projection above through task-local owners;
+caller caches are neither trusted nor changed. Its positive integer row budget
+caps both same-path candidates across families and the union of current and
+explicitly retained IDs. Kept and retained IDs are unique tuples within that
+budget. Known vector-only remnants can be removed, but unknown orphans are not
+discovered. A retained ID belonging to another canonical point or incompatible
+vector provenance refuses the operation.
+
+All bound models, raw points and prepared zero-tail indices are checked before
+effects. Every affected index needs a reserved segment; an unchanged table
+does not. Only observed stale rows are deleted, from each bound vector table
+before canonical content, through the existing bucket mutation owner. The
+return value counts distinct IDs that had rows removed, not rows across models.
+Empty or fully kept points perform no native mutation. Unselected paths,
+families and models and the ordering ledger remain unchanged. A caught native
+failure latches the outer writer dirty and uncertain, even after an earlier
+model deletion succeeded.
+
+This cleanup does not compare provider versions or publish applied versions,
+embedding coverage, indices/FTS, path checkpoints or claim completion. Its caller
+must establish provider ordering before **any** replacement or deletion, and
+retain store-before-checkpoint recovery. Ordinary reconciliation remains
+unsupported on a point domain.
+
+The explicit [typed-claim application and sealed suffix](component-ledger.md#explicit-native-application)
+compose these native prerequisites. Ordinary point application, whole-claim
+completion and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP
@@ -107,6 +268,13 @@ operation itself is not a transaction and does not roll back or reclassify
 uncertain effects. A read/guard refusal before mutation remains clean, and a
 later retry retains already completed writes. Ordinary indexing is not fenced
 for a backfill job's lifetime.
+
+A nested participating write that raises after marking a new irreversible
+effect or reconciliation seal latches the outer writer as failed. Catching
+that exception, or completing a later nested no-op, cannot publish the source
+clean or clear its uncertainty. The existing recovery/reconciliation owner is
+still required; this is not rollback or new repair authority. A caught
+pre-effect refusal does not invalidate earlier successfully completed writes.
 
 Ordinary shared-engine ingestion uses [prepared source application](prepared-application.md):
 embedding finishes outside exclusion, then one outer writer contains the

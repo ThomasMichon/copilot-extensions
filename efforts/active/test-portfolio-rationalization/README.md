@@ -55,6 +55,173 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The reviewed finite #13082 portable-pidfd, #13369 distribution/profile
+and #13378 caller-session/PID-reuse fixture families enter the existing
+Phase 4 Vault/shared-library, Containers and Bridge waves through Phase 7
+migration-intake and domain review. Preserve the primary maintainer and
+actual fixture, process-identity, runtime-resource, migration/preparation,
+runner, source/native/release and resource custodians, OPEN #1303, all
+incumbent states/holds, unit-only required CI and hosted-Windows quiescence.
+No implementer, common cause, execution or resource is appointed.
+
+#13733 delivered every P/V/G clause, continuing Coordination, dated Journal
+and intake route after current-head review and required CI. Complete current
+finite receiving/source/discussion/custody readback preceded three separate
+judgments: #13082's acknowledged NOT_PLANNED tracking retirement, and KEEP
+OPEN for #13369/#13378 because their other contributor's requests remain
+unfinished. Planned receiving is not fulfillment of those requests.
+All fifteen technical rows remain unchecked. Preserve each original
+fallback/tier alternative and failure packet; unrelated source delivery or
+required unit success is not qualification. No generic ACK, unrelated
+whole-portfolio prerequisite, production-policy waiver or execution grant
+is introduced.
+
+The complete #1475 full-user Windows WinGet bootstrap-venue family was
+accepted through reviewed #13701 and the explicit plugin-AND-runtime
+clarification #13703 in Phase 5's owning-runner/native-workflow lane and
+Phase 7 intake. Complete current receiving/original/custody readback and a
+separate audited judgment preceded #1475's NOT_PLANNED tracking retirement.
+OPEN #1303 now carries this planned work; #1475 is historical provenance.
+Preserve the primary maintainer and actual
+clean-room/provider, bootstrap/installer, repository-resource, credential,
+native, source and cleanup custodians. No VM/provider, machine, implementer,
+resource, access or budget is appointed. OPEN #1303, all incumbent states/holds,
+unit-only required CI and hosted-Windows quiescence remain.
+
+This is separate from #5921's finite verdict-reducer case and preserves that
+case's independent #1475 contract rather than absorbing it. #688's own cost,
+precondition, native and downstream F3-E ownership gates remain independent;
+its received #1192 remote Windows container path is not a full-user WinGet
+venue. Documentary receiving and the separate source disposition are complete;
+all six P1475/V1475/G1475 technical rows remain unchecked until their own
+evidence exists. Do not repeat the proposal/readback/retirement gates or
+infer provider, native or execution completion. No new generic ACK,
+whole-Portfolio prerequisite or execution/resource transfer follows.
+
+The proposed finite #13598 observed-collection attribution family enters the
+existing Phase 4 tools/shared-observer wave through Phase 7 migration intake.
+Preserve the actual source-admission, observer, fixture, runner, native and
+release owners. Its operator-selected separate tracking from #6237's lookup
+diagnostic remains: #13598 stays OPEN, with no observer waiver or claimed
+Windows pass. The related P13294 family, original inventories, every incumbent
+state/hold, unit-only required CI and hosted-Windows quiescence stay unchanged.
+
+The proposed finite #9348 historical-workflow, #12968 publication-identity
+and #13164 session-command fixture families enter Phase 4's tools/workflow
+and Worktrees waves. The distinct #12973 finished-daemon cleanup
+qualification enters Phase 5's owning-runner lane. Each has one primary
+placement through Phase 7 migration-intake and domain review, not a common
+cause or a new implementer. Preserve the primary maintainer and actual
+fixture, publication, receiving-ledger, release/controller, daemon-instance,
+native, runner, source and resource custodians, OPEN #1303, all incumbent
+checks/holds, unit-only required CI and hosted-Windows quiescence.
+
+Credit #12968's correction reported in the existing open #13297 contribution
+without calling it merged delivery or repeating its implementation. That
+contribution's Draft status, older-publisher exclusion and review hold remain;
+this intake neither enables its recovery path nor makes unrelated #13279
+recovery completion a fixture requirement. #9348 retains coordination with
+#3336/#6237 and its existing adjacent-file claimant. #13164 remains distinct
+from #13300's twelve-file packet and #12879's seed fixtures. #12973 retains
+available historical evidence and its unknown original cause; a bounded
+instrumented Windows reproduction may supply its own attempt-bound daemon,
+process-birth, supervisor/settlement and artifact evidence. The cleanup owner
+remains; a finished record or reused PID is not settlement or permission to
+kill an occupant or discard artifacts.
+
+Normal review must deliver every applicable P/V/G clause, continuing
+Coordination, dated Journal and intake route. Keep all four source trackers
+OPEN during proposal; permitted current whole receiving/source/custody
+readback and separate source-specific judgments follow actual complete
+reviewed delivery. All twenty new technical rows remain unchecked.
+No execution, cleanup, claim/resource transfer, generic ACK or unrelated
+whole-portfolio completion prerequisite is introduced.
+
+The proposed finite #12156/#12193/#12194 fixture families enter the existing
+Phase 4 Vault, tools/workflow and SSH/installer waves. The distinct #12235
+native-profile admission family enters Phase 5. All four use existing Phase 7
+migration-intake deduplication and domain review, preserving the primary
+maintainer and actual fixture, cache/DPAPI, installer, workflow/runner,
+platform, source/native/release and resource custodians. No implementer,
+common cause, native venue or execution is appointed. Preserve OPEN #1303,
+all incumbent states/holds, unit-only required CI and hosted-Windows quiescence.
+
+Normal review must deliver every applicable P/V/G clause, continuing
+Coordination, dated Journal and intake route. Keep the four sources OPEN during
+proposal; permitted current whole receiving/source/custody readback and separate
+source-specific judgments follow actual complete reviewed delivery. All
+twenty-three technical rows remain unchecked. This is not a cache/installer
+repair, workflow run, no-skip waiver, production fallback, resource transfer,
+generic ACK or unrelated whole-portfolio completion prerequisite.
+
+The finite #11995 PowerShell 5.1 child-budget family enters Phase 4's
+Worktrees/owning-fixture wave through existing Phase 7 migration-intake and
+domain review. Preserve the primary maintainer, actual prepared-membership/
+native-write, workflow/runner, production, platform, source/native/release
+and resource custodians, OPEN #1303 and every incumbent state/hold.
+This is independent of the existing six-family timeout grouping, not a
+common-cause finding or new execution assignment. Normal reviewed complete
+P11995/V11995/G11995 Plan, local/global Validation, Coordination, dated
+Journal and intake delivery, then permitted current whole receiving/source/
+custody readback, precede a separate tracking judgment. Keep #11995 OPEN
+during proposal. No generic ACK, unrelated whole-portfolio prerequisite,
+required-native-CI expansion or resource release follows.
+
+The proposed finite #11372 visual-fixture and #11512 supported-interpreter/
+independent-witness families enter the existing Phase 4 Manager and Dispatch
+waves, respectively, through Phase 7 migration-intake deduplication and
+domain review. Preserve the same primary maintainer and actual UI/fixture,
+worker/witness, related-family, runner, source/native/release and resource
+custodians. No implementer, common cause, native venue or execution is appointed.
+Keep OPEN #1303, all incumbent checks/holds, unit-only required CI and hosted-
+Windows quiescence. Ordinary review must deliver every applicable P/V/G clause,
+Coordination/Journal and intake route; ledger-only publication is not domain
+acceptance. Keep both sources OPEN during the proposal, then make separate
+judgments after permitted current whole receiving/source/custody readback.
+No new ACK, receipt PR, source/resource transfer or whole-parent barrier follows.
+
+The proposed finite #10487 author-command family enters the Phase 3 Worktrees
+pilot through existing Phase 7 migration-intake deduplication and domain review.
+The primary maintainer and actual CLI registration, lazy-dispatch/scanner,
+cluster-loading, fixture, runner and source/resource owners retain their scopes.
+Preserve OPEN #1303, all incumbent checks/holds, unit-only required CI and
+hosted-Windows quiescence. Normal review must deliver every P10487/V10487/G10487
+clause and its intake route; ledger publication alone is not domain acceptance.
+Keep #10487 OPEN during the proposal. Current permitted whole receiving/source/
+custody readback precedes a separate tracking judgment, not a generic ACK,
+implementation appointment, execution grant or resource release.
+
+The proposed finite #9970 fixture family enters the Phase 4 Dispatch wave;
+the separate #10031 initial guard-map startup/cutover and #10032 native
+platform families enter the Phase 3 Worktrees pilot. All three use existing
+Phase 7 migration-intake deduplication and domain-Plan review. The primary
+maintainer retains portfolio responsibility; the original fixture, override/
+supervisor, hook/map producer/consumer, resident-lifecycle, deployment-reader,
+native, runner, release and resource owners keep their scopes. No implementer,
+native venue or resource is appointed. Preserve OPEN #1303, all existing
+claims/holds, unit-only required CI and hosted-Windows quiescence.
+
+Normal review must actually deliver every applicable P9970/V9970/G9970,
+P10031/V10031/G10031 and P10032/V10032/G10032 clause, continuing Coordination,
+dated Journal and the Phase 7 intake route. Ledger-only publication is not
+domain acceptance. Keep the three sources OPEN during the proposal; current
+permitted whole receiving/source/owner readback precedes separate tracking
+judgments. Planned consolidation neither completes native qualification nor
+reactivates the completed guard-map source effort or the independent full-
+harness program. No generic acknowledgement or extra receipt-PR gate is added.
+
+The proposed #9568 family enters Phase 5 only through the existing Phase 7
+migration-intake deduplication and domain-Plan review. The primary maintainer
+retains portfolio ownership; existing workflow/runner, fixture, source-audit,
+runtime/native, release, cleanup and resource custodians retain their scopes.
+No implementation participant is appointed. Keep OPEN #1303, all incumbent
+claims/holds, unit-only required PR/promotion CI and hosted-Windows quiescence.
+Normal review must actually deliver the whole P9568/V9568/G9568 receiving
+and intake route; ledger publication alone is not domain acceptance.
+Current permitted receiving/source/owner readback precedes separate tracking
+judgment. Keep #9568 OPEN during this proposal. Historical capacity/results
+grant no native execution, resource transfer or changed budgets.
+
 The finite #13294 Windows-native unit-collector attribution family enters
 the existing Phase 4 tools/shared-library wave through Phase 7
 migration-intake deduplication and domain-Plan review. Preserve the existing
@@ -487,6 +654,38 @@ suites first.
   budgets, tiering, and contribution gates rather than forcing an exhaustive
   per-plugin disposition campaign.
 
+#### Finite author-command registration and cold loading from #10487
+
+Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
+
+- [ ] **P10487-1:** Retain `pr-author-capabilities`, `pr-update` and `pr-push`.
+  Reconcile the parser-registration roster, runtime lazy-dispatch table,
+  regenerated scan and `pr_author_cli` cluster-free declaration against the
+  actual supported registrations; neither dropping commands nor weakening
+  either regeneration-equality assertion is a correction.
+- [ ] **P10487-2:** Qualify genuine cold-handler behavior for EACH of those
+  three author commands before deciding the author module's cluster-loading
+  requirement. Earlier source research credited static roster/declaration
+  repairs but found that the cold-handler selection omitted these commands;
+  static equality and unrelated inventory tests do not supply that proof.
+- [ ] **P10487-3:** Keep the two original lazy-dispatch guards and their
+  finite cold-author controls with the existing CLI/fixture owners. Preserve
+  the historical two-failure/187-pass/31-skip coupled observation and separate
+  120-case/one-skip owner-file result as scoped history, not current success.
+  Use the appropriate bounded tier; do not expand required unit-only CI or
+  make project-wide inventory completion a prerequisite.
+
+##### Local Validation for #10487
+
+- [ ] **V10487-1:** Prove both named regeneration guards agree with the
+  supported parser/runtime registrations, retaining all three author commands.
+  Exercise each command's actual cold handler and required cluster-loading
+  behavior rather than warming imports or substituting a static roster check.
+- [ ] **V10487-2:** Record source/selection identity, real assertion results,
+  skips and owned cleanup for the focused guard/cold controls. Preserve the
+  regeneration assertions, supported command behavior and existing runner
+  bounds; source comparison is not executed or installed qualification.
+
 ### Phase 4 — Rationalize the portfolio in waves
 
 - [ ] Complete `agent-worktrees`, `agent-bridge`, and `agent-dispatch`.
@@ -502,6 +701,329 @@ suites first.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite portable-pidfd fixture contract from #13082
+
+Agent-recommended Phase 4 Vault/shared-library receiving through Phase 7.
+
+- [ ] **P13082-1:** Preserve the [portable helper fallback OR explicit unsupported skip](fixture-authority-and-cleanup.md#p13082-1-portable-peer-handle), not a direct `os.pidfd_open` requirement.
+- [ ] **P13082-2:** Retain the [original nine-error module and existing process custody](fixture-authority-and-cleanup.md#p13082-2-original-module-and-custody), without changing production policy.
+
+##### Local Validation for #13082
+
+- [ ] **V13082-1:** Qualify the [original module on the supported portable interpreter](fixture-authority-and-cleanup.md#v13082-1-original-portable-module), with honest unsupported outcomes.
+- [ ] **V13082-2:** Preserve [peer-handle assertions, capability distinctions and runner settlement](fixture-authority-and-cleanup.md#v13082-2-faithful-outcomes), not unrelated diagnostic credit.
+
+#### Finite distribution and staged-profile fixtures from #13369
+
+Agent-recommended Phase 4 Containers-wave receiving through Phase 7.
+
+- [ ] **P13369-1:** Refresh the [complete fixture/staged resource contract](fixture-authority-and-cleanup.md#p13369-1-complete-resource-fixtures), not only three copied files.
+- [ ] **P13369-2:** Preserve [wheel/sdist expectations, per-resource refusals and independent scope](fixture-authority-and-cleanup.md#p13369-2-assertions-and-independent-scope).
+
+##### Local Validation for #13369
+
+- [ ] **V13369-1:** Qualify [both original files and every distribution/refusal expectation](fixture-authority-and-cleanup.md#v13369-1-both-original-files) against the current intended builder contract.
+- [ ] **V13369-2:** Qualify [both staged-load modes AND native-policy refusal](fixture-authority-and-cleanup.md#v13369-2-all-three-profile-cases), retaining original failure attribution.
+
+#### Finite caller-session and process-incarnation fixtures from #13378
+
+Agent-recommended Phase 4 Bridge-wave receiving through Phase 7.
+
+- [ ] **P13378-1:** Retain [all six exact caller/migration/PID cases and their distinct failures](fixture-authority-and-cleanup.md#p13378-1-six-case-packet), without assuming one cause.
+- [ ] **P13378-2:** Resolve [managed-runner pass OR justified explicit host-dependent tier](fixture-authority-and-cleanup.md#p13378-2-original-outcome-alternative), preserving assertions and bounds.
+
+##### Local Validation for #13378
+
+- [ ] **V13378-1:** Qualify [each original case and its selected supported outcome](fixture-authority-and-cleanup.md#v13378-1-complete-selected-outcomes).
+- [ ] **V13378-2:** Preserve [custody/incarnation negatives, deadlines and truthful unreached coverage](fixture-authority-and-cleanup.md#v13378-2-no-false-aggregate).
+
+#### Finite observed Windows bytecode attribution from #13598
+
+Agent-recommended Phase 4 tools/shared-observer receiving through Phase 7.
+This is a distinct original-profile boundary, not a second implementation owner.
+
+- [ ] **P13598:** Preserve [exact declared-source/bytecode attribution](windows-bytecode-attribution.md#p13598-exact-source-binding), the reported failure and all fail-closed controls.
+- [ ] **V13598:** Qualify [the original observed Windows collection boundary](windows-bytecode-attribution.md#v13598-original-profile-qualification), not a longer profile or an unobserved preload.
+
+#### Finite historical workflow-fixture contracts from #9348
+
+Agent-recommended Phase 4 tools/workflow receiving through Phase 7.
+
+- [ ] **P9348-1:** Prepare [explicit bounded historical recipes](fixture-authority-and-cleanup.md#p9348-1-historical-recipes) for the original three-file packet.
+- [ ] **P9348-2:** Preserve [all controls, current declarations and adjacent ownership](fixture-authority-and-cleanup.md#p9348-2-controls-and-current-declarations).
+
+##### Local Validation for #9348
+
+- [ ] **V9348-1:** Qualify the [unchanged historical packet and refusal assertions](fixture-authority-and-cleanup.md#v9348-1-historical-qualification).
+- [ ] **V9348-2:** Independently qualify [current declarations and adjacent verifier evidence](fixture-authority-and-cleanup.md#v9348-2-independent-current-evidence).
+
+#### Finite publication execution-identity fixtures from #12968
+
+Agent-recommended Phase 4 Worktrees-wave receiving through Phase 7.
+
+- [ ] **P12968-1:** Model [distinct portable host and execution identities](fixture-authority-and-cleanup.md#p12968-1-execution-identity) in both exact publication cases.
+- [ ] **P12968-2:** Preserve [privacy, the existing contribution and its holds](fixture-authority-and-cleanup.md#p12968-2-privacy-and-current-contribution).
+
+##### Local Validation for #12968
+
+- [ ] **V12968-1:** Qualify [both unchanged raw/codename cases with portable identities](fixture-authority-and-cleanup.md#v12968-1-portable-case-qualification).
+- [ ] **V12968-2:** Retain [the failed packet and actual contribution state](fixture-authority-and-cleanup.md#v12968-2-historical-failure-and-delivery-state).
+
+#### Finite session-command receiving-ledger fixtures from #13164
+
+Agent-recommended Phase 4 Worktrees-wave receiving through Phase 7.
+
+- [ ] **P13164-1:** Align [canonical receiving-layout inputs and literal subjects](fixture-authority-and-cleanup.md#p13164-1-canonical-receiving-layout).
+- [ ] **P13164-2:** Preserve [distinct success, unchanged-binding and negative outcomes](fixture-authority-and-cleanup.md#p13164-2-distinct-authority-outcomes), not a blanket guard patch.
+
+##### Local Validation for #13164
+
+- [ ] **V13164-1:** Qualify [the unchanged command packet and independent authority controls](fixture-authority-and-cleanup.md#v13164-1-command-and-authority-qualification) with their actual distinct outcomes.
+- [ ] **V13164-2:** Keep [neighboring packets and their evidence separate](fixture-authority-and-cleanup.md#v13164-2-neighboring-packet-boundaries).
+
+#### Finite Windows Vault cleanup and native-cache fixtures from #12156
+
+Agent-recommended Phase 4 Vault-wave receiving through Phase 7. These are two
+distinct reported fixture families, not one proved product or host cause.
+
+- [ ] **P12156-1:** Retain all four parametrizations of
+  `test_cleanup_only_calls_a_loaded_construction_handler` in
+  `test_install_cleanup_ps1.py`: installer exit 1, `Write-Warn:` and
+  actual `['UNLOCK']` versus expected `['STAMP', 'UNLOCK']`. Diagnose the
+  loaded-construction-handler/stamp/unlock boundary while preserving meaningful
+  cleanup ordering and failure behavior; a different copy/CLI repair is not
+  correspondence.
+- [ ] **P12156-2:** Separately retain all four original native-profile cases:
+  `TestNativeProfileSequence::test_base_repeat_and_ssh_switch`,
+  `test_ssh_repeat_update_and_preservation`,
+  `test_native_profile_failed_dependency_preserves_installed_consumer` and
+  `test_source_profile_stamp_survives_publisher_and_validates_retained_helpers[ssh]`.
+  Their actual native consumer's `PersistentCache().put(...)` returned false;
+  the owner attributed `CryptProtectData` error 5 to unavailable DPAPI in that
+  process. Preserve explicit capability-based test skipping OR a selected
+  non-DPAPI test cipher. Neither alternative authorizes a production cipher
+  fallback, profile/privilege change or silent cache-write success.
+- [ ] **P12156-3:** Preserve the original Windows 11/PowerShell 7/Python 3.13
+  context, reported unchanged-Dev failures and real native-consumer population
+  assertions. Credit actual existing source/fixture corrections only at their
+  demonstrated scope; a different cache test's exit 77 is not this consumer's
+  correction. Keep unavailable capability, skipped assertions and passing
+  supported controls distinct, with original budgets and owning cleanup.
+
+##### Local Validation for #12156
+
+- [ ] **V12156-1:** Through the existing bounded fixture lane, qualify all four
+  loaded-handler cases and their expected stamp/unlock and error/cleanup
+  outcomes. Preserve assertions and original failure history; unrelated suite
+  counts or an isolated different test are not this finite result.
+- [ ] **V12156-2:** Qualify all four actual profile consumers under the
+  selected capability-skip OR test-cipher policy, with DPAPI available and
+  unavailable controls at the proper supported tier. Preserve real consumer
+  cache population, ordinary production policy, truthful pass/skip/failure and
+  resource cleanup. No credential operation or new native run is authorized.
+
+#### Finite public-toolchain workflow assertion reconciliation from #12193
+
+Agent-recommended Phase 4 tools/workflow receiving through Phase 7.
+
+- [ ] **P12193-1:** Map the reported 153 failures/187 passes in
+  `test_public_toolchain_source.py` plus `test_seasoned_public_feed.py` to
+  authoritative current workflow and runner contracts. Retain all five named
+  failure groups: absent `windows-python-artifact-builder`, removed/renamed
+  steps, three imports of the unavailable shared CI-gate helper, absent
+  `construction-macos`, and the native-MCP provisioning-command mismatch.
+- [ ] **P12193-2:** Replace an obsolete expectation only when its intended
+  source-path selection, dependency-policy, platform and coverage guarantee has
+  an identified, meaningfully tested replacement. Preserve legitimate failure
+  sensitivity; broad skips, disabled checks or matching a broken workflow do
+  not reconcile the contract.
+- [ ] **P12193-3:** Keep this broader module family separate from metadata
+  transport deadlines and the positively admitted promotion-unit packet.
+  Their independent source/CI credit is not a pass of this selection. Use the
+  existing workflow/test-support owners and original bounded tier, not a new
+  required full-suite or native matrix.
+
+##### Local Validation for #12193
+
+- [ ] **V12193-1:** Exercise the reconciled named workflow/helper assertions
+  and actual runner/selection contracts, preserving meaningful path,
+  dependency, platform and coverage positives and negatives. Record explicit
+  original-to-current replacements rather than dropping absent names.
+- [ ] **V12193-2:** Attribute the actual two-module selection and its
+  pass/failure/skip outcomes separately from required unit CI and deadline
+  extraction. Preserve existing containment and budgets; historical counts
+  are not a fresh reproduction or current repair.
+
+#### Finite Windows SSH installer snapshot and transaction fixtures from #12194
+
+Agent-recommended Phase 4 SSH/installer-wave receiving through Phase 7.
+Preserve [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement);
+fixture admission does not add an old-recovery veto to ordinary installation.
+
+- [ ] **P12194-1:** Retain the PowerShell
+  `test_checkout_stamp_retains_complete_driver_graph_without_source` failure:
+  the stamped snapshot's `pyproject.toml` retained a
+  `../../libs/configuration-layers` UV source path resolving outside the
+  snapshot. Qualify the actual Windows snapshot/driver-graph contract, not
+  only the Bash path exercised by the dispatch lane.
+- [ ] **P12194-2:** Retain all six `agent-machines` transaction
+  parametrizations: `source_ps_native_reuse_keeps_package_and_exact_slot`
+  on both PowerShell hosts; `source_sh_native_reuse_keeps_package_and_exact_slot`;
+  `source_sh_selection_skips_nonfunctional_python3`; and
+  `source_ps_stamp_preserves_hashed_closure_and_refuses_corruption` on both
+  PowerShell hosts. Diagnose `source-runtime: completed source work` and
+  missing `Assert-CellPayloadIdentity` at their actual fixture/consumer
+  boundaries without treating them as one established cause.
+- [ ] **P12194-3:** Preserve the original alternative: correct and qualify
+  supported Windows behavior OR explicitly scope/skip cases where that lane
+  does not apply, retaining the intended supported-domain assertions elsewhere.
+  Preserve package/exact-slot reuse, nonfunctional-interpreter selection and
+  hashed-closure/corruption refusal. The separately corrected
+  `installerLifecycle` expectation is credit, not these seven tests' result.
+
+##### Local Validation for #12194
+
+- [ ] **V12194-1:** Map all seven original cases to the actual PowerShell/Bash
+  snapshot and transaction consumers and their supported Windows lane. Verify
+  the chosen corrected-behavior OR justified-domain disposition without
+  weakening production identity, source or corruption guards.
+- [ ] **V12194-2:** Retain actual supported pass, unsupported/skip and
+  unavailable outcomes with source/selection and cleanup under original
+  bounds. Workflow-dispatch availability or required PR CI alone is not this
+  local full-suite acceptance. No installer, native test or rollout is run by
+  this intake.
+
+#### Finite prepared-membership PowerShell child-budget contract from #11995
+
+Agent-recommended Phase 4 Worktrees/owning-fixture receiving through Phase 7;
+the original budget-policy question and its alternatives remain unresolved.
+
+- [ ] **P11995-1:** Retain intermittent hosted-Windows PowerShell 5.1
+  native-write AND membership failures at the original 10-second child
+  limit: runs 42793382667, 42857991671, 42881289827 and 42931808880,
+  including job 130232156330 and the registered-file/local-write guard
+  case. Preserve the reported phase offsets from process start:
+  command-entry 3.3s, marker-decoded 5.7s, membership-complete 8.8s and
+  native-proof-start 9.0s; other entry observations were 1.7s and
+  3.4s-4.2s. Later passing reruns/pushes are not causal repairs.
+- [ ] **P11995-2:** Establish whether 10 seconds is intended to qualify
+  production latency on a loaded hosted runner. If so, retain that contract
+  and investigate a possible budget regression. Otherwise select the
+  original warmed-host OR phase-based assertion excluding process start
+  OR runner-calibrated fixture-limit alternative, explicitly stating what
+  it measures. Do not raise production timeouts merely to make CI pass.
+- [ ] **P11995-3:** Preserve the actual native-write/membership assertions,
+  phase diagnostics, owned child/stream cleanup and applicable item/group/
+  process bounds. A fixture-policy adjustment must retain the original
+  failed 10-second evidence and remain distinct from production policy.
+  Keep #11745 related, not an established common cause; unrelated Index
+  or documentary deliveries do not complete this finite contract.
+
+##### Local Validation for #11995
+
+- [ ] **V11995-1:** At the existing separately admitted bounded Windows
+  PowerShell 5.1 consumer, distinguish real process startup from marker,
+  membership and native-proof work for both affected families. Preserve
+  meaningful positive/failure controls and actual behavior assertions;
+  mocked startup, a different PowerShell edition or an unrelated pass
+  cannot supply the selected native measurement.
+- [ ] **V11995-2:** Validate the selected production-latency OR fixture-only
+  policy at its declared boundary, with attributable source/selection,
+  phases, elapsed limits, results/skips and cleanup. Keep original
+  failures, later passes and unexplained variation distinct. Unit-only
+  required CI and hosted-Windows quiescence remain; this intake authorizes
+  no run, larger budget, production change or accepted-flake declaration.
+
+#### Finite Recovery comparison visual fixture from #11372
+
+Agent-recommended Phase 4 Manager fixture-wave receiving through Phase 7.
+
+- [ ] **P11372-1:** Retain the reported Linux source `9ea3b8958e` failure of
+  `test_full_companion_visual[evidence-size3]`: the Recovery comparison-
+  evidence `Collapsible` remained collapsed when expansion was expected;
+  the other thirteen parametrizations passed. These are historical outcomes,
+  not a current reproduction or a proved production UI regression. Keep the
+  original `worktree-manager/tests/test_companion_visual.py` family mapping.
+- [ ] **P11372-2:** Classify the actual selected tab/target/size interaction
+  before choosing the original fixture/expectation correction OR UI-behavior
+  correction. Earlier static inspection found a Timeline-selected fixture
+  interacting with a Recovery comparison, but did not execute the click or
+  prove the runtime cause. Do not blindly change expected collapse state.
+- [ ] **P11372-3:** Preserve the finite fourteen-case visual selection and
+  its real layout/interaction assertions, existing UI/fixture ownership and
+  runner bounds. A merged Agenda change, unchanged source, isolated green
+  or a broader unrelated UI programme is not whole correction or causality.
+
+##### Local Validation for #11372
+
+- [ ] **V11372-1:** Through the actual bounded visual fixture, exercise the
+  intended Recovery comparison interaction at `evidence-size3`, distinguish
+  the selected tab/target, and preserve the other thirteen controls and
+  original expanded/collapsed assertions. Do not mock past the click/layout.
+- [ ] **V11372-2:** Attribute the chosen fixture/expectation OR behavior
+  correction to meaningful failed/positive controls and current source.
+  Preserve original selection, budgets and truthful unavailable outcomes;
+  intake is not executed Linux/native/installed evidence or an accepted flake.
+
+#### Finite independent worker-witness and related triage from #11512
+
+Agent-recommended Phase 4 Dispatch fixture-wave receiving through Phase 7.
+The principal regression and five related local-failure families are distinct.
+
+- [ ] **P11512-1:** Retain the reported CPython 3.12.11 devcontainer failure
+  of `test_lane_admission_retains_original_native_stream_worker[legacy-True-*]`
+  in `test_lane_event_retirement.py` on private `Thread._handle`, distinct
+  from runners using 3.13+. Preserve
+  the original faithful public/independent API OR reviewed interpreter-
+  alignment options; alignment alone cannot silently drop an older still-
+  supported fallback or qualify its independent-retirement behavior.
+- [ ] **P11512-2:** Preserve evidence of the ORIGINAL worker despite poisoned
+  or replaced facade/wake references. The regression deliberately poisons
+  instance `is_alive()` and wraps `join()`; directly using those substituted
+  methods cannot replace its independent witness. Retain live, retired and
+  finally-cleanup assertions. Credit earlier feature-detection/`_capture_legacy`
+  source findings only at their inspected tier, not as fresh execution.
+- [ ] **P11512-3:** Keep intake running until actual retirement, exact-once
+  witness release, original interruption/error propagation and bounded
+  failure cleanup. Preserve the legacy/native AND poisoned/unpoisoned matrix
+  on its supported interpreter/platform combinations, meaningful assertions
+  and original budgets; no skip or production-liveness weakening is a fix.
+- [ ] **P11512-4:** Separately triage ALL five reported local families:
+  pool-release successor-wake native accounting (`pending`/`unknown`);
+  pool-accountability suspended-wake legacy-spawn blocking (`pending`/`unknown`);
+  stale cold-snapshot/pending-resume capacity; fleet SSH embody argv; and
+  order-dependent spawn diagnostics. Recover exact unnamed diagnostic nodes
+  OR retain their named unknown; a shared interpreter/environment cause is
+  unproven, not permission to repair all cases as one or drop their assertions.
+
+Original related selectors under `plugins/agent-dispatch/tests/` are retained
+as reported patterns, not invented current parameter IDs:
+
+```text
+test_pool_release.py::test_successor_wake_accounts_its_native_without_recounting_retired_predecessor[wake_outbox-pending|unknown]
+test_pool_accountability.py::test_active_suspended_pool_wake_blocks_actual_legacy_spawn[wake_outbox-pending|unknown]
+test_pending_startup_reentry.py::test_stale_cold_snapshot_cannot_hide_newer_pending_resume_capacity
+test_fleet.py::test_spawn_fleet_embodied_worker_builds_ssh_embody_argv
+test_spawn_diagnostics.py (several unnamed nodes; combined failure, isolated pass)
+```
+
+##### Local Validation for #11512
+
+- [ ] **V11512-1:** Exercise actual original-worker observation while blocked,
+  after real retirement and during failed cleanup, including poisoned facade
+  and replacement-reference controls. Prove intake lifetime, exact-once
+  witness release and original error/interruption propagation independently
+  of the facade being tested.
+- [ ] **V11512-2:** Qualify the declared legacy/native and poisoned/unpoisoned
+  supported matrix through the owning bounded lane. Preserve the original
+  Python 3.12 report, static findings and new executed results as different
+  tiers; pinning an interpreter or passing on 3.13 alone is not fallback proof.
+- [ ] **V11512-3:** Map each related family to current nodes and a separate
+  causal/fixture treatment OR explicitly retained tracked uncertainty, with
+  original assertions, tier and budgets. Preserve isolated-versus-combined
+  spawn-diagnostic evidence. No common-cause claim, new full-suite/native
+  programme or required-CI exception follows from the principal test repair.
 
 #### Finite Windows-native unit-collector attribution from #13294
 
@@ -1077,6 +1599,128 @@ a different selection. Any changed controlled selection must be named as changed
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
 
+#### Complete full-user WinGet bootstrap venue from #1475
+
+Agent-recommended owning-runner/native-workflow receiving through Phase 7.
+The [complete finite contract](winget-bootstrap-venue.md) preserves every
+original stage and independent owner.
+
+- [ ] **P1475-1:** Provide the [supported full-user Windows venue and exact
+  minimal starting state](winget-bootstrap-venue.md#provider-and-minimal-starting-state),
+  without relabeling Server Core or preinstalled tools as the subject's work.
+- [ ] **P1475-2:** Preserve the [complete subject-installed Copilot, external
+  marketplace-installed seed plugin AND its Python/uv runtime setup, plus the
+  repository-only restore chain](winget-bootstrap-venue.md#subject-owned-bootstrap-and-repository-restore),
+  using the actual installation owners rather than implicit plugin loading.
+- [ ] **P1475-3:** Preserve [stage attribution, literal mode, repeated-bootstrap
+  alternatives, ephemeral credentials and owned disposal](winget-bootstrap-venue.md#evidence-ownership-and-independent-scope),
+  retaining #688/#1192 and downstream F3-E as independent contracts.
+
+##### Local Validation for #1475
+
+- [ ] **V1475-1:** Exercise the [actual fresh Windows start and complete native
+  bootstrap/restore outcome](winget-bootstrap-venue.md#native-start-and-full-bootstrap),
+  including the non-equivalent Server Core/preinstalled-tool control.
+- [ ] **V1475-2:** Verify [repeatability, literal and safe failure/cleanup
+  outcomes](winget-bootstrap-venue.md#repeatability-and-safe-outcomes),
+  without changing existing CI, native admission, budgets or resource custody.
+
+#### Finite finished-daemon cleanup qualification from #12973
+
+Agent-recommended Phase 5 owning-runner receiving through Phase 7.
+
+- [ ] **P12973-1:** Preserve [historical failure and attempt-bound diagnostic evidence](fixture-authority-and-cleanup.md#p12973-1-attempt-bound-evidence), allowing an instrumented bounded reproduction.
+- [ ] **P12973-2:** Distinguish [fixture settlement failure from mishandled proven-dead identity](fixture-authority-and-cleanup.md#p12973-2-discriminate-the-cleanup-cause) without inferring the unknown historical cause.
+
+##### Local Validation for #12973
+
+- [ ] **V12973-1:** Qualify [the exact selection with CI evidence or an instrumented bounded Windows fixture](fixture-authority-and-cleanup.md#v12973-1-bounded-windows-evidence), binding proof to its actual attempt.
+- [ ] **V12973-2:** Preserve [identity, descendant, artifact and execution-boundary refusals](fixture-authority-and-cleanup.md#v12973-2-safe-settlement-and-refusals).
+
+#### Finite Windows-native no-skip roster admission from #12235
+
+Agent-recommended Phase 5 profile/runner receiving through Phase 7.
+
+- [ ] **P12235-1:** Preserve the reported 4,804 passes/three skips followed
+  by correct evidence refusal, not a passing native profile. The three
+  POSIX-only nodes in `test_windows_lease_acl.py` are
+  `test_posix_fresh_lease_root_passes_strict_private_admission[construction]`,
+  the corresponding `[retention]` case, and
+  `test_posix_existing_root_is_not_repaired_for_private_admission`.
+- [ ] **P12235-2:** Positively admit the platform-appropriate Windows-native
+  roster OR report the unsupported platform boundary before complete
+  execution. Preserve exact inventory and every-admitted-unit setup/call/
+  teardown-without-skips rules, the Linux required-CI inventory and actual
+  native qualification owner. Do not ignore skips, relabel partial execution
+  or broaden this finite admission correction into constructor/policy repair.
+
+##### Local Validation for #12235
+
+- [ ] **V12235-1:** Exercise selected Windows admission and all three
+  platform-inapplicable-node controls before execution, plus intended
+  platform-appropriate positives. The declared roster must match the executed
+  evidence; supported refusal is not an executed native pass.
+- [ ] **V12235-2:** Verify exact-inventory/no-skip enforcement and unchanged
+  Linux required-CI admission, retaining historical failure and actual
+  selected outcomes separately. Preserve original containment, budgets,
+  supervisor-verified cleanup credit and separately authorized native scope;
+  this intake runs no profile or test.
+
+#### Independently bounded optional Windows scheduling - #9568
+
+_Agent-recommended finite receiving, not a newly reproduced regression or
+an assertion that the historical source defect remains current._
+
+- [ ] **P9568-1:** Preserve the attributed run 40949196454 on #9566:
+  DirectJob lifetime, cold construction and concurrent Manager recovery
+  passed; separate PowerShell/POSIX jobs passed; all three cold serving-slot
+  retention controls passed in 205.03, 134.57 and 141.34 seconds. The
+  combined Windows job timed out at 900 seconds and later finite removal
+  did NOT run. These are historical partial results, not a green aggregate
+  or current full qualification.
+- [ ] **P9568-2:** Give optional Windows consumer, retention and removal
+  independently bounded scheduling at the existing workflow/runner boundary.
+  Preserve underlying assertion coverage, group/job/process/storage/cleanup/
+  resource limits and truthful cancellation/not-run outcomes. Justified
+  scheduling-shape assertion updates must retain their intended checks,
+  including finite-removal coverage, rather than preserve obsolete topology.
+  Do not solve the combined timeout
+  by enlarging deadlines or dropping controls; its 900-second failure is
+  evidence, not an invented universal cap for every independent job.
+- [ ] **P9568-3:** Revalidate the actual current candidate and intended
+  contracts before changing six reported stale assertions in
+  `tools/test_installation_context_ci_scope.py`: native-launch description
+  (one), seed timeout 8 versus 12 (two), diagnostics-family exclusion of
+  MCP controls (two), and missing windows-native-process job inventory
+  (one). Do not blindly mandate 12 or update expectations to match a bug.
+  Credit any already-delivered corrections without losing remaining
+  scheduling/qualification obligations.
+- [ ] **P9568-4:** Keep the related queued-installer lifetime repair separate:
+  the original report left these assertion changes alone and did not publish
+  the proposed regrouping. Retain normal review, required CI and actual
+  installation acceptance as distinct gates. Use existing Phase 7 scope
+  revalidation, synthetic fixtures and the same custodians; no required-CI
+  native enrollment, new runner or execution authority follows from intake.
+
+##### Local Validation
+
+- [ ] **V9568-1:** Attribute each historical pass, timeout and not-run result
+  to its real source/run/tier. Never count the combined cancelled aggregate
+  or unexecuted removal as passing; retain all three retention controls.
+- [ ] **V9568-2:** Verify independent consumer/retention/removal selection,
+  finite scheduling and truthful timeout/cancellation/not-run reporting with
+  bounded workflow/runner fixtures, preserving underlying contract coverage
+  and resource/cleanup limits rather than increasing deadlines. Verify
+  justified assertion updates still exercise the moved finite-removal work.
+- [ ] **V9568-3:** Resolve all six reported assertion contracts against the
+  current intended behavior before any expectation change, with justified
+  regression coverage and accurate credit for existing delivery.
+- [ ] **V9568-4:** Resolve every P9568 clause at its existing finite tier,
+  preserving unit-only required PR/promotion CI, hosted-Windows quiescence,
+  OPEN #1303 and independent installer/installation/native/release gates.
+  A synthetic scheduling pass or receiving merge is not a native full pass,
+  installation acceptance, implementation appointment or resource release.
+
 #### Finite external image-mapping cleanup outcome - #7643
 
 - [ ] **P7643-1:** Preserve the original Windows ARM64 case: the copied x64
@@ -1135,6 +1779,76 @@ a different selection. Any changed controlled selection must be named as changed
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed P13082/V13082/G13082, P13369/V13369/G13369 and
+P13378/V13378/G13378 families each have one primary placement in the existing
+Phase 4 Vault/shared-library, Containers and Bridge waves, respectively.
+The append-only migration-intake route retains complete finite contracts
+and actual custodians. This same planning unit supplies direct Plan,
+local/actual global Validation, Coordination and dated Journal for review.
+The sources stay OPEN during proposal; no new tracker, administrative
+checkbox, implementation appointment, execution enrollment or custody
+transfer follows from routing.
+
+The accepted complete P1475/V1475/G1475 family has one primary placement in
+Phase 5's owning-runner/native-workflow lane. The append-only migration-intake
+route records full-user WinGet provider/bootstrap acceptance, not generic
+Windows transport equivalence, and retains existing custodians. This same
+planning unit supplied complete Plan, local/actual global Validation,
+Coordination and dated Journal through #13701/#13703. #1475's separately
+audited NOT_PLANNED disposition retires redundant tracking, not technical
+work. Continue under OPEN #1303 and these six unchecked domain rows; do not
+reopen or repeat the completed proposal/receiving gates. No new issue,
+administrative checkbox, implementer or execution authority is added.
+
+The proposed P9348/V9348/G9348, P12968/V12968/G12968 and
+P13164/V13164/G13164 families each have one primary Phase 4 placement;
+P12973/V12973/G12973 has one Phase 5 placement. The append-only
+migration-intake ledger records deduplication and unchanged custodians.
+This same planning unit supplies complete domain Plan, local/global
+Validation, Coordination and dated Journal for review. Existing sources
+remain their trackers during proposal; no new tracker, administrative
+checkbox, implementation appointment or execution grant is added.
+
+The proposed P12156/V12156/G12156, P12193/V12193/G12193 and
+P12194/V12194/G12194 families each have one primary Phase 4 placement;
+P12235/V12235/G12235 has one Phase 5 placement. The append-only
+migration-intake ledger records deduplication and unchanged custodians.
+This same planning unit supplies complete domain Plan, local/global
+Validation, Coordination and dated Journal for ordinary review; sources
+remain their trackers during proposal. No new administrative checkbox,
+tracker, implementer or unrelated portfolio prerequisite is added.
+
+The finite P11995/V11995/G11995 family has one primary placement in
+Phase 4's Worktrees/owning-fixture wave. Its append-only migration-intake
+row records deduplication and unchanged custodians; this same planning
+unit supplies complete domain Plan, local/global Validation, Coordination
+and dated Journal for review. Existing #11995 supplies the tracker during
+proposal; no new issue, administrative checkbox or implementer is appointed.
+
+The proposed P11372/V11372/G11372 and P11512/V11512/G11512 families each
+have one primary Phase 4 placement, in the Manager and Dispatch fixture
+waves respectively. The append-only migration-intake ledger records
+deduplication and unchanged owners; this same planning unit supplies the
+complete domain Plan, local/global Validation, Coordination and dated Journal
+for review. Existing sources supply the trackers during proposal; no new
+tracker, administrative checkbox or implementation appointment follows.
+
+The proposed P10487/V10487/G10487 family has one primary placement in the
+Phase 3 Worktrees pilot. The append-only migration-intake ledger records its
+deduplication and unchanged owners; this same planning unit supplies the
+complete domain Plan, local/global Validation, Coordination and dated Journal
+for review. Existing #10487 supplies its tracker during the proposal; no
+new tracker, administrative checkbox or implementation appointment follows.
+
+The proposed #9970 family has one primary placement in Phase 4's Dispatch
+wave. The separate #10031 and #10032 families each have one primary
+placement in Phase 3's Worktrees pilot. The matching append-only
+[`migration-intake` ledger](../migration-intake/ledger.md) records
+deduplication and the unchanged owners; this same planning unit supplies
+complete domain Plan, local/global Validation, Coordination and Journal
+for review. Existing source issues supply their trackers during the proposal.
+No new tracker, administrative checkbox or implementation appointment follows.
 
 - [ ] Accept test-portfolio candidates only through
   [`migration-intake`](../migration-intake/README.md)'s deduplication and
@@ -2305,7 +3019,276 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
   delivery, current ownership or retained OPEN condition means KEEP.
   A study, graph edge, child-only note or document merge is not a fix.
 
+### Finite cold-source override fixture from #9970
+
+Agent-recommended Phase 4 Dispatch-wave receiving through Phase 7.
+This is fixture determinism, not a production outage or a new runtime policy.
+
+- [ ] **P9970-1:** Retain the combined six-file observation of 486 passes
+  and one `CompanionIndeterminate: override discovery pending; no confirmed
+  veto snapshot` failure, followed by 48 unchanged isolated passes with
+  confirmed cleanup in both runs. Deterministically establish the initial
+  authoritative override/source observations before the bounded publication
+  assertion in
+  `test_declaration_publication_is_bounded_and_does_not_duplicate_pending_write`
+  in `test_supervisor_bounded_recovery.py`. Registry priming or an empty
+  override provider alone does not establish completed observation.
+- [ ] **P9970-2:** Preserve genuinely pending-discovery refusal, the
+  original pending-write/no-duplicate-write assertions, the existing
+  0.05-second reconciliation budget and 0.5-second cycle bound. Fixture
+  preparation must not perform the publication under test. Do not relax
+  production unknown-state handling or solve fixture timing by blanket
+  timeout increases.
+- [ ] **P9970-3:** Qualify the finite setup correction and its cold/pending
+  regression controls at the actual owning fixture/source boundary, with
+  attributable current-source results and cleanup. An isolated green,
+  reported merged test slice or source comparison is only scoped evidence;
+  no product-behavior change, test execution or runtime repair is activated
+  by this intake.
+
+#### Local Validation for #9970
+
+- [ ] **V9970-1:** Demonstrate deterministic authoritative initialization
+  before the first bounded assertion AND a genuinely pending observation
+  retaining the original refusal. Exercise the owning observation boundary,
+  not a fixture that publishes early or substitutes away discovery.
+- [ ] **V9970-2:** Preserve pending/no-duplicate-write checks and both
+  original bounds, recording source/attempt identity, actual assertion and
+  cleanup outcomes, skips and remaining unknowns. Keep production refusal
+  behavior and unit-only required CI unchanged; any separately needed
+  contained/native run retains its own admission and owner.
+
+### Finite initial guard-map startup and cutover from #10031
+
+Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
+The [completed guard-map source effort](../precomputed-hook-guard-map/README.md)
+retains its earned source and Windows installed-consumer credit; this is its
+distinct transferred large-caller qualification, not evidence that it failed.
+
+- [ ] **P10031-1:** Use the existing contained native runtime/service lane
+  to measure INITIAL prepared-caller acquisition/construction with
+  representative larger caller counts and acquisition failures. Record
+  construction and control-listener readiness timings, cutover serving
+  continuity, bounded cleanup, exact exercised counts, source/runtime
+  identities and actual platform limits. An already-running resident or
+  source/unit result does not qualify initial startup.
+- [ ] **P10031-2:** Test the existing lifecycle deadline without enlarging
+  it. Synchronous acquisition before listener start is an ordering
+  observation, not an established deadline failure. IF measured evidence
+  shows it misses the deadline, route the correction through the actual
+  resident-lifecycle owner. Keep acquisition failure diagnostics and retry
+  scope; no hook-time topology/CLI discovery fallback, new daemon or second
+  scheduler is permitted.
+- [ ] **P10031-3:** Retain producer-owned managed preparation/mutation/
+  explicit refresh, caller/installation isolation, atomic whole-map
+  publication, unavailable versus complete-empty facts and both lookup-only
+  consumers. Current directional configuration, modes, kill switches and
+  expiring grants stay authoritative. Missing/unavailable maps remain
+  fail-open at consumption with bounded event-time Git identity; no RPC/
+  topology acquisition, watcher, TTL or periodic recomputation is added.
+  The independent #3303 full-harness objective and #10032 platform lane
+  keep their own owners and acceptance, not a new whole-parent barrier.
+
+#### Local Validation for #10031
+
+- [ ] **V10031-1:** Witness real initial construction/listener readiness
+  and cutover continuity across the declared larger inventories and
+  acquisition-failure controls under unchanged lifecycle deadlines.
+  Preserve diagnostics, exact exercised counts/timings/platform limits and
+  bounded cleanup; unit tests or an already-serving resident are not native
+  startup proof.
+- [ ] **V10031-2:** Qualify any measured-necessary ordering correction
+  through the existing owner and retain fail-open consumption, both
+  consumers, isolation, atomic publication and all no-discovery/no-new-
+  scheduler controls. Distinguish source, released, installed and exercised
+  results; no native run, service action or rollout is authorized by intake.
+
+### Finite native guard-map platforms from #10032
+
+Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7;
+independent of #10031's large-caller startup/cutover lane.
+
+- [ ] **P10032-1:** Exercise actual admitted native UNC AND complete
+  non-Windows/POSIX venues through the existing native entry, producer,
+  native and resident consumers, deployment path and deployed-reader
+  dependency closure. Synthetic paths, a direct Python call, correct
+  deployed filenames or earlier ordinary Windows adoption do not execute
+  these unqualified platform lanes.
+- [ ] **P10032-2:** Cover applicable path normalization/casing, actual
+  symlink/nonregular-input behavior, concurrent atomic publication and
+  missing/unavailable maps. Record the actual platform and source/runtime/
+  selected/serving identity, capability skips and cleanup. Retain the
+  previously credited ordinary/linked/nested/bare Windows, registered-
+  junction alias, literal/global-option Git, read-access and missing-map
+  controls without recrediting them as UNC or full POSIX qualification.
+- [ ] **P10032-3:** Preserve caller/installation isolation, bounded local
+  event-time Git metadata, both lookup-only consumers, current controls,
+  managed producer boundaries, atomic facts and fail-open missing-map
+  behavior. There is no hook-time topology/CLI discovery, watcher, TTL or
+  periodic acquisition. Do not provision a shared network service, broaden
+  privileges, start a new daemon or substitute another platform's result
+  to manufacture a passing lane. Existing producer/consumer, deployment,
+  native and resource owners remain responsible.
+
+#### Local Validation for #10032
+
+- [ ] **V10032-1:** Record actual native-entry/producer/both-consumer/
+  deployed-reader results for UNC AND POSIX, retaining all original
+  normalization/casing, symlink/nonregular, concurrent publication and
+  absent/unavailable-map controls. Unavailable capability remains explicitly
+  unqualified rather than a passing substitute.
+- [ ] **V10032-2:** Bind each result to actual platform/source/runtime/
+  selected/serving identities, exact cleanup and applicable skips; retain
+  existing consumption/producer/isolation controls and original owners.
+  Keep the completed source effort Done and the separate startup and
+  full-harness objectives independently tracked. Intake activates no native
+  execution, network provisioning, privilege change or deployment.
+
 ## Validation Plan
+
+- [ ] **G13082:** Resolve every P13082/V13082 and continuing Coordination
+  clause for the original portable-interpreter peer-handle module: shared
+  wrapper/libc fallback OR clear unsupported skip only when neither works,
+  retained assertions and nine-error history, existing process/runner custody
+  and honest results. Preserve original bounds and Phase 7 acceptance; a
+  diagnostic fix or documentary merge is not this module's qualification.
+- [ ] **G13369:** Resolve every P13369/V13369 and continuing Coordination
+  clause for BOTH original files: all three current runtime resources,
+  wheel/sdist expectations, per-resource refusal controls, both staged-load
+  modes AND native-policy refusal. Retain five-failure/twenty-error and
+  three-case history, actual source/build/fixture owners and original tiers;
+  discovery, Fleet work or required unit CI does not qualify this packet.
+- [ ] **G13378:** Resolve every P13378/V13378 and continuing Coordination
+  clause for ALL six migration/caller-session/PID-incarnation cases under
+  the managed runner OR justified explicit host-dependent tiers. Preserve
+  writable preparation, all four remote caller cases, process-birth
+  distinctions, original deadlines and truthful later-not-run coverage.
+  Keep actual owners, unit-only CI and execution holds; neither a timeout
+  waiver nor another caller's source pass fulfills the family.
+
+- [ ] **G1475:** Resolve every P1475/V1475 and continuing Coordination clause:
+  the supported full-user WinGet venue; PowerShell/WinGet/Git-only baseline
+  plus required checkout transport; subject WinGet Copilot, external marketplace,
+  marketplace-installed seed plugin AND its bootstrap Python/uv runtime setup;
+  repository-only plan/validate/
+  restore; attributed postconditions; repeat no-op OR readiness; ephemeral
+  credentials, literal mode and owned disposal. Retain Server Core smoke
+  without false equivalence, actual native/resource admission, independent
+  #688/#1192/downstream F3-E owners, Phase 7 review, unit-only CI and all existing
+  holds. Planned receiving is not an implemented provider, native pass,
+  installation, source/resource handback or whole-Portfolio completion.
+
+- [ ] **G13598:** Resolve P13598/V13598 and continuing Coordination at the
+  original CPython 3.11.9 observed-collection boundary, including relocated
+  cache-prefix and supported extended spelling, exact declared-source binding
+  and unknown/stale/mismatched/unadmitted refusals. Preserve the separate
+  #6237 diagnostic track, ordinary Linux CI, original limits and actual
+  owners; this intake supplies neither a #13598 retirement nor a native pass.
+
+- [ ] **G9348:** Resolve every P9348/V9348 and continuing Coordination clause:
+  the complete historical three-file recipe family, current unit-profile
+  declarations and separate adjacent workflow-verifier migration. Preserve all
+  qualification/source/effect/timing/publication controls, #3336/#6237 and
+  actual claimants; no obsolete gate, skip or wider permission is introduced.
+- [ ] **G12968:** Resolve every P12968/V12968 and continuing Coordination
+  clause for both exact publication cases with distinct portable execution
+  identity and unchanged raw/codename privacy. Preserve the existing #13297
+  correction and Draft/older-publisher/review hold; documentary consolidation
+  neither merges that contribution nor enables its recovery path.
+- [ ] **G13164:** Resolve every P13164/V13164 and continuing Coordination
+  clause for the unchanged two-module command packet AND independent
+  authority controls. Preserve canonical receiving subjects, successful fresh
+  identity, omitted foreign-project identity fields, unchanged binding during
+  optional-stamp lock contention and actual stale/foreign negatives; different
+  fixture families, a patched guard or required unit success do not qualify it.
+- [ ] **G12973:** Resolve every P12973/V12973 and continuing Coordination
+  clause using attempt-bound daemon/process-birth/supervisor/settlement/artifact
+  evidence from available CI material OR an instrumented bounded Windows
+  reproduction. Retain historical assertions, failed cleanup and unknown cause;
+  distinguish the reproduced fixture failure OR proven-dead-identity cleanup
+  cause without attributing it to the old run. Preserve all identity, descendant,
+  artifact, custodian and original-bound protections.
+
+- [ ] **G12156:** Resolve every P12156/V12156 and continuing Coordination
+  clause for BOTH original Windows fixture families: all four stamp/unlock
+  controls and all four actual native-profile cache consumers, original
+  capability-skip OR non-DPAPI-test-cipher choice and honest evidence tiers.
+  Preserve production DPAPI/cache policy, existing custodians and original
+  bounds; a different fixture's skip or plan merge is not a repair.
+- [ ] **G12193:** Resolve every P12193/V12193 and continuing Coordination
+  clause for the two-module workflow contract: all five failure groups,
+  identified meaningful replacements and retained path/dependency/platform/
+  coverage sensitivity. Required unit success and deadline extraction are
+  independent; no broad disabling or new full-suite required gate follows.
+- [ ] **G12194:** Resolve every P12194/V12194 and continuing Coordination
+  clause for all seven Windows snapshot/transaction cases, actual supported
+  behavior OR justified domain disposition and preserved source/identity/
+  corruption assertions. Retain separate prior repair credit, ordinary
+  replacement intent, actual owners and truthful native/unavailable outcomes.
+- [ ] **G12235:** Resolve every P12235/V12235 and continuing Coordination
+  clause: platform-appropriate positive admission OR explicit pre-execution
+  unsupported boundary, all three named POSIX-only controls and unchanged
+  exact-inventory/no-skip/Linux required-CI rules. Documentary receiving is
+  not a profile pass, native execution grant or resource release.
+
+- [ ] **G11995:** Resolve every P11995/V11995 and continuing Coordination
+  clause: both actual PowerShell 5.1 families, original 10-second failures/
+  phase evidence, production-latency classification and the original
+  warmed-host OR phase-based OR calibrated-fixture alternative. Preserve
+  behavior assertions, original-versus-selected budget distinctions,
+  ownership, Phase 7 domain acceptance and required unit-only CI. Planned
+  consolidation is neither causal repair, native PASS, production-timeout
+  authority nor completion of this ROOT's remaining portfolio acceptance.
+
+- [ ] **G11372:** Resolve every P11372/V11372 and continuing Coordination
+  clause at the original fourteen-case visual boundary: correct Recovery/
+  selected-tab/size interaction, original fixture/expectation OR behavior
+  alternative, retained assertions and attributable cause/results. Historical
+  source inspection and unrelated Agenda delivery are not a current UI pass;
+  preserve actual owners, Phase 7 intake, unit-only CI and execution holds.
+- [ ] **G11512:** Resolve every P11512/V11512 and continuing Coordination
+  clause: original worker evidence despite poison/replacement, running-until-
+  retirement, exact-once release/error/cleanup, supported matrix and separate
+  triage of ALL five related families/unknown diagnostic nodes. Preserve
+  original alternatives, old-versus-new evidence, budgets and actual custodians;
+  planned consolidation is not interpreter/native proof or claim release.
+
+- [ ] **G10487:** Resolve every P10487/V10487 and continuing Coordination
+  clause: both regeneration equalities, all three supported author commands,
+  genuine per-command cold-handler/cluster-loading proof and attributable
+  focused results. Preserve static-repair credit, original assertions,
+  distinct historical selections, actual owners and Phase 7 domain acceptance.
+  Documentary consolidation neither supplies a passing test nor relaxes
+  unit-only CI, execution admission or the parent's own completion gate.
+
+- [ ] **G9970:** Resolve every P9970/V9970 and continuing Coordination
+  clause at the finite original fixture boundary: authoritative initial
+  observation, genuinely pending refusal, pending/no-duplicate assertions,
+  original reconciliation/cycle bounds and truthful cleanup. Preserve the
+  historical intermittent evidence, production unknown handling, Phase 7
+  domain acceptance and required unit-only CI. Planned receiving is not a fix.
+- [ ] **G10031:** Resolve every P10031/V10031 and continuing Coordination
+  clause at INITIAL large-caller construction/listener/cutover, acquisition-
+  failure, diagnostic/retry and bounded-cleanup boundaries. Preserve the
+  original deadline, map/consumer safety, actual owners and independent
+  platform/full-harness duties. Scoped source/Windows credit and an already-
+  running resident do not supply the unexecuted native proof.
+- [ ] **G10032:** Resolve every P10032/V10032 and continuing Coordination
+  clause for actual UNC AND complete POSIX native entry/producer/both
+  consumers/deployed-reader closure, all original path/input/concurrency/
+  missing-map controls, identities, skips and cleanup. Preserve existing
+  owners, no-discovery/fail-open policy, Phase 7 acceptance, unit-only CI and
+  hosted-Windows quiescence. No source/resource release or execution grant
+  follows from documentary acceptance.
+
+- [ ] **G9568:** Resolve every P9568-1 through P9568-4, local V9568-1
+  through V9568-4 and continuing Coordination condition: independently
+  bounded optional Windows consumer/retention/removal, accurate historical
+  partial results, all six intended-contract decisions before expectation
+  edits and preserved assertion coverage, tiers, deadlines and resource custody.
+  Preserve Phase 7 deduplication/domain acceptance, OPEN #1303, unit-only
+  required CI and hosted-Windows quiescence. No combined-timeout green claim,
+  enlarged deadlines, native execution grant or unrelated whole-parent gate.
 
 - [ ] **G13294:** Resolve every P13294/V13294 and continuing Coordination
   clause at the original finite Windows-native collector boundary:
@@ -2631,6 +3614,111 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### [2026-11-20 UTC - Fixture receiving accepted, with separate source judgments](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md#previous-reviewed-receiving-and-separate-source-judgments)
+
+### [2026-11-20 UTC - Proposed portable fixture and runtime-resource receiving](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+
+### [2026-11-20 UTC - Full-user WinGet receiving and tracking accepted](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md#accepted-portfolio-receiving-follow-through)
+
+### [2026-11-20 UTC - Proposed complete full-user WinGet bootstrap venue](../backlog-reconciliation/journal/2026/11.20-winget-venue-and-retained-contracts.md)
+
+### [2026-11-20 UTC - Windows attribution and retained-transition receiving](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
+
+### [2026-11-20 UTC - Proposed finite fixture-authority and cleanup receiving](../backlog-reconciliation/journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+
+### 2026-11-20 UTC - Windows fixture and no-skip receiving accepted
+
+#13622 delivered the complete four P/V/G domain families, local and actual
+global Validation, continuing Coordination, dated Journal and Phase 7 intake
+after current-head review and required CI. Complete current whole receiving,
+original/discussion and custody readback supports four separate redundant-
+tracking retirements: #12156, #12193, #12194 and #12235. The
+[source-fulfillment record](../backlog-reconciliation/journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+retains actual merge, final qualifications and independently audited effects.
+All twenty-three technical rows and every incumbent check state remain
+unchecked/unchanged respectively. Existing owners, OPEN #1303, original
+alternatives, unit-only required CI, hosted-Windows quiescence and actual
+source/native/release/resource custody remain. No test, native run,
+production fallback, installer/profile change or resource release occurred.
+
+### 2026-11-20 UTC - Proposed Windows fixture and no-skip roster receiving
+
+Complete current originals/discussions retain the four finite families in
+their existing Phase 4/5 waves through Phase 7, with direct Plan, local and
+actual global Validation, continuing Coordination and append-only intake.
+All twenty-three new technical rows remain unchecked. The consumed prior
+Vault study is reused without repeating its unchanged source/native trace;
+its two actual fixture gaps are not replaced with a different cache test.
+The [fourteen-source record](../backlog-reconciliation/journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+retains the independent scope, original alternatives, claims and separate
+post-review judgment gates. No implementation, import, test/native run,
+production fallback, installer/CI/profile change or resource action occurred.
+
+### 2026-11-20 UTC - Proposed finite PowerShell budget-policy receiving
+
+The complete qualified #11995 original and empty discussion are retained
+in the existing Phase 4 Worktrees/owning-fixture wave through Phase 7.
+Three direct Plan, two local Validation and one actual global Validation
+row preserve the source's production-versus-fixture question and all
+three alternatives, phase measurements and unchanged production policy.
+All six technical rows remain unchecked. The [native crypto and receiving record](../backlog-reconciliation/journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+separates this proposal from source completion, actual execution and the
+independent six-family timeout grouping. No test, native, runtime or
+resource operation occurred.
+
+### 2026-11-20 UTC - Proposed visual and worker-witness fixture receiving
+
+Complete qualified #11372 and #11512 originals, including the latter's
+whole static-research discussion, are retained directly in the existing
+Phase 4 Manager/Dispatch waves through Phase 7. Both have local and actual
+global Validation; all fourteen new technical rows remain unchecked.
+The principal witness regression does not absorb its five related unknown-
+cause families into one alleged fix. The [four-source receiving record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+preserves complete source distinctions, owners and separate tracking gates.
+No test, source implementation, native/GUI action or resource release occurred.
+
+### 2026-11-19 UTC - Proposed finite author-command guard receiving
+
+The complete qualified #10487 original was compared with this existing
+Worktrees pilot and migration-intake contract. Direct unchecked Plan,
+local/global Validation and continuing Coordination retain static equality
+AND the omitted three-command cold-handler proof, without repeating source
+or native execution. The [six-source receiving record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+retains the proposal and separate disposition gates. No technical completion,
+tracker retirement, implementation appointment or custody release is claimed.
+
+### 2026-11-19 UTC - Proposed cold-fixture and guard-map qualification receiving
+
+The complete #9970 fixture contract is proposed for Phase 4's Dispatch
+wave; the separate #10031 initial-startup/cutover and #10032 UNC/POSIX
+contracts enter Phase 3's Worktrees pilot. All use existing Phase 7
+deduplication/domain review and the appended migration-intake ledger.
+The direct Plan, local and actual global Validation, Coordination and
+route are reviewed together; no ledger-only acceptance or new tracker is
+claimed. All eighteen technical rows remain unchecked.
+
+Complete current metadata and full collaborator rosters qualify the three
+unchanged whole originals. The completed guard-map ROOT is preserved,
+including its explicit transfer, earned source/Windows credit and actual
+owner boundaries. Keep sources OPEN during proposal, then make separate
+tracking judgments after reviewed complete delivery and permitted current
+receiving/source/custody readback. This is no implementation, test/native
+run, deadline increase, rollout, claimant appointment or resource release.
+
+### 2026-11-19 UTC - Proposed bounded optional Windows scheduling receiving
+
+Propose complete P9568/V9568/G9568 Phase 5 retention through existing
+Phase 7 migration-intake and actual domain-Plan review, with the paired
+append-only intake route. Preserve the historical consumer/PowerShell/POSIX
+and three retention passes, combined 900-second timeout, removal NOT RUN
+and all six intended-contract decisions. All nine technical rows remain
+unchecked. Normal reviewed delivery and current permitted whole receiving/
+source/owner readback precede a separate source-specific tracking judgment;
+no extra administrative checkbox or receipt-PR gate is introduced.
+The [campaign record](../backlog-reconciliation/journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+retains the mapping. #9568 stays OPEN now. No native run, implementation,
+CI enrollment, installation, source/resource transfer or custody release occurred.
 
 ### 2026-11-19 UTC - Finite Windows collector receiving accepted
 

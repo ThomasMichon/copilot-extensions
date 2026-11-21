@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve retained conversation metadata and cache misses during explicit terminal adoption without inferring legacy generation bindings.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

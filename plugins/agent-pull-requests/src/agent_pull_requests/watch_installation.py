@@ -11,11 +11,11 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
-from zdd.cutover_lock import CutoverLock
+from zdd.cutover_lock import CutoverLock, lock_path
 
-from . import _installation_context as context_api
+from . import _installation_context as _context_api
 from .watch_notification import positive_seconds
 
 PLUGIN_ID = "agent-pull-requests"
@@ -25,6 +25,33 @@ _PINNED_FIELDS = (
     "logsRoot", "cacheRoot", "launchersRoot", "reposRoot", "namespaceReceipt",
     "installReceipt", "namespaceGeneration", "generation",
 )
+
+
+class _InstallationAPI(Protocol):
+    def paths_equal(self, left: str | Path, right: str | Path) -> bool: ...
+
+    def validate_namespace_receipt(
+        self, receipt_path: str | Path, durable_home: str | Path,
+    ) -> dict[str, Any]: ...
+
+    def validate_context_receipt(
+        self, receipt_path: str | Path, durable_home: str | Path, *,
+        expected_plugin_id: str | None = None,
+        expected_marketplace_id: str | None = None,
+        expected_payload_root: str | Path | None = None,
+        expected_cell_root: str | Path | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def resolve_installation_mode(
+        self, *, legacy_root: str | Path, context: str | Path, plugin_id: str,
+        payload_root: str | Path, durable_home: str | Path,
+        expected_marketplace_id: str, expected_cell_root: str | Path,
+        environment: Mapping[str, str] | None, os_profile: str | Path,
+    ) -> dict[str, Any]: ...
+
+
+context_api = cast(_InstallationAPI, _context_api)
 
 
 def _absolute(path: Path, label: str) -> Path:
@@ -164,6 +191,37 @@ class WatchInstallation:
     def evidence(self) -> dict[str, Any]:
         """Pinned installation identity for an independently durable owner journal."""
         return dict(zip(_PINNED_FIELDS, self._signature, strict=True))
+
+    def require_transition_origin(
+        self, origin: object, *, guard: CutoverLock,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
+        """Validate historical installation scope under current admission.
+
+        The transition owner must obtain ``origin`` from its validated private
+        journal and separately prove native writer/topology custody. This check
+        neither authenticates a caller's claimed origin nor authorizes adoption.
+        """
+        guard.require_owned()
+        if guard.path != lock_path(self.run_root):
+            raise PermissionError("watch transition origin requires its installation transaction")
+        self.require_current(environment=environment)
+        current = self.evidence()
+        if not isinstance(origin, dict) or set(origin) != set(current):
+            raise PermissionError("watch transition origin has incomplete installation evidence")
+        for field in _PINNED_FIELDS:
+            value = origin[field]
+            if field in {"generation", "namespaceGeneration"}:
+                valid = type(value) is int and 0 < value <= current[field]
+            elif field == "payloadRoot":
+                # Retain this as provenance; do not resolve or execute the old payload.
+                valid = isinstance(value, str) and Path(value).is_absolute()
+            else:
+                valid = type(value) is str and value == current[field]
+            if not valid:
+                raise PermissionError(f"watch transition origin conflicts at {field}")
+        self.require_current(environment=environment)
+        guard.require_owned()
 
     @contextmanager
     def transaction(

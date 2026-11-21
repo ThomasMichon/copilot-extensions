@@ -487,7 +487,7 @@ function Test-PostToolDiscoveryContext {
 }
 
 function Invoke-PreparedPostToolRead {
-    param([string]$Raw)
+    param([string]$Raw, [bool]$PreparedMembership = $false)
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return $null }
     try {
         if ($Raw.Length -gt 1048576) { return $null }
@@ -530,7 +530,7 @@ function Invoke-PreparedPostToolRead {
         if ($session -isnot [string] -or
             $session -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { return ,@{} }
         $sessionHome = [IO.Path]::Combine($env:USERPROFILE, '.copilot', 'session-state', $session)
-        if (-not (Test-PreparedManagedWorktreesSession -Raw $Raw)) {
+        if (-not $PreparedMembership -and -not (Test-PreparedManagedWorktreesSession -Raw $Raw)) {
             if ($env:COPILOT_EXTENSIONS_CONTEXT) { return $null }
             return ,@{}
         }

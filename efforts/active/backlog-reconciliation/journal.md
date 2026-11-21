@@ -3,6 +3,58 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Selected startup wave and current delivery boundaries](journal/2026/11.20-selected-startup-wave.md)
+
+- [2026-11-20 - Current roadmap integration gaps and retained routes](journal/2026/11.20-roadmap-integration-gaps.md)
+
+- [2026-11-20 - Idle steering and existing keepers](journal/2026/11.20-idle-steering-and-existing-keepers.md)
+
+- [2026-11-20 - Portable fixture and runtime-resource receiving](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+
+- [2026-11-20 - Finite Vault copy contracts and existing keepers](journal/2026/11.20-vault-copy-and-existing-keepers.md)
+
+- [2026-11-20 - Retained supervisor recovery and existing canonicals](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+
+- [2026-11-20 - Complete orphan-task adoption planning](journal/2026/11.20-orphan-task-adoption-planning.md)
+
+- [2026-11-20 - Independent inference identity and retained custody](journal/2026/11.20-independent-inference-identity-and-custody.md)
+
+- [2026-11-20 - Full-user WinGet venue and retained contracts](journal/2026/11.20-winget-venue-and-retained-contracts.md)
+
+- [2026-11-20 - Local transport and complete rendezvous planning](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+
+- [2026-11-20 - Shared context and registry-default receiving](journal/2026/11.20-shared-context-and-registry-default-receiving.md)
+
+- [2026-11-20 - Windows attribution and retained-transition receiving](journal/2026/11.20-path-attribution-and-retained-transitions.md)
+
+- [2026-11-20 - Finite fixture-authority and cleanup receiving](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+
+- [2026-11-20 - Config-free registration and selected peer-launch completion](journal/2026/11.20-registration-and-peer-launch-completions.md)
+
+- [2026-11-20 - Constructor retention and distinct owner continuations](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
+
+- [2026-11-20 - Changed deliveries and two finite defect completions](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
+
+- [2026-11-20 - Three compatibility requests fulfilled by existing source](journal/2026/11.20-source-compatibility-fulfillment.md)
+
+- [2026-11-20 - Whole source fulfillment and retained ownership boundaries](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+
+- [2026-11-20 - Windows fixture and native-profile receiving](journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+
+- [2026-11-20 - Native crypto fulfillment and existing-owner receiving](journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+
+- [2026-11-20 - Fulfilled source-claim and credential-generation receiving](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+
+- [2026-11-20 - Provider observation and original terminal-load receiving](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+
+- [2026-11-20 - Source attribution, visual and retirement-fixture receiving](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+
+- [2026-11-19 - Bounded readers, truthful guidance and recipe-field receiving](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+
+- [2026-11-19 - Cold-fixture and guard-map qualification receiving](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+
+- [2026-11-19 - Read-only and bounded Windows receiving proposals](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+
 - [2026-11-19 - Non-live cause reconciliation and current identity accounting](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
 
 - [2026-11-19 - Current qualification and retained ownership](journal/2026/11.19-current-qualification-and-retained-ownership.md)

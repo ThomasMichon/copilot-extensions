@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicitly selected native point-vector effects with current model ownership and caught-failure latching",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

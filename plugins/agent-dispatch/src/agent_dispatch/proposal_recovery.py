@@ -26,6 +26,18 @@ def _wire(value: object) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True, allow_nan=False)
 
 
+def _draft_aware(db: sqlite3.Connection) -> bool:
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposal_v2'").fetchone() is not None
+
+
+def proposal_row(db: sqlite3.Connection) -> tuple[Any, ...]:
+    if _draft_aware(db):
+        [row] = db.execute("SELECT id,title,repo,payload,created,draft FROM proposal_v2")
+        return tuple(row)
+    [row] = db.execute("SELECT id,title,repo,payload,created FROM proposal_v1")
+    return (*row, None)
+
+
 class ProposalIntake:
     """Finite private intake. Each instance owns a fresh, exclusive queue for one proposal.
 
@@ -88,21 +100,50 @@ class ProposalIntake:
             if not old:
                 db.execute("INSERT INTO steer_v1(key,fields,created,receipt) VALUES (?,?,?,?)",
                            (key, encoded, now, _wire(receipt)))
+                if _draft_aware(db):
+                    db.execute("UPDATE proposal_v2 SET draft='null' WHERE id=?", (self.identity,))
             db.commit()
             self._usable = True
             return receipt
 
+    def write_draft(self, fields: dict[str, Any] | None, *, expected_revision: str,
+                    expected_draft_revision: str) -> dict[str, Any] | None:
+        """Acknowledge this guarded save/clear only after the independent record commits."""
+        with closing(sqlite3.connect(self.records.as_uri() + "?mode=rw", uri=True)) as db:
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
+            if not self._usable or db.execute("SELECT epoch FROM writer").fetchall() != [(self._epoch,)]:
+                raise ValueError("unavailable or superseded proposal writer")
+            if not _draft_aware(db):
+                # Legacy readers require proposal_v1. They must refuse instead
+                # of returning an empty draft from a newer acknowledged history.
+                db.execute("ALTER TABLE proposal_v1 RENAME TO proposal_v2")
+                db.execute("ALTER TABLE proposal_v2 ADD COLUMN draft TEXT NOT NULL DEFAULT 'null'")
+            self._usable = False
+            if fields is None:
+                task = self.queue.clear_card_draft(self.identity, expected_revision=expected_revision,
+                                                   expected_draft_revision=expected_draft_revision)
+            else:
+                task = self.queue.save_card_draft(self.identity, fields=fields, expected_revision=expected_revision,
+                                                  expected_draft_revision=expected_draft_revision)
+            if db.execute("UPDATE proposal_v2 SET draft=? WHERE id=?",
+                          (_wire(task.card_draft), self.identity)).rowcount != 1:
+                raise ValueError("missing proposal draft record")
+            db.commit()
+            self._usable = True
+            return task.card_draft
+
     @classmethod
-    def recover(cls, records: Path, generation: Path) -> ProposalIntake:
+    def recover(cls, records: Path, generation: Path, *, expected_epoch: str | None = None) -> ProposalIntake:
         """Caller supplies owner-private records and an absent offline destination."""
         records, generation = records.absolute(), generation.absolute()
         with closing(sqlite3.connect(records.as_uri() + "?mode=rw", uri=True)) as db:
             db.execute("PRAGMA trusted_schema=OFF")
             db.execute("PRAGMA synchronous=FULL")
             db.execute("BEGIN IMMEDIATE")
-            [(identity, title, repo, payload, created)] = db.execute(
-                "SELECT id,title,repo,payload,created FROM proposal_v1"
-            ).fetchall()
+            if expected_epoch is not None and db.execute("SELECT epoch FROM writer").fetchall() != [(expected_epoch,)]:
+                raise ValueError("proposal owner changed; refresh the handoff offer")
+            identity, title, repo, payload, created, draft = proposal_row(db)
             if not re.fullmatch(r"[a-f0-9]{32}", identity):
                 raise ValueError("invalid original task identity")
             generation.mkdir(mode=0o700)
@@ -115,6 +156,17 @@ class ProposalIntake:
                                             idempotency_key=key, now=accepted)
                 if _wire(restored.queue.steer_receipt(identity, key)) != receipt:
                     raise ValueError("reconstructed receipt differs; retain original records")
+            if draft is not None:
+                value = json.loads(draft)
+                if value is not None and not (
+                    isinstance(value, dict) and isinstance(value.get("fields"), dict)
+                    and isinstance(value.get("revision"), str) and value["revision"]
+                ):
+                    raise ValueError("invalid acknowledged draft")
+                with closing(sqlite3.connect(restored.queue.db_path)) as queue:
+                    queue.execute("UPDATE tasks SET card_draft=? WHERE id=?",
+                                  (draft if value is not None else None, identity))
+                    queue.commit()
             if db.execute("UPDATE writer SET epoch=? WHERE singleton=1", (restored._epoch,)).rowcount != 1:
                 raise ValueError("missing writer epoch")
             db.commit()

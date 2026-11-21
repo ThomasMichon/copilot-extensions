@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify explicit whole typed point claim completion through existing queue and pending owners",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

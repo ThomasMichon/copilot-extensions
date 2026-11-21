@@ -893,3 +893,499 @@ coordination, actual nonexpiry reservations, owner/effect agreements and
 independent technical acceptance remain. No implementation, native job,
 restart, ticket/resource release, custody transfer or new tracker effect
 follows from recording these completed administrative placements.
+
+## Proposed bounded optional Windows scheduling receiving - 2026-11-19 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #9568 optional Windows consumer/retention/removal scheduling and six reported assertion contracts | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 5 P9568/V9568/G9568, through existing Phase 7 | Source stays OPEN during proposal; all nine technical rows remain unchecked; normal domain review must cover complete requirements, deduplication and ownership, not merely this ledger |
+
+This same planning unit supplies the direct domain Plan, local and actual
+global Validation, Coordination and dated Journal. Existing #9568 supplies
+the public tracker; no new issue, administrative checkbox or receipt-PR
+requirement is added. Revalidate current technical scope before execution.
+Normal reviewed complete delivery and permitted current whole receiving/
+source/owner readback precede a separate tracking judgment. Ledger-only
+publication is not domain acceptance.
+
+Retain the historical partial passes, combined 900-second timeout and
+unexecuted removal, all six intended-contract decisions and independently
+bounded scheduling without deadline inflation or lost assertion coverage;
+justified scheduling-shape expectation changes retain the underlying checks.
+Existing owners, claims, resource/cleanup limits, unit-only required CI,
+hosted-Windows quiescence and OPEN #1303 remain. No implementation, native
+execution, installer acceptance, source/resource transfer or custody release
+is authorized. The [campaign record](../backlog-reconciliation/journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+preserves the separate proposal and disposition boundaries.
+
+## Proposed finite fixture and guard-map qualification receiving - 2026-11-19 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #9970 cold authoritative-override fixture initialization and bounded publication | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Dispatch wave, P9970/V9970/G9970 through Phase 7 | Full initial-observation, genuinely pending refusal, pending/no-duplicate assertions and unchanged reconciliation/cycle bounds; no production relaxation |
+| #10031 large prepared-caller INITIAL startup/cutover qualification | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 3 Worktrees pilot, P10031/V10031/G10031 through Phase 7 | Existing native lifecycle owner/deadline, acquisition failures, listener/continuity timings, diagnostics/retries and bounded cleanup; independent platform/full-harness owners |
+| #10032 native UNC and complete POSIX guard-map entry/deployment qualification | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 3 Worktrees pilot, P10032/V10032/G10032 through Phase 7 | Actual native entry/producer/both consumers/deployed-reader closure, original path/input/concurrency/missing-map controls, identities/skips/cleanup; no network or privilege expansion |
+
+This same planning unit supplies complete direct domain Plan, local and actual
+global Validation, Coordination and dated Journal for ordinary review.
+Ledger-only publication is not domain acceptance. Each family has one primary
+phase; existing source issues supply the trackers during proposal. The existing
+maintainer, fixture/source/override, map/consumer, lifecycle/deployment/native,
+runner/release and resource owners retain responsibility. No new issue,
+administrative checkbox, generic acknowledgement, executor or receipt-PR gate
+is introduced. Keep sources OPEN until actual reviewed whole receiving
+delivery and permitted current source/receiver/custody readback support
+separate tracking judgments.
+
+The completed [guard-map effort](../precomputed-hook-guard-map/README.md)
+remains Done, with its source and ordinary Windows installed-consumer credit;
+its original qualification transfer is preserved, not re-executed or recredited.
+All eighteen new technical rows remain unchecked. Preserve OPEN #1303,
+unit-only required PR/promotion CI, hosted-Windows quiescence, every original
+deadline/alternative, actual claim/hold and resource boundary. Planned
+receiving grants no native run, implementation, service action, deployment,
+privilege change or custody release. The
+[campaign record](../backlog-reconciliation/journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+retains the independent source and prior-publication evidence.
+
+## Proposed finite author-command guard and cold-handler receiving - 2026-11-19 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #10487 lazy-dispatch/scanner equality and all three author-command cold handlers | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 3 Worktrees pilot, P10487/V10487/G10487 through Phase 7 | Both original regeneration assertions, supported `pr-author-capabilities`/`pr-update`/`pr-push`, actual per-command cluster-loading proof, historical/source-versus-executed distinctions and unchanged runner/resource owners |
+
+This same planning unit supplies complete direct domain Plan, local and actual
+global Validation, Coordination and dated Journal. Ledger publication alone
+is not domain acceptance. Existing #10487 supplies the tracker during the
+proposal; no new issue, administrative checkbox, generic ACK or implementation
+appointment is added. Normal reviewed whole receiving delivery and permitted
+current source/receiver/custody readback precede a separate tracking judgment.
+All six technical rows remain unchecked. Preserve OPEN #1303, all existing
+checks/holds, unit-only required CI, hosted-Windows quiescence and original
+source/fixture/runner/resource custody. No product test, native run, runtime
+repair, source takeover or resource release follows. The
+[campaign record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+retains this proposal and its independent source judgment.
+
+## Proposed finite visual and worker-witness receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #11372 Recovery comparison visual fixture | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Manager fixture wave, P11372/V11372/G11372 through Phase 7 | Original fourteen-case selection, `evidence-size3`, actual selected-tab/Recovery interaction and fixture/expectation OR UI-behavior alternative; static finding is not runtime cause |
+| #11512 supported-interpreter independent worker witness and five related local-failure families | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Dispatch fixture wave, P11512/V11512/G11512 through Phase 7 | Original-worker evidence despite poisoned/replaced facade, supported legacy/native matrix, retirement/release/error/cleanup and separate exact related-family triage with unnamed-node uncertainty |
+
+This same planning unit supplies complete direct domain Plan, local and actual
+global Validation, Coordination and dated Journal. Ledger publication alone
+is not domain acceptance. Each family has one primary placement and its
+existing public tracker during proposal; no new issue, administrative checkbox,
+implementation appointment or common cause is introduced. Normal reviewed
+whole receiving delivery and permitted current source/receiver/custody
+readback precede separate source-specific judgments. All fourteen technical
+rows remain unchecked. Preserve OPEN #1303, all existing source/UI/worker/
+witness/related-family/runner/native/release and resource custodians, unit-only
+required CI, hosted-Windows quiescence and original budgets. No test, code,
+native/GUI/process operation, rollout, source takeover or resource release
+follows. The [campaign record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+retains the independent evidence and proposal/disposition boundaries.
+
+## Proposed finite PowerShell child-budget receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #11995 prepared-membership native-write/membership child budget | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Worktrees/owning-fixture wave, P11995/V11995/G11995 through Phase 7 | Original PowerShell 5.1/10-second failures and phase evidence; production-latency decision OR warmed-host/phase-based/calibrated-fixture policy; no production-timeout increase or assumed common cause |
+
+This same planning unit supplies complete direct domain Plan, local and
+actual global Validation, Coordination and dated Journal. Ledger publication
+alone is not domain acceptance. Keep #11995 OPEN during proposal, with
+OPEN #1303 and the existing primary, fixture, runner, production, platform,
+source/native/release and resource custodians unchanged. Normal reviewed
+complete receiving delivery and permitted current whole source/receiver/
+custody readback precede a separate tracking judgment. All six technical
+rows remain unchecked. This is a separate finite family, not a seventh
+member silently added to the earlier six-family grouping. Unit-only
+required CI, hosted-Windows quiescence, original failure history and
+applicable bounds remain; no run, implementation appointment, budget
+increase or resource release follows. The [campaign record](../backlog-reconciliation/journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+retains the evidence and independent proposal/disposition boundaries.
+
+## Proposed Windows fixture and native-profile receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #12156 Windows Vault cleanup/native-cache fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Vault wave, P12156/V12156/G12156 through Phase 7 | Four stamp/unlock and four actual native-profile consumers; capability-based test skip OR non-DPAPI test cipher; no production fallback or different-test substitute |
+| #12193 public-toolchain workflow assertions | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 tools/workflow wave, P12193/V12193/G12193 through Phase 7 | All five reported failure groups; meaningful identified path/dependency/platform/coverage replacements; no broad disabling or unit/deadline-pass proxy |
+| #12194 Windows SSH installer fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 SSH/installer wave, P12194/V12194/G12194 through Phase 7 | All seven actual snapshot/transaction cases; supported Windows pass OR justified lane scope, preserved identity/closure/corruption assertions and separate prior repair |
+| #12235 Windows-native no-skip admission | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 5 profile/runner wave, P12235/V12235/G12235 through Phase 7 | Platform-appropriate positive roster OR explicit unsupported boundary before execution; all three named POSIX controls; unchanged exact inventory/no-skip and Linux required CI |
+
+This same planning unit delivers complete direct domain Plan, local and
+actual global Validation, continuing Coordination and dated Journal for
+ordinary review. Ledger publication alone is not domain acceptance.
+The four existing sources remain OPEN during proposal, and OPEN #1303,
+all incumbent states, source/fixture/cache/DPAPI/installer/workflow/runner/
+platform/native/release and resource custodians remain unchanged.
+All twenty-three technical rows are unchecked. Actual complete reviewed
+receiving, current permitted whole receiving/source/custody readback and
+four separate source judgments remain necessary; no generic ACK or
+unrelated whole-portfolio prerequisite is added.
+
+No implementation, native/hosted test, import, installer/profile/CI change,
+production fallback, larger budget, lease transfer or resource release
+follows. Required CI stays unit-only and hosted-Windows execution remains
+quiesced. The [fourteen-source record](../backlog-reconciliation/journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+retains original evidence, alternatives and independent obligations.
+
+## Windows fixture and native-profile receiving accepted - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #12156 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 4 Vault wave, P12156/V12156/G12156 through Phase 7 | All six technical rows unchecked; both original families, skip OR test-cipher alternative, production policy and actual custodians retained |
+| #12193 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 4 tools/workflow wave, P12193/V12193/G12193 through Phase 7 | All six technical rows unchecked; five failure groups and meaningful replacement/assertion requirements retained |
+| #12194 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 4 SSH/installer wave, P12194/V12194/G12194 through Phase 7 | All six technical rows unchecked; all seven cases, supported correction OR justified scope and actual ownership retained |
+| #12235 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 5 profile/runner wave, P12235/V12235/G12235 through Phase 7 | All five technical rows unchecked; positive Windows roster OR pre-execution unsupported boundary, exact inventory/no-skip/Linux CI retained |
+
+#13622 supplied the actual complete domain/intake delivery. Subsequent
+whole-current receiving/source/custody readback preceded four independently
+audited `NOT_PLANNED` tracking judgments, recorded in the
+[source-fulfillment unit](../backlog-reconciliation/journal/2026/11.20-source-fulfillment-and-owned-boundaries.md).
+This append preserves the earlier conditional proposal as history; it adds
+no technical completion, administrative checkbox, execution grant, owner
+appointment or resource release. OPEN #1303, all incumbent obligations,
+unit-only required CI and hosted-Windows quiescence remain.
+
+## Proposed finite fixture-authority and cleanup receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #9348 historical workflow fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 tools/workflow wave, P9348/V9348/G9348 through Phase 7 | Original three-file 65-failure family, explicit bounded historical recipes and current unit declarations; separate adjacent 19-failure claimant and #3336/#6237 coordination; no restored gates, skips or wider permissions |
+| #12968 publication execution-identity fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 4 Worktrees wave, P12968/V12968/G12968 through Phase 7 | Both exact TestCreatePRAutoOpen cases, distinct portable host/execution identity and unchanged raw/codename privacy; current #13297 correction and its Draft/older-publisher/review hold, without a new implementation owner |
+| #13164 session-command receiving fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 4 Worktrees wave, P13164/V13164/G13164 through Phase 7 | Unchanged register/bind two-module packet AND independent authority controls; canonical tracking/project/record subjects, fresh trusted-identity success, omitted foreign-project identity fields, unchanged binding under optional-stamp lock contention and actual stale/foreign negatives; distinct #13300/#12879 families |
+| #12973 finished-daemon cleanup qualification | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 5 owning-runner lane, P12973/V12973/G12973 through Phase 7 | Attempt-bound daemon/process-birth/supervisor/settlement/artifact evidence from available CI material OR an instrumented bounded Windows reproduction; retain historical failure and unknown old cause, distinguish that attempt's fixture failure OR proven-dead-identity cleanup cause; assertion success distinct from final cleanup, all identity/descendant/artifact refusals and original bounds |
+
+This same planning unit delivers complete direct domain Plan, local and
+actual global Validation, continuing Coordination and dated Journal for
+review. Ledger-only publication is not domain acceptance. All four sources
+remain OPEN during proposal; permitted current whole receiving/source/custody
+readback and four separate judgments follow actual reviewed complete delivery.
+All twenty new technical rows remain unchecked. Preserve OPEN #1303, all
+incumbent history/checks/holds, unit-only required CI, hosted-Windows quiescence,
+existing contributors and actual native/release/source/resource custodians.
+No generic ACK, unrelated whole-portfolio or legacy-recovery prerequisite,
+new tracker, implementation appointment, native/test execution, cleanup,
+guard/deadline change or resource transfer is introduced.
+The [thirteen-source crosswalk](../backlog-reconciliation/journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+retains the evidence limits and independent unresolved outcomes.
+The [canonical P/V details](../test-portfolio-rationalization/fixture-authority-and-cleanup.md)
+belong to the same Phase 4/5 domain Plan; its sixteen P/V state anchors and
+four actual global G rows remain solely in the Portfolio README.
+
+## Fixture-authority and cleanup receiving accepted - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Current tracker outcome |
+|---|---|---|---|
+| #9348 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 4 tools/workflow P9348/V9348/G9348 | Separate `NOT_PLANNED` retirement; audited explanation 7038245608; all five technical rows remain unchecked |
+| #12968 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 4 Worktrees P12968/V12968/G12968 | Separate `NOT_PLANNED` retirement; audited explanation 7038271959; existing #13297 Draft/older-publisher/review hold and actual source owner retained |
+| #12973 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 5 owning-runner P12973/V12973/G12973 | Separate `NOT_PLANNED` retirement; audited explanation 7038279947; historical unknown cause, attempt-bound evidence alternatives and actual cleanup custody retained |
+| #13164 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 4 Worktrees P13164/V13164/G13164 | Separate `NOT_PLANNED` retirement; audited explanation 7038288323; distinct positive/unchanged/negative outcomes and neighboring families retained |
+
+#13663 supplied the complete six-document domain/intake delivery after
+current-head Copilot approval, all four findings resolved and all required
+checks green. Complete current receiving/source/custody readback preceded
+each independently audited explanation and closure. Original reports and all
+prior authored discussions remain exact; all twenty technical rows remain
+unchecked. This append preserves every earlier conditional row and actual
+owner/hold, with no implementation, native run, cleanup or resource release.
+
+## Proposed Windows attribution and retained-transition receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #13598 observed Windows bytecode attribution | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 4 tools/shared-observer P13598/V13598/G13598 through Phase 7 | Exact CPython 3.11.9 original observed profile, relocated cache prefix, declared-source binding and fail-closed negatives; operator-selected separate tracking from #6237 preserved, source remains OPEN |
+| #13667 retained-capture Windows spelling | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Installer Upgrade Recovery Phase 2 source-only U6-13667/P13667/V13667/G13667, outside the selected whole-update cases | Same admitted completed directory, all existing identity checks, actual capture AND validation/negative fixture; no latest-update-entry/installed-consumer/whole-update prerequisite for this finite result; parent incoming/master-cycle readiness and actual custodians remain separate |
+| #13487 finite retained-reader transition | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Durable PR-Watch T3 P13487/V13487/G13487 and already-reviewed transition child | Existing bounded driver and complete lease/adoption/state/unknown-effect/interruption/retry/rollback contract; narrower source credit is not positive generation/native-active or full T3/provider/installed acceptance |
+
+These are three distinct contracts, not one Windows or retention cause.
+Normal review must deliver the complete direct domain Plan, local and actual
+global Validation, continuing Coordination, dated Journal and these routes.
+Ledger-only publication is not domain acceptance. All ten new technical
+rows remain unchecked. Keep all three source trackers OPEN during proposal;
+current applicable source/receiver/custody readback and separate source-specific
+judgments remain, and this intake does not override #13598's selected separate
+tracking. No new issue, executor, generic ACK, unrelated whole-parent gate,
+runtime/observer change, native test, migration or source/resource transfer
+follows. The [complete source crosswalk](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
+retains evidence tiers, prior outcomes and current ownership.
+
+## Proposed shared-context and registry-default receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #12920 versioned in-process repository-context core | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing configuration-layer/read authority through the new [Shared Repository Context](../shared-repository-context/README.md) S1-S7/G12920/GSkew/GCustody plan | #12920 remains OPEN as the canonical whole tracker; provider-first schema/read core, Worktrees adapters and exclusive write/cell authority, identical promoted vendors and actual consumer/skew/rollback acceptance remain unfinished |
+| #12042 registry-derived machine-default Vault owner | routed (proposed; effective after actual reviewed complete domain acceptance) | Same Shared Repository Context P12042/V12042/actual G12042, coordinated with existing Vault native-default claimant | Whole original and both refinements retained: registry graft, precedence, validated default root, CLI AND daemon Linux/Windows neutral/service/minimal-PATH behavior, parity and actionable distinct fail-fast absence; #12681 explicit native-default credit and existing cwd/cache/database/service custody remain |
+
+Normal review must deliver the complete canonical Goal/Request,
+Participants/Coordination, Plan, actual global Validation and dated Journal
+before these proposed routes become accepted. Every technical row remains
+unchecked. Current applicable whole original/receiver/custody readback and a
+separate source judgment remain necessary; #12042 stays OPEN during proposal
+and #12920 remains the whole tracker. No new issue, source implementer,
+generic ACK, native run, credential/service action or resource transfer is
+supplied. The [complete source crosswalk](../backlog-reconciliation/journal/2026/11.20-shared-context-and-registry-default-receiving.md)
+also retains actual #13680 delivery, the two independent tracking retirements,
+the 884-open census and all existing owners/holds.
+
+## Proposed local transport and complete rendezvous planning - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #54 native-first local service transport, including its received #4040 policy choice | routed (proposed; effective after actual reviewed complete domain-plan acceptance) | Existing #54 transport authority through [Local Service Transport](../local-service-transport/README.md), P54-H/P54-D/P54-V/P54-Docs/P4040 and G54/G4040/GSkew/GCustody | Native endpoint default OR justified dynamic-loopback/rendezvous fallback, trusted opt-in boundary tunnel, actual clients/standalone reach and truthful architecture; exclusive Bridge loopback versus explicit-wider policy stays unresolved for its existing owners; #54 remains OPEN |
+| #5904 complete endpoint cleanup and already-received #5903 tolerant discovery | routed (proposed; effective after actual reviewed complete domain-plan acceptance) | Same Local Service Transport P5904-Read/P5904-Clean/P5904-Copies with P-Skew and G5904/GSkew/GCustody; existing reader/cleanup owners unchanged | Actual same-publication mutation authority, credited common lock/PID guard, PRESENT unknown ownership versus genuine absence, shape-safe/fail-closed readers and all affected copies/callers; independent #5904 tracking remains OPEN |
+
+This is one direct planning home, not a new issue, service, implementation
+reservation or domain-owner replacement. Complete Goal/Request,
+Participants/Coordination, Plan, actual global Validation and dated Journal
+must land through normal review; this ledger alone is not acceptance.
+All fourteen technical rows remain unchecked. Neither source retirement nor
+claimant handback is proposed. #5716, #5791 and #4183 keep their actual
+separate pipe-lifetime, account and duplex-transport owners/conditions.
+The [whole-source crosswalk](../backlog-reconciliation/journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+also retains actual #13690 delivery, the independent #12042 tracking outcome
+and the complete 884-open census. No product, native, endpoint, credential,
+configuration, cleanup, source/resource or rollout effect follows.
+
+## Proposed complete full-user WinGet bootstrap venue - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #1475 supported full-user Windows WinGet provider and complete minimal-seed/repository-restore lifecycle | routed (proposed; effective after actual reviewed complete domain-plan acceptance) | Existing Portfolio Phase 5 owning-runner/native-workflow P1475-1/P1475-2/P1475-3, V1475-1/V1475-2 and actual global G1475 through Phase 7; [complete finite contract](../test-portfolio-rationalization/winget-bootstrap-venue.md) | PowerShell/WinGet/Git-only start plus checkout transport; subject WinGet Copilot/external marketplace/one seed and bootstrap Python/uv runtime; repo-only plan/validate/restore; stage attribution, no-op OR readiness repeat, ephemeral auth/literal mode/owned disposal; Server Core stays separate smoke |
+
+This adds no issue, implementer, selected provider, VM, machine, access or
+budget. Existing clean-room/provider, bootstrap/installer, repository-resource,
+credential, native, source and cleanup owners remain. All six technical rows
+stay unchecked. Normal review must deliver the complete direct domain Plan,
+local and actual global Validation, continuing Coordination, dated Journal and
+this route; the ledger alone is not acceptance. Keep #1475 OPEN during the
+proposal, then perform permitted current whole applicable receiving/original/
+custody readback and a separate source-specific judgment.
+
+#688's cost/precondition/declared-platform and downstream F3-E owner conditions,
+including its received #1192 remote Windows container path, remain independent.
+No native/hosted-Windows enrollment, evaluation, credential operation, bootstrap/
+restore, configuration change, cleanup or rollout is authorized. The
+[source crosswalk and current census](../backlog-reconciliation/journal/2026/11.20-winget-venue-and-retained-contracts.md)
+also record actual #13698 delivery and the distinct retained canonicals.
+
+## Proposed seed plugin AND runtime clarification - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #1475 complete WinGet bootstrap, explicitly including BOTH plugin delivery and runtime setup | routed; #13701 delivered the full existing P1475/V1475/G1475 family, with this conjunction clarification proposed for normal review | Same Portfolio Phase 5 P1475-2/G1475 and [complete subject-owned chain](../test-portfolio-rationalization/winget-bootstrap-venue.md#subject-owned-bootstrap-and-repository-restore) | Install the one seed plugin THROUGH the external marketplace AND establish THAT plugin's runtime through explicit installation ownership using bootstrap Python/uv; neither operation substitutes for the other |
+
+The preceding row remains unchanged history. This clarification preserves
+the original two requirements, not a new implementation, owner, venue or
+technical checkbox. All six technical rows remain unchecked. Keep #1475 OPEN
+until corrected complete current receiving/original/custody readback and a
+separate judgment after reviewed delivery. No native run, implicit loading-time
+provisioning, resource transfer or changed #688/#1192/downstream F3-E gate follows.
+
+## Proposed complete independent inference-identity intake - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #3296 independent repo/machine Copilot inference identity | routed (proposed; effective after complete reviewed domain-plan acceptance) | Existing [Account-Aware Operations Phase 6](../account-aware-operations/README.md#phase-6---independent-copilot-inference-identity-from-3296), CI3296-P1..5/V1..3 and actual global CI3296-G | Exact repo override then machine default; unreadable/malformed lookup stays unresolved, not fallback; disabled enforcement no-op; opted-in shared-session warning safety; mode-qualified ambient compatibility and strict unset-account refusal; supported launch/machine-restore consumers and unchanged Git/gh identity |
+
+This is one separate inference lane in the existing account-aware family,
+not another gh resolver, credential store or new effort. Credit the reported
+#3344/#3498 prototype/policy, #6415 trusted-container isolation and #6725
+preference-editing slices without promoting them to full program acceptance.
+The existing trusted-container claimant keeps its bounded source scope and
+explicit parser/storage/refresh/proxy exclusions; launcher, machine-policy,
+credential, native and source owners remain unchanged.
+
+All nine new technical rows remain unchecked. Preserve the receiver's Draft
+status and temporary-token implementation restriction. #3296 remains OPEN
+during the proposal; actual reviewed complete receiving, current original/
+receiver/custody readback and any separate permitted source judgment are
+distinct. Normal document review is not claim release. No implementation,
+credential lookup, login, account switch, model request, container operation,
+settings change or rollout is authorized.
+
+The [source crosswalk and current census](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md)
+also record #13703's actual correction delivery and #1475's separately audited
+NOT_PLANNED disposition after complete accepted receiving. Earlier intake
+rows stay unchanged history; all six WinGet technical rows and independent
+#688/#1192/#2612 conditions remain.
+
+## Proposed complete orphan-task adoption intake - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #3443 existing headless ACP AND bare-scripted orphan adoption | routed (proposed; effective after complete reviewed domain-plan acceptance) | [Orphan Task Adoption](../orphan-task-adoption/README.md), OA3443-P1..5/V1..3 and actual global OA3443-G | All four stages: existing resource/host/venue/status resolution, appropriate controlling worktree creation OR reuse, explicit authorized stewardship charter, ordinary interactive inspection/steering for BOTH shapes; results, unknowns, real holders and independent task/workspace/provider/credential/service custody |
+
+The existing Remote ACP Host Ownership effort explicitly preserves this
+separate orphan UX. Its host retains #7237's relationship, writer/lifecycle
+and transfer boundaries; a retained conversation is not ownership of a peer
+process or workspace. The new Draft composes existing owners, not another
+connector, registry or allocator. Previously reported Session Host recovery,
+interactive embodiment and task/session adoption are finite partial credit,
+not the complete four-stage/two-shape outcome.
+
+All nine technical rows remain unchecked. #3443 stays OPEN during proposal
+review; actual complete receiving readback and any separate permitted
+tracking judgment follow review/merge. A missing controller, age or reachable
+handle authorizes neither takeover nor a replacement remote body. No
+implementation claim, remote inspection, worktree/controller launch,
+credential operation, provider acquisition, resource transfer or rollout
+occurs. See the [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md).
+
+## Independent inference-identity reviewed receiving receipt - 2026-11-20 UTC
+
+#13709 delivered the complete Account-Aware Operations Phase 6/detail/global
+contract after current-head review and required CI. Complete current original,
+all three discussions, receiving and custody readback accepted the planned
+mapping. The separate judgment keeps #3296 OPEN for its bounded claimant,
+exclusions and independent launcher/machine-policy/native/credential custody.
+The [live receiver Coordination](../account-aware-operations/README.md#coordination)
+and [dated follow-through](../backlog-reconciliation/journal/2026/11.20-orphan-task-adoption-planning.md#previous-reviewed-delivery-and-distinct-source-keeper)
+now record that acceptance rather than presenting it as still pending.
+All nine technical rows remain unchecked; Draft status, temporary-token
+implementation restriction and actual owners remain. Earlier proposed rows
+are unchanged history, not a second current acceptance gate or claim release.
+
+## Proposed retained legacy supervisor receiving - 2026-11-20 UTC
+
+| Source | Complete proposed receiver | Retained boundary |
+|---|---|---|
+| #13617 | Existing [Installer Upgrade Recovery Plan](../installer-upgrade-recovery/README.md#retained-legacy-supervisor-transition---13617), [case](../installer-upgrade-recovery/legacy-supervisor-upgrade.md) and G13617: P13617-1..3/V13617-1..3 preserve the complete original and discussion. | Seven technical rows unchecked; original transition OR actionable prerequisite, actual native/cycle/worker custody, distinct coordinator-only positive, full-update/repeat truth and optional capture. Review/current complete receiving and custody readback/separate judgment precede source disposition. No implementation, process action or owner appointment. |
+
+The [dated mapping](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+retains #13614's independent same-running-consumer qualification and existing
+owners; it is not forced into the incoming-installation gate. Other existing
+canonicals retain their precise gaps, not another documentary umbrella.
+
+## Orphan adoption reviewed receiving receipt - 2026-11-20 UTC
+
+#13718 delivered complete four-stage/two-shape planned receiving. Complete
+current original/discussions, ROOT/intake and custody readback preceded the
+separate acknowledged #3443 NOT_PLANNED tracking retirement. The
+[live receiver](../orphan-task-adoption/README.md#coordination) and
+[follow-through](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md#previous-reviewed-adoption-and-separate-source-disposition)
+record actual acceptance; all nine technical rows, Draft status, #7237's
+independent relationship and actual resource owners remain unchanged.
+Earlier proposed entries are preserved history, not an additional pending
+receiving gate or proof of feature implementation.
+
+## Proposed finite Vault copy-transaction receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13077 | residual | Proposed existing [Vault Service P2](../vault-service/README.md#finite-copy-transaction-contracts), P13077-1..3/V13077-1..3/G13077 and [whole case](../vault-service/copy-transaction-contracts.md#relocation-and-cache-fences---13077): BOTH outside-group move/copy with move safety; invalidate ONLY values at/below the pre-revocation ceiling; preserve pending journal AND newer writes; expire floors at lookup; all three regression findings. Seven technical rows unchecked. |
+| #13083 | residual | Proposed same P2, P13083-1..2/V13083-1..2/G13083 and [whole case](../vault-service/copy-transaction-contracts.md#running-service-copy-support---13083): running-service health copy capability, selected-peer pre-mutation refusal/message, provider-first migration, mixed-version/rollback and declared support window. Five technical rows unchecked. |
+| #13085 | residual | Proposed same P2, P13085-1..3/V13085-1..2/G13085 and [whole case](../vault-service/copy-transaction-contracts.md#explicit-overwrite-and-uncertain-renames---13085): explicit overwrite separate from ordinary no-overwrite copy, re-list-before-restore for uncertain renames, committed-backup timeout AND final/restore failure, every surviving staged/backup name and both regressions. Six technical rows unchecked. |
+
+The [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md)
+retains all three OPEN sources during proposal; each becomes `routed` only
+after reviewed complete domain receiving. The existing credential/
+cache/journal/provider/CLI/service/recovery custodians, P0 design and applicable
+owner/slice admission, current R1-R4 priority and every incumbent state remain.
+This appoints no relay implementer and authorizes no credential, cache,
+copy/rename/overwrite, cleanup, service, source, native or resource operation.
+Actual complete reviewed receiving and current whole source/receiver/custody
+readback precede separate source judgments; no prospective retirement or
+technical completion is credited.
+
+## Vault generation and legacy supervisor reviewed receipts - 2026-11-20 UTC
+
+#13590/#11816 and #13723/#13617 are actual reviewed planned receiving followed
+by distinct, acknowledged NOT_PLANNED tracking retirements. The live
+[Vault Coordination](../vault-service/README.md#coordination) and
+[upgrade-recovery Coordination](../installer-upgrade-recovery/README.md#coordination)
+now record accepted tracking rather than another pending gate. Their six
+generation/freshness and seven legacy-supervisor technical checks respectively
+remain unchecked. Original source, native, credential, worker and resource
+custody is unchanged; neither retirement claims an implementation fix.
+Earlier proposed entries remain history. The [dated follow-through](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#previous-reviewed-receiving-and-distinct-tracking-retirements)
+does not repeat the already-published #13718/#3443 disposition.
+
+## Proposed portable fixture and resource receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13082 | residual | Existing [Portfolio Phase 4 Vault/shared-library wave](../test-portfolio-rationalization/README.md#finite-portable-pidfd-fixture-contract-from-13082), P13082-1..2/V13082-1..2/G13082: original generation module, shared pidfd wrapper/libc fallback OR clear unsupported skip, retained peer-handle assertions/Windows branch and nine-error history. Five technical rows unchecked. |
+| #13369 | residual | Existing [Portfolio Phase 4 Containers wave](../test-portfolio-rationalization/README.md#finite-distribution-and-staged-profile-fixtures-from-13369), P13369-1..2/V13369-1..2/G13369: both original files, identity/fingerprint/cache resources, wheel/sdist and per-resource refusal expectations, both staged-load modes AND native-policy retention. Five technical rows unchecked. |
+| #13378 | residual | Existing [Portfolio Phase 4 Bridge wave](../test-portfolio-rationalization/README.md#finite-caller-session-and-process-incarnation-fixtures-from-13378), P13378-1..2/V13378-1..2/G13378: all six migration/four caller/PID-incarnation cases, managed-runner pass OR justified explicit host-dependent tier, original bounds/assertions and later-not-run coverage. Five technical rows unchecked. |
+
+The [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+retains all three OPEN sources during proposal. Each becomes `routed` only
+after actual complete reviewed domain Plan/local/global Validation,
+Coordination and Journal delivery through existing Phase 7. Preserve OPEN
+#1303, primary maintainer and actual fixture/process/runtime-resource/
+migration/runner/source/native/release/resource custody, every incumbent
+state/hold and original alternative, unit-only CI and hosted-Windows quiescence.
+Current whole receiving/source/custody readback and separate source judgments
+remain before any retirement. No execution, appointment or transfer follows.
+
+## Vault copy-transaction reviewed receiving - 2026-11-20 UTC
+
+| Source | Disposition | Accepted owner and distinct tracker outcome |
+|---|---|---|
+| #13077 | routed | #13730 delivered complete existing Vault P2 relocation/fencing receiving; separate audited acknowledgment and NOT_PLANNED retirement preserve all seven unchecked technical rows and actual custodians. |
+| #13083 | routed | Same reviewed P2 owner retains running-peer capability, preflight and evolution acceptance; separate audited acknowledgment and NOT_PLANNED retirement preserve all five unchecked technical rows. |
+| #13085 | routed | Same reviewed P2 owner retains uncertain overwrite/recovery and both failure regressions; separate audited acknowledgment and NOT_PLANNED retirement preserve all six unchecked technical rows. |
+
+Current [Vault Coordination](../vault-service/README.md#coordination) and the
+[additive dated receipt](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#reviewed-receiving-and-separate-source-judgments)
+record complete current receiving/source/custody readback before three separate
+tracking judgments. Earlier proposals remain immutable history, not another
+pending receiving gate. All eighteen technical rows, OPEN #8729, R1-R4/P0
+and applicable owner/slice admission stay unchanged; no credential, cache,
+copy/overwrite, service, test/native or resource operation is inferred.
+
+## Proposed finite idle-steering receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13734 | residual | Proposed idle/hint slice in existing Active [Queued Steering Phase 2](../bridge-queued-steering/README.md#finite-idle-transition-and-truthful-notification-from-13734), P13734-1..2/V13734-1..2/G13734: supported idle submission without unrelated tool/operator/scheduled turns, resume/re-registration, truthful conditional hints, multiple arrivals and exact identity/no duplicate or false consumption. Five technical rows unchecked. A later possibly separate resumed-headless carrier 503/hello-read observation stays unreceived at OPEN #13734 under existing carrier owners; these rows are not whole-source receiving. |
+
+The [complete case, eight current keepers and whole census](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md)
+preserve the existing Driver and actual provider/registration/routing/
+compatibility/receipt/resource owners, broader #6394 gates and bounded claim,
+Goal/Request/Scope Approvals and existing notification credit. Normal complete
+reviewed Plan/local/actual global Validation, Coordination and dated Journal
+delivery receives this idle slice, not the separate carrier observation.
+The overall source remains `residual` and OPEN until that distinct observation
+has complete accepted handling as well. Permitted current whole source/
+receiving/custody readback and a separate source judgment remain before any
+retirement. No implementation, native/session/queue
+operation, prompt replay, assignment or resource transfer follows.
+
+## Portable fixture reviewed receiving and distinct outcomes - 2026-11-20 UTC
+
+| Source | Disposition | Accepted owner and distinct tracker outcome |
+|---|---|---|
+| #13082 | routed | #13733 delivered complete existing Portfolio Phase 4 Vault/shared-library receiving; separate audited acknowledgment and NOT_PLANNED retirement retain all five unchecked technical rows and actual custodians. |
+| #13369 | routed | Same reviewed Portfolio owner retains complete two-file distribution/profile acceptance. Source stays OPEN as the other contributor's unfinished request; all five technical rows remain unchecked. |
+| #13378 | routed | Same reviewed Portfolio owner retains all six caller/migration/PID cases and original pass OR justified-tier alternative. Source stays OPEN as the other contributor's unfinished request; all five technical rows remain unchecked. |
+
+The current [Portfolio Coordination](../test-portfolio-rationalization/README.md#coordination)
+and [additive dated receipt](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md#reviewed-receiving-and-distinct-source-outcomes)
+record complete current finite receiving/source/custody readback before three
+separate judgments. Earlier proposals remain immutable history, not another
+pending receiving gate. Preserve OPEN #1303, all fifteen technical rows,
+incumbent states/holds, unit-only CI, hosted-Windows quiescence and actual
+source/native/release/resource custody. Planned intake is not fulfillment,
+fixture correction, execution, claim release or deployment.
+
+### 2026-11-20 - Accepted idle slice and current roadmap gaps
+
+| Source | Class | Existing route and explicit limit |
+|---|---|---|
+| #13734 | partial receiving accepted; source remains OPEN | Reviewed #13740 accepted only P13734-1..2/V13734-1..2/G13734 in existing [Queued Steering](../bridge-queued-steering/README.md#coordination), all five technical rows unchecked. Complete source/discussion and finite receiving readback retain the distinct carrier 503/hello-read observation as unreceived under actual carrier owners. No whole-source retirement, acknowledgment, claim release or technical completion; [additive evidence](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md#reviewed-idle-only-receiving-and-distinct-carrier-gap). |
+| #5512 | existing accepted route corrected; no new disposition | The historical shortlist now points through its already acknowledged NOT_PLANNED retirement to the unchanged Draft [singleton-correctness effort](../status-monitor-singleton-correctness/README.md). Sole owner/public successor handoff, restart Phase 1, sequential replacement/cutover Phase 2 and complete validation remain. No replay, implementation or new credit; [current route and coverage](../backlog-reconciliation/roadmap-current-qualification.md#2026-11-20-singleton-tracking-route-and-current-coverage). |
+
+The [current integration assessment](../backlog-reconciliation/stabilization-roadmap.md#2026-11-20-integration-assessment)
+keeps all six execution-plan gates unchecked. Complete 15:09 PT metadata
+counts 882 open: 292 retained historical assignments, 153 other creator-eligible
+identities and 437 excluded metadata-only, with 408 baseline and 474 inflow.
+There are no new dispositions in this assessment; 153 above fixed 729 is not
+a proposed closure cohort. Existing Goal, source/copy and ownership/resource
+limits remain.

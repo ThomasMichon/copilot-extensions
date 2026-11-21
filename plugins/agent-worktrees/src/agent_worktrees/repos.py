@@ -1257,7 +1257,7 @@ class RepoStatus:
     error: str = ""
 
 
-def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProcess[str]:
     # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (e.g. from a hook or a
     # parent git process) must never redirect a registry repo's status or
     # sync to another repository: always act on `path`.
@@ -1329,16 +1329,11 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
     """Fetch and fast-forward one repo's default branch.
 
     Returns ``(state, detail)`` where state is one of: ``synced``,
-    ``skipped``, ``missing``, ``error``.  Dirty trees and detached HEADs are
-    skipped (never force-updated). A repo's own in-repo-declared
-    ``default_branch`` (via ``inrepo_declared_default_branch``) is
-    authoritative over the registry's ``entry.default_branch`` -- when the
-    checkout is clean but sitting on a *different* branch than the declared
-    one (e.g. a stale clone left on GitHub's advertised HEAD instead of the
-    repo's actual contribution branch), this switches it back rather than
-    permanently skipping every future sync. A **bare** anchor (no work tree
-    of its own) delegates to :func:`bare_anchor_sync.sync_bare_anchor`
-    instead, since plain ``git status``/``git merge --ff-only`` require one.
+    ``skipped``, ``missing``, ``error``. Dirty, detached and confirmed
+    no-remote checkouts are skipped without switching branches. Otherwise
+    the repo's in-repo-declared default branch takes precedence over the
+    registry and a clean checkout on another branch is switched back.
+    Bare anchors delegate to :func:`bare_anchor_sync.sync_bare_anchor`.
     """
     plat = plat or _current_platform()
     path = entry.local_path(plat)
@@ -1355,6 +1350,11 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
             # Detached HEAD (e.g. a reference repo pinned at a tag/commit):
             # never fast-forward it.
             return ("skipped", "detached HEAD")
+        remotes = _git(path, "remote")
+        if remotes.returncode != 0:
+            return ("error", remotes.stderr.strip() or "cannot inspect configured remotes")
+        if not remotes.stdout.strip():
+            return ("skipped", "local-only repository (no remotes configured)")
         if branch and current != branch:
             checkout = _git(path, "checkout", branch)
             if checkout.returncode != 0:
@@ -1365,12 +1365,7 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
                 )
             current = branch
         target = branch or current
-        # Use git_ops.fetch (not the plain local _git helper) so a cross-account
-        # remote authenticates the same way every other agent-worktrees git flow
-        # does -- resolving the repo's configured account and injecting a scoped
-        # credential override when it differs from the active `gh` account.
-        # `sync_repo`'s ambient-credential fetch previously bypassed that,
-        # failing private repos owned by a non-active account (dotfiles#2069).
+        # Preserve repository-scoped credentials rather than using a plain fetch.
         git_ops.fetch("origin", cwd=path, timeout=180, isolated_repository=True)
         if not target:
             return ("skipped", "no branch to fast-forward")

@@ -1,0 +1,25 @@
+{
+  "comment": "Adopt Dispatch lifecycle command telemetry with closed producer projection and explicit coordinator-owned origins; preserve Bridge and legacy consumers",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/process-telemetry",
+      "type": "patch"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import os
 import json
 import re
 import sqlite3
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,7 +62,10 @@ def _self() -> PeerIdentity:
     token = process_start_time(os.getpid())
     if token is None:
         raise PrivateIPCError(Refusal.IDENTITY)
-    principal = Native().current_sid() if os.name == "nt" else str(os.geteuid())
+    if sys.platform == "win32":
+        principal = Native().current_sid()
+    else:
+        principal = str(os.geteuid())
     return PeerIdentity(os.getpid(), token, principal)
 
 
@@ -393,6 +397,9 @@ class PendingRuntime:
         except BaseException:
             db.close()
             raise
+        from .consumer_telemetry import adopt_database
+
+        adopt_database(app.state.session_manager, db)
         app.state.db = db
         app.state.session_manager._db = db
         for _session_id, event_log in self._event_logs:

@@ -21,7 +21,7 @@ function Get-WorktreeTerminalCapability {
     $result = Invoke-DaemonInstanceRequest -Transient @{command='run-query'; parameters=@{
         executable=$application; arguments=@($QueryArguments)
         cwd=[IO.Directory]::GetCurrentDirectory(); environment=$environment
-        timeout_ms=10000; limit=4096
+        timeout_ms=$null; limit=4096
     }}
     if ($result.returncode -ne 0 -or $result.stderr) {
         throw 'Selected runtime terminal capability query failed; no launch was admitted.'

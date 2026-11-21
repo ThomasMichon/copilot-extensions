@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify ordinary synchronous PR waits across sustained failure, recovery and deadline precedence.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

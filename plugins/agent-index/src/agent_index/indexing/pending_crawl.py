@@ -428,6 +428,21 @@ class PendingCrawls(PollRefreshJournal):
                 self.cover_refresh(conn, manifest, scope)
             conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
 
+    @staticmethod
+    def _retire_point_claim(
+        conn: sqlite3.Connection, *, source: str, scope: str, payload: str,
+    ) -> None:
+        from agent_index.indexing.point_claim import _point_completion_transition
+
+        row = conn.execute(
+            "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+        ).fetchone()
+        if row is None or (row["scope"], row["payload"]) != (scope, payload):
+            raise PendingCrawlConflict("Point pending parent changed before retirement")
+        PendingCrawls.decode_point_pending(payload, source)
+        with _point_completion_transition(conn, "pending_point_claim_delete"):
+            conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
+
 
 def recover_source(
     source: str, *, scope: str, state: IndexState, state_file: Path,

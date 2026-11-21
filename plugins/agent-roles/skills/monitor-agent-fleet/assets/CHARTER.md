@@ -26,6 +26,14 @@ Mode: read-only sweep | recurring observation | steering | dormant correction
   | repair (modes combine only when each has its own grant)
   Enforced goals: <G1-G4 and G6 for a finite sweep | G1-G6 for a recorded
     recurring assignment; see SKILL.md "Enforced goals">
+  Drive posture: <conservative (default) | relentless, only by explicit
+    operator grant; see references/watchdog-checks.md "Drive posture". The
+    posture changes what counts as waste, never the authority of any scope>
+  Hold policy (relentless only): <a hold is kept only with a recorded
+    specific reason: clear resource contention, or lifting it would worsen
+    a known issue or outage. Every other hold is reported for review and
+    lifted only by the operator's direction; record who lifted which hold,
+    when, and the source>
   Cadence and wake source: <existing scheduler/event; required for recurring>
   Confidence cadence: <tight cadence used until confident, e.g. 15 minutes;
     recurring only>
@@ -57,7 +65,9 @@ Steering scope (only if explicitly granted; else "none")
 Answer scope (only if explicitly granted; else "none")
   Recipients: <owners/selectors whose parked questions may be answered>
   Permitted question classes: <routine decisions within the worker's own
-    delegated authority, e.g. ordering, retry/validation depth, continue>
+    delegated authority, e.g. ordering, retry/validation depth, continue;
+    optionally "goal-advancing option" under relentless posture only, see
+    references/pending-input.md>
   Excluded: <permission/approval prompts, destructive, access/spend,
     objective change, deployment, raising caps or review-round limits>
   Validity: <expiry, revision or revocation condition>
@@ -78,6 +88,9 @@ Repair scope (only if explicitly granted; else "none"; see
   Recipients: <owners/selectors whose blockers may be repaired>
   Rung ceiling: <R1 diagnose | R2 doctor records | R3 recover transport or
     session | R4 named disruptive effects>
+  Head reactivation: <none (default) | resume inactive heads of named
+    targets at R3; see references/dormant-correction.md "Reactivating an
+    inactive head">
   Host-shared services: <services that may be restarted, or "none">
   Direct access: <declared SSH profiles/transports usable for diagnosis>
   Delegation: <parallel sub-agent delegates allowed; concurrency bound; one
@@ -163,6 +176,14 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   not to send one, and no operator-defined goal was paraphrased.
 - Holds, review bars, approvals, resource limits and ownership are unchanged
   by the monitor.
+- The drive posture is recorded. Under relentless posture, every kept hold
+  shows its recorded specific reason, every other hold was reported for
+  review, and every lifted hold records who lifted it, when and the source.
+- Every goal-advancing answer was within a granted answer scope, followed an
+  immediate re-capture of the same form and cursor, picked no excluded
+  option, and has a pending record before and a result after.
+- Every blocker names an owner who diagnoses the root cause and drives the
+  fix, or is reported as unowned.
 - The monitor asked no blocking question; every wait it reports is classified
   required, productive or waste with evidence.
 - Each escalation was reported once with evidence, a recommended decision and

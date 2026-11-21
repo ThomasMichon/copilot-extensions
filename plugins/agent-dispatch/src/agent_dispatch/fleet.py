@@ -17,12 +17,18 @@ The design (Model C) keeps the strong guarantee where it belongs:
 - **Liveness-gated selection.** A pool host is a candidate only when it is
   reachable over SSH **and** has ``agent-worktrees`` (or ``agent-bridge`` in
   headless-fleet mode) -- so it can actually embody. The first live candidate by
-  policy (config order) is chosen.
+  policy (config order) is chosen. A task pinned to a ``target_machine`` runs
+  only on that pool host: an asleep pinned host defers the task, and a pin
+  outside the pool is never served by this fleet (its body could not claim it).
 - **Defer, don't fail, when the pool is asleep.** :meth:`FleetSpawner.can_spawn`
   is the supervisor's **capacity gate**: when no host is live, the task is skipped
   for this cycle **without a reservation**, so an all-asleep pool never burns
   spawn attempts toward the dead-letter bound. Selection is cached briefly so the
   gate and the subsequent spawn agree on the same host without re-probing.
+- **Optional placement ordering.** A lane may hand the order of a managed subset
+  of its pool to a trusted provider (:mod:`agent_dispatch.fleet_placement`),
+  called at most once per cycle before any reservation. Unmanaged hosts keep
+  their configured positions and never depend on the provider.
 
 Nothing here is consumer-specific: a :class:`FleetSpawner` is keyed only on host
 aliases + task ids.
@@ -30,16 +36,20 @@ aliases + task ids.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from . import embody
 from .embody_prompts import validate_fleet_route
+from .fleet_placement import PlacementOrdering
 from .procutil import run_ssh_command
+from .queue_common import machine_matches
 
 log = logging.getLogger("agent-dispatch.fleet")
 
@@ -76,29 +86,124 @@ def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
     ``agent-worktrees``, so this checks for that binary instead. Same fail-closed
     semantics as :func:`host_can_embody`: any failure returns False so an asleep
     or unprovisioned host is not a candidate.
+
+    A headless body is created through the Bridge carrier rather than a POSIX
+    remote command line, so this probe also accepts a Windows OpenSSH host whose
+    login shell is ``cmd.exe`` or PowerShell (see :func:`host_bridge_shell`).
     """
-    return _host_has_command(host, "agent-bridge", timeout=timeout)
+    return host_bridge_shell(host, timeout=timeout) is not None
 
 
-def _host_has_command(host: str, command: str, *, timeout: float = 8.0) -> bool:
-    """SSH to ``host`` (SSH alias) and check ``command -v <command>``.
+#: :func:`host_bridge_shell` result for a host whose SSH login shell is POSIX.
+POSIX_SHELL = "posix"
+#: :func:`host_bridge_shell` result for a ``cmd.exe``/PowerShell login shell.
+WINDOWS_SHELL = "windows"
 
-    The shared reachability + capability probe behind :func:`host_can_embody` and
-    :func:`host_can_bridge`. ``BatchMode`` so a missing key fails fast; any
-    failure (ssh absent, unreachable, timeout, or missing binary) returns False.
+
+def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
+    """Classify the SSH login shell under which ``host`` resolves ``agent-bridge``.
+
+    Returns :data:`POSIX_SHELL`, :data:`WINDOWS_SHELL`, or ``None`` when the
+    host is unreachable or has no ``agent-bridge``. Fleet liveness needs only
+    presence (:func:`host_can_bridge`); the SSH create fallback in
+    :func:`agent_dispatch.embody.spawn_fleet_headless_worker` sends a
+    POSIX-quoted command line, so it also requires :data:`POSIX_SHELL`.
+    """
+    return _host_command_shell(host, "agent-bridge", timeout=timeout, windows=True)
+
+
+def require_posix_bridge_host(host: str, *, timeout: float = 8.0) -> None:
+    """Raise :class:`~agent_dispatch.embody.EmbodyUnavailable` unless ``host``
+    resolves ``agent-bridge`` under a POSIX login shell.
+
+    Guards the POSIX-quoted SSH create fallback: fleet liveness also admits
+    Windows OpenSSH hosts (for the carrier path), whose ``cmd.exe`` or
+    PowerShell login shell would split that command line.
+    """
+    host = host.strip().lower()
+    shell = host_bridge_shell(host, timeout=timeout)
+    if shell is None:
+        raise embody.EmbodyUnavailable(
+            f"pool host {host!r} is unreachable over ssh or has no agent-bridge"
+        )
+    if shell != POSIX_SHELL:
+        raise embody.EmbodyUnavailable(
+            f"pool host {host!r} resolves agent-bridge under a non-POSIX shell; "
+            "without the local Agent Bridge carrier a headless body cannot start there"
+        )
+
+
+def _posix_command_probe(command: str) -> str:
+    """A probe only a POSIX shell can run: ``command -v`` inside ``case``/``esac``.
+
+    A bare ``command -v`` does not prove POSIX semantics: PowerShell resolves
+    ``command`` to ``Get-Command``, which succeeds with nonempty output when the
+    binary exists. PowerShell and ``cmd.exe`` both reject the ``case`` construct
+    before running anything, so success here means a POSIX shell resolved it.
+    """
+    return f"case posix in posix) command -v {command};; esac"
+
+
+def _host_has_command(
+    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+) -> bool:
+    """SSH to ``host`` (SSH alias) and check that ``command`` resolves there."""
+    return _host_command_shell(host, command, timeout=timeout, windows=windows) is not None
+
+
+def _host_command_shell(
+    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+) -> str | None:
+    """Classify the login shell under which ``command`` resolves on ``host``.
+
+    The shared reachability + capability probe behind :func:`host_can_embody`
+    and :func:`host_bridge_shell`. ``BatchMode`` so a missing key fails fast;
+    any failure (ssh absent, unreachable, timeout, or missing binary) returns
+    ``None``.
+
+    The POSIX probe (:func:`_posix_command_probe`) counts only when it exits 0
+    **and** prints the resolved command. With ``windows``, a host that fails
+    the POSIX probe (other than an SSH-level failure, exit 255) gets one
+    ``where.exe <command>`` probe within the same ``timeout`` budget;
+    ``where.exe`` behaves the same under ``cmd.exe`` and PowerShell.
     """
     exe = shutil.which("ssh")
     if exe is None:
-        return False
-    cmd = [
-        exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-        _ssh_alias(host), f"command -v {command}",
-    ]
-    try:
-        result = run_ssh_command(cmd, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+        return None
+    probes = [(POSIX_SHELL, _posix_command_probe(command))]
+    if windows:
+        probes.append((WINDOWS_SHELL, f"where.exe {command}"))
+    deadline = time.monotonic() + timeout
+    budget = timeout
+    for shell, probe in probes:
+        cmd = [
+            exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            _ssh_alias(host), probe,
+        ]
+        try:
+            result = run_ssh_command(cmd, timeout=budget)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode == 0 and (result.stdout or "").strip():
+            return shell
+        if result.returncode == 255:
+            return None
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            return None
+    return None
+
+
+def _selector_tokens(value: object) -> set[str]:
+    """Selector tokens from a task's ``excludes``/``requires`` (list or JSON text)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value or "[]")
+        except ValueError:
+            return set()
+    if not isinstance(value, (list, tuple, set)):
+        return set()
+    return {t for t in value if isinstance(t, str)}
 
 
 class FleetSpawner:
@@ -141,8 +246,9 @@ class FleetSpawner:
         all_repos: bool = False,
         verify_timeout: int = 0,
         liveness: LivenessFn | None = None,
-        spawn_fn: Callable[..., subprocess.CompletedProcess] | None = None,
+        spawn_fn: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         now: Callable[[], float] = time.time,
+        placement: PlacementOrdering | None = None,
     ):
         self.pool = [h.strip() for h in pool if h and h.strip()]
         if not self.pool:
@@ -172,19 +278,25 @@ class FleetSpawner:
         self.verify_timeout = verify_timeout
         default_liveness = host_can_bridge if self.headless else host_can_embody
         self._liveness = liveness or default_liveness
-        default_spawn = (
+        default_spawn: Callable[..., subprocess.CompletedProcess[str]] = (
             embody.spawn_fleet_headless_worker
             if self.headless
             else embody.spawn_fleet_embodied_worker
         )
-        self._spawn = spawn_fn or default_spawn
+        self._spawn: Callable[..., subprocess.CompletedProcess[str]] = spawn_fn or default_spawn
         self._now = now
+        self.placement = placement
         #: task_id -> chosen host, so can_spawn() and __call__() agree per cycle.
         self._selection: dict[str, str] = {}
         #: host -> (checked_at, is_live); short-TTL so a cycle probes each host once.
         self._live_cache: dict[str, tuple[float, bool]] = {}
 
     # -- host selection ------------------------------------------------------
+
+    def begin_placement_cycle(self) -> None:
+        """Start a supervisor cycle: drop the previous cycle's provider result."""
+        if self.placement is not None:
+            self.placement.begin_cycle()
 
     def _is_live(self, host: str) -> bool:
         now = self._now()
@@ -195,31 +307,57 @@ class FleetSpawner:
         self._live_cache[host] = (now, live)
         return live
 
-    def _candidates(self, task: dict) -> list[str]:
+    def _candidates(self, task: dict[str, Any]) -> list[str]:
         """Ordered candidate hosts for ``task``.
 
-        A task pinned to a ``target_machine`` that is in the pool is tried
-        **first** (honor an explicit affinity), then the rest of the pool in
-        config order. A ``target_machine`` outside the pool is ignored here -- the
-        pool is the authority on where fleet bodies may run.
+        An unpinned task may run on any pool host, in config order. A task
+        pinned to a ``target_machine`` may run **only** on that host: the claim
+        enforces the pin, so a body on any other host could not claim the task.
+        The pin matches a pool host case-insensitively, like the claim does. A
+        pin outside the pool has no candidate here.
+
+        The claim also checks ``machine:`` selectors against the body's
+        ``--machine``, so a host named in ``excludes`` (for example after a
+        ``yield --exclude-self machine``) or not named by a ``machine:`` entry in
+        ``requires`` is skipped. These tokens match exactly, as in the claim.
         """
         target = (task.get("target_machine") or "").strip()
-        if target and target in self.pool:
-            return [target] + [h for h in self.pool if h != target]
-        return list(self.pool)
+        excludes = _selector_tokens(task.get("excludes"))
+        machine_requires = {
+            t for t in _selector_tokens(task.get("requires")) if t.startswith("machine:")
+        }
 
-    def select(self, task: dict) -> str | None:
+        def admits(host: str) -> bool:
+            token = f"machine:{host}"
+            return token not in excludes and machine_requires <= {token}
+
+        if not target:
+            return [h for h in self.pool if admits(h)]
+        pinned = [h for h in self.pool if machine_matches(target, h)][:1]
+        return [h for h in pinned if admits(h)]
+
+    def select(self, task: dict[str, Any]) -> str | None:
         """Pick the first live candidate host for ``task``; cache and return it,
-        or ``None`` when the whole pool is asleep/unreachable this cycle."""
+        or ``None`` when the whole pool is asleep/unreachable this cycle.
+
+        With a placement provider, managed hosts are reordered (or dropped)
+        before liveness, so a hard pin to a managed host starts only when the
+        provider kept it and it is live; it never moves to another host.
+        """
         tid = str(task.get("id"))
-        for host in self._candidates(task):
+        candidates = self._candidates(task)
+        if self.placement is not None:
+            candidates = self.placement.order(candidates)
+        for host in candidates:
             if self._is_live(host):
                 self._selection[tid] = host
                 return host
         self._selection.pop(tid, None)
+        if self.placement is not None:
+            log.info("fleet: no eligible host for task %s this cycle; deferring", tid)
         return None
 
-    def can_spawn(self, task: dict) -> bool:
+    def can_spawn(self, task: dict[str, Any]) -> bool:
         """Capacity gate: True iff a live pool host is available for ``task``.
 
         Used as the supervisor's ``capacity_gate`` so a task is reserved only when
@@ -230,7 +368,7 @@ class FleetSpawner:
 
     # -- spawn ---------------------------------------------------------------
 
-    def __call__(self, task: dict) -> tuple[bool, dict]:
+    def __call__(self, task: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         """Spawn the task's body on its selected (or freshly selected) pool host.
 
         Returns ``(ok, handle)`` in the :data:`SpawnFn` contract. ``handle`` carries
@@ -259,6 +397,7 @@ class FleetSpawner:
                     origin=self.origin,
                     owner=owner,
                     worker_id=owner,
+                    machine=host,
                     agent=self.agent,
                     charter=self.charter,
                     repo=None if self.all_repos else task.get("repo"),
@@ -272,6 +411,7 @@ class FleetSpawner:
                     origin=self.origin,
                     owner=owner,
                     worker_id=owner,
+                    machine=host,
                     driver=self.driver,
                     project=embody.project_for_task(task),
                     repo=None if self.all_repos else task.get("repo"),

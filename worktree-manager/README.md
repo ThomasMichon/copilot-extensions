@@ -57,7 +57,27 @@ does not execute its displayed commands, open links or change readiness.
 Redirected/noninteractive bare invocation still prints installation status;
 explicit verbs, project launch and launcher JSON output keep their contracts.
 
+Foreground project launch opens the app directly, without first acquiring a
+warm UI session from the Manager service daemon. The app can paint its pending
+state while its data and optional services become available. Version and
+terminal-capability checks retain selected-runtime validation and actual error
+reporting, but do not impose an execution timeout: CPU contention alone is not
+evidence of an unusable installation. Cancellation and owned-child cleanup
+remain active. Installer readiness and background service deadlines are unchanged.
+
 ## Prepared application installation
+
+To inspect what a particular worktree needs, invoke
+`python -m worktree_manager.repository_suite_roster` with the staged Manager's
+Python. `--worktree` selects the checkout with the composed plugin settings;
+`--source` selects the promoted suite folder. Both paths must be absolute.
+Supply the repository owner's ordered `--gate-path` candidates, or `--no-gate`
+when the owner established there is no gate. `--machine` accepts the qualified
+execution and physical machine names. `--index-role` and `--vault-state` carry
+the app owners' observations, not requests to enable them. The JSON result
+distinguishes required runtimes, payload-only plugins, exclusions and missing
+policy observations. An incomplete result exits 2 and is not an install list.
+This operation reads metadata only; it does not fetch, install or activate.
 
 `worktree-manager-install FOOTPRINT` is Manager's finite, noninteractive
 frontdoor for an already prepared application footprint. It is separate from

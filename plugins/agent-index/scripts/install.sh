@@ -931,7 +931,7 @@ _versioned_slot_clean() {
     py="$(_bootstrap_python)" || return 1
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
-        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        helpers="$("$py" -I -B "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
@@ -1515,7 +1515,7 @@ _ensure_runtime() {
         active_python="$INSTALL_DIR/versions/$active_version/bin/python"
         [[ -x "$active_python" ]] || active_python="$INSTALL_DIR/versions/$active_version/Scripts/python.exe"
         if _test_index_venv "$INSTALL_DIR/versions/$active_version" "$active_python" \
-            && "$active_python" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$active_version" >/dev/null 2>&1 \
+            && "$active_python" -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$active_version" >/dev/null 2>&1 \
             && _runtime_origin_under "$active_python" "$INSTALL_DIR/versions/$active_version"; then
             active_ready=1
         fi
@@ -1770,7 +1770,7 @@ _install_engine() {
     local py vr="$SCRIPT_DIR/versioned_runtime.py" selected engine_version="$SRC_VERSION"
     py="$(_bootstrap_python)" || return 1
     if [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]] \
-        && selected="$("$py" -I "$vr" --root "$ENGINE_HOME" resolve-python)" \
+        && selected="$("$py" -I -B "$vr" --root "$ENGINE_HOME" resolve-python)" \
         && [[ -n "$selected" && "${1:-}" != upgrade ]]; then
         ENGINE_VENV_PYTHON="$selected"
         ENGINE_VENV="$(dirname "$(dirname "$selected")")"
@@ -1784,7 +1784,7 @@ _install_engine() {
     ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
     _install_engine_build() (
     local helpers payload_hash
-    helpers="$("$py" -I "$vr" --root "$ENGINE_HOME" construction-shell --shell sh)" || return 1
+    helpers="$("$py" -I -B "$vr" --root "$ENGINE_HOME" construction-shell --shell sh)" || return 1
     eval "$helpers"
     payload_hash="$(_payload_hash)" || return 1
     _runtime_construction_begin "$py" "$vr" "$ENGINE_HOME" "$engine_version" \
@@ -1878,7 +1878,7 @@ _install_engine() {
     for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py versioned_runtime.py; do
         _runtime_publication_copy "$SCRIPT_DIR/$name" "$ENGINE_HOME/$name" || return 1
     done
-    "$py" -I "$vr" --root "$ENGINE_HOME" --link-name '.venv' activate "$engine_version" --no-link || return 1
+    "$py" -I -B "$vr" --root "$ENGINE_HOME" --link-name '.venv' activate "$engine_version" --no-link || return 1
     _runtime_construction_finish || return 1
     if [[ "${1:-}" == upgrade ]]; then
         _ok "Engine runtime updated (durable venv): $ENGINE_VENV"
@@ -2339,7 +2339,7 @@ esac
 if [[ "$ACTION" != uninstall && "$ACTION" != stamp && "$ACTION" != engine && "$ACTION" != engine-update ]] \
     && [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]]; then
     bootstrap="$(_bootstrap_python)" || exit 1
-    ENGINE_VENV_PYTHON="$("$bootstrap" -I "$SCRIPT_DIR/versioned_runtime.py" --root "$ENGINE_HOME" resolve-python)" || exit 1
+    ENGINE_VENV_PYTHON="$("$bootstrap" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$ENGINE_HOME" resolve-python)" || exit 1
     [[ -n "$ENGINE_VENV_PYTHON" ]] || { _fail 'No completed engine runtime is selectable'; exit 1; }
     ENGINE_VENV="$(dirname "$(dirname "$ENGINE_VENV_PYTHON")")"
 fi

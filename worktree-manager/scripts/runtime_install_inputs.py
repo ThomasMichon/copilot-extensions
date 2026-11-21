@@ -1,4 +1,4 @@
-"""Admission of independent native wheel inputs before Manager dispatch."""
+"""Admission of native installation inputs before Manager dispatch."""
 from __future__ import annotations
 
 import argparse
@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 
 
@@ -35,6 +36,29 @@ def describe_source_inputs(args: argparse.Namespace, parser: argparse.ArgumentPa
         "capabilities": ["install-source"],
     }))
     return True
+
+
+def installation_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[str]:
+    if args.root is None:
+        parser.error("--root is required for installation")
+    command: list[str] = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if args.install_only and (command or args.source_digest is None):
+        parser.error("Installation participant requires a source digest and no application command")
+    if args.update_participant and (
+        args.install_only or command[:1] != ["update"] or args.source_digest is None
+        or args.recover_adopted is not None
+    ):
+        parser.error("Update participant requires a source digest and one update command")
+    if args.skip_instance_reconcile and not args.install_only:
+        parser.error("Instance reconciliation policy requires an installation participant")
+    if args.source_digest is not None and (
+        not (args.install_only or args.update_participant)
+        or re.fullmatch("[0-9a-f]{64}", args.source_digest) is None
+    ):
+        parser.error("Source digest requires an installation participant and a SHA-256")
+    if args.repair_update and not args.install_only and command[:1] != ["update"]:
+        parser.error("Bootstrap repair is only valid for update")
+    return command
 
 
 def admit_bootstrap_uv(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:

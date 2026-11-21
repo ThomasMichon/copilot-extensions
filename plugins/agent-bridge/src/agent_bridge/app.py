@@ -7,8 +7,9 @@ import contextlib
 import logging
 import threading
 import time
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 from fastapi import FastAPI
 
@@ -24,10 +25,19 @@ from .session_manager import session_manager_from_config
 from .transport import shutdown_ssh
 
 if TYPE_CHECKING:
+    from credential_relay import CredentialRelayServer
+    from zdd.routing import Endpoint
+
     from .agent_registry_resolver import AgentResolver
+    from .client import BridgeClient
+    from .models import ServiceConfig
     from .runtime_restore import RestoredRuntime
+    from .session_manager import SessionManager
 
 log = logging.getLogger("agent-bridge")
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_Value = TypeVar("_Value")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 # Session statuses that mean "a host is actively using this daemon". When none
@@ -35,13 +45,13 @@ _GOVERNANCE_BACKOFF_SECONDS = 10.0
 _ACTIVE_STATUSES = {"created", "starting", "running", "idle"}
 
 
-def daemon_resolver(cfg) -> AgentResolver:
+def daemon_resolver(cfg: ServiceConfig) -> AgentResolver:
     from .agent_registry import daemon_resolver as resolve
 
     return resolve(cfg)
 
 
-def _count_active_sessions(mgr, db=None) -> int:
+def _count_active_sessions(mgr: SessionManager, db: Database | None = None) -> int:
     """Count work this daemon still owns or represents.
 
     Supersession self-retire uses this as its idleness gate. Count both
@@ -74,18 +84,20 @@ def _count_active_sessions(mgr, db=None) -> int:
     return n
 
 
-async def _run_in_daemon_thread(fn, *args):
+async def _run_in_daemon_thread(
+    fn: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs,
+) -> _T:
     """Await blocking readiness work without letting it pin process shutdown."""
     loop = asyncio.get_running_loop()
-    future = loop.create_future()
+    future: asyncio.Future[_T] = loop.create_future()
 
-    def deliver(setter, value) -> None:
+    def deliver(setter: Callable[[_Value], None], value: _Value) -> None:
         if not future.done():
             setter(value)
 
     def run() -> None:
         try:
-            result = fn(*args)
+            result = fn(*args, **kwargs)
         except BaseException as exc:
             try:
                 loop.call_soon_threadsafe(deliver, future.set_exception, exc)
@@ -168,7 +180,7 @@ def _self_retire_settings() -> tuple[bool, float, int]:
     return enabled, poll, k
 
 
-def _same_daemon(left, right) -> bool:
+def _same_daemon(left: Endpoint | None, right: Endpoint | None) -> bool:
     """Whether two routing endpoints identify the same daemon process."""
     if left is None or right is None:
         return False
@@ -177,23 +189,23 @@ def _same_daemon(left, right) -> bool:
     return left.bind == right.bind and left.port == right.port
 
 
-def _owns_generation(endpoint, owner) -> bool:
+def _owns_generation(endpoint: Endpoint | None, owner: Endpoint) -> bool:
     """Whether *endpoint* is the exact active generation published by *owner*."""
     return (
-        _same_daemon(endpoint, owner)
+        endpoint is not None and _same_daemon(endpoint, owner)
         and endpoint.generation == owner.generation
     )
 
 
 async def _retire_previous_daemon(
     app: FastAPI,
-    previous,
-    successor,
+    previous: Endpoint,
+    successor: Endpoint,
     *,
-    make_client=None,
+    make_client: Callable[[Endpoint], BridgeClient] | None = None,
     drain_timeout: float = _SUPERSESSION_DRAIN_TIMEOUT_S,
     retirement_timeout: float = 30.0,
-    initial_recovery_task: asyncio.Task | None = None,
+    initial_recovery_task: asyncio.Task[None] | None = None,
 ) -> None:
     """Retire a predecessor with native exit evidence before owned cold recovery."""
     await retire_previous_daemon(
@@ -207,7 +219,7 @@ async def _retire_previous_daemon(
 
 
 async def _recover_owned_cold(
-    app: FastAPI, successor=None, *, initial_recovery_task: asyncio.Task | None = None,
+    app: FastAPI, successor: Endpoint | None = None, *, initial_recovery_task: asyncio.Task[None] | None = None,
     predecessor_exited: bool = False, automatic: bool = False,
 ) -> int:
     """Use the existing active owner and heartbeat, never an unverified predecessor exit."""
@@ -261,7 +273,7 @@ async def _recover_owned_cold(
 
 
 @contextlib.asynccontextmanager
-async def _lifespan(app: FastAPI):
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan -- initialize DB, topology, and session manager."""
     from .app_lifecycle import close_database
 
@@ -286,7 +298,9 @@ async def _lifespan(app: FastAPI):
     app.state.db = db
 
     if independent_source:
-        (db_path.parent / "hosts").mkdir(parents=True, exist_ok=True)
+        from .session_host.host_index import HostIndex
+
+        HostIndex.provision_root(db_path.parent / "hosts")
         mgr = session_manager_from_config(db, cfg, read_only_rehydrate=True)
     else:
         mgr = session_manager_from_config(db, cfg)
@@ -387,10 +401,10 @@ async def _lifespan(app: FastAPI):
     reattach_task = asyncio.create_task(_reattach_session_hosts_bg())
     app.state.cold_initial_recovery_task = reattach_task
 
-    relay_server = None
+    relay_server: CredentialRelayServer | None = None
     relay_start_lock = asyncio.Lock()
 
-    async def _ensure_relay():
+    async def _ensure_relay() -> None:
         nonlocal relay_server
         async with relay_start_lock:
             relay_server = await _start_credential_relay(app)
@@ -398,7 +412,6 @@ async def _lifespan(app: FastAPI):
                 relay_server is not None
                 and getattr(relay_server, "running", False)
             )
-            return relay_server
 
     async def _initialize_readiness() -> None:
         retry_delay = 0.25
@@ -487,9 +500,9 @@ async def _lifespan(app: FastAPI):
     # Expose a relay-adoption hook so a passive cutover instance can bind the
     # shared relay port *after* the retiring daemon releases it (the relay is a
     # singleton on 9857). The /api/v1/relay/adopt endpoint calls this.
-    async def _adopt_relay():
+    async def _adopt_relay() -> bool:
         await _ensure_relay()
-        return relay_server is not None and getattr(relay_server, "running", False)
+        return relay_server is not None and relay_server.running
 
     app.state.adopt_relay = _adopt_relay
 
@@ -500,7 +513,7 @@ async def _lifespan(app: FastAPI):
                 not independent_source
                 or (lifecycle_start_task is not None and lifecycle_start_task.done())
             )
-            and app.state.cold_recovery_ready
+            and bool(app.state.cold_recovery_ready)
         )
 
     # Periodic GC sweep -- prune aged terminal/disconnected sessions and
@@ -784,7 +797,7 @@ async def _lifespan(app: FastAPI):
 
     # The route was published before slow startup work. Record the durable START
     # event only after uvicorn confirms that it is accepting connections.
-    if independent_source:
+    if source_published is not None:
         from .source_start import complete_source_start
 
         lifecycle_start_task = asyncio.create_task(
@@ -1055,7 +1068,7 @@ async def _lifespan(app: FastAPI):
 
 
 def create_app(
-    *, config=None, token: str | None = None,
+    *, config: ServiceConfig | None = None, token: str | None = None,
     restored_runtime: RestoredRuntime | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""

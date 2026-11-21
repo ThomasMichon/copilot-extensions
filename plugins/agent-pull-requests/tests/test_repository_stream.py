@@ -87,6 +87,48 @@ def test_stream_reprojects_freshness_without_a_new_durable_event(tmp_path: Path)
     assert selected[1].path.read_bytes() == before
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("history_state", ["APPROVED", "DISMISSED"])
+def test_mixed_history_stream_preserves_evidence_and_existing_delivery_owner(
+    tmp_path: Path, reverse: bool, history_state: str,
+) -> None:
+    selected = setup(tmp_path, provider="github" if history_state == "DISMISSED" else "gitea")
+    reviews = [
+        fixtures.verdict(dismissed=True, state=history_state), fixtures.verdict(id=10),
+    ]
+    if reverse:
+        reviews.reverse()
+    observe(selected, head_sha=fixtures.OLD, reviews=reviews)
+    row = request(selected, "subscribe", request_id="mixed", ttl=3600, after=0)["subscription"]
+    payload = {"registration_id": row["registration_id"], "reviewer": "reviewer"}
+    first = RepositoryStream(selected[-1], selected[2].key, "consumer", payload, None).sample(
+        expires_at=10000,
+    )
+    prior = first["frames"][2][1]["view"]
+    assert prior["unavailable"] == [{"pr": 7, "reason": "reviewed-base-unknown"}]
+    selected[0][0] = 1100
+    observe(selected, reviews=reviews)
+    before = json.loads(selected[1].path.read_bytes())
+    resumed = RepositoryStream(selected[-1], selected[2].key, "consumer", payload, first["cursor"])
+    current = resumed.sample(expires_at=10000)
+    view = current["frames"][2][1]["view"]
+    assert view["next_actions"][0]["action"] == "new_verdict"
+    assert view["next_actions"][0]["review"]["id"] == 10 and not view["unavailable"]
+    after = json.loads(selected[1].path.read_bytes())
+    original_registration = before["repository_cache"]["registrations"][0]
+    registration = after["repository_cache"]["registrations"][0]
+    assert original_registration["delivered"] < registration["delivered"]
+    original_registration["delivered"] = registration["delivered"]
+    assert before == after and registration["acknowledged"] == 0
+    stable = selected[1].path.read_bytes()
+    repeated = resumed.sample(expires_at=10000)
+    assert repeated["cursor"] == current["cursor"]
+    assert repeated["frames"][2][1]["view"] == view
+    assert selected[1].path.read_bytes() == stable
+    with pytest.raises(ValueError, match="page changed"):
+        request(selected, cursor=prior["cursor"])
+
+
 @pytest.mark.parametrize("interval", [1, 300])
 def test_backlogged_events_preserve_the_full_sample_interval(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interval: int,

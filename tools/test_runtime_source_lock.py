@@ -234,6 +234,7 @@ def test_source_owner_delegation_keeps_fresh_origin_retention_and_custody_checks
 def test_native_source_lock_binds_nonempty_dated_feed_output(
     adopter: Adopter, source: Source, target: Target, tmp_path: Path,
     as_extra: bool, wheel_witness: bool, multiple: bool, capture_diagnostics: bool,
+    *, as_provider: bool = False,
 ) -> None:
     filename = "fixture_registry-1.0-py3-none-any.whl"
     archive = io.BytesIO()
@@ -291,7 +292,13 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
 
     manifest = source[0] / "pyproject.toml"
     text = manifest.read_text()
-    if as_extra:
+    if as_provider:
+        import installer_provider_roots
+
+        installer_provider_roots.persist(
+            Path(plan(adopter).policy()["owner"]["runtimeRoot"]), ["fixture-registry"],
+        )
+    elif as_extra:
         text += '\n[project.optional-dependencies]\nfeature=["fixture-registry>=1"]\n'
     else:
         text = text.replace("dependencies=[]", 'dependencies=["fixture-registry>=1"]')
@@ -330,6 +337,8 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
                 assert b"fixture-registry==1.0" in selected.requirements
                 assert selected.record()["source"] == selected_source[1].document()
                 assert selected.record()["extras"] == (["feature"] if as_extra else [])
+                if as_provider:
+                    assert selected.record()["provider_roots"] == ["fixture-registry"]
                 if wheel_witness:
                     assert selected.record()["files"] == [{
                         "name": "fixture-registry", "version": "1.0", "filename": filename,
@@ -343,6 +352,27 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_source_reconstruction_resolves_persistent_provider_through_existing_feed(
+    adopter: Adopter, source: Source, target: Target, tmp_path: Path,
+) -> None:
+    test_native_source_lock_binds_nonempty_dated_feed_output(
+        adopter, source, target, tmp_path, as_extra=False, wheel_witness=True,
+        multiple=False, capture_diagnostics=False, as_provider=True,
+    )
+
+
+def test_source_reconstruction_refuses_changed_provider_desire(
+    adopter: Adopter, source: Source, target: Target, tmp_path: Path,
+) -> None:
+    import installer_provider_roots
+
+    root = Path(plan(adopter).policy()["owner"]["runtimeRoot"])
+    with pytest.raises(ProfileError, match="provider roots changed"):
+        with candidate(adopter, source, target, tmp_path) as selected:
+            installer_provider_roots.persist(root, ["example-provider"])
+            selected.verify(deadline=time.monotonic() + 10)
 
 
 @pytest.mark.parametrize("field,value", [
@@ -502,7 +532,10 @@ def test_candidate_output_must_be_exact_applicable_and_hashed(content: bytes) ->
 
 
 def test_exact_candidate_pins_are_frozen_without_claiming_wheel_admission() -> None:
-    content = b"fixture==1.0 \\\n --hash=sha256:" + b"a" * 64 + b"\n"
+    content = (
+        b"# Exact native compiler output\nfixture==1.0 \\\n --hash=sha256:" + b"a" * 64
+        + b"\n\n# The following packages were excluded from the output:\n# fixture-source\n"
+    )
     assert locks._pins(content, default_environment(), time.monotonic() + 10) == [
         {"name": "fixture", "version": "1.0", "hashes": ["sha256:" + "a" * 64]},
     ]

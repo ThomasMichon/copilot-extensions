@@ -126,8 +126,14 @@ selected inventory receiver refuses rather than substituting an ambient source.
 One cycle unions those configured targets with existing registered waits.
 The existing four-reader executor shares each account-qualified PR read across
 overlapping interests. At most 32 configured-only snapshot targets join each cycle,
-with a rotating cursor so unread members are not permanently hidden behind the
-first page; existing legacy-wait admission remains unchanged. Inventory remains
+with separate rotating cursors for current inventory members and unresolved
+departures. Cohorts use effective retained membership, so partial/unavailable
+inventory does not misclassify still-current rows or shrink their read allowance.
+Current members take the first slots; at most one four-reader wave
+of departure reconciliation is interleaved within that same 32-read allowance.
+Rotation advances with consumed results, with at least one slot of progress on
+an interrupted pass, rather than skipping a whole planned batch that never ran.
+Existing legacy-wait admission remains unchanged. Inventory remains
 bounded by the native page/member/time limits. A finite cycle's supplied expiry
 and checkpoint govern every persistence boundary; a stale cycle cannot publish
 after authority withdrawal, and the executor still joins actual native cleanup.
@@ -170,8 +176,11 @@ snapshot interface. Only the selected projection reads are retained for the
 publication batch; legacy-only snapshots are released after ordinary observation.
 Already-acquired configured wait results are projected even outside the rotation
 window. Only configured-only acquisition consumes the 32-read allowance.
-Projection batches contain at most 32 normalized results, not full raw snapshots;
-each batch commits its current facts and corresponding events atomically.
+Each completed configured read commits its current facts and corresponding
+events before waiting for a later read. A subsequent expiry cannot discard that
+committed progress, and no flush renews the expired cycle's authority.
+Inventory and pre-inventory wait reconciliation use batches of at most 32
+normalized results, not full raw snapshots.
 Recorded observation times conservatively identify the cycle start rather than
 overstating freshness after a delayed batch.
 Existing unrelated legacy waits are serviced before repository acquisition,
@@ -181,9 +190,15 @@ them `selection_reentry_unconfirmed` until a bounded read refreshes them.
 Selection entry does not publish an old terminal summary as new current evidence.
 Passive qualification is now separate from provider inventory: once bounds are
 confirmed, already-admitted configured waits are read before inventory pages.
-Their bounded normalized evidence is retained across inventory and projected
-for every known cached PR, including a departed terminal summary absent from
-the current inventory plan. No duplicate acquisition is charged to that wait.
+Their bounded normalized evidence immediately refreshes known cached PRs without
+changing inventory coverage, timestamps or membership. Unknown PRs are not
+invented from a wait. Evidence is also retained across inventory and projected
+for every then-known cached PR, including a departed terminal summary absent
+from the current inventory plan. No duplicate acquisition is charged to that wait.
+Repository event backpressure during an early wait defers only its cache
+publication, retaining that evidence for the existing reconciliation after
+registered waits have recorded their results. It cannot starve a later
+terminal wait; expiry, cancellation and all other failures remain authoritative.
 The transient prepared bound is the existing at-most-1,024 wait targets times
 64 KiB normalized facts, plus at most 32 configured-only results; raw results
 remain limited to the four-reader phases. These phases are sequential under one

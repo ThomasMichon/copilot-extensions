@@ -13,6 +13,7 @@ from .queue_records import TaskError
 
 def original_request_digest(
     bridge_session: str, native_session: str, prompt: str, *, idempotency_key: str,
+    no_resume: bool = False,
 ) -> str:
     """Encode the Bridge version-1 original-request digest without importing it."""
     document = {
@@ -22,7 +23,7 @@ def original_request_digest(
             "expected_native_session_id": native_session,
             "prompt": prompt,
             "caller_id": f"agent-dispatch:{idempotency_key}",
-            "no_resume": False,
+            "no_resume": no_resume,
         },
     }
     return hashlib.sha256(json.dumps(
@@ -32,7 +33,7 @@ def original_request_digest(
 
 def valid_settlement(
     receipt: Any, bridge_session: str, native_session: str, prompt: str, *,
-    idempotency_key: str,
+    idempotency_key: str, no_resume: bool = False,
 ) -> TypeGuard[dict[str, Any]]:
     """Require the original identity and a provider-issued, request-bound result."""
     if not isinstance(receipt, dict) or (
@@ -54,13 +55,14 @@ def valid_settlement(
         and "turn_index" not in receipt
         and receipt.get("request_digest") == original_request_digest(
             bridge_session, native_session, prompt, idempotency_key=idempotency_key,
+            no_resume=no_resume,
         )
     )
 
 
 def native_prompt_settlement(
     bridge_session: str, native_session: str, prompt: str, *,
-    idempotency_key: str, machine: str | None,
+    idempotency_key: str, machine: str | None, no_resume: bool = False,
 ) -> dict[str, Any]:
     """Negotiate an explicit repair; never fall back, send, ensure or retry."""
     from . import bridge
@@ -102,10 +104,11 @@ def native_prompt_settlement(
         "--expected-native-session-id", native_session,
         "--idempotency-key", idempotency_key,
         "--caller", f"agent-dispatch:{idempotency_key}",
-        "--prompt-file", "-", "--settle-native-send", "--no-wait",
+        "--prompt-file", "-", *(["--no-resume"] if no_resume else []), "--settle-native-send", "--no-wait",
     ], prompt)
     if not valid_settlement(
         receipt, bridge_session, native_session, prompt, idempotency_key=idempotency_key,
+        no_resume=no_resume,
     ):
         raise TaskError(
             "Bridge settlement does not prove original wake outcome; send remains unknown"

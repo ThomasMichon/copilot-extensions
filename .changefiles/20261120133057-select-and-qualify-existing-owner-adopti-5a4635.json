@@ -1,0 +1,9 @@
+{
+  "comment": "Select and qualify existing-owner adoption of recorded workspace cache generations.",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

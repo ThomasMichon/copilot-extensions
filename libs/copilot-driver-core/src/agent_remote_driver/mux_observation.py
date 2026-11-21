@@ -147,7 +147,7 @@ def _settled_inventory(root: Path, deadline: float) -> dict[str, tuple[str, int]
 
 def observe_psmux(
     session: str, *, timeout: float = 1.0, data_dir: Path | None = None,
-    namespace: str | None = None,
+    namespace: str | None = None, expected_incarnation: str | None = None,
     _inventory: Callable[[], dict[str, tuple[str, int]]] | None = None,
 ) -> Observation:
     """Read native rendezvous hints, then require an authenticated live response.
@@ -157,6 +157,9 @@ def observe_psmux(
     No observation deletes, reconstructs or refreshes the provider's files.
     An explicit namespace selects the creation transport without changing the
     process-wide default used by independent observers.
+    A pinned observation requires an explicit root and namespace. Missing
+    rendezvous is unknown in that scope; it never consults host inventory.
+    Matching a mux incarnation is not proof of an agent route.
     """
     if (
         not isinstance(session, str)
@@ -170,6 +173,12 @@ def observe_psmux(
         or session.endswith(".") or not 0 < timeout <= 5
     ):
         return Observation("unsupported", "unsupported-target")
+    if expected_incarnation is not None and (
+        data_dir is None or not data_dir.is_absolute() or namespace is None
+        or not isinstance(expected_incarnation, str)
+        or not re.fullmatch(r"\$[0-9]{1,20}:[0-9]{1,20}", expected_incarnation)
+    ):
+        return Observation("unsupported", "invalid-pin")
     deadline = time.monotonic() + timeout
     try:
         root = data_dir if data_dir is not None else _data_dir()
@@ -179,6 +188,8 @@ def observe_psmux(
         try:
             port_raw = _read(paths["port"])
         except FileNotFoundError:
+            if expected_incarnation is not None:
+                return Observation("unknown", "missing-rendezvous")
             inventory = (
                 _inventory() if _inventory is not None
                 else _settled_inventory(root, deadline)
@@ -197,6 +208,8 @@ def observe_psmux(
         result = _parse(_exchange(int(port_text), key, deadline), session)
         if _read(paths["port"]) != port_raw or _read(paths["key"]) != key_raw:
             return Observation("unknown", "changed-rendezvous")
+        if expected_incarnation is not None and result.incarnation != expected_incarnation:
+            return Observation("unknown", "different-incarnation")
         return result
     except (OSError, ValueError, UnicodeError, ObservationUnavailable):
         return Observation("unknown", "native-query-unavailable")
@@ -287,24 +300,44 @@ def main(argv: list[str] | None = None) -> int:
         describe = parser.parse_args(arguments).describe_contract
     if describe:
         print(json.dumps({
-            "contract": CONTRACT, "version": VERSION, "operations": ["psmux-observe"],
+            "contract": CONTRACT, "version": VERSION,
+            "operations": ["psmux-observe", "psmux-observe-pinned"],
             "python": str(Path(sys.executable).absolute()),
             "entrypoint": str(Path(__file__).resolve()),
         }))
         return 0
+    scope: dict[str, str] = {}
     try:
         raw = sys.stdin.read(4097)
         if len(raw) > 4096:
             raise ValueError("Oversized request")
         request = json.loads(raw, object_pairs_hook=_unique_object)
-        if not isinstance(request, dict) or set(request) != {"version", "session"}:
+        if not isinstance(request, dict):
+            raise ValueError("Invalid observation request")
+        pinned = set(request) == {"version", "session", "expected_incarnation"}
+        if not pinned and set(request) != {"version", "session"}:
             raise ValueError("Invalid observation request")
         if type(request["version"]) is not int or request["version"] != VERSION:
             raise ValueError("Unsupported observation request")
-        result = observe_psmux(request["session"])
+        if pinned:
+            root = os.environ.get("PSMUX_DATA_DIR")
+            namespace = os.environ.get("COPILOT_DRIVER_PSMUX_NAMESPACE")
+            if not root or namespace is None or not isinstance(request["expected_incarnation"], str):
+                raise ValueError("Pinned observations require explicit scope and identity")
+            result = observe_psmux(
+                request["session"], data_dir=Path(root), namespace=namespace,
+                expected_incarnation=request["expected_incarnation"],
+            )
+            if result.status != "unsupported":
+                scope = {"operation": "psmux-observe-pinned", "session": request["session"],
+                         "namespace": namespace, "expected_incarnation": request["expected_incarnation"]}
+        else:
+            result = observe_psmux(request["session"])
     except (ValueError, TypeError):
         result = Observation("unsupported", "invalid-request")
-    print(json.dumps({"contract": CONTRACT, "version": VERSION, **asdict(result)}))
+    payload = ({"status": result.status, "reason": result.reason, "incarnation": result.incarnation}
+               if scope else asdict(result))
+    print(json.dumps({"contract": CONTRACT, "version": VERSION, **scope, **payload}))
     return 0 if result.status in {"present", "absent"} else 3
 
 

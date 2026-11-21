@@ -14,11 +14,7 @@ on PATH) and degrades gracefully (the caller falls back to the bridge backend,
 or leaves the task queued) when it is not -- so the plugin remains standalone on
 a host without agent-worktrees.
 
-The two autopilot seed-prompt builders (``autopilot_worker_prompt``,
-``fleet_autopilot_worker_prompt``) live in :mod:`agent_dispatch.embody_prompts`
-(componentization: this module was over the repo's module-size cap) and are
-re-exported here under their original names, so every existing call site is
-unaffected.
+The autopilot seed-prompt builders are re-exported from :mod:`agent_dispatch.embody_prompts`.
 """
 
 from __future__ import annotations
@@ -27,9 +23,13 @@ import json
 import shlex
 import shutil
 import subprocess
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .client import DispatchClient
 
 from . import bridge_remote, worktree_attribution, worktree_cohort, worktree_record
-from .embody_prompts import autopilot_worker_prompt, fleet_autopilot_worker_prompt
+from .embody_prompts import autopilot_worker_prompt as autopilot_worker_prompt, fleet_autopilot_worker_prompt
 from .procutil import (
     agent_worktrees_environment,
     agent_worktrees_launch_prefix,
@@ -56,7 +56,7 @@ class DisposableConclusionError(RuntimeError):
     """Raised when safe terminal conclusion cannot be executed."""
 
 
-def project_for_task(task: dict) -> str | None:
+def project_for_task(task: dict[str, Any]) -> str | None:
     """Resolve a task's lane to a local **project name** for embody's ``--project``.
 
     A supervisor / fleet spawner runs CWD-neutral (its working directory is a
@@ -85,7 +85,7 @@ def project_for_task(task: dict) -> str | None:
     return tail or None
 
 
-def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
+def parse_handle(result: subprocess.CompletedProcess[str]) -> dict[str, str | None]:
     """Best-effort extract the session/worktree handle from ``embody --json``.
 
     Returns ``{"session": ..., "worktree": ...}`` (values may be ``None``). Used
@@ -109,7 +109,7 @@ def create_worktree(
     agent: str | None = None,
     no_pair: bool = False,
     creation_key: str | None = None,
-    allocation_cohort: dict | None = None,
+    allocation_cohort: dict[str, object] | None = None,
     cohort_transport: str = "baseline", runtime_prefix: list[str] | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
@@ -217,8 +217,8 @@ def resolve_worktree(
 
 
 def prepare_reusable_worktree(
-    task: dict,
-    reservation: dict,
+    task: dict[str, Any],
+    reservation: dict[str, Any],
     *,
     project: str | None = None,
     interface: str,
@@ -227,7 +227,7 @@ def prepare_reusable_worktree(
     timeout: float | None = None,
     agent: str | None = None,
     no_pair: bool = False,
-    allocation_client=None,
+    allocation_client: DispatchClient | None = None,
 ) -> dict[str, object]:
     """Resolve a carried owner-qualified workspace or allocate a new one."""
     from .workspace_binding import allocation_project, allocation_provenance, hold, prepared_result
@@ -308,7 +308,7 @@ def conclude_disposable_worker(
     *,
     owner: str = DEFAULT_DRIVER,
     timeout: float = 30.0,
-) -> dict:
+) -> dict[str, Any]:
     """Safely conclude and remove one exact terminal CLI worker.
 
     The local/remote ground layer receives the reservation's recorded worktree
@@ -357,14 +357,14 @@ def conclude_dispatch_attempt(
     project: str | None = None,
     worktree_path: str | None = None,
     creation_nonce: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Safely conclude one dispatch-created (or Bridge-created, by nonce) worktree.
 
     Dispatch provenance is always tried first, so a preallocated worker that
     Bridge merely targeted keeps its exact reservation proof. Only a record
     without dispatch provenance falls back to Bridge's retained creation
     nonce; a runtime without that policy preserves the workspace."""
-    def conclude(*proof: str) -> dict:
+    def conclude(*proof: str) -> dict[str, Any]:
         args = ["conclude-disposable", "--worktree", worktree, *proof,
                 "--owner", owner, "--remove", "--json", *(["--session", session] if session else [])]
         return _run_dispatch_conclusion(
@@ -386,7 +386,7 @@ class _UnsupportedConclusionPolicy(DisposableConclusionError):
 def _run_dispatch_conclusion(
     worktree: str, args: list[str], *, timeout: float,
     project: str | None, worktree_path: str | None,
-) -> dict:
+) -> dict[str, Any]:
     prefix = _agent_worktrees_launch_prefix()
     if prefix is None:
         raise DisposableConclusionError("agent-worktrees CLI not found on this host")
@@ -442,7 +442,7 @@ def spawn_embodied_worker(
     timeout: float | None = None,
     seed: str | None = None,
     charter: str | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Spawn a CLI-backed autopilot worker via ``agent-worktrees embody``.
 
     Runs ``agent-worktrees [--project <project>] embody --new --seed "<autopilot
@@ -533,7 +533,7 @@ def spawn_fleet_embodied_worker(
     *,
     origin: str,
     owner: str,
-    worker_id: str,
+    worker_id: str, machine: str | None = None,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
     repo: str | None = None,
@@ -541,7 +541,7 @@ def spawn_fleet_embodied_worker(
     route: str = "",
     verify_timeout: int = 0,
     timeout: float | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Spawn a CLI-backed autopilot body on a **remote pool ``host``** via SSH.
 
     Remote ``agent-worktrees embody --new`` creates a detached worktree/session.
@@ -568,7 +568,7 @@ def spawn_fleet_embodied_worker(
         owner=owner,
         worker_id=worker_id,
         repo=repo,
-        all_repos=all_repos,
+        all_repos=all_repos, machine=machine,
         **({"route": route} if route else {}),
     )
     remote_argv = ["agent-worktrees"]
@@ -604,14 +604,14 @@ def spawn_fleet_headless_worker(
     *,
     origin: str,
     owner: str,
-    worker_id: str,
+    worker_id: str, machine: str | None = None,
     agent: str = DEFAULT_HEADLESS_AGENT,
     charter: str | None = None,
     repo: str | None = None,
     all_repos: bool = False,
     route: str = "",
     timeout: float | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Spawn a **headless agent-bridge ACP** body on a remote pool ``host``.
 
     Use the local Bridge carrier, with bounded SSH fallback only when that
@@ -631,9 +631,8 @@ def spawn_fleet_headless_worker(
     ``--no-wait`` create returns once the ACP session is spawned into the host's
     bridge daemon, which owns it independently of the command transport.
 
-    If carrier capability is absent, missing local ``ssh`` raises
-    :class:`EmbodyUnavailable`; a fallback host lacking ``agent-bridge`` surfaces
-    as a non-zero exit (the caller fails the reservation).
+    Without carrier capability, missing local ``ssh`` or a non-POSIX fallback
+    host (``fleet.require_posix_bridge_host``) raises :class:`EmbodyUnavailable`.
     """
     host = bridge_remote.normalize_host(host)
     seed = fleet_autopilot_worker_prompt(
@@ -642,7 +641,7 @@ def spawn_fleet_headless_worker(
         owner=owner,
         worker_id=worker_id,
         repo=repo,
-        all_repos=all_repos,
+        all_repos=all_repos, machine=machine,
         **({"route": route} if route else {}),
     )
     try:
@@ -680,6 +679,8 @@ def spawn_fleet_headless_worker(
     exe = shutil.which("ssh")
     if exe is None:
         raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
+    from . import fleet  # lazy: fleet imports embody
+    fleet.require_posix_bridge_host(host)
     # `--json` (a global flag, before the subcommand) makes `create --no-wait`
     # emit the created session_id as JSON, so the caller can record a recovery
     # handle (the pool host's agent-bridge session id) for liveness-gated
@@ -745,7 +746,7 @@ def remote_registered_agent_record(
     agent: str,
     *,
     timeout: float = 15.0,
-) -> dict | object | None:
+) -> dict[str, Any] | object | None:
     """Best-effort single-agent metadata probe on a remote pool host.
 
     Mirrors :func:`agent_dispatch.bridge._resolve_agent_record`'s purpose for a
@@ -762,7 +763,7 @@ def remote_registered_agent_record(
     if exe is None:
         return None
 
-    def _run(remote_argv: list[str]) -> subprocess.CompletedProcess | None:
+    def _run(remote_argv: list[str]) -> subprocess.CompletedProcess[str] | None:
         remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
         cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
         try:
@@ -813,7 +814,7 @@ def remote_registered_agent_record(
     return bridge._AGENT_NOT_FOUND
 
 
-def parse_fleet_body_session(result: subprocess.CompletedProcess) -> str | None:
+def parse_fleet_body_session(result: subprocess.CompletedProcess[str]) -> str | None:
     """Extract the agent-bridge **session id** from ``create --no-wait --json``.
 
     The headless-fleet body is a bridge-hosted ACP session on the pool host; its
@@ -873,7 +874,7 @@ _FLEET_BODY_ALIVE = frozenset(
 )
 
 
-def _classify_body_status(proc: subprocess.CompletedProcess) -> str:
+def _classify_body_status(proc: subprocess.CompletedProcess[str]) -> str:
     """Classify an ``agent-bridge --json status <session>`` result to a tri-state
     verdict, shared by the fleet (SSH) and local body probes.
 

@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 import threading
 from types import SimpleNamespace
+from collections.abc import Callable
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -16,7 +18,7 @@ SOURCE = Path(__file__).resolve().parents[2] / "plugins/agent-worktrees/src/agen
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     spec = importlib.util.spec_from_file_location("promotion_hook_demand", SOURCE)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -37,8 +39,10 @@ def api(monkeypatch):
     owner._worktree_changed = None
     owner._read_demand_lock = threading.RLock()
 
-    def dispatch(change=None):
-        request = {
+    def dispatch(
+        change: Callable[[dict[str, Any], SimpleNamespace, Any], None] | None = None,
+    ) -> dict[str, Any] | None:
+        request: dict[str, Any] = {
             "version": 1, "token": "expected", "kind": "postToolUse",
             "payload": {"toolName": "view"}, "deadline": 101.0,
         }
@@ -56,13 +60,13 @@ def api(monkeypatch):
         handler.rfile = io.BytesIO((json.dumps(request) + "\n").encode())
         handler.handle()
         raw = handler.wfile.getvalue()
-        return json.loads(raw) if raw else None
+        return cast(dict[str, Any], json.loads(raw)) if raw else None
 
     return SimpleNamespace(module=module, clock=clock, owner=owner, dispatch=dispatch)
 
 
 @pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])
-def test_completed_hook_response_retains_demand_until_monotonic_expiry(api, kind):
+def test_completed_hook_response_retains_demand_until_monotonic_expiry(api: SimpleNamespace, kind: str) -> None:
     assert not api.owner.has_recent_hook_demand()
     response = api.dispatch(lambda request, *_a: request.update(kind=kind))
     assert response["version"] == 1
@@ -75,10 +79,49 @@ def test_completed_hook_response_retains_demand_until_monotonic_expiry(api, kind
 
 
 @pytest.mark.parametrize("case", [
+    "current", "large-pre", "generation", "closed", "flag", "deadline", "oversized", "post-oversized",
+])
+def test_native_policy_request_retains_generation_and_bounded_admission(api: SimpleNamespace, case: str) -> None:
+    def change(request: dict[str, Any], server: SimpleNamespace, handler: Any) -> None:
+        request["kind"] = "preToolUse"
+        request["hook_generation"] = api.owner.generation
+        request["payload"]["_agentWorktrees"] = {"nativePolicy": 1}
+        if case == "generation":
+            request["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.admission_closed = True
+        elif case == "flag":
+            request["payload"]["_agentWorktrees"]["nativePolicy"] = True
+        elif case == "deadline":
+            request["deadline"] = float("nan")
+        elif case == "oversized":
+            request["payload"]["padding"] = "x" * (2 * 1024 * 1024)
+        elif case == "large-pre":
+            request["payload"]["padding"] = "x" * 65536
+        elif case == "post-oversized":
+            request["kind"] = "postToolUse"
+            request["payload"]["padding"] = "x" * 65536
+        if case not in {"current", "large-pre"}:
+            server.decide = lambda *_a: pytest.fail("unavailable request reached policy")
+
+    response = api.dispatch(change)
+    if case == "oversized":
+        assert response is None
+        assert not api.owner.has_recent_hook_demand()
+    elif case in {"current", "large-pre"}:
+        assert response["result"] == {"additionalContext": "handled"}
+        assert "native-tool-policy-v1" in response["capabilities"]
+        assert api.owner.has_recent_hook_demand()
+    else:
+        assert response["fallback"] is True
+        assert not api.owner.has_recent_hook_demand()
+
+
+@pytest.mark.parametrize("case", [
     "current", "generation", "closed", "revoked", "legacy", "deadline", "extra", "version",
 ])
-def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):
-    def change(request, server, handler):
+def test_send_only_read_demand_keeps_original_admission_and_expiry(api: SimpleNamespace, case: str) -> None:
+    def change(request: dict[str, Any], server: SimpleNamespace, handler: Any) -> None:
         request.clear()
         request.update(
             version=1, token="expected", kind="readHookDemand",
@@ -111,7 +154,7 @@ def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):
     "current", "generation", "closed", "unavailable", "legacy",
     "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
 ])
-def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, case):
+def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "nativeToolMutation")
 
 
@@ -119,11 +162,11 @@ def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, 
     "current", "generation", "closed", "revoked", "legacy", "deadline", "payload", "version",
     "contended", "expired-after-lock",
 ])
-def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api, case):
-    seen = []
+def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api: SimpleNamespace, case: str) -> None:
+    seen: list[str | None] = []
     cwd = str(SOURCE.parent)
 
-    def change(request, server, handler):
+    def change(request: dict[str, Any], server: SimpleNamespace, handler: Any) -> None:
         request.clear()
         request.update(
             version=1, token="expected", kind="worktreeChanged",
@@ -151,7 +194,7 @@ def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api, cas
                 release=lambda: pytest.fail("unowned worktree-change lock release"),
             )
         elif case == "expired-after-lock":
-            def acquire(**kwargs):
+            def acquire(**kwargs: Any) -> bool:
                 api.clock["wall"] = 101.0
                 return True
             api.owner._read_demand_lock = SimpleNamespace(acquire=acquire, release=lambda: None)
@@ -165,7 +208,7 @@ def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api, cas
     "current", "generation", "closed", "unavailable", "legacy",
     "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
 ])
-def test_native_batch_mutation_uses_original_send_only_boundary(api, case):
+def test_native_batch_mutation_uses_original_send_only_boundary(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "nativeToolBatchMutation")
 
 
@@ -173,7 +216,7 @@ def test_native_batch_mutation_uses_original_send_only_boundary(api, case):
     "current", "generation", "closed", "unavailable", "legacy",
     "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
 ])
-def test_shell_mutation_uses_original_send_only_boundary(api, case):
+def test_shell_mutation_uses_original_send_only_boundary(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "shellToolMutation")
 
 
@@ -181,13 +224,13 @@ def test_shell_mutation_uses_original_send_only_boundary(api, case):
     "current", "generation", "closed", "unavailable", "legacy",
     "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
 ])
-def test_mixed_batch_mutation_uses_original_send_only_boundary(api, case):
+def test_mixed_batch_mutation_uses_original_send_only_boundary(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "mixedToolBatchMutation")
 
 
-def _assert_native_mutation_boundary(api, case, kind):
-    seen = []
-    payload = {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}}
+def _assert_native_mutation_boundary(api: SimpleNamespace, case: str, kind: str) -> None:
+    seen: list[tuple[Any, ...]] = []
+    payload: dict[str, Any] = {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}}
     if kind == "nativeToolBatchMutation":
         payload = {"toolCalls": [{"name": "multi_edit", "args": payload["toolArgs"]}]}
     elif kind == "shellToolMutation":
@@ -198,7 +241,7 @@ def _assert_native_mutation_boundary(api, case, kind):
             {"name": "powershell", "args": '{"command":"git pull --ff-only"}'},
         ]}
 
-    def decide(*args):
+    def decide(*args: Any) -> dict[str, Any] | None:
         if case == "unavailable":
             raise api.module.HookUnavailable
         if case == "declined":
@@ -206,7 +249,7 @@ def _assert_native_mutation_boundary(api, case, kind):
         seen.append(args)
         return {}
 
-    def change(request, server, handler):
+    def change(request: dict[str, Any], server: SimpleNamespace, handler: Any) -> None:
         request.clear()
         request.update(
             version=1, token="expected", kind=kind,
@@ -248,25 +291,26 @@ def _assert_native_mutation_boundary(api, case, kind):
     "token", "version", "payload", "kind", "expired", "closed",
     "failed", "unavailable", "late", "result", "serialization", "write",
 ])
-def test_rejected_or_uncompleted_requests_do_not_retain_hook_demand(api, case):
-    def change(request, server, handler):
+def test_rejected_or_uncompleted_requests_do_not_retain_hook_demand(api: SimpleNamespace, case: str) -> None:
+    def change(request: dict[str, Any], server: SimpleNamespace, handler: Any) -> None:
         if case in {"token", "version", "payload", "kind", "expired"}:
-            request.update({
+            overrides: dict[str, dict[str, Any]] = {
                 "token": {"token": "foreign"},
                 "version": {"version": 2},
                 "payload": {"payload": []},
                 "kind": {"kind": "handoffWake"},
                 "expired": {"deadline": 99.0},
-            }[case])
+            }
+            request.update(overrides[case])
         elif case == "closed":
             server.admission_closed = True
             server.admission_closed_reason = "superseded"
         elif case in {"failed", "unavailable"}:
-            def refuse(*args):
+            def refuse(*args: Any) -> NoReturn:
                 raise api.module.HookUnavailable if case == "unavailable" else RuntimeError()
             server.decide = refuse
         elif case == "late":
-            def late(*args):
+            def late(*args: Any) -> dict[str, Any]:
                 api.clock["wall"] = 101.0
                 return {}
             server.decide = late
@@ -276,7 +320,7 @@ def test_rejected_or_uncompleted_requests_do_not_retain_hook_demand(api, case):
             server.decide = lambda *a: {"not-json": object()}
         else:
             class Broken(io.BytesIO):
-                def write(self, data):
+                def write(self, data: Any) -> int:
                     raise BrokenPipeError
             handler.wfile = Broken()
 
@@ -285,10 +329,10 @@ def test_rejected_or_uncompleted_requests_do_not_retain_hook_demand(api, case):
 
 
 @pytest.fixture
-def exit_api(monkeypatch):
-    events = []
+def exit_api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    events: list[dict[str, Any]] = []
 
-    def record(directory, action, **kwargs):
+    def record(directory: Path, action: str, **kwargs: Any) -> dict[str, Any]:
         events.append({"action": action, **kwargs})
         return events[-1]
 
@@ -304,11 +348,11 @@ def exit_api(monkeypatch):
     )
 
 
-def test_idle_diagnostics_preserve_short_circuit_and_do_not_write_during_checks(exit_api):
+def test_idle_diagnostics_preserve_short_circuit_and_do_not_write_during_checks(exit_api: SimpleNamespace) -> None:
     trace = exit_api.trace
     probes = []
 
-    def probe(name, clear):
+    def probe(name: str, clear: bool) -> bool:
         probes.append(name)
         return clear
 
@@ -331,7 +375,9 @@ def test_idle_diagnostics_preserve_short_circuit_and_do_not_write_during_checks(
 @pytest.mark.parametrize(
     "error", [RuntimeError("private message"), KeyboardInterrupt()], ids=["error", "interrupt"],
 )
-def test_retirement_diagnostics_preserve_original_error_without_recording_it(exit_api, error):
+def test_retirement_diagnostics_preserve_original_error_without_recording_it(
+    exit_api: SimpleNamespace, error: BaseException,
+) -> None:
     with pytest.raises(type(error)) as raised:
         with exit_api.trace.retiring("idle-no-demand", error):
             raise error
@@ -343,7 +389,7 @@ def test_retirement_diagnostics_preserve_original_error_without_recording_it(exi
     }
 
 
-def test_idle_diagnostics_clear_prior_observation_and_filter_unknown_labels(exit_api):
+def test_idle_diagnostics_clear_prior_observation_and_filter_unknown_labels(exit_api: SimpleNamespace) -> None:
     trace = exit_api.trace
     trace.check("picker", False)
     trace.begin_idle()
@@ -355,7 +401,9 @@ def test_idle_diagnostics_clear_prior_observation_and_filter_unknown_labels(exit
     }
 
 
-def test_unavailable_exit_log_does_not_prevent_retirement(exit_api, monkeypatch):
+def test_unavailable_exit_log_does_not_prevent_retirement(
+    exit_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(exit_api.module.lifecycle, "record", lambda *a, **k: None)
     completed = []
     with exit_api.trace.retiring("idle-no-demand", None):
@@ -364,17 +412,20 @@ def test_unavailable_exit_log_does_not_prevent_retirement(exit_api, monkeypatch)
 
 
 @pytest.mark.parametrize("phase", ["cleanup-begin", "cleanup-failed", "cleanup-complete"])
-def test_log_interruption_cannot_skip_cleanup_or_replace_its_error(exit_api, monkeypatch, phase):
+def test_log_interruption_cannot_skip_cleanup_or_replace_its_error(
+    exit_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
     record = exit_api.module.lifecycle.record
 
-    def interrupt(directory, action, **kwargs):
+    def interrupt(directory: Path, action: str, **kwargs: Any) -> dict[str, Any]:
         if kwargs["detail"]["phase"] == phase:
             raise KeyboardInterrupt
-        return record(directory, action, **kwargs)
+        return cast(dict[str, Any], record(directory, action, **kwargs))
 
     monkeypatch.setattr(exit_api.module.lifecycle, "record", interrupt)
     error = RuntimeError("original retirement error") if phase == "cleanup-failed" else None
-    completed, caught = [], None
+    completed: list[bool] = []
+    caught: BaseException | None = None
     try:
         with exit_api.trace.retiring("idle-no-demand", error):
             completed.append(True)

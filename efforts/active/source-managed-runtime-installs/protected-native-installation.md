@@ -3,7 +3,7 @@
 Back to [Source-Managed Runtime Installs](README.md).
 Tracked by [#13504](https://github.com/ThomasMichon/copilot-extensions/issues/13504).
 
-**Status: proposed source contract, not implemented or natively qualified.**
+**Status: Linux source implementation and containing release qualified; native adoption open.**
 This bounded slice complements #12905's Manager reference and #12900's
 provider/profile reconstruction. It takes neither program nor live installation
 custody. It targets the installer's
@@ -108,18 +108,21 @@ Automatic inhibition remains automatic-only.
 
 ## Plan
 
-- [ ] P1: Review this handoff contract and retain the existing source,
+- [x] P1: Review this handoff contract and retain the existing source,
   construction, Manager, provider/profile and native lifecycle owners.
-- [ ] P2: Implement the smallest protected provider/admission seam in the
+- [x] P2: Implement the smallest protected provider/admission seam in the
   existing installation/runtime libraries, with a trustworthy native bootstrap
   entry and unchanged ordinary defaults. Document its actual platform support
   and the source of independent administrative trust.
-- [ ] P3: Qualify the real owning functions and compatibility boundary with
+- [x] P3: Qualify the real owning functions and compatibility boundary with
   focused inert unit controls and existing contained process/filesystem fixtures.
   Complete normal source review, required CI, merge and containing release.
 - [ ] P4: Migrate a capable consumer through the released contract, retaining
   its explicit target authority and separately owned native installation,
   provider adoption and readiness qualification. Report remaining gates.
+  The [closed-wheel downstream Source preparation proposal](closed-wheel-source-preparation.md)
+  supplies the input-contract sub-slice for applications whose valid development
+  graph is distinct from their independently selected closed-wheel runtime.
 
 ## Validation plan
 
@@ -152,3 +155,71 @@ The source deliverable ends at reviewed implementation and release with honest
 native/adoption limits. The parent effort's full Plan and Validation Plan remain
 the installation completion gate; neither this proposal nor a contained witness
 completes F1-F3 or provider reconstruction.
+
+## Source implementation
+
+The implementation uses the canonical installer library's
+[protected entry](../../../libs/installer-engine/protected-installation.md):
+an independently installed native bootstrap loads a protected packaged seed,
+never an elevated controller-owned Python program.
+
+The first provider is explicitly Linux root-only and requires independently
+admitted, already protected source/toolchain and addressed output roles.
+It composes the existing Source/application entry, leaves ordinary callers
+unchanged and refuses unsupported selected-owner contracts. It does not supply
+an installer for its own privileged seed or establish that a native deployment
+is qualified. P3's source review/CI/merge and containing release are recorded
+below. P4's capable-consumer adoption, the full parent and native acceptance
+gates remain open.
+
+## Journal
+
+### 2026-11-19 - Contract proposal
+
+The contract proposal merged in
+[13506](https://github.com/ThomasMichon/copilot-extensions/pull/13506) as
+`62693117778137089298374d4dcb506c2185532f` after accepted current-head review
+and required CI. Its protection-before-import boundary and independently owned
+construction/lifecycle requirements govern the source implementation.
+
+### 2026-11-19 - Implementation and containing release
+
+The implementation merged in
+[13517](https://github.com/ThomasMichon/copilot-extensions/pull/13517) as
+`30ab3a8263cabee8c559c35f6423b72cf41cfc50` after current-head Copilot review,
+disposition of its already-addressed carried findings and successful required
+checks. Focused source qualification covers 16 admitted in-memory controls,
+110 separate protected/materialization/ordinary controls and the existing
+packaged-provider case, with strict Linux/Windows typing and lint.
+The first provider requires static native UV without `PT_INTERP` or
+`PT_DYNAMIC`; ordinary callers retain their existing defaults.
+
+Initial containing promotions correctly refused a retained-helper closure
+omission and a later distinct native Manager consumer failure. Those nonpasses
+remain in their producing runs; neither was bypassed or represented as a
+qualified release. The existing provider-root owner supplied
+[13555](https://github.com/ThomasMichon/copilot-extensions/pull/13555)'s
+retained-helper correction without transferring its larger program.
+
+Producing run
+[44655473309](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44655473309)
+subsequently passed the exact source-unit/coverage, artifact construction and
+attestation, installed Manager Windows TTY, Windows Resume, immutable reuse,
+publication/readback and normal Main-merge gates. Promotion
+[13573](https://github.com/ThomasMichon/copilot-extensions/pull/13573)
+actually merged Main `e3b27e01febf4f7edbf58425011e2379f1c48d83`, from validated
+Dev `3a5ab4c81640c86fd9887643ffc3fe204ad04327`.
+The source artifacts were actually published before that merge.
+
+Nonexecuting content readback confirms that the validated Dev source contains
+the implementation merge, and that Main's Manager source-provider bundle
+retains the exact protected provider, native executable helper, bootstrap,
+staging-environment helper and generated-launcher helper. Main's Vault payload
+also contains the exact protected provider, native executable helper and
+bootstrap, with the declared `linux-root/v1` capability. This is content
+qualification, not an inference from Main ancestry.
+
+P3 is complete for source and containing release. P4 remains open for its
+capable consumer; no privileged installation, native protection against another
+identity, provider adoption, installed target readiness or deployment is claimed.
+The parent N1 and global Validation remain open at their complete scope.

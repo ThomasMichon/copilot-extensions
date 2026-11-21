@@ -44,6 +44,32 @@ These are candidate families, not assertions that each needs a new defect or
 issue. Each implementation unit must identify a
 specific failing boundary, supported contract and unconflicted owner.
 
+## U13617 - Retained legacy supervisor
+
+The [complete planned case](legacy-supervisor-upgrade.md) joins the existing
+ordinary-update recovery objective, not the optional source-only capture
+subcase below. All seven P13617/V13617/G13617 technical checks remain
+unchecked in the ROOT. The existing selected-case controls still apply at
+their actual scope; no implementation or native operation is appointed.
+
+| Before-state | Required outcome and distinct evidence | Existing coordination |
+|---|---|---|
+| An incoming Windows Dispatch coordinator is healthy, but post-install reconciliation encounters a retained legacy master without completed-cycle support or an acceptable prepared record. | Supported owner-controlled transition OR actionable prerequisite, actual legacy/current native and cycle evidence, protected workers/accepted operations, truthful full-update and immediate-repeat results. Keep the separately reported coordinator-only preservation result and optional capture independent; old support cannot veto authoritative incoming replacement. | #13617 under #10377; existing Dispatch supervisor, installer, completed-cycle, worker, native-process and capture/restoration owners. No fabricated preparation, duplicate master, process action or claim release follows from planning. |
+
+## Finite source-only capture subcase
+
+U6-13667 is an optional capture/validation subcase of the existing
+source/platform coordination, NOT a selected whole-update recovery case.
+Its complete finite acceptance is P13667-1/P13667-2/V13667/G13667 at the
+owning retained-capture boundary. It does not require the latest public
+update entry, an installed consumer or whole-update recovery to pass first.
+Those broader controls remain unchanged for the parent and its existing
+selected cases, and cannot be claimed from this finite source result.
+
+| Source-only subcase | Reported before-state | Required finite evidence | Existing coordination |
+|---|---|---|---|
+| U6-13667 - Retained-capture Windows spelling | Optional Dispatch retained capture compares a forward-slash manifest `venv` with a native backslash slot spelling. | Resolve [P13667/V13667/G13667](retained-capture-path-identity.md): same admitted completed directory, positive capture AND validation, different/indirect/incomplete negatives and every existing identity check. | Existing capture/restoration, installer, source, fixture/native and resource owners under #10377; no live-manifest rewrite, supervisor stop, incoming veto or master-cycle completion claim. |
+
 ## L5820 - Whole installer and resident-companion lifecycle
 
 Source: #5820, including its original version-slot/whole-lifecycle intent,
@@ -73,6 +99,11 @@ No updater, live companion operation, resource release or custody transfer
 is authorized by this documentary intake.
 
 ## Required controls for a selected case
+
+These controls remain unchanged for the parent and its other selected cases.
+The explicitly source-only U6-13667 subcase above retains its own finite
+capture/validation acceptance; it neither inherits these whole-update
+prerequisites nor supplies their missing parent evidence.
 
 | Control | Observable postcondition |
 |---|---|

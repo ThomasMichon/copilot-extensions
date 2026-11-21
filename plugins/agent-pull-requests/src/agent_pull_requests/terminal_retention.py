@@ -5,28 +5,40 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from .attention import Cursor
 from .conversation_journal import ConversationJournal, Observation
-from .review_intent import encoded, identifier, text
+from .review_intent import encoded
+from . import review_intent as _review_intent
 from .review_workspace import _scope
 from .watch_contract import PRSnapshot
 from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
 from .workspace_conversation import conversation_key
 
 if TYPE_CHECKING:
+    from .generation_cache import GenerationCache
     from .watch_replay_store import ReplayStore
 
 PROTOCOL = "agent-pull-requests.terminal-retention/v1"
 MAX_RECORDS = 1024
+Document = dict[str, Any]
+text = cast(Callable[[object, int], str], _review_intent.text)
+identifier = cast(Callable[[object], str], _review_intent.identifier)
 
 
 class TerminalAdmissionClosed(RuntimeError):
     """Content or execution admission is fenced; recovery custody is unchanged."""
 
 
-def validate(document: dict, namespace: str) -> None:
+def native_watch_contract() -> dict[str, str]:
+    return {
+        "protocol": "agent-pull-requests.terminal-native-watches/v1",
+        "observations": "native_only", "workspace_deadlines": "sweep_before_retirement",
+    }
+
+
+def validate(document: Document, namespace: str) -> None:
     state = document["terminal_retention"]
     if (
         document["terminal_retention_version"] != 1
@@ -39,7 +51,7 @@ def validate(document: dict, namespace: str) -> None:
     ):
         raise ValueError("invalid terminal retention contract")
     identities = set()
-    targets = {}
+    targets: dict[bytes, Document] = {}
     journal = ConversationJournal(document["conversations"])
     admitted = set()
     for row in state["admissions"]:
@@ -140,17 +152,18 @@ def validate(document: dict, namespace: str) -> None:
             raise ValueError("noncanonical generation scope")
         identifier(row["generation_id"])
         Cursor(row["epoch"], 0)
-        identity = (encoded(row["scope"]), row["generation_id"])
-        if identity in generations:
+        generation_identity = (encoded(row["scope"]), row["generation_id"])
+        if generation_identity in generations:
             raise ValueError("duplicate generation epoch binding")
-        generations.add(identity)
+        generations.add(generation_identity)
     if len(encoded(state)) > document["capacities"]["terminal_retention_bytes"]:
         raise ValueError("terminal retention exceeds its reserved capacity")
 
 
 def require_live(
-    document: dict, scope: dict, *, operation_id: str | None = None,
+    document: Document, scope: Document, *, operation_id: str | None = None,
     generation_id: str | None = None, epoch: int | None = None,
+    recorded_body: bool = False,
 ) -> int | None:
     """Called under replay custody at each content/effect mutation boundary."""
     state = document.get("terminal_retention")
@@ -158,17 +171,28 @@ def require_live(
         return None
     scope = _scope(scope)
     if operation_id is not None and any(
+        operation["intent"]["operation_id"] == operation_id and operation.get("recovery_only") is True
+        for operation in document["reviews"]
+    ):
+        raise TerminalAdmissionClosed("imported original operation is permanently recovery-only")
+    if operation_id is not None and any(
         row["operation_id"] == operation_id
         for row in document.get("terminal_recovery", {}).get("operations", [])
     ):
         raise TerminalAdmissionClosed("historical compact operation is recovery-only")
     admission = next((row for row in state["admissions"] if row["scope"] == scope), None)
-    if admission is None or any(
-        row["scope"] == scope and row["cursor"]["epoch"] == admission["cursor"]["epoch"]
+    if admission is None:
+        from .recorded_terminal_cache import workspace_epoch
+        current_epoch = (
+            workspace_epoch(document, scope) if recorded_body and operation_id is None else None
+        )
+    else:
+        current_epoch = admission["cursor"]["epoch"]
+    if current_epoch is None or any(
+        row["scope"] == scope and row["cursor"]["epoch"] == current_epoch
         for row in state["records"]
     ):
         raise TerminalAdmissionClosed("live conversation epoch unavailable")
-    current_epoch = admission["cursor"]["epoch"]
     if epoch is not None and epoch != current_epoch:
         raise TerminalAdmissionClosed("selected conversation epoch changed")
     if operation_id is not None and any(
@@ -184,13 +208,15 @@ def require_live(
     return current_epoch
 
 
-def bind_generation(document: dict, generation: dict, cursor: dict) -> None:
+def bind_generation(document: Document, generation: Document, cursor: Document) -> None:
     state = document.get("terminal_retention")
     if state is None:
         return
     epoch = require_live(document, generation["scope"], epoch=cursor["epoch"])
-    current = next(row for row in state["admissions"] if row["scope"] == generation["scope"])
-    if current["cursor"] != cursor:
+    current = next(
+        (row for row in state["admissions"] if row["scope"] == generation["scope"]), None,
+    )
+    if current is None or current["cursor"] != cursor:
         raise TerminalAdmissionClosed("publication observation is no longer current")
     row = {"scope": copy.deepcopy(generation["scope"]), "generation_id": generation["id"], "epoch": epoch}
     previous = next(
@@ -204,8 +230,9 @@ def bind_generation(document: dict, generation: dict, cursor: dict) -> None:
 
 
 def observe_terminal(
-    document: dict, scope: dict, record: dict, target: ObservationTarget, *, clock: Callable[[], float],
-) -> dict:
+    document: Document, scope: Document, record: Document, target: ObservationTarget, *, clock: Callable[[], float],
+    native_watches: bool = False,
+) -> Document:
     """Stage notification and fence with the tombstone, never a second file commit."""
     if type(target) is not ObservationTarget or target.number != scope["number"]:
         raise ValueError("actual captured terminal observation target required")
@@ -237,14 +264,16 @@ def observe_terminal(
     ):
         raise TerminalAdmissionClosed("finite original delivery recovery policy required")
     core = WatchReplay(document["namespace"], state=before, commit=lambda _state: None, clock=clock)
-    core.observe(
-        target.account, target.repo, target.number,
-        PRSnapshot(
-            pr_state="closed", merged=value.state == "merged",
-            head_sha=value.candidate.head, provider=value.key.provider,
-        ),
-        registration_ids=target.registration_ids,
-    )
+    core.sweep_timeouts()
+    if not native_watches:
+        core.observe(
+            target.account, target.repo, target.number,
+            PRSnapshot(
+                pr_state="closed", merged=value.state == "merged",
+                head_sha=value.candidate.head, provider=value.key.provider,
+            ),
+            registration_ids=target.registration_ids,
+        )
     after = core.snapshot()
     deliveries = []
     for registration in before["records"]:
@@ -258,7 +287,7 @@ def observe_terminal(
             continue
         identity = registration["registration_id"]
 
-        def pending(replay: dict) -> dict | None:
+        def pending(replay: Document) -> Document | None:
             return next(
                 (sub["pending"] for group in replay["registries"]
                  for sub in group["subscriptions"] if sub["registration_id"] == identity), None,
@@ -301,7 +330,7 @@ def observe_terminal(
     return copy.deepcopy(row)
 
 
-def observe_live(document: dict, scope: dict, record: dict, target: ObservationTarget) -> None:
+def observe_live(document: Document, scope: Document, record: Document, target: ObservationTarget) -> None:
     """Keep admission authority distinct from later partial journal evidence."""
     if type(target) is not ObservationTarget or target.number != scope["number"]:
         raise ValueError("actual captured live observation target required")
@@ -321,7 +350,7 @@ def observe_live(document: dict, scope: dict, record: dict, target: ObservationT
         state["admissions"].append(row)
 
 
-def replay_epoch(document: dict, target: ObservationTarget) -> tuple[str, int] | None:
+def replay_epoch(document: Document, target: ObservationTarget) -> tuple[str, int] | None:
     state = document.get("terminal_retention")
     if state is None:
         return None
@@ -338,7 +367,7 @@ def replay_epoch(document: dict, target: ObservationTarget) -> tuple[str, int] |
 
 
 def replay_observation(
-    document: dict, target: ObservationTarget, snapshot: PRSnapshot,
+    document: Document, target: ObservationTarget, snapshot: PRSnapshot,
 ) -> PRSnapshot | None:
     """Preserve the pre-IO epoch; never promote an old read into reopened content."""
     current_epoch = replay_epoch(document, target)
@@ -369,36 +398,77 @@ class TerminalRetentionStore:
     def adopt(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
         checkpoint: Callable[[], None] | None = None, retention_bytes: int = 8 * 1024 * 1024,
-    ) -> dict:
+        retained_cache: GenerationCache | None = None, retained_targets: list[Document] | None = None,
+    ) -> Document:
         if not callable(lifecycle_checkpoint):
             raise ValueError("actual reader lifecycle checkpoint required")
+        if (retained_cache is None) != (retained_targets is None):
+            raise ValueError("retained cache and original target bindings are required together")
 
         def current() -> None:
+            self.owner.check_current(expires_at, None)
             if checkpoint is not None:
                 checkpoint()
             lifecycle_checkpoint()
+            if retained_cache is not None and retained_cache.checkpoint is not None:
+                retained_cache.checkpoint()
 
-        def adopt(document: dict) -> dict:
+        def adopt(document: Document) -> Document:
             lifecycle_checkpoint()
+            if retained_cache is not None and (
+                retained_cache.owner_root != self.owner.root
+                or retained_cache.expected_descriptor["namespace"] != document["namespace"]
+                or retained_cache.expected_descriptor["service"] != document["service"]
+            ):
+                raise ValueError("retained cache must belong to the original replay owner")
             if document["version"] not in (3, 4, 5, 6):
                 raise ValueError("terminal retention requires conversation adoption")
-            if "terminal_retention" in document:
+            adopted = "terminal_retention" in document
+            if adopted:
                 if document["capacities"]["terminal_retention_bytes"] != retention_bytes:
                     raise ValueError("terminal capacity differs from adopted layout")
-                return {"status": "already_adopted", "protocol": PROTOCOL}
-            document["terminal_retention_version"] = 1
-            document["terminal_retention"] = {
-                "protocol": PROTOCOL, "records": [], "generations": [], "admissions": [],
-            }
-            document["capacities"]["terminal_retention_bytes"] = retention_bytes
+            else:
+                document["terminal_retention_version"] = 1
+                document["terminal_retention"] = {
+                    "protocol": PROTOCOL, "records": [], "generations": [], "admissions": [],
+                }
+                document["capacities"]["terminal_retention_bytes"] = retention_bytes
+            if retained_cache is not None and retained_targets is not None:
+                from .generation_cache import GenerationCache as RequestCache
+                from .retained_live_cache import validate as validate_metadata
+                original_cache = retained_cache
+
+                request_cache = RequestCache(
+                    original_cache.owner_root, self.owner.namespace,
+                    max_bytes=original_cache.max_bytes, max_generations=original_cache.max_generations,
+                    service_identity=self.owner.service_identity, checkpoint=current,
+                )
+                validate_metadata(
+                    document, request_cache, retained_targets, current,
+                    recorded_generations=self.owner.recorded_terminal_cache,
+                    recorded_native_targets=(
+                        self.owner.recorded_terminal_cache and self.owner.native_generation_associations
+                    ),
+                    retained_active_reviews=self.owner.retained_active_reviews,
+                )
+                from .terminal_recovery import PROTOCOL as RECOVERY
+                from .terminal_cache_retirement import PROTOCOL as CACHE
+                complete = copy.deepcopy(document)
+                complete.setdefault("terminal_recovery_version", 1)
+                complete.setdefault("terminal_recovery", {"protocol": RECOVERY, "operations": []})
+                complete.setdefault("terminal_cache_retirement_version", 1)
+                complete.setdefault("terminal_cache_retirement", {"protocol": CACHE, "records": []})
+                if self.owner.terminal_comment_mapping:
+                    complete["terminal_comment_mapping_version"] = 1
+                self.owner._validate_owner(complete)
             self.owner._validate_owner(document)
             lifecycle_checkpoint()
-            return {"status": "adopted", "protocol": PROTOCOL}
+            return {"status": "already_adopted" if adopted else "adopted", "protocol": PROTOCOL}
 
         return self.owner._review_transaction(adopt, expires_at=expires_at, checkpoint=current)
 
     @staticmethod
-    def selected(document: dict, scope: dict, cursor: Cursor) -> dict:
+    def selected(document: Document, scope: Document, cursor: Cursor) -> Document:
         if type(cursor) is not Cursor:
             raise ValueError("exact terminal cursor required")
         state = document.get("terminal_retention")
@@ -415,12 +485,12 @@ class TerminalRetentionStore:
             record["epoch"] != cursor.epoch or not Observation.restore(record["current"]).terminal
         ):
             raise TerminalAdmissionClosed("terminal retirement no longer owns the selected epoch")
-        return row
+        return cast(Document, row)
 
     def inspect(
-        self, scope: dict, cursor: Cursor, *, expires_at: int,
+        self, scope: Document, cursor: Cursor, *, expires_at: int,
         checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> Document:
         scope = _scope(scope)
         return self.owner._review_transaction(
             lambda document: self.selected(document, scope, cursor),

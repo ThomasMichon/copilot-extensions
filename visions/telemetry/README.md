@@ -4,7 +4,7 @@
   Extensions tools and services, with sinks owned by the adopting harness
 - **Scope:** branch (cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-19
 - **Reality docs:** [Suite architecture](../../docs/architecture.md) ·
   [Dispatch telemetry seam](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [Bridge telemetry seam](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
@@ -19,8 +19,8 @@ together rather than as unrelated plugin-specific streams.
 
 **Implementing harnesses bring their own sink.** A harness selects its consumer
 through per-harness configuration or a user-local override, in the same adoption
-shape as configurable logger and index capabilities. The generic suite supplies
-portable producer seams, not an organization-specific sink or destination.
+shape as configurable logger, index and Vault capabilities. The generic suite
+supplies portable producer seams, not an organization-specific sink or destination.
 Selected capabilities can offer bounded history profiles without imposing them
 on unrelated telemetry. Adoption is optional: an unconfigured installation exports
 nothing and remains fully useful.
@@ -41,6 +41,7 @@ nothing and remains fully useful.
 - **Transport-neutral delivery.** A continuously fed executable and a discovered
   local HTTP daemon are alternative ways to consume the same event model and
   context. The transport does not change attribution, privacy or trace meaning.
+  HTTP is optional; command-only adoption does not require a standing service.
 - **Independent local diagnostics.** Owner-local logs, status and diagnostic
   tools remain usable without export and without access to a configured sink.
 - **Machine health heartbeats.** An optional
@@ -69,6 +70,10 @@ the selection within the adopter's policy. The effective choice is explainable
 without revealing credentials or sensitive configuration. The suite imposes no
 particular organization's selection or override policy.
 
+The selection can name an adopter-owned receiver script or executable. A
+producer uses that declared consumer without importing its packages or
+requiring separate consumer wiring inside every plugin.
+
 ### continuous-executable-sink
 
 A harness can select an executable launched for a particular producer or source
@@ -77,12 +82,25 @@ input**. That consumer has an explicit owner and lifetime; it is not a new
 process for each event, and short-lived callbacks or hooks do not bootstrap a
 reporter. Consumer failure or restart remains separate from producer success.
 
+### daemon-free-command-adoption
+
+Command-only collection is a complete adoption mode for short-lived tools and
+long-running producers. An adopter can supply a receiver script or executable
+without installing or starting an HTTP daemon or a service-management layer.
+Ordinary command dependencies remain explicit; telemetry does not bootstrap
+them during an observed callback.
+
 ### discovered-local-http-sink
 
-A harness can instead select a local HTTP daemon reached through the owning
-service's endpoint or port-discovery mechanism. Clients discover the current
-owned endpoint; they neither assume a fixed port nor scan for a listener.
-Selecting this transport does not implicitly install or start a daemon.
+A harness can optionally select a local HTTP daemon reached through the owning
+service's discovery mechanism. The harness can provide a command that resolves
+the current owned endpoint, keeping port and runtime-discovery details out of
+producers. Clients neither assume a fixed port nor scan for a listener.
+
+An adopter offering this service owns its explicit installation, readiness,
+start, update and removal lifecycle. Command-only consumers do not acquire
+that lifecycle dependency. Selecting HTTP or emitting an event does not
+implicitly install or start a daemon.
 
 ### locally-inspectable-capture
 
@@ -207,6 +225,7 @@ subject of [Process Telemetry](../process-telemetry/README.md).
 - No bundled organization sink, implicit off-site destination, automatic export
   when unconfigured, or mandatory observability stack for generic adopters.
 - No implicit sink, SDK, exporter or daemon installation or rollout.
+- No mandatory HTTP receiver or service installer for command-only collection.
 - No telemetry-owned process registry, discovery authority, liveness ledger or
   control plane. Observations do not authorize execution, recovery or cleanup;
   authoritative operational state remains with its existing owner.

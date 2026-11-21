@@ -3599,10 +3599,12 @@ function Ensure-PsmuxSshSafe {
        piped/NoProfile pwsh. (Same reparse-shim wall the WinGet uv.exe install
        hits.)
 
-       Fix: select the newest compatible REAL binary, remove
-       every stale marlocarlo.psmux package directory from User and process
-       PATH, and put that directory first. This does not mutate the package or
-       its server, so it remains safe while existing sessions are live. #>
+       Fix: select the newest compatible REAL binary from the WinGet packages
+       or the agent-worktrees side-by-side root, remove every stale
+       marlocarlo.psmux package and side-by-side version directory from User
+       and process PATH, and put that directory first. This does not mutate
+       any package or server, so it remains safe while existing sessions are
+       live. #>
     $packageRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (-not (Test-Path -LiteralPath $helper)) {
@@ -3610,20 +3612,22 @@ function Ensure-PsmuxSshSafe {
         return
     }
     . $helper
+    $sideBySideRoot = Get-AwPsmuxSideBySideRoot
     $selected = Find-AwCompatiblePsmuxPackageBinary `
-        -PackageRoot $packageRoot
+        -PackageRoot $packageRoot -SideBySideRoot $sideBySideRoot
     if (-not $selected) {
-        Write-ServiceWarn "psmux: no compatible WinGet package binary was found; User PATH was not changed"
+        Write-ServiceWarn "psmux: no compatible WinGet package or side-by-side binary was found; User PATH was not changed"
         return
     }
 
     $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'Path' -Target 'User'
     if (-not $userPath) { $userPath = '' }
     $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
-        -UserPath $userPath -ProcessPath $env:Path -PackageRoot $packageRoot
+        -UserPath $userPath -ProcessPath $env:Path -PackageRoot $packageRoot `
+        -SideBySideRoot $sideBySideRoot
     if ($repair.UserChanged) {
         Set-CopilotPersistentEnvironmentVariable -Name 'Path' -Value $repair.UserPath -Target 'User'
-        Write-ServiceChanged "psmux: selected compatible $($selected.Version) package binary and removed stale package dirs from User PATH (SSH-safe): $($selected.Directory)"
+        Write-ServiceChanged "psmux: selected compatible $($selected.Version) binary and removed stale psmux dirs from User PATH (SSH-safe): $($selected.Directory)"
     }
     $env:Path = $repair.ProcessPath
 
@@ -3675,7 +3679,8 @@ function Resolve-AwPsmuxBin {
        if (Test-Path -LiteralPath $helper) {
            . $helper
            $desired = Find-AwCompatiblePsmuxPackageBinary `
-               -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
+               -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+               -SideBySideRoot (Get-AwPsmuxSideBySideRoot)
            if ($desired) { return $desired.Path }
        }
        $src = $Cmd.Source
@@ -3699,7 +3704,11 @@ function Ensure-Psmux {
        adopting machine-state package may pin an exact validated version.
        Replacement happens only when no live sessions exist, because refreshing
        the portable package
-       tears down the running psmux server and every attached session. #>
+       tears down the running psmux server and every attached session. While
+       provider activity is live or unknown, the required version is installed
+       side by side under the agent-worktrees psmux root instead; the older
+       provider keeps serving its sessions and new sessions use the newer
+       client (see visions/installer/README.md#authoritative-runtime-replacement). #>
     $installVersion = '3.4.0'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (-not (Test-Path -LiteralPath $helper)) {
@@ -3709,14 +3718,16 @@ function Ensure-Psmux {
     . $helper
     if (-not (Get-Command Get-AwPsmuxBinaryVersion -ErrorAction SilentlyContinue) -or
         -not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue) -or
-        -not (Get-Command Get-AwPsmuxSessionState -ErrorAction SilentlyContinue)) {
+        -not (Get-Command Get-AwPsmuxSessionState -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Install-AwPsmuxSideBySide -ErrorAction SilentlyContinue)) {
         Write-ServiceWarn "psmux compatibility cannot be validated because the helper is unavailable -- not replacing it"
         return
     }
     if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
         $sessionState = Get-AwPsmuxSessionState -Path 'psmux.exe'
         if (-not $sessionState.Known -or $sessionState.Sessions.Count -gt 0) {
-            Write-ServiceWarn "psmux is unavailable on PATH, but provider activity is present or unknown -- not installing or repairing paths"
+            Install-AwPsmuxSideBySideForUpdate -Version $installVersion `
+                -Reason "psmux is unavailable on PATH, but provider activity is present or unknown -- not replacing the package"
             return
         }
         Write-Host "  Installing psmux $installVersion (terminal multiplexer)..."
@@ -3737,10 +3748,12 @@ function Ensure-Psmux {
     if (-not $compatible) {
         $sessionState = Get-AwPsmuxSessionState -Path $muxBin
         if (-not $sessionState.Known) {
-            Write-ServiceWarn "psmux $psmuxDisplay is incompatible, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
+            Install-AwPsmuxSideBySideForUpdate -Version $installVersion `
+                -Reason "psmux $psmuxDisplay is incompatible, but live-session state could not be determined -- not replacing it"
             return
         } elseif ($sessionState.Sessions.Count -gt 0) {
-            Write-ServiceWarn "psmux $psmuxDisplay is incompatible. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to upgrade."
+            Install-AwPsmuxSideBySideForUpdate -Version $installVersion `
+                -Reason "psmux $psmuxDisplay is incompatible. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them)"
             return
         } else {
             Write-ServiceChanged "psmux $psmuxDisplay is incompatible -- refreshing the portable package"
@@ -3748,7 +3761,8 @@ function Ensure-Psmux {
                 --uninstall-previous --force --accept-source-agreements `
                 --accept-package-agreements 2>&1 | Out-Null
             $selected = Find-AwCompatiblePsmuxPackageBinary `
-                -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
+                -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+                -SideBySideRoot (Get-AwPsmuxSideBySideRoot)
             if ($selected) {
                 Write-ServiceOk "psmux upgraded to compatible version $($selected.Version)"
             } else {
@@ -3757,6 +3771,25 @@ function Ensure-Psmux {
         }
     } else {
         Write-ServiceOk "psmux available ($psmuxDisplay; compatible)"
+    }
+    Ensure-PsmuxSshSafe
+}
+
+function Install-AwPsmuxSideBySideForUpdate {
+    <# Live or unknown provider activity blocks package replacement. Install
+       the required version beside the old one, then select it on PATH. The
+       old provider and its sessions are not stopped or changed. #>
+    param(
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Reason
+    )
+    $root = Get-AwPsmuxSideBySideRoot
+    Write-ServiceChanged "$Reason; installing psmux $Version side by side under $root"
+    $result = Install-AwPsmuxSideBySide -Version $Version -Root $root
+    if ($result.Status -in @('installed', 'present')) {
+        Write-ServiceOk "psmux $($result.Version) is available side by side at $($result.Directory); existing sessions were not changed"
+    } else {
+        Write-ServiceWarn "psmux side-by-side install did not complete: $($result.Message). Existing sessions were not changed; new sessions stay blocked until a compatible psmux is available."
     }
     Ensure-PsmuxSshSafe
 }

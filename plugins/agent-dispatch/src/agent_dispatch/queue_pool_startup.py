@@ -111,12 +111,15 @@ def advance_pool_startup(conn: sqlite3.Connection, key: str, ts: float) -> None:
 
 
 def reset_pool_startup(conn: sqlite3.Connection, task_id: str) -> None:
+    """Reset the budget, not the original CLI caller's exact completion identity."""
     conn.execute(
         "UPDATE task_pool_assignments SET startup_attempts=0, episode_start_attempt=0,"
         " cooldown_stage=0, startup_deadline=NULL, reachable_at=NULL,"
         " next_nudge_at=NULL, decision_deadline=NULL, exhausted_at=NULL,"
         " exhaustion_reason=NULL, outcome_kind=NULL, outcome_detail=NULL,"
-        " outcome_revision=NULL, outcome_at=NULL, retry_invocation=NULL,"
+        " outcome_revision=NULL, outcome_at=NULL, retry_invocation=CASE WHEN EXISTS ("
+        " SELECT 1 FROM spawn_reservations s WHERE s.key=task_pool_assignments.reservation_key"
+        " AND s.driver='cli' AND s.startup_complete=0) THEN retry_invocation ELSE NULL END,"
         " recovery_requested_at=NULL, recovery_wake_id=NULL, recovery_hold_started_at=NULL,"
         " lane_wait_since=NULL, lane_wait_message=NULL, lane_wait_wake=NULL WHERE task_id=?", (task_id,),
     )
@@ -160,7 +163,7 @@ class PoolStartupObservation:
     outcome_detail: str | None
     outcome_revision: int | None
     outcome_at: float | None
-    retry_invocation: dict | None
+    retry_invocation: dict[str, object] | None
     recovery_revision: int
     recovery_requested_at: float | None
     recovery_wake_id: str | None

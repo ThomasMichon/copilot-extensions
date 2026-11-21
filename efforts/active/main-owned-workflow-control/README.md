@@ -144,10 +144,66 @@ The author subsequently agrees the bootstrap-only handoff on #12708, and
 acceptance is posted before editing. The restorative source fix and real cold-
 CLI regression now proceed independently through ordinary review and CI,
 preserving the broader PR and its existing ownership.
+That bounded correction merges in #13496 at `ef88d21b28c87c5cc9d6ce30ec007156650622c5`
+after current-head Copilot approval and required CI. The
+[November 19 journal](journal/2026/11.19-bootstrap-restoration.md) records the
+bounded source milestone; containing release adoption is subsequently verified
+through #13527, without native qualification. The consumed one-run grant,
+broader #12708 ownership and every retained hold remain unchanged.
+After a new explicit one-run grant and verified containing release #13527,
+follow-up `44654996590` reaches preparation in all three modes but fails
+materialization on ten already-present declared assets. All three diagnostics
+are retained; no Manager lifecycle result is qualified and no retry is
+authorized. The dated journal records the separate settlement limits and
+preserves the materializer and authentic-source owners.
 Separately, the [portfolio audit](workflow-portfolio-audit.md#november-17-source-pr-edit-repeated-execution-not-a-reuse-hit)
 proves one exact-context repeated source-CI execution after an evidence-only
 body edit. The base-retarget/event seam is coordinated on #3336 before shared
 CI changes; neither finding authorizes another capture or Main activation.
+The independent [lookup-attribution slice](journal/2026/11.20-unit-lookup-attribution.md)
+merges in #13603 at `bc68912640affd7e3c106f18f743f3ef6cdea5e5` after fresh
+approval and complete current-head Linux CI. Its bounded diagnostic is visibly
+flushed before the fresh unit handoff; the original lookup and packet budgets,
+proof checks and provider request sequence remain. This is measured diagnostic
+delivery, not a workflow-count reduction, a reuse hit or attribution of the
+historical exhausted stage. The separate Windows collection gap #13598 remains
+open, and native preparation stays with its existing owner.
+The [November 20 identifier contract trace](workflow-portfolio-audit.md#november-20-identifier-validation-contract-closure)
+then establishes shared scanner implementation but distinct required-enforcement
+and detailed-reporting contracts. Direct deletion is not justified. Any
+one-scan integration needs an accepted shared CI/release-owner seam and proof
+that required enforcement, stale-head refusal, existing findings feedback and
+Main-targeting admission survive. No workflow-count reduction or new execution
+is claimed for that read-only closure.
+The operator retains that shared-owner boundary and selects continuation of the
+[scheduled portfolio audit](workflow-portfolio-audit.md#november-20-scheduled-entrypoint-census-and-stress-pair-trace).
+Its bounded census distinguishes 78 observed invocations from declared jobs
+and failed/cancelled coverage. The two stress suites remain distinct. A later
+full-context admission trace observes one executing scheduled job and 80
+distinct skipped manual-portfolio check records, not 81 test executions.
+Dispatch-preserving reduction and complete helper/repair-owner closure remain
+unqualified; no held native selector or shared workflow is changed.
+The subsequent
+[periodic wrapper trace](workflow-portfolio-audit.md#november-20-periodic-wrapper-selection-and-containment-closure)
+closes its default Linux selection, online preparation/offline execution,
+containment and refusal boundaries. Preparation is not a second pytest run;
+default-full still excludes declared discovery/explicit-tier residuals.
+No live wrapper result or equivalent unit/native replacement is claimed.
+The [remaining weekly and maintenance traces](workflow-portfolio-audit.md#november-20-weekly-test-callers-and-inventory-only-reduction-candidate)
+then distinguish real Handoff/Dispatch coverage from the inventory-only
+Payload CWD invocation and separate hourly label policy from weekly branch
+cleanup. The concrete trigger-reduction request is with the existing #1303
+owner; the observed purge refusal names existing cleanup PR #13117 under
+#3336, not a new takeover. Source traces cover all ten scheduled declarations,
+but replacement acceptance, live effects, unresolved failure signatures and
+comparable saving/coverage measurements do not follow from that inventory.
+The [current declaration delta and first-hop map](workflow-portfolio-audit.md#november-20-current-declaration-delta)
+extend the historical inventory to 33 YAMLs, including twelve added native/
+controller declarations also present byte-identically at the observed Main
+snapshot. The actual review embeds its minimal setup rather than adding a
+second setup run; the legacy trusted-CI automatic entry is already retired.
+Separate native/typed selections and source-missing repair-claimant declarations
+remain explicit frontiers, not removal permission or completed qualification.
 Ubuntu run
 `44028815333` at the prior checkpoint `7ab79f8cfb` passes all
 638 controlled cases in both write and independent no-write modes, then all
@@ -452,13 +508,25 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Complete the branch protection, ruleset, environment, workflow,
   credential-binding metadata and in-flight release snapshot; never read secret
   values. Identify enforced freshness and admission beyond the initial audit.
+  The November 20 [environment/name-binding readback](workflow-portfolio-audit.md#november-20-environment-and-credential-binding-metadata)
+  complements the required-context readback. A bounded
+  [in-flight release-control snapshot](workflow-portfolio-audit.md#november-20-in-flight-release-control-snapshot)
+  records the active promotion, two old queued trigger records and unresolved
+  API count/row discrepancies. Complete custody is not inferred from that
+  inventory; metadata alone does not establish actual token identity, scope
+  or custody, and creates no new operational authority.
 - [ ] Classify every workflow and its helper/action dependencies, including
   required contexts, event filters, credentials and failure-remediation owner.
 - [ ] Measure runs/jobs/checks per contributor update, dev advance and release;
   reviewer queue/start latency and observed throttling. Distinguish GitHub
   Actions concurrency from Copilot service limits; do not assume one shared quota.
-- [ ] Rank safe redundant trigger/check removals under existing gates ahead of
+- [x] Rank safe redundant trigger/check removals under existing gates ahead of
   ownership work that is not needed for those reductions.
+  The November 20 [current candidate ledger](workflow-portfolio-audit.md#prioritized-candidate-ledger)
+  puts the echo-only weekly allocation and owner-gated one-scan interface
+  first, separates delivered source work from pending activation and does
+  not count retired automatic entrypoints as future savings. Ranking is not
+  implementation acceptance or measured whole-flow completion.
 - [x] Resolve the trusted-check publication limitation explicitly: the common
   Actions app and a check name cannot prevent deliberate Write-actor spoofing.
   Do not claim stronger guarantees than the selected enforceable boundary.
@@ -511,15 +579,25 @@ authorizes critical main-path acceptance or a bounded administrative change.
   completes their group in twelve seconds and executes all 1,012 admitted
   units. Empty-pass removal and local paired timing are not controlled
   whole-flow latency; the full source-CI invocation remains.
-- [ ] Observe qualified release adoption of #8213 separately from source-CI
+- [x] Observe qualified release adoption of #8213 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
+- [ ] Qualify and land invocation-local fieldless AST dispatch specialization
+  for the headless guard, retaining every input read/parse, all six rules,
+  allowances, custom handlers and malformed-instance fallback.
+  The [bounded source candidate](workflow-portfolio-audit.md#november-21-fieldless-visitor-dispatch-candidate)
+  has focused, strict-typing and full-corpus equivalence evidence; current-head
+  source review and required Linux CI remain before delivery. This is recipe
+  work reduction, not fewer workflow invocations or native qualification.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
   retains all three scanners and all 1,012 admitted units. Local recipe timing
   and omitted analysis are not controlled whole-flow latency.
-- [ ] Observe qualified release adoption of #8227 separately from source-CI
+- [x] Observe qualified release adoption of #8227 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
+  The [November 20 adoption audit](journal/2026/11.20-release-adoption.md)
+  verifies both delivered guard blobs, retained optimization branches and the
+  already executed source consumer. It establishes no controlled timing gain.
 - [x] Land and observe conservative narrative-only PR omission of the three
   source AST scans (#7706), retaining full non-narrative and non-PR execution,
   pinned input/error handling, every other guard and all required unit evidence.
@@ -601,8 +679,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and all 1,010 admitted units in 19.780 seconds. The integrated merged packet
   preserves the independent peer's two nodes. Local paired timing remains
   separate; this is reduced recipe work, not fewer workflow invocations.
-- [ ] Observe qualified release adoption of #8199 separately from source-CI
+- [x] Observe qualified release adoption of #8199 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
+  The [same adoption audit](journal/2026/11.20-release-adoption.md) binds the
+  retained suffix admission and actual documentation-guard execution to the
+  exact released blob without claiming a controlled latency result.
 - [x] Land and observe bounded asyncio ancestry-map reduction, preserving
   every file read/parse, path validation, handler classification and ordered
   diagnostic/list output (#7865). Actual required source CI runs all three
@@ -618,8 +699,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   scanning first, then remove legacy CI allocation while retaining full
   main-push validation.
   #6789 proves zero CI invocations and preserved required admission/configured
-  scanning. Main-push CI still runs; its generated-tree failures remain open
-  below and are not a passing-coverage claim or permission to remove that lane.
+  scanning. At that delivery, Main-push CI still ran and its generated-tree
+  failures remained open. The
+  [November 20 snapshot](journal/2026/11.20-release-adoption.md#main-metadata-is-a-distinct-current-contract)
+  records the later metadata-only Main declaration; it does not restore the
+  old test lane or silently settle its historical failures.
 - [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
   #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
@@ -1073,6 +1157,9 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
+- [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)
+- [2026-11-19 UTC - Cold CLI bootstrap restoration](journal/2026/11.19-bootstrap-restoration.md)
 - [2026-11-14 UTC - Source-attribution receiving](journal/2026/11.14-attribution-receiving.md)
 - [2026-11-14 UTC - Finite fixture receiving](journal/2026/11.14-fixture-receiving.md)
 - [2026-11-09 - Installed Manager lifecycle contract](journal/2026/11.09-installed-manager-lifecycle.md)

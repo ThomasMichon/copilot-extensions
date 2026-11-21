@@ -153,9 +153,10 @@ After the reviewed proposal, the operator admitted execution:
   explicit pending-parent retention can resume each exact target and compose a
   whole-claim candidate only after every named version/correlation is retained.
   An explicit prepared-journal binding requalifies and retains that exact complete
-  application candidate without replacing the pending parent. Application
-  constructors do not consume it yet, and it establishes no durable
-  application/current-claim completion coverage.
+  application candidate without replacing the pending parent. Explicit
+  `PreparedApplication` consumption now requalifies that complete binding before
+  chunking/embedding and uses scoped native vector reads; ordinary point-domain
+  execution remains open; the explicit acquisition caller is described below.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
@@ -181,9 +182,54 @@ After the reviewed proposal, the operator admitted execution:
   frontdoors and direct native content/vector/cluster/package-export readers
   have bounded refusal qualification; broader consumer composition remains
   open. Exact-scope cold content/model schema and component-ledger bootstrap,
-  plus explicitly budgeted point-index preparation, are available; point-domain
-  application, v2 execution, automatic partial-effect/restore reconciliation
-  and whole-claim completion remain unimplemented.
+  plus explicitly budgeted point-index preparation, typed-claim application
+  and its exact sealed publication suffix, are available. A separate explicit
+  whole-claim completion composes current queue/pending/native/checkpoint owners
+  with requalifying lost-return retries. An explicit
+  [retained worker](../../../plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
+  composes fully acquired claims through prepared/native application and that
+  completion under the existing source writer. An explicit
+  [Azure DevOps acquisition caller](../../../plugins/agent-index/docs/component-ledger.md#explicit-azure-devops-acquisition-caller)
+  composes missing named reads with fresh eligibility checks, retained recovery
+  and that worker; an explicit
+  [configured composition](../../../plugins/agent-index/docs/component-ledger.md#configured-in-process-azure-devops-composition)
+  opens isolated prepared owners and pins the expected whole parked snapshot.
+  An explicit [in-process worker hook](../../../plugins/agent-index/docs/component-ledger.md#explicit-in-process-worker-dispatch)
+  selects that bound composition without detached-worker registration and verifies
+  completion through the queue rather than the callable's return value.
+  An explicit [async lifetime owner](../../../plugins/agent-index/docs/component-ledger.md#explicit-async-lifetime-owner)
+  joins native dispatch through cancellation and truthful bounded drains,
+  with supported point queue cancellation serialized against that same source
+  writer. An explicit [point queue consumer](../../../plugins/agent-index/docs/component-ledger.md#explicit-point-queue-consumer)
+  supplies exact-scope FIFO batches with failure pause and explicit retained
+  retry. An explicit [service binding](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
+  composes isolated exact-scope HTTP intake, the existing governed runner and
+  joined client lifetime, with paused reconstruction and no ordinary activation.
+  Fresh entirely superseded claims can now select qualified higher-version
+  completion before named-body acquisition; equal versions retain canonical
+  comparison, mixed claims retain whole acquisition and existing pending work
+  is never bypassed. Explicit HTTP/service qualification covers that distinct
+  no-acquisition outcome and its client-free completed retry.
+  The [configured executor ownership step](azure-devops-point-targets.md#configured-executor-ownership-before-caller-migration)
+  supplies production connector/model lifetime composition under that existing
+  Python binding, with per-execution missing-pair readiness and cancellation-safe
+  joined cleanup.
+  The [selected executor/qualified-reader refinement](azure-devops-point-targets.md#selected-executor-and-qualified-reader-composition)
+  now composes both actual owners through one shared in-process binding, with
+  per-read non-creating qualification and joined shutdown. The
+  [reviewed running-service declaration](azure-devops-point-targets.md#running-service-declaration-and-provider-rollback)
+  now has receiver-only selected-pair/lifecycle advertisement and pure optional
+  missing-support/provider-rollback validation. Existing clients remain unchanged;
+  the [request-bound required-admission refinement](point-required-admission.md)
+  was reviewed in #13712 and its receiver merged in #13715. It checks the actual peer,
+  selected scope and admission before an owned queue effect and emits an
+  explicit typed receipt. Existing wire callers remain unchanged; the
+  [explicit caller proposal](point-required-admission.md#explicit-caller-migration-proposal)
+  specifies a separately reviewed opt-in API, selected-peer negotiation and
+  typed receipt checks before implementation.
+  Ordinary v2 execution and automatic partial-effect/restore
+  reconciliation remain unimplemented; live-provider, broader event-delivery
+  and consumer-scale qualification remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
@@ -307,8 +353,58 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-20 - Named-point native corpus counts
+
+The [native-corpus journal](journal/2026/11.20%20point-native-scale.md)
+records actual queue/caller/worker/reader operation-count qualification beside
+100/10,000/100,000 unrelated content/vector/checkpoint rows, and separately
+observed process-byte growth. Additional fixture setup populates the same
+unrelated ordering-ledger cardinalities and preserves sampled raw records;
+broader acceptance remains open. Merged #13678 supplies the initial native
+corpus qualification, not constant total-cost or consumer acceptance.
+The same journal now records a separate no-replay completed-retry control and
+per-query/index-inspection attribution. Representative B-tree plans preserve
+bounded canonical rows while process bytes grow; no production cache, currentness
+shortcut or ordinary activation is justified by these observations.
+Merged #13683 supplies that fixture-only attribution; the broader count/consumer
+matrix remains open.
+Merged #13685 supplies unrelated ordering-ledger scale with sampled raw-record
+preservation. The separate HTTP/service scale packet now exercises the existing
+higher-covered path and client-free completed retry at those same cardinalities,
+with equal logical/native query metrics and separately reported process-byte
+growth. Ordinary activation, automatic repair and broader acceptance remain open.
+Merged #13689 supplies that HTTP/service packet after current-head approval
+and actual unit CI. Next, inspect the explicit selected-runtime capability seam
+against the reviewed point-target contract before choosing further source wiring;
+successful fixture composition is not blanket v2 execution advertisement.
+
+### 2026-11-20 - Point-worker dispatch and lifetime
+
+The [worker-lifetime journal](journal/2026/11.20%20point-worker-lifetime.md)
+records merged #13646, original-selection verification, current-head review,
+executed/reused CI evidence and guarded source reconciliation. Both parent
+completion gates remain open; hosted lifetime and ordinary scheduling remain
+separate implementation work.
+The same entry now records the explicit async host's joined cancellation and
+truthful drain tests; service/queue admission and cutover wiring remain open.
+Merged #13649 supplies that host after current-head approval and passing CI;
+its source reconciliation and remaining integration boundary are journaled.
+Merged #13651 serializes supported point cancellation with native ownership;
+merged #13655 adds caller-driven exact-scope queue batches with failure pause.
+Merged #13659 composes explicit service construction, isolated exact-scope
+HTTP intake, the existing governed runner and joined client lifetime.
+Ordinary activation, cross-generation recovery and broader acceptance remain
+separate.
+Merged #13665 qualifies explicit service reconstruction around sealed native
+publication and unchanged refusal of an unsealed partial write.
+Merged #13672 skips acquisition for entirely higher-covered fresh claims;
+merged #13676 qualifies that outcome through actual HTTP/service dispatch and
+client-free completed retry. Unrelated-corpus scale qualification remains open.
+
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-19 retained point model/table ownership](journal/2026/11.19%20point-model-binding.md)
+- [2026-11-19 caught nested source effects](journal/2026/11.19%20nested-writer-latch.md)
 - [2026-11-19 point-domain binding and read refusal](journal/2026/11.19%20point-read-domains.md)
 - [2026-11-19 component application prerequisites](journal/2026/11.19%20component-application.md)
 - [2026-11-18 Azure DevOps response and selected-record coverage](journal/2026/11.18%20ado-response-coverage.md)

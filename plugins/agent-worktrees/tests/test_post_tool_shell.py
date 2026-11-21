@@ -67,11 +67,10 @@ SCRIPT = PLUGIN / "scripts" / "post-tool-hook.ps1"
 def admitted_protocol_script(tmp_path: Path) -> Path:
     scripts = tmp_path / "protocol-scripts"
     scripts.mkdir()
-    for name in ("post-tool-hook.ps1", "hook_client.py"):
+    for name in ("post-tool-hook.ps1", "hook_client.py", "managed-session.ps1", "hook-facts.ps1"):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
-    (scripts / "managed-session.ps1").write_text(
-        "function Test-ManagedWorktreesSession { return $true }\n", encoding="utf-8"
-    )
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write("\nfunction Test-PreparedManagedWorktreesSession { return $false }\n")
     return scripts / "post-tool-hook.ps1"
 
 
@@ -84,7 +83,8 @@ def test_post_hook_uses_same_shell_and_installs_the_client() -> None:
     assert "OpenStandardInput()" in command
     assert "$OutputEncoding = $utf8" in command
     assert "post-tool-hook.ps1" in command
-    assert "$raw | & $py $fallback postToolUse" in command
+    assert "hook_client.py" not in command
+    assert "Get-Command" not in command
     for name in ("install.ps1", "install.sh"):
         assert "post-tool-hook.ps1" in (PLUGIN / "scripts" / name).read_text(
             encoding="utf-8"
@@ -427,7 +427,17 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path: Path
                     assert (session / "local-guidance-watch.json").read_text() == "{}"
             else:
                 assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
-        expected_payload = {**payload, "_agentWorktrees": {"environment": forwarded}}
+        policy_switches = dict.fromkeys((
+            "AGENT_WORKTREES_STATELESS_GUARD", "CROSS_REPO_GUARD", "CROSS_REPO_GUARD_MODE",
+            "ANCHOR_WRITE_GUARD", "ANCHOR_WRITE_GUARD_MODE", "PR_SUPERSEDE_GUARD",
+            "PR_SUPERSEDE_GUARD_MODE",
+        ))
+        expected_payload = {
+            **payload, "_agentWorktrees": {
+                "nativePolicy": 1, "environment": {**policy_switches, **forwarded},
+            },
+        }
+        expected_payload.pop("toolResult", None)
         expected = [] if event_case in {"mutation", "late-watch"} else [("postToolUse", expected_payload)] * 2
         assert seen == expected
     finally:
@@ -915,8 +925,6 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
                 "version": 1, "root": str(root), "revision": "b" * 32,
             }))
         payload = {**fixture["payload"], "toolResult": "must-not-be-sent"}
-        if case in {"changed-receipt", "changed-payload", "unadmitted", "old-membership"}:
-            fixture["env"]["EXPECTED_PYTHON_LOOKUPS"] = "1"
         if case == "native":
             payload.update(toolName="multi_edit", toolArgs={"edits": [{"path": target}]})
         elif case in {"batch", "mixed-targets", "mixed-write"}:
@@ -941,6 +949,13 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             env=fixture["env"], **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
+        if case in {"changed-receipt", "changed-payload", "unadmitted", "old-membership"}:
+            warning = (
+                "agent-worktrees postToolUse: selected native resident unavailable; "
+                "advisory/accounting completion is unconfirmed; no local fallback or retry was run\n"
+            )
+            assert result.stderr.startswith(warning), result.stderr
+            result.stderr = result.stderr.removeprefix(warning)
         assert result.stderr.startswith("entry_seconds="), result.stderr
         print(f"{shell}/cell/{case}: {result.stderr.strip()}")
         if case == "late-guidance":
@@ -995,6 +1010,60 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             stalled_thread.join(timeout=2)
             assert not stalled_thread.is_alive()
         server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native post-tool membership work count")
+@pytest.mark.parametrize("prepared_read_event", ["legacy", "cell"], indirect=True)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_registered_prepared_cell_post_tool_validates_membership_once(
+    prepared_read_event: PreparedReadEvent, shell: str,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    assert executable, f"Required membership-count shell {shell} is unavailable"
+    fixture = prepared_read_event
+    scripts = fixture["payload_root"] / "scripts"
+    original = PLUGIN / "scripts" / "managed-session.ps1"
+    managed = original.read_text(encoding="utf-8")
+    start = managed.index("function Test-PreparedManagedWorktreesSession {")
+    first_statement = managed.index("    $stream =", start)
+    counted = scripts / "counted-managed-session.ps1"
+    counted.write_text(
+        managed[:first_statement] + "    $script:preparedAdmissionCalls++\n"
+        + managed[first_statement:],
+        encoding="utf-8",
+    )
+    wrapper = scripts / "managed-session.ps1"
+    source = str(original).replace("'", "''")
+    assert source in wrapper.read_text(encoding="utf-8")
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace(source, str(counted).replace("'", "''")),
+        encoding="utf-8",
+    )
+    harness = fixture["harness"].read_text(encoding="utf-8")
+    terminal = "[Console]::Error.WriteLine('entry_seconds='"
+    assert harness.count(terminal) == 1
+    fixture["harness"].write_text(
+        "$script:preparedAdmissionCalls=0\n" + harness.replace(
+            terminal,
+            "if ($script:preparedAdmissionCalls -ne 1) {\n"
+            " throw ('prepared admission count=' + $script:preparedAdmissionCalls)\n"
+            "}\n" + terminal,
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+        input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+        env=fixture["env"], **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and result.stderr.startswith("entry_seconds="), result.stderr
+    assert json.loads(fixture["sidecar"].read_text())["count"] == 1
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -1083,12 +1152,11 @@ def test_registered_post_tool_entry_fallback_preserves_original_boundary(tmp_pat
         },
         **no_window_kwargs(),
     )
-    if case == "directory":
-        assert result.returncode != 0 and not result.stdout
-        assert "unexpected fallback selection" not in result.stderr
-    else:
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "original-fallback" and not result.stderr
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
+    assert "native hook unavailable" in result.stderr
+    assert "original-fallback" not in result.stdout
+    assert "unexpected fallback selection" not in result.stderr
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -1096,7 +1164,7 @@ def test_registered_post_tool_entry_fallback_preserves_original_boundary(tmp_pat
 @pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native post-tool fallback cwd compatibility")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path: Path, shell: str) -> None:
+def test_post_tool_unavailable_keeps_cwd_without_compatibility_admission(tmp_path: Path, shell: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -1106,10 +1174,8 @@ def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path: Path
     scripts.mkdir()
     shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
     (scripts / "managed-session.ps1").write_text(
-        "function Test-ManagedWorktreesSession {\n"
-        " if ((Get-Location).Path -cne $env:USERPROFILE -or\n"
-        "     [IO.Directory]::GetCurrentDirectory() -cne $env:USERPROFILE) { throw 'cwd not repaired' }\n"
-        " [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'admission-checked'), 'checked')\n"
+        "function Test-PreparedManagedWorktreesSession {\n"
+        " [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'admission-checked'), (Get-Location).Path)\n"
         " return $false\n}\n",
         encoding="utf-8",
     )
@@ -1123,7 +1189,8 @@ def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path: Path
         env={**os.environ, "USERPROFILE": str(tmp_path)}, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "admission-checked").read_text() == "checked"
+    assert Path((tmp_path / "admission-checked").read_text()) == unrelated
+    assert "unconfirmed" in result.stderr
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -2920,6 +2987,9 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
         pytest.skip("PowerShell unavailable in explicit integration venue")
     seen = []
     def decide(kind: str, payload: dict[str, Any], deadline: float | None) -> dict[str, Any]:
+        assert payload.pop("_agentWorktrees")["nativePolicy"] == 1
+        assert payload.pop("sessionId") == "post-fixture"
+        assert payload.pop("cwd") == str(tmp_path)
         seen.append((kind, payload))
         if payload.get("toolName") == "empty":
             return {}
@@ -2960,22 +3030,16 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
             "$bad.hook_endpoint='example.invalid:80'\n"
             "if ($null -ne (Invoke-ResidentPostTool $bad '{}')) { throw 'remote endpoint accepted' }\n"
             "function Invoke-ResidentPostTool { return $null }\n"
-            "function Get-Command { [pscustomobject]@{Source='Invoke-FakePython'} }\n"
-            "function Invoke-FakePython {\n"
-            "  if ($args[-1] -ne '--local-fallback') { throw 'request would be resent' }\n"
-            "  [Console]::Out.Write('local-fallback')\n"
-            "}\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n"
             "$env:COPILOT_EXTENSIONS_CONTEXT='selected-cell'\n"
-            "function Invoke-FakePython {\n"
-            "  if ($args[-1] -ne 'postToolUse') { throw 'cell bypassed validated client' }\n"
-            "  [Console]::Out.Write('cell-client')\n"
-            "}\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n",
             encoding="utf-8",
         )
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
+        env["AGENT_HOME"] = str(tmp_path)
+        env["COPILOT_AGENT_SESSION_ID"] = "post-fixture"
+        env["COPILOT_PROJECT_DIR"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
@@ -2983,11 +3047,10 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
             **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
-        assert result.stderr == ""
+        assert result.stderr.count("completion is unconfirmed") == 2
         assert result.stdout == (
             '{"additionalContext":"resident"}'
             '{"additionalContext":"resident"}'
-            'local-fallbackcell-client'
         )
         assert seen == [
             ("postToolUse", {"toolName": "view"}),
@@ -2998,10 +3061,8 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
         bin_dir = root / "bin"
         bin_dir.mkdir()
         shutil.copyfile(SCRIPT, bin_dir / SCRIPT.name)
-        shutil.copyfile(
-            admitted_protocol_script.parent / "managed-session.ps1",
-            bin_dir / "managed-session.ps1",
-        )
+        for name in ("managed-session.ps1", "hook-facts.ps1"):
+            shutil.copyfile(admitted_protocol_script.parent / name, bin_dir / name)
         command = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))[
             "hooks"
         ]["postToolUse"][0]["powershell"]
@@ -3041,8 +3102,8 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
             **no_window_kwargs(),
         )
         assert fallback_result.returncode == 0, fallback_result.stderr
-        assert fallback_result.stderr == ""
-        assert json.loads(fallback_result.stdout) == payload
+        assert "native hook unavailable" in fallback_result.stderr
+        assert fallback_result.stdout == ""
     finally:
         server.close()
 
@@ -3083,6 +3144,9 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path: Path
     seen = []
 
     def decide(kind: str, payload: dict[str, Any], deadline: float | None) -> dict[str, Any]:
+        assert payload.pop("_agentWorktrees")["nativePolicy"] == 1
+        assert payload.pop("sessionId") == "post-fixture"
+        assert payload.pop("cwd") == str(tmp_path)
         seen.append((kind, payload))
         return payload
 
@@ -3098,6 +3162,9 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path: Path
         escaped = str(admitted_protocol_script).replace("'", "''")
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
+        env["AGENT_HOME"] = str(tmp_path)
+        env["COPILOT_AGENT_SESSION_ID"] = "post-fixture"
+        env["COPILOT_PROJECT_DIR"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
         reference_harness = tmp_path / "legacy-json.ps1"
         expected_requests = []
@@ -3166,13 +3233,14 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path: Path, admit
             request = json.loads(self.rfile.readline())
             mode = request["payload"]["mode"]
             requests.append(mode)
+            capabilities = b'"capabilities":["native-tool-policy-v1"],'
             responses = {
-                "version": b'{"version":2,"result":{}}\n',
-                "fallback": b'{"version":1,"fallback":true}\n',
-                "shape": b'{"version":1,"result":[]}\n',
-                "malformed": b'{"version":1,"result":{bad}}\n',
+                "version": b'{"version":2,' + capabilities + b'"result":{}}\n',
+                "fallback": b'{"version":1,' + capabilities + b'"fallback":true}\n',
+                "shape": b'{"version":1,' + capabilities + b'"result":[]}\n',
+                "malformed": b'{"version":1,' + capabilities + b'"result":{bad}}\n',
                 "oversized": b"x" * 65536 + b"\n",
-                "unterminated": b'{"version":1,"result":{}}',
+                "unterminated": b'{"version":1,' + capabilities + b'"result":{}}',
             }
             if mode == "timeout":
                 time.sleep(0.8)
@@ -3191,11 +3259,14 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path: Path, admit
             "hook_transport": "tcp",
             "hook_endpoint": f"127.0.0.1:{server.server_address[1]}",
             "hook_token": "fixture",
+            "hook_generation": "fixture-generation",
+            "hook_capabilities": ["native-tool-policy-v1"],
         }), encoding="utf-8")
         escaped = str(admitted_protocol_script).replace("'", "''")
         harness.write_text(
             f". '{escaped}'\n"
-            f"$endpoint=@{{hook_transport='tcp';hook_endpoint='127.0.0.1:{server.server_address[1]}';hook_token='fixture'}}\n"
+            f"$endpoint=@{{hook_transport='tcp';hook_endpoint='127.0.0.1:{server.server_address[1]}';"
+            "hook_token='fixture';hook_generation='fixture-generation';hook_capabilities=@('native-tool-policy-v1')}\n"
             "foreach($mode in @('version','fallback','shape','oversized','unterminated')) {\n"
             "  $payload=ConvertTo-Json @{mode=$mode} -Compress\n"
             "  if($null -ne (Invoke-ResidentPostTool $endpoint $payload)){throw \"$mode accepted\"}\n"
@@ -3203,11 +3274,7 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path: Path, admit
             "$timer=[Diagnostics.Stopwatch]::StartNew()\n"
             "try { $null=Invoke-ResidentPostTool $endpoint '{\"mode\":\"timeout\"}' } catch [IO.IOException] {}\n"
             "if($timer.Elapsed.TotalSeconds -gt 2){throw 'unbounded response wait'}\n"
-            "function Get-Command { [pscustomobject]@{Source='Invoke-FakePython'} }\n"
-            "function Invoke-FakePython {\n"
-            "  if ($args[-1] -ne '--local-fallback') { throw 'request would be resent' }\n"
-            "  [Console]::Out.Write('local-fallback')\n"
-            "}\n"
+            "function Get-Command { throw 'Python fallback requested' }\n"
             "Invoke-PostToolHook -Raw '{\"mode\":\"malformed\"}'\n"
             "$endpoint.installReceipt='another-cell'\n"
             "if($null -ne (Invoke-ResidentPostTool $endpoint '{}')){throw 'foreign cell accepted'}\n",
@@ -3215,15 +3282,16 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path: Path, admit
         )
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
+        env["AGENT_HOME"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
             capture_output=True, text=True, env=env, timeout=15, **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout == "local-fallback"
+        assert result.stdout == ""
         assert result.stderr == (
-            "agent-worktrees postToolUse: resident request unavailable; using local advisory fallback\n"
+            "agent-worktrees postToolUse: selected native resident unavailable; advisory/accounting completion is unconfirmed; no local fallback or retry was run\n"
         )
         assert requests.count("malformed") == 1
     finally:

@@ -109,11 +109,14 @@ def _unlock(fd: int) -> None:
 @contextmanager
 def source_writer(
     data_dir: Path, *, wait: bool = False, cancel_check: Callable[[], None] | None = None,
+    allow_reentry: bool = True,
 ) -> Iterator[None]:
     """Own acquisition through checkpoint publication; readers do not participate.
 
     All writers using one JSON state file must join, including hosted ingest and
     retirement callers. This cannot fence older, nonparticipating writers.
+    ``allow_reentry=False`` refuses even this thread's existing ownership,
+    independently of ``wait``, for operations that must not revoke active work.
     """
     owner_pid = os.getpid()
     root = Path(data_dir).resolve()
@@ -136,6 +139,8 @@ def source_writer(
         if active is None:
             active = _local.active = set()
         if root in active:
+            if not allow_reentry:
+                raise SourcePipelineBusy(f"Source writer already active for {root}")
             yield
             return
         root.mkdir(parents=True, exist_ok=True)

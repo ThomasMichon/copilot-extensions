@@ -1,0 +1,9 @@
+{
+  "comment": "Use native Windows tool-hook entries and selected resident policy without per-event Python fallback.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -16,7 +16,7 @@ import pytest
 
 from agent_remote_driver import mux_creation, mux_observation as mux
 from agent_remote_driver import mux_inventory
-from agent_remote_driver.mux_observation_types import ObservationUnavailable, Pane
+from agent_remote_driver.mux_observation_types import Observation, ObservationUnavailable, Pane
 from agent_procutil import no_window_kwargs
 
 
@@ -112,6 +112,31 @@ def test_zero_clients_is_live_not_absent(tmp_path: Path) -> None:
     with native_endpoint(tmp_path, (b"OK\r\n" + _PANE, b"OK\n", b"OK\n" + _IDENTITY)):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
     assert observed.presence() and observed.clients == 0
+
+
+def test_pinned_observation_does_not_replace_or_census(tmp_path: Path) -> None:
+    def forbidden() -> dict[str, tuple[str, int]]:
+        pytest.fail("pinned observation requested host inventory")
+
+    def observe() -> Observation:
+        return mux.observe_psmux(
+            "wt-fixture", data_dir=tmp_path, namespace="", expected_incarnation="$7:100",
+            _inventory=forbidden,
+        )
+
+    missing = observe()
+    assert (missing.status, missing.reason) == ("unknown", "missing-rendezvous")
+    for actual, expected in [(b"$7:100", "present"), (b"$7:101", "unknown")]:
+        replies = (b"OK\n" + _PANE.replace(b"$7:100", actual), b"OK\n",
+                   b"OK\n" + _IDENTITY.replace(b"$7:100", actual))
+        with native_endpoint(tmp_path, replies) as captured:
+            result = observe()
+        assert captured[1::2] == list(mux._QUERIES)
+        assert result.status == expected
+        if expected == "present":
+            assert result.incarnation == "$7:100"
+        else:
+            assert result.reason == "different-incarnation"
 
 
 @pytest.mark.parametrize("namespace", ["", "selected"])
@@ -340,6 +365,37 @@ def test_finite_cli_keeps_unknown_and_invalid_requests_explicit(
     with pytest.raises(SystemExit) as exc:
         mux.main(["--observe", "--typo"])
     assert exc.value.code == 2
+
+
+def test_finite_pinned_cli_requires_scope_and_never_uses_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    def forbidden(**kwargs: object) -> None:
+        pytest.fail("pinned request attempted a host census")
+
+    monkeypatch.setattr(mux_inventory, "observe_registrations", forbidden)
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("COPILOT_DRIVER_PSMUX_NAMESPACE", raising=False)
+    assert mux.main(["--describe-contract"]) == 0
+    assert "psmux-observe-pinned" in json.loads(capsys.readouterr().out)["operations"]
+
+    def query(pin: str | None, code: int) -> dict[str, object]:
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+            "version": 1, "session": "wt-fixture", "expected_incarnation": pin,
+        })))
+        assert mux.main(["--observe"]) == code
+        body = json.loads(capsys.readouterr().out)
+        assert isinstance(body, dict)
+        return body
+
+    assert query("$7:100", 3)["status"] == "unsupported"
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "selected")
+    assert query(None, 3)["status"] == "unsupported"
+    assert query("$7:100", 3)["reason"] == "missing-rendezvous"
+    with native_endpoint(tmp_path, b"OK\n" + _PANE + _IDENTITY, namespace="selected"):
+        assert query("$7:100", 0)["incarnation"] == "$7:100"
+    with native_endpoint(tmp_path, b"OK\n" + _PANE + _IDENTITY, namespace="selected"):
+        assert query("$7:101", 3)["reason"] == "different-incarnation"
 
 
 def test_finite_file_entrypoint_retains_inventory_error_identity(tmp_path: Path) -> None:

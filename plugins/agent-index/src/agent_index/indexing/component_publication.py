@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
+from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.prepared_journal import PreparedJournal
 from agent_index.store.component_ledger import ComponentEvidence, ComponentLedger, _decode, _encode
 from agent_index.store.file_projection import capture_file_projection
@@ -83,6 +84,9 @@ class ComponentPublication:
         from .component_application import _qualified_chunks
 
         domain = ledger._source_domain
+        point_scope = (
+            self.journal.point_claim.hints.scope if self.journal.point_claim is not None else None
+        )
         if not domain.writing:
             raise SourceLayoutError("Component publication requires the owning source writer")
         if self.journal.get(OWNER, [KEY]).get(KEY) != self.payload:
@@ -94,17 +98,18 @@ class ComponentPublication:
         # Validate the whole sealed set before repairing any ordering/checkpoint suffix.
         for point in self.points:
             identity, target = point.identity, point.target
-            previous = ledger.get(*identity)
+            previous = ledger.get(*identity, point_scope=point_scope)
             if previous != target and (not point.selected or previous != point.previous):
                 raise SourceLayoutError("Component publication ordering evidence changed")
             retained[identity] = previous
             projection = capture_file_projection(
                 config, store, *identity, max_rows=max_rows,
                 retained_chunk_ids=target.projection.vector_chunk_ids,
+                point_scope=point_scope,
             )
             if projection != target.projection:
                 raise SourceLayoutError("Component publication native projection changed")
-            _qualified_chunks(projection, config, store, coverage)
+            _qualified_chunks(projection, config, store, coverage, point_scope=point_scope)
             if (current.get(identity) != point.before
                     and (not point.selected or not _completed(current.get(identity), point.after))):
                 raise PendingCrawlConflict("Component publication checkpoint changed")
@@ -113,7 +118,9 @@ class ComponentPublication:
                 continue
             identity = point.identity
             if retained[identity] != point.target:
-                ledger.put(point.target, expected=point.previous, max_rows=max_rows)
+                ledger.put(
+                    point.target, expected=point.previous, max_rows=max_rows, point_scope=point_scope,
+                )
                 domain.seal_reconciliation(OWNER, self.token)
             if not _completed(current.get(identity), point.after):
                 if point.after is None:
@@ -161,6 +168,7 @@ def retain_component_publication(
 def reconcile_component_publication(
     manifest: CrawlManifest, *, scope: str, family: str, max_rows: int,
     config: IndexConfig, paths: PathIndex, store: MultiModelStore,
+    point_claim: PendingPointClaim | None = None,
 ) -> tuple[int, int]:
     """Finish an exact sealed suffix without engines, native data replay or claim completion.
 
@@ -177,12 +185,18 @@ def reconcile_component_publication(
     PendingCrawls._validate(manifest)
     if manifest.component_versions is None:
         raise ValueError("Component reconciliation requires ordered acquisition")
+    if point_claim is not None and type(point_claim) is not PendingPointClaim:
+        raise ValueError("Point reconciliation requires a whole typed claim")
+    point_scope = point_claim.hints.scope if point_claim is not None else None
     ledger = ComponentLedger(config, store)
+    ledger._source_domain._require_read_access(point_scope)
     payload = PendingCrawls(paths).read_payload(manifest.source, scope)
     if payload is None:
         raise PendingCrawlConflict("Component reconciliation requires its pending crawl")
     journal = PreparedJournal(
         paths, manifest.source, scope, payload, manifest=manifest, full=False,
+    ) if point_claim is None else PreparedJournal.for_point_application(
+        paths, manifest.source, scope, payload, manifest=manifest, point_claim=point_claim,
     )
     stored = journal.get(OWNER, [KEY]).get(KEY)
     if stored is None:
@@ -227,5 +241,13 @@ def reconcile_component_publication(
         raise SourceLayoutError("Invalid retained component publication") from exc
     publication = ComponentPublication(journal, stored, points)
     domain = ledger._source_domain
-    with domain.reconcile(store.content_store.db, owner=OWNER, token=publication.token):
+    with domain.reconcile(
+        store.content_store.db, owner=OWNER, token=publication.token,
+        point_scope=point_scope,
+    ):
+        if point_claim is not None:
+            from .embedding_batch import _point_pair_store
+
+            store = _point_pair_store(store, config.model_profiles, point_scope=point_claim.hints.scope)
+            ledger = ComponentLedger(config, store)
         return publication.finish(config, store, ledger, max_rows=max_rows)

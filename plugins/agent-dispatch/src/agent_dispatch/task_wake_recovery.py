@@ -42,10 +42,12 @@ def reconcile_wake(
     receipt = (observe or provider)(
         target[0], target[1], prompt,
         idempotency_key=wake_id, machine=target[2],
+        **({"no_resume": True} if wake["no_resume"] else {}),
     )
     if settle_native_send:
         valid = valid_settlement(
             receipt, target[0], target[1], prompt, idempotency_key=wake_id,
+            no_resume=wake["no_resume"],
         )
     else:
         valid = isinstance(receipt, dict) and not (

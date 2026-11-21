@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agent_procutil import (
     detached_kwargs,
@@ -36,8 +36,12 @@ from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL, curr
 from agent_index.runtime_version import current_runtime_version
 
 if TYPE_CHECKING:
+    from agent_index.indexing.point_service import PointService
     from agent_index.indexing.task_store import TaskRecord, TaskStore
-    from agent_index.server.event_bus import EventBus
+
+
+class EventBus(Protocol):
+    def publish(self, event: str, payload: dict[str, Any]) -> None: ...
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +58,7 @@ _TERMINAL_VALUES = {s.value for s in TERMINAL}
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
-async def _settle(task: asyncio.Task[Any]) -> Any:
+async def _settle(task: asyncio.Future[Any]) -> Any:
     """Defer caller cancellation until this runner-owned operation settles."""
     cancelled = False
     while not task.done():
@@ -138,7 +142,7 @@ def _terminate_pid(pid: int) -> None:
         log.debug("terminate pid %s failed", pid, exc_info=True)
 
 
-def _load_governance_module():
+def _load_governance_module() -> dict[str, Any] | None:
     context_path = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "").strip()
     plugin_root_value = os.environ.get("AGENT_INDEX_HOME", "").strip()
@@ -310,10 +314,13 @@ class TaskRunner:
         self,
         store: TaskStore,
         event_bus: EventBus,
+        *,
+        point_service: PointService | None = None,
     ) -> None:
         self.store = store
         self.event_bus = event_bus
-        self._index_fn: Callable[..., None] | None = None
+        self.point_service = point_service
+        self._index_fn: Callable[..., object] | None = None
         self._post_index_fn: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
         self._startup_task: asyncio.Task[None] | None = None
@@ -336,7 +343,9 @@ class TaskRunner:
         self._worker_locks: dict[str, Any] = {}
         self._cancel_requested: set[str] = set()
         self._hint_worker_refusal: tuple[str, str] | None = None
-        self._governance_helper = _load_governance_module()
+        self._governance_helper: Callable[[str], dict[str, Any]] | dict[str, Any] | None = (
+            _load_governance_module()
+        )
         self._governance_baseline: dict[str, Any] | None = None
         self._governance_state: dict[str, Any] | None = None
         # Observable state
@@ -345,7 +354,7 @@ class TaskRunner:
         self.tasks_completed: int = 0
         self.tasks_failed: int = 0
 
-    def set_index_fn(self, fn: Callable[..., None]) -> None:
+    def set_index_fn(self, fn: Callable[..., object]) -> None:
         """Register the indexing function (called by the server at startup)."""
         self._index_fn = fn
 
@@ -393,6 +402,9 @@ class TaskRunner:
         # service cutover, running from its pinned version folder (near-ZDD).
         await self._adopt_running_workers(host)
 
+        if self.point_service is not None:
+            await self.point_service.start(legacy_data_dir=self.store.data_dir)
+
         pending = await asyncio.to_thread(self.store.get_pending_count)
         if pending > 0:
             log.info("Startup recovery: %d queued task(s)", pending)
@@ -406,6 +418,8 @@ class TaskRunner:
         survive a cutover and are re-adopted by the next service."""
         self._shutdown = True
         self._wake.set()
+        if self.point_service is not None:
+            self.point_service.pause()
         if self._stop_task is None:
             self._stop_task = asyncio.create_task(self._stop())
         await _settle(self._stop_task)
@@ -435,10 +449,12 @@ class TaskRunner:
                     with suppress(Exception):
                         lock.release()
             self._worker_locks.clear()
+            if self.point_service is not None:
+                await self.point_service.stop()
             log.info("Task runner stopped")
 
     async def drain(self, *, timeout: float = 300.0, poll: float = 0.5) -> bool:
-        """Pause dequeueing for a cutover; always drains clean.
+        """Pause dequeueing; join selected in-process work within the timeout.
 
         In the worker-delegation model indexing runs in a DETACHED versioned
         subprocess that survives this service's exit (it runs from its pinned
@@ -447,15 +463,20 @@ class TaskRunner:
         in-flight searches are drained separately by the DrainGate. ``timeout``
         and ``poll`` are accepted for signature compatibility but not needed
         (there is no in-process indexing work to wait out), so this never returns
-        ``False``.
+        ``False`` for detached work. An explicitly selected point service does
+        not survive process exit and must actually settle.
         """
         self._paused = True
         self._wake.set()
+        if self.point_service is not None:
+            return await self.point_service.drain(timeout=timeout)
         return True
 
     async def resume(self) -> None:
         """Resume dequeueing queued tasks after a drain rollback."""
         self._paused = False
+        if self.point_service is not None:
+            await self.point_service.resume()
         self._wake.set()
 
     def notify(self) -> None:
@@ -489,7 +510,9 @@ class TaskRunner:
 
     def status(self) -> dict[str, Any]:
         return {
-            "running": self.running,
+            "running": self.running or (
+                self.point_service is not None and self.point_service.running
+            ),
             "paused": self._paused,
             "active_task_id": self.active_task_id,
             "governance": self._governance_state,
@@ -497,6 +520,7 @@ class TaskRunner:
                 "completed": self.tasks_completed,
                 "failed": self.tasks_failed,
             },
+            **({"point": self.point_service.status()} if self.point_service is not None else {}),
         }
 
     async def _wait_for_wake(self, timeout: float) -> None:
@@ -511,6 +535,7 @@ class TaskRunner:
         if helper is None:
             self._governance_state = None
             return None
+        result: dict[str, Any]
         if callable(helper):
             result = helper(checkpoint)
             if "checkpoint" not in result:
@@ -550,6 +575,12 @@ class TaskRunner:
             and self._hint_worker_refusal != self._selected_worker_generation()
         )
 
+    def _can_dispatch_point(self) -> bool:
+        if self._shutdown or self._paused:
+            return False
+        boundary = self._recheck_governance("pre-mutation:point-launch")
+        return boundary is None or boundary.get("status") == "ready"
+
     async def _worker_loop(self) -> None:
         log.info("Worker loop started")
         # Small initial delay to let the service fully start
@@ -580,9 +611,18 @@ class TaskRunner:
         if self._paused or self._active_workers:
             return 5.0
 
+        point_completed = 0
+        if self.point_service is not None:
+            before_point = self._recheck_governance("pre-mutation:point-dispatch")
+            if before_point is not None and before_point.get("status") != "ready":
+                return _GOVERNANCE_BACKOFF_SECONDS
+            point_completed = await self.point_service.run_pending(admit=self._can_dispatch_point)
+        if self._shutdown or self._paused:
+            return None
+
         pending = await asyncio.to_thread(self.store.get_pending_count)
         if pending <= 0:
-            return 10.0
+            return None if point_completed else 10.0
         if self._shutdown:
             return None
         before_dequeue = self._recheck_governance("pre-mutation:dequeue")
@@ -600,7 +640,7 @@ class TaskRunner:
         else:
             task = await asyncio.to_thread(self.store.dequeue_next)
         if task is None:
-            return 10.0
+            return None if point_completed else 10.0
         if self._shutdown:
             await asyncio.to_thread(self.store.release_processing, task.id)
             return None

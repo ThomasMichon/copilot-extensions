@@ -10,6 +10,11 @@ Do not maintain a second independently evolving registrar schema.
 
 ## Coordinator environment (not portable authority)
 
+Optional command telemetry uses the exact local `consumer-telemetry.json`
+[admission policy](consumer-telemetry-command.md), not a new environment command
+override. Each approved root supplies the shared `.agent-telemetry` declaration.
+Its absence preserves the existing `telemetry.json` factory/spool configuration.
+
 | Variables (`AGENT_DISPATCH_` prefix) | Type / default |
 |---|---|
 | `HOST`, `PORT` | String/integer; `127.0.0.1` / 9847 |
@@ -201,6 +206,7 @@ and [worker configuration reference](worker-instances.md), not generic coercion.
 | `body.headless_labels`, `.cli_labels`, `.disposable_cli_labels`, `.idle_nudge_exempt_labels`, `.steering_disallowed_labels` | String lists; empty; native incompatible-body/charter checks |
 | `body.no_pair` | Boolean false; rejected with fleet |
 | `fleet.pool`, `.origin`, `.headless` | String list empty / string-null / boolean false |
+| `fleet.placement_provider` | Mapping `{name, hosts}` / null; `hosts` must be a non-empty, duplicate-free subset of `fleet.pool`; the provider argv and timeout come only from the supervisor host's trusted config (see [placement ordering](spawn-supervisor.md#optional-placement-ordering-fleetplacement_provider)) |
 | `filters.permit`, `.reject` | Dimension→string-list mappings; dimensions `repo`, `machine`, `env`, `role`, `worktree`, `task-type`, `capabilities` |
 | `evaluator` | String/null; null; native evaluator reference and kind-owned schema |
 | `runtime_generation`, `transition_group` | String/null; only attributed plugin-companion declarations may set these |

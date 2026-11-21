@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import stat
+from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-from . import config as cfg, installer, record_reporting
-from .producer_views import ObservedClaim, issue, ownership_snapshot, qualified_owner
+from . import config as cfg, installer, record_reporting, resource_producer as producer
+from .producer_views import ObservedClaim, _immutable, issue, ownership_snapshot, qualified_owner
 from .strict_yaml import load_strict_yaml_document
 
 _READ_ERRORS = (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError, yaml.YAMLError)
@@ -85,10 +88,72 @@ def _record(
     return rows
 
 
+def _qualify_transfer_aliases(
+    rows: list[ObservedClaim], issues: list[dict[str, str]],
+    stamps: list[tuple[Path, tuple[int, ...], bool]],
+) -> list[ObservedClaim]:
+    owners: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        if isinstance(row.metadata, dict) and isinstance(row.metadata.get("token"), str):
+            owners[row.metadata["token"]].add(row.owner)
+    needed: list[int] = []
+    for index, row in enumerate(rows):
+        metadata = row.metadata
+        if (
+            isinstance(metadata, dict) and metadata.get("phase") == "transferred"
+            and producer.valid_metadata(metadata)
+            and any(metadata["transfer"][role] not in owners[metadata["token"]]
+                    for role in ("source", "consumer"))
+        ):
+            needed.append(index)
+    if not needed:
+        return rows
+    from . import claim_handoffs as handoffs
+
+    path = handoffs.registry_path()
+    try:
+        data, stamp = _read(path)
+        stamps.append((path, stamp, False))
+        if (
+            not isinstance(data, dict) or data.get("version") != handoffs.REGISTRY_VERSION
+            or not isinstance(data.get("bundles"), list)
+        ):
+            raise ValueError("invalid accepted-handoff registry")
+        bundles = [handoffs._bundle_from_dict(raw) for raw in data["bundles"]]
+        by_id = {bundle.bundle_id: bundle for bundle in bundles}
+        if len(by_id) != len(bundles):
+            raise ValueError("duplicate accepted-handoff bundle ids")
+        claims_by_bundle = {
+            bundle.bundle_id: {
+                (claim["kind"], claim["ref"], _immutable(claim["producer"]))
+                for claim in bundle.claims
+                if isinstance(claim.get("producer"), dict)
+                and producer.valid_metadata(claim["producer"])
+            }
+            for bundle in bundles if bundle.state == "accepted"
+        }
+        for index in needed:
+            row = rows[index]
+            metadata = row.metadata
+            assert isinstance(metadata, dict)
+            receipt = metadata["transfer"]
+            bundle = by_id.get(receipt["bundle"])
+            if bundle is None or bundle.state != "accepted" or receipt != {
+                "accepted": True, "bundle": bundle.bundle_id,
+                "source": bundle.source, "consumer": bundle.consumer,
+            }:
+                continue
+            if (row.kind, row.ref, _immutable(metadata)) in claims_by_bundle[bundle.bundle_id]:
+                rows[index] = replace(row, accepted_transfer=True)
+    except (*_READ_ERRORS, handoffs.ClaimHandoffError) as exc:
+        issues.append(issue("handoff-evidence-unavailable", "claim-handoffs", str(exc)))
+    return rows
+
+
 def scan_ownership(
     *, owner: str | None = None, kind: str | None = None,
-    namespace: str | None = None, identity: dict | None = None,
-) -> dict:
+    namespace: str | None = None, identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Read registered tracking files without callbacks, locks, caches or writes."""
     rows: list[ObservedClaim] = []
     issues: list[dict[str, str]] = []
@@ -150,10 +215,11 @@ def scan_ownership(
                 rows.extend(_record(data, path, project, issues, reporter.execution_machine))
             except _READ_ERRORS as exc:
                 issues.append(issue("record-unavailable", f"{project}/{path.name}", str(exc)))
+    rows = _qualify_transfer_aliases(rows, issues, stamps)
     # Detect ordinary replacement/deletion/write races, not a cross-record transaction.
-    for path, stamp, directory in stamps:
+    for path, stamp, is_directory in stamps:
         try:
-            if _stamp(path, directory=directory) != stamp:
+            if _stamp(path, directory=is_directory) != stamp:
                 raise ValueError("tracking input changed during scan")
         except _READ_ERRORS as exc:
             issues.append(issue("snapshot-changed", str(path), str(exc)))

@@ -429,6 +429,9 @@ _versioned_slot_clean() {
     local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
     py="$(_bootstrap_python)" || return 1
     [[ -n "$py" ]] || return 1
+    if [[ -e "$INSTALL_DIR/runtime-provider-roots.json" || -L "$INSTALL_DIR/runtime-provider-roots.json" ]]; then
+        "$py" -I -B "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR" require-inputs || return 1
+    fi
     if ! declare -F _runtime_construction_begin >/dev/null; then
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
@@ -1348,7 +1351,14 @@ d=json.loads(sys.argv[1]); print(d["profile"]); print(d["runtime_version"])' "$s
         ;;
 esac
 case "$ACTION" in
-    install|update|provision|stamp) _assert_source_runtime || exit 1 ;;
+    install|update|provision|stamp)
+        _assert_source_runtime || exit 1
+        if [[ -e "$INSTALL_DIR/runtime-provider-roots.json" || -L "$INSTALL_DIR/runtime-provider-roots.json" ]]; then
+            provider_python="$(_bootstrap_python)" || exit 1
+            "$provider_python" -I -B "$SCRIPT_DIR/runtime_profile.py" \
+                --root "$INSTALL_DIR" require-inputs || exit 1
+        fi
+        ;;
 esac
 case "$ACTION:${DRY_RUN:-0}" in
     install:0|update:0|provision:0)

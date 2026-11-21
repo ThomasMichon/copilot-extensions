@@ -93,6 +93,41 @@ Select compatible setup/recovery rather than dropping required configuration
 or retrying speculative effects. Existing callers retain their old syntax;
 no old form is deprecated by this additive mode.
 
+## Native configuration without Manager installation
+
+A compatible standard bootstrap also accepts the existing configuration-only
+setup operation before Manager construction:
+
+```powershell
+& .\bootstrap.ps1 --toolchain-config C:\trusted\toolchain.conf setup --toolchain-only --apply
+```
+
+```bash
+bash ./bootstrap.sh --toolchain-config /trusted/toolchain.conf setup --toolchain-only --apply
+```
+
+Omit `--apply` for configuration preflight only. The native seed still performs
+its normal uv/managed-Python and source preparation; this is not the installed
+Manager's acquisition-free path. Source selection and package admission are
+unchanged. Acquisition uses a separate owned directory, not an application's
+shared staging path. Successful preparation removes that directory; a failed
+invocation retains it for diagnosis.
+
+The standard Python entry dispatches the same setup/configuration owner before
+Manager version construction, command activation, core setup or installation
+queue work. Only native configuration and its retained selection are applied;
+configuration success establishes no application readiness. Strict option
+parsing and the installed operation's repository/register restrictions remain.
+
+Before using this first-touch form, require `bootstrap-toolchain-only` in the
+exact bootstrap's version-1 `--describe-toolchain-config` capability list.
+An older bootstrap can install Manager before forwarding setup, so its support
+for the data file or the installed setup mode is insufficient. The compatible
+bootstrap also requires `toolchain-bootstrap-only=1` from its fetched Python
+entry before invoking it. Unsupported bootstrap/source combinations refuse
+instead of constructing Manager, falling back or omitting the selected data.
+Ordinary setup and existing installed configuration-only reuse are unchanged.
+
 ## Ordering, native configuration and conflicts
 
 The native seed parses the file and preflights affected environment and native

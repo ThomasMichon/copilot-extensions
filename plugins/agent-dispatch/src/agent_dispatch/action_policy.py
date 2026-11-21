@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,7 +35,9 @@ class ActionDecision:
     error: str | None = None
 
 
-def _read_object(path: Path, *, missing_ok: bool = True) -> dict:
+def _read_object(path: Path, *, missing_ok: bool = True,
+                 object_pairs_hook: Callable[[list[tuple[str, object]]], dict[str, object]] | None = None,
+                 ) -> dict[str, object]:
     """Read bounded ordinary local state; never wait on a pipe or follow a link."""
     for candidate in (path, *path.parents):
         if candidate.is_symlink():
@@ -55,15 +58,16 @@ def _read_object(path: Path, *, missing_ok: bool = True) -> dict:
         raw = stream.read(MAX_STATE_BYTES + 1)
     if len(raw) > MAX_STATE_BYTES:
         raise ValueError("state exceeds 64 KiB")
-    data = json.loads(raw.decode("utf-8-sig"))
+    data = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=object_pairs_hook)
     if not isinstance(data, dict):
         raise ValueError("state must be a JSON object")
     return data
 
 
-def read_controls(path: Path) -> dict[str, dict]:
+def read_controls(path: Path) -> dict[str, dict[str, object]]:
     """Validate the entire explicit policy, including inactive records."""
     data = _read_object(path)
+    controls: dict[str, dict[str, object]] = {}
     for action, record in data.items():
         if action not in ACTIONS:
             raise ValueError(f"unsupported action: {action}")
@@ -71,7 +75,8 @@ def read_controls(path: Path) -> dict[str, dict]:
             raise ValueError(f"{action} must have a boolean disabled field")
         if record.get("reason") is not None and not isinstance(record["reason"], str):
             raise ValueError(f"{action} reason must be text")
-    return data
+        controls[action] = record
+    return controls
 
 
 def evaluate_action(
@@ -96,7 +101,8 @@ def evaluate_action(
                               "invalid action policy", str(exc))
     record = controls.get(action, {})
     if record.get("disabled") is True:
-        return ActionDecision(action, str(root), True, str(source), record.get("reason"))
+        reason = record.get("reason")
+        return ActionDecision(action, str(root), True, str(source), reason if isinstance(reason, str) else None)
     if shared_bootstrap is not None:
         shared_source = shared_bootstrap
         try:

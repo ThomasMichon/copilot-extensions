@@ -1,0 +1,9 @@
+{
+  "comment": "Allow selected canonical writes to coexist with qualified component ordering evidence",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

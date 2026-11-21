@@ -27,7 +27,7 @@ if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
 fi
 
 if [ "$#" -eq 1 ] && [ "${1-}" = --describe-toolchain-config ]; then
-    printf '%s\n' '{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1"]}'
+    printf '%s\n' '{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1","bootstrap-toolchain-only"]}'
     exit 0
 fi
 
@@ -395,14 +395,22 @@ case "$REPO:$source_prefix" in
     esac ;;
 esac
 
+toolchain_only=0
+if [ "${1-}" = setup ]; then
+    for argument in "$@"; do
+        if [ "$argument" = --toolchain-only ]; then toolchain_only=1; fi
+    done
+fi
 update_staging=""
 if [ "$recovery_only" -eq 1 ]; then
     recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"
     STAGING="$recovery_staging/source"
     trap 'rm -rf -- "$recovery_staging"' EXIT
-elif [ "${1-}" = update ]; then
+elif [ "${1-}" = update ] || [ "$toolchain_only" -eq 1 ]; then
     mkdir -p "$ROOT/bootstrap-acquisition"
-    update_staging="$(mktemp -d "$ROOT/bootstrap-acquisition/update.XXXXXXXX")"
+    acquisition_kind=update
+    if [ "$toolchain_only" -eq 1 ]; then acquisition_kind=toolchain; fi
+    update_staging="$(mktemp -d "$ROOT/bootstrap-acquisition/$acquisition_kind.XXXXXXXX")"
     STAGING="$update_staging/source"
     trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf -- "$update_staging"; fi' EXIT
 fi
@@ -513,13 +521,18 @@ if [ "$recovery_only" -eq 0 ]; then
     fi
     installer_args+=(--bootstrap-uv "$UV")
 fi
-if [ -n "$toolchain_config" ]; then
+if [ -n "$toolchain_config" ] || [ "$toolchain_only" -eq 1 ]; then
     for capability in toolchain-config toolchain-context; do
         if ! grep -qx "# copilot-extensions:$capability=1" scripts/runtime_install.py; then
             _bootstrap_progress 'Selected Manager source does not support toolchain configuration; installation was not started.' failed
             exit 2
         fi
     done
+    if [ "$toolchain_only" -eq 1 ] &&
+        ! grep -qx '# copilot-extensions:toolchain-bootstrap-only=1' scripts/runtime_install.py; then
+        _bootstrap_progress 'Selected Manager source does not support toolchain configuration; installation was not started.' failed
+        exit 2
+    fi
 fi
 if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
     "$UV" python install --no-bin --no-registry 3.11

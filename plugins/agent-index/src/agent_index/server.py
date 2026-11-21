@@ -14,11 +14,11 @@ import socket
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from threading import Condition, Lock
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
@@ -29,6 +29,13 @@ from .config import Config, data_dir, install_dir, load_config, routing_dir, run
 from .query_surface import format_error, hit_to_dict, stored_cluster_to_dict
 from .rendezvous import clear_endpoint, write_endpoint
 from .runtime_version import current_runtime_version
+
+if TYPE_CHECKING:
+    from .indexing.point_service import PointService
+
+    daemon_entrypoint = cast(
+        Callable[..., Callable[[Callable[..., None]], Callable[..., None]]], daemon_entrypoint,
+    )
 
 log = logging.getLogger("agent-index.server")
 INSTALLATION_HEADER = "X-Agent-Index-Installation-Id"
@@ -136,7 +143,7 @@ def _create_task_runner() -> Any:
     store = TaskStore(data_dir() / "tasks.db")
     runner = TaskRunner(store, _EventBus())
 
-    def _run_reindex(**kwargs: Any) -> dict[str, float]:
+    def _run_reindex(**kwargs: Any) -> dict[str, object]:
         from agent_index.indexing import engine as indexing_engine
 
         return indexing_engine.run_reindex(**kwargs)
@@ -152,6 +159,8 @@ async def _start_task_runner(app: FastAPI) -> None:
         if getattr(app.state, "task_runner", None) is not None:
             return
         store, runner = _create_task_runner()
+        if app.state.point_service_factory is not None:
+            runner.point_service = app.state.point_service_factory()
         try:
             await runner.start()
         except BaseException:
@@ -243,13 +252,16 @@ def _publish_active_evidence(app: FastAPI, *, strict: bool) -> None:
         log.warning("Failed to publish active service evidence", exc_info=True)
 
 
-def build_app(*, passive: bool = False) -> FastAPI:
+def build_app(
+    *, passive: bool = False,
+    point_service_factory: Callable[[], PointService] | None = None,
+) -> FastAPI:
     """Build the agent-index service application."""
     cached_search_engine: Any | None = None
     search_engine_lock = Lock()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Admit direct framework hosts before their startup work."""
         from agent_procutil.daemon_instances import admit_daemon_instance
 
@@ -258,7 +270,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
                 yield
 
     @asynccontextmanager
-    async def _lifespan(app: FastAPI):
+    async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         data_dir().mkdir(parents=True, exist_ok=True)
         try:
             from .sources.providers import discover_and_register_providers
@@ -272,6 +284,8 @@ def build_app(*, passive: bool = False) -> FastAPI:
             try:
                 await _start_task_runner(app)
             except Exception:
+                if point_service_factory is not None:
+                    raise
                 log.warning("Task runner startup skipped", exc_info=True)
         try:
             yield
@@ -301,6 +315,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
     app.state.bound_port = None
     app.state.task_store = None
     app.state.task_runner = None
+    app.state.point_service_factory = point_service_factory
     app.state.task_runner_lock = asyncio.Lock()
 
     def service_identity(request: Request) -> dict[str, Any]:
@@ -412,9 +427,11 @@ def build_app(*, passive: bool = False) -> FastAPI:
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:
+        from .indexing.point_service_contract import point_service_contract
         from .sources.credentials import source_credentials_contract
 
         gate: DrainGate = request.app.state.drain_gate
+        runner = getattr(request.app.state, "task_runner", None)
         return {
             "status": (
                 "draining"
@@ -426,6 +443,10 @@ def build_app(*, passive: bool = False) -> FastAPI:
             "passive": request.app.state.passive,
             "promoted": request.app.state.promoted,
             "indexing_contract": intake_contract(),
+            "point_service_contract": point_service_contract(
+                getattr(runner, "point_service", None),
+                passive=request.app.state.passive, draining=gate.draining,
+            ),
             "source_credentials_contract": source_credentials_contract(),
             **service_identity(request),
         }
@@ -454,7 +475,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
             identity = request.app.state.installation_id
             if not identity or request.headers.get(INSTALLATION_HEADER) != identity:
                 raise HTTPException(status_code=409, detail="installation ownership mismatch")
-            async def read_body():
+            async def read_body() -> bytearray:
                 data = bytearray()
                 async for chunk in request.stream():
                     if len(data) + len(chunk) > 16384:
@@ -599,6 +620,41 @@ def build_app(*, passive: bool = False) -> FastAPI:
             runner = getattr(request.app.state, "task_runner", None)
             if store is None or runner is None or not request.app.state.promoted:
                 return {"accepted": False, "error": "indexing task runner unavailable"}
+            points = getattr(runner, "point_service", None)
+            if body.required_point_service_version is not None:
+                from .indexing.point_service import PointAdmissionRefused, PointService
+                from .indexing.point_hints import PointChangeHints
+                from .indexing.point_service_contract import point_scope_fingerprint
+                from .indexing.task_store import TaskRecord, TaskStore
+
+                if not request.headers.get(INSTANCE_HEADER):
+                    raise HTTPException(status_code=409, detail="service instance token required")
+                authorize_control(request)
+                if type(points) is not PointService or request.app.state.drain_gate.draining:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Required point-service admission unavailable; select a capable active service",
+                    )
+                identity = service_identity(request)
+                assert isinstance(body.change_hints, PointChangeHints)
+
+                async def enqueue_selected(selected: TaskStore) -> TaskRecord:
+                    return await enqueue_hinted_request(selected, body, runner.notify)
+
+                try:
+                    task = await points.enqueue_required(body.change_hints, enqueue_selected)
+                except PointAdmissionRefused as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from None
+                return {
+                    "accepted": True, "task": task.to_dict(),
+                    "indexing_contract": intake_contract(), **identity,
+                    "point_service_admission": {
+                        "id": "agent-index.point-service", "version": 1,
+                        "scope_fingerprint": point_scope_fingerprint(body.change_hints.scope),
+                    },
+                }
+            if points is not None and points.matches(body.change_hints):
+                store = points.store
             task = await enqueue_hinted_request(store, body, runner.notify)
             return {
                 "accepted": True,
@@ -735,7 +791,7 @@ def _index_status(include_sources: bool = False) -> dict[str, Any]:
     from .store.source_layout import SourceLayoutError, domain_for
 
     try:
-        import lancedb
+        lancedb = importlib.import_module("lancedb")
 
         from .index_config import IndexConfig
     except Exception:
@@ -806,7 +862,7 @@ def _clear_routing() -> None:
 @daemon_entrypoint("agent-index", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Bind an OS-assigned local endpoint and run the service."""
-    import uvicorn
+    uvicorn = importlib.import_module("uvicorn")
 
     cfg = cfg or load_config()
     data_dir().mkdir(parents=True, exist_ok=True)

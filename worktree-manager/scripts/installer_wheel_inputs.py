@@ -17,7 +17,7 @@ import stat
 import struct
 import time
 from types import MappingProxyType
-from typing import BinaryIO, Mapping
+from typing import Any, BinaryIO, Iterator, Mapping
 import zipfile
 import zlib
 
@@ -53,7 +53,7 @@ class WheelLimits:
     max_tags: int
     max_metadata_member_bytes: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(type(value) is not int or value <= 0 for value in vars(self).values()):
             raise WheelError("wheel limits must be explicit positive integers")
 
@@ -79,7 +79,7 @@ class InspectedWheel:
     sha256: str
     size: int
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.facts, name)
 
 
@@ -208,7 +208,7 @@ def preflight_archive(archive: BinaryIO, *, limits: WheelLimits, deadline: float
 def _member_chunks(
     archive: BinaryIO, bundle: zipfile.ZipFile, member: zipfile.ZipInfo, *,
     limit: int, deadline: float,
-):
+) -> Iterator[bytes]:
     _check_deadline(deadline)
     archive.seek(0, os.SEEK_END)
     archive_size = archive.tell()
@@ -293,7 +293,7 @@ def inspect_archive(
                 raise WheelError("wheel member count limit exceeded")
             names = [member.filename for member in members]
             seen = set()
-            tree = {}
+            tree: dict[str | None, Any] = {}
             prefixes = set()
             expanded = 0
             for member in members:
@@ -374,7 +374,7 @@ def inspect_archive(
             for tag in tags:
                 _, count = bounded_tag(tag, limit=limits.max_tags - tag_count, deadline=deadline)
                 tag_count += count
-            rows = []
+            rows: list[list[str]] = []
             for row in csv.reader(
                 io.StringIO(metadata[prefix + "RECORD"].decode("utf-8")), strict=True,
             ):
@@ -434,17 +434,17 @@ def inspect_archive(
         raise WheelError(f"invalid wheel archive: {exc}") from exc
 
 
-def _ordinary(path: Path) -> os.stat_result:
+def _ordinary(path: Path, *, allow_hardlinks: bool = False) -> os.stat_result:
     for item in (*reversed(path.parents), path):
         info = item.lstat()
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise WheelError("linked wheel input refused")
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+    if not stat.S_ISREG(info.st_mode) or (not allow_hardlinks and info.st_nlink != 1):
         raise WheelError("wheel input must be an ordinary unlinked file")
     return info
 
 
-def _identity(info: os.stat_result) -> tuple:
+def _identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     # Windows 3.12 path stat and fstat disagree on ctime's birth/change meaning.
     timestamp = getattr(info, "st_birthtime_ns", info.st_ctime_ns) if os.name == "nt" else info.st_ctime_ns
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, timestamp

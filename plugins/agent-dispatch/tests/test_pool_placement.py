@@ -1137,10 +1137,11 @@ def test_lane_load_stops_classifying_history_once_capacity_is_reached(
         conn: sqlite3.Connection, identity: tuple[str, str, str], *,
         accounting: ReservationAccountability | None = None, ahead_of: tuple[float, str] | None = None,
         cutoff: int | None = None, exclude_key: str | None = None, exclude_waiter: str | None = None,
+        waiter_holds: frozenset[str] = frozenset(),
     ) -> int:
         cutoffs.append(cutoff)
         return lane_load(conn, identity, accounting=accounting, ahead_of=ahead_of, cutoff=cutoff,
-                         exclude_key=exclude_key, exclude_waiter=exclude_waiter)
+                         exclude_key=exclude_key, exclude_waiter=exclude_waiter, waiter_holds=waiter_holds)
 
     monkeypatch.setattr(queue_pool_placement, "pool_lane_load", observe_load)
     with pytest.raises(TaskError, match="capacity"):

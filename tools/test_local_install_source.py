@@ -3341,6 +3341,7 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
     selected = SimpleNamespace(
         payload=payload, identity=SimpleNamespace(package_version="1.0"),
         project={"application": "application"},
+        closed_wheel_source=False,
     )
     inputs = SimpleNamespace(verify=lambda: None)
     selection = {

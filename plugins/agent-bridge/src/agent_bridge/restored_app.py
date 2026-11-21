@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from typing import cast
 import sqlite3
 
 from fastapi import FastAPI
@@ -36,7 +38,7 @@ def create_restored_app(runtime: RestoredRuntime) -> FastAPI:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
     @asynccontextmanager
-    async def candidate_lifespan(app: FastAPI):
+    async def candidate_resources(app: FastAPI) -> AsyncIterator[None]:
         db = None
         app.state.candidate_ready = False
         try:
@@ -46,6 +48,7 @@ def create_restored_app(runtime: RestoredRuntime) -> FastAPI:
                     raise PrivateIPCError(Refusal.AUTHORITY)
                 app.state.runtime_executable = executing_executable()
                 db = Database(runtime.config.db_path, read_only=True)
+                app.state.db = db
                 manager = runtime.build_manager(db)
             except PrivateIPCError:
                 raise
@@ -62,7 +65,7 @@ def create_restored_app(runtime: RestoredRuntime) -> FastAPI:
             app.state.candidate_ready = False
             app.state.ready = False
             app.state.credential_relay_ready = False
-            app._serving_target = None
+            cast(_CandidateApp, app)._serving_target = None
             adopted = getattr(app.state, "db", None)
             pending = getattr(app.state, "pending_runtime", None)
             if pending is not None:
@@ -84,6 +87,20 @@ def create_restored_app(runtime: RestoredRuntime) -> FastAPI:
                     finally:
                         if pending is not None:
                             pending.close()
+
+    @asynccontextmanager
+    async def candidate_lifespan(app: FastAPI) -> AsyncIterator[None]:
+        from .app_lifecycle import settled_thread_call
+        from .consumer_telemetry import close as close_consumer_telemetry
+
+        try:
+            async with candidate_resources(app):
+                yield
+        finally:
+            subject = getattr(app.state, "session_manager", None)
+            if subject is None:
+                subject = getattr(app.state, "db", None)
+            await settled_thread_call(close_consumer_telemetry, subject)
 
     app = _CandidateApp(
         title="Agent Bridge Candidate", version=__version__,

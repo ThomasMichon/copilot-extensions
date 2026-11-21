@@ -1,5 +1,9 @@
 """Native offline retained-telemetry configuration command."""
 
+from __future__ import annotations
+
+import argparse
+
 from plugin_activation.state import write_json_object_atomic
 from process_telemetry.retained_config import execute, register_commands
 from single_instance_lease.operation import OperationLock
@@ -7,14 +11,14 @@ from single_instance_lease.operation import OperationLock
 from .telemetry import SINK_ENV_VAR, _default_config_path
 
 
-def run(args):
+def run(args: argparse.Namespace) -> int:
     return execute(
         args, target=_default_config_path, service="agent-dispatch", sink_env=SINK_ENV_VAR,
         lock_factory=OperationLock, write_atomic=write_json_object_atomic,
     )
 
 
-def register(sub):
+def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     commands = register_commands(sub, run)
     from .hourly_reporting import run as run_hourly
 

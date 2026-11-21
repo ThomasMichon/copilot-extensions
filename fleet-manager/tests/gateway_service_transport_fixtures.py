@@ -4,48 +4,62 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import AsyncIterator, Callable
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Protocol, cast
 
 import aiohttp
 from aiohttp import web
+from joserfc.jwk import ECKey
 from yarl import URL
 
 from fleet_manager import planning
 from fleet_manager.gateway_auth import make_proof
+from fleet_manager.gateway_identity_provider import IdentityProvider
+from fleet_manager.gateway_local_handler import LocalHandlerBinding
+from fleet_manager.ledger import OperationLedger
 from fleet_manager.gateway_service_connector import ServiceConnector, verified_tls
-from fleet_manager.gateway_service_server import Listener, STATE, start
+from fleet_manager.gateway_service_listener import Listener
+from fleet_manager.gateway_service_server import STATE, Serving, start
 from gateway_fixtures import Fixtures
 from test_gateway_service_policy import Harness
 from test_runtime_identity import pair
 
 
-async def eventually(predicate, timeout=3):
-    async def poll():
+class _TokenPair(Protocol):
+    def __call__(self, keys: tuple[ECKey, ECKey], owner: SimpleNamespace, /, *,
+                 now: int, access: dict[str, str]) -> tuple[str, str]: ...
+
+
+async def eventually(predicate: Callable[[], bool], timeout: float = 3) -> None:
+    async def poll() -> None:
         while not predicate():
             await asyncio.sleep(0.01)
     await asyncio.wait_for(poll(), timeout)
 
 
 class Backend:
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.requests = []
+        self.requests: list[tuple[str, str, dict[str, str], bytes]] = []
         self.started = asyncio.Event()
         self.stopped = asyncio.Event()
         self.release = asyncio.Event()
-        self.stream = asyncio.Queue()
+        self.stream: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.writes = 0
         self.mutations = 0
-        self.runner = None
+        self.runner: web.AppRunner | None = None
 
-    async def handle(self, request):
+    async def handle(self, request: web.Request) -> web.StreamResponse:
         body = await request.read()
         self.requests.append((request.method, request.raw_path, dict(request.headers), body))
         if request.path == "/lost-mutation":
             self.mutations += 1
-            request.transport.close()
+            transport = request.transport
+            assert transport is not None
+            transport.close()
             return web.Response()
         if request.path == "/conditional":
             if (request.headers.get("If-Match", '"current"') != '"current"'
@@ -107,7 +121,7 @@ class Backend:
             headers={"Set-Cookie": "fixture=not-forwarded", "X-Identity": "not-forwarded",
                      "Cache-Control": "no-store"})
 
-    async def start(self):
+    async def start(self) -> str:
         app = web.Application()
         app.router.add_route("*", "/{tail:.*}", self.handle)
         self.runner = web.AppRunner(app, access_log=None, handler_cancellation=True,
@@ -133,18 +147,20 @@ class Rig:
                                  "https://localhost:0", str(fixture.root / "tls.pem"),
                                  str(fixture.root / "tls-key.pem"))
         self.backends = [Backend("a"), Backend("b")]
-        self.origins = []
-        self.connectors = []
-        self.tasks = []
-        self.serving = None
-        self.session = None
-        self.nonce = None
+        self.origins: list[str] = []
+        self.connectors: list[ServiceConnector] = []
+        self.tasks: list[asyncio.Task[None]] = []
+        self.serving: Serving | None = None
+        self.session: aiohttp.ClientSession | None = None
+        self.nonce: str | None = None
 
-    def save(self):
+    def save(self) -> None:
         self.policy.write_bytes(planning.canonical(self.h.document))
 
-    async def start(self, *, identity_provider=None, user_identity_provider=None,
-                    local_handlers=(), enrollment_journal=None):
+    async def start(self, *, identity_provider: IdentityProvider | None = None,
+                    user_identity_provider: IdentityProvider | None = None,
+                    local_handlers: tuple[LocalHandlerBinding, ...] = (),
+                    enrollment_journal: OperationLedger | None = None) -> Rig:
         self.save()
         for backend in self.backends:
             self.origins.append(await backend.start())
@@ -159,16 +175,21 @@ class Rig:
             trust_env=False, cookie_jar=aiohttp.DummyCookieJar())
         return self
 
-    def access(self, subject, key):
-        return pair((self.h.keys[0], self.h.keys[key]), SimpleNamespace(nonce="unused"),
-                    now=self.h.clock.value, access={"sub": subject})[0]
+    def access(self, subject: str, key: int) -> str:
+        token, _ = cast(_TokenPair, pair)(
+            (self.h.keys[0], self.h.keys[key]), SimpleNamespace(nonce="unused"),
+            now=self.h.clock.value, access={"sub": subject},
+        )
+        return token
 
-    async def auth(self, path, method="GET", *, subject="caller-a", key=3,
-                   proof_method=None, proof_target=None):
+    async def auth(self, path: str, method: str = "GET", *, subject: str = "caller-a", key: int = 3,
+                   proof_method: str | None = None, proof_target: str | None = None) -> dict[str, str]:
         if self.nonce is None:
+            assert self.session is not None
             async with self.session.get(self.origin + "/_fleet/challenge") as response:
                 assert response.status == 200
                 self.nonce = (await response.json())["nonce"]
+        assert self.nonce is not None
         access = self.access(subject, key)
         proof = make_proof(
             self.h.keys[key].get_op_key("sign"), access, nonce=self.nonce,
@@ -179,14 +200,15 @@ class Rig:
         assert result["Authorization"].endswith(access)
         return result
 
-    async def request(self, path="/api", method="GET", **kwargs):
+    async def request(self, path: str = "/api", method: str = "GET", **kwargs: Any) -> aiohttp.ClientResponse:
         selected = await self.auth(path, method)
         selected.update(kwargs.pop("headers", {}))
+        assert self.session is not None
         return await self.session.request(
             method, URL(self.origin + path, encoded=True), headers=selected, **kwargs)
 
-    async def connect(self, index=0):
-        async def access():
+    async def connect(self, index: int = 0) -> ServiceConnector:
+        async def access() -> str:
             return self.access("service-a" if index == 0 else "service-b", index + 1)
         connector = ServiceConnector(
             slot="service-a" if index == 0 else "service-b", gateway_origin=self.origin,
@@ -198,14 +220,14 @@ class Rig:
         await asyncio.wait_for(connector.connected.wait(), 3)
         return connector
 
-    async def update(self):
+    async def update(self) -> None:
         self.h.document["manifest"]["revision"] += 1
         self.save()
         revision = self.h.document["manifest"]["revision"]
-        await eventually(lambda: self.state.context.manifest.revision == revision)
+        await eventually(lambda: self.state.context is not None and self.state.context.manifest.revision == revision)
         self.nonce = None
 
-    async def close(self):
+    async def close(self) -> None:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -220,7 +242,7 @@ class Rig:
 
 
 @contextlib.asynccontextmanager
-async def running(root):
+async def running(root: Path) -> AsyncIterator[Rig]:
     rig = Rig(root)
     try:
         await rig.start()

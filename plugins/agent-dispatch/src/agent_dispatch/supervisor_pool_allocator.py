@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .client_errors import DispatchError, DispatchUpgradeRequired
 
@@ -13,9 +14,41 @@ if TYPE_CHECKING:
     from .supervisor import Supervisor
 
 
+_ALLOCATION_SETTING = "AGENT_DISPATCH_POOL_ALLOCATION"
+_BROAD_VALUES = {"1", "true", "yes", "on"}
+
+
 def allocation_enabled() -> bool:
-    """Source integration is opt-in independently of retained cohort publication."""
-    return os.environ.get("AGENT_DISPATCH_POOL_ALLOCATION", "").strip().lower() in {"1", "true", "yes", "on"}
+    """The legacy, unscoped supervisor opt-in; a selector is never broad consent."""
+    return os.environ.get(_ALLOCATION_SETTING, "").strip().lower() in _BROAD_VALUES
+
+
+def instance_allocation_enabled(
+    instance: tuple[str, str, str] | None, *, broad_enabled: bool,
+) -> bool:
+    """At the configured-cycle gate, apply operator policy to validated launch scope."""
+    setting = os.environ.get(_ALLOCATION_SETTING)
+    if setting is None or setting.strip().lower() in _BROAD_VALUES:
+        return broad_enabled
+    setting = setting.strip()
+    if instance is None or not setting.startswith("{"):
+        return False
+    from .pool_instances import pool_instance_identity
+    from .registrar_json import unique_json_fields
+
+    try:
+        value = json.loads(setting, object_pairs_hook=unique_json_fields)
+        if isinstance(value, dict) and set(value) == {"instances"}:
+            entries = value["instances"]
+            if not isinstance(entries, list) or not 1 <= len(entries) <= 128:
+                return False
+            # Validate the entire policy before matching: a valid prefix does
+            # not authorize allocation if a later entry is malformed.
+            identities = {pool_instance_identity(entry) for entry in entries}
+            return len(identities) == len(entries) and instance in identities
+        return pool_instance_identity(value) == instance
+    except (ValueError, RecursionError):
+        return False
 
 
 def validate_instance(
@@ -32,7 +65,7 @@ def validate_instance(
         raise ValueError("managed allocator instance conflicts with its supervisor or machine")
 
 
-def configured_catalog(client: DispatchClient) -> dict | None:
+def configured_catalog(client: DispatchClient) -> dict[str, Any] | None:
     health = client.health()
     observation = health.get("pool_cohort") if isinstance(health, dict) else None
     if not isinstance(observation, dict) or (
@@ -65,7 +98,7 @@ def begin_cycle(supervisor: Supervisor) -> bool:
     return True
 
 
-def matches_task(supervisor: Supervisor, task: dict) -> bool:
+def matches_task(supervisor: Supervisor, task: dict[str, Any]) -> bool:
     """Keep legacy/manual custody while excluding another current pool owner."""
     try:
         if supervisor.client.list_reservations(
@@ -105,10 +138,10 @@ def launch_scope(args: argparse.Namespace) -> tuple[str, str] | None:
 
 
 def reserve(
-    client: DispatchClient, task: dict, supervisor_id: str, *,
+    client: DispatchClient, task: dict[str, Any], supervisor_id: str, *,
     instance: tuple[str, str, str], ordinary: bool, restricted: bool, startup_timeout: float,
     driver: str | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """A different global winner waits without being claimed by this caller."""
     catalog = configured_catalog(client)
     if catalog is None:
@@ -141,10 +174,10 @@ def reserve(
 
 
 def prepare_task(
-    client: DispatchClient, task: dict, reservation: dict, *,
+    client: DispatchClient, task: dict[str, Any], reservation: dict[str, Any], *,
     instance: tuple[str, str, str] | None, supervisor_id: str,
     driver: str = "ordinary-bridge",
-) -> dict:
+) -> dict[str, Any]:
     """Refresh the allocator's generation before preparing any ordinary effects."""
     if reservation.get("reservation_pool_bound") is True and instance is None:
         from .spawn_factories import SpawnPreparationRetained

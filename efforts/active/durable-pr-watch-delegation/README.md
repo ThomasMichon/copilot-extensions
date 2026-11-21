@@ -136,6 +136,27 @@ native/fleet switch alone does not deliver this service intake model.
 
 ## Coordination
 
+The proposed #13487 tracking refinement retains the original finite
+existing-owner terminal-reader transition in its already-reviewed T3 home.
+Preserve the current transition driver, writer/reader/cache/ReplayStore,
+native and resource custodians, all actual holds and every broader parent
+gate. Bootstrap and metadata-only adoption do not qualify populated generation
+or active-native-watch transition. Normal reviewed complete domain/intake
+delivery and current applicable source/receiver/custody readback precede a
+separate administrative source judgment; no claim expiry, generic ACK,
+implementation appointment, service stop or installed migration follows.
+
+The proposed finite #11711 terminal-mapping result lane below stays with this
+existing PR-service process/workspace, observer/store and terminal-retirement
+owner. It does not duplicate the forge client, move a workspace, take over
+the current M1/callback/consumer priorities or reopen earned source milestones.
+Preserve actual uncertain-effect custody, original standalone bounds and all
+incumbent source/provider/native/resource obligations. Ordinary reviewed
+complete P11711/V11711/G11711 and continuing Journal delivery, followed by
+permitted current source/ROOT/custody readback, precedes a separate tracking
+judgment; keep #11711 OPEN during proposal. No generic ACK, receipt PR,
+whole-M1/provider/native prerequisite, effectful retry or owner transfer is added.
+
 ### MCP startup prerequisite follow-through
 
 The existing integration driver retains concurrent MCP bridge startup diagnosis
@@ -746,6 +767,11 @@ No remote source mutation, merge evidence, claim settlement or finalization is i
 - [ ] Complete P6 optional policy-gated automation, thin presentation and staged
   legacy retirement only after compatibility and consumer-dependency proof.
 
+#### Finite existing-owner retained-reader transition - #13487
+
+- [ ] **P13487:** Complete the [original finite retained-volume transition](retained-terminal-reader-transition.md), preserving its existing owner, explicit stopped-service selection, writer lease, adoption transactions and all original state/unknown-effect custody.
+- [ ] **V13487:** Qualify the [existing interruption/retry, concurrent-owner and rollback controls](retained-terminal-reader-transition.md#serial-delivery-and-acceptance), retaining current narrower source credit and unchecked positive populated/native-active acceptance without substituting whole-parent completion.
+
 ### Governed watch-owner cutover prerequisite
 
 _Agent-recommended design and validation, explicitly selected for review._
@@ -808,11 +834,72 @@ The [physical transition design](subscriber-state-transition.md), reviewed in
 sealing/recovery requirements. Runtime realization follows that accepted
 design. Its native open-handle experiment is not complete transition or
 historical-install proof.
-The next receiver slice observes fixed transition paths and the phase header
-through shared storage, preserving absent-transition legacy behavior and
+The receiver slice merged in #13508 observes fixed transition paths and the
+phase header through shared storage, preserving absent-transition legacy behavior and
 refusing every present or orphaned transition before legacy reads/writes.
-Guarded recovery and authority selection remain unimplemented; no phase,
-map/cwd capability or new state publisher is activated.
+The internal preparation slice, merged in #13520, validates binding and original
+descriptor custody, drains without releasing the writer and records only
+`prepared`, with a retained original-inode pin, same-inode recovery and
+final-publication guards. Preparation rejection closes admission, permanently
+retains guarded native/storage checks and fences unattempted queued callbacks;
+unsafe repair requires strict readoption. Readoption moves the retained queue,
+history, fence and concurrency limits only after old workers settle. Only
+authorized activation/resumption unfences it; preparation refuses publication
+until retained legacy work has drained. Startup refusal and guard removal
+share the final admission boundary. It is not connected to ordinary CLI/control
+entry. The internal Linux source slice, merged in #13594, adds journaled atomic-exchange
+sealing and topology-based recovery under that same custody, without importing
+or activating state. The Windows source slice merged in #13608 adds private
+staging, normal original-lease release, no-replace sealing and topology-based
+recovery; raced historical files remain retained blockers, never another lease.
+Contained Windows current-controller abrupt-exit recovery, merged in #13612, covers six
+transition boundaries without import or effects. The contained Windows packet
+merged in #13615 and extended in #13618
+also covers delayed opens, gap creation and cold legacy-home `serve`/`restart`
+refusal from three development snapshots and three promoted payloads with their
+bundled historical dependencies. Native Linux
+exchange/interruption, released historical installations, governed entry and
+complete supported-window qualification,
+boot-boundary qualification and authority
+selection remain open; no
+map/cwd capability or isolated subscription publisher is activated.
+The
+[domain/controller amendment](subscriber-state-transition.md#execution-domain-evidence-and-current-controller-recovery-amendment)
+reviewed in #13624
+separates immutable transition origin from current executor admission and
+requires native same-domain continuity before comparing boots. It proposes a
+versioned recovery adapter, not weaker binding checks or delivered boot/import
+support. The installation-owner prerequisite merged in #13634 validates full
+retained installation scope under fresh current admission and native transaction
+custody without requiring the historical payload. It does not authenticate
+caller-supplied provenance or adapt a transition journal. The internal
+[prepared-only adapter](subscriber-state-transition.md#prepared-only-version-2-receiver)
+merged in #13639 and preserves complete origin under freshly admitted current
+native custody.
+It does not adapt sealed records, select state authority or enable ordinary
+entry. The unwired native-domain/boot API merged in #13654 under the existing
+boot-evidence owner, with a Windows VM Generation Counter source and strict
+version-1 observations. Actor-free source proof is not native qualification;
+Linux/WSL and macOS still have no implemented continuity provider.
+The [Windows sealed receiver](subscriber-state-transition.md#windows-sealed-version-2-receiver)
+merged in #13662, preserving complete immutable origin and separately admitted
+current control under the qualified inner barrier lease. Actor-free and
+contained Windows receiver cases pass; this is not final import or ordinary
+entry. The [prepared-origin phase-progression receiver](subscriber-state-transition.md#windows-sealed-version-2-receiver)
+merged in #13668: an actual prepared origin stays unchanged while its v2
+envelope records the qualified sealed phase. Native current-controller
+publication and cold retry pass without the historical executable.
+The [Windows v2 sealing writer](subscriber-state-transition.md#windows-version-2-sealing-writer)
+merged in #13674, sharing the existing physical owner and preserving origin
+through staging, both moves and final publication. Metadata preflight, actual
+native interruption recovery and later-controller recovery pass without the
+old executable. POSIX v2 sealing/epoch recovery, native domain/boot
+qualification, final import/authority selection, ordinary entry and every
+remaining gate still follow under the existing source-only authority.
+The follow-on contained Windows historical-source and abrupt-controller-exit
+packet merged in #13681 and exercises both journal versions: 42 cases pass with
+one Linux-specific skip, preserving original evidence and legacy sole authority. This is not
+complete released-install qualification or native domain/boot proof.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -820,6 +907,17 @@ whole-contract acceptance and residual work, not a claim that the repaired
 outage-expiry defect remains unfixed.
 
 #### Direct callback Plan
+
+The [expiry persistence packet](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
+adds pure per-subscriber deadline/terminal controls and actual
+legacy/acknowledged expiry publication failure controls. Its 133-case combined
+packet merged in #13684 and passes; whole-outcome reconciliation below remains
+open, including sustained outage/recovery with other subscribers and ordinary
+synchronous waits.
+The same packet now records focused residual controls for both contracts'
+shared-poller recovery with known/unknown baselines and the separate ordinary
+synchronous-wait consumer. Local behavior checks pass; normal review, required
+CI (including strict typing) and whole-outcome reconciliation remain.
 
 - [ ] **P5947-1:** Preserve expiry independently of successful provider fetch,
   subscriber-specific filters/deadlines, legitimate terminal transitions,
@@ -1012,6 +1110,44 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [ ] Prove standalone/container lifecycle, restart and upgrade continuity,
   account/fleet isolation, observation sharing, disconnection recovery and the
   real client/Gateway/service path before treating fleet deployment as complete.
+
+### Finite original terminal-mapping load result from #11711
+
+Agent-recommended reliability receiving at the existing PR-service owner.
+
+- [ ] **P11711-1:** Retain the intermittent original standalone-process case
+  `services/pr/tests/test_installed_process.py::test_installed_host_process_register_observe_reconnect_restart_and_ack[True-False-False-False-True-True]`:
+  after `workspace-close` registration, synthetic PR abandonment and the next
+  evidence snapshot, terminal `workspace load` returned
+  `workspace_input_or_result_unavailable` / `workspace_unavailable`.
+  Two later unchanged complete runs, including the reported 168-pass run,
+  are intermittent evidence, not deterministic reproduction or a proved cause.
+- [ ] **P11711-2:** Qualify the observer/store-lock versus terminal-retirement
+  interaction and make the fixture's ORIGINAL operation deterministic OR fix
+  the underlying owner if an admitted original load can lose its result.
+  Preserve actual process/TLS boundaries, exact operation/result identity,
+  terminal assertions and uncertain-effect custody; do not hide unavailable
+  results by replaying `load`, `sync` or allocation or by weakening assertions.
+- [ ] **P11711-3:** Use the existing isolated standalone fixture and original
+  bounded preparation/execution path, retaining the reported 180-second
+  runner boundary and truthful unavailable outcomes. Keep this independent
+  of the optional report path, which was not established as causal. Choose
+  the smallest demonstrated fixture OR owner correction without a new
+  lifecycle harness, shared-service experiment or production request.
+
+#### Local Validation for #11711
+
+- [ ] **V11711-1:** Exercise meaningful observer/store-lock/terminal-retirement
+  interleavings through the actual process/TLS fixture and its original single
+  operation. Include an admitted result-loss/unavailable control; verify exact
+  result identity, preserved terminal assertions and custody without effectful
+  retry. A helper-only or unrelated report-path pass is not this qualification.
+- [ ] **V11711-2:** Validate the named terminal-mapping case and relevant
+  standalone packet at an attributable source, preserving original bounds,
+  assertions and exact cleanup. Separate historical unchanged green runs,
+  newly controlled failure/positive evidence and unresolved intermittent
+  behavior; a later merge or repeated green run alone is not a causal repair.
+  Planned receiving runs no fixture or live load/sync/allocation request.
 
 ### PR-service offline image inputs
 
@@ -1396,6 +1532,22 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] **G13487:** Resolve P13487/V13487 and continuing Coordination against
+  the complete original transition and applicable existing T3 child clauses.
+  Preserve namespace/service identity, cache bytes, registrations/events/ACKs,
+  unknown recovery, actual reader/writer exclusion, old-reader/layout/capacity
+  refusal and original finite bounds. Bootstrap/metadata-only source does not
+  qualify the unchecked positive generation/native-active outcomes; source
+  acceptance, full T3, provider/installed and whole-parent gates stay distinct.
+
+- [ ] **G11711:** Resolve every P11711/V11711 and continuing Coordination
+  clause at its original standalone process/TLS and bounded-operation tier:
+  actual interleaving qualification, deterministic original operation OR
+  cause-preserving owner correction, exact result/terminal assertions and
+  no effectful replay. Preserve historical partial credit and all existing
+  source/workspace/provider/resource owners. Planned consolidation is not a
+  fixed intermittent defect, broader service acceptance or custody release.
 
 - [x] Qualify the finite [filtered-population source controls](filter-subscriptions.md#validation-plan):
   hosted run 44001919435 passes both disposable platforms at its recorded source;
@@ -1824,7 +1976,37 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Expiry persistence qualification](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
+- [2026-11-20 - Windows version-2 sealing](journal/2026/11.20%20Windows%20version-2%20sealing.md)
+- [2026-11-20 - Prepared-origin phase progression](journal/2026/11.20%20Prepared-origin%20phase%20progression.md)
+- [2026-11-20 - Finite retained-reader tracking proposed](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
+- [2026-11-20 - Windows sealed receiver](journal/2026/11.20%20Windows%20sealed%20receiver.md)
+- [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
+- [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)
+- **2026-11-20 - Proposed finite M1 source-claim acknowledgment.** The
+  [current campaign reconciliation](../backlog-reconciliation/journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+  maps #11783's complete four-stage source/synthetic request to
+  #11790/#11838/#11866/#11897 and this owner's current accepted GitHub AND
+  Gitea Stage-5 records. The historical source-exit journal correctly kept
+  #11783 OPEN while Stage 5 was unqualified; the current M1 contract now
+  checks every acceptance row and explicitly accepts the combined milestone.
+  That actual changed evidence supports a proposed acknowledged `COMPLETED`
+  source-claim judgment after normal publication and final source checks,
+  not a waiver of a still-unmet owner condition or a duplicate fold.
+  #6007 and every broader outcome, operational hold and resource custodian
+  remain; #12159's filter scope and #13574's separately claimed observer
+  correction are not absorbed. No native run, service stop, credential,
+  deployment or source-resource transfer is authorized by this capture.
+- **2026-11-20 - Proposed finite original-load reliability receiving.** The
+  complete qualified #11711 original is retained directly with the existing
+  PR-service process/workspace owner, local/global Validation and continuing
+  Coordination. All six technical rows remain unchecked. The
+  [campaign record](../backlog-reconciliation/journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+  distinguishes intermittent green history from causal qualification and
+  preserves actual uncertain-effect custody. No load/sync/allocation replay,
+  process fixture, provider, runtime or resource operation occurred.
 - [2026-11-19 - Historical physical transition design](journal/2026/11.19%20Historical%20physical%20transition%20design.md)
+- [2026-11-19 - Reviewed retained terminal-reader transition and focused source qualification](journal/2026/11.19%20Retained%20terminal%20reader%20transition.md)
 - [2026-11-18 - Present-only per-version receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)
 - [2026-11-18 - Version-aware watch-state refusal baseline](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
 - **2026-11-18 - Versioned per-subscription map design reviewed.** #13277

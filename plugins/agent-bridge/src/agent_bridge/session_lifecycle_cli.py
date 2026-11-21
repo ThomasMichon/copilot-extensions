@@ -627,7 +627,13 @@ def _cmd_agent(args: argparse.Namespace) -> None:
         try:
             await run_agent(bridge_agent)
         finally:
-            await bridge_agent.cleanup()
+            try:
+                await bridge_agent.cleanup()
+            finally:
+                from .app_lifecycle import settled_thread_call
+                from .consumer_telemetry import close as close_consumer_telemetry
+
+                await settled_thread_call(close_consumer_telemetry, sm)
 
     asyncio.run(_run())
 

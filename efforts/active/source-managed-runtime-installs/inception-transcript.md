@@ -491,3 +491,37 @@ The later clarification permits exclusively version-owned, discardable runtime
 data under a slot's own `state/` directory, not arbitrary writes into code or
 state required across updates. Repository relocation is a long-term target,
 not part of the selected reference's live effects.
+
+## Legacy first-use foreground mapping
+
+The legacy first-use migration decision, 2026-11-20, preserves the existing
+foreground default and complete parent Goal. The assistant's question and
+offered choices below are decision context, not additional operator wording.
+
+Assistant decision question:
+
+````text
+The foreground default is settled, but this legacy `provision -Wait` entrypoint has no execution-mode declaration. Which migration should unblock #9026? I recommend mapping it to foreground semantics. Both choices require receiver-first source review and preserve the existing native/deployment holds.
+````
+
+Offered choices:
+
+````text
+Map -Wait to foreground (recommended): finite work follows the caller; record interruption/recovery honestly
+Preserve explicit legacy-background compatibility: add declared mode and accepted-owner evidence before caller loss
+````
+
+The operator selected, verbatim:
+
+````text
+foreground
+````
+
+Settled interpretation: map this legacy `-Wait` route to ordinary foreground
+semantics. Its finite construction/provisioning remains caller-owned; missing
+ordinary receipts do not become success. Honest interruption/recovery,
+explicit background work and independently accepted service startup remain
+distinct. The receiving contract and corresponding acceptance change clear
+source review before implementation. This selection does not authorize native
+escape, containment or Job weakening, deployment, or another owner's source or
+resource takeover.

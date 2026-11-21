@@ -489,7 +489,12 @@ test("releaseHandoffClaimIfTerminal releases the claim when the task is already 
   const calls = [];
   releaseHandoffClaimIfTerminal("C:\\repo", "task-123", "wt-9", (bin, argv, opts) => {
     calls.push({ bin, argv, opts });
-    if (bin === "agent-dispatch") return JSON.stringify({ id: "task-123", status: "completed" });
+    if (argv[0] === "show") return JSON.stringify({
+      id: "task-123", status: "completed", handoff_claim_contract: "context-handoff-creator-claim/v1",
+    });
+    if (argv[0] === "handoff-claim") return JSON.stringify({
+      id: "task-123", taskTerminal: true, claimSettled: true,
+    });
     return "{}";
   });
   assert.deepEqual(calls, [
@@ -499,9 +504,9 @@ test("releaseHandoffClaimIfTerminal releases the claim when the task is already 
       opts: { cwd: "C:\\repo", timeout: 15000 },
     },
     {
-      bin: "agent-worktrees",
-      argv: ["claims", "release", "task-123", "--worktree", "wt-9", "--json"],
-      opts: { cwd: "C:\\repo", timeout: 15000 },
+      bin: "agent-dispatch",
+      argv: ["handoff-claim", "task-123"],
+      opts: { cwd: "C:\\repo", timeout: 45000 },
     },
   ]);
 });
@@ -517,17 +522,19 @@ test("releaseHandoffClaimIfTerminal does nothing when the task is still nontermi
   assert.ok(!calls.some((c) => c.bin === "agent-worktrees"));
 });
 
-test("releaseHandoffClaimIfTerminal treats each terminal status (completed/abandoned/dead_letter) as releasable", () => {
+test("releaseHandoffClaimIfTerminal leaves each terminal decision with its actual task owner", () => {
   for (const status of ["completed", "abandoned", "dead_letter"]) {
     const calls = [];
     releaseHandoffClaimIfTerminal("C:\\repo", "task-123", "wt-9", (bin, argv, opts) => {
       calls.push({ bin, argv, opts });
-      if (bin === "agent-dispatch") return JSON.stringify({ id: "task-123", status });
+      if (argv[0] === "show") return JSON.stringify({
+        id: "task-123", status, handoff_claim_contract: "context-handoff-creator-claim/v1",
+      });
       return "{}";
     });
     assert.ok(
-      calls.some((c) => c.bin === "agent-worktrees"),
-      `expected a release call for status ${status}`,
+      calls.some((c) => c.bin === "agent-dispatch" && c.argv[0] === "handoff-claim"),
+      `expected owner reconciliation for status ${status}`,
     );
   }
 });
@@ -2162,11 +2169,13 @@ function ledgerExecuteStub({ worktreeId = "wt-1", cancelled = true } = {}) {
 test("abortHandoffTask abandons the agent-dispatch task with the given reason", () => {
   const calls = [];
   const ledger = ledgerExecuteStub();
+  let status = "queued";
   const execute = (bin, argv) => {
     calls.push({ bin, argv });
     if (argv[0] === "show") {
-      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status, attempts: 0 });
     }
+    if (argv[0] === "abandon") status = "abandoned";
     if (argv[0] === "payload") return "";
     if (bin === "agent-worktrees") return ledger(bin, argv);
     return "{}";
@@ -2190,6 +2199,7 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
         "--expected-status", "queued",
       ],
     },
+    { bin: "agent-dispatch", argv: ["show", "task-42"] },
     // Commit: the real cancellation, only after abandon succeeded.
     { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
     { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
@@ -2197,10 +2207,12 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
 });
 
 test("abortHandoffTask reports honestly when the ledger cancellation itself can't be confirmed", () => {
+  let status = "queued";
   const execute = (bin, argv) => {
     if (argv[0] === "show") {
-      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status, attempts: 0 });
     }
+    if (argv[0] === "abandon") status = "abandoned";
     if (argv[0] === "payload") return "";
     if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
     if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
@@ -2237,7 +2249,10 @@ test("abortHandoffTask decodes the payload for its sessionId BEFORE abandoning, 
   const marked = [];
   const execute = (bin, argv) => {
     if (argv[0] === "show") {
-      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+      return JSON.stringify({
+        id: "task-42", labels: ["handoff"], source: "context-handoff",
+        status: abandoned ? "abandoned" : "queued", attempts: 0,
+      });
     }
     if (argv[0] === "abandon") {
       abandoned = true;
@@ -2272,7 +2287,7 @@ test("abortHandoffTask refuses to abandon when the ledger already has an associa
   let abandonCalled = false;
   const execute = (bin, argv) => {
     if (argv[0] === "show") {
-      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued", attempts: 0 });
     }
     if (argv[0] === "payload") return "";
     if (argv[0] === "abandon") { abandonCalled = true; return "{}"; }
@@ -2300,7 +2315,7 @@ test("abortHandoffTask fails closed (refuses to abandon) when the ledger fence i
   let abandonCalled = false;
   const execute = (bin, argv) => {
     if (argv[0] === "show") {
-      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued", attempts: 0 });
     }
     if (argv[0] === "payload") return "";
     if (argv[0] === "abandon") { abandonCalled = true; return "{}"; }
@@ -2328,7 +2343,7 @@ test("abortHandoffTask never commits the ledger cancellation when abandon itself
   const commitCalls = [];
   const execute = (bin, argv) => {
     if (argv[0] === "show") {
-      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued", attempts: 0 });
     }
     if (argv[0] === "payload") return "";
     if (argv[0] === "abandon") {
@@ -2394,6 +2409,76 @@ test("abortHandoffTask degrades safe on a CLI failure", () => {
   const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
   assert.equal(result.ok, false);
   assert.equal(result.kind, "task");
+});
+
+for (const failure of ["settlement", "abandon-reply", "candidate"]) {
+  test(`abortHandoffTask preserves separate ${failure} outcome and never re-abandons on retry`, () => {
+    const binding = {
+      contract: "context-handoff-creator-claim/v1", machine: "box", project: "creator",
+      worktree_id: "shared-id", creation_nonce: "record-one", claim_nonce: "claim-one",
+      kind: "task", ref: "task-42",
+    };
+    const task = {
+      id: "task-42", labels: ["handoff"], source: "context-handoff",
+      status: "queued", attempts: 0, target_machine: "box", target_worktree: "shared-id",
+      handoff_claim_contract: binding.contract, handoff_claim: binding,
+    };
+    let abandonments = 0, settlements = 0, candidate = null;
+    const cancellations = [];
+    const execute = (bin, argv) => {
+      if (bin === "agent-worktrees") {
+        assert.equal(argv[0], "cancel-handoff");
+        assert.ok(!argv.includes("--worktree-id"));
+        assert.equal(argv[argv.indexOf("--owner-ref") + 1], "box/creator/shared-id");
+        assert.equal(argv[argv.indexOf("--expected-record-nonce") + 1], "record-one");
+        cancellations.push(argv);
+        if (!argv.includes("--dry-run") && failure === "candidate") candidate = "successor";
+        return JSON.stringify({ cancelled: !candidate, candidate });
+      }
+      if (argv[0] === "show") return JSON.stringify(task);
+      if (argv[0] === "payload") return "";
+      if (argv[0] === "abandon") {
+        abandonments++;
+        task.status = "abandoned";
+        if (failure === "abandon-reply") throw new Error("reply lost after acceptance");
+        return "{}";
+      }
+      assert.equal(argv[0], "handoff-claim");
+      settlements++;
+      if (failure === "settlement" && settlements === 1) throw new Error("native owner unavailable");
+      return JSON.stringify({ id: task.id, taskTerminal: true, claimSettled: true });
+    };
+    const first = abortHandoffTask("C:\\other-project", task.id, "cancel", execute);
+    assert.equal(first.claimSettled, false);
+    if (failure === "abandon-reply") {
+      assert.equal(first.taskCancelled, null);
+      assert.equal(cancellations.filter(argv => !argv.includes("--dry-run")).length, 0);
+    } else {
+      assert.equal(first.taskCancelled, true);
+    }
+    const retry = abortHandoffTask("C:\\other-project", task.id, "retry", execute);
+    assert.equal(abandonments, 1);
+    if (failure === "candidate") {
+      assert.equal(retry.ok, false);
+      assert.equal(settlements, 0);
+    } else {
+      assert.equal(retry.ok, true);
+      assert.equal(retry.taskCancelled, true);
+      assert.equal(retry.claimSettled, true);
+    }
+  });
+}
+
+test("abortHandoffTask never interprets missing or contradictory execution evidence as unconsumed", () => {
+  for (const fields of [{}, { attempts: null }, { attempts: 1 }, { attempts: 0, owner: "worker" }]) {
+    const calls = [];
+    const result = abortHandoffTask("C:\\repo", "task-42", "cancel", (_bin, argv) => {
+      calls.push(argv[0]);
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], status: "queued", ...fields });
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(calls, ["show"]);
+  }
 });
 
 test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming a fake consumer", () => {

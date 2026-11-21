@@ -1,0 +1,9 @@
+{
+  "comment": "Declare running point-service selection and lifecycle without migrating wire callers",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

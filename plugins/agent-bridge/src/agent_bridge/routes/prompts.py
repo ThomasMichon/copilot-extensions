@@ -20,6 +20,7 @@ from ..acquisition_contract import AcquisitionRefused
 from ..native_send_settlement import settle as settle_native_send
 
 if TYPE_CHECKING:
+    from ..native_receipt_records import NativeReceiptRecords
     from ..session_manager import SessionManager
 
 router = APIRouter()
@@ -46,7 +47,10 @@ async def read_native_send(
 ) -> dict[str, Any]:
     """Missing historical evidence is unproven, never permission to send."""
     try:
-        result = await read_receipt(request.app.state.session_manager, session_id, req)
+        manager = request.app.state.session_manager
+        records: NativeReceiptRecords | None = getattr(request.app.state, "native_receipt_records", None)
+        result = (await read_receipt(manager, session_id, req) if records is None or not req.no_resume
+                  else await records.reconcile(manager, session_id, req))
     except KeyError as exc:
         raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
     except ValueError as exc:
@@ -62,7 +66,14 @@ async def submit_native_send(
 ) -> dict[str, Any]:
     """The ordinary send command owns its key and exact retained native target."""
     try:
-        return await native_send(request.app.state.session_manager, session_id, req)
+        manager = request.app.state.session_manager
+        records: NativeReceiptRecords | None = getattr(request.app.state, "native_receipt_records", None)
+        if records is None or not req.no_resume:
+            return await native_send(manager, session_id, req)
+        receipt = await records.submit_once(manager, session_id, req)
+        if receipt is None:
+            raise HTTPException(409, detail={"code": "native_receipt_unproven"})
+        return receipt
     except KeyError as exc:
         raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
     except DaemonDrainingError as exc:

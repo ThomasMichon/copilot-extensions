@@ -6,6 +6,8 @@ import socket
 import threading
 import time
 from types import SimpleNamespace
+from pathlib import Path
+from typing import Any, Callable, Iterator
 
 import pytest
 from fastapi import FastAPI
@@ -14,22 +16,31 @@ from fastapi.testclient import TestClient
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.mcp_http import bearer_guard_middleware
-from agent_dispatch.queue import Status
-from tests._helpers import OTHER_REPO, TEST_REPO
+from agent_dispatch.procutil import no_window_kwargs
+from agent_dispatch.queue_common import CreationOutcome, Task
+from agent_dispatch.queue_records import Status
+from tests._helpers import OTHER_REPO, TEST_REPO, required
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 mcp = pytest.importorskip("mcp")
 import httpx2  # noqa: E402
 from mcp import ClientSession  # noqa: E402
 from mcp.client.streamable_http import streamable_http_client  # noqa: E402
+from mcp.types import CallToolResult, TextContent, Tool  # noqa: E402
 
 
-def test_bearer_guard_accepts_case_insensitive_scheme():
+def _text(result: CallToolResult) -> str:
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    return content.text
+
+
+def test_bearer_guard_accepts_case_insensitive_scheme() -> None:
     app = FastAPI()
     app.add_middleware(bearer_guard_middleware("client-secret", "control-secret"))
 
     @app.get("/health")
-    def health():
+    def health() -> dict[str, Any]:
         return {"ok": True}
 
     api = TestClient(app)
@@ -47,7 +58,7 @@ def test_bearer_guard_accepts_case_insensitive_scheme():
     ).status_code == 401
 
 
-def _boot(app):
+def _boot(app: FastAPI) -> tuple[str, Callable[[], None]]:
     import uvicorn
 
     sock = socket.socket()
@@ -71,7 +82,7 @@ def _boot(app):
         raise RuntimeError("coordinator did not start")
     probe.close()
 
-    def stop():
+    def stop() -> None:
         server.should_exit = True
         thread.join(timeout=5)
 
@@ -79,7 +90,7 @@ def _boot(app):
 
 
 @pytest.fixture
-def coord(tmp_path):
+def coord(tmp_path: Path) -> Iterator[str]:
     url, stop = _boot(
         create_app(
             TaskQueue(tmp_path / "tasks.db"),
@@ -90,7 +101,7 @@ def coord(tmp_path):
     stop()
 
 
-async def _call(url, tool, args, headers=None):
+async def _call(url: str, tool: str, args: dict[str, Any], headers: dict[str, str] | None=None) -> CallToolResult:
     # mcp 2.0: streamable_http_client returns a 2-tuple and takes headers via an
     # httpx2 client (30s/read-300s matches the old streamablehttp_client default).
     async with httpx2.AsyncClient(
@@ -103,10 +114,10 @@ async def _call(url, tool, args, headers=None):
                 return res
 
 
-def test_mcp_endpoint_lists_tools(coord):
+def test_mcp_endpoint_lists_tools(coord: str) -> None:
     import asyncio
 
-    async def go():
+    async def go() -> list[Tool]:
         async with httpx2.AsyncClient(
             timeout=httpx2.Timeout(30, read=300), follow_redirects=True
         ) as http_client:
@@ -139,7 +150,7 @@ def test_mcp_endpoint_lists_tools(coord):
     assert {variant.get("type") for variant in variants} == {"array", "object"}
 
 
-def test_http_audit_recipe_retains_verification_and_exclusivity(coord, tmp_path):
+def test_http_audit_recipe_retains_verification_and_exclusivity(coord: str, tmp_path: Path) -> None:
     import asyncio
     import json
 
@@ -154,21 +165,22 @@ def test_http_audit_recipe_retains_verification_and_exclusivity(coord, tmp_path)
         },
     ))
     assert not response.is_error
-    task = json.loads(response.content[0].text)
+    task = json.loads(_text(response))
     assert task["require_verification"] is True
     assert task["exclusive_key"] == "worktree-audit:fixture-project"
     assert "mode:report-only" in task["labels"]
 
 
-def test_http_existing_recipe_leaves_verification_unspecified(coord, monkeypatch):
+def test_http_existing_recipe_leaves_verification_unspecified(coord: str, monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     captured = []
     original_create = TaskQueue.create
 
-    def capture_create(queue, *args, **kwargs):
+    def capture_create(queue: TaskQueue, *args: Any, **kwargs: Any) -> Task | CreationOutcome:
         captured.append(kwargs)
-        return original_create(queue, *args, **kwargs)
+        result: Task | CreationOutcome = original_create(queue, *args, **kwargs)
+        return result
 
     monkeypatch.setattr(TaskQueue, "create", capture_create)
     response = asyncio.run(_call(
@@ -181,7 +193,7 @@ def test_http_existing_recipe_leaves_verification_unspecified(coord, monkeypatch
 
 
 @pytest.mark.guard
-def test_actual_cli_audit_kick_enqueues_without_spawning(coord, tmp_path):
+def test_actual_cli_audit_kick_enqueues_without_spawning(coord: str, tmp_path: Path) -> None:
     import json
     import os
     from pathlib import Path
@@ -190,7 +202,7 @@ def test_actual_cli_audit_kick_enqueues_without_spawning(coord, tmp_path):
 
     source = Path(__file__).resolve().parents[1] / "src"
     env = {**os.environ, "PYTHONPATH": str(source)}
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    flags = no_window_kwargs()
     response = subprocess.run(
         [
             sys.executable, "-m", "agent_dispatch", "--url", coord,
@@ -208,7 +220,7 @@ def test_actual_cli_audit_kick_enqueues_without_spawning(coord, tmp_path):
     assert task["producer_fence"] is None
 
 
-def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeypatch):
+def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     from agent_dispatch import remote_dispatch
@@ -225,19 +237,21 @@ def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeyp
         reg_id="emitter-reviews",
         machine="host-b",
     )
-    calls = []
+    calls: list[tuple[str, list[str], float | None]] = []
+
+    def browse_remote(machine: str, argv: list[str], timeout: float | None = None) -> SimpleNamespace:
+        calls.append((machine, argv, timeout))
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"registration_id":"emitter-reviews","created":[]}',
+            stderr="",
+        )
+
     monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
     monkeypatch.setattr(
         remote_dispatch,
         "browse_remote",
-        lambda machine, argv, timeout=None: (
-            calls.append((machine, argv, timeout))
-            or SimpleNamespace(
-                returncode=0,
-                stdout='{"registration_id":"emitter-reviews","created":[]}',
-                stderr="",
-            )
-        ),
+        browse_remote,
     )
     url, stop = _boot(create_app(queue))
     try:
@@ -268,7 +282,7 @@ def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeyp
     ]
 
 
-def test_hosted_emitter_side_load_can_create_proposed_task(tmp_path, monkeypatch):
+def test_hosted_emitter_side_load_can_create_proposed_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     from agent_dispatch import remote_dispatch
@@ -319,7 +333,7 @@ def test_hosted_emitter_side_load_can_create_proposed_task(tmp_path, monkeypatch
     assert queue.list(status="proposed")[0].source == "emitter"
 
 
-def test_mcp_heartbeat_and_recover_publish_bus_events(tmp_path):
+def test_mcp_heartbeat_and_recover_publish_bus_events(tmp_path: Path) -> None:
     """Phase 3a audit: `dispatch_heartbeat`/`dispatch_recover` are MCP's own
     transport for the same mutations the HTTP routes already cover -- wire
     them through `_mutate`/a direct `bus.publish` the same way, and prove it
@@ -330,10 +344,10 @@ def test_mcp_heartbeat_and_recover_publish_bus_events(tmp_path):
 
     queue = TaskQueue(tmp_path / "tasks.db")
     app = create_app(queue)
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     original = app.state.bus.publish
 
-    def _record(event: dict) -> None:
+    def _record(event: dict[str, Any]) -> None:
         events.append(event)
         original(event)
 
@@ -361,7 +375,7 @@ def test_mcp_heartbeat_and_recover_publish_bus_events(tmp_path):
         stop()
 
 
-def test_mcp_heartbeat_does_not_emit_telemetry(tmp_path):
+def test_mcp_heartbeat_does_not_emit_telemetry(tmp_path: Path) -> None:
     """Same no-telemetry contract as `coordinator_tasks.py`'s own HTTP
     `/tasks/{id}/heartbeat` route -- `dispatch_heartbeat` must still wake
     the bus (the subscribe relay needs that; see the test above), but must
@@ -380,7 +394,7 @@ def test_mcp_heartbeat_does_not_emit_telemetry(tmp_path):
         client.claim("w1", repo=TEST_REPO)
         client.start(task["id"], "w1")
 
-        seen: list[dict] = []
+        seen: list[dict[str, Any]] = []
         telemetry.set_telemetry_sink(seen.append)
         try:
             result = asyncio.new_event_loop().run_until_complete(
@@ -398,7 +412,7 @@ def test_mcp_heartbeat_does_not_emit_telemetry(tmp_path):
         stop()
 
 
-def test_mcp_rearm_spawn(coord):
+def test_mcp_rearm_spawn(coord: str) -> None:
     import asyncio
     import json
 
@@ -419,11 +433,11 @@ def test_mcp_rearm_spawn(coord):
             },
         )
     )
-    result = json.loads(response.content[0].text)
+    result = json.loads(_text(response))
     assert result["rearmed"] == 3
 
 
-def test_mcp_rearm_spawn_reaches_rest_sse(coord):
+def test_mcp_rearm_spawn_reaches_rest_sse(coord: str) -> None:
     import asyncio
     import threading
 
@@ -435,7 +449,7 @@ def test_mcp_rearm_spawn_reaches_rest_sse(coord):
 
     seen = []
 
-    def watch():
+    def watch() -> None:
         with DispatchClient(coord) as watcher:
             for event in watcher.stream_events():
                 seen.append(event)
@@ -460,7 +474,7 @@ def test_mcp_rearm_spawn_reaches_rest_sse(coord):
     assert any(event.get("type") == "spawn.rearmed" for event in seen)
 
 
-def test_mcp_create_visible_over_rest(coord):
+def test_mcp_create_visible_over_rest(coord: str) -> None:
     import asyncio
     import json
 
@@ -477,7 +491,7 @@ def test_mcp_create_visible_over_rest(coord):
             },
         )
     )
-    task = json.loads(res.content[0].text)
+    task = json.loads(_text(res))
     assert task["status"] == Status.QUEUED
     assert task["exclusive_key"] == "resource:42"
     assert task["require_verification"] is True
@@ -486,7 +500,7 @@ def test_mcp_create_visible_over_rest(coord):
     assert got["title"] == "via mcp"
 
 
-def test_mcp_producer_fence_parity(coord):
+def test_mcp_producer_fence_parity(coord: str) -> None:
     import asyncio
     import json
 
@@ -503,7 +517,7 @@ def test_mcp_producer_fence_parity(coord):
             },
         )
     )
-    assert json.loads(denied.content[0].text)["error"]["reason"] == (
+    assert json.loads(_text(denied))["error"]["reason"] == (
         "invalid_control_authority"
     )
 
@@ -521,7 +535,7 @@ def test_mcp_producer_fence_parity(coord):
             headers={"Authorization": "Bearer control-secret"},
         )
     )
-    transition = json.loads(first.content[0].text)
+    transition = json.loads(_text(first))
     assert transition["current_generation"] == 1
     capability = transition["producer_capability"]
 
@@ -542,7 +556,7 @@ def test_mcp_producer_fence_parity(coord):
             },
         )
     )
-    task = json.loads(created.content[0].text)
+    task = json.loads(_text(created))
     assert task["producer_fence"]["generation"] == 1
 
     status = loop.run_until_complete(
@@ -552,11 +566,11 @@ def test_mcp_producer_fence_parity(coord):
             {"repo": TEST_REPO, "source": "scheduled"},
         )
     )
-    assert json.loads(status.content[0].text)["active_producer"] == "scheduler-a"
+    assert json.loads(_text(status))["active_producer"] == "scheduler-a"
     loop.close()
 
 
-def test_mcp_claim_uses_header_identity(coord):
+def test_mcp_claim_uses_header_identity(coord: str) -> None:
     import asyncio
     import json
 
@@ -574,21 +588,21 @@ def test_mcp_claim_uses_header_identity(coord):
             },
         )
     )
-    claimed = json.loads(res.content[0].text)
+    claimed = json.loads(_text(res))
     assert claimed["owner"] == "host-a/wt-1"  # composed from the request headers
 
 
-def test_mcp_claim_without_identity_errors(coord):
+def test_mcp_claim_without_identity_errors(coord: str) -> None:
     import asyncio
     import json
 
     DispatchClient(coord).create("work")
     res = asyncio.new_event_loop().run_until_complete(_call(coord, "dispatch_claim", {}))
-    payload = json.loads(res.content[0].text)
+    payload = json.loads(_text(res))
     assert "error" in payload
 
 
-def test_mcp_claim_requires_repo_or_explicit_all_repos(coord):
+def test_mcp_claim_requires_repo_or_explicit_all_repos(coord: str) -> None:
     import asyncio
     import json
 
@@ -597,7 +611,7 @@ def test_mcp_claim_requires_repo_or_explicit_all_repos(coord):
     missing = asyncio.new_event_loop().run_until_complete(
         _call(coord, "dispatch_claim", {}, headers=headers)
     )
-    assert json.loads(missing.content[0].text)["error"]["code"] == (
+    assert json.loads(_text(missing))["error"]["code"] == (
         "claim_scope_required"
     )
     claimed = asyncio.new_event_loop().run_until_complete(
@@ -608,16 +622,16 @@ def test_mcp_claim_requires_repo_or_explicit_all_repos(coord):
             headers={**headers, "X-Agent-Repo": OTHER_REPO},
         )
     )
-    assert json.loads(claimed.content[0].text)["id"] == task["id"]
+    assert json.loads(_text(claimed))["id"] == task["id"]
 
 
-def test_mcp_complete_result_is_visible_over_rest(coord):
+def test_mcp_complete_result_is_visible_over_rest(coord: str) -> None:
     import asyncio
     import json
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
     result = {"verdict": "accepted", "details": {"count": 2}}
 
@@ -633,7 +647,7 @@ def test_mcp_complete_result_is_visible_over_rest(coord):
             },
         )
     )
-    completed = json.loads(response.content[0].text)
+    completed = json.loads(_text(response))
 
     assert completed["result"] == result
     assert client.get(task["id"])["result"] == result
@@ -643,12 +657,12 @@ def test_mcp_complete_result_is_visible_over_rest(coord):
     retrieved = asyncio.new_event_loop().run_until_complete(
         _call(coord, "dispatch_result", {"task_id": task["id"]})
     )
-    assert json.loads(retrieved.content[0].text)["result"] == result
+    assert json.loads(_text(retrieved))["result"] == result
 
 
 def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
-    coord, monkeypatch
-):
+    coord: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
     import json
 
@@ -657,14 +671,14 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
     published = []
     original_publish = EventBus.publish
 
-    def capture(self, event):
+    def capture(self: EventBus, event: dict[str, Any]) -> None:
         published.append(event)
         return original_publish(self, event)
 
     monkeypatch.setattr(EventBus, "publish", capture)
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
     client.complete(task["id"], owner)
 
@@ -680,13 +694,13 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
         )
     )
 
-    assert json.loads(response.content[0].text)["result"] == {"ok": True}
+    assert json.loads(_text(response))["result"] == {"ok": True}
     types = [event["type"] for event in published]
     assert types.count("task.completed") == 1
     assert types.count("task.result_recorded") == 1
 
 
-def test_mcp_complete_releases_handoff_claim(coord, monkeypatch):
+def test_mcp_complete_releases_handoff_claim(coord: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """dispatch_complete calls queue.complete_with_outcome directly
     (in-process), bypassing the coordinator's own HTTP routes entirely -- so
     the release must be wired into mcp_http's own _mutate, not just
@@ -699,16 +713,16 @@ def test_mcp_complete_releases_handoff_claim(coord, monkeypatch):
     task = client.create(
         "work", repo=TEST_REPO, labels=["handoff"], target_worktree="wt-9",
     )
-    owner = client.claim(
+    owner = required(client.claim(
         worker_id="m/wt-9", repo=TEST_REPO, task_id=task["id"],
         machine="m", worktree="wt-9",
-    )["owner"]
+    ))["owner"]
     client.start(task["id"], owner)
 
     calls = []
     monkeypatch.setattr(
-        handoff_claim_release, "_release_task_claim",
-        lambda task_id, **k: calls.append((task_id, k.get("worktree"))),
+        handoff_claim_release, "release_if_handoff",
+        lambda task, **k: calls.append((task["id"], handoff_claim_release.handoff_worktree(task))),
     )
     asyncio.new_event_loop().run_until_complete(
         _call(
@@ -720,20 +734,25 @@ def test_mcp_complete_releases_handoff_claim(coord, monkeypatch):
     assert calls == [(task["id"], "wt-9")]
 
 
-def test_mcp_complete_never_releases_a_non_handoff_task(coord, monkeypatch):
+def test_mcp_complete_never_releases_a_non_handoff_task(coord: str, monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     from agent_dispatch import handoff_claim_release
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
 
-    calls = []
+    calls: list[str] = []
+
+    def observe_release(task_id: str, **_kwargs: Any) -> dict[str, Any]:
+        calls.append(task_id)
+        return {"taskTerminal": False, "claimSettled": False}
+
     monkeypatch.setattr(
         handoff_claim_release, "_release_task_claim",
-        lambda task_id, **k: calls.append(task_id),
+        observe_release,
     )
     asyncio.new_event_loop().run_until_complete(
         _call(
@@ -745,7 +764,7 @@ def test_mcp_complete_never_releases_a_non_handoff_task(coord, monkeypatch):
     assert calls == []
 
 
-def test_mcp_abandon_releases_handoff_claim(coord, monkeypatch):
+def test_mcp_abandon_releases_handoff_claim(coord: str, monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     from agent_dispatch import handoff_claim_release
@@ -757,8 +776,8 @@ def test_mcp_abandon_releases_handoff_claim(coord, monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        handoff_claim_release, "_release_task_claim",
-        lambda task_id, **k: calls.append((task_id, k.get("worktree"))),
+        handoff_claim_release, "release_if_handoff",
+        lambda task, **k: calls.append((task["id"], handoff_claim_release.handoff_worktree(task))),
     )
     asyncio.new_event_loop().run_until_complete(
         _call(
@@ -770,7 +789,7 @@ def test_mcp_abandon_releases_handoff_claim(coord, monkeypatch):
     assert calls == [(task["id"], "wt-9")]
 
 
-def test_mcp_idempotent_abandon_retry_does_not_re_release(coord, monkeypatch):
+def test_mcp_idempotent_abandon_retry_does_not_re_release(coord: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """PR #3248 review: the MCP abandon tool passed a constant
     `"task.abandoned"` into `_mutate` unconditionally, so a retry against
     an already-abandoned task (idempotent, no error) re-fired the release
@@ -790,8 +809,8 @@ def test_mcp_idempotent_abandon_retry_does_not_re_release(coord, monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        handoff_claim_release, "_release_task_claim",
-        lambda task_id, **k: calls.append(task_id),
+        handoff_claim_release, "release_if_handoff",
+        lambda task, **k: calls.append(task["id"]),
     )
     asyncio.new_event_loop().run_until_complete(
         _call(coord, "dispatch_abandon", {"task_id": task["id"], "permit": True})
@@ -800,12 +819,12 @@ def test_mcp_idempotent_abandon_retry_does_not_re_release(coord, monkeypatch):
     assert calls == []
 
 
-def test_mcp_complete_rejects_null_result(coord):
+def test_mcp_complete_rejects_null_result(coord: str) -> None:
     import asyncio
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
 
     response = asyncio.new_event_loop().run_until_complete(
@@ -824,12 +843,12 @@ def test_mcp_complete_rejects_null_result(coord):
     assert client.get(task["id"])["status"] == Status.STARTED
 
 
-def test_mcp_complete_normalizes_json_object_string(coord):
+def test_mcp_complete_normalizes_json_object_string(coord: str) -> None:
     import asyncio
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
 
     response = asyncio.new_event_loop().run_until_complete(
@@ -848,14 +867,14 @@ def test_mcp_complete_normalizes_json_object_string(coord):
     assert client.result(task["id"])["result"] == {"ok": True}
 
 
-def test_mcp_events_reach_rest_sse(coord):
+def test_mcp_events_reach_rest_sse(coord: str) -> None:
     """A task created via the MCP endpoint publishes to the shared event bus."""
     import asyncio
     import threading
 
     seen = []
 
-    def watch():
+    def watch() -> None:
         client = DispatchClient(coord)
         for event in client.stream_events():
             seen.append(event)
@@ -872,7 +891,7 @@ def test_mcp_events_reach_rest_sse(coord):
     assert any(e.get("type") == "task.created" for e in seen)
 
 
-def test_mcp_disabled_when_requested(tmp_path):
+def test_mcp_disabled_when_requested(tmp_path: Path) -> None:
     # enable_mcp=False -> no /mcp mount; REST still serves.
     url, stop = _boot(create_app(TaskQueue(tmp_path / "tasks.db"), enable_mcp=False))
     try:

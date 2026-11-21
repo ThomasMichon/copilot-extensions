@@ -36,7 +36,7 @@ APPLICATION_INSTALL_CONTRACT = {
     "schema": "copilot-extensions.prepared-application-install",
     "version": 1,
 }
-APPLICATION_INSTALL_CAPABILITIES = ("callback-timeouts/v1", "global-bin/v1")
+APPLICATION_INSTALL_CAPABILITIES = ("callback-timeouts/v1", "global-bin/v1", "closed-wheel-source/v1")
 
 
 class _ApplicationDeclarationConflict(_engine_module.ContentRepairRequired):
@@ -53,6 +53,13 @@ class ProjectSource:
     @property
     def project(self) -> dict[str, Any]:
         return cast(dict[str, Any], self.record["projects"][self.project_key])
+
+    @property
+    def closed_wheel_source(self) -> bool:
+        mode = self.project.get("input_mode", "source")
+        if not isinstance(mode, str) or mode not in ("source", "closed-wheels"):
+            raise ValueError("unsupported installation-source input mode")
+        return mode == "closed-wheels"
 
     @property
     def source_descriptor(self) -> dict[str, str] | None:
@@ -158,6 +165,7 @@ def select_project(snapshot: Path, component: str) -> ProjectSource:
         raise ValueError(f"{component} source differs from its immutable source association")
     selected = ProjectSource(payload, identity, record, project_key)
     selected.composition
+    selected.closed_wheel_source
     return selected
 
 
@@ -270,6 +278,12 @@ def project_inputs(
             raise ValueError("project repository provenance changed during installation")
         if observed.composition != composition:
             raise ValueError("project Git composition changed during installation")
+        if observed.closed_wheel_source != selected.closed_wheel_source:
+            raise ValueError("project input mode changed during installation")
+        if selected.closed_wheel_source and (
+            observed.project.get("source_artifact") != selected.project.get("source_artifact")
+        ):
+            raise ValueError("project source/artifact association changed during installation")
 
 
 @contextmanager
@@ -280,10 +294,12 @@ def manager_inputs(
         yield inputs
 
 
-def _wheel_selection(payload: Path, version: str, inputs: WheelInstallInputs) -> dict[str, Any]:
+def _wheel_selection(
+    payload: Path, version: str, inputs: WheelInstallInputs, *, closed_wheel_source: bool = False,
+) -> dict[str, Any]:
     inputs.verify()
     receipt = inputs.receipt()
-    packages = engine._package_roots(payload)
+    packages = engine._package_roots(payload, **({"closed_wheels": True} if closed_wheel_source else {}))
     distributions = receipt["distributions"]
     local = tuple(sorted(
         engine._package_name(package) for package in packages
@@ -297,12 +313,17 @@ def _wheel_selection(payload: Path, version: str, inputs: WheelInstallInputs) ->
         row["selected_extras"] for row in profile["wheels"] if row["name"] == name
     ))
     extras = engine._selected_extras(payload, extras)
+    from installer_provider_roots import from_profile
+
     return {
         "runtime_version": version + ".profile." + receipt["lock_id"][7:23],
         "payload_hash": engine._wheel_construction_hash(
-            engine._construction_hash(engine._source_files(packages), extras, local), inputs,
+            engine._construction_hash(engine._source_input_files(
+                packages, closed_wheel_source=closed_wheel_source,
+            ), extras, local), inputs,
         ),
         "extras": list(extras), "local_packages": list(local),
+        "provider_roots": from_profile(profile, core=name),
     }
 
 
@@ -349,6 +370,9 @@ def native_current(root: Path, payload: Path, component: str) -> bool:
         )
         receipt = inputs.receipt()
         name = engine._package_name(payload)
+        from installer_provider_roots import check_construction
+
+        check_construction(root, receipt, core=name)
         profile_wheels = receipt["binding"]["wheels"]
         if (
             name not in receipt["distributions"]
@@ -391,10 +415,23 @@ def native_current(root: Path, payload: Path, component: str) -> bool:
 
 def native_selection(selected: ProjectSource, inputs: WheelInstallInputs) -> dict[str, Any]:
     """Use the constructor's existing source/profile identity before native setup."""
-    selection = _wheel_selection(selected.payload, selected.identity.runtime_version, inputs)
+    selection = _wheel_selection(
+        selected.payload, selected.identity.runtime_version, inputs,
+        **({"closed_wheel_source": True} if selected.closed_wheel_source else {}),
+    )
     distributions = inputs.receipt()["distributions"]
     artifact = selected.project.get("artifact")
     artifacts = artifact.get("wheels") if isinstance(artifact, dict) else None
+    if selected.closed_wheel_source:
+        association = selected.project.get("source_artifact")
+        if (
+            not isinstance(association, dict)
+            or association.get("schema") != "copilot-extensions.source-associated-wheel"
+            or type(association.get("version")) is not int or association["version"] != 1
+            or association.get("source") != selected.identity.document()
+        ):
+            raise ValueError("closed-wheel source requires its original source/artifact association")
+        artifacts = [association.get("wheel")]
     if not isinstance(artifacts, list) or not artifacts or len(artifacts) > 256:
         raise ValueError("native installation requires associated first-party wheels")
     associated = {}
@@ -421,14 +458,18 @@ def native_selection(selected: ProjectSource, inputs: WheelInstallInputs) -> dic
 def application_inputs(selected: ProjectSource, inputs: WheelInstallInputs) -> dict[str, Any]:
     """Carry the actual Source constructor's facts into a copyable application."""
     selection = native_selection(selected, inputs)
-    packages = engine._package_roots(selected.payload)
+    packages = engine._package_roots(
+        selected.payload, **({"closed_wheels": True} if selected.closed_wheel_source else {}),
+    )
     extras = tuple(selection["extras"])
     local = tuple(selection["local_packages"])
     return {
         **{key: selection[key] for key in (
             "identity", "runtime_version", "payload_hash", "extras", "local_packages",
         )},
-        "source_hash": engine._construction_hash(engine._source_files(packages), extras, local),
+        "source_hash": engine._construction_hash(engine._source_input_files(
+            packages, closed_wheel_source=selected.closed_wheel_source,
+        ), extras, local),
         "wheel_inputs": inputs.receipt(),
         "excluded_packages": sorted(
             {engine._package_name(package) for package in packages} - set(local),
@@ -552,6 +593,7 @@ def install_application(
                         local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
                         application=application, process_retention=True, reuse_generations=False,
                         expected_source_identity=selection["identity"], validate_candidate=validate,
+                        **({"closed_wheel_source": True} if selected.closed_wheel_source else {}),
                     ))
                 except (engine.ContentRepairRequired, engine.HealthRepairRequired) as error:
                     if (
@@ -582,8 +624,12 @@ def install_application(
                     validate(candidate.slot)
                     return {"state": "installed", "slot": str(candidate.slot)}
             frozen = engine.FrozenInputs(
-                candidate.frozen_plugin, engine._package_roots(candidate.frozen_plugin),
+                candidate.frozen_plugin, engine._package_roots(
+                    candidate.frozen_plugin,
+                    **({"closed_wheels": True} if selected.closed_wheel_source else {}),
+                ),
                 candidate.payload_hash, wheel_inputs=inputs,
+                closed_wheel_source=selected.closed_wheel_source,
             )
             python = candidate.slot / ".venv" / (
                 "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -639,6 +685,7 @@ def native_session(
             expected_version=expected_version, expected_hash=expected_hash, repair=repair,
             application=_member(snapshot, selected.project["application"])
             if "application" in selected.project else None,
+            **({"closed_wheel_source": True} if selected.closed_wheel_source else {}),
         )
 
 
@@ -647,6 +694,7 @@ def _native_candidate_session(
     uv: Path, base_python: Path, health_module: str, expected_version: str, expected_hash: str,
     repair: bool = False, application: Path | None = None,
     nested_environment: bool = False,
+    closed_wheel_source: bool = False,
     health_callable: str | None = None,
 ) -> int:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True):
@@ -665,6 +713,7 @@ def _native_candidate_session(
         local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
         application=application, process_retention=True, reuse_generations=False,
         nested_environment=nested_environment,
+        **({"closed_wheel_source": True} if closed_wheel_source else {}),
         expected_source_identity=selection["identity"],
     ) as candidate:
         if candidate.payload_hash != expected_hash:

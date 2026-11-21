@@ -143,6 +143,9 @@ class _SessionResumeMixin:
         session.event_log = EventLog(
             db=self._db, session_id=session_id, worktree_id=target.worktree_id,
         )
+        from .consumer_telemetry import bind as bind_consumer_telemetry
+
+        bind_consumer_telemetry(self, session)
         self._sessions[session_id] = session
         return session
 

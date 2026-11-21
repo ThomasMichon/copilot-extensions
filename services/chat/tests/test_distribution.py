@@ -136,7 +136,7 @@ finally:
         "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
         "shell": "direct", "availability": "ready",
     }
-    assert len(catalog["resource_sha256s"]) == 29
+    assert len(catalog["resource_sha256s"]) == 32
     assert "hosting.py" in catalog["resource_sha256s"]
     assert "workspace.py" in catalog["resource_sha256s"]
     assert "collaboration.py" in catalog["resource_sha256s"]
@@ -182,6 +182,7 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                 "versioned_runtime_publication.py", "versioned_runtime_source.py",
                 "versioned_runtime_cache.py",
+                "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
             )
         },
         **{
@@ -190,7 +191,7 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
                 "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
                 "installer_wheel_inputs.py", "installer_wheel_snapshot.py",
                 "runtime_launcher.py",
-                "installer_source_wheel_cache.py", "installer_source_build.py",
+                "installer_source_wheel_cache.py", "installer_source_build.py", "installer_provider_roots.py",
             )
         },
     }
@@ -206,6 +207,14 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
             metadata=message_from_bytes(bundle.read(metadata_name)),
             component="chat-service", candidate_root=root,
         )
+    installed_chat.run([
+        str(installed_chat.interpreter), "-I", "-B", "-c",
+        "import pathlib; from agent_chat_service import catalog; "
+        "actual={path.name for path in pathlib.Path(catalog.__file__).parent.glob('*.py')}; "
+        "assert actual==set(catalog.PACKAGE_FILES), "
+        "('unexpected',sorted(actual-set(catalog.PACKAGE_FILES)),"
+        "'missing',sorted(set(catalog.PACKAGE_FILES)-actual))",
+    ], cwd=tmp_path)
     catalog = json.loads(installed_chat.run([
         str(installed_chat.console), "catalog",
     ], cwd=tmp_path))

@@ -84,8 +84,9 @@ def _path_rows(content: ContentStore, file_path: str, max_rows: int) -> list[dic
 
 def require_file_projection_capacity(
     store: MultiModelStore, replacements: dict[tuple[str, str], int], *, max_rows: int,
+    point_scope: PointScope | None = None,
 ) -> None:
-    """Preflight final same-path occupancy across all selected source mutations."""
+    """Preflight final same-path occupancy; selected points require their writer."""
     if type(max_rows) is not int or max_rows < 1:
         raise ValueError("File projection requires a positive integer row budget")
     by_path: dict[str, int] = {}
@@ -100,7 +101,16 @@ def require_file_projection_capacity(
     domain = store._source_domain
     if domain is None or content._source_domain is not domain:
         raise SourceLayoutError("File projection capacity requires a participating source store")
-    with domain.operation(content.db):
+    if point_scope is not None and (
+        not domain.writing or Path(store._db_path).resolve() != domain.path.resolve()
+        or any(source != point_scope[1] for source, _ in replacements)
+    ):
+        raise SourceLayoutError("Point capacity requires the owning source writer and family")
+    with domain.operation(content.db, point_scope=point_scope):
+        if point_scope is not None:
+            from .point_content import _prepared_tables
+
+            content, _ = _prepared_tables(content, point_scope=point_scope)
         state, _ = inspect_index(_table(content), column="file_path")
         if not state.prepared:
             raise ScalarIndexPreparationRequired("File projection needs a prepared file_path index")

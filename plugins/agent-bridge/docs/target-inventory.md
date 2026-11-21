@@ -27,6 +27,12 @@ is retained verbatim. Missing or invalid Host inventory is explicitly unavailabl
 not an empty source. Local Host liveness is observed; remote liveness remains
 unverified until its owning transport qualifies it.
 
+On first startup, the process that creates the Host directory writes an empty
+index under the Host index lock unless another writer has already created it.
+This lets the first `create <project>` proceed when the other sources are also
+complete and no target matches. If the directory already exists, startup does
+not replace a missing or invalid index. Listing targets never repairs it.
+
 ## Metadata only
 
 The separately negotiated `worktree_metadata_hydration: 1` capability adds

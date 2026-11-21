@@ -8,7 +8,7 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 from .repo_filter import _sql_str
-from .source_layout import SourceLayoutError
+from .source_layout import PointScope, SourceDomain, SourceLayoutError
 
 if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
@@ -19,14 +19,14 @@ PAGE_SIZE = 512
 log = logging.getLogger(__name__)
 
 
-def check_content_sources(content, chunks) -> None:
+def check_content_sources(content: ContentStore, chunks: list[Chunk]) -> None:
     """Validate immutable canonical identities through the selected strict lookup."""
     old = content.get_by_ids([chunk.chunk_id for chunk in chunks])
     if any(chunk.chunk_id in old and old[chunk.chunk_id].source != chunk.source for chunk in chunks):
         raise SourceLayoutError("existing ID has conflicting canonical source")
 
 
-def delete_canonical(content, predicate: str, *, return_ids: bool = False):
+def delete_canonical(content: Any, predicate: str, *, return_ids: bool = False) -> int | list[str]:
     from .bucket_projection import MAX_BUCKETS, mutation_buckets
 
     table = content._get_or_create_table()
@@ -39,7 +39,8 @@ def delete_canonical(content, predicate: str, *, return_ids: bool = False):
         table.search().where(predicate, prefilter=True).select(["chunk_id", "source"])
         .limit(None).to_batches(batch_size=PAGE_SIZE)
     )
-    total, selected = 0, []
+    total = 0
+    selected: list[str] = []
     sources: set[str] | None = set()
     try:
         for batch in reader:
@@ -71,12 +72,16 @@ def delete_canonical(content, predicate: str, *, return_ids: bool = False):
     return selected if return_ids else total
 
 
-def sync_content_projection(db, chunks, *, source_domain=None) -> None:
-    groups = defaultdict(list)
+def sync_content_projection(
+    db: Any, chunks: list[Chunk], *, source_domain: SourceDomain | None = None,
+    tables: list[Any] | None = None,
+) -> None:
+    groups: defaultdict[tuple[str, str], list[str]] = defaultdict(list)
     for chunk in chunks:
         groups[(chunk.source, chunk.language)].append(chunk.chunk_id)
-    for name in db.list_tables().tables:
-        table = db.open_table(name)
+    selected_tables = tables if tables is not None else (db.open_table(name) for name in db.list_tables().tables)
+    for table in selected_tables:
+        name = table.name
         if "vector" not in table.schema.names:
             continue
         if not {"source", "language"} <= set(table.schema.names):
@@ -105,11 +110,14 @@ def sync_content_projection(db, chunks, *, source_domain=None) -> None:
 def projection_records(
     db: Any, content_name: str, chunks: list[Chunk],
     *, bounded_content: ContentStore | None = None, require_current_input: bool = False,
+    point_scope: PointScope | None = None,
 ) -> dict[str, dict[str, Any]]:
     from .content_mutations import content_record
 
     if require_current_input and bounded_content is None:
         raise ValueError("Current embedding input requires a bounded canonical owner")
+    if point_scope is not None and bounded_content is None:
+        raise ValueError("Point projection requires a bounded canonical owner")
     if bounded_content is not None:
         from .chunk_id_index import indexed_chunk_rows
 
@@ -119,7 +127,7 @@ def projection_records(
         )
         rows = indexed_chunk_rows(
             bounded_content, [chunk.chunk_id for chunk in chunks],
-            columns=columns,
+            columns=columns, point_scope=point_scope,
         )
         result = {row["chunk_id"]: row for row in rows}
     else:

@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
+command = ["agent-procutil"]
 otlp = [
     "opentelemetry-sdk>=1.45.1,<2",
     "opentelemetry-exporter-otlp-proto-common>=1.45.1,<2",
@@ -20,6 +21,9 @@ otlp = [
 
 [tool.uv]
 exclude-newer = "7 days"
+
+[tool.uv.sources]
+agent-procutil = { path = "../agent-procutil", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

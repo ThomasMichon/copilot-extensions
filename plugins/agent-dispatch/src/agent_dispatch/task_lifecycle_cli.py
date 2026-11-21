@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, cast
 
 from worktree_identity import WorktreeMachineIdentityError, parse_machine_identity
 
@@ -11,8 +14,12 @@ from .loop_commands import _resolve_cli_module
 from .task_recovery_cli import _cmd_reset as _cmd_reset  # compatibility export
 
 
-def _core():
-    return _resolve_cli_module()
+class _LifecycleCLI(ModuleType):
+    _emit: Callable[[object], int]
+
+
+def _core() -> _LifecycleCLI:
+    return cast(_LifecycleCLI, _resolve_cli_module())
 
 
 def _cmd_claim(args: argparse.Namespace) -> int:
@@ -183,16 +190,25 @@ def _cmd_claimant(args: argparse.Namespace) -> int:
     """task -> claiming worktree: resolve which worktree owns a task.
 
     The inbound-ledger reverse of ``worktree-status`` (worktree -> its tasks).
-    Returns a focused record: the actual claimant (``owner`` = machine/worktree,
-    once the task is claimed/started), or -- for a not-yet-claimed task -- the
-    pinned ``target`` worktree, with ``claimed`` distinguishing the two.
+    Report durable pool placement separately from execution ownership and pins.
     """
     with _core()._client(args) as c:
         task = c.get(args.task_id)
     status = task.get("status")
     owner = task.get("owner")
     claimed = bool(owner) and status in ("claimed", "started", "suspended", "submitted")
-    if claimed:
+    snapshot = task.get("task_obligation") or {}
+    has_placement = (
+        isinstance(snapshot, dict) and "pool_placement" in snapshot
+        and snapshot.get("state") == status and snapshot.get("generation") == task.get("generation")
+    )
+    placement = snapshot.get("pool_placement") if has_placement else None
+    workspace = placement and placement["workspace"]
+    source: str | None
+    if workspace:
+        machine, worktree = workspace["machine"], workspace["worktree"]
+        source = "assignment"
+    elif claimed:
         machine, worktree = _core()._split_owner(owner)
         source = "owner"
     else:
@@ -211,6 +227,8 @@ def _cmd_claimant(args: argparse.Namespace) -> int:
         "owner_session_id": task.get("owner_session_id"),
         "repo": task.get("repo"),
     }
+    if has_placement:
+        result["pool_assignment"] = placement["assignment"] if placement else None
     return _core()._emit(_core()._enrich(result))
 
 def _cmd_yield(args: argparse.Namespace) -> int:
@@ -267,7 +285,7 @@ def _cmd_suspend(args: argparse.Namespace) -> int:
     if args.no_cooldown and args.cooldown_seconds is not None:
         print("--no-cooldown and --cooldown-seconds are mutually exclusive", file=sys.stderr)
         return 2
-    kwargs: dict = {}
+    kwargs: dict[str, Any] = {}
     if args.no_cooldown:
         kwargs["cooldown_seconds"] = None
     elif args.cooldown_seconds is not None:
@@ -453,7 +471,7 @@ def _focus_from_status_core(args: argparse.Namespace) -> int:
     # converges.
     from .identity import aw_list_records, aw_set_summary
 
-    def _focus_row(w: dict) -> dict:
+    def _focus_row(w: dict[str, Any]) -> dict[str, object]:
         identity = parse_machine_identity(w)
         row: dict[str, object] = {
             "machine": identity.execution_machine if identity is not None else w.get("machine"),

@@ -31,6 +31,17 @@ forge client, lifecycle state machine, review rubric, or credential store.
 
 ## Coordination
 
+The proposed finite #11482 trailer-preservation lane below stays with this
+existing lifecycle tracking owner and the actual Worktrees managed Git/
+publication and source-attribution custodians. It is an owner-side publication
+correctness contract, not a transfer of Git authority into the PR observation
+service or a reopening/takeover of the completed finite #10383 author-client
+source contribution. Preserve OPEN #7051 and all incumbent provider, source,
+native, resource and review gates. Ordinary reviewed complete P11482/V11482/
+G11482 delivery and permitted current receiving/source/custody readback
+precede a separate tracking judgment; keep #11482 OPEN during the proposal.
+No publication, history rewrite, implementation appointment or rollout follows.
+
 The complete direct retained #4358 acceptance below continues through this SAME Active
 ROOT's Plan, own and actual global Validation, and Journal under every incumbent source,
 integration, native and resource custodian. Administrative supersession retires
@@ -141,6 +152,39 @@ proposal for review, not a claim of prior implementation or production consent.
   conflict-resolution worker or merge-policy bypass is added.
 - [ ] Preserve internally brokered credentials and existing provider transports.
   Callers neither acquire tokens nor construct forge-specific requests.
+
+#### Finite managed multi-commit provenance preservation from #11482
+
+Agent-recommended correctness follow-through at the existing source-publication
+owner, not a new provider, identity policy or service-side Git writer.
+
+- [ ] **P11482-1:** Preserve applicable VERIFIED contribution/provenance
+  trailers across all surviving commits when managed `create-pr` squashes
+  multiple commits, rather than publishing only the title. Retain permitted
+  `Co-authored-by` and standard `Copilot-Session` provenance without inventing
+  attribution, exposing private source identifiers or changing target policy.
+- [ ] **P11482-2:** Handle repeated trailers faithfully and distinguish
+  actual trailer blocks from ordinary message prose and no-trailer input.
+  Keep the single-surviving-commit and live-PR incremental publication paths
+  unchanged; neither arbitrary message retention nor filtering away verified
+  authorship is the requested correction.
+- [ ] **P11482-3:** Preserve ordinary source/branch/remote, hooks, candidate,
+  rollback and unknown-publication ownership. Exercise the actual managed
+  squash path through existing publication/Git owners without unrelated
+  history rewriting, another authenticated publisher or source takeover.
+
+##### Local Validation for #11482
+
+- [ ] **V11482-1:** In real disposable managed Git fixtures, create two
+  ordinary surviving commits with public co-author and synthetic session
+  trailers, use the normal explicit-title squash path, and inspect the
+  resulting commit body against the retained original contributions.
+  A formatter-only or single-commit test does not exercise this defect.
+- [ ] **V11482-2:** Cover repeated trailers, ordinary message content,
+  no-trailer input and rollback alongside existing publication tests.
+  Preserve single/incremental behavior, verified attribution/privacy and
+  branch/remote/unknown-outcome protections at the original bounded tier;
+  no live forge, unrelated history or full-provider/native matrix is added.
 
 ### Phase 4 - Persistent-agent lifecycle acceptance
 
@@ -402,6 +446,13 @@ checkout-free coverage is not absorbed into this finite contract.
 
 ## Validation Plan
 
+- [ ] **G11482:** Resolve every P11482/V11482 and continuing Coordination
+  clause through the actual multi-surviving-commit managed squash consumer:
+  verified permitted trailers, repeated/prose/absent controls, unchanged
+  single/incremental behavior and safe rollback. Preserve original source
+  custody, privacy and every existing provider/lifecycle gate; planned
+  consolidation is not a published fix, history rewrite or resource release.
+
 - [ ] G3: Resolve EVERY directly retained #6818 original/refined wait-planning
   Plan, own Validation and Continuing Coordination clause at its finite,
   read-only tier: configurable estimates without deadline/result/merge
@@ -474,6 +525,17 @@ No live test writes, credential configuration, service lifecycle or deployed
 host changes are authorized by the plan.
 
 ## Journal
+
+### 2026-11-20 UTC - Proposed finite managed-trailer receiving
+
+The complete qualified #11482 original is retained directly under the
+existing Phase 3 source-publication owner, with local and actual global
+Validation. All six new technical rows remain unchecked. The author-client
+amendment consumes Worktrees publication and explicitly does not take its
+Git authority; its completed source contribution is not reopened here.
+The [four-source receiving record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+preserves separate review and tracking judgments. No Git/forge mutation,
+implementation, history rewrite, rollout or resource transfer occurred.
 
 ### 2026-11-04 - Direct finite wait-planning acceptance from #6818
 

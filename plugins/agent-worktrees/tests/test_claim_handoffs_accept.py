@@ -4,21 +4,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import subprocess
 import types
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from agent_worktrees import __main__ as m
 from agent_worktrees import (
+    activity,
+    claimant,
     claim_handoff_accept_support,
     claim_handoffs,
     claim_history,
+    config as cfg,
     finalize,
     tracking,
     tracking_claim_write,
+    tracking_claims,
+    tracking_lifecycle,
 )
+from agent_worktrees.claim_handoff_admission import parse_bundle, snapshot_claim
+from agent_worktrees.tracking_claims import ResourceClaim
 from agent_worktrees import worktree_identity
 from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_store import GitLeaseStore
@@ -33,8 +43,8 @@ def _record(
     *,
     machine: str = MACHINE,
     owner_ref: str | None = None,
-    claims=(),
-):
+    claims: Iterable[ResourceClaim] = (),
+) -> Path:
     tdir = tmp_path / project / "worktrees"
     tdir.mkdir(parents=True, exist_ok=True)
     wdir = tmp_path / "trees" / project / worktree_id
@@ -47,7 +57,7 @@ def _record(
         "repo_name": project, "machine": machine, "platform": "linux",
         "repos": {project: {"anchor": str(wdir), "worktree_root": str(wdir.parent)}},
     }), encoding="utf-8")
-    record = tracking.create_new_record(
+    record = tracking_lifecycle.create_new_record(
         worktree_id,
         f"worktree/{worktree_id}",
         str(wdir),
@@ -63,24 +73,25 @@ def _record(
 
 
 @pytest.fixture
-def handoff_world(tmp_path, monkeypatch):
-    monkeypatch.setattr(claim_handoffs.cfg, "detect_platform", lambda: "linux")
+def handoff_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(socket, "gethostname", lambda: MACHINE)
     runtime = tmp_path / "runtime"
-    monkeypatch.setattr(claim_handoffs.cfg, "_load_inrepo_config", lambda anchor: {})
-    monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda anchor: {})
+    monkeypatch.setattr(cfg, "install_dir", lambda: runtime)
     monkeypatch.setattr(
-        claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
+        cfg, "project_dir", lambda name=None: tmp_path / str(name)
     )
-    load_config = claim_handoffs.cfg.load_config
+    load_config = cfg.load_config
     monkeypatch.setattr(
-        claim_handoffs.cfg, "load_project_config",
+        cfg, "load_project_config",
         lambda name, **kwargs: load_config(tmp_path / name / "config.yaml", project=name, **kwargs),
     )
     return {"tmp_path": tmp_path}
 
 
 def _setup_bundle(
-    handoff_world,
+    handoff_world: dict[str, Any],
     *,
     source_machine: str = MACHINE,
     consumer_machine: str = MACHINE,
@@ -88,20 +99,20 @@ def _setup_bundle(
     consumer_project: str = "consumer-project",
     include_codespace: bool = False,
     include_unsupported: bool = False,
-):
+) -> dict[str, Any]:
     tmp_path = handoff_world["tmp_path"]
     source = f"{source_machine}/{source_project}/wt-source"
     consumer = f"{consumer_machine}/{consumer_project}/wt-consumer"
     child_ref = f"{consumer_machine}/child-project/wt-child"
     claims = [
-        tracking.ResourceClaim(
+        ResourceClaim(
             kind="worktree",
             ref=child_ref,
             created_at="2026-08-25T12:00:00",
             state="active",
             note="child",
         ),
-        tracking.ResourceClaim(
+        ResourceClaim(
             kind="pr",
             ref="ThomasMichon/example#42",
             created_at="2026-08-25T12:01:00",
@@ -111,7 +122,7 @@ def _setup_bundle(
     ]
     if include_codespace:
         claims.append(
-            tracking.ResourceClaim(
+            ResourceClaim(
                 kind="codespace",
                 ref="octo-space",
                 created_at="2026-08-25T12:02:00",
@@ -121,7 +132,7 @@ def _setup_bundle(
         )
     if include_unsupported:
         claims.append(
-            tracking.ResourceClaim(
+            ResourceClaim(
                 kind="ssh",
                 ref="atlas-core",
                 created_at="2026-08-25T12:03:00",
@@ -159,7 +170,9 @@ def _setup_bundle(
     }
 
 
-def _offer(world, refs, *, bundle_id="bundle-1"):
+def _offer(
+    world: dict[str, Any], refs: list[str], *, bundle_id: str = "bundle-1",
+) -> tuple[claim_handoffs.ClaimBundle, bool]:
     return claim_handoffs.offer(
         world["source"],
         world["consumer"],
@@ -169,14 +182,16 @@ def _offer(world, refs, *, bundle_id="bundle-1"):
     )
 
 
-def _offer_cross_machine(world, refs, *, bundle_id="bundle-1"):
+def _offer_cross_machine(
+    world: dict[str, Any], refs: list[str], *, bundle_id: str = "bundle-1",
+) -> claim_handoffs.ClaimBundle:
     source_record = tracking.load_record(world["source_path"])
     by_ref = {claim.ref: claim for claim in source_record.resources}
     snapshots = []
     for ref in sorted(refs):
         claim = by_ref[ref]
         claim.handoff_bundle = bundle_id
-        snapshots.append(claim_handoffs._claim_snapshot(claim))
+        snapshots.append(snapshot_claim(claim))
     tracking.save_record(
         source_record,
         world["source_path"],
@@ -195,7 +210,7 @@ def _offer_cross_machine(world, refs, *, bundle_id="bundle-1"):
     return bundle
 
 
-def _args(target, **kwargs):
+def _args(target: list[str], **kwargs: Any) -> argparse.Namespace:
     values = {
         "target": target,
         "json": True,
@@ -207,7 +222,7 @@ def _args(target, **kwargs):
     return argparse.Namespace(**values)
 
 
-def _init_lease_store(tmp_path: Path, monkeypatch):
+def _init_lease_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> GitLeaseStore:
     origin = tmp_path / "lease-origin.git"
     subprocess.run(
         ["git", "init", "--quiet", "--bare", str(origin)],
@@ -224,8 +239,8 @@ def _init_lease_store(tmp_path: Path, monkeypatch):
 
 
 def test_accept_same_project_transfers_worktree_lease_and_ledger_claims(
-    handoff_world, monkeypatch
-):
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     world = _setup_bundle(
         handoff_world,
         consumer_project="source-project",
@@ -252,10 +267,46 @@ def test_accept_same_project_transfers_worktree_lease_and_ledger_claims(
     assert all(claim.state == "active" for claim in consumer.resources)
     assert all("prior owner: " in claim.note for claim in consumer.resources)
     assert child.owner_ref == world["consumer"]
-    assert store.inspect("codespace", "octo-space").record.holder == world["consumer"]
+    lease = store.inspect("codespace", "octo-space")
+    assert lease is not None and lease.record.holder == world["consumer"]
 
 
-def test_accept_cross_project_worktree_transfer_rewrites_child_owner(handoff_world):
+def test_task_claim_nonce_survives_bundle_reload_and_transfer(
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _setup_bundle(handoff_world)
+    source = tracking.load_record(world["source_path"])
+    task = tracking_claims.add_resource_claim(
+        source, ResourceClaim(kind="task", ref="task-transfer"), save=False,
+    )
+    tracking.save_record(source, world["source_path"])
+    store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
+    store.acquire("task", task.ref, world["source"])
+    bundle = _offer(world, [task.ref])[0]
+    loaded = claim_handoffs.show(bundle.bundle_id)
+    assert loaded.claims[0]["claim_nonce"] == task.claim_nonce
+    accepted = claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+    assert accepted.state == "accepted"
+    assert task.ref not in {claim.ref for claim in tracking.load_record(world["source_path"]).resources}
+    received = tracking.load_record(world["consumer_path"]).resources[0]
+    assert received.ref == task.ref and received.claim_nonce
+    assert received.claim_nonce != task.claim_nonce
+    lease = store.inspect("task", task.ref)
+    assert lease is not None and lease.record.holder == world["consumer"]
+
+
+@pytest.mark.parametrize("nonce", [None, ""])
+def test_bundle_reload_rejects_malformed_claim_generation(nonce: object) -> None:
+    raw = claim_handoffs.ClaimBundle(
+        bundle_id="bundle", state="offered", source=f"{MACHINE}/source/wt",
+        consumer=f"{MACHINE}/consumer/wt", offered_at="t", updated_at="t",
+        claims=({"kind": "task", "ref": "task-transfer", "claim_nonce": nonce},),
+    ).to_dict()
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="claim nonce"):
+        parse_bundle(raw)
+
+
+def test_accept_cross_project_worktree_transfer_rewrites_child_owner(handoff_world: dict[str, Any]) -> None:
     world = _setup_bundle(handoff_world)
     bundle = _offer(world, [world["claims"][0].ref])[0]
 
@@ -269,7 +320,7 @@ def test_accept_cross_project_worktree_transfer_rewrites_child_owner(handoff_wor
     assert child.owner_ref == world["consumer"]
 
 
-def test_accept_is_idempotent(handoff_world):
+def test_accept_is_idempotent(handoff_world: dict[str, Any]) -> None:
     world = _setup_bundle(handoff_world)
     bundle = _offer(world, [world["claims"][1].ref])[0]
 
@@ -284,7 +335,7 @@ def test_accept_is_idempotent(handoff_world):
     assert {claim.ref for claim in consumer.resources} == {world["claims"][1].ref}
 
 
-def test_accept_feeds_claim_history_for_pr_claim(handoff_world):
+def test_accept_feeds_claim_history_for_pr_claim(handoff_world: dict[str, Any]) -> None:
     """worktree-claims-transitive-finalization Phase 3b: an explicit
     claim-handoff bundle accept is a genuine ownership transfer -- the
     source worktree must get a "released" entry and the consumer worktree
@@ -305,7 +356,7 @@ def test_accept_feeds_claim_history_for_pr_claim(handoff_world):
     assert bundle.bundle_id in claimed["note"] and world["source"] in claimed["note"]
 
 
-def test_accept_worktree_claim_does_not_feed_claim_history(handoff_world):
+def test_accept_worktree_claim_does_not_feed_claim_history(handoff_world: dict[str, Any]) -> None:
     """A `worktree`-kind claim transferred by the same bundle is outside
     claim_history's scope (`pr`-kind only) and must never feed an entry."""
     world = _setup_bundle(handoff_world)
@@ -317,7 +368,7 @@ def test_accept_worktree_claim_does_not_feed_claim_history(handoff_world):
     assert claim_history.history_for_ref(worktree_ref) == []
 
 
-def test_accept_retry_does_not_duplicate_claim_history(handoff_world):
+def test_accept_retry_does_not_duplicate_claim_history(handoff_world: dict[str, Any]) -> None:
     """A retried/idempotent accept call on an already-accepted bundle must
     never double-record the transfer."""
     world = _setup_bundle(handoff_world)
@@ -332,8 +383,8 @@ def test_accept_retry_does_not_duplicate_claim_history(handoff_world):
 
 
 def test_accept_records_claim_history_even_if_a_later_child_save_fails(
-    handoff_world, monkeypatch,
-):
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A review finding on the first version of this wiring: the consumer
     claim is already durably saved before any child-ownership record save
     -- a later child save failure (e.g. disk/lock contention) must not
@@ -347,12 +398,14 @@ def test_accept_records_claim_history_even_if_a_later_child_save_fails(
 
     real_save = tracking.save_record
 
-    def _fail_on_child(record, path=None, **kwargs):
+    def _fail_on_child(
+        record: tracking.WorktreeRecord, path: Path | None = None, **kwargs: Any,
+    ) -> None:
         if path is not None and str(path) == str(world["child_path"]):
             raise OSError("simulated child-record save failure")
         return real_save(record, path, **kwargs)
 
-    monkeypatch.setattr(claim_handoffs.tracking, "save_record", _fail_on_child)
+    monkeypatch.setattr(tracking, "save_record", _fail_on_child)
 
     with pytest.raises(claim_handoffs.ClaimHandoffError):
         claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
@@ -363,7 +416,9 @@ def test_accept_records_claim_history_even_if_a_later_child_save_fails(
     assert [e["event"] for e in events] == ["released", "claimed"]
 
 
-def test_accept_moves_finalize_block_from_source_to_consumer(handoff_world, monkeypatch):
+def test_accept_moves_finalize_block_from_source_to_consumer(
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     world = _setup_bundle(handoff_world)
     refs = [claim.ref for claim in world["claims"]]
     bundle = _offer(world, refs)[0]
@@ -384,7 +439,7 @@ def test_accept_moves_finalize_block_from_source_to_consumer(handoff_world, monk
     ) is False
 
 
-def test_accept_rejects_unsupported_kind_without_transferring_anything(handoff_world):
+def test_accept_rejects_unsupported_kind_without_transferring_anything(handoff_world: dict[str, Any]) -> None:
     world = _setup_bundle(handoff_world, include_unsupported=True)
     refs = [claim.ref for claim in world["claims"]]
     bundle = _offer(world, refs)[0]
@@ -402,7 +457,7 @@ def test_accept_rejects_unsupported_kind_without_transferring_anything(handoff_w
     assert claim_handoffs.show(bundle.bundle_id).state == "offered"
 
 
-def test_accepted_bundle_rejects_decline_and_cancel(handoff_world):
+def test_accepted_bundle_rejects_decline_and_cancel(handoff_world: dict[str, Any]) -> None:
     world = _setup_bundle(handoff_world)
     bundle = _offer(world, [world["claims"][1].ref])[0]
     claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
@@ -424,8 +479,8 @@ def test_accepted_bundle_rejects_decline_and_cancel(handoff_world):
 
 
 def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
-    handoff_world, monkeypatch
-):
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     remote_machine = "ember"
     world = _setup_bundle(
         handoff_world,
@@ -436,26 +491,28 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     store.acquire("codespace", "octo-space", world["source"])
     refs = [claim.ref for claim in world["claims"]]
     bundle = _offer_cross_machine(world, refs)
-    seen = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(
         claim_handoff_accept_support, "no_window_kwargs",
         lambda: {"creationflags": 0x08000000},
     )
 
     monkeypatch.setattr(
-        claim_handoff_accept_support.claimant,
+        claimant,
         "resolve_machine_ssh",
         lambda key: ("ember-wsl", "bash") if key == remote_machine else None,
     )
     real_run = subprocess.run
 
-    def _fake_remote(argv, **kwargs):
+    def _fake_remote(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if argv[0] != "ssh":
             return real_run(argv, **kwargs)
         seen["argv"] = argv
         seen["timeout"] = kwargs.get("timeout")
         seen["creationflags"] = kwargs.get("creationflags")
-        accepted = claim_handoffs.accept_source(bundle.bundle_id, actor=world["consumer"])
+        with monkeypatch.context() as remote:
+            remote.setattr(socket, "gethostname", lambda: remote_machine)
+            accepted = claim_handoffs.accept_source(bundle.bundle_id, actor=world["consumer"])
         return subprocess.CompletedProcess(
             argv,
             0,
@@ -463,7 +520,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
             stderr="",
         )
 
-    monkeypatch.setattr(claim_handoff_accept_support.subprocess, "run", _fake_remote)
+    monkeypatch.setattr(subprocess, "run", _fake_remote)
 
     accepted = claim_handoffs.accept(
         bundle.bundle_id,
@@ -486,7 +543,8 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     assert source.resources == []
     assert {claim.ref for claim in consumer.resources} == set(refs)
     assert child.owner_ref == world["consumer"]
-    assert store.inspect("codespace", "octo-space").record.holder == world["consumer"]
+    lease = store.inspect("codespace", "octo-space")
+    assert lease is not None and lease.record.holder == world["consumer"]
     pr_ref = next(c.ref for c in world["claims"] if c.kind == "pr")
     events = claim_history.history_for_ref(pr_ref)
     assert [e["event"] for e in events] == ["released", "claimed"]
@@ -496,8 +554,8 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
 
 @pytest.mark.parametrize("source_state", ["absent", "invalid", "dangling-config"])
 def test_remote_source_without_local_registration_keeps_fenced_ssh_leg(
-    handoff_world, monkeypatch, source_state,
-):
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch, source_state: str,
+) -> None:
     remote_machine = "remote-host"
     world = _setup_bundle(handoff_world, source_machine=remote_machine)
     store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
@@ -516,13 +574,13 @@ def test_remote_source_without_local_registration_keeps_fenced_ssh_leg(
         except OSError as exc:
             pytest.skip(f"host cannot create the contained symlink fixture: {exc}")
     monkeypatch.setattr(
-        claim_handoff_accept_support.claimant, "resolve_machine_ssh",
+        claimant, "resolve_machine_ssh",
         lambda machine: ("remote-source-ssh", "bash") if machine == remote_machine else None,
     )
     real_run = subprocess.run
-    ssh_calls = []
+    ssh_calls: list[list[str]] = []
 
-    def remote(argv, **kwargs):
+    def remote(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if argv[0] != "ssh":
             return real_run(argv, **kwargs)
         fence = store.inspect("claim-handoff", bundle.bundle_id)
@@ -532,7 +590,7 @@ def test_remote_source_without_local_registration_keeps_fenced_ssh_leg(
         claim_handoffs._save_registry(claim_handoffs.registry_path(), [accepted])
         return subprocess.CompletedProcess(argv, 0, json.dumps(accepted.to_dict()), "")
 
-    monkeypatch.setattr(claim_handoff_accept_support.subprocess, "run", remote)
+    monkeypatch.setattr(subprocess, "run", remote)
     registry = claim_handoffs.registry_path()
     before = {
         path: path.read_bytes() for path in [registry, world["consumer_path"], world["child_path"]]
@@ -554,19 +612,19 @@ def test_remote_source_without_local_registration_keeps_fenced_ssh_leg(
 
 
 def test_accept_cross_machine_remote_failure_leaves_state_unchanged_and_no_live_fence(
-    handoff_world, monkeypatch
-):
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     world = _setup_bundle(handoff_world, source_machine="ember")
     store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
     bundle = _offer_cross_machine(world, [claim.ref for claim in world["claims"]])
     monkeypatch.setattr(
-        claim_handoff_accept_support.claimant,
+        claimant,
         "resolve_machine_ssh",
         lambda key: ("ember-wsl", "bash"),
     )
     real_run = subprocess.run
     monkeypatch.setattr(
-        claim_handoff_accept_support.subprocess,
+        subprocess,
         "run",
         lambda argv, **kwargs: (
             subprocess.CompletedProcess(argv, 255, stdout="", stderr="ssh down")
@@ -593,14 +651,16 @@ def test_accept_cross_machine_remote_failure_leaves_state_unchanged_and_no_live_
     assert fence is not None and fence.live is False
 
 
-def test_accept_cross_machine_rejects_live_fence_conflict(handoff_world, monkeypatch):
+def test_accept_cross_machine_rejects_live_fence_conflict(
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     world = _setup_bundle(handoff_world, source_machine="ember")
     store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
     bundle = _offer_cross_machine(world, [world["claims"][0].ref])
     store.acquire("claim-handoff", bundle.bundle_id, "other/project/wt-other")
     real_run = subprocess.run
     monkeypatch.setattr(
-        claim_handoff_accept_support.subprocess,
+        subprocess,
         "run",
         lambda argv, **kwargs: (
             pytest.fail("remote SSH should not run")
@@ -619,7 +679,7 @@ def test_accept_cross_machine_rejects_live_fence_conflict(handoff_world, monkeyp
     assert tracking.load_record(world["consumer_path"]).resources == []
 
 
-def test_accept_source_is_atomic_and_idempotent(handoff_world):
+def test_accept_source_is_atomic_and_idempotent(handoff_world: dict[str, Any]) -> None:
     world = _setup_bundle(handoff_world, source_machine="ember")
     bundle = _offer_cross_machine(world, [claim.ref for claim in world["claims"]])
 
@@ -633,12 +693,13 @@ def test_accept_source_is_atomic_and_idempotent(handoff_world):
 
 
 def test_cli_accept_source_returns_json_without_logging_main_accept(
-    handoff_world, monkeypatch, capfd
-):
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     world = _setup_bundle(handoff_world, source_machine="ember")
     bundle = _offer_cross_machine(world, [world["claims"][1].ref])
     config = types.SimpleNamespace(machine="ember", repo_name="source-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
 
     assert m.cmd_claims(
@@ -653,14 +714,17 @@ def test_cli_accept_source_returns_json_without_logging_main_accept(
     assert tracking.load_record(world["source_path"]).resources[0].ref == world["claims"][0].ref
 
 
-def test_cli_accept_logs_and_returns_accepted_bundle(handoff_world, monkeypatch, capfd):
+def test_cli_accept_logs_and_returns_accepted_bundle(
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     world = _setup_bundle(handoff_world)
     bundle = _offer(world, [world["claims"][1].ref])[0]
     config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
-    logged = []
-    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    logged: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: logged.append((a, k)))
 
     assert m.cmd_claims(_args(["handoff", "accept", bundle.bundle_id])) == 0
 
@@ -675,8 +739,8 @@ def test_cli_accept_logs_and_returns_accepted_bundle(handoff_world, monkeypatch,
 
 
 def test_full_lifecycle_history_is_ordered_across_rebind_and_bundle_transfer(
-    handoff_world,
-):
+    handoff_world: dict[str, Any],
+) -> None:
     """worktree-claims-transitive-finalization Phase 3b's own Validation
     Plan item: a PR handed off across worktrees/sessions (an agent-bridge
     session rebind, then an explicit claim-handoff bundle transfer, then a
@@ -703,10 +767,10 @@ def test_full_lifecycle_history_is_ordered_across_rebind_and_bundle_transfer(
     ]
     tracking.save_record(source_rec, source_path)
     source_rec = tracking.load_record(source_path)
-    tracking.open_handoff(source_rec, "old-session", "token", save=False)
+    tracking_lifecycle.open_handoff(source_rec, "old-session", "token", save=False)
     tracking.save_record(source_rec, source_path)
     source_rec = tracking.load_record(source_path)
-    tracking.link_handoff(source_rec, "token", "new-session")  # save=True
+    tracking_lifecycle.link_handoff(source_rec, "token", "new-session")  # save=True
 
     # Hop 2: an explicit claim-handoff bundle transfer from source to
     # consumer -- the same mechanism `test_accept_feeds_claim_history_for_pr_claim`

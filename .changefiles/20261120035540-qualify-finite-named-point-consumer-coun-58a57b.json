@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify finite named-point consumer counts against three native corpus sizes without claiming constant total I/O.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

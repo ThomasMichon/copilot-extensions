@@ -171,6 +171,20 @@ class RepositoryProjection:
             return targets
         return self._transaction(plan, **authority)
 
+    def members(self, **authority: Any) -> frozenset[ObservationKey]:
+        """Read effective membership, retaining members across incomplete scans."""
+        def selected(state: dict[str, Any]) -> frozenset[ObservationKey]:
+            result: set[ObservationKey] = set()
+            for row in state["repositories"]:
+                identity = RepositoryIdentity.parse(row["identity"])
+                if identity.key in self.identities:
+                    result.update(
+                        (identity.key, identity.repo, pull["number"])
+                        for pull in row["pulls"] if pull["member"]
+                    )
+            return frozenset(result)
+        return self._transaction(selected, **authority)
+
     def apply(
         self, inventories: dict[str, dict[str, Any]],
         snapshots: dict[ObservationKey, PRSnapshot | None], **authority: Any,
@@ -194,7 +208,7 @@ class RepositoryProjection:
         snapshots: dict[ObservationKey, dict[str, Any] | None], *,
         observed_at: int | None = None, **authority: Any,
     ) -> dict[str, Any]:
-        """Publish a bounded prepared batch, retaining atomic state/event pairs."""
+        """Publish facts/events atomically; omitted inventories retain coverage."""
         from .repository_state import facts as validate_facts
         observed_at = int(self.store.clock()) if observed_at is None else observed_at
         if type(observed_at) is not int or not 0 <= observed_at <= self.store.clock():
@@ -205,45 +219,17 @@ class RepositoryProjection:
             for key, identity in self.identities.items():
                 row = next((row for row in state["repositories"]
                             if RepositoryIdentity.parse(row["identity"]).key == key), None)
+                scan = inventories.get(key)
                 if row is None:
+                    if scan is None:
+                        continue
                     row = _new_repository(identity)
                     state["repositories"].append(row)
                 initial = row["inventory"]["last_complete_at"] is None and not row["pulls"]
-                scan = inventories[key]
-                coverage = {
-                    "outcome": scan["outcome"], "observed_at": observed_at, "pages": scan["pages"],
-                    "error": scan["error"], "last_complete_at": (
-                        observed_at if scan["outcome"] == "complete" else row["inventory"]["last_complete_at"]
-                    ),
-                }
-                if (coverage["outcome"], coverage["error"]) != (
-                    row["inventory"]["outcome"], row["inventory"]["error"],
-                ):
-                    _event(state, key, None, "coverage", {
-                        "outcome": coverage["outcome"], "error": coverage["error"],
-                    }, now)
-                row["inventory"] = coverage
+                if scan is not None:
+                    self._apply_inventory(state, row, key, scan, observed_at, now, initial)
                 known = {pull["number"]: pull for pull in row["pulls"]}
-                for number in scan["numbers"]:
-                    if number not in known:
-                        if len(row["pulls"]) >= MAX_PULLS * 2:
-                            raise RepositoryBackpressure("retained repository summary capacity reached")
-                        pull: dict[str, Any] = {"number": number, "member": True, "departed_at": None,
-                                "observed_at": None, "error": "", "facts": None}
-                        if self.store.repository_activity:
-                            pull["activity"] = None
-                        row["pulls"].append(pull)
-                        known[number] = pull
-                        _event(state, key, number, "baseline" if initial else "entry", None, now)
-                    elif not known[number]["member"]:
-                        known[number].update(
-                            member=True, departed_at=None, error="selection_reentry_unconfirmed",
-                        )
-                        _event(state, key, number, "entry", None, now)
                 for number, pull in known.items():
-                    if scan["outcome"] == "complete" and number not in scan["numbers"] and pull["member"]:
-                        pull.update(member=False, departed_at=now)
-                        _event(state, key, number, "departure", pull["facts"], now)
                     selected = (key, identity.repo, number)
                     if selected not in snapshots:
                         continue
@@ -274,6 +260,45 @@ class RepositoryProjection:
             _trim_bytes(state, now, first_new, 2 if self.store.repository_continuing else 1)
             return {"status": "projected", "cursor": state["next_sequence"] - 1}
         return self._transaction(apply, persist=True, **authority)
+
+    def _apply_inventory(
+        self, state: dict[str, Any], row: dict[str, Any], key: str, scan: dict[str, Any],
+        observed_at: int, now: int, initial: bool,
+    ) -> None:
+        coverage = {
+            "outcome": scan["outcome"], "observed_at": observed_at, "pages": scan["pages"],
+            "error": scan["error"], "last_complete_at": (
+                observed_at if scan["outcome"] == "complete" else row["inventory"]["last_complete_at"]
+            ),
+        }
+        if (coverage["outcome"], coverage["error"]) != (
+            row["inventory"]["outcome"], row["inventory"]["error"],
+        ):
+            _event(state, key, None, "coverage", {
+                "outcome": coverage["outcome"], "error": coverage["error"],
+            }, now)
+        row["inventory"] = coverage
+        known = {pull["number"]: pull for pull in row["pulls"]}
+        for number in scan["numbers"]:
+            if number not in known:
+                if len(row["pulls"]) >= MAX_PULLS * 2:
+                    raise RepositoryBackpressure("retained repository summary capacity reached")
+                pull: dict[str, Any] = {"number": number, "member": True, "departed_at": None,
+                                      "observed_at": None, "error": "", "facts": None}
+                if self.store.repository_activity:
+                    pull["activity"] = None
+                row["pulls"].append(pull)
+                known[number] = pull
+                _event(state, key, number, "baseline" if initial else "entry", None, now)
+            elif not known[number]["member"]:
+                known[number].update(
+                    member=True, departed_at=None, error="selection_reentry_unconfirmed",
+                )
+                _event(state, key, number, "entry", None, now)
+        for number, pull in known.items():
+            if scan["outcome"] == "complete" and number not in scan["numbers"] and pull["member"]:
+                pull.update(member=False, departed_at=now)
+                _event(state, key, number, "departure", pull["facts"], now)
 
     def query(
         self, key: str, *, after: int = 0, limit: int = 16, number: int | None = None,

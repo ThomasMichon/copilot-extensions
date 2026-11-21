@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify selected historical source closures against native Windows watch-state sealing and raced creation.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

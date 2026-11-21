@@ -188,6 +188,19 @@ completion.
 Never push a premature finalization, lower an acceptance bar, or count a
 merged child as the root's completion, just to reduce the roster.
 
+### Under relentless drive posture
+
+When the charter's drive posture is `relentless` (see
+[watchdog checks](watchdog-checks.md#drive-posture)), the monitor treats these
+as waste for a set-to-work target: the agent idles with an open root and no
+required wait; a hold has no recorded specific reason; a blocker has no
+assigned owner who diagnoses its root cause and drives the fix; or a
+goal-advancing question stays unanswered. Record each hold in the target's
+summary with who set it, its reason and, when lifted, who lifted it and when.
+The posture never widens authority: exploratory targets still get a light
+touch, standing targets still get no completion push, required waits stay
+required, and operator-set holds are lifted only by the operator's direction.
+
 ## Report churn
 
 Each recurring sweep reports the fleet's churn: completions and finalizations

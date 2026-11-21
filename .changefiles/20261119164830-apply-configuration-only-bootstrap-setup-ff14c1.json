@@ -1,0 +1,9 @@
+{
+  "comment": "Apply configuration-only bootstrap setup before Manager construction, with native capability and selected-source admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

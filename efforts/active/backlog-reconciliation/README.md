@@ -410,6 +410,206 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current roadmap integration assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
+separates all six unfinished execution-plan gates from the reviewed historical
+research. The complete 15:09 PT inventory has 882 open: 292 retained historical
+assignments, 153 other creator-eligible identities and 437 excluded metadata-only
+records. A [finite research queue](roadmap-sequencing.md#finite-integration-research-queue)
+reconciles existing later coverage before new studies, refreshes selected
+priority/receiver deltas and composes only actual scoped prerequisites.
+#5512's already accepted NOT_PLANNED route continues in the unchanged Draft
+singleton effort; eight original shortlist trackers and four receiving routes
+remain, without technical completion or new disposition credit.
+The [dated journal](journal/2026/11.20-roadmap-integration-gaps.md) also follows
+through reviewed #13740's accepted idle-only slice, five unchecked technical
+rows and OPEN #13734's unreceived carrier observation. The campaign remains
+Active, 153 above fixed 729; all Plan/Validation and source/custody gates remain.
+
+The [idle-steering and existing-keeper unit](journal/2026/11.20-idle-steering-and-existing-keepers.md)
+proposes the finite #13734 idle/hint slice in the existing Active Queued
+Steering owner: supported idle submission without another unrelated turn,
+resume/re-registration, truthful conditional hints and exact message identity.
+Five technical rows remain unchecked. A qualified later repeat also reports
+a possibly separate resumed-headless carrier handshake failure; it remains
+unreceived under existing carrier owners in OPEN #13734, not folded into the
+idle slice or waived by its review.
+Eight complete current original/discussion unions retain actual canonical,
+claim, incident, policy, source/native and explicit acceptance gates; #3507's
+literal accepted-transfer alternative resolves an older OPEN-placement
+statement without replay or a native-pass claim. The same record follows
+through reviewed #13733, #13082's separate NOT_PLANNED retirement and
+#13369/#13378's unfinished-other-party KEEP judgments. The complete 13:21 PT
+census is unchanged at 880 whole, 151 above fixed 729.
+
+The [portable fixture and runtime-resource unit](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+proposes complete #13082/#13369/#13378 receiving in existing Test Portfolio
+Phase 4 waves through Phase 7: portable peer handles, complete distribution/
+staged resources and all six caller/session/incarnation cases. Fifteen new
+technical rows remain unchecked, original alternatives and actual custodians
+are preserved, and all three sources remain OPEN during proposal.
+The same record follows through actual reviewed #13730 and three separate
+Vault NOT_PLANNED tracking retirements, with eighteen technical rows still
+unchecked. The complete 12:40 PT whole census remains 880 open, 151 above
+fixed 729, with no arrivals or departures in this proposal.
+
+The [finite Vault copy-transaction unit](journal/2026/11.20-vault-copy-and-existing-keepers.md)
+proposes complete #13077/#13083/#13085 receiving in existing Vault Service P2:
+relocation/fencing, selected-peer copy support and uncertain overwrite
+recovery retain eighteen unchecked technical rows and their actual
+custodians. The three sources remain OPEN during proposal. The same record
+follows through reviewed #13590/#13723 and separate #11816/#13617
+NOT_PLANNED tracking retirements without checking technical acceptance.
+The complete 11:59 PT whole census remains 883 open, 154 above fixed 729;
+there are no arrivals, departures or new campaign dispositions in this unit.
+
+The [retained-supervisor and existing-canonical unit](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+proposes complete #13617 receiving in existing Installer Upgrade Recovery:
+seven unchecked technical rows retain the native legacy/current transition,
+coordinator-only credit, original OR, repeat and independent capture. Eight
+other source contracts keep their existing canonical or exact unresolved
+owner/evidence boundary; no duplicate effort or implementation is introduced.
+The same record follows through #13718's actual reviewed planning and the
+separate #3443 NOT_PLANNED tracking retirement. The complete 11:07 PT whole
+census is unchanged at 884 open, 155 above fixed 729, with no arrivals,
+departures or new campaign disposition; filtered recent-delivery discovery
+is a different observation.
+
+The [complete orphan-task adoption planning unit](journal/2026/11.20-orphan-task-adoption-planning.md)
+was delivered through reviewed #13718. Complete current receiving/custody
+readback and a separate judgment preceded #3443's acknowledged NOT_PLANNED
+tracking retirement. Its four stages and BOTH headless ACP and bare scripted
+tasks remain in one Draft, with all nine technical rows unchecked and #7237's
+independent relationship and actual resource custodians unchanged. Its
+09:27 PT 885-open census is historical; the subsequent complete 09:58 PT
+observation is 884 open, 155 above fixed 729. The new unit records the
+follow-through, not a repeated disposition or claim of adoption functionality.
+
+The [independent inference-identity and custody unit](journal/2026/11.20-independent-inference-identity-and-custody.md)
+proposes complete #3296 receiving in existing Account-Aware Operations
+Phase 6, with nine unchecked technical rows and no new effort or credential
+owner. Nine complete current source/discussion unions retain the distinct
+custodian, architecture, repair-reservation and final-open incident gates.
+The complete 08:18 PT census remains 883 open, 154 above fixed 729, with no
+new arrivals, departures or campaign disposition in this unit.
+
+The [full-user WinGet venue receiving unit](journal/2026/11.20-winget-venue-and-retained-contracts.md)
+records #13701's actual reviewed receiving and the historical 884-open census.
+The explicit conjunction was then clarified through reviewed #13703: install the
+seed plugin through the external marketplace AND establish its runtime through
+the declared installation owner. Complete current receiving/original/custody
+readback and a separate judgment preceded #1475's acknowledged NOT_PLANNED
+tracking retirement. All six Portfolio technical rows remain unchecked;
+the clarification and retirement change no native/resource custodian or
+original outcome. #688's independent gates, #2612's actual mapping condition
+and the distinct canonicals remain. The new unit above records this follow-through,
+not a repeated disposition or claim of technical completion.
+
+The [local transport and complete rendezvous planning unit](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+records #13690's actual reviewed delivery, #12042's separately audited tracking
+retirement and a complete unchanged 884-open census. One canonical Draft plan
+under existing #54 directly retains the native-first ladder, unresolved #4040
+Bridge-policy choice and #5904's complete independently tracked parser/cleanup
+lane. All fourteen technical rows remain unchecked; #54 and #5904 remain OPEN.
+Changed ownership-observation, cancellation-closeout and fleet-growth source
+references are credited only at their actual finite scope, not whole-parent
+fulfillment or permission to repeat unchanged code/native audits.
+
+The [shared-context and registry-default unit](journal/2026/11.20-shared-context-and-registry-default-receiving.md)
+records #13680's actual reviewed delivery, two separately audited tracking
+retirements and the complete 884-open census. It proposes one canonical
+configuration-reader plan under OPEN #12920, retaining the complete #12042
+registry-default residual and existing native-default/cache/write authorities.
+Every new technical row stays unchecked; #13075's historical timeout and
+#13598's selected separate tracking remain OPEN.
+
+The [Windows attribution and retained-transition unit](journal/2026/11.20-path-attribution-and-retained-transitions.md)
+records #13663's actual reviewed receiving and four separate audited
+tracking retirements, while proposing three distinct finite contracts in
+their existing Portfolio, upgrade-recovery and PR-watch homes. Ten new
+technical rows remain unchecked; #13598's selected separate tracking and
+every actual source, implementation, native and resource owner remain.
+
+The historical [fixture-authority and cleanup receiving proposal](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+mapped four complete source contracts to the existing Portfolio and intake,
+with twenty unchecked technical rows and nine independent retained outcomes.
+Its then-pending reviewed delivery and source judgments are now recorded
+above as #13663's actual acceptance and four audited tracking retirements.
+Every technical row and actual owner remains; no repair or resource release
+is inferred from that administrative completion.
+
+The [registration and selected peer-launch unit](journal/2026/11.20-registration-and-peer-launch-completions.md)
+records two independently acknowledged finite source completions and nine
+distinct retained contracts, with a complete 888-open census. Existing owner,
+source/copy, native and rollout gates and all parent check states remain.
+
+The [native crypto and existing-owner receiving unit](journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+records acknowledged whole #12119 fulfillment through #12122 and proposes
+complete #11995 portfolio receiving plus #12111's same-parent TargetLock
+lane under final-OPEN #2709. All eleven new technical rows remain unchecked.
+Thirteen current source identities preserve the other delivery, claimant,
+scope and source/copy gaps. It also records actual #13590 follow-through
+and the complete 901-open census; no new disposition follows automatically
+from either receiving proposal or the numerical observation.
+
+The [source-claim and credential-generation unit](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+proposes one complete #11816 Vault P2 receiving contract, with six unchecked
+technical rows, and an acknowledged #11783 source completion after the actual
+historical Stage-5 keeper reason became satisfied by current owner acceptance.
+Thirteen complete current unions retain eleven further claim, receiving or
+whole-scope gaps; #11805 remains an actual source-author metadata-only hold.
+The same record captures actual #13580 delivery, two separately verified
+tracking retirements and the complete 902-open census. Neither proposed
+judgment follows automatically from this publication.
+
+The [provider-observation and terminal-load unit](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+proposes complete direct #11726 Driver observation-design and #11711 PR-service
+original-result contracts in their existing owners' Plan, local/global
+Validation, Coordination and Journal. All fourteen new technical rows remain
+unchecked. Thirteen complete current unions also preserve actual claimants,
+three existing canonical cohorts and independent source/copy conditions.
+The same record captures actual #13571 delivery, four separately verified
+tracking retirements and the complete 903-open census; no new disposition
+or technical/custody credit follows from these two proposals.
+
+The [source-attribution and retirement-fixture unit](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+proposes complete direct #11348 required-context, #11372 visual-fixture,
+#11512 independent-witness/related-triage and #11482 managed-trailer
+contracts in three existing domain plans. All twenty-six new technical
+rows remain unchecked. Twelve complete current original unions also retain
+eight specific claimant, acceptance-gate or receiving gaps, rather than
+forcing title-only homes. The same unit records actual #13535 delivery,
+six independently verified tracking retirements and the complete 898-open
+census whose six arrivals offset those departures. No new source disposition
+or technical/custody credit follows from these proposals.
+
+The [six-source existing-owner receiving unit](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+proposes complete direct #10487 portfolio, #10811 bounded enumeration,
+#11210 transcript-reader/output, #11239/#11240 guidance and #11296 recipe
+contracts in four existing domain plans. All thirty-eight new technical
+rows remain unchecked. Twelve complete current metadata records, eleven
+unchanged admitted whole discussions and #10212's changed complete comment
+also retain six specific source/owner/receiving gaps. The same unit records
+actual #13523 delivery, three separately verified tracking retirements and
+the 898-open census; it introduces no new issue disposition or technical credit.
+
+The [cold-fixture and guard-map receiving unit](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+proposes complete direct #9970 Phase 4 and #10031/#10032 Phase 3
+test-portfolio families through existing Phase 7 intake/domain review.
+It records actual #13515 delivery and the separately verified #9056/#9568
+redundant-tracking retirements, without technical or custody credit.
+Twelve complete current metadata records and eleven unchanged admitted
+whole originals support three proposed routes and nine retained ownership,
+scope or source-admission gaps. No new disposition follows from the proposal;
+all incumbent campaign Plan/Validation states remain.
+
+The [read-only and bounded-Windows receiving unit](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+proposes complete direct #9056 Bridge-acquisition and #9568 Phase 5
+test-portfolio receiving, with the latter's existing Phase 7 intake route.
+It also records #13485's reviewed delivery and #11113's separately verified
+tracking retirement. The complete 20:08:54 UTC census is 903 whole open,
+174 above fixed 729. No new issue disposition or technical credit follows
+from these proposals; all incumbent campaign Plan/Validation states remain.
+
 The [current qualification and ownership record](journal/2026/11.19-current-qualification-and-retained-ownership.md)
 records #13463's reviewed delivery, credits changed feed/snapshot and
 point-binding source slices without completing their whole acceptance,
@@ -1247,6 +1447,57 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [constructor-retention completion record](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
+records #13648's actual reviewed merge and parent return, acknowledged whole
+#10799 source fulfillment through #10810, and seven distinct retained
+continuations. The real constructor consumer and immutable-bundle controls
+remain separate from synthetic owner data, historical notification failures,
+foreground intent and installed acceptance. No incumbent check state, actual
+source/copy restriction or custody changes. The complete 890-open census is
+161 above fixed 729; the campaign remains Active.
+
+The [changed-delivery and finite-defect unit](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
+records #13643's actual reviewed delivery/parent return and acknowledged
+whole #13491/#13585 fulfillment through existing merged/current source.
+Eleven whole originals, seven delivery descriptions and a bounded reference
+delta retain nine unfinished contracts plus #10873's metadata-only continuation.
+Local author-reported Windows evidence, exact-head hosted qualification and
+source correspondence remain distinct from campaign execution or rollout.
+All incumbent check states and owners remain; the complete 891-open census
+is 162 above fixed 729.
+
+The [three-request source-compatibility unit](journal/2026/11.20-source-compatibility-fulfillment.md)
+records actual #13632 delivery/parent return and acknowledged whole #12819,
+#12852 and #12773 fulfillment through their original contributors' merged
+source. Exact current implementation/regression correspondence, the existing
+real constructor result and actual retained-prefix process controls remain
+distinct from fresh native execution, broader writer capabilities or installed
+adoption. All incumbent campaign/Portfolio check states and retained owners
+remain unchanged. The complete 893-open census is 164 above fixed 729;
+unrelated #13626 completion receives no campaign credit.
+
+The [source-fulfillment and retained-owner unit](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+records actual #13622 delivery/current whole receiving and four separately
+audited tracking retirements, plus acknowledged whole #12542 fulfillment
+through #12533. All twenty-three Portfolio technical rows remain unchecked.
+Fourteen complete current original unions, one withheld original and eleven
+linked delivery observations retain the distinct source/claim/native gaps,
+including OPEN #12875 and new mixed-review-history inflow. The complete
+897-open census remains 168 above fixed 729; no implementation, rollout,
+resource release or automatic remaining-source disposition follows.
+
+The [Windows fixture and native-profile unit](journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+records #13611's actual reviewed delivery and parent return, complete current
+receiving readback and two separately audited redundant-tracking retirements
+of #11995/#12111. All eleven earlier technical rows and the OPEN keepers remain.
+Four complete finite fixture/profile families are proposed directly in the
+existing Portfolio Phase 4/5 waves through Phase 7; all twenty-three new
+technical rows remain unchecked. Ten other complete outcomes preserve actual
+claimants, combined keepers, source/copy gaps and live-consumer boundaries.
+No implementation, native/hosted test, changed policy or resource effect is
+claimed. The complete 05:47:50 UTC census is 901 whole open, 172 above fixed
+729; two arrivals offset the two retirements and every parent gate remains.
 
 The [native-readiness and Vault boundary audit](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
 records #13456's reviewed delivery and parent return, the whole finite #13020
@@ -4846,6 +5097,11 @@ closure credit, resource release or parent checkbox change follows.
   acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [selected startup wave](roadmap-startup-wave.md) adds evidence-ranked
+  #12657/#12691 contributions with original homes, parallel local precedences
+  and finite source/release/consumer exits. It retains actual home uncertainty
+  and pending author PRs rather than appointing implementers; broader current
+  selection and all roadmap integration gates remain open.
   The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
   directs two historical selected slices to their audited OPEN receivers:
   #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
@@ -4912,6 +5168,83 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-compatibility completion record](journal/2026/11.20-source-compatibility-fulfillment.md)
+maps three whole original contracts to actual merged/current source and
+regressions, with separate acknowledged `COMPLETED` effects and independent
+provider readbacks. Prior native/semantic results remain attributed rather
+than new campaign runs; account identity is not human-review evidence.
+Auxiliary document drift was distinguished from unchanged core source without
+repeating the standing final check. No technical row, source/copy or resource
+gate is waived. Two equal complete observations establish 893 whole open,
+not prospective subtraction or parent completion.
+
+The [source-fulfillment and retained-owner record](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+separates four accepted planned-receiving retirements from one acknowledged
+whole source completion. All incumbent campaign/Portfolio checks and the
+twenty-three technical obligations remain unchanged. Actual merge/current
+source, full-roster and public-effect readbacks do not qualify unexecuted
+native/installed work or transfer resource custody. Fourteen current whole
+originals and one held original retain actual owners and exact acceptance;
+the full 897-open census, not arithmetic subtraction, remains authoritative.
+
+The [source-claim and generation proposal](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+preserves every incumbent check state and all six new Vault technical rows
+unchecked. Complete direct domain Plan, local/global Validation, Coordination
+and Journal receiving still needs ordinary review/current readback before
+separate #11816 tracking judgment. #11783 needs its own final whole-fulfillment,
+current original/roster/delivery verification and acknowledged `COMPLETED`
+judgment, retaining the actual satisfied-versus-waived keeper distinction.
+No new per-source receipt PR, generic ACK, broader-parent completion barrier,
+native/credential operation or resource release follows.
+
+The [two-source receiving proposal](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+directly retains both complete finite unions in their actual existing owners'
+Plan, local and actual global Validation, Coordination and dated Journal.
+Every incumbent check state remains and all fourteen new technical rows are
+unchecked. Normal reviewed whole receiving delivery, permitted current complete
+source/ROOT/custody readback and two separate judgments precede any new
+disposition. No native/provider experiment, implementation appointment, generic
+ACK/receipt PR, whole-parent prerequisite or uncertain-effect replay follows.
+
+The [four-source receiving contract](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+directly retains all four complete finite unions in their actual owners'
+Plan, local and actual global Validation, Coordination and dated Journal;
+both portfolio families also use existing Phase 7 migration-intake/domain
+review. Every incumbent state remains and all twenty-six new technical rows
+are unchecked. Ordinary reviewed complete delivery and permitted current
+receiving/source/custody readback precede four separate source judgments.
+No current defect, causal repair, native pass, owner transfer, extra ACK/
+receipt PR or unrelated whole-parent prerequisite is inferred.
+
+The [six-source receiving contract](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+directly retains all six finite original unions in their existing owners'
+Plan and actual global Validation, with local Validation and Phase 7 intake
+where applicable. Every incumbent check state remains; all thirty-eight
+new technical rows are unchecked. Ordinary review must accept the complete
+domain contracts, coordination and deduplication route, followed by permitted
+current whole receiving/source/custody readback and separate source judgments.
+No implementation, stronger native/public-receipt prerequisite, source
+retirement or resource release follows from a proposed map or document merge.
+
+The [three-family receiving proposal](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+directly retains all #9970 cold/pending/bounded-publication conditions
+and the independent #10031 initial-startup/cutover and #10032 UNC/POSIX
+native acceptance in the actual portfolio Plan, local/global Validation
+and Phase 7 route. All eighteen technical rows remain unchecked.
+Normal review must accept the complete domain/deduplication/ownership
+contract; current permitted whole readback and separate source-specific
+judgments remain. No automatic source retirement, execution, extra receipt
+gate, deadline inflation or source/resource release is inferred.
+
+The [two-source receiving proposal](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+retains six direct #9056 Plan/global Validation pairs and four #9568
+Plan/local Validation pairs plus its actual global gate. All remain unchecked.
+Normal review must cover complete domain acceptance and #9568 deduplication/
+ownership; actual delivery and permitted current source/receiver/custody
+readback precede separate source-specific judgments. No automatic closure,
+extra receipt-PR bar, implementation, native run or source/resource release
+is inferred; all incumbent check states and the whole-queue gate remain.
 
 The [whole fork/composition receiving proposal](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
 preserves every existing domain/campaign check state, actual original

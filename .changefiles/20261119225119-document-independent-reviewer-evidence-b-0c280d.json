@@ -1,0 +1,9 @@
+{
+  "comment": "Document independent reviewer evidence beside dismissed history in cache-only next-action reads.",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

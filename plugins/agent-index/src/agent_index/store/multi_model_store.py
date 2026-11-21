@@ -129,6 +129,17 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         Returns the VectorTable instance for direct access if needed.
         """
+        domain = self._source_domain
+        if domain is not None and domain._point_scope is not None:
+            from .source_layout import SourceLayoutError
+
+            binding = domain.receipt().get("point_models")
+            if (binding is None or type(profile.dim) is not int or profile.dim <= 0
+                    or binding["content_table"] != self._content._table_name
+                    or binding["models"].get(profile.model_id) != {
+                        "table_name": profile.table_name, "dim": profile.dim,
+                    }):
+                raise SourceLayoutError("model registration differs from its retained point binding")
         if profile.model_id in self._vector_tables:
             return self._vector_tables[profile.model_id]
 
@@ -138,6 +149,7 @@ class MultiModelStore(_ItemRepresentationMixin):
             dim=profile.dim,
             source_domain=self._source_domain,
             content_table=self._content._table_name,
+            model_id=profile.model_id,
         )
         self._vector_tables[profile.model_id] = vt
         logger.info(
@@ -174,6 +186,10 @@ class MultiModelStore(_ItemRepresentationMixin):
         """Store chunk content in the global content table."""
         return self._content.upsert(chunks, skip_identical=skip_identical)
 
+    def upsert_point_content(self, chunks: list[Chunk], *, point_scope: PointScope | None) -> int:
+        """Write selected native content; no applied-version or completion certificate."""
+        return self._content.upsert_point(chunks, point_scope=point_scope)
+
     def upsert_vectors(
         self,
         model_id: str,
@@ -190,6 +206,24 @@ class MultiModelStore(_ItemRepresentationMixin):
         if bounded_provenance:
             return vt.upsert(chunks, vectors, bounded_provenance=True)
         return vt.upsert(chunks, vectors)
+
+    def preflight_point_vectors(
+        self, model_id: str, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Inspect selected canonical input; no model-ownership or mutation receipt."""
+        return self.get_vector_table(model_id).preflight_point_upsert(
+            chunks, vectors, point_scope=point_scope,
+        )
+
+    def upsert_point_vectors(
+        self, model_id: str, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> int:
+        """Write selected native vectors; caller owns publication and coverage."""
+        return self.get_vector_table(model_id).upsert_point(
+            chunks, vectors, point_scope=point_scope,
+        )
 
     @source_write
     def upsert(

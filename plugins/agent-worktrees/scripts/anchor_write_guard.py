@@ -877,6 +877,13 @@ def decide(
     if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
         return None  # reads / everything else: fast allow
 
+    args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
+                    else payload.get("tool_input"))
+    if tool in SHELL_TOOLS:
+        command = _pick(args, CMD_ARG_KEYS)
+        if not command or not _WRITE_VERBS.search(command):
+            return None
+
     cwd = str(payload.get("cwd") or "")
     override = env.get("AGENT_HOME", "").strip()
     legacy_home = Path(os.path.abspath(override)) if override else home
@@ -888,8 +895,6 @@ def decide(
     if not anchors:
         return None
 
-    args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
-                    else payload.get("tool_input"))
     while anchors:
         hit = evaluate(tool, args, cwd, anchors)
         if hit is None:

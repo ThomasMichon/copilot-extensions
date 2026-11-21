@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     filtered_client.add_commands(commands)
     from . import evaluation_client
     evaluation_client.add_command(commands)
-    for operation in ("provision", "serve"):
+    for operation in ("provision", "serve", "adopt-terminal"):
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, required=True)
     health = commands.add_parser("ready", help="Read bounded-age passive local readiness")
@@ -42,6 +42,13 @@ def main(argv: list[str] | None = None) -> int:
             if native.exists() or native.is_symlink():
                 raise ValueError("native and replay state roots must be separate")
             config.provision()
+        elif args.command == "adopt-terminal":
+            from .config import HostConfig
+            from .terminal_transition import adopt
+
+            if not isinstance(config, HostConfig):
+                raise ValueError("retained transition requires the workspace host profile")
+            adopt(config)
         else:
             asyncio.run(run(config))
         return 0

@@ -7,9 +7,12 @@ import socket
 import sys
 import threading
 import time
+from pathlib import Path
+from typing import Any, Callable, Iterator, cast
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -18,33 +21,40 @@ from agent_dispatch.client import (
     DispatchError,
     DispatchUpgradeRequired,
 )
-from agent_dispatch.coordinator_auth import scoped_control_token
+from agent_dispatch.control_token import scoped_control_token
 from agent_dispatch.coordinator_loops import _refresh_worktree_status_relay
 from agent_dispatch.coordinator import create_app
-from agent_dispatch.queue import Status
+from agent_dispatch.queue_records import Status
+from agent_dispatch.queue_common import Task
 from agent_dispatch import remote_dispatch
 from agent_dispatch.worktree_status_relay import WorktreeStatusRelayStore
-from tests._helpers import TEST_REPO
+from tests._helpers import TEST_REPO, required
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 CONTROL_TOKEN = "control-token"
 
 
+class _ApiClient(TestClient):
+    app: FastAPI
+
+
 @pytest.fixture
-def app(tmp_path):
+def app(tmp_path: Path) -> FastAPI:
     return create_app(TaskQueue(tmp_path / "tasks.db"), control_token=CONTROL_TOKEN)
 
 
 @pytest.fixture
-def api(app):
-    with TestClient(app) as client:
+def api(app: FastAPI) -> Iterator[_ApiClient]:
+    client = _ApiClient(app)
+    with client:
         yield client
 
 
-def test_passive_http_admission_preserves_work_then_follows_route_owner(tmp_path):
+def test_passive_http_admission_preserves_work_then_follows_route_owner(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     held = queue.create("held", repo=TEST_REPO)
     owner = queue.claim_one("worker-held", repo=TEST_REPO)
+    assert isinstance(owner, Task)
     queued = queue.create("queued", repo=TEST_REPO)
     reservation, _ = queue.reserve_spawn(queued.id)
     before = [queue.get(task_id) for task_id in (held.id, queued.id)]
@@ -56,17 +66,17 @@ def test_passive_http_admission_preserves_work_then_follows_route_owner(tmp_path
         assert client.post("/tasks", json={"title": "not admitted", "repo": TEST_REPO}).status_code == 503
         assert client.post(f"/tasks/{held.id}/complete", json={"worker_id": "worker-held"}).status_code == 503
         assert [queue.get(task_id) for task_id in (held.id, queued.id)] == before
-        assert queue.latest_reservation(queued.id).key == reservation.key
+        assert required(queue.latest_reservation(queued.id)).key == reservation.key
         active = True
         assert client.get(f"/tasks/{held.id}").status_code == 200
         assert client.post("/tasks", json={"title": "admitted", "repo": TEST_REPO}).status_code == 200
         active = False
         assert client.get(f"/tasks/{held.id}").status_code == 503
-        assert queue.get(held.id).owner == owner.owner
+        assert required(queue.get(held.id)).owner == owner.owner
 
 
-def test_passive_http_admission_refuses_unknown_ownership(tmp_path):
-    def unavailable():
+def test_passive_http_admission_refuses_unknown_ownership(tmp_path: Path) -> None:
+    def unavailable() -> bool:
         raise OSError("routing unavailable")
 
     app = create_app(
@@ -91,7 +101,7 @@ def _control_headers(sender: str) -> dict[str, str]:
     }
 
 
-def _register_event_emitter(api, *, reg_id: str = "emitter-review") -> str:
+def _register_event_emitter(api: _ApiClient, *, reg_id: str = "emitter-review") -> str:
     api.app.state.queue.register_registration(
         "emitter",
         {
@@ -106,7 +116,7 @@ def _register_event_emitter(api, *, reg_id: str = "emitter-review") -> str:
     return reg_id
 
 
-def test_resource_reservation_api_elects_binds_and_owner_releases(api):
+def test_resource_reservation_api_elects_binds_and_owner_releases(api: _ApiClient) -> None:
     key = "forge:github:repository:example/project:issue:7"
     acquired = api.post(
         "/resource-reservations/acquire",
@@ -178,7 +188,7 @@ def test_resource_reservation_api_elects_binds_and_owner_releases(api):
 
 
 @pytest.fixture
-def server_url(app):
+def server_url(app: FastAPI) -> Iterator[str]:
     # Run a real uvicorn server on an ephemeral port so the sync client (and SSE)
     # can be exercised over real HTTP.
     import uvicorn
@@ -214,20 +224,20 @@ def server_url(app):
 
 
 @pytest.fixture
-def client(server_url):
+def client(server_url: str) -> Iterator[DispatchClient]:
     c = DispatchClient(server_url)
     yield c
     c.close()
 
 
-def test_client_suspend_resume_release_routes(client, monkeypatch):
+def test_client_suspend_resume_release_routes(client: DispatchClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import bridge
 
     monkeypatch.setattr(
         bridge, "resume_steered_owner", lambda *_args, **_kwargs: False
     )
     task = client.create("wait")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
     parked = client.suspend(
         task["id"], owner, reason="waiting for an external result"
@@ -245,9 +255,9 @@ def test_client_suspend_resume_release_routes(client, monkeypatch):
     assert released["owner"] is None
 
 
-def test_client_suspend_cooldown_seconds_round_trips_over_http(client):
+def test_client_suspend_cooldown_seconds_round_trips_over_http(client: DispatchClient) -> None:
     task = client.create("wait")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
 
     parked = client.suspend(
@@ -258,9 +268,9 @@ def test_client_suspend_cooldown_seconds_round_trips_over_http(client):
     assert parked["monitor_not_before"] > parked["updated_at"]
 
 
-def test_client_suspend_cooldown_seconds_omitted_still_applies_default(client):
+def test_client_suspend_cooldown_seconds_omitted_still_applies_default(client: DispatchClient) -> None:
     task = client.create("wait")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
 
     parked = client.suspend(task["id"], owner, reason="waiting")
@@ -268,9 +278,9 @@ def test_client_suspend_cooldown_seconds_omitted_still_applies_default(client):
     assert parked["monitor_kind"] == "cooldown"
 
 
-def test_client_suspend_cooldown_seconds_none_suppresses_the_monitor(client):
+def test_client_suspend_cooldown_seconds_none_suppresses_the_monitor(client: DispatchClient) -> None:
     task = client.create("wait")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
 
     parked = client.suspend(
@@ -282,8 +292,8 @@ def test_client_suspend_cooldown_seconds_none_suppresses_the_monitor(client):
 
 
 def test_client_resume_can_atomically_adopt_successor_session(
-    client, monkeypatch
-):
+    client: DispatchClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from agent_dispatch import bridge, coordinator
 
     sessions = iter(["session-old", "session-new"])
@@ -294,7 +304,7 @@ def test_client_resume_can_atomically_adopt_successor_session(
         bridge, "resume_steered_owner", lambda *_args, **_kwargs: False
     )
     task = client.create("continue after handoff")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     started = client.start(task["id"], owner)
     parked = client.suspend(task["id"], owner, reason="handoff")
 
@@ -313,15 +323,15 @@ def test_client_resume_can_atomically_adopt_successor_session(
     assert resumed["resume_wake_status"] == "not_requested"
 
 
-def test_client_completes_suspended_task_without_wake(client, monkeypatch):
+def test_client_completes_suspended_task_without_wake(client: DispatchClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import bridge
 
-    def unexpected_wake(*_args, **_kwargs):
+    def unexpected_wake(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("terminal resolution must not wake the owner")
 
     monkeypatch.setattr(bridge, "resume_steered_owner", unexpected_wake)
     task = client.create("wait for condition")
-    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    owner = required(client.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
     client.start(task["id"], owner)
     client.suspend(task["id"], owner, reason="condition pending")
 
@@ -337,14 +347,14 @@ def test_client_completes_suspended_task_without_wake(client, monkeypatch):
 # -- coordinator routes ------------------------------------------------------
 
 
-def test_health(api):
+def test_health(api: _ApiClient) -> None:
     r = api.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
     assert r.json()["data_auth_required"] is False
 
 
-def test_worktree_status_relay_route_reads_local_store(api):
+def test_worktree_status_relay_route_reads_local_store(api: _ApiClient) -> None:
     relay = api.app.state.worktree_status_relay
     relay.put(
         TEST_REPO,
@@ -364,7 +374,7 @@ def test_worktree_status_relay_route_reads_local_store(api):
     assert response.json()["repo"] == TEST_REPO
 
 
-def test_worktree_status_relays_route_batches_entries(api):
+def test_worktree_status_relays_route_batches_entries(api: _ApiClient) -> None:
     relay = api.app.state.worktree_status_relay
     relay.put(
         TEST_REPO,
@@ -389,7 +399,7 @@ def test_worktree_status_relays_route_batches_entries(api):
     ]
 
 
-def test_create_app_registers_representative_extracted_route_groups(app):
+def test_create_app_registers_representative_extracted_route_groups(app: FastAPI) -> None:
     route_paths = {
         route.path for route in app.routes if isinstance(route, APIRoute)
     }
@@ -406,7 +416,7 @@ def test_create_app_registers_representative_extracted_route_groups(app):
     } <= route_paths
 
 
-def test_explicit_allocation_revision_endpoint_is_required_and_persisted(api):
+def test_explicit_allocation_revision_endpoint_is_required_and_persisted(api: _ApiClient) -> None:
     queue = api.app.state.queue
     task = queue.create("work")
     missing = api.post("/spawn-reservations/revisions", json={"task_id": task.id})
@@ -422,10 +432,10 @@ def test_explicit_allocation_revision_endpoint_is_required_and_persisted(api):
     assert queue.get_reservation(reservation["key"]).creation_key == reservation["creation_key"]
 
 
-def test_client_never_sends_explicit_revision_to_an_old_reservation_endpoint():
+def test_client_never_sends_explicit_revision_to_an_old_reservation_endpoint() -> None:
     paths = []
 
-    def old_server(request):
+    def old_server(request: httpx.Request) -> httpx.Response:
         paths.append(request.url.path)
         assert request.url.path == "/spawn-reservations/revisions"
         return httpx.Response(404, json={"detail": "unsupported explicit allocation revision"})
@@ -437,7 +447,7 @@ def test_client_never_sends_explicit_revision_to_an_old_reservation_endpoint():
     assert paths == ["/spawn-reservations/revisions"]
 
 
-def test_health_loops_empty_when_sweep_disabled(api):
+def test_health_loops_empty_when_sweep_disabled(api: _ApiClient) -> None:
     # The loop-health map is always present once lifespan starts; disabled
     # loops report zero intervals instead of disappearing.
     with TestClient(
@@ -450,7 +460,7 @@ def test_health_loops_empty_when_sweep_disabled(api):
         assert loops["worktree_status_relay"]["base_interval"] == 0.0
 
 
-def test_health_includes_slot_descriptor_shape(api):
+def test_health_includes_slot_descriptor_shape(api: _ApiClient) -> None:
     # process-slot-ownership Phase 5: /health renders a "slot" descriptor
     # (process -> slot -> owner -> alive?) regardless of what state the
     # self-retire / abandoned-passive-reap loops happen to be in.
@@ -469,7 +479,7 @@ def test_health_includes_slot_descriptor_shape(api):
     }
 
 
-def test_slot_descriptor_unknown_role_without_routing_table(tmp_path, monkeypatch):
+def test_slot_descriptor_unknown_role_without_routing_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     from agent_dispatch.coordinator import _slot_descriptor
@@ -490,7 +500,7 @@ def test_slot_descriptor_unknown_role_without_routing_table(tmp_path, monkeypatc
     }
 
 
-def test_slot_descriptor_reports_active_role_for_own_pid(tmp_path, monkeypatch):
+def test_slot_descriptor_reports_active_role_for_own_pid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import os
     from types import SimpleNamespace
 
@@ -509,8 +519,8 @@ def test_slot_descriptor_reports_active_role_for_own_pid(tmp_path, monkeypatch):
 
 
 def test_slot_descriptor_reports_unknown_role_when_active_pid_is_null(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A malformed/legacy routing entry with no recorded pid must never be
     mistaken for "passive" -- there is nothing to compare against, so the
     owner question is genuinely unanswerable (Copilot review finding)."""
@@ -532,8 +542,8 @@ def test_slot_descriptor_reports_unknown_role_when_active_pid_is_null(
 
 
 def test_slot_descriptor_reports_unknown_role_when_active_pid_is_boolean(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``bool`` is an ``int`` subclass in Python; a malformed entry with
     ``pid: true`` must not be mistaken for a real, comparable pid (Copilot
     review finding)."""
@@ -554,8 +564,8 @@ def test_slot_descriptor_reports_unknown_role_when_active_pid_is_boolean(
 
 
 def test_slot_descriptor_reports_passive_role_for_other_active_pid(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
 
     from zdd import routing
@@ -572,7 +582,7 @@ def test_slot_descriptor_reports_passive_role_for_other_active_pid(
     assert slot["active"]["pid"] == 999999
 
 
-def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path, monkeypatch):
+def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Copilot review finding on PR #2963: prove the published status actually
     tracks the running self-retire loop end-to-end (armed -> generation ->
     superseded/confirms), not just the pure `_slot_descriptor` rendering of
@@ -611,13 +621,13 @@ def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path, monkeypat
     app = create_app(TaskQueue(tmp_path / "t.db"))
     with TestClient(app) as client:
 
-        def _wait(predicate, *, timeout=5.0):
+        def _wait(predicate: Callable[[dict[str, Any]], bool], *, timeout: float=5.0) -> dict[str, Any]:
             deadline = time.monotonic() + timeout
             last = None
             while time.monotonic() < deadline:
                 last = client.get("/health").json()["slot"]["self_retire"]
                 if predicate(last):
-                    return last
+                    return cast(dict[str, Any], last)
                 time.sleep(0.02)
             pytest.fail(f"condition not met within {timeout}s; last status={last}")
 
@@ -647,8 +657,8 @@ def test_self_retire_status_lifecycle_reflects_the_live_loop(tmp_path, monkeypat
 
 
 def test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding on PR #2963: the abandoned-passive-reap loop's
     published status needs its own deterministic lifecycle proof, mirroring
     the self-retire coverage above -- it arms, then `last_outcome` reflects a
@@ -694,13 +704,13 @@ def test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop(
     app = create_app(TaskQueue(tmp_path / "t.db"))
     with TestClient(app) as client:
 
-        def _wait(predicate, *, timeout=15.0):
+        def _wait(predicate: Callable[[dict[str, Any]], bool], *, timeout: float=15.0) -> dict[str, Any]:
             deadline = time.monotonic() + timeout
             last = None
             while time.monotonic() < deadline:
                 last = client.get("/health").json()["slot"]["abandoned_passive_reap"]
                 if predicate(last):
-                    return last
+                    return cast(dict[str, Any], last)
                 time.sleep(0.02)
             pytest.fail(f"condition not met within {timeout}s; last status={last}")
 
@@ -712,7 +722,7 @@ def test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop(
         assert outcome["pid"] == 999999
 
 
-def test_create_and_get(api):
+def test_create_and_get(api: _ApiClient) -> None:
     r = api.post(
         "/tasks",
         json={
@@ -730,11 +740,11 @@ def test_create_and_get(api):
     assert got["exclusive_key"] == "resource:42"
 
 
-def test_get_missing_is_404(api):
+def test_get_missing_is_404(api: _ApiClient) -> None:
     assert api.get("/tasks/nope").status_code == 404
 
 
-def test_full_lifecycle_over_http(api):
+def test_full_lifecycle_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     claimed = api.post(
         "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
@@ -748,7 +758,7 @@ def test_full_lifecycle_over_http(api):
     assert done["status"] == Status.COMPLETED
 
 
-def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
+def test_complete_over_http_retriggers_whole_goal_verification(api: _ApiClient, tmp_path: Path) -> None:
     script = tmp_path / "eval.py"
     script.write_text(
         "import json, sys\n"
@@ -802,7 +812,7 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
         raise AssertionError("event-note verification did not complete asynchronously")
 
 
-def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_path):
+def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api: _ApiClient, tmp_path: Path) -> None:
     script = tmp_path / "eval.py"
     script.write_text(
         "import json, sys\n"
@@ -848,7 +858,7 @@ def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_pa
         raise AssertionError("backfill verification did not complete asynchronously")
 
 
-def test_verify_submitted_publishes_bus_event(api, tmp_path):
+def test_verify_submitted_publishes_bus_event(api: _ApiClient, tmp_path: Path) -> None:
     """Phase 3a audit: `verify-submitted` updates `updated_at` with no prior
     bus event at all -- a pure wake signal is enough."""
     script = tmp_path / "eval.py"
@@ -886,7 +896,7 @@ def test_verify_submitted_publishes_bus_event(api, tmp_path):
     )
 
 
-def test_register_run_waiter_publishes_bus_event(api):
+def test_register_run_waiter_publishes_bus_event(api: _ApiClient) -> None:
     """Phase 3a audit: registering a run waiter can move a task from
     `started` to `suspended` with no prior bus event at all."""
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
@@ -913,7 +923,7 @@ def test_register_run_waiter_publishes_bus_event(api):
     )
 
 
-def test_get_task_surfaces_active_run_waiter(api):
+def test_get_task_surfaces_active_run_waiter(api: _ApiClient) -> None:
     """2026-10-05: `GET /tasks/{id}` must expose the exact blocking-wait
     command of an active `run --detach` waiter (the Tasks board/claim-status
     enrichment both read this field), and must NOT carry a `run_waiter` key
@@ -955,7 +965,7 @@ def test_get_task_surfaces_active_run_waiter(api):
     assert task["run_waiter"]["state"] == "active"
 
 
-def test_bulk_run_waiters_endpoint_keys_by_task_id(api):
+def test_bulk_run_waiters_endpoint_keys_by_task_id(api: _ApiClient) -> None:
     """2026-10-05: `GET /run-waiters` is the Tasks board's single bulk
     lookup (no N+1 per-row query) -- every currently-active waiter, keyed by
     task id, with the same trimmed shape `GET /tasks/{id}`'s `run_waiter`
@@ -997,7 +1007,7 @@ def test_bulk_run_waiters_endpoint_keys_by_task_id(api):
 
 
 
-def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_path):
+def test_complete_over_http_triggers_immediate_whole_goal_verification(api: _ApiClient, tmp_path: Path) -> None:
     script = tmp_path / "eval.py"
     script.write_text(
         "import json, sys\n"
@@ -1031,7 +1041,7 @@ def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_
         raise AssertionError("submitted verification did not complete asynchronously")
 
 
-def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
+def test_event_note_wakes_and_supersedes_active_run_waiter(api: _ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1081,7 +1091,7 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
     assert wakes[0].status == "pending"
 
 
-def test_reviewer_deadline_recovery_wakes_a_suspended_task_without_a_verdict(api):
+def test_reviewer_deadline_recovery_wakes_a_suspended_task_without_a_verdict(api: _ApiClient) -> None:
     api.app.state.queue.register_registration(
         "evaluator",
         {
@@ -1149,7 +1159,7 @@ def test_reviewer_deadline_recovery_wakes_a_suspended_task_without_a_verdict(api
     assert api.app.state.queue.list_verification_requests(tid) == []
 
 
-def test_event_note_wakes_and_supersedes_preparing_run_waiter(api):
+def test_event_note_wakes_and_supersedes_preparing_run_waiter(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1197,7 +1207,7 @@ def test_event_note_wakes_and_supersedes_preparing_run_waiter(api):
     )
 
 
-def test_event_note_after_waiter_finish_does_not_queue_duplicate_wake(api):
+def test_event_note_after_waiter_finish_does_not_queue_duplicate_wake(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1253,7 +1263,7 @@ def test_event_note_after_waiter_finish_does_not_queue_duplicate_wake(api):
     assert wakes[0].message == "wait completed"
 
 
-def test_event_note_queues_running_owner_wake(api):
+def test_event_note_queues_running_owner_wake(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1277,7 +1287,7 @@ def test_event_note_queues_running_owner_wake(api):
     assert wakes[0].owner == "w1"
 
 
-def test_event_note_rejects_untrusted_sender(api):
+def test_event_note_rejects_untrusted_sender(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1296,7 +1306,7 @@ def test_event_note_rejects_untrusted_sender(api):
     assert r.status_code == 403
 
 
-def test_event_note_rejects_goal_rewrite_fields(api):
+def test_event_note_rejects_goal_rewrite_fields(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1311,7 +1321,7 @@ def test_event_note_rejects_goal_rewrite_fields(api):
     assert r.status_code == 422
 
 
-def test_run_waiter_arm_rejects_empty_identity_fields(api):
+def test_run_waiter_arm_rejects_empty_identity_fields(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1348,7 +1358,7 @@ def test_run_waiter_arm_rejects_empty_identity_fields(api):
     assert r.status_code == 422
 
 
-def test_run_waiter_register_requires_owner_session(api):
+def test_run_waiter_register_requires_owner_session(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -1370,7 +1380,7 @@ def test_run_waiter_register_requires_owner_session(api):
     assert "owner_session_id" in r.json()["detail"]
 
 
-def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
+def test_complete_over_http_releases_handoff_claim(api: _ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """The `/tasks/{id}/complete` route's shared _guard hook releases a
     handoff task's target-worktree claim on a genuine (non-retry)
     completion -- covering the CLI, which always talks HTTP."""
@@ -1392,7 +1402,7 @@ def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None, cancel_pending=False: released.append(
+        lambda task, task_id=None, cancel_pending=False, queue=None: released.append(
             (task.get("id"), task.get("target_worktree"), cancel_pending)),
     )
     done = api.post(
@@ -1403,24 +1413,29 @@ def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     assert released == [(tid, "wt-9", False)]
 
 
-def test_complete_over_http_never_releases_a_non_handoff_task(api, monkeypatch):
+def test_complete_over_http_never_releases_a_non_handoff_task(api: _ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import handoff_claim_release
 
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
 
-    calls = []
+    calls: list[str] = []
+
+    def observe_release(task_id: str, **_kwargs: Any) -> dict[str, Any]:
+        calls.append(task_id)
+        return {"taskTerminal": False, "claimSettled": False}
+
     monkeypatch.setattr(
         handoff_claim_release, "_release_task_claim",
-        lambda task_id, **k: calls.append(task_id),
+        observe_release,
     )
     api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"})
     time.sleep(0.1)  # let any (wrongly-)spawned release thread run
     assert calls == []
 
 
-def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch):
+def test_idempotent_result_recording_retry_does_not_re_release(api: _ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """A retry that only attaches a missing result to an already-SUBMITTED
     task (event_type stays None) must not fire the release hook again."""
     from agent_dispatch import handoff_claim_release
@@ -1439,7 +1454,7 @@ def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch)
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None, cancel_pending=False: released.append(task.get("id")),
+        lambda task, task_id=None, cancel_pending=False, queue=None: released.append(task.get("id")),
     )
     # Retry attaching a result to the already-submitted task.
     api.post(
@@ -1449,7 +1464,7 @@ def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch)
     assert released == []
 
 
-def test_abandon_over_http_releases_handoff_claim(api, monkeypatch):
+def test_abandon_over_http_releases_handoff_claim(api: _ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import handoff_claim_release
 
     tid = api.post(
@@ -1459,7 +1474,7 @@ def test_abandon_over_http_releases_handoff_claim(api, monkeypatch):
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None, cancel_pending=False: released.append(
+        lambda task, task_id=None, cancel_pending=False, queue=None: released.append(
             (task.get("id"), task.get("target_worktree"), cancel_pending)),
     )
     abandoned = api.post(
@@ -1470,7 +1485,7 @@ def test_abandon_over_http_releases_handoff_claim(api, monkeypatch):
     assert released == [(tid, "wt-9", True)]
 
 
-def test_idempotent_abandon_retry_does_not_re_release(api, monkeypatch):
+def test_idempotent_abandon_retry_does_not_re_release(api: _ApiClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """PR #3248 review: `queue.abandon()` is `idempotent_replay=True` --  a
     retry against an already-abandoned task returns 200 with no error, but
     must not be treated as a fresh terminal transition. Before
@@ -1488,14 +1503,14 @@ def test_idempotent_abandon_retry_does_not_re_release(api, monkeypatch):
     released = []
     monkeypatch.setattr(
         handoff_claim_release, "release_if_handoff",
-        lambda task, task_id=None, cancel_pending=False: released.append(task.get("id")),
+        lambda task, task_id=None, cancel_pending=False, queue=None: released.append(task.get("id")),
     )
     retry = api.post(f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "retry"})
     assert retry.json()["status"] == Status.ABANDONED
     assert released == []
 
 
-def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api):
+def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api: _ApiClient) -> None:
     tid = api.post(
         "/tasks", json={"title": "x", "target_worktree": "wt-1"}
     ).json()["id"]
@@ -1552,7 +1567,7 @@ def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api):
     assert "result" not in mine_row
 
 
-def test_invalid_http_result_leaves_task_started(api):
+def test_invalid_http_result_leaves_task_started(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -1570,7 +1585,7 @@ def test_invalid_http_result_leaves_task_started(api):
     assert task["result"] is None
 
 
-def test_oversized_http_result_leaves_task_started(api):
+def test_oversized_http_result_leaves_task_started(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -1599,7 +1614,7 @@ def test_oversized_http_result_leaves_task_started(api):
         '{"worker_id":"w1","result":"{\\"ok\\":true}"}',
     ],
 )
-def test_invalid_result_json_shapes_are_400_and_non_terminal(api, content):
+def test_invalid_result_json_shapes_are_400_and_non_terminal(api: _ApiClient, content: Any) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -1614,7 +1629,7 @@ def test_invalid_result_json_shapes_are_400_and_non_terminal(api, content):
     assert api.get(f"/tasks/{tid}").json()["status"] == Status.STARTED
 
 
-def test_result_validation_response_omits_rejected_input(api):
+def test_result_validation_response_omits_rejected_input(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -1630,7 +1645,7 @@ def test_result_validation_response_omits_rejected_input(api):
     assert all("input" not in error for error in response.json()["detail"])
 
 
-def test_non_result_validation_on_complete_remains_422(api):
+def test_non_result_validation_on_complete_remains_422(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
 
     response = api.post(
@@ -1642,7 +1657,7 @@ def test_non_result_validation_on_complete_remains_422(api):
     assert response.json()["detail"][0]["loc"] == ["body", "worker_id"]
 
 
-def test_result_size_validation_response_is_413_and_sanitized(api):
+def test_result_size_validation_response_is_413_and_sanitized(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -1659,10 +1674,10 @@ def test_result_size_validation_response_is_413_and_sanitized(api):
     assert api.get(f"/tasks/{tid}").json()["status"] == Status.STARTED
 
 
-def test_client_omits_none_result_for_older_coordinator():
+def test_client_omits_none_result_for_older_coordinator() -> None:
     seen = {}
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         import json
 
         seen.update(json.loads(request.content))
@@ -1678,7 +1693,7 @@ def test_client_omits_none_result_for_older_coordinator():
     assert "result" not in seen
 
 
-def test_default_connect_retries_env_override(monkeypatch):
+def test_default_connect_retries_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """``AGENT_DISPATCH_HTTP_CONNECT_RETRIES`` tunes the default; an absent,
     empty, or malformed value falls back to the built-in default (2) rather
     than raising or disabling retry entirely."""
@@ -1697,7 +1712,7 @@ def test_default_connect_retries_env_override(monkeypatch):
     assert default_connect_retries() == 2
 
 
-def test_default_idempotent_retries_env_override(monkeypatch):
+def test_default_idempotent_retries_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """``AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES`` tunes the default; an
     absent, empty, or malformed value falls back to the built-in default (2)
     -- the same shape as :func:`default_connect_retries`, but this is a
@@ -1718,7 +1733,7 @@ def test_default_idempotent_retries_env_override(monkeypatch):
     assert default_idempotent_retries() == 2
 
 
-def test_steer_retries_a_read_timeout_reusing_the_same_idempotency_key(monkeypatch):
+def test_steer_retries_a_read_timeout_reusing_the_same_idempotency_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """The exact live failure mode this substrate exists to fix: the
     coordinator's write already landed, but the response never made it back
     before the client gave up waiting. A retry must reuse the same
@@ -1728,7 +1743,7 @@ def test_steer_retries_a_read_timeout_reusing_the_same_idempotency_key(monkeypat
     seen_keys = []
     attempt = {"n": 0}
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
             return httpx.Response(200, json={"steer_idempotency_key": True})
         body = json.loads(request.content)
@@ -1750,7 +1765,7 @@ def test_steer_retries_a_read_timeout_reusing_the_same_idempotency_key(monkeypat
     assert seen_keys[0]  # a real, non-empty key was generated
 
 
-def test_steer_does_not_retry_against_a_coordinator_without_the_capability(monkeypatch):
+def test_steer_does_not_retry_against_a_coordinator_without_the_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     """An older coordinator mid zero-downtime update doesn't advertise
     ``steer_idempotency_key`` on ``/health`` -- it would silently ignore the
     field and perform no dedup at all, so retrying an ambiguous timeout
@@ -1758,7 +1773,7 @@ def test_steer_does_not_retry_against_a_coordinator_without_the_capability(monke
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "2")
     attempts = {"n": 0}
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
             return httpx.Response(200, json={"version": "0.11.0"})  # no capability flag
         attempts["n"] += 1
@@ -1772,14 +1787,14 @@ def test_steer_does_not_retry_against_a_coordinator_without_the_capability(monke
     assert attempts["n"] == 1  # never retried
 
 
-def test_steer_does_not_retry_when_the_health_probe_itself_fails(monkeypatch):
+def test_steer_does_not_retry_when_the_health_probe_itself_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed/unreachable capability probe is never treated as permission
     to retry -- it degrades to the same conservative "don't retry" answer
     as a confirmed-old coordinator."""
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "2")
     attempts = {"n": 0}
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
             raise httpx.ConnectError("coordinator unreachable", request=request)
         attempts["n"] += 1
@@ -1793,10 +1808,10 @@ def test_steer_does_not_retry_when_the_health_probe_itself_fails(monkeypatch):
     assert attempts["n"] == 1
 
 
-def test_steer_exhausts_its_retry_budget_and_raises_on_persistent_timeout(monkeypatch):
+def test_steer_exhausts_its_retry_budget_and_raises_on_persistent_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES", "1")
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
             return httpx.Response(200, json={"steer_idempotency_key": True})
         raise httpx.ReadTimeout("always slow", request=request)
@@ -1808,12 +1823,12 @@ def test_steer_exhausts_its_retry_budget_and_raises_on_persistent_timeout(monkey
             client.steer("t1", fields={"a": "b"})
 
 
-def test_steer_never_retries_a_real_http_error_response(monkeypatch):
+def test_steer_never_retries_a_real_http_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-timeout failure (the request reached the server and it said no)
     must never be retried here -- only an ambiguous timeout is."""
     calls = {"n": 0}
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         return httpx.Response(409, json={"detail": "task changed; refresh and retry"})
 
@@ -1825,10 +1840,10 @@ def test_steer_never_retries_a_real_http_error_response(monkeypatch):
     assert calls["n"] == 1
 
 
-def test_steer_caller_supplied_idempotency_key_is_sent_verbatim():
+def test_steer_caller_supplied_idempotency_key_is_sent_verbatim() -> None:
     captured = {}
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         captured["key"] = json.loads(request.content)["idempotency_key"]
         return httpx.Response(200, json={"id": "t1", "status": Status.STARTED})
 
@@ -1840,7 +1855,7 @@ def test_steer_caller_supplied_idempotency_key_is_sent_verbatim():
     assert captured["key"] == "caller-chosen-key"
 
 
-def test_connect_retry_client_preserves_environment_proxy_routing(monkeypatch):
+def test_connect_retry_client_preserves_environment_proxy_routing(monkeypatch: pytest.MonkeyPatch) -> None:
     """``ConnectRetryClient`` must build the exact same proxy mounts a plain
     ``httpx.Client()`` would for the same environment -- unlike passing a
     custom ``transport=`` (which disables ``HTTP_PROXY``/``HTTPS_PROXY``/
@@ -1870,7 +1885,7 @@ def test_connect_retry_client_preserves_environment_proxy_routing(monkeypatch):
         retrying.close()
 
 
-def test_client_survives_transient_connection_refused(monkeypatch, tmp_path):
+def test_client_survives_transient_connection_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A coordinator supersession cutover can leave a brief window where the
     old generation has released its socket and the new one hasn't bound yet:
     the liveness probe a CLI command runs just before constructing its client
@@ -1898,7 +1913,7 @@ def test_client_survives_transient_connection_refused(monkeypatch, tmp_path):
     app = create_app(TaskQueue(tmp_path / "tasks.db"))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
 
-    def _start_late():
+    def _start_late() -> None:
         time.sleep(0.3)  # give the client's first connect attempt(s) time to refuse
         server.run()
 
@@ -1916,8 +1931,8 @@ def test_client_survives_transient_connection_refused(monkeypatch, tmp_path):
         thread.join(timeout=5)
 
 
-def test_client_detects_coordinator_that_drops_structured_result():
-    def handler(request):
+def test_client_detects_coordinator_that_drops_structured_result() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200, json={"id": "t1", "status": Status.SUBMITTED}
         )
@@ -1929,7 +1944,7 @@ def test_client_detects_coordinator_that_drops_structured_result():
             client.complete("t1", "w1", result={"ok": True})
 
 
-def test_progress_over_http(api):
+def test_progress_over_http(api: _ApiClient) -> None:
     import json
 
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
@@ -1948,7 +1963,7 @@ def test_progress_over_http(api):
     ).status_code == 409
 
 
-def test_activity_over_http(api):
+def test_activity_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     reservation = api.post(
         "/spawn-reservations", json={"task_id": tid, "reserved_by": "sup"}
@@ -1973,14 +1988,14 @@ def test_activity_over_http(api):
     assert invalid.json()["activity"] == "IDLE"
 
 
-def _record_bus_events(api) -> list[dict]:
+def _record_bus_events(api: _ApiClient) -> list[dict[str, Any]]:
     """Phase 3a's event-coverage audit: every board-visible mutation must
     publish *some* bus event (a pure wake trigger is enough). Patches
     ``app.state.bus.publish`` to record every call made during the test."""
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     original = api.app.state.bus.publish
 
-    def _record(event: dict) -> None:
+    def _record(event: dict[str, Any]) -> None:
         events.append(event)
         original(event)
 
@@ -1988,7 +2003,7 @@ def _record_bus_events(api) -> list[dict]:
     return events
 
 
-def test_heartbeat_over_http_publishes_bus_event(api):
+def test_heartbeat_over_http_publishes_bus_event(api: _ApiClient) -> None:
     """Phase 3a audit: heartbeat updates `updated_at`/leases with no prior
     bus event at all."""
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
@@ -2000,7 +2015,7 @@ def test_heartbeat_over_http_publishes_bus_event(api):
     assert any(e["type"] == "task.heartbeat" for e in events)
 
 
-def test_heartbeat_over_http_does_not_emit_telemetry(api):
+def test_heartbeat_over_http_does_not_emit_telemetry(api: _ApiClient) -> None:
     """A heartbeat runs periodically for every live task and never
     transitions state -- it must still wake the bus (the subscribe relay
     needs that), but must NOT record a `kind: state_transition` telemetry
@@ -2012,7 +2027,7 @@ def test_heartbeat_over_http_does_not_emit_telemetry(api):
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
 
-    seen: list[dict] = []
+    seen: list[dict[str, Any]] = []
     telemetry.set_telemetry_sink(seen.append)
     try:
         r = api.post(f"/tasks/{tid}/heartbeat", json={"worker_id": "w1"})
@@ -2022,7 +2037,7 @@ def test_heartbeat_over_http_does_not_emit_telemetry(api):
         telemetry.clear_telemetry_sink()
 
 
-def test_activity_over_http_publishes_bus_event(api):
+def test_activity_over_http_publishes_bus_event(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     reservation = api.post(
         "/spawn-reservations", json={"task_id": tid, "reserved_by": "sup"}
@@ -2041,7 +2056,7 @@ def test_activity_over_http_publishes_bus_event(api):
     assert any(e["type"] == "task.activity_updated" for e in events)
 
 
-def test_activity_over_http_does_not_emit_telemetry(api):
+def test_activity_over_http_does_not_emit_telemetry(api: _ApiClient) -> None:
     """Same no-telemetry contract as heartbeat (above) -- activity updates
     also run periodically for every live task without transitioning
     state."""
@@ -2057,7 +2072,7 @@ def test_activity_over_http_does_not_emit_telemetry(api):
         json={"session_handle": "local-body:s1"},
     )
 
-    seen: list[dict] = []
+    seen: list[dict[str, Any]] = []
     telemetry.set_telemetry_sink(seen.append)
     try:
         r = api.post(
@@ -2070,7 +2085,7 @@ def test_activity_over_http_does_not_emit_telemetry(api):
         telemetry.clear_telemetry_sink()
 
 
-def test_steer_take_over_http_publishes_bus_event(api):
+def test_steer_take_over_http_publishes_bus_event(api: _ApiClient) -> None:
     """Phase 3a audit: `take_steer` updates `lease_expires_at`/
     `last_seen_at`/`updated_at` (board-sort-/liveness-relevant) with no
     prior bus event at all. A pure wake signal is enough -- no task payload
@@ -2089,7 +2104,7 @@ def test_steer_take_over_http_publishes_bus_event(api):
     )
 
 
-def test_recover_over_http_publishes_bus_event(api):
+def test_recover_over_http_publishes_bus_event(api: _ApiClient) -> None:
     """Phase 3a audit: manual recovery (`POST /recover`) can requeue,
     suspend, or dead-letter rows with no event published at all today."""
     events = _record_bus_events(api)
@@ -2098,14 +2113,14 @@ def test_recover_over_http_publishes_bus_event(api):
     assert any(e["type"] == "task.recovered" for e in events)
 
 
-def test_events_route_advertises_ready_frame_capability(api):
+def test_events_route_advertises_ready_frame_capability(api: _ApiClient) -> None:
     """Phase 3a: `/health` advertises `/events?ready_frame=1` support so a
     relay client can gate on genuine daemon support before waiting for the
     frame -- see `board_relay.py`."""
     assert api.get("/health").json()["events_ready_frame"] is True
 
 
-def test_health_advertises_steer_idempotency_key_capability(api):
+def test_health_advertises_steer_idempotency_key_capability(api: _ApiClient) -> None:
     """``client_steering.py``'s ``steer()`` gates its timeout-retry on this
     flag -- an older coordinator that doesn't advertise it must never be
     retried against (see the ``test_steer_does_not_retry_against_a_*``
@@ -2113,7 +2128,7 @@ def test_health_advertises_steer_idempotency_key_capability(api):
     assert api.get("/health").json()["steer_idempotency_key"] is True
 
 
-def test_goal_and_progress_log_over_http(api):
+def test_goal_and_progress_log_over_http(api: _ApiClient) -> None:
     # A goal-bearing task carries goal + done_criteria on the row...
     r = api.post(
         "/tasks",
@@ -2146,11 +2161,11 @@ def test_goal_and_progress_log_over_http(api):
     ]
 
 
-def test_progress_log_missing_task_is_404(api):
+def test_progress_log_missing_task_is_404(api: _ApiClient) -> None:
     assert api.get("/tasks/nope/progress-log").status_code == 404
 
 
-def test_attachment_history_over_http(api):
+def test_attachment_history_over_http(api: _ApiClient) -> None:
     """durable-attachment-history over the wire: owner-session route ("
     "/tasks/{id}/owner-session) records durably queryable via GET
     /tasks/{id}/attachments, surviving a release that clears the current
@@ -2179,11 +2194,11 @@ def test_attachment_history_over_http(api):
     # ...but the prior session's record is NOT discarded (the whole point).
 
 
-def test_attachment_history_missing_task_is_404(api):
+def test_attachment_history_missing_task_is_404(api: _ApiClient) -> None:
     assert api.get("/tasks/nope/attachments").status_code == 404
 
 
-def test_tasks_for_session_reverse_lookup_over_http(api):
+def test_tasks_for_session_reverse_lookup_over_http(api: _ApiClient) -> None:
     """The reverse of test_attachment_history_over_http: given a session id,
     GET /sessions/{id}/tasks finds the task(s) it attached to."""
     r = api.post("/tasks", json={"title": "reviewed"})
@@ -2200,7 +2215,7 @@ def test_tasks_for_session_reverse_lookup_over_http(api):
     assert found[0]["detached_at"] is None
 
 
-def test_tasks_for_session_unknown_session_is_empty_not_404(api):
+def test_tasks_for_session_unknown_session_is_empty_not_404(api: _ApiClient) -> None:
     """A session id with no attachment anywhere is an empty list -- there is
     no single task to 404 against, unlike /tasks/{id}/attachments."""
     r = api.get("/sessions/never-seen-session/tasks")
@@ -2208,27 +2223,27 @@ def test_tasks_for_session_unknown_session_is_empty_not_404(api):
     assert r.json() == []
 
 
-def test_claim_empty_returns_null(api):
+def test_claim_empty_returns_null(api: _ApiClient) -> None:
     assert api.post(
         "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
     ).json() is None
 
 
-def test_illegal_transition_is_409(api):
+def test_illegal_transition_is_409(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     # cannot start a task that was never claimed
     r = api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
     assert r.status_code == 409
 
 
-def test_abandon_requires_permission_over_http(api):
+def test_abandon_requires_permission_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     assert api.post(f"/tasks/{tid}/abandon", json={"permitted": False}).status_code == 409
     ok = api.post(f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "dup"})
     assert ok.status_code == 200 and ok.json()["status"] == Status.ABANDONED
 
 
-def test_hold_and_unhold_over_http(api):
+def test_hold_and_unhold_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     held = api.post(f"/tasks/{tid}/hold", json={"reason": "pause", "actor": "op"})
     assert held.status_code == 200
@@ -2238,7 +2253,7 @@ def test_hold_and_unhold_over_http(api):
     assert unheld.json()["hold_reason"] is None
 
 
-def test_hold_rejects_stale_expected_status_over_http(api):
+def test_hold_rejects_stale_expected_status_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     stale = api.post(
@@ -2253,7 +2268,7 @@ def test_hold_rejects_stale_expected_status_over_http(api):
     assert ok.status_code == 200
 
 
-def test_unexclude_over_http(api):
+def test_unexclude_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -2264,7 +2279,7 @@ def test_unexclude_over_http(api):
     assert api.post(f"/tasks/{tid}/unexclude", json={}).json()["excludes"] == []
 
 
-def test_unexclude_removes_only_the_named_token_over_http(api):
+def test_unexclude_removes_only_the_named_token_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -2283,7 +2298,7 @@ def test_unexclude_removes_only_the_named_token_over_http(api):
     assert cleared.json()["excludes"] == ["machine:m2"]
 
 
-def test_reset_over_http(api):
+def test_reset_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     reset = api.post(f"/tasks/{tid}/reset", json={"reason": "not like this"})
@@ -2293,7 +2308,7 @@ def test_reset_over_http(api):
     assert body["owner"] is None
 
 
-def test_reset_refuses_terminal_and_held_over_http(api):
+def test_reset_refuses_terminal_and_held_over_http(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/tasks/" + tid + "/abandon", json={"permitted": True})
     assert api.post(f"/tasks/{tid}/reset", json={}).status_code == 409
@@ -2303,7 +2318,7 @@ def test_reset_refuses_terminal_and_held_over_http(api):
     assert api.post(f"/tasks/{tid2}/reset", json={}).status_code == 409
 
 
-def test_proposed_not_claimable_then_approved(api):
+def test_proposed_not_claimable_then_approved(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "draft", "proposed": True}).json()["id"]
     assert api.post(
         "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
@@ -2314,7 +2329,7 @@ def test_proposed_not_claimable_then_approved(api):
     ).json()["id"] == tid
 
 
-def test_capability_gate_over_http(api):
+def test_capability_gate_over_http(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "log", "requires": ["logger"]})
     assert api.post(
         "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
@@ -2330,7 +2345,7 @@ def test_capability_gate_over_http(api):
     assert got is not None
 
 
-def test_list_and_find(api):
+def test_list_and_find(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "alpha task"})
     api.post("/tasks", json={"title": "beta task"})
     assert len(api.get("/tasks").json()) == 2
@@ -2338,7 +2353,7 @@ def test_list_and_find(api):
     assert len(found) == 1 and found[0]["title"] == "alpha task"
 
 
-def test_list_comma_separated_status(api):
+def test_list_comma_separated_status(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "q"})
     api.post("/tasks", json={"title": "draft", "proposed": True})
     got = api.get("/tasks", params={"status": "queued,proposed"}).json()
@@ -2347,7 +2362,7 @@ def test_list_comma_separated_status(api):
     assert [t["title"] for t in only_q] == ["q"]
 
 
-def test_sweep_endpoint_excludes_abandoned(api):
+def test_sweep_endpoint_excludes_abandoned(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "live"})
     gone = api.post("/tasks", json={"title": "dead"}).json()
     api.post("/tasks/" + gone["id"] + "/abandon", json={"permitted": True})
@@ -2356,7 +2371,7 @@ def test_sweep_endpoint_excludes_abandoned(api):
     assert "live" in titles and "dead" not in titles
 
 
-def test_repo_param_scopes_list_sweep_find(api):
+def test_repo_param_scopes_list_sweep_find(api: _ApiClient) -> None:
     # POST carries an explicit repo lane; the RepoDefaultingQueue only defaults
     # when repo is omitted, so these land in distinct lanes.
     api.post("/tasks", json={"title": "widget work", "repo": "example.com/acme/widget"})
@@ -2373,7 +2388,7 @@ def test_repo_param_scopes_list_sweep_find(api):
     assert [t["title"] for t in found] == ["widget work"]
 
 
-def test_claim_is_repo_scoped(api):
+def test_claim_is_repo_scoped(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "widget task", "repo": "example.com/acme/widget"})
     api.post("/tasks", json={"title": "gadget task", "repo": "example.com/acme/gadget"})
     # a worker in the gadget lane only ever claims the gadget task
@@ -2387,7 +2402,7 @@ def test_claim_is_repo_scoped(api):
     assert again is None  # nothing else in this lane; the widget task is invisible
 
 
-def test_claim_requires_repo_or_explicit_all_repos(api):
+def test_claim_requires_repo_or_explicit_all_repos(api: _ApiClient) -> None:
     task = api.post("/tasks", json={"title": "scoped"}).json()
 
     missing = api.post("/claim", json={"worker_id": "w"})
@@ -2412,7 +2427,7 @@ def test_claim_requires_repo_or_explicit_all_repos(api):
 # -- auth --------------------------------------------------------------------
 
 
-def test_bearer_auth_enforced(tmp_path):
+def test_bearer_auth_enforced(tmp_path: Path) -> None:
     app = create_app(TaskQueue(tmp_path / "t.db"), token="secret")
     api = TestClient(app)
     assert api.get("/health").status_code == 401
@@ -2425,11 +2440,12 @@ def test_bearer_auth_enforced(tmp_path):
 # -- the DispatchClient against the app -------------------------------------
 
 
-def test_client_round_trip(client):
+def test_client_round_trip(client: DispatchClient) -> None:
     t = client.create("via client", requires=["review"])
     assert t["status"] == Status.QUEUED
     assert client.claim("w1", repo=TEST_REPO) is None  # lacks capability
     claimed = client.claim("w1", ["review"], repo=TEST_REPO)
+    assert claimed is not None
     assert claimed["id"] == t["id"]
     client.start(t["id"], "w1")
     done = client.complete(t["id"], "w1", result_ref="pr/9")
@@ -2444,7 +2460,7 @@ def test_client_round_trip(client):
     ]
 
 
-def test_client_tasks_for_session_round_trip(client):
+def test_client_tasks_for_session_round_trip(client: DispatchClient) -> None:
     """DispatchClient.tasks_for_session against the real HTTP route (not just
     the fake client the CLI test exercises, and not just the raw route the
     coordinator test exercises) -- the actual production path the CLI uses."""
@@ -2461,7 +2477,7 @@ def test_client_tasks_for_session_round_trip(client):
     assert client.tasks_for_session("session-never-seen") == []
 
 
-def test_client_tasks_for_session_url_encodes_reserved_characters(client):
+def test_client_tasks_for_session_url_encodes_reserved_characters(client: DispatchClient) -> None:
     """Regression: a session id containing a URL-reserved character (``?``,
     ``#``) must round-trip correctly, not be mis-parsed as query/fragment
     syntax when interpolated into the request URL. (A literal ``/`` in a
@@ -2480,13 +2496,13 @@ def test_client_tasks_for_session_url_encodes_reserved_characters(client):
     assert client.tasks_for_session("sess-with") == []
 
 
-def test_client_error_maps_to_dispatch_error(client):
+def test_client_error_maps_to_dispatch_error(client: DispatchClient) -> None:
     with pytest.raises(DispatchError) as exc:
         client.get("missing")
     assert exc.value.status_code == 404
 
 
-def test_client_recover(client, monkeypatch):
+def test_client_recover(client: DispatchClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
     t = client.create("leased")
     client.claim("m/wt", repo=TEST_REPO)  # owner is a machine/worktree so liveness resolves
@@ -2497,12 +2513,12 @@ def test_client_recover(client, monkeypatch):
 # -- SSE event stream --------------------------------------------------------
 
 
-def test_sse_stream_distinguishes_retry_recorded_result(server_url):
+def test_sse_stream_distinguishes_retry_recorded_result(server_url: str) -> None:
     streamer = DispatchClient(server_url)
     mutator = DispatchClient(server_url)
-    received: list[dict] = []
+    received: list[dict[str, Any]] = []
 
-    def collect():
+    def collect() -> None:
         try:
             for ev in streamer.stream_events():
                 received.append(ev)
@@ -2556,7 +2572,7 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     assert confirmed["task"]["status"] == "completed"
 
 
-def test_stream_events_ready_frame_handshake(server_url):
+def test_stream_events_ready_frame_handshake(server_url: str) -> None:
     """Phase 3a: a caller that requests ``ready_frame=True`` sees the ready
     sentinel as its first item (closing the registration-vs-real-event
     race); every other caller (the default) never sees it at all, even
@@ -2565,10 +2581,10 @@ def test_stream_events_ready_frame_handshake(server_url):
     watcher = DispatchClient(server_url)  # mirrors `agent-dispatch watch`
     mutator = DispatchClient(server_url)
 
-    relay_events: list[dict] = []
-    watch_events: list[dict] = []
+    relay_events: list[dict[str, Any]] = []
+    watch_events: list[dict[str, Any]] = []
 
-    def collect_relay():
+    def collect_relay() -> None:
         try:
             for ev in streamer.stream_events(ready_frame=True):
                 relay_events.append(ev)
@@ -2577,7 +2593,7 @@ def test_stream_events_ready_frame_handshake(server_url):
         except Exception:
             return
 
-    def collect_watch():
+    def collect_watch() -> None:
         try:
             for ev in watcher.stream_events():
                 watch_events.append(ev)
@@ -2612,11 +2628,11 @@ def test_stream_events_ready_frame_handshake(server_url):
     assert watch_events[0]["type"] == "task.created"
 
 
-def test_health_reports_zero_subscribers_initially(api):
+def test_health_reports_zero_subscribers_initially(api: _ApiClient) -> None:
     assert api.get("/health").json()["subscribers"] == 0
 
 
-def test_claim_by_id_over_http(api):
+def test_claim_by_id_over_http(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "a"})
     tid_b = api.post("/tasks", json={"title": "b"}).json()["id"]
     got = api.post(
@@ -2631,7 +2647,7 @@ def test_claim_by_id_over_http(api):
     ).json() is None
 
 
-def test_mine_over_http(api):
+def test_mine_over_http(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "for-me", "target_worktree": "wt-1"})
     tid = api.post("/tasks", json={"title": "to-own"}).json()["id"]
     api.post(
@@ -2648,7 +2664,7 @@ def test_mine_over_http(api):
     assert any(t["id"] == tid and t["owner"] == "m1/wt-1" for t in r["owned"])
 
 
-def test_claim_composes_owner_from_machine_worktree(api):
+def test_claim_composes_owner_from_machine_worktree(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     got = api.post(
         "/claim",
@@ -2662,12 +2678,12 @@ def test_claim_composes_owner_from_machine_worktree(api):
     assert got["owner"] == "m1/wt-1"
 
 
-def test_claim_without_identity_is_422(api):
+def test_claim_without_identity_is_422(api: _ApiClient) -> None:
     api.post("/tasks", json={"title": "x"})
     assert api.post("/claim", json={"capabilities": []}).status_code == 422
 
 
-def test_payload_endpoint_inline(api):
+def test_payload_endpoint_inline(api: _ApiClient) -> None:
     tid = api.post("/tasks", json={"title": "t", "payload_inline": "small"}).json()["id"]
     r = api.get(f"/tasks/{tid}/payload").json()
     assert r["inline"] is True
@@ -2675,7 +2691,7 @@ def test_payload_endpoint_inline(api):
     assert r["ref"] is None
 
 
-def test_payload_endpoint_spilled_blob(api):
+def test_payload_endpoint_spilled_blob(api: _ApiClient) -> None:
     big = "m" * 5000  # over the default 4096 threshold -> spills to a blob
     tid = api.post("/tasks", json={"title": "t", "payload_inline": big}).json()["id"]
     task = api.get(f"/tasks/{tid}").json()
@@ -2686,11 +2702,11 @@ def test_payload_endpoint_spilled_blob(api):
     assert r["payload"] == big
 
 
-def test_payload_endpoint_missing_task_404(api):
+def test_payload_endpoint_missing_task_404(api: _ApiClient) -> None:
     assert api.get("/tasks/nope/payload").status_code == 404
 
 
-def _boot(app):
+def _boot(app: FastAPI) -> tuple[str, Callable[[], None]]:
     """Boot an app on an ephemeral port; return (url, stop). Mirrors server_url."""
     import uvicorn
 
@@ -2715,14 +2731,14 @@ def _boot(app):
         raise RuntimeError("coordinator did not start")
     probe.close()
 
-    def stop():
+    def stop() -> None:
         server.should_exit = True
         thread.join(timeout=5)
 
     return url, stop
 
 
-def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
+def test_background_gc_auto_recovers_gone_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 0.3s GC interval: a held task whose owner is confirmed gone returns to
     # queued on its own, with no manual recover.
     from agent_dispatch.coordinator import create_app
@@ -2737,7 +2753,7 @@ def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
-        assert c.claim(worker_id="m/wt", repo=TEST_REPO)["id"] == tid
+        assert required(c.claim(worker_id="m/wt", repo=TEST_REPO))["id"] == tid
         assert c.get(tid)["status"] == Status.CLAIMED
         owner_gone.set()
         deadline = time.time() + 5
@@ -2752,7 +2768,7 @@ def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
         stop()
 
 
-def test_gc_disabled_by_default(tmp_path, monkeypatch):
+def test_gc_disabled_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # gc_interval=0 (default) -> a held task is NOT auto-recovered even if its
     # owner is gone; only a manual recover (or an enabled GC loop) requeues it.
     from agent_dispatch.coordinator import create_app
@@ -2773,7 +2789,7 @@ def test_gc_disabled_by_default(tmp_path, monkeypatch):
         stop()
 
 
-def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path, monkeypatch):
+def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The two coordinator polling loops record live status at ``GET /health``
     once sweep_interval is enabled -- the diagnosis surface requested for
     'where a stuck poller got stuck' rather than inferring it from an
@@ -2821,7 +2837,7 @@ def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path, monkeypatch):
         stop()
 
 
-def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path, monkeypatch):
+def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The liveness GC loop's piggybacked cooldown reconciler (Phase 3 of
     agent-dispatch-monitor-and-confirmed-state) auto-resumes a suspended
     task once its default cooldown monitor elapses -- no operator/worker
@@ -2835,7 +2851,7 @@ def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path, monkeypatch):
     try:
         c = DispatchClient(url)
         task = c.create("cooldown")
-        owner = c.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+        owner = required(c.claim(worker_id="worker-1", repo=TEST_REPO))["owner"]
         c.start(task["id"], owner)
         c.suspend(task["id"], owner, reason="waiting", cooldown_seconds=0.3)
 
@@ -2853,8 +2869,8 @@ def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path, monkeypatch):
 
 
 def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Phase 3a audit: the always-on liveness GC loop must publish
     a board-visible wake whenever it transitions a task at all, not only
     when `requeued` is nonzero. A CLI-embodied `started` task whose owner
@@ -2884,10 +2900,10 @@ def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
     q = TaskQueue(tmp_path / "tasks.db")
     app = create_app(q, sweep_interval=1.0, enable_mcp=False)
 
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     original = app.state.bus.publish
 
-    def _record(event: dict) -> None:
+    def _record(event: dict[str, Any]) -> None:
         events.append(event)
         original(event)
 
@@ -2897,7 +2913,7 @@ def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
     try:
         c = DispatchClient(url)
         task = c.create("x")
-        owner = c.claim(worker_id="m1/wt1", repo=TEST_REPO)["owner"]
+        owner = required(c.claim(worker_id="m1/wt1", repo=TEST_REPO))["owner"]
         c.start(task["id"], owner)
         verdict["value"] = "gone"
 
@@ -2927,7 +2943,7 @@ def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
         stop()
 
 
-def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch):
+def test_health_loops_report_handoff_fallback_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Opting in (``handoff_fallback_enabled=True``) arms the coordinator's
     reconciliation loop alongside liveness GC / orphan reap, on the same
     ``sweep_interval`` cadence, and it is independently visible at ``GET
@@ -2973,7 +2989,7 @@ def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch
         stop()
 
 
-def test_worktree_status_relay_refresh_skips_other_machines(tmp_path):
+def test_worktree_status_relay_refresh_skips_other_machines(tmp_path: Path) -> None:
     q = TaskQueue(tmp_path / "tasks.db")
     q.create(
         "local-owned",
@@ -2990,15 +3006,16 @@ def test_worktree_status_relay_refresh_skips_other_machines(tmp_path):
     relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
     seen: list[tuple[str, str]] = []
 
+    def fetch_bundle(repo: str, worktree_id: str) -> dict[str, Any]:
+        seen.append((repo, worktree_id))
+        return {"project": "proj", "worktree_id": worktree_id, "facts": {}}
+
     counts = _refresh_worktree_status_relay(
         q,
         relay,
         poll_interval=10.0,
         resolve_machine=lambda: "local",
-        fetch_bundle=lambda repo, worktree_id: (
-            seen.append((repo, worktree_id))
-            or {"project": "proj", "worktree_id": worktree_id, "facts": {}}
-        ),
+        fetch_bundle=fetch_bundle,
     )
 
     assert counts["checked"] == 1
@@ -3008,7 +3025,7 @@ def test_worktree_status_relay_refresh_skips_other_machines(tmp_path):
     assert relay.get(TEST_REPO, "wt-remote") is None
 
 
-def test_worktree_status_relay_refresh_revalidates_explicit_refs(tmp_path):
+def test_worktree_status_relay_refresh_revalidates_explicit_refs(tmp_path: Path) -> None:
     q = TaskQueue(tmp_path / "tasks.db")
     q.create(
         "remote-owned",
@@ -3019,16 +3036,17 @@ def test_worktree_status_relay_refresh_revalidates_explicit_refs(tmp_path):
     relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
     seen: list[tuple[str, str]] = []
 
+    def fetch_bundle(repo: str, worktree_id: str) -> dict[str, Any]:
+        seen.append((repo, worktree_id))
+        return {"project": "proj", "worktree_id": worktree_id, "facts": {}}
+
     counts = _refresh_worktree_status_relay(
         q,
         relay,
         poll_interval=10.0,
         resolve_machine=lambda: "local",
         refs=[(TEST_REPO, "wt-remote")],
-        fetch_bundle=lambda repo, worktree_id: (
-            seen.append((repo, worktree_id))
-            or {"project": "proj", "worktree_id": worktree_id, "facts": {}}
-        ),
+        fetch_bundle=fetch_bundle,
     )
 
     assert counts["checked"] == 0
@@ -3036,7 +3054,7 @@ def test_worktree_status_relay_refresh_revalidates_explicit_refs(tmp_path):
     assert seen == []
 
 
-def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path):
+def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path: Path) -> None:
     q = TaskQueue(tmp_path / "tasks.db")
     q.create(
         "first",
@@ -3053,14 +3071,16 @@ def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path
     relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
     seen: list[str] = []
 
+    def fetch_bundle(_repo: str, worktree_id: str) -> dict[str, Any]:
+        seen.append(worktree_id)
+        return {"project": "proj", "worktree_id": worktree_id, "facts": {}}
+
     counts = _refresh_worktree_status_relay(
         q,
         relay,
         poll_interval=10.0,
         resolve_machine=lambda: "local",
-        fetch_bundle=lambda _repo, worktree_id: seen.append(worktree_id) or {
-            "project": "proj", "worktree_id": worktree_id, "facts": {}
-        },
+        fetch_bundle=fetch_bundle,
         max_items=1,
     )
 
@@ -3069,7 +3089,7 @@ def test_worktree_status_relay_refresh_can_bound_one_worktree_per_cycle(tmp_path
     assert seen == ["wt-b"]
 
 
-def test_worktree_status_relay_prunes_stale_rows(tmp_path):
+def test_worktree_status_relay_prunes_stale_rows(tmp_path: Path) -> None:
     relay = WorktreeStatusRelayStore(tmp_path / "relay.sqlite3")
     relay.put(
         TEST_REPO,
@@ -3085,7 +3105,7 @@ def test_worktree_status_relay_prunes_stale_rows(tmp_path):
     assert relay.get(TEST_REPO, "wt-stale") is None
 
 
-def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatch, capsys):
+def test_cli_consume_completes_and_prints_payload(server_url: str, client: DispatchClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """``agent-dispatch consume`` drives a proposed handoff to completed and
     prints its payload -- then a second consume of the now-spent baton is
     REFUSED (exit 3, stop notice), never replaying the finished work."""
@@ -3135,7 +3155,7 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     assert client.get(tid)["status"] == Status.COMPLETED
 
 
-def test_cli_consume_refuses_superseded_handoff(server_url, client, monkeypatch, capsys):
+def test_cli_consume_refuses_superseded_handoff(server_url: str, client: DispatchClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """A handoff abandoned because a newer one superseded it is refused (exit
     3), not delivered: a successor seeded with the stale baton must stand down
     instead of running the old brief alongside the newer handoff's successor."""
@@ -3186,7 +3206,7 @@ def test_cli_consume_refuses_superseded_handoff(server_url, client, monkeypatch,
 # -- satellite presence registry ---------------------------------------------
 
 
-def test_satellite_register_and_list(api):
+def test_satellite_register_and_list(api: _ApiClient) -> None:
     r = api.post(
         "/satellites/register",
         json={
@@ -3205,7 +3225,7 @@ def test_satellite_register_and_list(api):
     assert [e["machine"] for e in listing] == ["field-laptop"]
 
 
-def test_satellite_heartbeat_updates_status(api):
+def test_satellite_heartbeat_updates_status(api: _ApiClient) -> None:
     api.post("/satellites/register", json={"machine": "book2"})
     r = api.post(
         "/satellites/book2/heartbeat",
@@ -3215,12 +3235,12 @@ def test_satellite_heartbeat_updates_status(api):
     assert r.json()["status"] == {"wt-a": {"turn_state": "active"}}
 
 
-def test_satellite_heartbeat_unknown_is_404(api):
+def test_satellite_heartbeat_unknown_is_404(api: _ApiClient) -> None:
     r = api.post("/satellites/ghost/heartbeat", json={})
     assert r.status_code == 404
 
 
-def test_satellite_deregister(api):
+def test_satellite_deregister(api: _ApiClient) -> None:
     api.post("/satellites/register", json={"machine": "book2"})
     r = api.delete("/satellites/book2")
     assert r.status_code == 200
@@ -3228,7 +3248,7 @@ def test_satellite_deregister(api):
     assert api.get("/satellites").json() == []
 
 
-def test_satellite_deregister_absent(api):
+def test_satellite_deregister_absent(api: _ApiClient) -> None:
     r = api.delete("/satellites/never")
     assert r.json() == {"deregistered": False}
 
@@ -3236,7 +3256,7 @@ def test_satellite_deregister_absent(api):
 # -- fleet directory endpoints -----------------------------------------------
 
 
-def test_directory_register_and_list(api):
+def test_directory_register_and_list(api: _ApiClient) -> None:
     r = api.post(
         "/directory/register",
         json={"instance": "mantis-counter", "role": "coordinator", "epoch": 3},
@@ -3251,14 +3271,14 @@ def test_directory_register_and_list(api):
     assert [e["instance"] for e in listing] == ["mantis-counter"]
 
 
-def test_directory_list_filters_by_role(api):
+def test_directory_list_filters_by_role(api: _ApiClient) -> None:
     api.post("/directory/register", json={"instance": "peer-1", "role": "peer"})
     api.post("/directory/register", json={"instance": "sat-1", "role": "satellite"})
     sats = api.get("/directory", params={"role": "satellite"}).json()
     assert [e["instance"] for e in sats] == ["sat-1"]
 
 
-def test_directory_coordinator_endpoint(api):
+def test_directory_coordinator_endpoint(api: _ApiClient) -> None:
     assert api.get("/directory/coordinator").json() is None
     api.post(
         "/directory/register",
@@ -3273,18 +3293,18 @@ def test_directory_coordinator_endpoint(api):
     assert coord["epoch"] == 9
 
 
-def test_directory_heartbeat_unknown_is_404(api):
+def test_directory_heartbeat_unknown_is_404(api: _ApiClient) -> None:
     r = api.post("/directory/ghost/heartbeat", json={})
     assert r.status_code == 404
 
 
-def test_directory_deregister(api):
+def test_directory_deregister(api: _ApiClient) -> None:
     api.post("/directory/register", json={"instance": "peer-1"})
     assert api.delete("/directory/peer-1").json() == {"deregistered": True}
     assert api.get("/directory").json() == []
 
 
-def test_satellite_facade_tags_role_and_shows_in_directory(api):
+def test_satellite_facade_tags_role_and_shows_in_directory(api: _ApiClient) -> None:
     # A satellite registered via the /satellites facade appears in the unified
     # directory with role=satellite.
     api.post("/satellites/register", json={"machine": "book2"})

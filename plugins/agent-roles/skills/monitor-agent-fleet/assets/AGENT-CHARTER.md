@@ -27,7 +27,10 @@ Alignment: <aligned | detour | tangent | unknown: recent work vs Root, with evid
 Projected progress: <converging | stalled | receding | unknown: remaining
   acceptance against recent deltas>
 Last delta: <result and time>
-Blocker: <condition and owner; repair rung if any, or "none">
+Blocker: <condition, owner diagnosing and driving the fix, and repair rung
+  if any; or "none"; an unowned blocker is recorded as "owner: none">
+Holds: <each hold, who set it and its recorded reason; who lifted it, when
+  and the source; or "none">
 Outstanding steer: <key and stage, or "none">
 Last reconciled: <time and sources read>
 ```

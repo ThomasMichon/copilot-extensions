@@ -138,6 +138,22 @@ class HostIndex:
             self._load()
 
     # -- persistence -------------------------------------------------------
+    @classmethod
+    def provision_root(cls, directory: Path) -> None:
+        """Only the creator of the host directory may seed an empty index."""
+        try:
+            directory.mkdir(parents=True)
+        except FileExistsError:
+            if not directory.is_dir():
+                raise
+            return  # A missing index in an existing root is not known to be empty.
+        index = cls(directory / "index.json", load=False)
+        with index._locked_index(create_parent=False):
+            try:
+                index._path.lstat()
+            except FileNotFoundError:
+                index._flush()  # No concurrent registration won the mutex first.
+
     def _load(self) -> None:
         """(Re)populate ``self._records`` from disk.
 

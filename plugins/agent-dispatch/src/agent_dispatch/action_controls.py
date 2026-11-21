@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .queue_common import Task
 
 from .action_policy import ActionDecision, evaluate_action
 from .install_paths import install_dir, uses_legacy_install_dir
@@ -51,9 +56,20 @@ def action_inhibited(
     return decision.inhibited
 
 
-def require_worker_admission() -> None:
-    """Production queue boundary; embeddings select their policy explicitly."""
-    from .queue_records import WorkerAdmissionInhibited
+class InstallationWorkerAdmission:
+    """Production queue policy; embeddings can still inject a global-only callable."""
 
-    if action_inhibited("worker-admission", logger=logging.getLogger(__name__)):
-        raise WorkerAdmissionInhibited()
+    def __call__(self) -> None:
+        from .queue_records import WorkerAdmissionInhibited
+
+        if action_inhibited("worker-admission", logger=logging.getLogger(__name__)):
+            raise WorkerAdmissionInhibited()
+
+    def require_spawn(self, task: Task, owner: str | None,
+                      instance: tuple[str, str, str] | None, driver: str | None,
+                      reservation: Mapping[str, object] | None = None) -> None:
+        from .admission_holds import require_spawn_admission
+        require_spawn_admission(task, owner, instance, driver, reservation)
+
+
+require_worker_admission = InstallationWorkerAdmission()

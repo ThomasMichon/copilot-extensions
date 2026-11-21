@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.metadata
@@ -16,11 +18,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Any, Literal, TypeGuard, TypedDict
 import zipfile
 
 from candidate_qualification_receipt import (
     MAX_ARCHIVE_BYTES,
-    MAX_UNIT_EVIDENCE_FILE_BYTES,
     PACKET_FILES,
     UnitQualificationError,
     canonical_digest,
@@ -28,6 +30,7 @@ from candidate_qualification_receipt import (
     verify_archive,
 )
 from promotion_unit_contract import (
+    MAX_UNIT_EVIDENCE_FILE_BYTES,
     UnitEvidenceError,
     admit_manifest,
     decode_json,
@@ -42,6 +45,11 @@ EXECUTE_STEP = "Qualify exact-input PR units"
 UPLOAD_STEP = "Upload freshly executed PR unit evidence"
 UNIT_JOB = "Eligible units with coverage"
 MAX_LOOKUP_SECONDS = 8
+JsonObject = dict[str, Any]
+LookupPhase = Literal[
+    "run_inventory", "artifact_inventory", "job_inventory",
+    "producer_qualification", "artifact_download", "packet_verification",
+]
 ENVIRONMENT_KEYS = (
     "PATH",
     "HOME",
@@ -65,6 +73,37 @@ class ReuseUnavailable(ValueError):
     """Reuse is unqualified; the current run must execute fresh units."""
 
 
+class _PhaseTiming(TypedDict):
+    phase: LookupPhase
+    elapsed_ms: int
+    outcome: Literal["success", "error"]
+
+
+class _LookupTimings:
+    def __init__(self, clock: Callable[[], float] | None = None) -> None:
+        self._clock = clock or time.monotonic
+        self.started = self._clock()
+        self._phases: list[_PhaseTiming] = []
+
+    @contextmanager
+    def phase(self, name: LookupPhase) -> Iterator[None]:
+        started = self._clock()
+        timing: _PhaseTiming = {"phase": name, "elapsed_ms": 0, "outcome": "error"}
+        self._phases.append(timing)
+        try:
+            yield
+            timing["outcome"] = "success"
+        finally:
+            timing["elapsed_ms"] = max(0, round((self._clock() - started) * 1000))
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "budget_seconds": MAX_LOOKUP_SECONDS,
+            "elapsed_ms": max(0, round((self._clock() - self.started) * 1000)),
+            "phases": self._phases,
+        }
+
+
 def unit_environment(environment: dict[str, str]) -> dict[str, str]:
     """The source-PR child receives no credentials or event-dependent inputs."""
     result = {key: environment[key] for key in ENVIRONMENT_KEYS if key in environment}
@@ -76,7 +115,7 @@ def unit_environment(environment: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def _positive(value: object) -> bool:
+def _positive(value: object) -> TypeGuard[int]:
     return type(value) is int and value > 0
 
 
@@ -94,10 +133,10 @@ def _timestamp(value: object) -> datetime:
 
 def context(
     environment: dict[str, str],
-    event: dict,
-    manifest: dict,
-    runtime: dict,
-) -> dict:
+    event: object,
+    manifest: JsonObject,
+    runtime: object,
+) -> JsonObject:
     """Bind semantic unit inputs, excluding only the current provider execution."""
     if environment.get("GITHUB_EVENT_NAME") != "pull_request":
         raise ReuseUnavailable("not-a-source-pr")
@@ -190,13 +229,13 @@ def context(
     return identity
 
 
-def artifact_name(identity: dict, run_id: int, attempt: int) -> str:
+def artifact_name(identity: JsonObject, run_id: int, attempt: int) -> str:
     if not _positive(run_id) or not _positive(attempt):
         raise ReuseUnavailable("invalid-artifact-origin")
     return f"pr-unit-evidence-v1-{manifest_digest(identity)}-{run_id}-{attempt}"
 
 
-def context_fingerprint(identity: dict) -> dict:
+def context_fingerprint(identity: JsonObject) -> JsonObject:
     """Explain cache misses using existing digests, never environment values or paths."""
     return {
         "identity": {
@@ -217,8 +256,8 @@ def context_fingerprint(identity: dict) -> dict:
     }
 
 
-def runtime_identity() -> dict:
-    distributions = {}
+def runtime_identity() -> JsonObject:
+    distributions: dict[str, dict[str, str]] = {}
     deadline = time.monotonic() + 5
     total = 0
     prefix = Path(sys.prefix).resolve()
@@ -238,7 +277,7 @@ def runtime_identity() -> dict:
         for relative in sorted(files, key=str):
             if time.monotonic() >= deadline:
                 raise ReuseUnavailable("toolchain-binding-budget-exhausted")
-            path = Path(distribution.locate_file(relative)).resolve()
+            path = Path(str(distribution.locate_file(relative))).resolve()
             if not path.is_relative_to(prefix) or not path.is_file():
                 raise ReuseUnavailable("unqualified-installed-file")
             total += path.stat().st_size
@@ -268,12 +307,12 @@ def runtime_identity() -> dict:
 
 
 def producer(
-    identity: dict,
-    run: dict,
-    jobs: list[dict],
-    artifact: dict,
+    identity: JsonObject,
+    run: JsonObject,
+    jobs: list[JsonObject],
+    artifact: JsonObject,
     now: datetime,
-) -> dict:
+) -> JsonObject:
     """Require a real fresh execution/upload from one successful exact attempt."""
     if (
         not isinstance(run, dict)
@@ -379,8 +418,8 @@ def producer(
 
 
 def verify_download(
-    raw: bytes, artifact: dict, identity: dict, manifest: dict, root: Path
-) -> dict:
+    raw: bytes, artifact: JsonObject, identity: JsonObject, manifest: JsonObject, root: Path
+) -> JsonObject:
     """Verify immutable archive bytes and the unchanged canonical three-file packet."""
     if len(raw) > MAX_ARCHIVE_BYTES:
         raise ReuseUnavailable("oversized-unit-archive")
@@ -415,9 +454,9 @@ def verify_download(
         )
 
 
-def qualification_epoch(runs: list[dict], current_run: int) -> list[list]:
+def qualification_epoch(runs: list[JsonObject], current_run: int) -> list[list[object]]:
     """Retry/outcome revisions fence old success without inferring chronology from IDs."""
-    revisions = []
+    revisions: list[list[object]] = []
     for run in runs:
         attempt = run.get("run_attempt")
         if not _positive(attempt):
@@ -456,16 +495,22 @@ def qualification_epoch(runs: list[dict], current_run: int) -> list[list]:
 
 
 def resolve(
-    identity: dict, manifest: dict, root: Path, current_run: int, read, now: datetime
-) -> dict:
+    identity: JsonObject, manifest: JsonObject, root: Path, current_run: int,
+    read: Callable[..., Any], now: datetime,
+    phase: Callable[[LookupPhase], AbstractContextManager[None]] | None = None,
+) -> JsonObject:
     """Fence complete bounded head history, then inspect at most three artifact inventories."""
-    prefix = "repos/" + identity["repository"] + "/actions/"
-    listing = read(
-        prefix
-        + "workflows/ci.yml/runs?event=pull_request&head_sha="
-        + identity["head_sha"]
-        + "&per_page=10",
+    measure: Callable[[LookupPhase], AbstractContextManager[None]] = (
+        phase or (lambda _: nullcontext())
     )
+    prefix = "repos/" + identity["repository"] + "/actions/"
+    with measure("run_inventory"):
+        listing = read(
+            prefix
+            + "workflows/ci.yml/runs?event=pull_request&head_sha="
+            + identity["head_sha"]
+            + "&per_page=10",
+        )
     runs = listing.get("workflow_runs")
     if (
         not isinstance(runs, list)
@@ -495,7 +540,8 @@ def resolve(
             continue
         if run["id"] > current_run:
             continue
-        artifacts = read(prefix + f"runs/{run['id']}/artifacts?per_page=100")
+        with measure("artifact_inventory"):
+            artifacts = read(prefix + f"runs/{run['id']}/artifacts?per_page=100")
         rows = artifacts.get("artifacts")
         if (
             not isinstance(rows, list)
@@ -515,16 +561,20 @@ def resolve(
             raise ReuseUnavailable("ambiguous-unit-artifact")
         if matches:
             artifact = matches[0]
-            jobs = read(
-                prefix + f"runs/{run['id']}/attempts/{attempt}/jobs?per_page=100"
-            )
+            with measure("job_inventory"):
+                jobs = read(
+                    prefix + f"runs/{run['id']}/attempts/{attempt}/jobs?per_page=100"
+                )
             if not isinstance(jobs.get("jobs"), list) or jobs.get("total_count") != len(
                 jobs["jobs"]
             ):
                 raise ReuseUnavailable("incomplete-job-inventory")
-            origin = producer(identity, run, jobs["jobs"], artifact, now)
-            raw = read(prefix + f"artifacts/{artifact['id']}/zip", binary=True)
-            verified = verify_download(raw, artifact, identity, manifest, root)
+            with measure("producer_qualification"):
+                origin = producer(identity, run, jobs["jobs"], artifact, now)
+            with measure("artifact_download"):
+                raw = read(prefix + f"artifacts/{artifact['id']}/zip", binary=True)
+            with measure("packet_verification"):
+                verified = verify_download(raw, artifact, identity, manifest, root)
             return {
                 "mode": "reused",
                 "artifact_name": artifact["name"],
@@ -541,10 +591,12 @@ def resolve(
     }
 
 
-def _process(arguments: list[str], **kwargs):
+def _process(
+    arguments: list[str], **kwargs: Any,
+) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         arguments,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
         **kwargs,
     )
 
@@ -568,7 +620,8 @@ def main() -> int:
             if key not in {"GH_TOKEN", "GITHUB_TOKEN"}
         }
     )
-    result = {"mode": "executed", "artifact_name": "promotion-unit-evidence"}
+    result: JsonObject = {"mode": "executed", "artifact_name": "promotion-unit-evidence"}
+    timings: _LookupTimings | None = None
     attempt = 1
     if is_pr:
         if args.source_sha != source_sha(os.environ.get("GITHUB_SHA", "")):
@@ -619,9 +672,10 @@ def main() -> int:
         )
         if not os.environ.get("GH_TOKEN"):
             raise ReuseUnavailable("missing-read-only-provider-token")
-        deadline = time.monotonic() + MAX_LOOKUP_SECONDS
+        timings = _LookupTimings()
+        deadline = timings.started + MAX_LOOKUP_SECONDS
 
-        def read(path, binary=False):
+        def read(path: str, binary: bool = False) -> Any:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ReuseUnavailable("provider-lookup-budget-exhausted")
@@ -648,6 +702,7 @@ def main() -> int:
             int(os.environ["GITHUB_RUN_ID"]),
             read,
             datetime.now(timezone.utc),
+            timings.phase,
         )
         if time.monotonic() >= deadline:
             raise ReuseUnavailable("provider-lookup-budget-exhausted")
@@ -672,6 +727,8 @@ def main() -> int:
             print(
                 f"::warning::PR unit reuse unavailable ({result['reason']}); fresh units required."
             )
+    if timings is not None:
+        print(json.dumps({"pr_unit_lookup": timings.snapshot()}, sort_keys=True), flush=True)
     if result["mode"] == "executed":
         completed = _process(
             [

@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -50,6 +51,31 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
 
 class HealthRepairRequired(RuntimeError):
     """Published health needs a distinct generation, never an in-place rebuild."""
+
+
+def application_uv_selection(application: Path) -> bool:
+    """Inspect explicit executable support in the selected POSIX application."""
+    entry = application / "install.sh"
+    _ordinary(entry)
+    prefix = b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
+    with _open(entry) as stream:
+        return stream.read(len(prefix)) == prefix
+
+
+def application_staging_environment(
+    application: Path, uv: Path, base_python: Path,
+) -> dict[str, str]:
+    """Keep marked UV selection separate from ordinary legacy PATH lookup."""
+    exact_uv = os.name != "nt" and application_uv_selection(application)
+    return {
+        **os.environ,
+        **(
+            {"COPILOT_INSTALLER_UV": str(uv)} if exact_uv else
+            {"PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", "")}
+        ),
+        "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
+    }
+
 
 def verify_installed_inputs(
     slot: Path, python: Path | None, module: str, *,

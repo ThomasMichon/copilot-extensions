@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import asdict
 import os
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .coordinator_auth import _make_control_auth
 from .coordinator_task_views import _event_task_dict
-from .queue import TaskError, TaskQueue
+from .queue import TaskQueue
+from .queue_records import TaskError
 from .queue_common import CompletionOutcome
 from .queue_relevance_registration import RelevanceAdmission, RelevanceRegistration
 from .registrar_discovery import RegistrarSources
@@ -59,7 +60,7 @@ def register_relevance_routes(
     )
     dependencies = [Depends(auth)]
 
-    def envelope(result: dict) -> dict:
+    def envelope(result: dict[str, Any]) -> dict[str, Any]:
         return {"protocol": RELEVANCE_PROTOCOL, "version": 1, "result": result}
 
     def transition(outcome: CompletionOutcome) -> None:
@@ -67,17 +68,17 @@ def register_relevance_routes(
         from .handoff_claim_release import release_if_handoff
 
         task = asdict(outcome.task)
-        release_if_handoff(task, cancel_pending=True)
+        release_if_handoff(task, cancel_pending=True, queue=queue)
         event_task = _event_task_dict(task)
         app.state.bus.publish({"type": outcome.event_type, "task": event_task})
-        telemetry.emit(telemetry.task_lifecycle_event(outcome.event_type, event_task))
+        telemetry.emit_for(app.state.bus, telemetry.task_lifecycle_event(cast(str, outcome.event_type), event_task))
 
     @app.get(f"{RELEVANCE_PATH}/contract", dependencies=dependencies)
-    def contract() -> dict:
+    def contract() -> dict[str, Any]:
         return relevance_contract(control_token)
 
     @app.get(f"{RELEVANCE_PATH}/tasks/{{task_id}}", dependencies=dependencies)
-    def snapshot(task_id: str, registration_id: str) -> dict:
+    def snapshot(task_id: str, registration_id: str) -> dict[str, Any]:
         try:
             with local_policy() as (machine, env, disabled):
                 result = queue.relevance_snapshot(
@@ -90,12 +91,12 @@ def register_relevance_routes(
         return envelope(result)
 
     @app.post(f"{RELEVANCE_PATH}/tasks/{{task_id}}", dependencies=dependencies, response_model=None)
-    def reconcile(task_id: str, body: RelevanceBody, request: Request) -> dict | JSONResponse:
+    def reconcile(task_id: str, body: RelevanceBody, request: Request) -> dict[str, Any] | JSONResponse:
         return decide(task_id, body, request, source.prepare())
 
     def decide(
         task_id: str, body: RelevanceBody, request: Request, admission: RelevanceAdmission,
-    ) -> dict | JSONResponse:
+    ) -> dict[str, Any] | JSONResponse:
         gate = request.app.state.drain_gate
         try:
             with gate.track_claim():
@@ -118,6 +119,7 @@ def register_relevance_routes(
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             # The synchronous decision has finished. Only its atomic receipt
             # can distinguish a rejected write from a post-commit callback error.
+            accepted: dict[str, Any] | bool | None
             try:
                 accepted = queue.relevance_receipt(
                     task_id, body.request_id, registration_id=body.registration_id,
@@ -146,7 +148,7 @@ def register_relevance_routes(
         f"{RELEVANCE_PATH}/tasks/{{task_id}}/receipts/{{request_id:path}}",
         dependencies=dependencies,
     )
-    def receipt(task_id: str, request_id: str, registration_id: str) -> dict:
+    def receipt(task_id: str, request_id: str, registration_id: str) -> dict[str, Any]:
         try:
             result = queue.relevance_receipt(
                 task_id, request_id, registration_id=registration_id,

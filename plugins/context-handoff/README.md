@@ -448,13 +448,18 @@ selection:
 
 | Coordinator availability | Storage |
 |---|---|
-| `agent-dispatch` reachable | proposed, handoff-labeled task pinned to the current worktree |
-| no `agent-dispatch` | one-time JSON file under the machine-local worktree state directory |
+| reachable `agent-dispatch` advertises creator-claim contract v1 | proposed, handoff-labeled task pinned to the current worktree |
+| unavailable or older `agent-dispatch` | one-time JSON file under the machine-local worktree state directory |
 
 In both cases the plugin also returns a bounded one-line seed. The seed is a
 locator, not the handoff itself: it contains a task lead, a recommendation to
 use `/consume-handoff`, and one opaque `task:<id>` or `file:<id>` recovery
 locator.
+
+Task cancellation reports task retirement, pending-ledger cancellation and
+exact creator-claim settlement separately. See
+[creator-claim closeout](docs/creator-claim-closeout.md) for guarded retries,
+protected legacy tasks and independently updated peers.
 
 ## Resuming
 

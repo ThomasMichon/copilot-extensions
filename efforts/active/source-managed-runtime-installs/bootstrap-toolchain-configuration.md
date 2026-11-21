@@ -92,6 +92,52 @@ credential ownership and dependency-age policy remain unchanged. Configuration
 success is not evidence that any application or engine is ready or selected.
 Adopter migration waits for reviewed implementation and release availability.
 
+## Native configuration-only entry - reviewed refinement
+
+A lightweight adopter may need native feed configuration before provisioning
+its own tools, without installing desktop Manager. Installed configuration-only
+reuse does not cover that first touch: the ordinary bootstrap constructs
+Manager before dispatching `setup --toolchain-only`. Installing an application
+merely to configure native tools is not an equivalent operation.
+
+Keep the existing `setup --toolchain-only [--apply]` syntax and configuration
+owner. Extend the standard native bootstrap and its Python installation entry
+to recognize that operation and dispatch it before Manager construction,
+application activation, engine/core setup or installation-queue work.
+Do not add a second configuration writer or a separate installer. The native
+seed still selects and preflights the same data before its normal uv/managed
+Python and source preparation; this mode is not an acquisition-free bootstrap.
+An already-installed capable Manager retains its existing acquisition-free
+configuration path.
+
+Advertise `bootstrap-toolchain-only` in the exact bootstrap's existing
+`copilot-extensions.toolchain-config` version-1 capability list. Require a
+corresponding declaration from the fetched Python entry before dispatch, so
+a new bootstrap cannot construct Manager through an older selected source.
+Callers must establish the bootstrap capability before using this first-touch
+mode. Missing or unsupported support refuses the affected operation; never
+fall back to ordinary application installation or omit the required data.
+Existing no-configuration and ordinary setup syntax remain unchanged.
+
+Use the bootstrap's normal source-selection rules and finite ownership.
+Configuration-only acquisition must not reuse or delete an application's
+shared staging directory. Retained native configuration and the selected
+input remain outside application versions; no Manager version or binstub,
+application alias/registration, service, adopter repository or current
+application selection is created or changed. Plan-only configuration remains
+read-only after normal bootstrap preparation. Keep strict parsing, native
+conflicts/locks, independent credential and source owners, and all existing
+package/TLS policy.
+
+This closes the same finite configuration and independent application intent;
+it does not revise the installation model or take over application conversion.
+Under [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement),
+configuration success is not incoming application readiness, activation,
+replacement or outgoing retirement. No incumbent-recovery veto, daemon,
+deployment or native privilege authority is introduced.
+Review this refinement before code, release provider support before migrating
+callers, and retain prior-provider refusal and rollback coverage.
+
 ## Plan
 
 - [x] Review and merge this bounded contract before implementation. Accepted in #13412.
@@ -109,6 +155,11 @@ Adopter migration waits for reviewed implementation and release availability.
   Accepted in #13480; implementation/release and adopter qualification remain open.
 - [ ] Implement and release the additive installed setup mode and safe help
   declaration, then qualify conditional adopter reuse without acquisition files.
+- [x] Review the native configuration-only refinement before implementation.
+  Accepted in #13552; implementation, release and caller qualification remain open.
+- [ ] Implement and release bootstrap capability/source-skew admission and
+  configuration-only dispatch without Manager construction, then migrate
+  lightweight adopters conditionally.
 
 ## Validation Plan
 
@@ -134,8 +185,49 @@ Adopter migration waits for reviewed implementation and release availability.
   including Windows PowerShell 7, while retaining aliases, knowledge and unrelated
   registrations. Older/mismatched receivers refuse mandatory configuration
   without speculative effects. Keep the existing native reuse phase intact.
+- [ ] Actual native Windows and POSIX first touch applies the selected
+  configuration without creating a Manager version, command, application
+  selection, engine or installation request. Preserve an unrelated application
+  staging sentinel. Plan-only and malformed/conflicting forms do not apply
+  configuration; ordinary setup and installed acquisition-free reuse still pass.
+- [ ] Older bootstrap metadata and an older fetched Python entry refuse the
+  configuration-only requirement before Manager construction. Exercise the
+  real parser/process boundary, including invalid option combinations and
+  provider rollback; do not infer support from package versions.
 
 ## Journal
+
+2026-11-20: The native configuration-only refinement merged in #13552 after
+exact-head Copilot approval, required CI and resolved review threads. Four
+focused regressions then failed against the previous provider: unrelated
+staging was removed, an older routing-capable source reached execution, native
+metadata omitted the required capability, and the real source entry tried UV
+lookup instead of configuration-only dispatch. This is measured pre-fix
+evidence, not implementation, release or installed adoption.
+
+2026-11-20: The standard provider now has capability/source-skew admission,
+isolated configuration acquisition and early configuration-only dispatch.
+The first implementation passed 110 selected controls but the real `-I -S`
+source entry found an eager process-package import. The existing parser was
+then extracted unchanged into a dependency-free shared module, and the same
+configuration/error-reporting stage serves both source and installed setup.
+Parser and automatic-update policy function ASTs remain identical.
+The four-file configuration, handoff, repository and provisioning packet
+passes 245 tests with 28 platform skips in 121.95 seconds on Windows.
+Bash syntax, install-contract and changed-Python lint pass. Native Linux
+execution remains for the existing path-gated hosted lane; source review/CI,
+merge, release and caller adoption remain open. No live installation occurred.
+
+2026-11-20: The implementation's first published head passed exact-head
+Copilot approval and all eight active Windows/Linux native jobs. Required CI
+then stopped on the 1,000-line module cap: the installation entry had grown
+to 1,009 lines. Its unchanged operation-admission block now lives with the
+existing native input admission helpers, reducing the entry to 993 lines
+without changing validation or widening the baseline. The admission ASTs
+match; both real source/installed configuration entry controls pass again,
+and module size, changed-Python lint and whitespace pass. The source pin
+is refreshed. The corrected published head still needs fresh review and CI;
+the earlier native pass is not its qualification.
 
 2026-11-19: The installed configuration-only refinement merged in #13480 after
 current-head Copilot approval and required CI. It preserves the native

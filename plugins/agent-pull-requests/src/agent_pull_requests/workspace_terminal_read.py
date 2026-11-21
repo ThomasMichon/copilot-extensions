@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .workspace_operations import WorkspaceOperations
@@ -11,9 +11,10 @@ if TYPE_CHECKING:
 PROTOCOL = "agent-pull-requests.workspace/v2"
 SELECTION = "agent-pull-requests.terminal-workspace-read/v1"
 OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "events")
+Document = dict[str, Any]
 
 
-def conversation_contract(version: int) -> dict:
+def conversation_contract(version: int) -> Document:
     return {
         "protocol": "agent-pull-requests.terminal-conversation/v1",
         "owner_store_versions": [version], "ingest": "trusted_owner_only",
@@ -21,7 +22,7 @@ def conversation_contract(version: int) -> dict:
     }
 
 
-def contract() -> dict:
+def contract() -> Document:
     return {
         "protocol": SELECTION, "effects": "none",
         "retirement": "existing_lifecycle_only",
@@ -30,7 +31,7 @@ def contract() -> dict:
     }
 
 
-def target_capture_contract() -> dict:
+def target_capture_contract() -> Document:
     return {
         "protocol": "agent-pull-requests.terminal-target-capture/v1",
         "phase": "before_acquisition", "budget": "request_checkpoint_and_expiry",
@@ -61,12 +62,16 @@ def adopted_version(workspace: WorkspaceOperations, *, expires_at: int,
                     checkpoint: Callable[[], None]) -> int:
     from .watch_replay_store import ReplayStoreInvalid
 
-    def selected(document: dict) -> int:
+    def selected(document: Document) -> int:
         if any(document.get(name + "_version") != 1 for name in (
             "terminal_retention", "terminal_recovery", "terminal_cache_retirement",
         )):
             raise ReplayStoreInvalid("terminal workspace read requires explicit storage adoption")
-        return document["version"]
+        if workspace.store.recorded_terminal_cache and document.get("recorded_terminal_cache_version") != (
+            2 if workspace.store.native_generation_associations else 1
+        ):
+            raise ReplayStoreInvalid("recorded terminal cache requires explicit storage adoption")
+        return cast(int, document["version"])
 
     return workspace.store._review_transaction(
         selected, expires_at=expires_at, checkpoint=checkpoint, persist=False,
@@ -74,18 +79,22 @@ def adopted_version(workspace: WorkspaceOperations, *, expires_at: int,
 
 
 def capabilities(workspace: WorkspaceOperations, *, expires_at: int,
-                 checkpoint: Callable[[], None]) -> dict:
+                 checkpoint: Callable[[], None]) -> Document:
     from .native_read import NativeReadHandler
-    from .workspace_operations import CHUNK_BYTES, MAX_GENERATION_BYTES
+    from .workspace_operations import CHUNK_BYTES
+    from .review_workspace import MAX_GENERATION_BYTES
 
     version = adopted_version(workspace, expires_at=expires_at, checkpoint=checkpoint)
     from .workspace_terminal_mapping import FIELD, available, contract as mapping_contract
     mapping = available(workspace, expires_at=expires_at, checkpoint=checkpoint)
+    from . import workspace_retained_review as retained_review
+    recovery = retained_review.available(workspace, expires_at=expires_at, checkpoint=checkpoint)
     return {
         "protocol": PROTOCOL, "operations": list(OPERATIONS),
         "generation_versions": [1], "owner_store_versions": [version],
         "terminal_read_contract": contract(),
         **({FIELD: mapping_contract()} if mapping else {}),
+        **({retained_review.FIELD: retained_review.contract()} if recovery else {}),
         "conversation_contract": conversation_contract(version),
         "conversation_acquisition": "workspace-projection/v1",
         "max_generation_bytes": MAX_GENERATION_BYTES, "chunk_bytes": CHUNK_BYTES,
@@ -96,9 +105,9 @@ def capabilities(workspace: WorkspaceOperations, *, expires_at: int,
     }
 
 
-def serve(workspace: WorkspaceOperations, operation: str, payload: dict, *,
+def serve(workspace: WorkspaceOperations, operation: str, payload: Document, *,
           expires_at: int, checkpoint: Callable[[], None], selection: object = None,
-          **options: object) -> dict:
+          **options: Any) -> Document:
     from .workspace_operations import WorkspaceUnavailable
 
     if workspace.terminal_reads:
@@ -106,7 +115,11 @@ def serve(workspace: WorkspaceOperations, operation: str, payload: dict, *,
         mapping = operation == "retained-comment" and selection == MAPPING_SELECTION and available(
             workspace, expires_at=expires_at, checkpoint=checkpoint,
         )
-        if not mapping and (
+        from . import workspace_retained_review as retained_review
+        recovery = operation == "inspect" and selection == retained_review.SELECTION and retained_review.available(
+            workspace, expires_at=expires_at, checkpoint=checkpoint,
+        )
+        if not mapping and not recovery and (
             operation not in OPERATIONS or operation != "capabilities" and selection != SELECTION
         ):
             raise WorkspaceUnavailable("terminal workspace read capability required")

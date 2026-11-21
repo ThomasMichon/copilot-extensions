@@ -6,7 +6,7 @@ import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,10 +15,12 @@ from repository_policy import AgentHostingError
 from agent_bridge import hosting_policy, local_launch_preparation, provider_creation, transport
 from agent_bridge.agent_registry import AgentConfig, AgentResolver, CliNamespaceResolver
 from agent_bridge.connect import ConnectTracker
-from agent_bridge.models import StartSessionRequest
+from agent_bridge.agent_registry_namespace import NamespaceResolver
 from agent_bridge.routes import sessions
 from agent_bridge.session_host import agent_runner, launcher
 from agent_bridge.session_host_connection import _SessionHostConnectionMixin
+from agent_bridge.session_manager import SessionManager
+from agent_bridge.session_start_models import StartSessionRequest
 from agent_bridge.transport import SpawnTarget
 from test_repository_hosting_policy import deny, local_scope as _local_scope, repo as _repo
 
@@ -28,7 +30,7 @@ repo = _repo
 
 @pytest.mark.asyncio
 async def test_http_start_with_cold_ssh_manager_checks_policy_before_agent_effects(
-    tmp_path: Path, session_manager, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, session_manager: SessionManager, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from ssh_manager import ConnectionManager, SSHConfig, SSHProfileSource
     from ssh_manager import manager as ssh_owner
@@ -82,7 +84,7 @@ async def test_http_start_with_cold_ssh_manager_checks_policy_before_agent_effec
         session_manager=session_manager, resolver=resolver, ready=True,
     )))
     with pytest.raises(AgentBoundaryReached):
-        await sessions.start_session(StartSessionRequest(agent="receiver"), request)
+        await sessions.start_session(StartSessionRequest(agent="receiver"), cast(Any, request))
     assert effects == ["connect", "policy", "agent-boundary"]
     assert session_manager.list_sessions() == []
     assert session_manager.db.execute_read("SELECT * FROM sessions") == []
@@ -94,7 +96,7 @@ async def test_resolved_execution_checkout_checked_before_plugin_preparation(
 ) -> None:
     effects: list[str] = []
 
-    async def resolve(*_a, **_k):
+    async def resolve(*_a: Any, **_k: Any) -> dict[str, Any]:
         deny(repo)
         return {"launch": {"cmd": ["copilot"], "work_dir": str(repo)}}
 
@@ -112,7 +114,7 @@ async def test_resolved_execution_checkout_checked_before_plugin_preparation(
 
 @pytest.mark.asyncio
 async def test_prepared_plan_rechecks_policy(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def resolve(*_a, **_k):
+    async def resolve(*_a: Any, **_k: Any) -> tuple[list[str], str, dict[str, str]]:
         return ["copilot"], str(repo), {}
 
     monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
@@ -144,7 +146,7 @@ async def test_host_connection_checks_retained_actual_cwd_not_only_target(
     )
     with pytest.raises(AgentHostingError):
         await _SessionHostConnectionMixin._connect_via_session_host(
-            SimpleNamespace(), target, tracker=ConnectTracker(), session_id="reserved",
+            cast(Any, SimpleNamespace()), target, tracker=ConnectTracker(), session_id="reserved",
             on_acp_event=None, permission_callback=None, spawner=spawner,
             prepared_local_launch=plan,
         )
@@ -191,13 +193,13 @@ async def test_actual_host_backstop_precedes_survival_spawn_state_and_ready(
 async def test_direct_spawn_rechecks_after_retained_resolution(
     repo: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def resolve(*_a, **_k):
+    async def resolve(*_a: Any, **_k: Any) -> tuple[list[str], str, dict[str, str]]:
         deny(repo)
         return ["copilot"], str(repo), {}
 
     monkeypatch.setattr(transport, "resolve_local_launch", resolve)
     spawn = AsyncMock()
-    monkeypatch.setattr(transport.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr("agent_bridge.transport.asyncio.create_subprocess_exec", spawn)
     with pytest.raises(AgentHostingError):
         await transport.spawn_local(SpawnTarget(cwd=str(repo)))
     spawn.assert_not_awaited()
@@ -205,7 +207,7 @@ async def test_direct_spawn_rechecks_after_retained_resolution(
 
 @pytest.mark.asyncio
 async def test_opaque_provider_refuses_before_journal_or_spawn(
-    session_manager, monkeypatch: pytest.MonkeyPatch,
+    session_manager: SessionManager, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     effects: list[str] = []
     monkeypatch.setattr(
@@ -228,7 +230,9 @@ async def test_namespace_refuses_before_readiness_can_cold_start(
     resolver = AgentResolver({}, {})
     resolved = AsyncMock(side_effect=AssertionError("opaque receiver must refuse before resolution"))
 
-    async def resolve(name, *, extra_plugins=(), repo=None, repo_remote=None):
+    async def resolve(
+        name: str, *, extra_plugins: Any = (), repo: str | None = None, repo_remote: str | None = None,
+    ) -> Any:
         return await resolved(
             name, extra_plugins=extra_plugins, repo=repo, repo_remote=repo_remote,
         )
@@ -236,7 +240,7 @@ async def test_namespace_refuses_before_readiness_can_cold_start(
     provider = SimpleNamespace(
         prefix="provider", ensure_ready=AsyncMock(), resolve=resolve,
     )
-    resolver.register_namespace_resolver(provider)
+    resolver.register_namespace_resolver(cast(NamespaceResolver, provider))
     monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
     monkeypatch.setattr(
         resolver, "_gather_bare_candidates", AsyncMock(return_value=[("provider:named", provider, "named")]),
@@ -266,11 +270,12 @@ async def test_worktree_namespace_checks_fresh_owner_path_before_staging(
     related = AsyncMock(return_value=[])
     monkeypatch.setattr(resolver, "_related_plugins_for", related)
 
-    async def ready(_name):
+    async def ready(_name: str) -> None:
         if denied_at == "after-readiness":
             deny(repo)
 
-    provider.ensure_ready = AsyncMock(side_effect=ready)
+    ensure_ready = AsyncMock(side_effect=ready)
+    monkeypatch.setattr(provider, "ensure_ready", ensure_ready)
     if denied_at == "before-readiness":
         deny(repo)
     if denied_at is None:
@@ -282,9 +287,9 @@ async def test_worktree_namespace_checks_fresh_owner_path_before_staging(
             await resolver.resolve_async("dispatch:task")
         related.assert_not_awaited()
     if denied_at == "before-readiness":
-        provider.ensure_ready.assert_not_awaited()
+        ensure_ready.assert_not_awaited()
     else:
-        provider.ensure_ready.assert_awaited_once_with("task")
+        ensure_ready.assert_awaited_once_with("task")
     assert owner.await_args_list
     assert all(call.args == ("workspace", "execution-project") for call in owner.await_args_list)
 
@@ -345,7 +350,8 @@ def test_ssh_receiving_shell_rechecks_before_launch(shell: str) -> None:
     if shell == "powershell":
         command = base64.b64decode(command.split()[-1]).decode("utf-16-le")
         assert "if ($LASTEXITCODE -ne 0)" in command
-    assert command.index("agent-policy") < command.rindex("copilot" if shell == "bash" else "powershell")
+        assert "-EncodedCommand" not in command
+    assert command.index("agent-policy") < command.rindex("copilot")
 
 
 @pytest.mark.parametrize("payload", [
@@ -353,7 +359,7 @@ def test_ssh_receiving_shell_rechecks_before_launch(shell: str) -> None:
     {"version": 1, "repository": "/workspace", "expose_agent": False, "sources": [], "denied_by": []},
     {"version": 1, "repository": "/workspace", "expose_agent": "true", "sources": [], "denied_by": []},
 ])
-def test_unsupported_policy_answer_is_never_an_allow(payload: dict) -> None:
+def test_unsupported_policy_answer_is_never_an_allow(payload: dict[str, Any]) -> None:
     with pytest.raises(AgentHostingError):
         hosting_policy.validate_policy_result(payload)
 
@@ -379,7 +385,7 @@ def test_unsupported_policy_answer_is_never_an_allow(payload: dict) -> None:
     {"denied_by": ["config.yaml"]},
     {"denied_by": None},
 ])
-def test_check_result_requires_explicit_allow_and_well_formed_success(changes: dict) -> None:
+def test_check_result_requires_explicit_allow_and_well_formed_success(changes: dict[str, Any]) -> None:
     payload = {
         "version": 1, "allowed": True, "repository": "/workspace",
         "expose_agent": None, "sources": [], "denied_by": [],
@@ -413,7 +419,7 @@ async def test_supported_container_checks_actual_instance_user_and_guest_before_
     calls = []
     instance = "a" * 64
 
-    async def run(argv, **kwargs):
+    async def run(argv: list[str], **kwargs: Any) -> tuple[int, bytes, bytes]:
         calls.append(argv)
         if argv[:2] == ["docker", "inspect"]:
             return 0, json.dumps([{"Id": instance, "State": {"Running": True}}]).encode(), b""
@@ -453,7 +459,7 @@ async def test_driver_backed_container_checks_through_provider_runtime_proxy(
     instance = "0123456789ab"
     proxy = ["provider", "runtime-proxy", "--fleet", "example"]
 
-    async def run(argv, **kwargs):
+    async def run(argv: list[str], **kwargs: Any) -> tuple[int, bytes, bytes]:
         calls.append(argv)
         assert argv[:4] == proxy, "a driver-backed member must not be reached via docker"
         argv = argv[4:]
@@ -498,7 +504,7 @@ async def test_supported_codespace_checks_guest_and_closes_inspection(
 ) -> None:
     calls = []
 
-    async def run(command, **kwargs):
+    async def run(command: str, **kwargs: Any) -> tuple[int, str, str]:
         calls.append(command)
         assert kwargs["input_bytes"].startswith(b"PK")
         if denied:
@@ -556,7 +562,7 @@ async def test_project_without_cwd_uses_read_only_owner_and_honors_denial(
     deny(repo)
     calls = []
 
-    async def command(argv, project):
+    async def command(argv: list[str], project: str) -> dict[str, Any]:
         calls.append((argv, project))
         return {
             "version": 1, "allowed": True, "repository": str(repo),
@@ -589,9 +595,12 @@ def test_portable_bundle_contains_enforcing_dependency_free_adapter(tmp_path: Pa
 
 @pytest.mark.parametrize("allowed", [True, False, None, 1])
 def test_portable_receiver_requires_explicit_guest_policy_allow(
-    monkeypatch: pytest.MonkeyPatch, allowed,
+    monkeypatch: pytest.MonkeyPatch, allowed: object,
 ) -> None:
-    from agent_bridge.session_host import receiver_policy
+    from agent_bridge.session_host import receiver_policy as _receiver_policy
+
+    # The compatibility module replaces itself with the portable implementation.
+    receiver_policy: Any = _receiver_policy
 
     monkeypatch.setattr(receiver_policy.shutil, "which", lambda _name: "/guest/agent-worktrees")
     query = MagicMock(return_value=SimpleNamespace(
@@ -620,17 +629,18 @@ async def test_supported_namespace_admission_precedes_readiness(
 
     resolver = AgentResolver({}, {})
     provider = CliNamespaceResolver("codespace", "agent-codespaces")
-    provider._run = AsyncMock(return_value=(0, json.dumps({
+    monkeypatch.setattr(provider, "_run", AsyncMock(return_value=(0, json.dumps({
         "type": "command", "spawn_command": ["provider"],
         "codespace": {"name": "member", "workspace_folder": "/actual"},
-    }), ""))
-    provider.ensure_ready = AsyncMock()
+    }), "")))
+    ensure_ready = AsyncMock()
+    monkeypatch.setattr(provider, "ensure_ready", ensure_ready)
     resolver.register_namespace_resolver(provider)
     monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
     monkeypatch.setattr(resolver, "_related_plugins_for", AsyncMock(return_value=[]))
     calls = []
 
-    async def query(target, *, operation):
+    async def query(target: SpawnTarget, *, operation: str) -> dict[str, Any]:
         calls.append(operation)
         return {**require_agent_hosting(repo, operation=operation).to_dict(), "allowed": True}
 
@@ -639,12 +649,12 @@ async def test_supported_namespace_admission_precedes_readiness(
         deny(repo)
         with pytest.raises(AgentHostingError):
             await resolver.resolve_async("codespace:member")
-        provider.ensure_ready.assert_not_awaited()
+        ensure_ready.assert_not_awaited()
         assert calls == ["namespace readiness"]
     else:
         target = await resolver.resolve_async("codespace:member")
         assert target.type == "command"
-        provider.ensure_ready.assert_awaited_once_with("member")
+        ensure_ready.assert_awaited_once_with("member")
         assert calls[0] == "namespace readiness" and len(calls) == 3
 
 
@@ -654,15 +664,17 @@ async def test_session_reference_namespace_is_inspection_not_launch(monkeypatch:
 
     resolver = AgentResolver({}, {})
     provider = CliNamespaceResolver("dispatch", "agent-dispatch")
-    provider._run = AsyncMock(return_value=(0, json.dumps({
+    monkeypatch.setattr(provider, "_run", AsyncMock(return_value=(0, json.dumps({
         "type": "session", "venue": {"task": {"owner_session_id": "existing"}},
-    }), ""))
-    provider.ensure_ready = AsyncMock()
+    }), "")))
+    ensure_ready = AsyncMock()
+    monkeypatch.setattr(provider, "ensure_ready", ensure_ready)
     resolver.register_namespace_resolver(provider)
     monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
     target = await resolver.resolve_async("dispatch:task")
-    assert target.type == "session" and target.venue["task"]["owner_session_id"] == "existing"
-    provider.ensure_ready.assert_not_awaited()
+    assert target.type == "session" and target.venue is not None
+    assert target.venue["task"]["owner_session_id"] == "existing"
+    ensure_ready.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -683,7 +695,7 @@ async def test_elevated_policy_denial_precedes_subdaemon_effects(
     start = MagicMock(side_effect=AssertionError("denied repository must not start a subdaemon"))
     monkeypatch.setattr(elevated, "ensure_running", start)
     if route == "admin":
-        resolver.register_namespace_resolver(AdminResolver(resolver))
+        resolver.register_namespace_resolver(cast(NamespaceResolver, AdminResolver(resolver)))
     with pytest.raises(AgentHostingError, match="expose_agent"):
         await resolver.resolve_async("admin:worker" if route == "admin" else "worker")
     start.assert_not_called()
@@ -695,12 +707,13 @@ async def test_read_only_protocol_does_not_admit_an_opaque_receiver(monkeypatch:
 
     resolver = AgentResolver({}, {})
     provider = CliNamespaceResolver("custom", "isolated-fixture-provider")
-    provider._run = AsyncMock(return_value=(0, json.dumps({
+    monkeypatch.setattr(provider, "_run", AsyncMock(return_value=(0, json.dumps({
         "type": "command", "spawn_command": ["opaque"],
-    }), ""))
-    provider.ensure_ready = AsyncMock()
+    }), "")))
+    ensure_ready = AsyncMock()
+    monkeypatch.setattr(provider, "ensure_ready", ensure_ready)
     resolver.register_namespace_resolver(provider)
     monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
     with pytest.raises(AgentHostingError, match="receiver cannot enforce"):
         await resolver.resolve_async("custom:worker")
-    provider.ensure_ready.assert_not_awaited()
+    ensure_ready.assert_not_awaited()

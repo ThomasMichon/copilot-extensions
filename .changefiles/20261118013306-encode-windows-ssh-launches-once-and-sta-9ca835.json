@@ -1,0 +1,9 @@
+{
+  "comment": "Encode Windows SSH launches once and stage over-length launches to a remote temp script; refresh stale transport tests for the hosting policy",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -85,6 +85,9 @@ for (const mode of ["inline", "spilled", "legacy", "unreadable"]) {
         })[key],
         execute: (_bin, argv) => {
           calls.push(argv[0]);
+          if (argv[0] === "health") return JSON.stringify({
+            handoff_claim_contract: "context-handoff-creator-claim/v1",
+          });
           if (argv[0] === "create") {
             if (payload === null) {
               payload = readFileSync(argv[argv.indexOf("--payload-file") + 1], "utf-8");
@@ -125,6 +128,24 @@ for (const mode of ["inline", "spilled", "legacy", "unreadable"]) {
     });
   });
 }
+
+test("an older or rolled-back task owner falls back before publishing a task", () => {
+  fixture(({ stateDir, worktreeDir }) => {
+    for (const peer of [{ status: "ok" }, { handoff_claim_contract: "unsupported/v2" }]) {
+      const calls = [];
+      const stored = dispatchHandoff("brief", "predecessor", worktreeDir, "Continue", {
+        get: key => ({ "worktree-dir": worktreeDir, "worktree-state-dir": stateDir })[key],
+        execute: (_bin, argv) => {
+          calls.push(argv[0]);
+          assert.equal(argv[0], "health");
+          return JSON.stringify(peer);
+        },
+      });
+      assert.equal(stored, null);
+      assert.deepEqual(calls, ["health"]);
+    }
+  });
+});
 
 for (const invalid of ["absent", "legacy", "wrong-session", "wrong-worktree", "oversized", "invalid"]) {
   test(`optional ${invalid} binding does not qualify or block ordinary consumption`, () => {

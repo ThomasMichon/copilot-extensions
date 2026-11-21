@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: add an opt-in relentless drive posture with hold audit, goal-advancing answer scope, blocker owners and same-session head reactivation",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

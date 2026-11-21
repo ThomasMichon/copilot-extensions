@@ -209,10 +209,21 @@ setting makes native tests safe on a shared host.
 
 The finite CLI advertises `copilot-driver.mux-observation`, version 1 and
 operation `psmux-observe` with its actual interpreter/entrypoint through
-`--describe-contract`. `--observe` consumes at most 4 KiB of JSON with exactly
-`version: 1` and `session`. Its response has the contract/version and
+`--describe-contract`. The ordinary `--observe` request takes `version: 1`
+and `session`. A runtime advertising `psmux-observe-pinned` also accepts an
+`expected_incarnation` (native `$id:created` string). This form requires an
+explicit absolute `PSMUX_DATA_DIR` and an explicitly set
+`COPILOT_DRIVER_PSMUX_NAMESPACE` (empty for the default). These select the
+caller's trusted scope, not scope supplied by a remote request. A missing
+rendezvous or different incarnation is `unknown`; this form does not consult
+host inventory. Consumers requiring the pin must not retry without it. Even
+a match establishes only mux identity, not a reachable Copilot session.
+Both forms accept at most 4 KiB of JSON. The response has the contract/version and
 `status` (`present`, `absent`, `unknown`, `unsupported`), with incarnation,
-client count and pane observations when present. Confirmed present/absent
+client count and pane observations when present in ordinary mode. The pinned
+form returns the operation, namespace, session, expected incarnation, status,
+reason and observed incarnation, without pane details or authentication data.
+Confirmed present/absent
 exits zero; unknown/unsupported exits 3. Duplicate/unknown properties and
 unknown options are refused. Older independently installed providers without
 the declaration stay unsupported; callers must not downgrade to passive

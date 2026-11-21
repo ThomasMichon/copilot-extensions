@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -128,11 +129,12 @@ class PreparedPoints:
         if journal.point_claim != claim:
             raise PendingCrawlConflict("Point acquisition requires its whole bound claim")
         self.journal, self.claim, self.manifest = journal, claim, manifest
+        self._targets = frozenset(claim.hints.targets)
 
     def _key(self, target: PointTarget) -> str:
         if (
             type(target) not in (WorkItemRevisionTarget, CommentVersionTarget)
-            or target not in self.claim.hints.targets
+            or target not in self._targets
         ):
             raise ValueError("Point acquisition target does not belong to the whole claim")
         return _json(target.to_dict())
@@ -155,7 +157,10 @@ class PreparedPoints:
         stored = self.journal.get(_KIND, [key])
         if key not in stored:
             return None
-        result = PointAcquisition.from_bytes(stored[key])
+        return self._decode(target, stored[key])
+
+    def _decode(self, target: PointTarget, payload: bytes) -> PointAcquisition:
+        result = PointAcquisition.from_bytes(payload)
         if (
             result.target != target
             or result.component.source != self.claim.hints.canonical_family
@@ -174,10 +179,12 @@ class PreparedPoints:
         component_to_logical: dict[tuple[str, str], tuple[str, ...]] = {}
         versions: dict[tuple[str, str, int], str] = {}
         selected: dict[tuple[str, str], PointAcquisition] = {}
-        for target in self.claim.hints.targets:
-            observed = self.read(target)
-            if observed is None:
-                raise ValueError("Whole point acquisition is incomplete")
+        targets = {self._key(target): target for target in self.claim.hints.targets}
+        seen = set()
+        for key, payload in self.journal.iter_rows(_KIND, list(targets)):
+            target = targets[key]
+            seen.add(key)
+            observed = self._decode(target, payload)
             component = observed.component
             logical = (target.kind, target.item_id) + (
                 (target.comment_id,) if isinstance(target, CommentVersionTarget) else ()
@@ -190,7 +197,7 @@ class PreparedPoints:
                 raise ValueError("Point acquisition logical/component identity changed")
             data = observed.to_dict()
             del data["target"]
-            content = _json(data)
+            content = hashlib.sha256(_json(data).encode("utf-8")).hexdigest()
             version_key = (*physical, component.version)
             if versions.setdefault(version_key, content) != content:
                 raise ValueError("Equal point versions have conflicting acquisition content")
@@ -199,6 +206,8 @@ class PreparedPoints:
                 raise ValueError("Point acquisition component semantics changed")
             if previous is None or previous.component.version < component.version:
                 selected[physical] = observed
+        if seen != targets.keys():
+            raise ValueError("Whole point acquisition is incomplete")
         ordered = [selected[key] for key in sorted(selected)]
         upserts = [item.entry for item in ordered if item.entry is not None]
         deletions = [item.deletion for item in ordered if item.deletion is not None]
@@ -222,3 +231,11 @@ class PreparedPoints:
         if supplied != expected:
             raise PendingCrawlConflict("Point application manifest does not match every acquired target")
         self.journal.put_immutable(_APPLICATION_KIND, "manifest", expected)
+
+    def read_application(self) -> CrawlManifest:
+        """Requalify the complete retained application without creating a binding."""
+        candidate = self.compose()
+        expected = _json(PendingCrawls.manifest_data(candidate)).encode()
+        if self.journal.get(_APPLICATION_KIND, ["manifest"]).get("manifest") != expected:
+            raise PendingCrawlConflict("Whole point application binding is missing or changed")
+        return candidate

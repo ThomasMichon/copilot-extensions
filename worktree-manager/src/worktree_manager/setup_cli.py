@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import configparser
-
 from .core_install import core_status, install_command, install_core
 from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
@@ -19,19 +17,13 @@ def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
         return error.code if isinstance(error.code, int) else (0 if error.code is None else 1)
     do_apply = args.apply
     from .self_install import default_root
-    from .toolchain_config import configure_selected
+    from .toolchain_config import configure_setup
 
-    try:
-        configure_selected(root=default_root(), apply=do_apply)
-    except (OSError, ValueError, UnicodeError, configparser.Error) as error:
-        # Parser exceptions can contain native file contents.
-        reason = f": {error}" if type(error) is ValueError else ""
-        print(f"  ! toolchain configuration refused: {type(error).__name__}{reason}")
-        return 2
-    if args.toolchain_only:
-        mode = "applied" if do_apply else "preflight complete (plan only)"
-        print(f"  toolchain configuration: {mode}; no prerequisite/core/repository setup requested.")
-        return 0
+    configuration_status = configure_setup(
+        root=default_root(), apply=do_apply, configuration_only=args.toolchain_only,
+    )
+    if configuration_status or args.toolchain_only:
+        return configuration_status
     gaps = missing(detect_baseline())
     actions = provision_plan(gaps)
     core = core_status()

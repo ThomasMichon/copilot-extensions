@@ -2,6 +2,85 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-20 - Recover saved and cleared proposal drafts without the queue
+
+The original installed reader reconstructed the proposal but lost its saved
+draft before any B mutation. The opt-in `ProposalIntake.write_draft` now commits
+the guarded queue result to the existing proposal records before acknowledging
+it. The first such write selects a draft-aware record layout; an older reader
+cannot silently accept it as a v1 history. Ordinary queue writes do not acquire
+this guarantee. A failed journal commit invalidates the writer; reconstruct
+from the last acknowledged records instead of mounting the partial queue.
+
+Separate Windows installed A -> B -> A trials withheld each entire outgoing
+queue before starting the next reader. Both B readers saw the exact seed
+draft. One returning A saw B's exact updated draft, including its revision;
+the other saw B's acknowledged clear. Task, payload and original keyed steer
+receipt survived before retry, with no wake requested. These are queue-loss
+rebuilds between draft-aware fixture wheels, not historical compatibility,
+active task recovery, or deployment evidence.
+
+## 2026-11-20 - Compatible Dispatch handoff retains a cleared card draft
+
+Two installed Windows fixture wheels transferred an unowned proposal A -> B
+-> A using the outgoing queue each time. B read the exact draft saved by A
+and cleared it against the observed card and draft revisions. Returning A
+read the same task with the draft absent. The keyed steer receipt remained
+unchanged and the wake outbox stayed empty. This covers the task's draft
+field, not task deletion. Both queues used format 1; the independent
+proposal and steer records do not witness a draft clear after queue loss.
+
+## 2026-11-20 - Host-index discovery without an attached session
+
+The installed mux consumer trial merged in [#13635](https://github.com/ThomasMichon/copilot-extensions/pull/13635).
+The next private fixture exercises the public Bridge target and session status
+routes with an empty database. A host index record with a living but unrelated
+fixture PID is listed as a candidate. A missing or unreadable-version index is
+an unavailable source, not a complete empty inventory. In all three cases,
+status returns `404 Session <id> not found`. No session or turn is created.
+
+The status handler requires a managed session before calling Driver inspection.
+The existing client's inspection credential is established during attachment;
+the host index's owner generation identifies the **frontend**, not the host
+incarnation. Neither a PID nor a saved endpoint binds a cold probe to the
+original host. Do not send an attachment credential to a candidate to find
+out who owns it. Original-versus-lookalike cold verification and installed
+host recovery remain open until the host owner supplies a read-only route
+bound independently to the original incarnation. No new store or grant.
+
+## 2026-11-20 - Pinned mux discovery merged
+
+[#13621](https://github.com/ThomasMichon/copilot-extensions/pull/13621)
+merged to `dev` as `01bd6c08b745`. With an empty Bridge database, the
+opt-in caller used an independent pin and the Driver CLI to distinguish
+the original mux incarnation from a same-name replacement. Neither result
+added a target or verified an agent route.
+
+A Windows fixture then installed `8bced12e2eaa` (A) and `01bd6c08b745`
+(B) non-editably into separate environments. Each Bridge and Driver import
+resolved inside its selected environment. Against the same fixture-owned
+loopback endpoint and pin, B observed the original incarnation in three
+native reads. New Bridge with A's Driver returned `pinned_read_unsupported`
+without contacting the endpoint. Returning to A restored the legacy
+capability declaration; A did not have a pinned discovery caller. B later
+rejected a same-name replacement in three native reads. The Bridge session
+database stayed empty. This exercised the installed discovery function, not
+full CLI target listing, live reattachment or acknowledged application writes.
+
+The subsequent installed `agent-bridge targets --json` trial passed five
+Windows cases against the real HTTP health and target-list handlers in the
+private fixture. Ordinary inventory was unchanged on A, B and return to A.
+With an independent pin, B distinguished original, lookalike, missing and
+unreadable rendezvous; the mixed installation refused the older Driver
+without querying the fixture mux. No route, session or turn was created.
+This tests read-only discovery, not reattachment or acknowledged writes.
+
+Offline staging of both revisions initially failed: the resolver could not
+find `agent-client-protocol` in its cache. Neither failure qualified a build.
+Staging the same source revisions with the configured package source succeeded;
+the exercised console scripts came from those separate non-editable installs.
+No offline installation, live service validation or rollout is claimed.
+
 ## 2026-11-13 - Original application integration merged
 
 [Source and bounded native evidence](<journal/2026/11.13 canonical-application-integration.md>)

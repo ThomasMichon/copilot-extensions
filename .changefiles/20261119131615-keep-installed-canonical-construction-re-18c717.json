@@ -1,0 +1,9 @@
+{
+  "comment": "Keep installed canonical construction resources complete when provider-root preservation is enabled.",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

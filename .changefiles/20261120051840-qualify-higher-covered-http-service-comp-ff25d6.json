@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify higher-covered HTTP service completion and client-free retry against unrelated native history",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

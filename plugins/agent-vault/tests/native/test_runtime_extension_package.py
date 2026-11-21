@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from .test_runtime_profile import (
     _backend,
     _closed_wheels,
     _external_wheel,
     _isolated_install_env,
+    _no_service_provision_command,
     _run,
     _stage_payload,
+    native_profile_inputs,
 )
 
 PROVIDER = '''
@@ -56,8 +61,33 @@ sys.path.insert(0, str(payload / "scripts"))
 import installer_engine as engine
 import install_source
 import runtime_profile
+import installer_provider_roots
 from agent_procutil import no_window_kwargs
 root = home / ".agent-vault"
+installer_provider_roots.persist(root, ["example-vault-provider"])
+desire = (root / installer_provider_roots.FILE).read_bytes()
+transitive = json.loads(profile.read_text())
+transitive["roots"].append('psutil; python_version < "3.0"')
+transitive_file = home / "conditional-transitive-profile.json"
+transitive_file.write_text(json.dumps(transitive))
+with install_source.wheel_inputs(transitive_file, wheels) as transitive_inputs:
+    transitive_selection = install_source.wheel_selection(payload, "agent-vault", transitive_inputs)
+    assert transitive_selection["provider_roots"] == ["example-vault-provider"]
+    runtime_profile.wheel_selection(root, payload, transitive_selection, "ssh")
+inactive = json.loads(profile.read_text())
+inactive["roots"] = [inactive["roots"][0], 'example-vault-provider; python_version < "3.0"']
+inactive["wheels"] = [row for row in inactive["wheels"] if row["name"] != "example-vault-provider"]
+inactive_file = home / "inactive-provider-profile.json"
+inactive_file.write_text(json.dumps(inactive))
+with install_source.wheel_inputs(inactive_file, wheels) as inactive_inputs:
+    inactive_selection = install_source.wheel_selection(payload, "agent-vault", inactive_inputs)
+    assert inactive_selection["provider_roots"] == []
+    try:
+        runtime_profile.wheel_selection(root, payload, inactive_selection, "ssh")
+    except ValueError as error:
+        assert "changes selected" in str(error)
+    else:
+        raise AssertionError("an inactive root satisfied the selected provider")
 with install_source.wheel_inputs(profile, wheels) as inputs:
     admitted = install_source.wheel_selection(payload, "agent-vault", inputs)
     selected = runtime_profile.wheel_selection(root, payload, admitted, "ssh")
@@ -91,8 +121,49 @@ with install_source.wheel_inputs(profile, wheels) as inputs:
             assert not (root / "deploy-manifest.json").exists()
             assert not (home / ".local" / "bin").exists()
     assert observations == [{"installed_provider": True, "unlock_invoked": False}] * 2
+assert (root / installer_provider_roots.FILE).read_bytes() == desire
 print(json.dumps({"constructed": True, "reused": True, "activated": False}))
 '''
+
+
+@pytest.mark.timeout(120)
+def test_base_profile_update_refuses_unqualified_provider_inputs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    with contextmanager(native_profile_inputs)(
+        tmp_path_factory, crypto=False,
+    ) as (payload, home, env, pwsh):
+        installer = payload / "scripts" / "install.ps1"
+        _run(_no_service_provision_command(home, installer, pwsh), env, home)
+        root = home / ".agent-vault"
+        assert not (root / "runtime-profile.json").exists()
+        retained = {
+            name: (root / name).read_bytes() for name in ("current-version", "deploy-manifest.json")
+        }
+        versions = sorted(path.name for path in (root / "versions").iterdir())
+        selection = root / "runtime-provider-roots.json"
+        selection.write_text(json.dumps({
+            "schema": "copilot-extensions.runtime-provider-roots", "version": 1,
+            "roots": ["example-vault-provider"],
+        }), encoding="utf-8")
+        before = selection.read_bytes()
+        result = subprocess.run(
+            _no_service_provision_command(home, installer, pwsh, action="update"),
+            env=env, cwd=home, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=60, **no_window_kwargs(),
+        )
+        assert result.returncode != 0
+        assert "complete native wheel profile" in result.stdout + result.stderr
+        assert selection.read_bytes() == before
+        assert {name: (root / name).read_bytes() for name in retained} == retained
+        assert sorted(path.name for path in (root / "versions").iterdir()) == versions
+        cleared = json.loads(before)
+        cleared["roots"] = []
+        selection.write_text(json.dumps(cleared), encoding="utf-8")
+        _run(_no_service_provision_command(home, installer, pwsh, action="update"), env, home)
+        version = json.loads((root / "deploy-manifest.json").read_text())["source"]["version"]
+        _run([sys.executable, "-I", "-B", payload / "scripts" / "runtime_profile.py",
+              "--root", root, "current", "--package-version", version], env, home)
 
 
 @pytest.mark.timeout(120)
@@ -150,3 +221,20 @@ def test_closed_native_profile_installs_an_independent_provider_without_activati
         env, home,
     )
     assert json.loads(result.stdout) == {"constructed": True, "reused": True, "activated": False}
+    root = home / ".agent-vault"
+    desire = root / "runtime-provider-roots.json"
+    retained = desire.read_bytes()
+    roots = tuple(json.loads(retained)["roots"])
+    core = payload / "src" / "agent_vault" / "__init__.py"
+    core.write_text(core.read_text(encoding="utf-8") + "\nRECONSTRUCTION_FIXTURE = True\n", encoding="utf-8")
+    profile, wheels, base_python, selected_uv = _closed_wheels(
+        payload, env, home, "ssh", additional_roots=roots,
+    )
+    result = _run(
+        [sys.executable, "-I", "-B", "-c", CONSTRUCT, payload, home, profile, wheels,
+         selected_uv, base_python, probe_file],
+        env, home,
+    )
+    assert json.loads(result.stdout) == {"constructed": True, "reused": True, "activated": False}
+    assert desire.read_bytes() == retained
+    assert len(list((root / "versions").iterdir())) == 2

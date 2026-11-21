@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable
+from typing import Any
 
 from . import bridge_remote, remote_dispatch
 from .procutil import no_window_kwargs
@@ -48,9 +49,9 @@ def _command_result(
     *,
     machine: str | None,
     launch_prefix: Callable[[], list[str] | None],
-    run_ssh: Callable[..., subprocess.CompletedProcess],
+    run_ssh: Callable[..., subprocess.CompletedProcess[str]],
     timeout: float | None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[str] | None:
     """Run the same Bridge CLI locally or through the existing SSH transport."""
     local = remote_dispatch.local_machine()
     remote = bridge_remote.normalize_host(machine) if machine is not None else None
@@ -58,7 +59,7 @@ def _command_result(
         raise RuntimeError("local machine identity is unavailable for Bridge delivery")
     normalized_local = bridge_remote.normalize_host(local) if local is not None else None
     is_remote = remote is not None and remote != normalized_local
-    if is_remote:
+    if is_remote and remote is not None:
         ssh = shutil.which("ssh")
         if ssh is None:
             log.warning("Bridge command delivery requires an available SSH executable")
@@ -94,7 +95,7 @@ def _command_result(
 def send_command(
     argv: list[str], prompt: str, *, machine: str | None,
     launch_prefix: Callable[[], list[str] | None],
-    run_ssh: Callable[..., subprocess.CompletedProcess], timeout: float | None,
+    run_ssh: Callable[..., subprocess.CompletedProcess[str]], timeout: float | None,
 ) -> bool:
     """Run the standard Bridge send and retain its existing acceptance result."""
     result = _command_result(
@@ -106,8 +107,8 @@ def send_command(
 
 def native_prompt_receipt(
     bridge_session: str, native_session: str, prompt: str, *,
-    idempotency_key: str, machine: str | None,
-) -> dict:
+    idempotency_key: str, machine: str | None, no_resume: bool = False,
+) -> dict[str, Any]:
     """Observe an exact prior send; a miss never admits or resumes a prompt."""
     from . import bridge
     from .queue_records import TaskError
@@ -118,7 +119,7 @@ def native_prompt_receipt(
             "--expected-native-session-id", native_session,
             "--idempotency-key", idempotency_key,
             "--caller", f"agent-dispatch:{idempotency_key}",
-            "--prompt-file", "-", "--receipt-only", "--no-wait",
+            "--prompt-file", "-", *(["--no-resume"] if no_resume else []), "--receipt-only", "--no-wait",
         ],
         prompt, machine=machine, launch_prefix=bridge._agent_bridge_launch_prefix,
         run_ssh=bridge.run_ssh_command, timeout=20.0,
@@ -145,8 +146,9 @@ def native_prompt(
     bridge_session: str, native_session: str, prompt: str, *,
     idempotency_key: str, machine: str | None,
     launch_prefix: Callable[[], list[str] | None],
-    run_ssh: Callable[..., subprocess.CompletedProcess],
+    run_ssh: Callable[..., subprocess.CompletedProcess[str]],
     timeout: float | None = 20.0,
+    no_resume: bool = False,
 ) -> bool:
     """Bridge owns protocol negotiation, native admission and receipt recovery."""
     result = _command_result(
@@ -155,7 +157,7 @@ def native_prompt(
             "--expected-native-session-id", native_session,
             "--idempotency-key", idempotency_key,
             "--caller", f"agent-dispatch:{idempotency_key}",
-            "--prompt-file", "-", "--no-wait",
+            "--prompt-file", "-", *(["--no-resume"] if no_resume else []), "--no-wait",
         ],
         prompt, machine=machine, launch_prefix=launch_prefix, run_ssh=run_ssh,
         timeout=timeout,

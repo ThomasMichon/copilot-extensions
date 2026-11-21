@@ -53,12 +53,11 @@ from .coordinator_task_models import (
 from .coordinator_task_views import _bulk_task_dict, _event_task_dict, _task_dict
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
-from .queue_records import WorkerAdmissionInhibited
 from .lease import FencingGuard
 from .queue import TaskQueue
 from .queue_common import CompletionOutcome, ResultTooLargeError, ResultValidationError, Task, worker_id_for
 from .queue_producer_fences import ProducerFenceError, ProducerScopeValidationError
-from .queue_records import TaskError
+from .queue_records import TaskError, WorkerAdmissionInhibited
 from .task_authority import (
     mint_task_token, register_task_grant_route, resolve_task_authority, start_incarnation,
 )
@@ -123,6 +122,8 @@ def register_task_routes(
     register_task_recovery_routes(app, queue, bus, control_token=control_token)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
+    from .coordinator_handoff_claim import register_routes as register_handoff_claim_routes
+    register_handoff_claim_routes(app, queue, bus, control_token=control_token)
     register_category_routes(app, queue, control_token=control_token,
                              emit=lambda kind, data: bus.publish({"type": kind, **data}))
     def _require(task: Task | None) -> Task:
@@ -133,6 +134,9 @@ def register_task_routes(
     def _bulk_tasks(tasks: Iterable[Task]) -> list[dict[str, Any]]:
         scope = _draft_scope(queue)
         return [_bulk_task_dict(task, scope) for task in tasks]
+
+    from .admission_page import register as register_admission_page
+    register_admission_page(app, queue, _bulk_tasks)
 
     def _resolve_task_authority(
         request: Request,
@@ -151,19 +155,13 @@ def register_task_routes(
     def _emit(event_type: str, task: dict[str, Any]) -> None:
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
-        # Heartbeats and activity updates run periodically for every live
-        # task and never transition its state -- recording them as
-        # `kind: state_transition` telemetry would give a configured spool
-        # misleading, high-volume records for a mutation that is a no-op
-        # from telemetry's own perspective. The content-free bus wake above
-        # still fires unconditionally (the Picker's `--subscribe` relay
-        # still needs it to know something happened).
+        # Heartbeat/activity wake subscribers but are not state transitions.
         if event_type not in _NO_TELEMETRY_EVENT_TYPES:
-            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+            telemetry.emit_for(bus, telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
-        telemetry.emit(telemetry.producer_fence_event(event_type, detail))
+        telemetry.emit_for(bus, telemetry.producer_fence_event(event_type, detail))
 
     def _producer_rejection(exc: ProducerFenceError) -> None:
         _emit_producer_event(
@@ -197,7 +195,9 @@ def register_task_routes(
             # mutation succeeds.
             from . import handoff_claim_release
 
-            handoff_claim_release.release_if_handoff(result, cancel_pending=event_type == "task.abandoned")
+            handoff_claim_release.release_if_handoff(
+                result, cancel_pending=event_type == "task.abandoned", queue=queue,
+            )
         if event_type is not None:
             _emit(event_type, result)
         return result

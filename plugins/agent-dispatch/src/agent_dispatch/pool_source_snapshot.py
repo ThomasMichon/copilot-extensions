@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from dropin_registry import ScanAuthority
 
@@ -95,7 +95,7 @@ def local_input_revision(declarations: object, overrides: object) -> str:
 
 
 def collect_pool_sources(
-    registrations: Mapping[str, dict], *, machine: str | None, env: str,
+    registrations: Mapping[str, dict[str, Any]], *, machine: str | None, env: str,
     attempt: int, observed_at: float, observations: Iterable[SourceObservation],
     reasons: Iterable[str] = (),
 ) -> PoolSourceSnapshot:
@@ -112,7 +112,7 @@ def collect_pool_sources(
         unavailable.append("pool-scope-unidentified")
     definitions = []
     for rid, registration in registrations.items():
-        if registration.get("kind") != RegistrationKind.SUPERVISED_LANE:
+        if registration.get("kind") not in RegistrationKind.LANES:
             continue
         try:
             definition = PoolInstanceDefinition.from_registration(registration)

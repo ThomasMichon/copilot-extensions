@@ -19,6 +19,19 @@ Closure first prevents a new owner prompt. Custody first records an in-flight
 participant; a later closure cannot erase that participant or imply quiescence.
 Neither transport nor installation resolution holds the queue write lock.
 
+An opt-in `WakeRecoveryRecords` store lets an isolated installation retain the
+original qualified ordinary native wake before calling transport. Its directory
+must be newly created under owner-private storage: it contains the prompt and
+original custody evidence, is not telemetry, and must follow the task's
+retention policy. The existing sender, not the record store, admits and settles
+the send. A crash or missing settlement leaves the independent record unknown.
+If the queue DB is unavailable, inspect the historical task/owner, generation,
+lease observation and steer acceptance there. They are **not a runnable lease**.
+Only the existing receipt-only Bridge reader for the expected original target
+can confirm previously uncertain acceptance. A miss cannot authorize retry,
+fresh send, or replacement. This does not restore an active coordinator queue,
+launch a worker, or enable journaling on unconfigured legacy installations.
+
 Custody is persisted as fields on `wake_outbox` and `run_waiter_wakes`, retaining
 scope, runtime, producer generation and the original delivery-token identity.
 Successful Bridge acceptance records `sent`; a false response or exception is

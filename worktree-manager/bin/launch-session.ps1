@@ -1303,9 +1303,16 @@ if (
     }
 }
 
-# Append copilot passthrough args (from after -- separator)
+# Add copilot passthrough args (from after -- separator) at the prepared native
+# boundary. A Windows setup launch carries Copilot's arguments in a
+# -NativeArgumentsJson envelope, and default-setup.ps1 refuses arguments that
+# follow the envelope, so a plain append would stop an ACP launch.
 if ($CopilotPassthrough.Count -gt 0) {
-    $cmd += $CopilotPassthrough
+    $appendedJson = & $VenvPython (Join-Path $PSScriptRoot 'ahp-command.py') append $CopilotPassthrough.Count -- @CopilotPassthrough @cmd
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not add the Copilot passthrough arguments to the prepared native command.'
+    }
+    $cmd = @($appendedJson | ConvertFrom-Json)
 }
 
 if ($ahpArgs.Count -gt 0) {
@@ -1516,14 +1523,38 @@ if (-not $noMux -and -not $psmuxCmd) {
 function Resolve-AwPsmuxBin {
     param($Cmd)
     if (-not $Cmd) { return 'psmux' }
+    $src = $Cmd.Source
     $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (Test-Path -LiteralPath $pathHelper) {
         . $pathHelper
+        # A compatible PATH client wins, as in the Python creation gate. Only
+        # file metadata is read, so no provider process starts. A WinGet link
+        # stub is replaced by its real target, which PowerShell 7.4 can launch.
+        $pathClient = $src
+        try {
+            $item = Get-Item -LiteralPath $src -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                $pathClient = $null
+                $linked = $item.ResolveLinkTarget($true)
+                if ($linked -and $linked.Exists) { $pathClient = $linked.FullName }
+            } elseif ($item.Length -eq 0) {
+                $pathClient = $null
+            }
+        } catch { $pathClient = $null }
+        $pathVersion = $null
+        if ($pathClient) {
+            try { $pathVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($pathClient).FileVersion } catch {}
+        }
+        if (Test-AwPsmuxVersionCompatible -Version $pathVersion -MinimumVersion '3.4.0') {
+            return $pathClient
+        }
+        # Side-by-side copies let a newer client create sessions while an older
+        # provider keeps serving its live sessions.
         $desired = Find-AwCompatiblePsmuxPackageBinary `
-            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+            -SideBySideRoot (Get-AwPsmuxSideBySideRoot)
         if ($desired) { return $desired.Path }
     }
-    $src = $Cmd.Source
     try {
         $item = Get-Item -LiteralPath $src -ErrorAction Stop
         $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
@@ -1537,9 +1568,36 @@ function Resolve-AwPsmuxBin {
     } catch {}
     return $src
 }
+
+# Return a PATH value with the selected client's directory first, so panes and
+# helpers that run a bare `psmux` use the same client as the launcher.
+function Join-AwPsmuxPathFirst {
+    param([string]$Binary, [string]$PathValue)
+    if (-not $Binary -or -not [IO.Path]::IsPathRooted($Binary)) { return $PathValue }
+    $dir = (Split-Path -Parent $Binary).TrimEnd('\', '/')
+    $sep = [IO.Path]::PathSeparator
+    $entries = @(([string]$PathValue) -split [regex]::Escape([string]$sep) | Where-Object { $_ })
+    $rest = @($entries | Where-Object { $_.TrimEnd('\', '/') -ine $dir })
+    return (@($dir) + $rest) -join $sep
+}
+function Set-AwPsmuxProcessPathFirst {
+    param([string]$Binary)
+    $env:PATH = Join-AwPsmuxPathFirst $Binary ([string]$env:PATH)
+}
+# A launch plan can set its own pane PATH; keep the selected client first there too.
+function Set-AwPsmuxPlanPathFirst {
+    param([System.Collections.IDictionary]$Environment, [string]$Binary)
+    if (-not $Binary) { return }
+    foreach ($key in @($Environment.Keys | Where-Object { [string]$_ -ieq 'PATH' })) {
+        $Environment[$key] = Join-AwPsmuxPathFirst $Binary ([string]$Environment[$key])
+    }
+}
 $script:AwPsmuxBin = Resolve-AwPsmuxBin $psmuxCmd
+$script:AwPsmuxPathFirstBin = $null
 if ($psmuxCmd -and $script:AwPsmuxBin -ne $psmuxCmd.Source) {
-    Write-SetupLog "psmux: resolved WinGet reparse stub to real exe: $($script:AwPsmuxBin)"
+    Write-SetupLog "psmux: selected $($script:AwPsmuxBin) instead of PATH $($psmuxCmd.Source)"
+    Set-AwPsmuxProcessPathFirst $script:AwPsmuxBin
+    $script:AwPsmuxPathFirstBin = $script:AwPsmuxBin
 }
 
 # Detect nested invocation: if we're already inside a psmux/tmux session,
@@ -1881,7 +1939,11 @@ function Assert-AwPsmuxCreationVersion {
     . (Join-Path $PSScriptRoot 'psmux-path.ps1')
     $version = Get-AwPsmuxCreationVersion
     if (-not (Test-AwPsmuxVersionCompatible -Version $version -MinimumVersion '3.4.0')) {
-        throw 'New PSMux sessions require version 3.4.0 or newer with readable file metadata. Existing sessions were not changed.'
+        $shown = if ($version) { $version } else { 'unknown' }
+        throw ("New PSMux sessions require version 3.4.0 or newer with readable file metadata " +
+            "(selected '$($script:AwPsmuxBin)', version $shown). Existing sessions were not changed. " +
+            "Run the agent-worktrees update to install PSMux 3.4.0 side by side under " +
+            "$(Get-AwPsmuxSideBySideRoot)\<version> without stopping live sessions.")
     }
 }
 
@@ -1986,6 +2048,7 @@ if (-not $noMux) {
     }
     $mergedEnv['WORKTREE_SETUP_LOG'] = [string]$script:SetupLog
     if ($script:LaunchId) { $mergedEnv['WORKTREE_LAUNCH_ID'] = [string]$script:LaunchId }
+    Set-AwPsmuxPlanPathFirst $mergedEnv $script:AwPsmuxPathFirstBin
 
     $envFlags = @()
     foreach ($kv in $mergedEnv.GetEnumerator()) {

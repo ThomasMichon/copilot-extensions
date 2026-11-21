@@ -10,6 +10,7 @@ import subprocess
 import sys
 import shlex
 import shutil
+from typing import Any
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -53,7 +54,7 @@ def test_existing_source_registers_without_reclassifying_other_repos(source: Pat
 
 @pytest.mark.parametrize(("repo_class", "agent"), [("worktree", False), ("reference", True)])
 def test_managed_name_without_local_path_refuses_before_acquisition(
-    tmp_path, registry, monkeypatch, repo_class, agent,
+    tmp_path: Path, registry: Path, monkeypatch: pytest.MonkeyPatch, repo_class: str, agent: bool,
 ) -> None:
     state = repos.read_registry(strict=True)
     state.repos["sample"] = repos.RepoEntry(
@@ -70,17 +71,18 @@ def test_managed_name_without_local_path_refuses_before_acquisition(
 
 @pytest.mark.parametrize("remote", ["", URL])
 def test_acquisition_prioritizes_selected_registry_account(
-    source, registry, tmp_path, monkeypatch, remote,
+    source: Path, registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: str,
 ) -> None:
     state = repos.read_registry(strict=True)
     state.repos["first-alias"] = repos.RepoEntry(name="first-alias", remote=URL, account="other")
     state.repos["sample"] = repos.RepoEntry(name="sample", remote=remote, account="selected")
     repos.write_registry(state)
     observed = []
-    monkeypatch.setattr(
-        bootstrap, "_credential_args",
-        lambda url, account, **kwargs: observed.append(account) or [],
-    )
+    def credentials(url: str, account: str, **kwargs: Any) -> list[str]:
+        observed.append(account)
+        return []
+
+    monkeypatch.setattr(bootstrap, "_credential_args", credentials)
     monkeypatch.setattr(bootstrap, "_clone", lambda url, target, args, **k: shutil.copytree(source, target))
     target = tmp_path / "acquired"
     bootstrap.acquire("sample", target, URL)
@@ -89,14 +91,14 @@ def test_acquisition_prioritizes_selected_registry_account(
 
 
 def test_selected_account_change_after_acquisition_refuses_registration(
-    source, registry, tmp_path, monkeypatch,
+    source: Path, registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = repos.read_registry(strict=True)
     state.repos["sample"] = repos.RepoEntry(name="sample", account="selected")
     repos.write_registry(state)
     monkeypatch.setattr(bootstrap, "_credential_args", lambda *a, **k: [])
 
-    def clone(url, target, args, **kwargs):
+    def clone(url: str, target: Path, args: list[str], **kwargs: Any) -> None:
         shutil.copytree(source, target)
         current = repos.read_registry(strict=True)
         current.repos["sample"].account = "changed"
@@ -112,7 +114,7 @@ def test_selected_account_change_after_acquisition_refuses_registration(
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_preferred_account_filters_acquisition_and_revalidation(
-    source, registry, tmp_path, monkeypatch, changed,
+    source: Path, registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool,
 ) -> None:
     selected = "https://github.com/example/sample.git"
     git(source, "remote", "set-url", "origin", selected)
@@ -125,7 +127,7 @@ def test_preferred_account_filters_acquisition_and_revalidation(
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     observed = []
 
-    def clone(url, target, args, **kwargs):
+    def clone(url: str, target: Path, args: list[str], **kwargs: Any) -> None:
         observed.append(args)
         assert f"credential.{selected}.username=operator-work" in args
         assert "credential.gitHubAccountFiltering=true" in args
@@ -147,7 +149,7 @@ def test_preferred_account_filters_acquisition_and_revalidation(
     assert len(observed) == 1
 
 
-def test_conflicting_alias_accounts_require_selected_account(registry) -> None:
+def test_conflicting_alias_accounts_require_selected_account(registry: Path) -> None:
     state = repos.read_registry(strict=True)
     for name in ("first", "second"):
         state.repos[name] = repos.RepoEntry(name=name, remote=URL, account=name)
@@ -158,7 +160,7 @@ def test_conflicting_alias_accounts_require_selected_account(registry) -> None:
 @pytest.mark.parametrize("registered", [False, True])
 @pytest.mark.parametrize("owner_mapping", [False, True])
 def test_account_is_not_inferred_from_an_unrelated_sibling(
-    registry, registered, owner_mapping,
+    registry: Path, registered: bool, owner_mapping: bool,
 ) -> None:
     selected = "https://github.com/example/sample.git"
     state = repos.read_registry(strict=True)
@@ -196,7 +198,9 @@ def test_refusal_preserves_registry_bytes_and_source(source: Path, registry: Pat
     assert {p.name: p.read_bytes() for p in source.iterdir() if p.is_file()} == files
 
 
-def test_plan_never_clones_registers_or_executes(source: Path, registry: Path, monkeypatch) -> None:
+def test_plan_never_clones_registers_or_executes(
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     before = registry.read_bytes()
     monkeypatch.setattr(bootstrap, "acquire", lambda *a: pytest.fail("plan acquired"))
     monkeypatch.setattr(protocol, "run", lambda *a, **k: pytest.fail("plan executed"))
@@ -205,7 +209,9 @@ def test_plan_never_clones_registers_or_executes(source: Path, registry: Path, m
     assert registry.read_bytes() == before
 
 
-def test_no_trust_stops_before_even_check(source: Path, registry: Path, monkeypatch) -> None:
+def test_no_trust_stops_before_even_check(
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bootstrap, "_terminal", lambda: False)
     monkeypatch.setattr(protocol, "_call", lambda *a: pytest.fail("untrusted repository code"))
     assert bootstrap.command([URL, "--target", str(source), "--apply"]) == 1
@@ -213,22 +219,26 @@ def test_no_trust_stops_before_even_check(source: Path, registry: Path, monkeypa
 
 
 @pytest.mark.parametrize("helper", ["", "store", "!gh auth git-credential", "manager\ncredential.helper store"])
-def test_explicit_account_never_falls_back_to_unqualified_helper(tmp_path, monkeypatch, helper) -> None:
-    monkeypatch.setattr(bootstrap.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+def test_explicit_account_never_falls_back_to_unqualified_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, helper: str,
+) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
         a[0], 0, f"credential.helper {helper}\n", "",
     ))
     with pytest.raises(protocol.SetupError, match="ambient authentication was not attempted"):
         bootstrap._credential_args("https://github.com/example/sample.git", "selected-login", cwd=tmp_path)
 
 
-def test_explicit_gcm_route_contains_no_token_and_preserves_global_settings(tmp_path, monkeypatch) -> None:
+def test_explicit_gcm_route_contains_no_token_and_preserves_global_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, "credential.helper manager\n", "")
 
-    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     selected = "https://github.com/example/sample.git"
     args = bootstrap._credential_args(selected, "selected-login", cwd=tmp_path)
     assert f"credential.{selected}.username=selected-login" in args
@@ -239,7 +249,12 @@ def test_explicit_gcm_route_contains_no_token_and_preserves_global_settings(tmp_
     assert not any("token" in a for a in args)
 
 
-def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(("use_http_path", "account"), [
+    (None, "selected-login"), (True, "selected-login"), (None, "missing-login"),
+])
+def test_real_multi_helper_and_http_header_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_http_path: bool | None, account: str,
+) -> None:
     selected = "https://github.com/example/sample.git"
     config = tmp_path / "isolated.gitconfig"
     helper_bin = tmp_path / "helpers"
@@ -255,7 +270,10 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
         "if sys.argv[-1] == 'get':\n"
         "    request=sys.stdin.read()\n"
         "    pathlib.Path(__file__).with_suffix('.called').write_text(request)\n"
-        "    print('username=selected-login\\npassword=fixture-value\\n')\n",
+        "    fields=dict(line.split('=',1) for line in request.splitlines() if '=' in line)\n"
+        f"    expected_path={'example/sample.git' if use_http_path else None!r}\n"
+        "    if fields.get('username') == 'selected-login' and fields.get('path') == expected_path:\n"
+        "        print('username=selected-login\\npassword=fixture-value\\n')\n",
         encoding="utf-8",
     )
     shim = helper_bin / "git-credential-manager"
@@ -267,13 +285,18 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
     git(tmp_path, "config", "--file", str(config), "credential.helper",
         "!" + shlex.quote(sys.executable) + " " + shlex.quote(str(ambient)))
     git(tmp_path, "config", "--file", str(config), f"credential.{selected}.helper", "manager")
+    git(tmp_path, "config", "--file", str(config), "credential.username", "ambient-login")
+    if use_http_path is not None:
+        git(tmp_path, "config", "--file", str(config),
+            f"credential.{selected}.useHttpPath", str(use_http_path).lower())
     for key in ("http.extraHeader", f"http.{selected}.extraHeader"):
         git(tmp_path, "config", "--file", str(config), key, "Authorization: fixture-only")
     before = config.read_bytes()
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_EXEC_PATH", str(helper_bin))
-    args = bootstrap._credential_args(selected, "selected-login", cwd=tmp_path)
+    monkeypatch.setattr(bootstrap, "_terminal", lambda: False)
+    args = bootstrap._credential_args(selected, account, cwd=tmp_path)
     headers = git(tmp_path, *args, "config", "--get-urlmatch", "http.extraHeader", selected)
     assert headers == ""
     credential = subprocess.run(
@@ -281,16 +304,27 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
         input=f"url={selected}\n\n", text=True, capture_output=True, timeout=30,
         env=bootstrap._acquisition_environment(), **no_window_kwargs(),
     )
-    assert credential.returncode == 0, credential.stderr
-    assert "username=selected-login" in credential.stdout
-    assert "password=fixture-value" in credential.stdout
-    assert "username=selected-login" in owner.with_suffix(".called").read_text()
+    request = dict(
+        line.split("=", 1) for line in owner.with_suffix(".called").read_text().splitlines()
+        if "=" in line
+    )
+    assert request["username"] == account
+    assert request.get("path") == ("example/sample.git" if use_http_path else None)
     assert not ambient.with_suffix(".called").exists()
     assert config.read_bytes() == before
+    if account == "missing-login":
+        assert credential.returncode != 0
+        assert "password=fixture-value" not in credential.stdout
+    else:
+        assert credential.returncode == 0, credential.stderr
+        assert "username=selected-login" in credential.stdout
+        assert "password=fixture-value" in credential.stdout
 
 
 @pytest.mark.parametrize("override", ["config-provider", "env-provider", "legacy-authority"])
-def test_explicit_account_refuses_unqualified_gcm_provider(tmp_path, monkeypatch, override) -> None:
+def test_explicit_account_refuses_unqualified_gcm_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: str,
+) -> None:
     config = tmp_path / "provider.gitconfig"
     git(tmp_path, "config", "--file", str(config), "credential.helper", "manager")
     if override == "config-provider":
@@ -310,7 +344,9 @@ def test_explicit_account_refuses_unqualified_gcm_provider(tmp_path, monkeypatch
     assert config.read_bytes() == before
 
 
-def test_redirected_git_refuses_without_askpass_or_credential_ui(tmp_path, monkeypatch) -> None:
+def test_redirected_git_refuses_without_askpass_or_credential_ui(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = tmp_path / "isolated.gitconfig"
     helper = tmp_path / "owner.py"
     helper.write_text(
@@ -352,7 +388,9 @@ def test_redirected_git_refuses_without_askpass_or_credential_ui(tmp_path, monke
 
 @pytest.mark.skipif(os.name != "nt", reason="native unavailable Windows drive")
 @pytest.mark.parametrize("apply", [False, True])
-def test_unreachable_drive_refuses_before_any_effect(tmp_path, monkeypatch, apply) -> None:
+def test_unreachable_drive_refuses_before_any_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, apply: bool,
+) -> None:
     unavailable = next(
         (Path(f"{letter}:\\") for letter in "ZYXWVUTSRQPONMLKJIHGFED"
          if not Path(f"{letter}:\\").exists()),
@@ -366,12 +404,14 @@ def test_unreachable_drive_refuses_before_any_effect(tmp_path, monkeypatch, appl
     ]) == 1
 
 
-def test_clone_failure_preserves_partial_target_and_does_not_register(tmp_path, registry, monkeypatch) -> None:
+def test_clone_failure_preserves_partial_target_and_does_not_register(
+    tmp_path: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target = tmp_path / "sample"
     before = registry.read_bytes()
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(kwargs)
         if "rev-parse" in argv:
             return subprocess.CompletedProcess(argv, 128, "", "")
@@ -381,7 +421,7 @@ def test_clone_failure_preserves_partial_target_and_does_not_register(tmp_path, 
         (target / "partial").write_text("preserve", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 128)
 
-    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(protocol.SetupError, match="partial target was preserved"):
         bootstrap.acquire("sample", target, URL)
     assert registry.read_bytes() == before
@@ -395,23 +435,27 @@ def test_clone_failure_preserves_partial_target_and_does_not_register(tmp_path, 
         assert "stdin" not in calls[-1]
 
 
-def test_rewrite_refused_before_any_clone(tmp_path, registry, monkeypatch) -> None:
+def test_rewrite_refused_before_any_clone(
+    tmp_path: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if "rev-parse" in argv:
             return subprocess.CompletedProcess(argv, 128, "", "")
         return subprocess.CompletedProcess(argv, 0, "https://elsewhere.invalid/sample", "")
 
-    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(protocol.SetupError, match="rewrites"):
         bootstrap.acquire("sample", tmp_path / "sample", URL)
     assert len(calls) == 2 and not any("clone" in argv for argv in calls)
     assert not (tmp_path / "sample").exists()
 
 
-def test_nested_acquisition_refuses_before_clone(source, registry, monkeypatch) -> None:
+def test_nested_acquisition_refuses_before_clone(
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     before = registry.read_bytes()
     monkeypatch.setattr(bootstrap, "_clone", lambda *a: pytest.fail("nested source acquired"))
     with pytest.raises(protocol.SetupError, match="nested"):
@@ -432,7 +476,9 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
 
 
-def test_rejected_selected_declaration_preserves_successful_acquisition(source, registry) -> None:
+def test_rejected_selected_declaration_preserves_successful_acquisition(
+    source: Path, registry: Path,
+) -> None:
     (source / protocol.DECLARATION).write_text(json.dumps({"version": 99}), encoding="utf-8")
     commit(source)
     assert bootstrap.command([URL, "--target", str(source), "--apply",
@@ -441,7 +487,9 @@ def test_rejected_selected_declaration_preserves_successful_acquisition(source, 
 
 
 @pytest.mark.parametrize("pinned", [False, True])
-def test_real_manager_to_engine_to_repository_consumer(source, registry, tmp_path, pinned) -> None:
+def test_real_manager_to_engine_to_repository_consumer(
+    source: Path, registry: Path, tmp_path: Path, pinned: bool,
+) -> None:
     consumer(source, """
 if ($r.mode -eq 'apply') { Set-Content -LiteralPath $state -Value 'done' }
 $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
@@ -465,7 +513,9 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
 
 
 @pytest.mark.parametrize("value", ["", "main", "a" * 39, "g" * 40, "a" * 41, "HEAD^{commit}", "--all"])
-def test_invalid_commit_refuses_before_any_effect(tmp_path, registry, monkeypatch, value) -> None:
+def test_invalid_commit_refuses_before_any_effect(
+    tmp_path: Path, registry: Path, monkeypatch: pytest.MonkeyPatch, value: str,
+) -> None:
     before = registry.read_bytes()
     monkeypatch.setattr(bootstrap, "_selection", lambda *a, **k: pytest.fail("invalid intent selected"))
     assert bootstrap.command([URL, "--commit", value, "--apply"]) == 2
@@ -477,7 +527,7 @@ def test_invalid_commit_refuses_before_any_effect(tmp_path, registry, monkeypatc
 
 @pytest.mark.parametrize("apply", [False, True])
 def test_existing_commit_mismatch_preserves_head_source_and_registry(
-    source, registry, monkeypatch, apply,
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch, apply: bool,
 ) -> None:
     old = git(source, "rev-parse", "HEAD")
     (source / "newer.txt").write_text("preserve newer work", encoding="utf-8")
@@ -496,7 +546,9 @@ def test_existing_commit_mismatch_preserves_head_source_and_registry(
     assert registry.read_bytes() == before
 
 
-def test_existing_exact_commit_reuses_without_fetch_or_checkout(source, registry, monkeypatch) -> None:
+def test_existing_exact_commit_reuses_without_fetch_or_checkout(
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     head = git(source, "rev-parse", "HEAD")
     monkeypatch.setattr(bootstrap, "_clone", lambda *a, **k: pytest.fail("existing source acquired"))
     selected = bootstrap.acquire("sample", source, URL, commit=head.upper())
@@ -508,7 +560,7 @@ def test_existing_exact_commit_reuses_without_fetch_or_checkout(source, registry
 
 @pytest.mark.parametrize("phase", ["plan", "apply", "reverify"])
 def test_replacement_tree_cannot_satisfy_an_approved_commit(
-    source, registry, monkeypatch, phase,
+    source: Path, registry: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
 ) -> None:
     approved = git(source, "rev-parse", "HEAD")
     for name in ("setup.ps1", "setup.sh"):
@@ -544,14 +596,14 @@ def test_replacement_tree_cannot_satisfy_an_approved_commit(
 
 @pytest.mark.parametrize("failure", ["peeled-tag", "checkout"])
 def test_new_commit_selection_failure_preserves_partial_target_without_registration(
-    tmp_path, registry, monkeypatch, failure,
+    tmp_path: Path, registry: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
 ) -> None:
     target = tmp_path / "selected"
     before = registry.read_bytes()
     calls = []
     requested = "a" * 40
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         if "rev-parse" in argv:
             return subprocess.CompletedProcess(argv, 128, "", "")
@@ -569,7 +621,7 @@ def test_new_commit_selection_failure_preserves_partial_target_without_registrat
         assert "timeout" not in kwargs and not kwargs.get("capture_output", False)
         return subprocess.CompletedProcess(argv, 7)
 
-    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(protocol, "_git", lambda *a: "b" * 40 if failure == "peeled-tag" else requested)
     with pytest.raises(protocol.SetupError, match="exact selected commit|status 7"):
         bootstrap.acquire("sample", target, URL, commit=requested)

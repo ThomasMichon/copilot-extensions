@@ -396,6 +396,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         #: reservation key -> redrive attempted in this supervisor process. A
         #: restarted supervisor may retry; a healthy worker claims promptly.
         self._redriven_spawn_keys: set[str] = set()
+        self._admission_cursor = ""
         #: Optional pre-reservation capacity gate. When it returns False for a
         #: task, the task is **skipped this cycle without a reservation** -- so a
         #: transient "no capacity" (e.g. a fleet pool that is entirely asleep)
@@ -447,20 +448,27 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         matching tasks behind other lanes' work or standing charters, which only
         explicit attachment admission may select. Deduplicate locally.
         """
-        if self.labels:
-            seen: dict[str, dict[str, Any]] = {}
-            for label in sorted(self.labels):
-                for t in self.client.list(
-                    repo=self.repo, status=Status.QUEUED, label=label, kind="finite", limit=200
-                ):
-                    seen[t["id"]] = t
-            tasks = list(seen.values())
+        from .admission_page import PAGE_SIZE, next_page
+        seen: dict[str, dict[str, Any]] = {}
+        saturated = False
+        streams: Sequence[str | None] = sorted(self.labels) if self.labels else (None,)
+        for label in streams:
+            rows = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=PAGE_SIZE,
+                                    **({"label": label} if label is not None else {}))
+            seen.update((t["id"], t) for t in rows)
+            saturated |= len(rows) == PAGE_SIZE
+        if saturated and isinstance(self.client, DispatchClient):
+            try:
+                extra, self._admission_cursor = next_page(self.client, self.repo, self._admission_cursor)
+                seen.update((t["id"], t) for t in extra)
+            except (DispatchError, httpx.TransportError, ValueError) as exc:
+                # Old coordinators have no supplemental endpoint. Never
+                # replace the bounded head pages or relax an admission check.
+                log.warning("supplemental admission candidate page unavailable (%s)", type(exc).__name__)
         else:
-            # No label restriction (a catch-all pool) -- nothing to scope the
-            # server-side query to; same broad page as before.
-            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=200)
+            self._admission_cursor = ""
         out: list[dict[str, Any]] = []
-        for t in tasks:
+        for t in seen.values():
             if t.get("kind", "finite") != "finite":
                 continue  # standing charters are never finite executable work
             if (t.get("not_before") or 0) > now:
@@ -726,8 +734,14 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 return self.script_body_verdict_fn(pid, start_token) != _tracking().GONE
             except Exception:
                 return True
-        # CLI suspension hands its process to the hibernation layer.
-        return False
+        # A suspended CLI normally releases its process slot. A pending
+        # owner wake for this still-spawned native makes that absence unknown.
+        return bool(
+            reservation.get("state") == SpawnState.SPAWNED and reservation.get("driver") == "cli"
+            and reservation.get("session_handle") and reservation["session_handle"] == task.get("owner_session_id")
+            and task.get("resume_requested") and task.get("wake_operation_id")
+            and task.get("wake_status") in {"pending", "delivering"}
+        )
 
     def cool_dormant_bodies(self) -> int:
         """Cool dormant bodies through the coordinator-held operation guard."""
@@ -839,6 +853,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     task["id"],
                     target_dir,
                 )
+                continue
+            from .admission_holds import supervisor_resume_inhibited
+            if supervisor_resume_inhibited(self, task, current):
                 continue
             prompt = (
                 f"Task {task['id']} has new durable steering. Resume this same "
@@ -1054,7 +1071,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 self._retain_terminal_startup(res, task)
                 continue
             if res.get("driver") == "restricted-bridge":
-                reconciled += self._reconcile_restricted_start(res, task)
+                from .admission_holds import supervisor_inhibited
+                if not supervisor_inhibited(self, task, res):
+                    reconciled += self._reconcile_restricted_start(res, task)
                 continue
             if res.get("agent_info") or res.get("driver") == "ordinary-bridge":
                 from .ordinary_bridge import reconcile_created
@@ -2089,12 +2108,15 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 failure["acp_session_id"] = session
             return failure
 
-    def _nudge_terminal_conclusion(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
-        """Reawaken the exact local body once to finish its worktree lifecycle."""
+    def _nudge_terminal_conclusion(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool | None:
+        """Reawaken the exact local body; None means policy deferred the attempt."""
         session_id = _parse_local_body_handle(reservation.get("session_handle"))
         worktree = reservation.get("worktree")
         if session_id is None or not isinstance(worktree, str) or not worktree:
             return False
+        from .admission_holds import supervisor_resume_inhibited
+        if supervisor_resume_inhibited(self, task, reservation):
+            return None
         prompt = (
             f"Task {task.get('id')} is already terminal, but managed worktree "
             f"{worktree} is not FINAL. Conclude this same worktree now: finalize "
@@ -2723,7 +2745,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                                 if exclusive:
                                     continue
                                 preconcluded = checkpoint
-                            elif not self._nudge_terminal_conclusion(res, task):
+                            elif (nudged := self._nudge_terminal_conclusion(res, task)) is None:
+                                continue
+                            elif not nudged:
                                 attempts = prior_attempts + 1
                                 conclusion_payload = {
                                     **preconcluded,
@@ -2827,17 +2851,17 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 conclusion_payload = dict(outcome)
                 if conclusion_state == _CONCLUSION_PENDING:
                     attempts = prior_attempts + 1
-                    conclusion_payload["attempts"] = attempts
-                    conclusion_payload["next_attempt_at"] = now + min(
-                        300,
-                        _CONCLUSION_RETRY_BASE_SECONDS * (2 ** (attempts - 1)),
-                    )
+                    next_attempt_at = now + min(300, _CONCLUSION_RETRY_BASE_SECONDS * (2 ** (attempts - 1)))
                     if attempts == 1 and "same_owner_nudge" not in conclusion_payload:
-                        conclusion_payload["same_owner_nudge"] = (
-                            "delivered"
-                            if self._nudge_terminal_conclusion(res, task)
-                            else "unavailable"
-                        )
+                        nudged = self._nudge_terminal_conclusion(res, task)
+                        if nudged is None:
+                            # Publish pending with the acquired token to finish this
+                            # claim, without charging the unattempted resume.
+                            attempts, next_attempt_at = self._conclusion_retry_meta(res)
+                            conclusion_payload["same_owner_nudge"] = "policy-deferred"
+                        else:
+                            conclusion_payload["same_owner_nudge"] = "delivered" if nudged else "unavailable"
+                    conclusion_payload.update(attempts=attempts, next_attempt_at=next_attempt_at)
                     if attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         conclusion_state = _CONCLUSION_HELD
                 try:
@@ -3352,6 +3376,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         identity and clear custody; Bridge owns same-native stopped recovery.
         """
         from .action_controls import action_inhibited
+        from .admission_holds import supervisor_inhibited
 
         redriven = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
@@ -3391,24 +3416,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         task.get("generation") != session.get("task_generation")
                     ) or task.get("hold_reason") is not None or task.get("awaiting_steer"):
                         continue
-                    if action_inhibited("worker-admission", logger=log):
-                        break
-                    pending = self.client.record_spawn(
-                        key, session_handle=current["session_handle"], worktree=current["worktree"],
-                        startup_complete=False, startup_revision=session["startup_revision"],
-                        ordinary_redrive=session,
-                    )
-                    from .ordinary_native_redrive import require_pending_redrive
-
-                    require_pending_redrive(current, session, pending)
-                    if self.redrive_fn(
-                        session["worktree_id"], session["machine"], task, session, current,
-                    ):
-                        self.client.record_spawn(
-                            key, session_handle=pending["session_handle"], worktree=pending["worktree"],
-                            startup_complete=True, startup_revision=pending["startup_revision"],
-                            ordinary_redrive=session,
-                        )
+                    from .ordinary_native_redrive import drive_or_observe
+                    held = action_inhibited("worker-admission", logger=log) or supervisor_inhibited(self, task, current)
+                    if drive_or_observe(self, current, task, session, held=held):
                         self._redriven_spawn_keys.add(key)
                         redriven += 1
                 except (DispatchError, ValueError, KeyError, RuntimeError):
@@ -3438,6 +3448,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 continue
             if action_inhibited("worker-admission", logger=log):
                 break
+            if supervisor_inhibited(self, task, res):
+                continue
             try:
                 pending = self.client.record_spawn(
                     key,

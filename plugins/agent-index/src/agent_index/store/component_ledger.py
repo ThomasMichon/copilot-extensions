@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
 
     from .multi_model_store import MultiModelStore
+    from .source_layout import SourceDomain
 
 TABLE = "component_ordering_evidence"
 BINDING = "component_ordering"
@@ -42,6 +43,29 @@ def _schema(identity: str) -> Any:
         [pa.field("point_key", pa.string()), pa.field("record", pa.binary())],
         metadata={IDENTITY: identity.encode("ascii")},
     )
+
+
+def qualified_component_table(domain: SourceDomain, db: Any) -> Any:
+    """Open existing ordering evidence without adopting, repairing or changing it."""
+    binding = domain.receipt().get(BINDING)
+    if (not isinstance(binding, dict)
+            or set(binding) != {"protocol", "table", "identity", "version"}
+            or type(binding["protocol"]) is not int or binding["protocol"] != 1
+            or binding["table"] != TABLE or type(binding["version"]) is not int
+            or binding["version"] < 1 or not isinstance(binding["identity"], str)
+            or len(binding["identity"]) != 32
+            or any(char not in "0123456789abcdef" for char in binding["identity"])
+            or TABLE not in db.list_tables().tables):
+        raise SourceLayoutError("Component ledger binding or native table is missing or incompatible")
+    table = db.open_table(TABLE)
+    if (table.version != binding["version"]
+            or not table.schema.equals(_schema(binding["identity"]), check_metadata=True)):
+        raise SourceLayoutError("Component ledger identity or version changed")
+    state, _ = inspect_index(table, column="point_key")
+    if not state.prepared:
+        raise ScalarIndexPreparationRequired("Component ledger needs a prepared point index")
+    require_budget(state, 0)
+    return table
 
 
 def _key(source: str, path: str) -> str:
@@ -152,25 +176,7 @@ class ComponentLedger:
         return self._db.open_table(TABLE)
 
     def _bound_table(self) -> Any:
-        binding = self._source_domain.receipt().get(BINDING)
-        if (not isinstance(binding, dict)
-                or set(binding) != {"protocol", "table", "identity", "version"}
-                or type(binding["protocol"]) is not int or binding["protocol"] != 1
-                or binding["table"] != TABLE or type(binding["version"]) is not int
-                or binding["version"] < 1 or not isinstance(binding["identity"], str)
-                or len(binding["identity"]) != 32
-                or any(char not in "0123456789abcdef" for char in binding["identity"])
-                or TABLE not in self._db.list_tables().tables):
-            raise SourceLayoutError("Component ledger binding or native table is missing or incompatible")
-        table = self._get_or_create_table()
-        if (table.version != binding["version"]
-                or not table.schema.equals(_schema(binding["identity"]), check_metadata=True)):
-            raise SourceLayoutError("Component ledger identity or version changed")
-        state, _ = inspect_index(table, column="point_key")
-        if not state.prepared:
-            raise ScalarIndexPreparationRequired("Component ledger needs a prepared point index")
-        require_budget(state, 0)
-        return table
+        return qualified_component_table(self._source_domain, self._db)
 
     def _bind(self, table: Any, identity: str) -> None:
         value = self._source_domain.receipt()
@@ -202,12 +208,13 @@ class ComponentLedger:
 
     def put(
         self, evidence: ComponentEvidence, *, expected: ComponentEvidence | None, max_rows: int,
+        point_scope: PointScope | None = None,
     ) -> bool:
         """Retain a witnessed point under an already-owned writer; never execute application."""
         if not self._source_domain.writing:
             raise SourceLayoutError("Component evidence requires the owning source writer")
         component = evidence.content.component
-        previous = self.get(component.source, component.path)
+        previous = self.get(component.source, component.path, point_scope=point_scope)
         if previous != expected:
             raise SourceLayoutError("Component evidence prior record changed")
         if previous is not None and (previous.scope, previous.policy) != (evidence.scope, evidence.policy):
@@ -221,7 +228,7 @@ class ComponentLedger:
         ))
         actual = capture_file_projection(
             self._config, self._store, component.source, component.path,
-            max_rows=max_rows, retained_chunk_ids=retained,
+            max_rows=max_rows, retained_chunk_ids=retained, point_scope=point_scope,
         )
         if actual != selected.projection:
             raise SourceLayoutError("Component evidence does not match the current native point")
@@ -241,7 +248,7 @@ class ComponentLedger:
         table.merge_insert("point_key").when_matched_update_all().when_not_matched_insert_all().execute([
             {"point_key": _key(component.source, component.path), "record": payload},
         ])
-        prepare_index(self, column="point_key", max_rows=1)
+        prepare_index(self, column="point_key", max_rows=1, point_scope=point_scope)
         self._bind(self._get_or_create_table(), identity)
         return True
 

@@ -8,6 +8,16 @@ hydrate missing Bridge metadata from the authoritative head; dormant raw sends
 require explicit resume. See
 [target discovery and hydration](docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup).
 
+For a known local PSMux instance, `targets --discover-mux SESSION INCARNATION --json`
+adds `sources.pinned_mux` to the listing. Supply the session and `$id:created`
+from the workspace owner, not a Bridge registration. Set `PSMUX_DATA_DIR` to
+that owner's absolute data directory and `COPILOT_DRIVER_PSMUX_NAMESPACE` to
+the matching namespace. The CLI probes its own runtime's Driver for
+`psmux-observe-pinned` before reading. An older or unavailable reader yields
+unavailable evidence, never an unpinned query. A match observes only the mux:
+the agent route stays unresolved and no target handle is added. This local
+option cannot be combined with `--refresh`; the daemon API is unchanged.
+
 Exact-session `status/inspect --json` provides
 [layered read-only inspection](docs/transport-diagnostics.md#exact-session-inspection)
 through the standalone Core without attaching another controller or adding a
@@ -1371,3 +1381,18 @@ owner's remaining obligations.
 | Windows | Scheduled task | At-logon (15s delay) |
 | Linux/WSL | systemd user unit | Enabled |
 | macOS | Planned | -- |
+### Independent native admission evidence
+
+For private recovery fixtures, `native_receipt_records.NativeReceiptRecords`
+provides an opt-in Python interface alongside the ordinary native send path.
+Prepare a fresh owner-private directory and retain it across generations.
+`submit_once` accepts only `no_resume=True`: it commits the original request
+digest before its one possible submission. A repeated request can only return
+the recorded receipt or query the original holder's receipt-only path.
+`inspect` reads independent evidence without a running Bridge; `None` is
+unknown, not proof that a prompt was never admitted. The record contains no
+prompt text and must not be used to reconstruct a runnable turn or lease.
+Protect and retain it for the full retry lifetime: starting with a new empty
+store is not a retry of the original operation. Ordinary CLI sends do not
+silently opt in. `tools/bridge_installed_receipt.py` exercises this contract
+with two non-editable fixture wheels and no live agent session.

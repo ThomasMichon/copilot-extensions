@@ -5,6 +5,7 @@ import base64
 import os
 import subprocess
 from pathlib import Path
+from typing import Callable, ContextManager, Protocol
 from unittest.mock import Mock
 
 import pytest
@@ -16,16 +17,21 @@ pytestmark = pytest.mark.skipif(
     reason="explicit Windows native bootstrap lifetime qualification",
 )
 
+class WindowObservation(Protocol):
+    surfaced: dict[int, str]
+    focus_changes: dict[int, str]
 
-def test_reported_worker_reuse_never_grants_cleanup_custody(monkeypatch):
+
+def test_reported_worker_reuse_never_grants_cleanup_custody(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_procutil import daemon_broker, _daemon_instance_identity
     from test_native_daemon import observed_worker
 
     unrelated = Mock(_handle=123)
     monkeypatch.setattr(daemon_broker, "WindowsDaemonProcess", Mock(return_value=unrelated))
     monkeypatch.setattr(_daemon_instance_identity, "_windows_birth", lambda handle: "reused")
+    pinned_worker: Callable[[dict[str, object]], object] = observed_worker
     with pytest.raises(ProcessLookupError, match="birth identity changed"):
-        observed_worker({"pid": 321, "birth": "expected"})
+        pinned_worker({"pid": 321, "birth": "expected"})
     unrelated.close.assert_called_once_with()
     unrelated.kill.assert_not_called()
     unrelated.terminate.assert_not_called()
@@ -39,11 +45,13 @@ def test_reported_worker_reuse_never_grants_cleanup_custody(monkeypatch):
     pytest.param("[Console]::Error.WriteLine('fixture-native-original-error')\n", 0, id="success"),
 ])
 @pytest.mark.parametrize("cycle", range(2))
-def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_path, body, expected, cycle):
+def test_native_worker_failure_preserves_original_error_in_redirected_log(
+    tmp_path: Path, body: str, expected: int, cycle: int,
+) -> None:
     helper = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_daemon.ps1"
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 
-    def quoted(value):
+    def quoted(value: Path) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
     worker = tmp_path / "worker.ps1"
@@ -81,14 +89,17 @@ def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_pa
 
 
 @pytest.mark.parametrize("mode", ["cleanup", "mismatch", "unconfirmed-cleanup"])
-def test_native_preack_cleanup_requires_verified_handles_and_observed_exit(tmp_path, mode):
+def test_native_preack_cleanup_requires_verified_handles_and_observed_exit(
+    tmp_path: Path, mode: str,
+) -> None:
     from test_native_daemon import observer
 
     base = Path(__file__).resolve().parents[2]
     helper = base / "agent-procutil" / "src" / "agent_procutil" / "native_daemon.ps1"
     fixture = Path(__file__).with_name("fixture_native_daemon_cleanup.ps1")
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-    with observer() as observation:
+    observe_windows: Callable[[], ContextManager[WindowObservation]] = observer
+    with observe_windows() as observation:
         result = subprocess.run(
             [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(fixture),
              mode, str(helper), str(tmp_path)],
@@ -97,6 +108,7 @@ def test_native_preack_cleanup_requires_verified_handles_and_observed_exit(tmp_p
     assert result.returncode == 0, result.stderr
     outcome = json.loads(result.stdout)
     assert outcome["settled"] is (mode != "unconfirmed-cleanup"), outcome
+    assert outcome["receiptSettled"] is True
     if mode == "mismatch":
         assert "client identity changed" in outcome["error"]
     elif mode == "cleanup":
@@ -110,11 +122,13 @@ def test_native_preack_cleanup_requires_verified_handles_and_observed_exit(tmp_p
 
 
 @pytest.mark.parametrize("fault", ["start", "preack"])
-def test_native_unconfirmed_cleanup_transfers_exact_live_handle_to_caller(tmp_path, fault):
+def test_native_unconfirmed_cleanup_transfers_exact_live_handle_to_caller(
+    tmp_path: Path, fault: str,
+) -> None:
     helper = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_daemon.ps1"
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 
-    def quoted(value):
+    def quoted(value: Path) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
     if fault == "start":
@@ -172,7 +186,9 @@ def test_native_unconfirmed_cleanup_transfers_exact_live_handle_to_caller(tmp_pa
         "$live=([NativeCustodyObserver]::WaitForSingleObject($handle,0) -eq 258); "
         "$settled=$custody.Stop(); "
         "$observed=([NativeCustodyObserver]::WaitForSingleObject($handle,0) -eq 0); "
-        "@{confirmed=$failure.CleanupConfirmed;exact=$exact;live=$live;settled=$settled;observed=$observed} "
+        "$receiptSettled=Complete-NativeDaemonFailedLaunch -Failure $failure; "
+        "@{confirmed=$failure.CleanupConfirmed;exact=$exact;live=$live;settled=$settled;observed=$observed; "
+        "receiptSettled=$receiptSettled} "
         "| ConvertTo-Json -Compress "
         "} finally { if ($custody) { $custody.Dispose() } }"
     )
@@ -184,4 +200,5 @@ def test_native_unconfirmed_cleanup_transfers_exact_live_handle_to_caller(tmp_pa
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
         "confirmed": False, "exact": True, "live": True, "settled": True, "observed": True,
+        "receiptSettled": True,
     }

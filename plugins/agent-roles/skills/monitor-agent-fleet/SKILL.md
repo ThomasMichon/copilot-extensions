@@ -109,6 +109,16 @@ Answering a worker's parked question is a separate **answer scope**: it names
 recipients and the routine question classes the monitor may answer. Without
 it, report the question with a recommended answer.
 
+**Drive posture is opt-in.** The charter records `conservative` (the default)
+or `relentless`, which applies only by explicit operator grant. Relentless
+posture also counts idle set-to-work agents, holds without a recorded
+specific reason, unowned blockers and unanswered goal-advancing questions as
+waste (see [drive posture](references/watchdog-checks.md#drive-posture)). It
+never widens mode, steering, answer, repair or source-change authority;
+operator-set holds are lifted only by the operator's direction, and answering
+goal-advancing options needs its own
+[answer-scope grant](references/pending-input.md#goal-advancing-option-scope-relentless-posture).
+
 **Goal establishment is role-inherent.** This role, and any equivalent
 supervisory agent chartered by the same operator, holds
 [standing goal-establishment authority](references/agent-charters.md#standing-goal-establishment-authority):

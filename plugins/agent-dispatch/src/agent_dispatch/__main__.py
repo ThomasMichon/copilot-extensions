@@ -16,7 +16,7 @@ import os
 import sys
 import time
 from pathlib import Path as Path  # noqa: F401 -- compatibility export for tests
-from typing import Any
+from typing import Any, cast
 
 if __name__ == "__main__":
     from .early_cli import dispatch
@@ -95,10 +95,10 @@ from .supervise_cli import (  # noqa: F401 -- re-exported for existing call site
     _build_registration_spec,
     _cmd_supervise,
     _read_supervisor_runtime_status,
-    _registration_scope,
     _spawn_supervisor_daemon_detached,
-    _supervisor_runtime_status_path,
 )
+from .supervisor_registration import registration_scope as _registration_scope  # noqa: F401 -- compatibility export
+from .supervisor_status_io import runtime_status_path as _supervisor_runtime_status_path  # noqa: F401 -- compatibility export
 from .coordinator_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
     _add_cutover_flags,
     _cmd_cutover,
@@ -142,7 +142,7 @@ from .task_query_cli import (  # noqa: F401 -- re-exported for existing call sit
     _board_keep,
     _board_sort_key,
     _browse_peer,
-    _cmd_consume,
+    _cmd_consume as _cmd_consume,
     _cmd_doctor,
     _cmd_find,
     _cmd_inbox,
@@ -669,7 +669,7 @@ def build_parser() -> argparse.ArgumentParser:
         "host's local coordinator. Authenticated with AGENT_DISPATCH_SHARED_TOKEN.",
     )
     parser.add_argument("--local", action="store_true", help="target only the local task authority; never fail over")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = cast("argparse._SubParsersAction[argparse.ArgumentParser]", parser.add_subparsers(dest="command", required=True))
 
     from .action_controls_cli import register_commands as register_actions
     register_actions(sub)
@@ -683,6 +683,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_task_lifecycle_commands(sub)
     register_task_recovery_commands(sub)
+    from .handoff_claim_cli import register_commands as register_handoff_claim_commands
+    register_handoff_claim_commands(sub)
     from .standing_cli import register_standing_commands
     register_standing_commands(sub)
     register_steering_commands(sub)
@@ -827,8 +829,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "claimant",
         help="task -> claiming worktree: which worktree owns a task (the inbound "
-        "reverse of worktree-status). Reports the actual owner once claimed, "
-        "else the pinned target worktree.",
+        "reverse of worktree-status). Reports the assigned workspace, "
+        "execution owner, or pinned target, in that order.",
     )
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_claimant)
@@ -977,10 +979,10 @@ def main(argv: list[str] | None = None) -> int:
         worker = task_worker(args)
         if worker is not None:
             return run_task_worker(args, worker)
-        return args.func(args)
+        return cast(int, args.func(args))
     except DispatchError as exc:
         detail = exc.as_dict()
-        if detail.get("code", "").startswith("producer_"):
+        if cast(str, detail.get("code", "")).startswith("producer_"):
             json.dump({"error": detail}, sys.stderr, sort_keys=True)
             sys.stderr.write("\n")
         else:

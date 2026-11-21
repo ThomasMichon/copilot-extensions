@@ -4236,9 +4236,7 @@ class _ResidentHookPolicy:
             module = self._module(name)
             if module is None:
                 continue
-            kwargs = {}
-            if name == "anchor_write_guard.py":
-                kwargs["anchors"] = self.anchors() if may_write else []
+            kwargs = {"anchors": self.anchors() if may_write else []} if name == "anchor_write_guard.py" else {}
             try:
                 decision = module.decide(payload, home=Path.home(), **kwargs)
             except Exception:
@@ -4323,7 +4321,9 @@ def _resident_hook_decision(
     provisioning_start_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if kind == "preToolUse":
-        return policy.pre(payload)
+        from .native_tool_policy import dispatch_pre
+
+        return dispatch_pre(policy, payload, deadline)
 
     if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")

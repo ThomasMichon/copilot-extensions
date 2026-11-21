@@ -118,6 +118,37 @@ time. A write without readback is unknown, not done; reconcile it before any
 retry. A correction published through a reviewed repository is not applied
 until that repository's gate lands it.
 
+## Reactivating an inactive head
+
+Dormant correction itself never reactivates a target. Reactivation is a
+separate effect: it needs a [repair](repair-escalation.md) grant whose rung
+ceiling reaches R3 and whose recipients name the target, recorded as head
+reactivation in [the charter](../assets/CHARTER.md). Without that grant,
+report the inactive head and the recommended reactivation. Under relentless
+[drive posture](watchdog-checks.md#drive-posture), an inactive head whose root
+is still open is a reactivation candidate when granted, and a finding
+otherwise.
+
+1. **Resume the same session.** Use the workspace owner's supported resume or
+   embody path for the recorded head session. Never start a new session,
+   reseed it or replace the head.
+2. **Launch from an interactive logon on Windows.** Start the resume from the
+   host's interactive logon session, for example by steering an interactive
+   session already running on that host; that steer needs its own steering
+   scope for that recipient. A launch from a non-interactive remote logon,
+   such as an SSH session, can create the terminal multiplexer pane that then
+   dies, because named kernel objects in the per-session `Local\` namespace
+   and the launching logon's job scope do not outlive that logon.
+3. **Verify the pane stays live.** Read the head back through the owner after
+   at least one reobservation interval. A pane that appeared and exited is a
+   failed resume, not a recovery; reconcile it before retrying.
+4. **Relay the goal once.** After a verified resume, send one message that
+   restates the recorded root goal and next action, only under a current
+   steering scope that covers the resumed head and that relay purpose. A
+   repair grant, or a steering scope for the interactive helper, does not
+   cover it. Without such a scope, report the proposed relay without sending
+   it. Do not repeat it.
+
 ## Coverage and report
 
 Unreachable machines, missing readers, unread histories and activity outside

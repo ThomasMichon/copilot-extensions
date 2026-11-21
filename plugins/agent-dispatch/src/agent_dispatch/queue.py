@@ -33,6 +33,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
+from typing import Literal
+from .action_controls import InstallationWorkerAdmission
 
 from .identity import canonical_reviewer_target, canonicalize_remote  # noqa: F401 -- compatibility re-export
 from .payload import PayloadStore, is_blob_ref  # noqa: F401 -- compatibility re-export
@@ -162,7 +164,7 @@ class _ClosingConnection(sqlite3.Connection):
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         try:
             return super().__exit__(exc_type, exc_value, traceback)
         finally:
@@ -257,6 +259,7 @@ class TaskQueue(
         self.blob_threshold = blob_threshold
         self.result_max_bytes = result_max_bytes
         self._worker_admission = worker_admission
+        self._spawn_admission = worker_admission.require_spawn if isinstance(worker_admission, InstallationWorkerAdmission) else None
         self._relationship_writer = relationship_writer
         self._relationship_authority = relationship_authority
         self._standing_relationship_writer = standing_relationship_writer
@@ -317,6 +320,8 @@ class TaskQueue(
             self._migrate_task_relevance(conn)
             self._migrate_relevance_evaluations(conn)
             self._migrate_pool_catalog(conn)
+            from .current_driver_schema import migrate as migrate_current_drivers
+            migrate_current_drivers(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)
             from .queue_assignment_cohort import migrate_allocation_cohorts
@@ -344,7 +349,7 @@ class TaskQueue(
                 "SELECT epoch FROM coordinator_fencing WHERE singleton = 1"
             ).fetchone()
             if row is not None and epoch <= row["epoch"]:
-                return row["epoch"]
+                return int(row["epoch"])
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT INTO coordinator_fencing (singleton, epoch) VALUES (1, ?)"
@@ -356,7 +361,7 @@ class TaskQueue(
                 "SELECT epoch FROM coordinator_fencing WHERE singleton = 1"
             ).fetchone()["epoch"]
             conn.commit()
-            return floor
+            return int(floor)
 
     @staticmethod
     def _migrate_producer_schema(conn: sqlite3.Connection) -> None:

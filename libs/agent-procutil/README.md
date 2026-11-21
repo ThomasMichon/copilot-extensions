@@ -4,6 +4,17 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`command_pipe.CommandPipe` adds a continuous binary stdin owner for the optional
+consumer-telemetry command route. It reuses atomic Windows caller-owned Job
+creation or the Linux private-session guardian and parent-lifetime pipe.
+Its producer-facing owner is an existing telemetry buffer, not a per-record
+process or a pipe-writer thread. Nonblocking writes have one aggregate record
+deadline; close retains exact custody until whole-tree settlement is confirmed.
+Unsupported pipe/custody primitives refuse optional export before writing data.
+Windows callers can omit child scope-name environment publication while keeping
+the native Job and inherited-handle restrictions. Existing launches retain their
+default publication and behavior.
+
 `spawn_sync_in_kill_on_close_job(..., require_job=True, allow_breakaway=False,
 on_suspended=callback)` optionally calls an in-process creation owner with the
 original Windows `Popen`, after required Job assignment and before resume.
@@ -552,14 +563,45 @@ guard, native-handle, finite Job and fresh-process compatibility details.
 Portable facade/transaction controls and actual Windows process/desktop
 qualification remain distinct.
 
-Finite shell queries use `Invoke-DaemonInstanceRequest -Transient` with the
+Shell capability queries use `Invoke-DaemonInstanceRequest -Transient` with the
 private `run-query` operation. It borrows the existing transport and strict
 child-Job/capture owner, not a daemon or new supervisor. A dedicated helper
 state closes before the response returns and never replaces the shell's
 existing instance guard. Requests supply literal argv, cwd and an explicit
-environment, a target deadline of at most 30 seconds, and per-stream capture
-limits of at most 65536 bytes. Actual child-tree settlement is required;
+environment, a target deadline of at most 30 seconds (or explicit `null` for
+caller-cancellable launch admission without an execution deadline), and
+per-stream capture limits of at most 65536 bytes. A null deadline requires
+transient custody. Transient requests have independent helper state and monitors;
+they cannot block unrelated finite requests behind the shared-helper lock.
+Shared-helper requests remain serialized. Actual child-tree settlement is required;
 timeout, output overflow and unknown cleanup cannot become successful output.
+An unsupported interpreter still has a finite refusal grace: without an
+execution deadline, its exit and diagnostic EOF share three seconds.
+Unconfirmed diagnostic capture refuses selection rather than waiting forever
+or trying another interpreter.
+Before qualification, the shell retains the original `Process` instance and
+pins its creation handle. Pre-offer cancellation terminates and observes that
+original process rather than depending on stdin EOF or rediscovering a PID.
+Windows venv candidates are launched through their declared `pyvenv.cfg` base,
+with `__PYVENV_LAUNCHER__` preserving the selected venv identity. The pinned
+creation process is therefore the interpreter, not a separately surviving
+redirector; `selectedExecutable` retains selection while `StartInfo.FileName`
+records the actual image. Unusable venv metadata refuses selection rather than
+substituting another interpreter.
+Unconfirmed cleanup retains the original state in the exception's
+`Data['DaemonInstanceState']`; this is live cleanup custody, not a serializable
+diagnostic or permission to replay selection.
+Transport reads use fixed 4096-character buffers, not unbounded line or
+read-to-end tasks. Qualification stdout is capped at 1024 characters; later
+protocol lines retain their 524288-character frame bound. Helper stderr has a
+separate cumulative 65536-character cap. Protocol and process-exit waits drain
+diagnostics concurrently; exceeding either capture cap fails through the same
+owned cleanup path without echoing captured content. These transport limits
+are separate from the target query's byte budgets.
+The original helper's observed exit starts one three-second post-exit pipe
+grace, even for no-deadline requests. A still-open inherited pipe refuses the
+outcome without replay and retains unconfirmed capture custody for explicit
+settlement; it does not authorize signaling an unadmitted descendant by PID.
 The caller still owns applicability and capability interpretation. This
 operation does not authorize installation or target effects.
 
@@ -646,6 +688,12 @@ it does not infer abort custody from a nonzero process exit. See Windows'
 
 ### Daemon and finite-process entrypoints
 
+Python daemon admission ignores only `ERROR_FILE_NOT_FOUND` when opening a
+tracked cleanup Job: a destroyed Job cannot retain a child. It still pins and
+checks every existing Job before resume. Malformed scope metadata, access
+denial, other native query failures and retained membership remain errors.
+This does not clear the caller's scope environment or authorize a launch retry.
+
 The packaged `native_daemon.ps1` retains compiled process creation/control
 while its compiler-free replacement remains open. `native_owned.ps1` uses the
 existing shared Python atomic Job owner. Both require setup-provided Python
@@ -692,6 +740,18 @@ acknowledgement; only an explicit refusal or observed cleanup clears that
 uncertainty. `RetainedChild` preserves native custody after unconfirmed cleanup
 for an explicit bounded `Stop()` retry followed by `Dispose()`. Callers must
 consult their durable operation state rather than retrying installation.
+Failed native launches also retain their instance receipt. Only the original,
+authenticated launcher can cancel a positively refused creation or settle a
+child whose exact retained handle proves exit. `ReservationSettled` reports
+that tracking result separately from `CleanupConfirmed`; neither authorizes
+replay. After retiring a retained child, call
+`Complete-NativeDaemonFailedLaunch -Failure <exception>` before disposing its
+handle. A retained child's own receipt also supports `-Child <retained-child>`.
+An independent pinned `-ObservedProcess` is accepted only when its PID and
+birth match the original child. Generic reconciliation still holds a
+reservation with no PID; it never infers refused creation from missing data.
+The native type and helper advertise version-one failed-launch support before
+reservation, so a newer caller refuses an older helper before creating state.
 With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
 windowless child and deliberately retains the caller's Job.
 
@@ -857,6 +917,34 @@ Unconfirmed cleanup retains exact process/output resources on
 add caller-death supervision: a dead caller is not settlement evidence.
 Descendants must remain in the inherited POSIX group; deliberate group/session
 escape is outside this contract, not a claimed whole-tree guarantee.
+
+`run_caller_owned(..., timeout=None, ...)` also supports foreground admission
+without an elapsed execution limit. Per-stream byte limits, caller-death
+custody, cancellation and confirmed cleanup remain enforced. An explicit
+aggregate `budget` still bounds execution and settlement; `None` does not
+override it. This opt-in does not change finite timeouts on existing callers.
+Only with explicit `timeout=None`, root exit is observed while pipes drain:
+a descendant retaining an inherited pipe cannot extend execution indefinitely.
+Windows retires and confirms the
+owned Job before joining its pipe workers. An exclusive POSIX owner retains
+the unreaped root through group retirement and confirmation, then drains
+available bytes. In the caller-owned POSIX supervisor, root exit drains
+available output without waiting for descendant EOF; publishing the completion
+frame lets the enclosing owner retire and confirm that same group before
+returning. Root output, nonzero exit codes and output-limit failures remain
+distinct from cleanup confirmation.
+Finite requests retain their original EOF-or-execution-deadline behavior,
+including descendant-produced output after root exit. For no-deadline requests
+with an aggregate budget, observing root exit switches draining and settlement
+to that budget's original cleanup deadline; crossing the execution cutoff
+during confirmed retirement does not turn a completed execution into a timeout.
+The cleanup deadline is never renewed or disabled.
+Borrowed parent scopes keep waiting for bounded pipe completion; only the
+actual completion-frame supervisor may hand off an idle inherited pipe at root
+exit. An exclusive owner reuses its confirmed group witness until root reap,
+without repeating the census. Recorded Windows pipe failures stop execution
+waiting even if retirement fails; unconfirmed cleanup retains the original
+process and Job.
 
 ### Aggregate execution and settlement budget
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Allow multiple exact pool instances and independently inhibit new worker admissions by pool, instance, task label or kind, and selected worker body.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

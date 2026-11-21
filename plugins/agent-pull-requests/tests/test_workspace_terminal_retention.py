@@ -7,12 +7,15 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 import time
+from pathlib import Path
+from typing import Any, cast
+from collections.abc import Callable
 
 import pytest
 from single_instance_lease import OperationLockedError
 
 from test_workspace_integration import environment as environment, integration as integration
-from test_review_workspace import section as evidence_section
+from test_review_workspace import section as _evidence_section
 
 from agent_pull_requests.attention import Cursor
 from agent_pull_requests.conversation_store import ConversationStore
@@ -21,15 +24,19 @@ from agent_pull_requests.review_workspace import EVIDENCE_SCHEMA, build_generati
 from agent_pull_requests.terminal_retention import TerminalAdmissionClosed, TerminalRetentionStore
 from agent_pull_requests.watch_replay import ObservationTarget
 from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.workspace_operations import WorkspaceOperations
 
 pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
+Document = dict[str, Any]
+Workspace = tuple[WorkspaceOperations, Document, Any, Document, Document, Document]
+evidence_section = cast(Callable[..., Document], _evidence_section)
 
 
 @pytest.fixture
-def workspace(environment, integration):
+def workspace(environment: Any, integration: Any) -> Workspace:
     owner, intent, initial, attachment, backend, _ = environment
     _, _, native, evidence, _, _ = integration
-    operations = native.operations
+    operations: WorkspaceOperations = native.operations
     for name in ("reviewers", "policies"):
         evidence["sections"][name] = evidence_section([])
     # This fixture has no running host or old reader; select the capable reader
@@ -45,19 +52,21 @@ def workspace(environment, integration):
     return operations, evidence, backend, intent, initial, attachment
 
 
-def execute(workspace, operation, payload):
-    return workspace.execute(
+def execute(workspace: WorkspaceOperations, operation: str, payload: Document) -> Document:
+    return cast(Document, workspace.execute(
         operation, payload, expires_at=int(time.time()) + 600, checkpoint=lambda: None,
-    )["result"]
+    )["result"])
 
 
-def load(workspace, expected):
+def load(workspace: WorkspaceOperations, expected: str) -> Document:
     return execute(workspace, "load", {
         "number": 42, "expected_current": expected, "budget_seconds": 10,
     })
 
 
-def terminal(workspace, current, *, state="completed", second=20):
+def terminal(
+    workspace: WorkspaceOperations, current: Document, *, state: str = "completed", second: int = 20,
+) -> tuple[Document, Document]:
     evidence = {
         "schema": EVIDENCE_SCHEMA, "version": 1,
         "scope": copy.deepcopy(current["scope"]), "sections": copy.deepcopy(current["sections"]),
@@ -69,6 +78,7 @@ def terminal(workspace, current, *, state="completed", second=20):
             observed_to=f"2026-10-30T00:00:{second + 1:02d}Z",
         )
     value = build_generation(evidence)["generation"]
+    assert workspace.retention_target is not None
     result = ConversationStore(workspace.store).observe_workspace(
         value, expires_at=int(time.time()) + 600,
         terminal_target=workspace.retention_target(value["scope"]),
@@ -76,14 +86,16 @@ def terminal(workspace, current, *, state="completed", second=20):
     return result, value
 
 
-def drain(workspace, scope, cursor, deadline):
-    return workspace.retention.drain(
+def drain(
+    workspace: WorkspaceOperations, scope: Document, cursor: Document, deadline: float,
+) -> Document:
+    return cast(Document, workspace.retention.drain(
         scope, Cursor(**cursor), expires_at=int(time.time()) + 600,
         checkpoint=lambda: None, lifecycle_checkpoint=lambda: None, deadline=deadline,
-    )
+    ))
 
 
-def test_real_load_stops_terminal_publication_and_reopen_rejects_old_buffers(workspace):
+def test_real_load_stops_terminal_publication_and_reopen_rejects_old_buffers(workspace: Workspace) -> None:
     operations, evidence, backend, _, initial, _ = workspace
     first = load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
@@ -119,15 +131,15 @@ def test_real_load_stops_terminal_publication_and_reopen_rejects_old_buffers(wor
 
 
 def test_already_admitted_acquisition_must_join_before_drain_and_cannot_republish(
-    workspace, monkeypatch,
-):
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     operations, _, _, _, initial, _ = workspace
     load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
     entered, release = threading.Event(), threading.Event()
     read = operations.read_owner.read
 
-    def paused(*args, **kwargs):
+    def paused(*args: Any, **kwargs: Any) -> Any:
         value = read(*args, **kwargs)
         entered.set()
         assert release.wait(5)
@@ -154,15 +166,15 @@ def test_already_admitted_acquisition_must_join_before_drain_and_cannot_republis
 
 @pytest.mark.parametrize("boundary", ["cache", "materialization"])
 def test_replay_fence_serializes_actual_cache_and_materialization_boundaries(
-    workspace, monkeypatch, boundary,
-):
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
     operations, _, _, _, initial, _ = workspace
     load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
     entered, release = threading.Event(), threading.Event()
     original = GenerationCache.publish if boundary == "cache" else operations._materialized
 
-    def paused(*args, **kwargs):
+    def paused(*args: Any, **kwargs: Any) -> Any:
         entered.set()
         assert release.wait(5)
         return original(*args, **kwargs)
@@ -179,8 +191,10 @@ def test_replay_fence_serializes_actual_cache_and_materialization_boundaries(
         try:
             assert entered.wait(5)
             before = operations.store.path.read_bytes()
+            # Probe custody without blocking the thread that must release the current owner.
             with pytest.raises(OperationLockedError):
-                terminal(operations, current)
+                with operations.store._lock():
+                    pytest.fail("publication must retain replay custody")
             assert operations.store.path.read_bytes() == before
         finally:
             release.set()
@@ -192,7 +206,9 @@ def test_replay_fence_serializes_actual_cache_and_materialization_boundaries(
     assert len(json.loads(operations.store.path.read_bytes())["terminal_retention"]["records"]) == 1
 
 
-def test_admitted_native_sender_is_joined_and_retains_receipt_without_starting_next_action(workspace):
+def test_admitted_native_sender_is_joined_and_retains_receipt_without_starting_next_action(
+    workspace: Workspace,
+) -> None:
     operations, _, backend, intent, initial, attachment = workspace
     load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
@@ -200,7 +216,7 @@ def test_admitted_native_sender_is_joined_and_retains_receipt_without_starting_n
     attachment = {**attachment, "generation_id": current["id"]}
     entered, release = threading.Event(), threading.Event()
 
-    def after_write(_backend):
+    def after_write(_backend: Any) -> None:
         entered.set()
         assert release.wait(5)
 
@@ -226,7 +242,9 @@ def test_admitted_native_sender_is_joined_and_retains_receipt_without_starting_n
     assert drain(operations, current["scope"], result["cursor"], time.monotonic() + 1)["drain"] == "drained"
 
 
-def test_partial_refresh_preserves_authoritative_live_reads_and_sync_reacquisition(workspace):
+def test_partial_refresh_preserves_authoritative_live_reads_and_sync_reacquisition(
+    workspace: Workspace,
+) -> None:
     operations, evidence, _, _, initial, _ = workspace
     load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
@@ -254,8 +272,8 @@ def test_partial_refresh_preserves_authoritative_live_reads_and_sync_reacquisiti
 
 @pytest.mark.parametrize("status", ["full", "conflict", "failed", "unconfirmed"])
 def test_failed_publications_do_not_consume_generation_binding_capacity(
-    workspace, monkeypatch, status,
-):
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, status: str,
+) -> None:
     operations, evidence, _, _, initial, _ = workspace
     load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
@@ -276,7 +294,9 @@ def test_failed_publications_do_not_consume_generation_binding_capacity(
 
 
 @pytest.mark.parametrize("failure", ["after_publication", "owner_write"])
-def test_cache_pointer_never_precedes_its_durable_epoch_binding(workspace, monkeypatch, failure):
+def test_cache_pointer_never_precedes_its_durable_epoch_binding(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     from agent_pull_requests import watch_replay_store as storage
 
     operations, evidence, _, _, initial, _ = workspace
@@ -287,7 +307,7 @@ def test_cache_pointer_never_precedes_its_durable_epoch_binding(workspace, monke
     published = False
     publish, write = GenerationCache.publish, storage._atomic_write_json
 
-    def interrupted(cache, generation, **kwargs):
+    def interrupted(cache: GenerationCache, generation: Document, **kwargs: Any) -> Document:
         nonlocal published
         result = publish(cache, generation, **kwargs)
         assert result["status"] == "published"
@@ -296,7 +316,7 @@ def test_cache_pointer_never_precedes_its_durable_epoch_binding(workspace, monke
             raise OSError("synthetic stop immediately after durable cache pointer")
         return result
 
-    def fail_owner_write(path, document):
+    def fail_owner_write(path: Path, document: Document) -> None:
         if published:
             raise OSError("synthetic later owner-file write failure")
         write(path, document)

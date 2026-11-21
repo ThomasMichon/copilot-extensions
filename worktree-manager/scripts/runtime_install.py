@@ -2,6 +2,7 @@
 # copilot-extensions:bootstrap-uv=1
 # copilot-extensions:toolchain-config=1
 # copilot-extensions:toolchain-context=1
+# copilot-extensions:toolchain-bootstrap-only=1
 
 from __future__ import annotations
 
@@ -842,7 +843,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--describe-source-inputs", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    from runtime_install_inputs import admit_bootstrap_uv, admit_native_wheels, describe_source_inputs
+    from runtime_install_inputs import (
+        admit_bootstrap_uv, admit_native_wheels, describe_source_inputs, installation_command,
+    )
     admit_bootstrap_uv(args, parser)
     admit_native_wheels(args, parser)
     if describe_source_inputs(args, parser):
@@ -906,28 +909,21 @@ def main(argv: list[str] | None = None) -> int:
             "provider": "worktree-manager",
         }))
         return 0
-    if args.root is None:
-        parser.error("--root is required for installation")
-    command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if args.install_only and (command or args.source_digest is None):
-        parser.error("Installation participant requires a source digest and no application command")
-    if args.update_participant and (
-        args.install_only or command[:1] != ["update"] or args.source_digest is None
-        or args.recover_adopted is not None
-    ):
-        parser.error("Update participant requires a source digest and one update command")
-    if args.skip_instance_reconcile and not args.install_only:
-        parser.error("Instance reconciliation policy requires an installation participant")
-    if args.source_digest is not None and (
-        not (args.install_only or args.update_participant)
-        or re.fullmatch("[0-9a-f]{64}", args.source_digest) is None
-    ):
-        parser.error("Source digest requires an installation participant and a SHA-256")
-    if args.repair_update and not args.install_only and command[:1] != ["update"]:
-        parser.error("Bootstrap repair is only valid for update")
+    command = installation_command(args, parser)
     os.environ.pop("__PYVENV_LAUNCHER__", None)
     os.environ["WORKTREE_MANAGER_ROOT"] = str(args.root.resolve())
     sys.path.insert(0, str(SCRIPTS.parent / "src"))
+    if command[:1] == ["setup"] and "--toolchain-only" in command[1:]:
+        from worktree_manager.setup_arguments import parse
+        from worktree_manager.toolchain_config import configure_setup
+
+        try:
+            setup = parse(command[1:])
+        except SystemExit as error:
+            return error.code if isinstance(error.code, int) else (0 if error.code is None else 1)
+        return configure_setup(
+            root=args.root.resolve(), apply=setup.apply, configuration_only=setup.toolchain_only,
+        )
     if not args.install_only:
         args.skip_instance_reconcile = bool(command and command[:1] not in (["update"], ["self-install"]))
     driver = _execution_driver(SCRIPTS.parent)

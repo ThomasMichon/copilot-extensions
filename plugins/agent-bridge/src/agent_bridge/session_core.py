@@ -172,7 +172,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if not sd.is_dir():
                 raise ValueError("Passive hydration requires an existing session-host root")
         else:
-            sd.mkdir(parents=True, exist_ok=True)
+            HostIndex.provision_root(sd)
         self._host_index = HostIndex(sd / "index.json", load=captured_sessions is None)
         # This process's own generation identity (effort
         # agent-bridge-unified-zdd-cutover, Phase 3): the outgoing generation

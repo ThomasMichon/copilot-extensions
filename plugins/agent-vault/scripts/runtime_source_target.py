@@ -88,6 +88,20 @@ def current(root: Path, payload: Path, package_version: str) -> bool:
         or manifest.get("runtime_source") != (fields["runtime_source"] if fields else None)
     ):
         return False
+    import installer_provider_roots as providers
+
+    desired = providers.read(root)
+    origins = root / "versions" / version / ".runtime-input-origins.json"
+    if desired is not None and (desired or os.path.lexists(origins)):
+        try:
+            if origins.stat().st_size > 1_048_576:
+                return False
+            record = json.loads(origins.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+            if not isinstance(record, dict):
+                return False
+            providers.check_construction(root, record.get("wheel_inputs"), core="agent-vault")
+        except (OSError, ValueError):
+            return False
     python = root / "versions" / version / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )

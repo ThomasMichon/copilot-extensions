@@ -281,6 +281,7 @@ def fleet_autopilot_worker_prompt(
     repo: str | None = None,
     all_repos: bool = False,
     route: str = "",
+    machine: str | None = None,
 ) -> str:
     """Build the autopilot seed for a **fleet-dispatched, remote** embody body.
 
@@ -303,10 +304,17 @@ def fleet_autopilot_worker_prompt(
       worktree), so the body passes the supervisor-assigned **synthetic owner**
       (``{owner}``) on every lease-holding verb. It is an opaque lease-holder id,
       stable for this attempt.
+    - **Carry the executing machine.** The same ``ssh <origin>`` shell would
+      resolve the *origin's* machine identity, so ``machine`` (the pool host the
+      supervisor launched this body on) is passed as ``--machine`` to ``claim``
+      and ``yield``. The claim then honors a ``target_machine`` pin and
+      ``machine:`` selectors against the host that runs the work, and
+      ``--exclude-self machine`` excludes that host, not the origin.
     """
     if repo and all_repos:
         raise ValueError("fleet claim scope cannot set repo and all_repos")
     lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
+    on_machine = f" --machine {machine.strip()}" if machine and machine.strip() else ""
     ad = f"ssh {origin} agent-dispatch{validate_fleet_route(route)}"
     charter_step = _charter_read_step(
         ad, task_charter=AUTOPILOT_CHARTER_NAME, concise=False
@@ -321,7 +329,7 @@ def fleet_autopilot_worker_prompt(
         f"origin, so the owner is not optional). {charter_step}"
         f"Then: (1) read the task: `{ad} show {task_id}`; "
         f"(2) claim it for evaluation: `{ad} claim --task {task_id} --worker "
-        f"{owner} --evaluation{lane}` (add `--capability <cap>` for each "
+        f"{owner} --evaluation{lane}{on_machine}` (add `--capability <cap>` for each "
         f"capability the task requires); "
         f"(3) while you hold the evaluation lease, follow the autopilot "
         f"charter's contract-net checks, using `{ad} list{lane}` for this "
@@ -333,7 +341,7 @@ def fleet_autopilot_worker_prompt(
         f'"<one line>"` (add `--pr <ref>` or `--blocker <why>` when relevant); '
         f"(6) if the task is not for you or you hit a transient blocker, decline "
         f"per the charter with `{ad} yield {task_id} {owner} --exclude-self "
-        f"machine --note <why>`; "
+        f"machine{on_machine} --note <why>`; "
         f"(7) if it is a duplicate or obsolete, retire it terminally with `{ad} "
         f"abandon {task_id} --worker-id {owner} --duplicate-of <ref>` (cite the "
         f"existing task/PR/issue) so the dedup is recorded, never a silent drop; "

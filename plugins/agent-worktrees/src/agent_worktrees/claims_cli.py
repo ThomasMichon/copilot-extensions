@@ -27,7 +27,9 @@ from . import (
     worktree_identity,
 )
 from . import config as cfg, execution_spaces, state_root as state_root_mod
-from .resident_recovery import dispatch_claim as _dispatch_claim
+from .resident_recovery import dispatch_claim
+
+_dispatch_claim = dispatch_claim
 F = TypeVar("F", bound=Callable[..., object])
 
 
@@ -102,6 +104,9 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
         action="store_true",
         help="with settle: mark the claim released rather than at-rest",
     )
+    p.add_argument("--expected-record-nonce", help="with settle: pin the owner's record incarnation")
+    p.add_argument("--expected-claim-nonce", help="with settle: pin the claim incarnation")
+    p.add_argument("--expected-kind", help="with settle: pin the claim kind (all pins require --owner-ref)")
     p.add_argument(
         "--worktree",
         default=None,
@@ -223,9 +228,26 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict[s
 def cmd_claims(args: argparse.Namespace) -> int:
     """Dispatch the claims verb."""
     target = list(getattr(args, "target", None) or [])
+    if target[:1] != ["settle"] and any(
+        getattr(args, key, None) is not None
+        for key in ("expected_record_nonce", "expected_claim_nonce", "expected_kind")
+    ):
+        message = "claim identity pins are supported only by claims settle"
+        if args.json:
+            return output._json_error(message, 2)
+        output.err(message)
+        return 2
     if getattr(args, "sweep_observation", False): return claims_find_cli.cmd_sweep_observation(args, target)
     if target and target[0] == "ownership":
         return producer_views_cli.cmd_ownership(args, target[1:])
+    if target[:1] == ["binding"]:
+        from . import claims_binding
+        if len(target) != 2:
+            if args.json:
+                return output._json_error("claims binding: expected exactly one task ref", 2)
+            output.err("claims binding: expected exactly one task ref")
+            return 2
+        return claims_binding.cmd_binding(args, target[1])
     if target and target[0] == "owner": return claims_owner.cmd_claims_owner(args, target[1:])
     if target and target[0] == "handoff":
         return _claims_handoff(args, target[1:])
@@ -492,6 +514,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 "state": result["state"],
                 "reopened": reopened,
                 "released_by_earlier_finalize": released_by_finalize,
+                **({"claim_binding": result["claim_binding"]} if result.get("claim_binding") else {}),
             }
         )
         return 0
@@ -593,78 +616,10 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
 
 
 def _claims_settle(args: argparse.Namespace, ref: str) -> int:
-    wt_id: str | None
     """Settle one outbound resource claim's disposition by ref."""
-    config = cfg.load_config()
-    owner_ref = getattr(args, "claim_owner_ref", None)
-    if owner_ref:
-        rec_path, wt_id, err = _resolve_owner_ref_record_path(owner_ref, config)
-        if err:
-            if args.json:
-                return output._json_error(err, 2)
-            output.err(err)
-            return 2
-        if rec_path is None:
-            if args.json:
-                output._json_output(
-                    {
-                        "worktree_id": wt_id,
-                        "ref": ref,
-                        "deferred": True,
-                        "reason": "cross-machine-owner",
-                    }
-                )
-                return 0
-            output.warn(
-                f"owner-ref {owner_ref} is on another machine -- settle deferred "
-                f"to the lease mirror (no local ledger write)"
-            )
-            return 0
-    else:
-        wt_id = worktree_identity._infer_worktree_id(getattr(args, "release_worktree", None), config)
-        rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-    if not rec_path.exists():
-        if args.json:
-            return output._json_error(f"worktree not found: {wt_id}")
-        output.err(f"worktree not found: {wt_id}")
-        return 1
-    disposition = obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
-    from . import tracking_write
+    from .claims_settle_cli import settle
 
-    try:
-        result = _dispatch_claim(
-            "claim_settle",
-            {
-                "worktree_id": wt_id,
-                "yaml_path": str(rec_path),
-                "ref": ref,
-                "disposition": disposition,
-                "session_id": claim_history.current_session_id(),
-            },
-        )
-    except tracking_write.ResidentRecoveryHeld as exc:
-        return tracking_write.refuse_recovery(exc, json_output=args.json)
-    except tracking_write.AmbiguousWriteOutcome as exc:
-        msg = f"claims settle: write to {wt_id} is in an unknown state: {exc}"
-        if args.json:
-            return output._json_error(msg)
-        output.err(msg)
-        return 1
-    if result.get("error") in {"reserved", "rejected", "frozen"}:
-        if args.json:
-            return output._json_error(result["message"])
-        output.err(result["message"])
-        return 1
-    if result.get("error") == "not_found":
-        if args.json:
-            return output._json_error(f"no outbound claim with ref: {ref}")
-        output.err(f"no outbound claim with ref: {ref} on {wt_id}")
-        return 1
-    if args.json:
-        output._json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
-        return 0
-    print(f"settled outbound claim {ref} on {wt_id} -> {disposition}")
-    return 0
+    return settle(args, ref, dispatch_claim=_dispatch_claim, resolve_owner_ref=_resolve_owner_ref_record_path)
 
 
 def _claims_sweep(args: argparse.Namespace) -> int:

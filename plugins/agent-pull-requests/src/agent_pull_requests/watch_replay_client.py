@@ -6,12 +6,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal, cast
 
 from fleet_manager.gateway_service_caller import ServiceCaller
 from fleet_manager.gateway_service_channel import TransportError, target as service_target
 
 from .watch_contract import ALL_TRANSITIONS
+from .watch_admission import ReplayAdmission, from_content_type
 from .watch_notification import positive_seconds, validate_pending
 from .watch_registry import WatchKey
 from .watch_replay import MAX_BATCH, MAX_BATCH_BYTES, RETENTION_SECONDS
@@ -70,6 +71,7 @@ class ReplayCapabilities:
     max_batch_bytes: int
     receipt_retention_seconds: int
     binding: ReplayBinding | None = None
+    registration_admission: ReplayAdmission | None = None
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,7 @@ class ReplayEvent:
     event_id: str
     _json: bytes = field(repr=False)
 
-    def payload(self) -> dict:
+    def payload(self) -> dict[str, Any]:
         """Return a detached copy, retaining the complete native notification."""
         return json_object(self._json)
 
@@ -130,8 +132,9 @@ class ReplayClient:
             raise ValueError("invalid replay route prefix")
         self._caller, self._path = caller, path
         self._repo = _identity(repo)
+        self._registration_admission: ReplayAdmission | None = None
 
-    async def _exchange(self, operation: str, payload: dict) -> dict:
+    async def _exchange(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         mutation = operation in ("register", "acknowledge", "cancel")
         if self._binding is not None and operation != "capabilities":
             payload = {"binding": self._binding.document(), "request": payload}
@@ -159,14 +162,16 @@ class ReplayClient:
             if (len(response.body) > MAX_BATCH_BYTES or len(content_types) != 1
                     or content_types[0].split(";")[0].strip().lower() != "application/json"):
                 raise ValueError
+            if operation == "capabilities":
+                self._registration_admission = from_content_type(content_types[0])
             return json_object(response.body)
         except (ValueError, UnicodeError, RecursionError, OverflowError):
             raise ReplayClientError("invalid_watch_response", outcome_unknown=mutation) from None
 
     @staticmethod
-    def _outcome(value: dict, operation: str) -> ReplayOutcome | None:
+    def _outcome(value: dict[str, Any], operation: str) -> ReplayOutcome | None:
         status = value.get("status")
-        allowed = {
+        allowed: dict[str, set[str | None]] = {
             "uncertain": {None, "state_commit_uncertain", "request_outside_retention"},
             "conflict": {None} if operation == "register" else set(),
             "unavailable": {"replay_capacity"} if operation == "register" else set(),
@@ -175,10 +180,12 @@ class ReplayClient:
             if (set(value) - {"status", "reason"}
                     or value.get("reason") not in allowed[status]):
                 raise ValueError
-            return ReplayOutcome(status, value.get("reason"))
+            return ReplayOutcome(
+                cast(Literal["uncertain", "conflict", "unavailable"], status), value.get("reason"),
+            )
         return None
 
-    async def _receipt(self, operation: str, payload: dict) -> ReplayReceipt | ReplayOutcome:
+    async def _receipt(self, operation: str, payload: dict[str, Any]) -> ReplayReceipt | ReplayOutcome:
         value = await self._exchange(operation, payload)
         try:
             outcome = self._outcome(value, operation)
@@ -211,7 +218,7 @@ class ReplayClient:
             ) from None
 
     @staticmethod
-    def _request(request: ReplayRequest) -> dict:
+    def _request(request: ReplayRequest) -> dict[str, Any]:
         if type(request) is not ReplayRequest:
             raise ValueError("expected original replay request")
         return {"request_id": request.request_id, "issued_at": request.issued_at}
@@ -236,7 +243,7 @@ class ReplayClient:
             raise ReplayClientError("invalid_watch_capabilities")
         return ReplayCapabilities(
             self._protocol, tuple(value["operations"]), MAX_BATCH, MAX_BATCH_BYTES,
-            RETENTION_SECONDS, self._binding,
+            RETENTION_SECONDS, self._binding, self._registration_admission,
         )
 
     async def register(self, request: ReplayRequest, *, number: int,

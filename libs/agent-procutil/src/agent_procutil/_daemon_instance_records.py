@@ -10,12 +10,14 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
-from ._daemon_instance_identity import birth_identity, path_identity
-from .daemon_instances import DaemonInstanceReceipt, DaemonInstanceSpec, DaemonLeasePolicy
+from . import _daemon_instance_clock as lease_clock
+from ._daemon_instance_identity import birth_identity, identity_state, path_identity
+from .daemon_instances import DaemonInstanceReceipt, DaemonInstanceSpec, DaemonLeasePolicy, Purpose
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,8 @@ class ProcessIdentity:
 
 
 def reserve_for_process(
-    spec: DaemonInstanceSpec, launcher: ProcessIdentity, *, environment=None,
+    spec: DaemonInstanceSpec, launcher: ProcessIdentity,
+    *, environment: Mapping[str, str] | None = None,
 ) -> DaemonInstanceReceipt:
     from . import _daemon_instance_store as store
 
@@ -53,14 +56,18 @@ def reserve_for_process(
         if spec.purpose == "interactive-test" and context["purpose"] != "interactive-test":
             raise ValueError("interactive daemon requires a pause-tolerant lifecycle owner")
         spec = replace(
-            spec, purpose=context["purpose"], owner=context["owner"],
+            spec, purpose=cast(Purpose, context["purpose"]), owner=context["owner"],
             registry_root=Path(context["registry_root"]),
             lease=DaemonLeasePolicy(float(context["ttl"]), float(context["max_lifetime"])),
         )
     source, source_member = store.source_provenance(spec.source)
-    timing = store.lease_clock.fields(
-        spec.lease.ttl_seconds, spec.lease.max_lifetime_seconds, store._monotonic_clock(),
-    ) if sys.platform.startswith("linux") and spec.lease else {}
+    timing: dict[str, str] = {}
+    lease = spec.lease
+    if lease is not None:
+        if sys.platform.startswith("linux"):
+            timing = lease_clock.fields(
+                lease.ttl_seconds, lease.max_lifetime_seconds, store._monotonic_clock(),
+            )
     root = store._root(spec.registry_root or store.registry_root(), create=True)
     runtime = store._runtime_anchor(spec.runtime_root)
     receipt = DaemonInstanceReceipt(uuid.uuid4().hex, root)
@@ -157,3 +164,58 @@ def finish_for_process(
             raise ValueError("daemon instance custody belongs to another process")
         record.update(state="finished", updated=str(store._wall_clock()))
         store._write(path, record)
+
+
+def cancel_for_process(
+    receipt: DaemonInstanceReceipt, launcher: ProcessIdentity, *, creation_refused: bool,
+) -> None:
+    """Cancel only the authenticated launcher's positively refused reservation."""
+    from . import _daemon_instance_store as store
+
+    if creation_refused is not True:
+        raise ValueError("reservation cancellation requires refused creation")
+    with store._locked(receipt, wait_seconds=1) as path:
+        record = store._read(path)
+        if (
+            not launcher.matches(record, "launcher_")
+            or record["state"] != "reserved" or record.get("pid")
+            or record["artifact_count"] != "0" or record.get("protected", "0") != "0"
+        ):
+            raise ValueError("daemon reservation cannot be cancelled")
+        path.unlink()
+
+
+def finish_failed_for_process(
+    receipt: DaemonInstanceReceipt, process: ProcessIdentity, launcher: ProcessIdentity,
+    *, admission_possible: bool,
+) -> bool:
+    """Settle the original launcher's pinned, exited child without deleting app files."""
+    from . import _daemon_instance_store as store
+
+    with store._locked(receipt, wait_seconds=1) as path:
+        record = store._read(path)
+        if not launcher.matches(record, "launcher_"):
+            raise ValueError("daemon launch belongs to a different process")
+        if record.get("pid") and not process.matches(record):
+            raise ValueError("daemon launch process changed")
+        if record["state"] not in ("reserved", "bound", "running", "finished"):
+            raise ValueError("daemon launch state changed")
+        record.update(pid=str(process.pid), birth=process.birth)
+        if admission_possible:
+            record["spawn_admission_possible"] = "1"
+        observed = identity_state(process.pid, process.birth)
+        if observed != "dead":
+            record["spawn_failure"] = "process-" + observed
+            store._write(path, record)
+            return False
+        if (
+            not admission_possible and record["state"] in ("reserved", "bound")
+            and record.get("spawn_admission_possible", "0") == "0"
+            and record["artifact_count"] == "0" and record.get("protected", "0") == "0"
+            and record.get("spawn_failure") != "exit-confirmed-effects-held"
+        ):
+            path.unlink()
+            return True
+        record.update(state="finished", spawn_failure="exit-confirmed-effects-held")
+        store._write(path, record)
+        return False

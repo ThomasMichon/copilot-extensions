@@ -153,6 +153,44 @@ def _versions(db: Any) -> dict[str, int]:
     return {name: db.open_table(name).version for name in db.list_tables().tables}
 
 
+def _validate_point_models(value: object) -> None:
+    if (not isinstance(value, dict) or set(value) != {"protocol", "content_table", "models"}
+            or type(value["protocol"]) is not int or value["protocol"] != 1
+            or not isinstance(value["models"], dict)):
+        raise SourceLayoutError("invalid point model binding")
+    try:
+        _identity(value["content_table"], "content_table")
+        tables = {value["content_table"]}
+        for model_id, model in value["models"].items():
+            _identity(model_id, "model_id")
+            if (not isinstance(model, dict) or set(model) != {"table_name", "dim"}
+                    or type(model["dim"]) is not int or model["dim"] <= 0):
+                raise ValueError("invalid model")
+            _identity(model["table_name"], "table_name")
+            if model["table_name"] in tables:
+                raise ValueError("duplicate table")
+            tables.add(model["table_name"])
+    except (TypeError, ValueError) as exc:
+        raise SourceLayoutError("invalid point model binding") from exc
+
+
+def _configured_point_models(config: IndexConfig) -> dict[str, Any]:
+    if any(key != profile.model_id for key, profile in config.model_profiles.items()):
+        raise SourceLayoutError("point-domain bootstrap requires distinct configured tables")
+    value = {
+        "protocol": 1, "content_table": config.content_table,
+        "models": {
+            key: {"table_name": profile.table_name, "dim": profile.dim}
+            for key, profile in config.model_profiles.items()
+        },
+    }
+    try:
+        _validate_point_models(value)
+    except SourceLayoutError as exc:
+        raise SourceLayoutError("point-domain bootstrap requires distinct configured tables") from exc
+    return value
+
+
 def _refuse_marked_legacy(store: Any) -> None:
     path = getattr(store, "_source_path", None)
     if path is None:
@@ -193,6 +231,7 @@ class SourceDomain:
             raise SourceLayoutError("source-aware domain busy")
         stream = None
         guard = None
+        previous = getattr(self._local, "exclusion_owned", False)
         try:
             if (self.path / MARKER).exists() and not all(
                 (self.path / name).is_file() for name in (LOCK, FTS_LOCK)
@@ -201,8 +240,10 @@ class SourceDomain:
             stream = kernel_lock(self.path / LOCK)
             guard = kernel_lock(self.path / FTS_LOCK)
             self._local.fts_guard = guard
+            self._local.exclusion_owned = True
             yield
         finally:
+            self._local.exclusion_owned = previous
             current = getattr(self._local, "fts_guard", None)
             if current is not None:
                 current.close()
@@ -266,11 +307,30 @@ class SourceDomain:
         if (self._point_scope is not None
                 and json.dumps(value.get("point_scope"), sort_keys=True) != self._point_scope):
             raise SourceLayoutError("point-domain scope differs from its retained binding")
+        if self._point_scope is not None and "point_models" in value:
+            _validate_point_models(value["point_models"])
 
     def save(self, value: dict[str, Any]) -> None:
+        if self._point_scope is not None and not getattr(self._local, "exclusion_owned", False):
+            self._validate_receipt(value)
+            with self.exclusion():
+                self._save_receipt(value)
+        else:
+            self._save_receipt(value)
+
+    def _save_receipt(self, value: dict[str, Any]) -> None:
         self._validate_receipt(value)
-        if (self.path / MARKER).exists():
-            self.receipt()
+        current = self.receipt() if (self.path / MARKER).exists() else {}
+        if self._point_scope is not None:
+            retained = current.get("point_models")
+            selected = value.get("point_models")
+            if retained is not None and selected != retained:
+                raise SourceLayoutError("point model binding cannot be changed or removed")
+            if retained is None and selected is not None and (
+                not self.writing or current.get("versions") != {}
+                or _versions(self._local.db)
+            ):
+                raise SourceLayoutError("point model binding requires an empty owning writer")
         payload = json.dumps(value, sort_keys=True)
         logical = value.get("logical_projection")
         if (len(payload.encode("utf-8")) > 65536 and isinstance(logical, dict)
@@ -331,6 +391,7 @@ class SourceDomain:
         if kind in ("content-upsert", "canonical-delete", "content-compact"):
             value.setdefault("fts_coverage", {}).pop(table, None)
         value.update(uncertain_effect=True, operation=operation)
+        self._local.effect_sequence += 1
         self.save(value)
 
     def _table_identity(self, table_name: str) -> dict[str, Any] | None:
@@ -445,14 +506,17 @@ class SourceDomain:
         }
         # Older participating validators must refuse even an empty native phase.
         value["uncertain_effect"] = True
+        self._local.effect_sequence += 1
         self.save(value)
 
     def write(self, db: Any) -> AbstractContextManager[None]:
         return self._write(db)
 
-    def reconcile(self, db: Any, *, owner: str, token: str) -> AbstractContextManager[None]:
+    def reconcile(
+        self, db: Any, *, owner: str, token: str, point_scope: PointScope | None = None,
+    ) -> AbstractContextManager[None]:
         """Resume only an exact sealed phase; arbitrary dirty stores still refuse."""
-        return self._write(db, reconciliation=(owner, token))
+        return self._write(db, reconciliation=(owner, token), point_scope=point_scope)
 
     @contextmanager
     def _write(
@@ -464,9 +528,14 @@ class SourceDomain:
             self.receipt()
             if reconciliation is not None:
                 raise SourceLayoutError("reconciliation requires outer source ownership")
+            sequence = self._local.effect_sequence
             self._local.depth += 1
             try:
                 yield
+            except BaseException:
+                if self._local.effect_sequence != sequence:
+                    self._local.failed_effect = True
+                raise
             finally:
                 self._local.depth -= 1
             return
@@ -499,8 +568,12 @@ class SourceDomain:
             self._local.physical_witness = dict(before or {})
             self._local.bucket_changes = {}
             self._local.bucket_witness = dict(before or {})
+            self._local.effect_sequence = 0
+            self._local.failed_effect = False
             try:
                 yield
+                if self._local.failed_effect:
+                    raise SourceLayoutError("source writer retained a failed nested effect")
                 if self.receipt().get("fts_pending"):
                     raise SourceLayoutError("FTS writer ownership is unsettled")
                 value = self.receipt()
@@ -531,6 +604,8 @@ class SourceDomain:
                 self._local.physical_witness = {}
                 self._local.bucket_changes = {}
                 self._local.bucket_witness = {}
+                self._local.effect_sequence = 0
+                self._local.failed_effect = False
 
 
 def domain_for(
@@ -597,12 +672,8 @@ def initialize_source_store(
     config: IndexConfig, *, point_scope: PointScope | None = None,
 ) -> MultiModelStore:
     """Cold writer bootstrap, including its canonical content/model tables."""
+    models = _configured_point_models(config) if point_scope is not None else None
     names = {config.content_table, *(p.table_name for p in config.model_profiles.values())}
-    if point_scope is not None and (
-        len(names) != 1 + len(config.model_profiles)
-        or any(name != profile.model_id for name, profile in config.model_profiles.items())
-    ):
-        raise SourceLayoutError("point-domain bootstrap requires distinct configured tables")
     initialize_source_layout(config.lance_dir, point_scope=point_scope)
     from .content_store import _CONTENT_SCHEMA
     from .multi_model_store import MultiModelStore
@@ -613,11 +684,17 @@ def initialize_source_store(
     domain = store._source_domain
     if domain is None:
         raise SourceLayoutError("source-aware store requires its configured domain")
-    for profile in config.model_profiles.values():
-        store.register_model(profile)
     with domain.operation(store.content_store.db, point_scope=point_scope):
-        existing = domain.receipt()["versions"]
+        receipt = domain.receipt()
+        existing = receipt["versions"]
+        retained = receipt.get("point_models")
+        if models is not None and (
+            (retained is not None and retained != models) or (retained is None and existing)
+        ):
+            raise SourceLayoutError("point-domain bootstrap model binding is missing or changed")
         if names <= existing.keys():
+            for profile in config.model_profiles.values():
+                store.register_model(profile)
             if point_scope is not None:
                 if not store.content_store._get_or_create_table().schema.equals(_CONTENT_SCHEMA):
                     raise SourceLayoutError("point-domain bootstrap content schema changed")
@@ -630,6 +707,10 @@ def initialize_source_store(
             raise SourceLayoutError("point-domain bootstrap refuses changed configured tables")
         # Scope is explicit only for schema bootstrap, never inherited by ordinary writers.
         with domain._write(store.content_store.db, point_scope=point_scope):
+            if models is not None and retained is None:
+                value = domain.receipt()
+                value["point_models"] = models
+                domain.save(value)
             cast("Callable[[], object]", store.content_store._get_or_create_table)()
             for profile in config.model_profiles.values():
                 cast("Callable[[], object]", store.register_model(profile)._get_or_create_table)()

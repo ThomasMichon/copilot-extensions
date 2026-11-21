@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from typing import Any
 from . import (
     _JOB_SCOPES_ENV as ENVIRONMENT_KEY,
     _job_child_environment as child_environment,
@@ -17,7 +19,7 @@ __all__ = [
 ]
 
 
-def _api():
+def _api() -> Any:
     import ctypes
     from ctypes import wintypes
     from . import _kernel32
@@ -35,7 +37,7 @@ def _api():
 
 
 @contextmanager
-def query_scopes(environment):
+def query_scopes(environment: Mapping[str, str]) -> Iterator[Callable[[int], None]]:
     """Pin exact scope objects only during suspended-child admission."""
     names = scope_names(environment)
     if not names:
@@ -44,20 +46,24 @@ def query_scopes(environment):
     import ctypes
     from ctypes import wintypes
 
+    windows: Any = ctypes
     kernel = _api()
-    handles = []
+    handles: list[int] = []
     try:
         for name in names:
             handle = kernel.OpenJobObjectW(4, False, name)  # JOB_OBJECT_QUERY
             if not handle:
-                raise ctypes.WinError(ctypes.get_last_error())
+                error = windows.get_last_error()
+                if error == 2:  # ERROR_FILE_NOT_FOUND: a destroyed Job cannot retain a child.
+                    continue
+                raise windows.WinError(error)
             handles.append(handle)
 
-        def verify(process_handle):
+        def verify(process_handle: int) -> None:
             for handle in handles:
                 inside = wintypes.BOOL()
                 if not kernel.IsProcessInJob(process_handle, handle, ctypes.byref(inside)):
-                    raise ctypes.WinError(ctypes.get_last_error())
+                    raise windows.WinError(windows.get_last_error())
                 if inside.value:
                     raise OSError("daemon retained a launcher-owned cleanup Job")
 
@@ -66,6 +72,6 @@ def query_scopes(environment):
         failure = None
         for handle in reversed(handles):
             if not kernel.CloseHandle(handle):
-                failure = ctypes.WinError(ctypes.get_last_error())
+                failure = windows.WinError(windows.get_last_error())
         if failure is not None:
             raise failure

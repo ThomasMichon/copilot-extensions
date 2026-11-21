@@ -103,6 +103,17 @@ claims** (it can't prove an arbitrary PR safe), so a `pr` claim is **manual to
 settle** — there is no auto-reclaim. Kinds: `worktree|codespace|container|ssh|
 workdir|pr|derived` (see *Derived output directories* below).
 
+## Cancelled task-backed handoffs
+
+Cancellation does not make `task` claims invisible to this gate. A recorded
+creator binding selects the exact project, worktree and record/claim incarnation;
+the Dispatch owner must independently confirm terminal state before guarded
+settlement. A candidate, producer/reservation fence, replacement or unavailable
+owner retains the claim. Legacy tasks without a binding require an explicitly
+owner-qualified retry, never caller-CWD or leaf-ID guessing.
+See [creator-claim closeout](../../../../context-handoff/docs/creator-claim-closeout.md)
+for the native binding/pin contract and separate partial outcomes.
+
 ## Derived output directories -- `derived` claims
 
 A producer that creates a regenerable directory inside this worktree's checkout

@@ -18,7 +18,7 @@ import stat
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .spawn_script_body import (  # noqa: F401 -- re-exported for existing call sites/tests
     ScriptBodyVerdictFn,
@@ -43,11 +43,12 @@ class SpawnPreparationPending(SpawnPreparationRetained):
 #: A spawn function: given a task snapshot, launch a worker and report
 #: ``(ok, handle)`` where ``handle`` carries ``session``/``worktree`` (on
 #: success) or ``error`` (on failure).
-SpawnFn = Callable[[dict], "tuple[bool, dict]"]
+Record = dict[str, Any]
+SpawnFn = Callable[[Record], tuple[bool, Record]]
 
 #: A liveness probe: ``(worktree, machine) -> session dict`` when the embodied
 #: session is **confirmed alive**, else ``None`` (dead *or* unresolvable).
-LivenessFn = Callable[[str, "str | None"], "dict | None"]
+LivenessFn = Callable[[str, "str | None"], "Record | None"]
 
 #: A liveness **verdict** resolver: ``(worktree, machine, owner_session_id) ->
 #: 'live' | 'gone' | 'unknown'`` (identity-keyed; ``unknown`` is never treated as
@@ -66,17 +67,17 @@ WorktreeDirectoryPresentFn = Callable[[str, "str | None"], "bool | None"]
 
 #: A nudge sender: ``(worktree, machine, task) -> sent?``. Delivers a non-blocking
 #: steering message to a stalled-but-live embodied session. Injectable for tests.
-NudgeFn = Callable[[str, "str | None", dict], bool]
+NudgeFn = Callable[[str, "str | None", Record], bool]
 
 #: A re-drive sender for a spawned-but-unclaimed embodied worker. The session is
 #: known live, but the task is still queued/unowned, so the supervisor re-sends
 #: the idempotent autopilot seed instead of spawning a duplicate.
-RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
+RedriveFn = Callable[[str, "str | None", Record, Record, Record], bool]
 
 #: Prime a terminal CLI worker for ground-layer managed GC:
 #: ``(worktree, session) -> structured outcome``.
-ConclusionFn = Callable[[str, "str | None"], dict]
-AttemptConclusionFn = Callable[[str, str | None, str, str], dict]
+ConclusionFn = Callable[[str, "str | None"], Record]
+AttemptConclusionFn = Callable[[str, str | None, str, str], Record]
 
 #: Stop a local headless bridge session while preserving its durable record.
 LocalColdFn = Callable[[str], bool]
@@ -85,7 +86,7 @@ LocalColdFn = Callable[[str], bool]
 FleetColdFn = Callable[[str, str], bool]
 
 
-def _default_liveness(worktree: str, machine: str | None) -> dict | None:
+def _default_liveness(worktree: str, machine: str | None) -> Record | None:
     """Resolve an embodied session's liveness via the agent-bridge registry.
 
     Delegates to :func:`agent_dispatch.tracking.resolve_live_session` (shells the
@@ -94,13 +95,13 @@ def _default_liveness(worktree: str, machine: str | None) -> dict | None:
     which is why the supervisor only *heartbeats* on a positive result and never
     treats ``None`` as proof-of-death.
     """
-    from . import tracking
+    from . import remote_dispatch, tracking
 
-    peer = machine if tracking.remote_dispatch.is_peer_machine(machine) else None
+    peer = machine if remote_dispatch.is_peer_machine(machine) else None
     return tracking.resolve_live_session(worktree, machine=peer)
 
 
-def _reservation_made_progress(reservation: dict, task: dict) -> bool:
+def _reservation_made_progress(reservation: Record, task: Record) -> bool:
     """Whether this spawned body durably advanced the task after reservation.
 
     A headless body commonly ends its one turn after posting a card/progress beat.
@@ -126,7 +127,7 @@ def _reservation_made_progress(reservation: dict, task: dict) -> bool:
         timestamps.append(progress.get("ts"))
     for value in timestamps:
         try:
-            if float(value) > reserved_at:
+            if isinstance(value, (str, int, float)) and float(value) > reserved_at:
                 return True
         except (TypeError, ValueError):
             continue
@@ -156,7 +157,7 @@ def _default_worktree_directory_present(
     return tracking.worktree_directory_present(worktree, project=project)
 
 
-def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
+def _default_nudge(worktree: str, machine: str | None, task: Record) -> bool:
     """Deliver a non-blocking nudge to a stalled-but-live embodied session.
 
     Builds a terse *notify*-kind steering message pointing the worker back at its
@@ -191,9 +192,9 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
     def redrive(
         worktree: str,
         machine: str | None,
-        task: dict,
-        session: dict,
-        reservation: dict,
+        task: Record,
+        session: Record,
+        reservation: Record,
     ) -> bool:
         from . import bridge, embody
 
@@ -202,6 +203,7 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
             return False
         if reservation.get("driver") == "ordinary-bridge":
             from .bridge_command_delivery import native_prompt
+            from .procutil import run_ssh_command
 
             captured = reservation.get("ordinary_redrive")
             if not isinstance(captured, dict) or captured != session or (
@@ -218,7 +220,7 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
                 captured["session_id"], captured["native_session_id"], invocation["prompt"],
                 machine=machine, idempotency_key=invocation["idempotency_key"],
                 launch_prefix=bridge._agent_bridge_launch_prefix,
-                run_ssh=bridge.run_ssh_command,
+                run_ssh=run_ssh_command,
             )
         worker_id = f"redrive-{uuid.uuid4().hex[:8]}"
         prompt = embody.autopilot_worker_prompt(
@@ -240,15 +242,15 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
 def _default_redrive(
     worktree: str,
     machine: str | None,
-    task: dict,
-    session: dict,
-    reservation: dict,
+    task: Record,
+    session: Record,
+    reservation: Record,
 ) -> bool:
     """Re-send the autopilot seed to a live worker that never claimed its task."""
     return make_redrive_sender()(worktree, machine, task, session, reservation)
 
 
-def _default_conclusion(worktree: str, session: str | None) -> dict:
+def _default_conclusion(worktree: str, session: str | None) -> Record:
     from . import embody
 
     return embody.conclude_disposable_worker(worktree, session)
@@ -261,7 +263,7 @@ def _default_attempt_conclusion(
     driver: str,
     *, project: str | None = None, worktree_path: str | None = None,
     creation_nonce: str | None = None,
-) -> dict:
+) -> Record:
     from . import embody
 
     return embody.conclude_dispatch_attempt(
@@ -279,7 +281,7 @@ def _worktree_from_owner(owner: str | None) -> str | None:
     return tracking.worktree_from_owner(owner)
 
 
-def _worktree_from_reservation(reservation: dict, owner: str | None = None) -> str | None:
+def _worktree_from_reservation(reservation: Record, owner: str | None = None) -> str | None:
     """Best-effort worktree handle for a spawn reservation.
 
     Newer reservations persist ``worktree`` directly. Older rows sometimes only
@@ -375,8 +377,8 @@ class _SpawnReleaseClient(Protocol):
 def request_failed_created_spawn_release(
     client: _SpawnReleaseClient,
     key: str,
-    handle: dict,
-    spawn_task: dict,
+    handle: Record,
+    spawn_task: Record,
     detail: str,
 ) -> None:
     """Fence a failed headless spawn, retaining its body identity if known.
@@ -567,7 +569,7 @@ def make_embody_spawn(
     """
     from . import embody
 
-    def spawn(task: dict) -> tuple[bool, dict]:
+    def spawn(task: Record) -> tuple[bool, Record]:
         from . import bridge, session_acquisition
         worker_id = f"embody-{task.get('spawn_reservation_key')}"
         try:
@@ -612,15 +614,12 @@ def make_embody_spawn(
             }
         return True, handle
 
-    spawn.requires_reusable_worktree = True
-    spawn.allocation_driver = driver
-    spawn.allocation_interface = "cli"
-    spawn.pool_placement_driver = "cli"
-    spawn.allocation_no_pair = no_pair
+    spawn.__dict__.update(requires_reusable_worktree=True, allocation_driver=driver,
+                          allocation_interface="cli", pool_placement_driver="cli", allocation_no_pair=no_pair)
     return spawn
 
 
-def resume_worktree_eligible(task: dict) -> bool:
+def resume_worktree_eligible(task: Record) -> bool:
     """Whether a worker spawn for ``task`` should pass ``resume_worktree=True``
     (the bridge's worktree-directory-level recovery fallback) alongside its
     own carried ``spawn_session_handle`` recovery.
@@ -689,9 +688,9 @@ def make_headless_spawn(
     """
     from . import bridge, embody, ordinary_bridge, session_acquisition
 
-    def spawn(task: dict) -> tuple[bool, dict]:
+    def spawn(task: Record) -> tuple[bool, Record]:
         client = task.get("_spawn_client")
-        if not callable(getattr(client, "get_reservation", None)):
+        if client is None or not callable(getattr(client, "get_reservation", None)):
             return False, {"error": "ordinary coordinator reservation read-back is unavailable"}
         from .ordinary_invocation import startup_seed
         try:
@@ -744,15 +743,11 @@ def make_headless_spawn(
             return False, {"error": str(exc)}
         return True, handle
 
-    spawn.requires_reusable_worktree = False
-    setattr(spawn, "ordinary_bridge_for", lambda _task: True)
-    spawn.allocation_driver = "agent-dispatch"
-    spawn.allocation_interface = "acp"
-    # Allocation attributes remain available for callers inspecting backend metadata.
-    spawn.allocation_agent = charter or agent
-    spawn.allocation_no_pair = no_pair
-    spawn.allocation_project_for = lambda _task: (
-        bridge.registered_agent_project(agent, strict=True) or ""
+    spawn.__dict__.update(
+        requires_reusable_worktree=False, ordinary_bridge_for=lambda _task: True,
+        allocation_driver="agent-dispatch", allocation_interface="acp", allocation_agent=charter or agent,
+        admission_agent=agent, allocation_no_pair=no_pair,
+        allocation_project_for=lambda _task: bridge.registered_agent_project(agent, strict=True) or "",
     )
     return spawn
 
@@ -771,14 +766,14 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
     if not overrides:
         return default
 
-    def spawn(task: dict) -> tuple[bool, dict]:
+    def spawn(task: Record) -> tuple[bool, Record]:
         for label in task.get("labels") or []:
             fn = overrides.get(label)
             if fn is not None:
                 return fn(task)
         return default(task)
 
-    def requires_reusable_worktree(task: dict) -> bool:
+    def requires_reusable_worktree(task: Record) -> bool:
         selected = default
         for label in task.get("labels") or []:
             if label in overrides:
@@ -786,7 +781,7 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
                 break
         return bool(getattr(selected, "requires_reusable_worktree", False))
 
-    def selected_attribute(task: dict, name: str, fallback: str) -> str:
+    def selected_attribute(task: Record, name: str, fallback: str) -> str:
         selected = default
         for label in task.get("labels") or []:
             if label in overrides:
@@ -796,7 +791,7 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
         value = selector(task) if callable(selector) else getattr(selected, name, fallback)
         return value if isinstance(value, str) and value else fallback
 
-    def selected_bool_attribute(task: dict, name: str, fallback: bool) -> bool:
+    def selected_bool_attribute(task: Record, name: str, fallback: bool) -> bool:
         selected = default
         for label in task.get("labels") or []:
             if label in overrides:
@@ -806,17 +801,14 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
         value = selector(task) if callable(selector) else getattr(selected, name, fallback)
         return bool(value)
 
-    spawn.requires_reusable_worktree_for = requires_reusable_worktree
-    spawn.allocation_driver_for = lambda task: selected_attribute(
-        task, "allocation_driver", "agent-dispatch"
-    )
-    spawn.allocation_interface_for = lambda task: selected_attribute(
-        task, "allocation_interface", "cli"
-    )
-    spawn.allocation_project_for = lambda task: selected_attribute(task, "allocation_project", "")
-    spawn.pool_placement_driver_for = lambda task: selected_attribute(task, "pool_placement_driver", "")
-    spawn.allocation_no_pair_for = lambda task: selected_bool_attribute(
-        task, "allocation_no_pair", False
+    spawn.__dict__.update(
+        requires_reusable_worktree_for=requires_reusable_worktree,
+        allocation_driver_for=lambda task: selected_attribute(task, "allocation_driver", "agent-dispatch"),
+        allocation_interface_for=lambda task: selected_attribute(task, "allocation_interface", "cli"),
+        admission_agent_for=lambda task: selected_attribute(task, "admission_agent", ""),
+        allocation_project_for=lambda task: selected_attribute(task, "allocation_project", ""),
+        pool_placement_driver_for=lambda task: selected_attribute(task, "pool_placement_driver", ""),
+        allocation_no_pair_for=lambda task: selected_bool_attribute(task, "allocation_no_pair", False),
     )
     setattr(spawn, "ordinary_bridge_for", lambda task: selected_bool_attribute(task, "ordinary_bridge", False))
     return spawn

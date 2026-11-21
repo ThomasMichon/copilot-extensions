@@ -1,3 +1,4 @@
 -r typecheck-service-index-requirements.txt
 cryptography==50.0.2
 types-psutil
+uvicorn>=0.52.1

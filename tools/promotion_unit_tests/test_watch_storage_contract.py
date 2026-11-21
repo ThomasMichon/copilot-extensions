@@ -56,6 +56,34 @@ def test_recorded_transition_never_selects_either_subscription_authority(
         storage.write_subscriptions_state([], root)
 
 
+def test_prepared_version_two_is_observation_not_authority(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = {
+        "schema": "agent-pull-requests.watch-state-transition", "version": 2, "phase": "prepared",
+    }
+    monkeypatch.setattr(storage, "_regular_bytes", lambda _path: json.dumps(document).encode())
+    monkeypatch.setattr(
+        storage, "_read_subscriptions_state",
+        lambda *_args, **_kwargs: pytest.fail("must not read subscription authority"),
+    )
+    monkeypatch.setattr(
+        storage, "_atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("must not begin a subscription write"),
+    )
+    root = Path("fixture-state")
+    for phase in ("prepared", "sealed-legacy"):
+        document["phase"] = phase
+        assert storage.read_transition_phase(root) == phase
+        with pytest.raises(ValueError, match="watch state transition"):
+            storage.read_subscriptions_state(root)
+        with pytest.raises(storage.StateWriteRefused, match="watch state transition"):
+            storage.write_subscriptions_state([], root)
+    document["phase"] = "import-ready"
+    with pytest.raises(ValueError, match="invalid watch state transition"):
+        storage.read_transition_phase(root)
+
+
 def test_transition_is_rechecked_at_the_final_storage_boundary(
     storage: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -76,7 +104,7 @@ def test_transition_is_rechecked_at_the_final_storage_boundary(
         storage.write_subscriptions_state([], Path("fixture-state"))
 
 
-@pytest.mark.parametrize("artifact", ["barrier", "retained", "staging", "reparse"])
+@pytest.mark.parametrize("artifact", ["barrier", "retained", "staging", "reparse", "pin"])
 def test_unjournaled_transition_is_not_legacy_absence(
     storage: Any, monkeypatch: pytest.MonkeyPatch, artifact: str,
 ) -> None:
@@ -88,13 +116,14 @@ def test_unjournaled_transition_is_not_legacy_absence(
         "retained": "watch-state-transition.legacy.lock",
         "staging": "watch-state",
         "reparse": "agent-pull-requests-watch.lock",
+        "pin": "watch-state-transition.pin",
     }
 
     def info(path: Path, **_kwargs: Any) -> Any:
         if path.name != names[artifact]:
             raise FileNotFoundError
         return SimpleNamespace(
-            st_mode=stat.S_IFREG if artifact == "reparse" else stat.S_IFDIR,
+            st_mode=stat.S_IFREG if artifact in {"reparse", "pin"} else stat.S_IFDIR,
             st_file_attributes=0x400 if artifact == "reparse" else 0,
         )
 

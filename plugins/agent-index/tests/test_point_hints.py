@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,7 @@ from agent_index.indexing.point_hints import (
     decode_change_hints, read_change_hints, union_change_hints,
 )
 from agent_index.indexing.task_store import TaskRecord, TaskStore
+from agent_index.indexing.point_queue_consumer import PointQueueConsumer
 from agent_index.indexing.worker import run_worker
 
 
@@ -36,6 +38,30 @@ def hints(**kwargs: Any) -> PointChangeHints:
         "targets": (WorkItemRevisionTarget("42", 7, ("event-a",)),),
         **kwargs,
     })
+
+
+def test_point_dispatch_requires_explicit_config_before_opening_queue() -> None:
+    calls: list[TaskRecord] = []
+    assert run_worker("not-selected", point_executor=calls.append) == 2
+    assert calls == []
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_point_dispatch_cannot_fabricate_completion_or_select_legacy_work(
+    tmp_path: Path, legacy: bool,
+) -> None:
+    config = IndexConfig(data_dir=tmp_path)
+    tasks = TaskStore(tmp_path / "tasks.db")
+    task = tasks.enqueue("git:sample") if legacy else enqueue(tasks)
+    calls: list[TaskRecord] = []
+
+    def execute(selected: TaskRecord) -> TaskRecord:
+        calls.append(selected)
+        return replace(selected, status="complete", point_claim_id="not-a-receipt")
+
+    assert run_worker(task.id, config=config, point_executor=execute) == 2
+    assert tasks.get_task(task.id) == task
+    assert calls == ([] if legacy else [task])
 
 
 def enqueue(store: TaskStore, value: PointChangeHints | None = None) -> TaskRecord:
@@ -123,8 +149,104 @@ def test_queue_union_is_fenced_by_entire_binding(tmp_path: Path, field: str, val
     a, b = enqueue(store, first), enqueue(store, other)
     assert a.id != b.id
     assert store.get_pending_count() == 2
+    before = store.get_queue()
+    assert store.next_point_task(point_scope=first.scope) == a
+    assert store.next_point_task(point_scope=other.scope) == b
+    assert store.get_queue() == before
     with pytest.raises(ValueError, match="different scopes"):
         first.union(other)
+
+
+def test_point_selection_keeps_pinned_fifo_and_excludes_legacy_and_terminal_work(
+    tmp_path: Path,
+) -> None:
+    store = TaskStore(tmp_path / "tasks.db")
+    legacy = store.enqueue("git:sample")
+    first = enqueue(store)
+    pinned = store.pin_point_claim(first.id, expected_hints=hints())
+    trailing = enqueue(store)
+    assert trailing.id != pinned.id
+    assert store.next_point_task(point_scope=hints().scope) == pinned
+    assert store.cancel(pinned.id)
+    assert store.next_point_task(point_scope=hints().scope) == trailing
+    retried = store.retry(pinned.id)
+    assert retried is not None and retried.point_claim_id == pinned.point_claim_id
+    assert TaskStore(tmp_path / "tasks.db").next_point_task(point_scope=hints().scope) == retried
+    assert store.cancel(retried.id) and store.cancel(trailing.id)
+    assert store.next_point_task(point_scope=hints().scope) is None
+    assert store.get_task(legacy.id) == legacy
+    with pytest.raises(RuntimeError, match="exact typed point scope"):
+        store.next_point_task(point_scope=cast(Any, ("all", *hints().scope[1:])))
+    with pytest.raises(ValueError, match="exact point scope"):
+        store.next_point_task(point_scope=cast(Any, None))
+    with pytest.raises(ValueError, match="exact point scope"):
+        PointQueueConsumer(
+            config=IndexConfig(data_dir=tmp_path), point_scope=cast(Any, None),
+            point_executor=lambda task: None,
+        )
+
+
+def test_point_consumer_refuses_fabricated_completion_and_requires_explicit_retry(
+    tmp_path: Path,
+) -> None:
+    config = IndexConfig(data_dir=tmp_path)
+    tasks = TaskStore(tmp_path / "tasks.db")
+    task = enqueue(tasks)
+    calls: list[TaskRecord] = []
+
+    async def exercise() -> None:
+        consumer = PointQueueConsumer(
+            config=config, point_scope=hints().scope, point_executor=calls.append,
+        )
+        with pytest.raises(RuntimeError, match="not accepting"):
+            await consumer.run_pending()
+        async with consumer:
+            with pytest.raises(RuntimeError, match="explicit resume"):
+                await consumer.run_pending()
+            await consumer.resume()
+            for value in (0, -1, True):
+                with pytest.raises(ValueError, match="task limit"):
+                    await consumer.run_pending(max_tasks=value)
+            for _ in range(2):
+                with pytest.raises(RuntimeError, match="exited with code 2"):
+                    await consumer.run_pending(max_tasks=2)
+                assert consumer.paused and tasks.get_task(task.id) == task
+                before = list(calls)
+                with pytest.raises(RuntimeError, match="explicit resume"):
+                    await consumer.run_pending()
+                assert calls == before
+                await consumer.resume()
+        with pytest.raises(RuntimeError, match="not accepting"):
+            await consumer.resume()
+        with pytest.raises(RuntimeError, match="cannot be entered again"):
+            async with consumer:
+                pass
+
+    asyncio.run(exercise())
+    assert calls == [task, task] and tasks.get_task(task.id) == task
+
+
+def test_point_consumer_rechecks_scope_at_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = IndexConfig(data_dir=tmp_path)
+    tasks = TaskStore(tmp_path / "tasks.db")
+    other_hints = hints(account_id="another-account")
+    other = enqueue(tasks, other_hints)
+    calls: list[TaskRecord] = []
+    monkeypatch.setattr(TaskStore, "next_point_task", lambda *args, **kwargs: other)
+
+    async def exercise() -> None:
+        async with PointQueueConsumer(
+            config=config, point_scope=hints().scope, point_executor=calls.append,
+        ) as consumer:
+            await consumer.resume()
+            with pytest.raises(RuntimeError, match="exited with code 1"):
+                await consumer.run_pending()
+            assert consumer.paused and not calls
+            assert tasks.get_task(other.id) == other
+
+    asyncio.run(exercise())
 
 
 def test_retention_reopen_retry_and_legacy_claimants_do_not_starve(tmp_path: Path) -> None:
@@ -247,6 +369,25 @@ def test_pin_freezes_whole_claim_and_retains_trailing_union_after_reopen(tmp_pat
     with pytest.raises(sqlite3.IntegrityError, match="worker not registered"):
         store.set_worker(task.id, 123, "test", "future")
     assert sql(path, "SELECT * FROM tasks ORDER BY id") == before
+
+
+def test_point_cancellation_cannot_reenter_an_active_source_writer(tmp_path: Path) -> None:
+    from agent_index.indexing.source_ownership import source_writer
+
+    store = TaskStore(tmp_path / "tasks.db")
+    task = enqueue(store)
+    pinned = store.pin_point_claim(task.id, expected_hints=hints())
+    legacy = store.enqueue("git:plain")
+    with source_writer(tmp_path):
+        assert not store.cancel(task.id)
+        assert record(store, task.id) == pinned
+        assert store.cancel(legacy.id)
+        with source_writer(tmp_path):
+            assert record(store, task.id) == pinned
+    assert store.cancel(task.id)
+    retried = store.retry(task.id)
+    assert retried is not None and retried.point_claim_id == pinned.point_claim_id
+    assert retried.change_hints == pinned.change_hints
 
 
 def test_pin_refuses_stale_or_partial_snapshot_without_losing_arrivals(tmp_path: Path) -> None:

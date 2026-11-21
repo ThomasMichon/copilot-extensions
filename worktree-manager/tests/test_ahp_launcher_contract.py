@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_windows_launcher_hard_binds_and_disables_post_exit():
+def test_windows_launcher_hard_binds_and_disables_post_exit() -> None:
     source = (ROOT / "bin" / "launch-session.ps1").read_text()
     assert "'execution-leg', 'get'" in source
     assert "'session-backend', 'ensure'" not in source
@@ -22,7 +22,8 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "@('-AwAhpTokenFile', $ahpTokenFile)" in source
     assert "$prop.Name -in @(" in source
     assert "Invoke-ManagedMuxRegister" in source
-    assert "$cmd += $CopilotPassthrough" in source
+    assert "$cmd += $CopilotPassthrough" not in source
+    assert "(Join-Path $PSScriptRoot 'ahp-command.py') append" in source
     assert "(Join-Path $PSScriptRoot 'ahp-command.py') json" in source
     assert "$cmd = @($reboundJson | ConvertFrom-Json)" in source
     assert "'--ahp', $endpointUrl" in source
@@ -39,7 +40,7 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "$ahpChildToken = $null" in wrapper
 
 
-def test_posix_launcher_hard_binds_and_disables_post_exit():
+def test_posix_launcher_hard_binds_and_disables_post_exit() -> None:
     source = (ROOT / "bin" / "launch-session.sh").read_text()
     assert "execution-leg get" in source
     assert '--worktree-id "$WORKTREE_ID" --json' in source

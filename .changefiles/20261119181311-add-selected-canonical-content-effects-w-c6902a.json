@@ -1,0 +1,9 @@
+{
+  "comment": "Add selected canonical content effects with prepared all-model provenance checks",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

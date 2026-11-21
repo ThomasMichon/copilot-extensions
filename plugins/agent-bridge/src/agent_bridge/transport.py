@@ -37,6 +37,13 @@ from .session_lifecycle_cli import (
     _agent_worktrees_launch_prefix,
 )
 from .spawn_target import PluginRef as PluginRef, SpawnTarget as SpawnTarget
+from .windows_ssh_launch import (
+    _WINDOWS_INLINE_COMMAND_LIMIT as _WINDOWS_INLINE_COMMAND_LIMIT,
+    _WINDOWS_SSH_SHELLS,
+    _encoded_powershell,
+    _is_windows_ssh_shell,
+    _stage_windows_launch as _stage_windows_launch,
+)
 from .stale_launcher import _reresolve_stale_interpreter as _reresolve_stale_interpreter
 
 log = logging.getLogger("agent-bridge")
@@ -401,7 +408,7 @@ async def _resolve_worktree_remote(
         cmd = " ".join(shlex.quote(a) for a in base_args + extra)
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
         from .startup_progress import current, preparation_output
-        options = {}
+        options: dict[str, Any] = {}
         if current() is not None:
             options["on_output"] = lambda name, chunk: preparation_output(
                 chunk, parse_phase=name == "stderr",
@@ -657,28 +664,46 @@ def _breadcrumb_prelude(session_id: str) -> str:
     )
 
 
+def _guarded_windows_script(target: SpawnTarget, session_id: str = "") -> str:
+    """The complete Windows receiver script: policy recheck, then the launch.
+
+    The launch is embedded as raw PowerShell rather than as a nested
+    ``powershell -EncodedCommand`` so the command is encoded exactly once; a
+    second encoding multiplies a long ``--plugin-dir`` launch past the
+    Windows process command-line limit.
+    """
+    from .hosting_policy import policy_check_args, unsupported_receiver
+
+    if not target.project or not target.cwd:
+        raise unsupported_receiver("SSH without an exact path and owner")
+    check = [target.project, *policy_check_args(target.cwd)]
+    quoted = " ".join("'" + arg.replace("'", "''") + "'" for arg in check)
+    command = _unguarded_remote_cmd(target, session_id, raw_windows_script=True)
+    return (
+        f"$ErrorActionPreference = 'Stop'; & {quoted} | Out-Null; "
+        "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; "
+        "$ErrorActionPreference = 'Continue'; "
+        f"{command}; exit $LASTEXITCODE"
+    )
+
+
 def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     """Recheck in the receiving shell before any binstub or direct launch."""
     from .hosting_policy import policy_check_args, unsupported_receiver
 
     if not target.project or not target.cwd:
         raise unsupported_receiver("SSH without an exact path and owner")
+    shell = (target.ssh_shell or "bash").lower()
+    if shell in _WINDOWS_SSH_SHELLS:
+        return _encoded_powershell(shell, _guarded_windows_script(target, session_id))
     command = _unguarded_remote_cmd(target, session_id)
     check = [target.project, *policy_check_args(target.cwd)]
-    shell = (target.ssh_shell or "bash").lower()
-    if shell in {"pwsh", "powershell", "cmd"}:
-        quoted = " ".join("'" + arg.replace("'", "''") + "'" for arg in check)
-        script = (
-            f"$ErrorActionPreference = 'Stop'; & {quoted} | Out-Null; "
-            "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; " + command
-        )
-        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-        exe = "pwsh" if shell == "pwsh" else "powershell"
-        return f"{exe} -NoProfile -NonInteractive -EncodedCommand {encoded}"
     return f"{shlex.join(check)} >&2 && {command}"
 
 
-def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
+def _unguarded_remote_cmd(
+    target: SpawnTarget, session_id: str = "", *, raw_windows_script: bool = False,
+) -> str:
     """Build the remote command string for SSH execution.
 
     Two modes:
@@ -744,6 +769,8 @@ def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
                 pwsh_script = f"{prefix}{binstub_cmd}"
             else:
                 pwsh_script = binstub_cmd
+            if raw_windows_script:
+                return pwsh_script
             # The Windows OpenSSH sshd DefaultShell on these dev boxes is
             # ``cmd.exe`` (the OpenSSH default), NOT PowerShell -- so a bare
             # pwsh-syntax command string would be handed to cmd.exe, which
@@ -787,6 +814,8 @@ def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
             script += f"$env:{key} = {quote(value)}; "
         argv = [copilot, "--acp", "--stdio", *target.copilot_args]
         script += "& " + " ".join(quote(arg) for arg in argv) + "; exit $LASTEXITCODE"
+        if raw_windows_script:
+            return script
         encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
         exe = "pwsh" if shell == "pwsh" else "powershell"
         return f"{exe} -NoProfile -NonInteractive -EncodedCommand {encoded}"
@@ -1087,6 +1116,12 @@ async def spawn_ssh(
     # Stages 5-7 happen remotely inside the binstub; the device breadcrumb
     # (in the remote command) is the on-device proof of arrival.
     remote_cmd = _build_remote_cmd(launch_target, session_id=session_id)
+    if _is_windows_ssh_shell(launch_target) and len(remote_cmd) > _WINDOWS_INLINE_COMMAND_LIMIT:
+        with tracker.stage(ConnectStage.TARGET_BINSTUB, "stage Windows launch script"):
+            remote_cmd = await _stage_windows_launch(
+                manager, launch_target,
+                _guarded_windows_script(launch_target, session_id),
+            )
     log.info("Spawning SSH agent on %s: %s", target.host, remote_cmd)
 
     proc = await manager.open_stdio_channel(target.host, remote_cmd)

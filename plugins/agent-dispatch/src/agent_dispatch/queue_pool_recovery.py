@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 from .queue_common import Task
+from .admission_holds import waiter_hold_snapshot
 from .queue_pool_startup import (
     COOLDOWN_SECONDS, DECISION_SECONDS, NUDGE_SECONDS, STARTUP_ATTEMPTS, begin_pool_episode,
 )
@@ -14,10 +18,11 @@ from .queue_records import SpawnState, Status, TaskError
 
 
 def recovery_assignment(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
-    return conn.execute(
+    assignment: sqlite3.Row | None = conn.execute(
         "SELECT * FROM task_pool_assignments WHERE task_id=? AND assignment_released=0",
         (task_id,),
     ).fetchone()
+    return assignment
 
 
 def pause_recovery(conn: sqlite3.Connection, task_id: str) -> None:
@@ -95,21 +100,22 @@ def hold_recovery(conn: sqlite3.Connection, task_id: str, *, held: bool, ts: flo
 
 def _decision_deadline(conn: sqlite3.Connection, assignment: sqlite3.Row) -> float | None:
     if assignment["decision_deadline"] is not None:
-        return assignment["decision_deadline"]
+        return float(assignment["decision_deadline"])
     wake = conn.execute(
         "SELECT delivered_at FROM wake_outbox WHERE id=?", (assignment["recovery_wake_id"],),
     ).fetchone()
     if wake is not None and wake["delivered_at"] is not None and (
         wake["delivered_at"] < assignment["startup_deadline"]
     ):
-        return wake["delivered_at"] + DECISION_SECONDS
-    return assignment["startup_deadline"]
+        return float(wake["delivered_at"]) + DECISION_SECONDS
+    deadline: float | None = assignment["startup_deadline"]
+    return deadline
 
 
 def _current(
     conn: sqlite3.Connection, task: Task, assignment: sqlite3.Row, *, retain_request: bool = False,
 ) -> sqlite3.Row:
-    reservation = conn.execute(
+    reservation: sqlite3.Row | None = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
     ).fetchone()
     from .ordinary_native_bindings import reservation_native_identity
@@ -173,13 +179,20 @@ def _wait_for_lane(
     """
     from .queue_pool_placement import pool_lane_load
     own = conn.execute(
-        "SELECT state FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
+        "SELECT * FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
     ).fetchone()
     identity = (assignment["registration_id"], assignment["machine"], assignment["env"])
     catalog = getattr(owner, "_pool_catalog_from_conn", None)
     if catalog is None:
         return False
     pool = _eligible_pool(catalog(conn, now=ts), identity)
+    if pool is not None and own is not None:
+        from .queue_execution_custody import PoolLaneUnavailable
+        from .retained_admission import require_retained
+        try:
+            require_retained(owner, conn, task, own, resume=True)
+        except PoolLaneUnavailable:
+            pool = None
     if pool is not None and (own is None or own["state"] != SpawnState.COLD):
         return False  # a body that never parked still holds its own lane
     since = assignment["lane_wait_since"]
@@ -187,7 +200,7 @@ def _wait_for_lane(
     # restarts intentionally suspended work outside its pool's authority.
     if pool is not None and pool_lane_load(
         conn, identity, ahead_of=(ts if since is None else since, task.id),
-        cutoff=pool.max_concurrent,
+        cutoff=pool.max_concurrent, waiter_holds=waiter_hold_snapshot(owner._spawn_admission is not None),
     ) < pool.max_concurrent:
         return False
     if since is None:
@@ -221,7 +234,7 @@ def lane_waiting(conn: sqlite3.Connection, task_id: str) -> bool:
 
 
 def request_recovery(
-    owner: Any, conn: sqlite3.Connection, task: Task, *, ts: float,
+    owner: TaskQueue, conn: sqlite3.Connection, task: Task, *, ts: float,
     wake_requested: bool, message: str | None = None,
 ) -> Task | None:
     """Return None only for a non-pool task; never turn delivery into STARTED."""
@@ -241,7 +254,8 @@ def request_recovery(
     ).fetchone():
         raise TaskError("original owner wake is still delivering; retain its custody")
     if continuing:
-        if ts >= _decision_deadline(conn, assignment):
+        deadline = _decision_deadline(conn, assignment)
+        if deadline is None or ts >= deadline:
             raise TaskError("pool recovery deadline expired before the requested wake")
         _enqueue(owner, conn, task, ts, assignment["recovery_revision"], message)
         return owner._fetch(conn, task.id)
@@ -262,7 +276,10 @@ def request_recovery(
         "UPDATE tasks SET resume_requested=1, wake_operation_id=NULL, wake_status=NULL,"
         " updated_at=? WHERE id=?", (ts, task.id),
     )
-    task = owner._fetch(conn, task.id)
+    updated = owner._fetch(conn, task.id)
+    if updated is None:
+        raise TaskError("suspended recovery task disappeared")
+    task = updated
     if wake_requested:
         _enqueue(owner, conn, task, ts, revision, message)
     owner._audit(
@@ -336,13 +353,14 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
     if row["state"] != SpawnState.COLD or catalog is None:
         return
     with owner._connect() as probe:
-        binding = probe.execute(
-            "SELECT registration_id, machine, env FROM pool_reservation_bindings WHERE reservation_key=?",
-            (row["key"],),
-        ).fetchone()
-        if binding is None:
+        from .retained_admission import bound_instance, require_retained
+        task = owner._fetch(probe, row["task_id"])
+        if task is None:
+            raise PoolLaneUnavailable("cold reservation has no task")
+        require_retained(owner, probe, task, row, resume=True)
+        identity = bound_instance(probe, row["key"])
+        if identity is None:
             return
-        identity = (binding["registration_id"], binding["machine"], binding["env"])
         pool = _eligible_pool(catalog(probe, now=owner._now(None)), identity)
         if pool is None:
             raise PoolLaneUnavailable("cold pool body's pool is disabled or its catalog unavailable")
@@ -355,6 +373,7 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
         load = pool_lane_load(
             probe, identity, cutoff=pool.max_concurrent,
             exclude_key=row["key"], exclude_waiter=row["task_id"],
+            waiter_holds=waiter_hold_snapshot(owner._spawn_admission is not None),
         )
     if load >= pool.max_concurrent:
         raise PoolLaneUnavailable("cold pool body is waiting for a free lane")
@@ -367,7 +386,8 @@ def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
     Runs under the reservation's write lock, so a superseded token, task or
     waiter incarnation, or a released reservation leaves the body cold.
     """
-    from .queue_execution_wakes import RunWaiterWakeOperation, WakeOperation, wake_table
+    from .queue_common import RunWaiterWakeOperation, WakeOperation
+    from .queue_execution_wakes import wake_table
     table = wake_table(wake)
     row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (wake.id,)).fetchone()
     if (
@@ -390,7 +410,7 @@ def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
     if getattr(wake, "pool_recovery_revision", None) is not None:
         assignment = recovery_assignment(conn, task.id)
         if (
-            not recovery_wake(conn, task, wake.id)
+            assignment is None or not recovery_wake(conn, task, wake.id)
             or assignment["recovery_revision"] != wake.pool_recovery_revision
             or assignment["reservation_key"] != reservation_key
         ):
@@ -466,7 +486,7 @@ def prepare_recovery_wake(owner: Any, wake: Any) -> None:
         if task is None or not recovery_wake(conn, task, wake.id):
             raise TaskError("suspended recovery wake incarnation changed")
         assignment = recovery_assignment(conn, task.id)
-        if assignment["recovery_revision"] != wake.pool_recovery_revision:
+        if assignment is None or assignment["recovery_revision"] != wake.pool_recovery_revision:
             raise TaskError("suspended recovery wake revision changed")
         reservation = _current(conn, task, assignment)
     if reservation["state"] == SpawnState.COLD:
@@ -579,6 +599,8 @@ def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
                 )
                 changed += 1
                 assignment = recovery_assignment(conn, task.id)
+                if assignment is None:
+                    raise TaskError("pool recovery assignment disappeared")
                 deadline = assignment["decision_deadline"]
             failures = assignment["startup_attempts"] - assignment["episode_start_attempt"]
             failed = wake is not None and wake["status"] == "failed"

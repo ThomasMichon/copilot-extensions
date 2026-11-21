@@ -1119,6 +1119,11 @@ for source/account admission, acquisition, checkpoints and all index mutations.
 `agent-index.change-hints`, `intake_versions: [1, 2]`, and separately computed
 `execution_versions` (`[]` unless the selected callable advertises v1).
 Advertising durable intake is not a claim that hinted execution is available.
+The independent
+[`point_service_contract`](component-ledger.md#running-point-service-declaration)
+describes only the running service's explicitly selected qualified point pair,
+scope and current admission. It does not expand ordinary v2 execution or HTTP
+read support, and existing clients do not require it.
 `POST /reindex/hints` accepts only `source`, optional `full: false`, and required
 `change_hints` containing a complete v1 or point-only v2 envelope. It refuses unknown fields,
 versions, duplicate JSON keys, mismatched scopes and oversized bodies before
@@ -1304,11 +1309,16 @@ updates, deletion and replacement of a v9 parent by older journal writers,
 including SQLite replacement inserts with the same source. Existing plain and
 v8 journal operations retain their contracts.
 
-V9 completion and discard remain unsupported. Cancellation does not make the
-retained claim successful, and later queue arrivals remain trailing work.
-Future whole-claim completion must recheck the queue owner and bind per-target
-outcomes before retiring the exact pending parent, without advancing polling
-state. No runner, producer or native application selects this new envelope.
+Ordinary v9 completion and discard remain unsupported. Cancellation does not
+make the retained claim successful, and later queue arrivals remain trailing
+work. The separate explicit
+[whole-claim completion](component-ledger.md#explicit-whole-claim-completion)
+rechecks the current queue pin, complete retained acquisition/application and
+every native/checkpoint outcome before committing queue success and retiring
+that exact pending incarnation. It preserves polling state and qualifies
+lost-return retries without replaying native application. Only the explicit
+[typed-claim native application](component-ledger.md#explicit-native-application)
+selects the complete retained candidate; no ordinary runner or producer does.
 
 `ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
 It compares matching source/path identities, considers lower versions covered,
@@ -1325,9 +1335,10 @@ can reconcile ordering/path suffixes only after the native phase is fully
 qualified and durably sealed under those same owners.
 
 There is no advertised component execution capability or producer. Automatic
-partial-effect/backup reconciliation, whole-claim completion and explicit read
-isolation remain required before recovery refusal or the v2 queue fences can be
-expanded. Ordinary reopening still refuses dirty/uncertain state; an unknown
+partial-effect/backup reconciliation and broader consumer/read composition
+remain required before recovery refusal or the v2 queue fences can be expanded.
+Explicit completion does not select ordinary v2 execution. Ordinary reopening
+still refuses dirty/uncertain state; an unknown
 mid-native effect cannot be recovered from cached bytes or surviving rows.
 These helpers do not change legacy callers or default readers.
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Skip confirmed local-only registry repositories before branch changes while preserving real synchronization failures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

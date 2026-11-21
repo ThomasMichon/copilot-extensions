@@ -17,6 +17,8 @@ import time
 from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from collections.abc import Callable
+from typing import Any, NoReturn, cast
 from unittest.mock import patch
 
 
@@ -29,14 +31,17 @@ def _expect(condition: bool, message: str) -> None:
         raise ContractViolation(message)
 
 
-def _function(path: Path, name: str, namespace: dict) -> object:
+def _function(path: Path, name: str, namespace: dict[str, Any]) -> Callable[..., Any]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    definitions = [
+    definitions: list[ast.stmt] = [
         node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name
     ]
     _expect(len(definitions) == 1, f"{path.name}: expected one {name} definition")
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(path), "exec"), namespace)
-    return namespace[name]
+    function = namespace[name]
+    if not callable(function):
+        raise ContractViolation(f"{path.name}: {name} is not callable")
+    return cast(Callable[..., Any], function)
 
 
 def _module(path: Path, name: str) -> ModuleType:
@@ -62,14 +67,17 @@ def check_monitor_outcome(source: Path) -> list[str]:
 def _check_monitor_outcome(source: Path) -> None:
     environ: dict[str, str] = {}
     environment = SimpleNamespace(environ=environ, getenv=environ.get)
-    state: dict = {}
-    calls = []
+    state: dict[str, Any] = {}
+    calls: list[bool] = []
 
-    def activate(*, monitor_was_live):
+    def activate(*, monitor_was_live: bool) -> dict[str, Any]:
         calls.append(monitor_was_live)
         if state.get("error"):
             raise RuntimeError("fixture transition failure")
-        return state["summary"]
+        summary = state["summary"]
+        if not isinstance(summary, dict):
+            raise ContractViolation("expected a monitor summary")
+        return summary
 
     adapter = _function(source / "status_monitor_cutover.py", "installer_after_update", {
         "os": environment, "activate_after_update": activate, "print": lambda *_args, **_kwargs: None,
@@ -130,17 +138,20 @@ def _check_receipt_judgment(source: Path) -> None:
     package.__path__ = []
     reconcile = ModuleType(f"{package_name}.reconcile")
     update_driver = ModuleType("update_driver")
-    update_driver.participant_environment = dict
-    state = {}
+    update_driver.__dict__["participant_environment"] = dict
+    state: dict[str, Any] = {}
     root = Path("receipt-contract-runtime")
 
-    def deployed(name, *, root):
+    def deployed(name: str, *, root: Path) -> str | None:
         _expect(name == "agent-example" and root == Path("receipt-contract-runtime"),
                 "receipt callback used the wrong runtime")
-        return state["deployed"]
+        version = state["deployed"]
+        if version is not None and not isinstance(version, str):
+            raise ContractViolation("expected a deployed version or None")
+        return version
 
-    reconcile.runtime_deployed_version = deployed
-    reconcile._versions_equal = _function(source / "reconcile.py", "_versions_equal", {})
+    reconcile.__dict__["runtime_deployed_version"] = deployed
+    reconcile.__dict__["_versions_equal"] = _function(source / "reconcile.py", "_versions_equal", {})
     tree = ast.parse((source / "installer_run.py").read_text(encoding="utf-8"))
     watchdogs = []
     for node in tree.body:
@@ -153,6 +164,8 @@ def _check_receipt_judgment(source: Path) -> None:
         if any(isinstance(target, ast.Name) and target.id == "_WATCHDOG_EXIT" for target in targets):
             watchdogs.append(node.value)
     _expect(len(watchdogs) == 1, "installer watchdog exit is missing or ambiguous")
+    if watchdogs[0] is None:
+        raise ContractViolation("installer watchdog exit has no value")
     watchdog = ast.literal_eval(watchdogs[0])
     _expect(type(watchdog) is int and watchdog == 124, "installer watchdog exit changed")
     with patch.dict(sys.modules, {
@@ -163,26 +176,26 @@ def _check_receipt_judgment(source: Path) -> None:
         })
         calls = []
 
-        def spawn(argv, cwd, env, capture, **_kwargs):
+        def spawn(argv: list[str], cwd: Path, env: dict[str, str], capture: bool, **_kwargs: object) -> tuple[SimpleNamespace, None]:
             _expect(argv == ["installer"] and capture, "targeted installer used the wrong child")
             calls.append(argv)
             return SimpleNamespace(returncode=state["rc"]), None
 
         class Capture:
-            def __init__(self, *_args, **_kwargs):
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
                 pass
 
-            def wait(self, timeout, **_kwargs):
+            def wait(self, timeout: float, **_kwargs: object) -> None:
                 if state["expired"]:
                     raise subprocess.TimeoutExpired("installer", timeout)
 
-            def deliver(self):
+            def deliver(self) -> None:
                 pass
 
-        def unowned(*_args, **_kwargs):
+        def unowned(*_args: object, **_kwargs: object) -> NoReturn:
             raise ContractViolation("targeted installer bypassed the receipt owner")
 
-        def result(status, rc, version, complete, duration):
+        def result(status: str, rc: int | None, version: str | None, complete: bool, duration: float) -> SimpleNamespace:
             return SimpleNamespace(
                 status=status, rc=rc, receipt_version=version, receipt_complete=complete, duration_s=duration,
             )
@@ -265,6 +278,11 @@ def _check_machine_gate(source: Path) -> None:
     with patch.dict(sys.modules, modules), tempfile.TemporaryDirectory(
         prefix="update-machine-gate-contract-"
     ) as temporary:
+        policy_root = Path(__file__).resolve().parents[1] / "libs/repository-policy/src/repository_policy"
+        policy_package = ModuleType("repository_policy")
+        policy_package.__path__ = [str(policy_root)]
+        sys.modules["repository_policy"] = policy_package
+        _module(policy_root / "runtime_gate.py", "repository_policy.runtime_gate")
         root = Path(temporary)
         payload = root / "payload"
         scripts = payload / "scripts"
@@ -272,22 +290,21 @@ def _check_machine_gate(source: Path) -> None:
         for extension in ("sh", "ps1"):
             (scripts / f"install.{extension}").write_text("exit 0\n", encoding="utf-8")
         anchor, context = root / "anchor", root / "enabling-repo"
-        identity.runtime_policy_physical_machine = lambda *args, **kwargs: "physical-host"
-        identity.repository_config = lambda repo_dir: None
+        identity.__dict__["runtime_policy_physical_machine"] = lambda *args, **kwargs: "physical-host"
+        identity.__dict__["repository_config"] = lambda repo_dir: None
         policy = _function(source / "update_gate.py", "runtime_allowed", {
             "__name__": reconcile.__name__, "__package__": package_name, "cfg": config,
         })
         gate = _module(source / "update_gate.py", f"{package_name}.update_gate")
-        runtime._machine_gate_blocks = gate._machine_gate_blocks
-        runtime.MACHINE_GATED_SKIP = gate.MACHINE_GATED_SKIP
-        runtime.MachineDetectionError = gate.MachineDetectionError
-        runtime._installer_timeout = lambda *args: 60
-        application.plan_step = _function(source / "update_runtime_application.py", "plan_step", {
+        for attr in ("_machine_gate_blocks", "MACHINE_GATED_SKIP", "MachineDetectionError"):
+            runtime.__dict__[attr] = getattr(gate, attr)
+        runtime.__dict__["_installer_timeout"] = lambda *args: 60
+        application.__dict__["plan_step"] = _function(source / "update_runtime_application.py", "plan_step", {
             "__name__": application.__name__, "__package__": package_name,
             "dataclasses": dataclasses,
         })
         planner = _module(source / "update_runtime_plan.py", f"{package_name}.update_runtime_plan")
-        planner.shutil = SimpleNamespace(which=lambda name: name)
+        planner.__dict__["shutil"] = SimpleNamespace(which=lambda name: name)
         namespace = {
             "__package__": package_name,
             "update_runtime_plan": planner,
@@ -295,12 +312,12 @@ def _check_machine_gate(source: Path) -> None:
         }
         execute = _function(source / "update_runtime.py", "_execute_runtime_step", namespace)
         name = "agent-example"
-        reconcile.core_installed_payload_dir = lambda name: payload
-        reconcile.payload_version = lambda path: "2"
-        reconcile.runtime_deployed_version = lambda *args, **kwargs: "1"
-        reconcile._versions_equal = lambda first, second: first == second
-        reconcile._zero_downtime_update = lambda path: False
-        scenarios = (
+        reconcile.__dict__.update(
+            core_installed_payload_dir=lambda name: payload, payload_version=lambda path: "2",
+            runtime_deployed_version=lambda *args, **kwargs: "1",
+            _versions_equal=lambda first, second: first == second, _zero_downtime_update=lambda path: False,
+        )
+        scenarios: tuple[tuple[str, str, dict[str, set[str]], bool, str | None, bool], ...] = (
             ("excluded", "machine-gated", {name: {"other"}}, True, None, False),
             ("omitted", "machine-gated", {}, True, None, False),
             ("allowed", "machine-gated", {name: {"local"}}, True, None, True),
@@ -326,21 +343,22 @@ def _check_machine_gate(source: Path) -> None:
 
 
 def _check_case(
-    case, planner, config, reconcile, namespace, execute, policy, kind, platform,
-    force, explicit_context, payload, anchor, context, name, scope, allowed,
-    present, failure, admitted,
+    case: str, planner: ModuleType, config: ModuleType, reconcile: ModuleType, namespace: dict[str, Any],
+    execute: Callable[..., str], policy: Callable[..., bool], kind: str, platform: str,
+    force: bool, explicit_context: bool, payload: Path, anchor: Path, context: Path, name: str,
+    scope: str, allowed: dict[str, set[str]], present: bool, failure: str | None, admitted: bool,
 ) -> None:
     detected, gate_reads, presence_reads, consulted, prepared, invoked = [], [], [], [], [], []
     selected_config = []
 
-    def load_config():
+    def load_config() -> SimpleNamespace:
         if failure == "anchor":
             raise ValueError("synthetic anchor resolution failure")
         config = SimpleNamespace(configured_machine="local", default_repo=SimpleNamespace(anchor=anchor))
         selected_config.append(config)
         return config
 
-    def detect_machine(repo, *, value=None, config=None):
+    def detect_machine(repo: Path, *, value: str | None = None, config: SimpleNamespace | None = None) -> str:
         detected.append(repo)
         _expect(value == "local", f"{case}: configured machine identity was not supplied")
         _expect(config is selected_config[0], f"{case}: target configuration was not supplied")
@@ -348,33 +366,30 @@ def _check_case(
             raise ValueError("synthetic machine detection failure")
         return "local"
 
-    def runtime_allowed(*args, **kwargs):
+    def runtime_allowed(*args: object, **kwargs: object) -> bool:
         consulted.append((args, kwargs))
         return policy(*args, **kwargs)
 
-    def load_gate(repo):
+    def load_gate(repo: Path) -> dict[str, set[str]]:
         gate_reads.append(repo)
         return allowed
 
-    def gate_present(repo):
+    def gate_present(repo: Path) -> bool:
         presence_reads.append(repo)
         return present
 
-    def environment(*args):
+    def environment(*args: object) -> tuple[dict[str, str], Path]:
         prepared.append(args)
         return {}, payload
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         invoked.append((argv, kwargs))
         return SimpleNamespace(status="OK")
 
-    config.load_config, config.detect_machine = load_config, detect_machine
-    config.detect_platform = lambda: platform
-    reconcile.manifest_runtime_scope = lambda path: scope
-    reconcile.load_runtime_gate = load_gate
-    reconcile.gate_manifest_present = gate_present
-    reconcile.runtime_allowed = runtime_allowed
-    reconcile.runtime_installer_environment = environment
+    config.__dict__.update(load_config=load_config, detect_machine=detect_machine, detect_platform=lambda: platform)
+    reconcile.__dict__.update(manifest_runtime_scope=lambda path: scope, load_runtime_gate=load_gate,
+                              gate_manifest_present=gate_present, runtime_allowed=runtime_allowed,
+                              runtime_installer_environment=environment)
     namespace["_run_human_installer"] = run
     namespace["output"] = SimpleNamespace(header=lambda text: None, info=lambda text: None)
     options = {"force": force, "gate_context": context if explicit_context else None}

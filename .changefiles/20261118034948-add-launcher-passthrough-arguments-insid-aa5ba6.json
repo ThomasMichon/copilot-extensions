@@ -1,0 +1,9 @@
+{
+  "comment": "Add launcher passthrough arguments inside the Windows setup native argument envelope so ACP launches no longer fail",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

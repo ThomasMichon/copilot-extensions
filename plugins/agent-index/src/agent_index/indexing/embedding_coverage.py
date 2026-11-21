@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -68,12 +69,13 @@ class EmbeddingCoverage:
         *, bounded: bool = False,
         point_scope: PointScope | None = None,
         read_only: bool = False,
+        wal_aware: bool = False,
     ) -> list[Chunk]:
         """Select missing pairs; bounded reads require explicit index preparation."""
         receipts: dict[str, tuple[str, str]] = {}
         conn = (
             self.paths._connect(read_only=True)
-            if read_only or point_scope is not None else self.paths._connect()
+            if read_only or (point_scope is not None and not wal_aware) else self.paths._connect()
         )
         try:
             for start in range(0, len(chunks), 200):
@@ -121,8 +123,11 @@ class EmbeddingCoverage:
         self, table: VectorTable, chunks: list[Chunk], profile: ModelProfile,
         vectors: np.ndarray[Any, Any],
         *, bounded: bool = False,
+        point_scope: PointScope | None = None,
     ) -> None:
         """Publish receipts only after actual vectors pass the selected read policy."""
+        if point_scope is not None:
+            table = _point_coverage_table(table, chunks, profile, point_scope=point_scope)
         expected = {
             chunk.chunk_id: vector_hash(vector)
             for chunk, vector in zip(chunks, vectors, strict=True)
@@ -130,10 +135,11 @@ class EmbeddingCoverage:
         actual: dict[str, np.ndarray[Any, Any]] = {}
         read_options = {"bounded": True} if bounded else {}
         for start in range(0, len(chunks), 200):
-            actual.update(table.get_vectors(
-                [chunk.chunk_id for chunk in chunks[start:start + 200]], strict=True,
-                **read_options,
-            ))
+            ids = [chunk.chunk_id for chunk in chunks[start:start + 200]]
+            actual.update(
+                table.get_vectors(ids, strict=True, **read_options) if point_scope is None
+                else table.get_point_vectors(ids, point_scope=point_scope)
+            )
         if any(cid not in actual or vector_hash(actual[cid]) != digest
                for cid, digest in expected.items()):
             raise RuntimeError("Stored embeddings do not match the completed embedding batch")
@@ -167,3 +173,35 @@ class EmbeddingCoverage:
             conn.commit()
         finally:
             conn.close()
+
+
+def _point_coverage_table(
+    table: VectorTable, chunks: list[Chunk], profile: ModelProfile, *, point_scope: PointScope,
+) -> VectorTable:
+    from agent_index.store.content_store import ContentStore
+    from agent_index.store.point_content import _prepared_tables
+    from agent_index.store.source_layout import SourceLayoutError
+    from agent_index.store.source_projection import projection_records
+
+    domain = table._source_domain
+    if domain is None or not domain.writing:
+        raise SourceLayoutError("Point coverage publication requires the owning source writer")
+    uri = getattr(table._db, "uri", None)
+    if (not isinstance(uri, (str, Path)) or Path(uri).resolve() != domain.path.resolve()
+            or table._model_id != profile.model_id or table.table_name != profile.table_name
+            or type(profile.dim) is not int or table.dim != profile.dim
+            or any(chunk.source != point_scope[1] for chunk in chunks)):
+        raise SourceLayoutError("Point coverage differs from its selected model binding")
+    with domain.read(table._db, point_scope=point_scope):
+        content = ContentStore(domain.path, table_name=table._content_table, point_scope=point_scope)
+        canonical, vectors = _prepared_tables(content, point_scope=point_scope)
+        projection_records(
+            canonical.db, canonical._table_name, chunks, bounded_content=canonical,
+            require_current_input=True, point_scope=point_scope,
+        )
+        for vector in vectors:
+            if (vector._model_id, vector.table_name, vector.dim) == (
+                profile.model_id, profile.table_name, profile.dim,
+            ):
+                return vector
+    raise SourceLayoutError("Point coverage differs from its retained model binding")

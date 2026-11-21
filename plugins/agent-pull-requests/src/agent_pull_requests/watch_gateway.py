@@ -6,10 +6,10 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_context import identifier
@@ -20,6 +20,9 @@ from single_instance_lease import OperationLockedError, OperationOwnershipError
 
 if TYPE_CHECKING:
     from fleet_manager.gateway_service_handler import BoundedServiceResponse
+    from fleet_manager.local_service_handler import LocalServiceRequest
+    from .repository_stream import LocalStreamResponse
+    from .workspace_operations import WorkspaceOperations
 
 from .watch_replay import MAX_BATCH, ConsumerScope
 from .watch_notification import positive_seconds
@@ -60,14 +63,16 @@ class WatchScopeBinding:
             raise ValueError("invalid watch scope")
 
 
-def _response(status: int, value: dict) -> ServiceResponse:
+def _response(
+    status: int, value: dict[str, Any], *, content_type: str = "application/json",
+) -> ServiceResponse:
     return ServiceResponse(
-        status, (("content-type", "application/json"), ("cache-control", "no-store")),
+        status, (("content-type", content_type), ("cache-control", "no-store")),
         json.dumps(value, allow_nan=False).encode("utf-8"),
     )
 
 
-def _payload(operation: str, value: dict) -> dict:
+def _payload(operation: str, value: dict[str, Any]) -> dict[str, Any]:
     required, optional = _FIELDS[operation]
     if not required <= value.keys() or value.keys() - required - optional:
         raise ValueError("invalid watch request fields")
@@ -96,11 +101,11 @@ class WatchGateway:
         self, store: ReplayStore, *, fleet: str | None, gateway: str | None, slot: str | None,
         bindings: tuple[WatchScopeBinding, ...],
         checkpoint: Callable[[], None] | None = None,
-        workspaces=None,
-        attention=None,
-        reports=None,
+        workspaces: Mapping[tuple[str, str], WorkspaceOperations] | None = None,
+        attention: Any = None,
+        reports: Any = None,
         local: bool = False,
-        repositories=None,
+        repositories: Any = None,
     ) -> None:
         if type(local) is not bool:
             raise ValueError("explicit local profile selection required")
@@ -116,7 +121,7 @@ class WatchGateway:
             for name in (fleet, gateway, slot):
                 identifier(name)
         if not local and store.service_identity is not None and store.service_identity != ReplayServiceIdentity(
-            fleet, gateway, slot,
+            cast(str, fleet), cast(str, gateway), cast(str, slot),
         ):
             raise ValueError("service identity differs from replay storage binding")
         selected = {}
@@ -134,7 +139,7 @@ class WatchGateway:
             raise ValueError("invalid service checkpoint")
         self._checkpoint = checkpoint
         self.fleet, self.gateway, self.slot = fleet, gateway, slot
-        self.bindings = MappingProxyType(selected)
+        self.bindings: Mapping[tuple[str, str], ConsumerScope] = MappingProxyType(selected)
         from .workspace_operations import WorkspaceOperations
         workspaces = {} if workspaces is None else dict(workspaces)
         if any(
@@ -162,15 +167,17 @@ class WatchGateway:
         ):
             raise ValueError("reports must use the existing admitted scope owner")
         self.reports = MappingProxyType(reports)
-        self._tasks: set[asyncio.Task[ServiceResponse | BoundedServiceResponse]] = set()
+        self._tasks: set[asyncio.Task[Any]] = set()
         self._closing = False
 
     def handler_binding(self, *, response_limit: int = BODY_BYTES) -> HandlerBinding:
         if self.local:
             raise ValueError("local ingress has no authenticated Gateway channel")
         if type(response_limit) is int and response_limit == BODY_BYTES:
-            return HandlerBinding(self.fleet, self.gateway, self.handle)
-        return HandlerBinding(self.fleet, self.gateway, self.handle, response_limit=response_limit)
+            return HandlerBinding(cast(str, self.fleet), cast(str, self.gateway), self.handle)
+        return HandlerBinding(
+            cast(str, self.fleet), cast(str, self.gateway), self.handle, response_limit=response_limit,
+        )
 
     async def handle(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
         if self.local:
@@ -191,7 +198,10 @@ class WatchGateway:
             return await self._handle_workspace(request)
         if request.target.startswith(("/v1/read/", "/v2/read/")):
             from .report_gateway import handle
-            return await handle(self, request)
+            report_handler = cast(
+                "Callable[..., Awaitable[ServiceResponse | BoundedServiceResponse]]", handle,
+            )
+            return await report_handler(self, request)
         matched = _PATH.fullmatch(request.target)
         if matched is None:
             return _response(404, {"error": "watch_route_not_found"})
@@ -246,7 +256,9 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
-    async def handle_local(self, request):
+    async def handle_local(
+        self, request: LocalServiceRequest,
+    ) -> ServiceResponse | BoundedServiceResponse | LocalStreamResponse:
         from fleet_manager.local_service_handler import LocalServiceRequest
         from .repository_gateway import handle, response
         if type(request) is not LocalServiceRequest or not self.local:
@@ -258,12 +270,12 @@ class WatchGateway:
             return response(403, {"error": "local_caller_refused"})
         return await handle(self, request)
 
-    def _check(self, request: ServiceRequest) -> None:
+    def _check(self, request: ServiceRequest | LocalServiceRequest) -> None:
         request.lifetime.check()
         if self._checkpoint is not None:
             self._checkpoint()
 
-    async def _handle_workspace(self, request):
+    async def _handle_workspace(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
         from .workspace_operations import OPERATIONS
         is_attention = request.target.startswith("/v1/attention/")
         prefix = "/v1/attention/" if is_attention else "/v2/review/"
@@ -313,21 +325,24 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
-    async def _execute_workspace(self, workspace, operation, payload, request, target, expected,
-                                 *, selection=None):
+    async def _execute_workspace(
+        self, workspace: Any, operation: str, payload: dict[str, Any], request: ServiceRequest,
+        target: str, expected: ReplayBinding, *, selection: object = None,
+    ) -> ServiceResponse | BoundedServiceResponse:
         from .attention_read import AttentionUnavailable, MAX_BATCH_BYTES
         from .generation_cache import CacheInvalid
         from .owner_read import OwnerReadResponseTooLarge
         from .workspace_operations import WorkspaceUnavailable
 
-        def checkpoint():
+        def checkpoint() -> None:
             self._check(request)
             if self._binding(request, target) != expected:
                 raise ReplayBindingMismatch
 
-        def validate_selection(intent: dict) -> None:
+        def validate_selection(intent: dict[str, Any]) -> None:
             from .workspace_operations import PROTOCOL, encoded
             from .workspace_selection import selection_preview
+            encode: Callable[[dict[str, Any]], bytes] = encoded
 
             preview = {
                 "protocol": PROTOCOL, "binding": expected.document(), "scope": intent["scope"],
@@ -342,25 +357,40 @@ class WatchGateway:
             }
             if (
                 len(json.dumps(preview, allow_nan=False).encode("utf-8")) > BODY_BYTES
-                or len(encoded(submission)) > BODY_BYTES
+                or len(encode(submission)) > BODY_BYTES
             ):
                 raise OwnerReadResponseTooLarge("prepared preview or submission exceeds transport limit")
 
         try:
             from .workspace_terminal_read import serve
             attention = request.target.startswith("/v1/attention/")
+            execute = cast(Callable[..., dict[str, Any]], workspace.execute if attention else serve)
             value = await asyncio.to_thread(
-                workspace.execute if attention else serve,
+                execute,
                 *((operation, payload) if attention else (workspace, operation, payload)),
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
                 **({} if attention else {"selection": selection}),
                 **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()
+            from .workspace_retained_review import FIELD, RESPONSE_BYTES, SELECTION
+            if not attention and operation == "capabilities" and request.response_limit < RESPONSE_BYTES:
+                value.pop(FIELD, None)
             value = dict(value, binding=expected.document())
             limit = MAX_BATCH_BYTES if request.target.startswith("/v1/attention/") else BODY_BYTES
-            if len(json.dumps(value, allow_nan=False).encode("utf-8")) > limit:
+            if not attention and operation == "inspect":
+                if selection == SELECTION:
+                    if request.response_limit < RESPONSE_BYTES:
+                        return _response(503, {"error": "workspace_response_limit"})
+                    limit = RESPONSE_BYTES
+            data = json.dumps(value, allow_nan=False).encode("utf-8")
+            if len(data) > limit:
                 return _response(503, {"error": "workspace_response_limit"})
+            if limit > BODY_BYTES:
+                from fleet_manager.gateway_service_handler import BoundedServiceResponse
+                return BoundedServiceResponse(
+                    200, (("content-type", "application/json"), ("cache-control", "no-store")), data,
+                )
             return _response(200, value)
         except RequestDisconnected:
             return _response(503, {"error": "workspace_request_disconnected"})
@@ -395,13 +425,13 @@ class WatchGateway:
         """Withdraw readiness before joining already-owned operations."""
         self._closing = True
 
-    def _completed(self, task: asyncio.Task[ServiceResponse | BoundedServiceResponse]) -> None:
+    def _completed(self, task: asyncio.Task[Any]) -> None:
         self._tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
             _LOG.error("watch-service-failed code=unexpected-operation-failure")
 
     async def _execute(
-        self, scope: ConsumerScope, operation: str, payload: dict, request: ServiceRequest,
+        self, scope: ConsumerScope, operation: str, payload: dict[str, Any], request: ServiceRequest,
         *, target: str, expected: ReplayBinding | None,
     ) -> ServiceResponse:
         def checkpoint() -> None:
@@ -417,6 +447,10 @@ class WatchGateway:
             checkpoint()
             if expected is not None and operation == "capabilities":
                 value = dict(value, protocol=SCOPED_PROTOCOL, binding=expected.document())
+            from .watch_admission import content_type
+            media_type = content_type(
+                self.store.registration_admission if operation == "capabilities" else None,
+            )
         except ReplayBindingMismatch:
             return _response(409, {"error": "watch_binding_mismatch"})
         except RequestDisconnected:
@@ -430,7 +464,7 @@ class WatchGateway:
             return _response(503, {"status": "uncertain", "reason": "watch_store_unavailable"})
         except (ValueError, OverflowError):
             return _response(400, {"error": "invalid_watch_request"})
-        return _response(200, value)
+        return _response(200, value, content_type=media_type)
 
     async def drain(self, *, timeout: float) -> None:
         """Stop admission and join disk work, even after its caller disconnected."""

@@ -99,16 +99,28 @@ New installations and provider selection require PSMux 3.4.0 or newer; 3.4.0 is
 the preferred installer version. This does not revoke observation or attachment
 of existing 3.3.5 sessions. The native observation path below retains legacy
 registration support, and installation refuses provider replacement while any
-provider process is present or its absence is unconfirmed. Legacy binaries
-without version metadata are not executed merely to discover their version
-while provider activity may be live. Upgrade only through the normal owner
-after its live-session gate is satisfied; changing this source policy neither
-updates a running provider nor migrates its sessions.
+provider process is present or its absence is unconfirmed. In that state the
+installer instead puts the required version side by side under
+`%USERPROFILE%\.agent-worktrees\psmux\<version>\`, from the WinGet
+portable archive after it verifies the manifest SHA-256 and the binary file
+version. If that version directory already exists but is empty, damaged or
+holds another version, the installer leaves it unchanged and uses a new
+`<version>-r<id>` directory instead. It then moves the selected directory
+before older PSMux entries on the user PATH. The older provider keeps its live sessions, and a newer client can still
+list, capture and attach them. Legacy binaries without version metadata are not
+executed merely to discover their version while provider activity may be live.
+The in-place package upgrade still runs only after the live-session gate is
+satisfied; changing this source policy neither updates a running provider nor
+migrates its sessions.
 
 The canonical Windows creation owner checks the selected executable's native
 file-version resource before preparing a pane. An old or unknown version
-refuses new creation; a PATH fallback cannot bypass the 3.4.0 floor. This read
-starts no provider process. An existing-session join returns before that check,
+refuses new creation from that executable. When the PATH copy is old, the
+owner selects the newest side-by-side or WinGet package copy that passes the
+same 3.4.0 floor and puts its directory first on the new pane's PATH,
+including a PATH value that the launch plan sets for the pane; no
+fallback admits an older binary. If no copy passes, the refusal names the
+side-by-side update as the remedy. This read starts no provider process. An existing-session join returns before that check,
 so legacy reattachment does not acquire a new creation-version requirement.
 Manager checks the same passive metadata after the join decision and before
 selecting a creation owner, preserving that floor even with an older Core or

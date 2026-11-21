@@ -156,6 +156,11 @@ which slices can start and which must wait.
 
 ## Integration deliverables and exit
 
+The [current integration assessment](#2026-11-20-integration-assessment)
+distinguishes delivered historical research from the remaining current-plan
+acceptance. These six gates remain unchecked; the assessment does not turn
+metadata coverage or a reviewed planning slice into an execution charter.
+
 - [ ] Full current issue coverage, with counted exclusions and refresh gaps.
 - [ ] Evidence-cited high-priority shortlist; no title-only rankings.
 - [ ] Canonical existing-effort map with retained owners and acceptance.
@@ -163,6 +168,56 @@ which slices can start and which must wait.
 - [ ] Bounded execution waves, each with entry conditions, useful slices and
   source/release/native/adoption exit evidence appropriate to that scope.
 - [ ] Normal reviewed publication of the resulting plan.
+
+### 2026-11-20 integration assessment
+
+The complete **2026-11-20 23:09:40 UTC (15:09:40 PST)** issue-only census has
+882 open issues: 445 creator-eligible and 437 excluded metadata-only.
+Two identical nine-page observations and a stable fourteen-member roster
+establish that inventory, not current whole-contract or source qualification.
+There are 408 original-cohort and 474 inflow issues, 153 above fixed 729.
+Two arrivals and no departures occurred since the preceding complete census;
+this integration assessment performs no tracker disposition.
+
+The historical 682-identity assignment set is independently reconstructed
+from the prior 600 identities and four disjoint terminal fourth-wave sets
+totaling 82, with exact assignment/routing agreement. Its intersection with
+the current inventory is:
+
+| Current open partition | Count | What the partition establishes |
+|---|---:|---|
+| Historical four-wave assignments, still creator-eligible | 292 | A historical research home exists; changed acceptance, current source and custody still need the appropriate delta check. |
+| Creator-eligible identities outside those assignments | 153 | The historical four waves do not cover them. Later campaign research or accepted receiving may already do so; reconcile it before allocating new study. |
+| Excluded identities outside those assignments | 437 | Counted, metadata-only gaps; no original/comment access or disposition follows. |
+| Whole current queue | 882 | Complete counting coverage, not 882 current technical assessments. |
+
+The other 390 historical assignments are not currently open. This comparison
+does not classify their reasons or attribute all of them to the campaign.
+The 153 outside-assignment eligible identities and the 153 issues above the
+numerical target are different measures, not a proposed closure cohort.
+
+| Integration gate | Existing evidence that remains useful | Remaining acceptance before checking the gate |
+|---|---|---|
+| Full current coverage | The four historical waves, later dated assessments and the complete current partition above. | Reconcile the 153 outside-assignment eligible identities with actual later research/receiving, identify changed-contract gaps among the 292 retained assignments, and keep all exclusions counted. Historical membership alone is not current research coverage. |
+| Evidence-cited priority shortlist | The [twelve bounded nominations](roadmap-next-slices.md) and their pinned qualifications distinguish defects, investigations and qualification duties. | Admit relevant changed delivery/acceptance before asserting current priority or readiness; retain explicit uncertainty rather than rerank from titles or age. |
+| Existing-effort map | Named incumbent homes, explicit home gaps and four audited [continuing routes](roadmap-current-qualification.md#2026-11-20-singleton-tracking-route-and-current-coverage). | Carry each selected contribution's exact acceptance and owner; resolve only the home/receipt uncertainty needed by that contribution. A related effort is not whole-source intake. |
+| Directed prerequisite graph | The 145 historical scoped relationships distinguish satisfied sources, within-issue precedences and interfaces. | Reconcile selected changed endpoints and acceptance without converting tracking routes into hard edges; keep unresolved cycles and independent work explicit. No whole-backlog DAG proof is claimed. |
+| Bounded waves | The independent contribution queues and [finite integration research queue](roadmap-sequencing.md#finite-integration-research-queue). | Produce a selected, evidence-backed execution-wave proposal with original owner, entry, useful slice and appropriate source/release/native/adoption exit. Research ordering below does not appoint implementers. |
+| Reviewed resulting plan | Reviewed historical waves, nominations and finite qualifications are delivered inputs. | Review the integrated current execution proposal after the preceding gaps are resolved or explicitly retained. Review of this gap assessment cannot check that broader gate. |
+
+The linked queue continues research rather than inventing another architecture,
+implementation programme or universal acknowledgment. Reuse unchanged admitted
+evidence; actual source/copy restrictions, owner/resource custody and the
+parent's fixed checkpoint remain independent.
+
+The later [selected startup-wave proposal](roadmap-startup-wave.md) applies
+that method to two unchanged, current source findings and retains two pending
+author-delivery lanes. It adds finite priority, entry, scoped sequencing and
+exit decisions, not whole-current coverage or completion of these six gates.
+Its [dated journal](journal/2026/11.20-selected-startup-wave.md) records the
+new complete 884-open inventory, six partial merged-delivery credits and
+retained whole-contract gaps; the 882-issue assessment above remains its
+original observation rather than being silently rewritten.
 
 Completion of this roadmap does not complete the parent's numerical target,
 any implementation effort, or a rollout. Those retain their own completion

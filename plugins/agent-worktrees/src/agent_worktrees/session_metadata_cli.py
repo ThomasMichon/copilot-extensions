@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+import argparse
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 from . import claimant as claimant_mod
 from . import output
@@ -16,21 +19,21 @@ from . import status_updater_cli
 from . import worktree_identity
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _activate_project_for_path(*args, **kwargs):
+def _activate_project_for_path(*args: Any, **kwargs: Any) -> None:
     return status_updater_cli._activate_project_for_path(*args, **kwargs)
 
 
-def resolve_worktree_id_by_codename(*args, **kwargs):
-    return _core().resolve_worktree_id_by_codename(*args, **kwargs)
+def resolve_worktree_id_by_codename(*args: Any, **kwargs: Any) -> str | None:
+    return cast(str | None, _core().resolve_worktree_id_by_codename(*args, **kwargs))
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser(
         "session-lock",
         help="Write/remove a session-state lattice lock -- a provable-liveness "
@@ -180,7 +183,9 @@ def add_parsers(sub) -> None:
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
-def _resolve_worktree_for_read(worktree_id, worktree_dir=None, session_id=None):
+def _resolve_worktree_for_read(
+    worktree_id: str | None, worktree_dir: str | None = None, session_id: str | None = None,
+) -> str | None:
     """Resolve a worktree for read-only hook/introspection commands.
 
     Resolution order: explicit id -> explicit/current directory (activating that
@@ -204,7 +209,7 @@ def _resolve_worktree_for_read(worktree_id, worktree_dir=None, session_id=None):
     return None
 
 
-def _session_role(record, session_id):
+def _session_role(record: tracking.WorktreeRecord, session_id: str | None) -> dict[str, Any]:
     """Compute a session's role relative to a worktree's asserted head."""
     head = record.resolved_head_session
     head_entry = record.session_entry(head) if head else None
@@ -234,7 +239,9 @@ def _session_role(record, session_id):
 _CONCLUDED_STATES = ("handed-off", "concluded")
 
 
-def _pending_handoff_predecessor_safe(record, *, exclude):
+def _pending_handoff_predecessor_safe(
+    record: tracking.WorktreeRecord, *, exclude: str,
+) -> tracking.SessionEntry | None:
     try:
         pending = record.pending_handoffs
         if pending:
@@ -251,7 +258,7 @@ def _pending_handoff_predecessor_safe(record, *, exclude):
         return None
 
 
-def _succession_header(record) -> str:
+def _succession_header(record: tracking.WorktreeRecord) -> str:
     """A terse succession/role line for the sessionStart digest, or ``""``."""
     try:
         head = record.resolved_head_session
@@ -279,7 +286,7 @@ def _succession_header(record) -> str:
         return ""
 
 
-def _effort_orientation(record) -> str:
+def _effort_orientation(record: tracking.WorktreeRecord) -> str:
     """Return the bounded active-effort pointer for the existing conduct hook."""
     try:
         return effort_focus.orientation(Path(record.worktree_path), record.active_effort)
@@ -287,7 +294,7 @@ def _effort_orientation(record) -> str:
         return ""
 
 
-def cmd_session_role(args) -> int:
+def cmd_session_role(args: argparse.Namespace) -> int:
     """Report THIS session's role relative to its worktree's head (JSON out)."""
     if getattr(args, "restart_survivor", None) is not None:
         from . import native_restart_launch, native_restart_survivor
@@ -304,13 +311,13 @@ def cmd_session_role(args) -> int:
             ) or getattr(args, "worktree_dir", None):
                 raise ValueError("Restart survivor request conflicts with extra selectors")
 
-            def load():
+            def load_survivor_record() -> tracking.WorktreeRecord | None:
                 try:
                     return tracking.load_record(cfg.tracking_dir() / f"{expected['worktree_id']}.yaml")
                 except FileNotFoundError:
                     return None
 
-            result = native_restart_survivor.inspect(request, loader=load)
+            result = native_restart_survivor.inspect(request, loader=load_survivor_record)
         except (OSError, ValueError, IndexError, RecursionError, yaml.YAMLError) as exc:
             return output._json_error(f"Could not inspect native restart survivor: {exc}")
         output._json_output(result)
@@ -330,13 +337,13 @@ def cmd_session_role(args) -> int:
             ) or getattr(args, "worktree_dir", None):
                 raise ValueError("Restart worktree expectations conflict with extra selectors")
 
-            def load():
+            def load_restart_record() -> tracking.WorktreeRecord | None:
                 try:
                     return tracking.load_record(cfg.tracking_dir() / f"{expected['worktree_id']}.yaml")
                 except FileNotFoundError:
                     return None
 
-            result = native_restart_check.check(expected, loader=load)
+            result = native_restart_check.check(expected, loader=load_restart_record)
         except (OSError, ValueError, IndexError, RecursionError, yaml.YAMLError) as exc:
             return output._json_error(f"Could not check native restart worktree: {exc}")
         output._json_output(result)
@@ -381,7 +388,7 @@ def cmd_session_role(args) -> int:
     return 0
 
 
-def cmd_history_digest(args) -> int:
+def cmd_history_digest(args: argparse.Namespace) -> int:
     """Print a compact recovery digest of THIS worktree's recent history."""
     session_id = getattr(args, "session_id", None) or (
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
@@ -425,7 +432,7 @@ def _effort_focus_output(
         "worktree_id": record.worktree_id,
         "active_effort": inspection.to_dict() if inspection is not None else None,
         "follow_up": record.follow_up or bool(inspection and inspection.active),
-        "summary": inspection.summary if active else record.summary,
+        "summary": inspection.summary if inspection is not None and active else record.summary,
     }
 
 
@@ -453,7 +460,7 @@ def _effort_storage_root(config: cfg.Config, worktree_root: Path) -> Path:
     return worktree_root
 
 
-def _cmd_effort_focus_lint(args) -> int:
+def _cmd_effort_focus_lint(args: argparse.Namespace) -> int:
     """``effort-focus lint`` -- standalone effort README schema validation.
 
     Reuses the exact validator ``effort-focus bind`` runs (see
@@ -494,7 +501,7 @@ def _cmd_effort_focus_lint(args) -> int:
     return 1
 
 
-def cmd_effort_focus(args) -> int:
+def cmd_effort_focus(args: argparse.Namespace) -> int:
     """Bind, show, replace, release, or lint a worktree's canonical effort slice."""
     if args.action == "lint":
         return _cmd_effort_focus_lint(args)
@@ -660,7 +667,7 @@ def cmd_effort_focus(args) -> int:
     return 1
 
 
-def cmd_claimant_liveness(args) -> int:
+def cmd_claimant_liveness(args: argparse.Namespace) -> int:
     """Report SAME-MACHINE claimant liveness for an owner_ref."""
     alive = claimant_mod.local_claimant_alive(args.owner_ref)
     if getattr(args, "json", False):
@@ -671,7 +678,7 @@ def cmd_claimant_liveness(args) -> int:
     return 0
 
 
-def cmd_codename_lookup(args) -> int:
+def cmd_codename_lookup(args: argparse.Namespace) -> int:
     """Report whether THIS machine's active project has a matching codename."""
     worktree_id = resolve_worktree_id_by_codename(args.codename)
     if getattr(args, "json", False):
@@ -690,7 +697,7 @@ def cmd_codename_lookup(args) -> int:
     return 0
 
 
-def cmd_session_lock(args) -> int:
+def cmd_session_lock(args: argparse.Namespace) -> int:
     """Write or remove a session-state lattice lock (#4272)."""
     from . import locks, sessions
 
@@ -701,7 +708,7 @@ def cmd_session_lock(args) -> int:
         if getattr(args, "json", False):
             print(json.dumps({"ok": True, "action": "remove", "path": str(lock_path)}))
         return 0
-    extra: dict = {"kind": args.kind, "session_id": args.session}
+    extra: dict[str, Any] = {"kind": args.kind, "session_id": args.session}
     if args.worktree:
         extra["worktree_id"] = args.worktree
     ok = locks.write_lock(lock_path, pid=args.pid, extra=extra)

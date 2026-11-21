@@ -92,6 +92,66 @@ explain a required author action without authorizing the reviewer to perform it.
 Retain independent actionable reasons rather than letting an example vocabulary
 erase existing CI/follow-up/merge distinctions.
 
+### Mixed dismissed and independently qualified verdict history
+
+This agent-recommended, review-first refinement is coordinated by
+[#13626](https://github.com/ThomasMichon/copilot-extensions/issues/13626).
+The prior conservative reader returned `review-dismissed` for any dismissed
+record from the selected reviewer, including a historical record beside a
+different, independently qualified undismissed verdict. That can mask a
+supported follow-up even when the existing activity owner observed the live
+verdict before a later candidate transition.
+
+Reuse `repository_reviewer._activity`, `repository_activity` and the existing
+pure attention/ranking owner; do not introduce a second review ledger,
+provider read or handled-write path. A dismissed verdict is never evidence
+that review is current, that no reviewer acted, or that a later author
+candidate was observed. Do not reinterpret it as an empty initial history.
+
+Permit the distinct undismissed verdict set to supply its own existing
+evidence when complete selected-reviewer history is otherwise qualified.
+Current-head matching retains its existing `reviewed-base-unknown` result:
+ignoring an older dismissal cannot manufacture a reviewed base or handled
+candidate. A follow-up still requires every qualifying undismissed verdict
+signature to be in the original durable `candidate_reviews` basis. A newly
+observed verdict, reported timestamp, head inequality, list order or dismissal
+alone never proves that causal order.
+
+Preserve `review-dismissed` when no independently qualifying undismissed
+verdict remains. Incomplete history, unknown/malformed submitted metadata,
+unavailable actor/candidate, stale facts and failed observation retain their
+current refusal and precedence; dismissed history must not become a shortcut
+around them. Draft/request records and other reviewers keep their existing
+meaning. Preserve author-owned rebase recommendations and independent reasons.
+
+This is a read-model refinement within the existing v1 action vocabulary,
+not new initial/follow-up causes, storage adoption or new effect authority.
+Keep immutable cached review records and existing observation signatures,
+candidate event/cause, pending age, freshness, projection-cursor calculation
+and response bounds. Qualify against the executing store/service paths before
+claiming support; runtime documentation changes only with implementation.
+
+Finite delivery and validation:
+
+- [x] Review this refinement before changing the current refusal behavior
+  (#13628; current-head Copilot approval and required green checks).
+- [x] Qualify old dismissed plus independently observed undismissed evidence
+  across a later candidate change, both review-list orders, unchanged refresh
+  and fresh-reader restart. Expect the existing `new_verdict/author_update`
+  cause, original pending age and `observed-before-candidate` basis.
+- [x] Preserve dismissed-only and incomplete/malformed-history refusal,
+  newly observed/noncausal verdicts, another reviewer's dismissal, draft/request
+  records, current-head reviewed-base uncertainty and author-owned rebase.
+- [x] Exercise cache-only query/stream projection and continuation invalidation.
+  Queries leave durable bytes unchanged; stream samples may advance only their
+  existing delivery progress. Neither rewrites cached facts/history, acquires
+  a provider, ACKs delivery, emits a task or publishes feedback.
+  These three source exits are covered by `test_repository_reviewer.py` and
+  `test_repository_stream.py`; installed/provider qualification remains separate.
+- [ ] Return to the complete activity/feed, provider-comparison and parent
+  gates. Source review/tests alone do not qualify installed behavior, actual
+  provider evidence or consumer activation.
+
 ## Serial plan and exits
 
 - [x] **Review the contract.** Completed;

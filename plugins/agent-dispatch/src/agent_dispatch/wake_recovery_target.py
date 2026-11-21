@@ -29,6 +29,7 @@ def retained_wake(
         ) from exc
     if not isinstance(send, dict) or (
         send.get("outbox") != outbox or send.get("wake_id") != wake_id
+        or type(send.get("no_resume", False)) is not bool
         or send.get("owner_session_id") != row["owner_session_id"]
         or type(send.get("task_generation")) is not int
         or send.get("task_generation") != (
@@ -68,7 +69,7 @@ def retained_wake(
             or detail["receipt"].get("admission") != "not_admitted"
         ):
             raise TaskError("not-sent wake lacks retained fenced-settlement evidence")
-    return row
+    return {**row, "no_resume": send.get("no_resume", False)}
 
 
 def reconciliation_plan(
@@ -127,6 +128,7 @@ def reconciliation_plan(
         prompt = steering_prompt(captured["task"]["id"], wake["message"])
         if not valid_settlement(
             detail["receipt"], target[0], target[1], prompt, idempotency_key=wake_id,
+            no_resume=wake["no_resume"],
         ):
             raise TaskError(
                 "not-sent wake retained settlement conflicts with its original request"

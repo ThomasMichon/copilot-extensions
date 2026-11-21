@@ -5,14 +5,17 @@ from __future__ import annotations
 import copy
 import json
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from single_instance_lease import OperationLockedError
 
-from test_review_owner_store import selected
+from test_review_owner_store import selected as _selected
 from test_review_workspace import evidence as evidence
-from test_workspace_conversation import generation
+from test_workspace_conversation import generation as _generation
 
 from agent_pull_requests.attention import Cursor, Interest
 from agent_pull_requests.conversation_store import ConversationStore
@@ -27,38 +30,51 @@ from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInval
 from agent_pull_requests.watch_storage import StateCommitUncertain
 
 CONSUMER = ConsumerScope("consumer-a", "account-a", "example/project")
+Document = dict[str, Any]
+selected = cast(Callable[[], Document], _selected)
+generation = cast(Callable[..., Document], _generation)
+
+
+def no_composition(*args: Any, **kwargs: Any) -> Document:
+    raise AssertionError("this control must not compose a comment")
 
 
 @pytest.fixture
-def owner(tmp_path):
+def owner(tmp_path: Path) -> ReplayStore:
     store = ReplayStore(tmp_path.resolve(), "owner", clock=lambda: 1, terminal_retention=True)
     store.provision(conversations=True)
     TerminalRetentionStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=100)
     return store
 
 
-def register(owner, request_id="request-a", *, deadline=90, until=("merged",)):
+def register(
+    owner: ReplayStore, request_id: str = "request-a", *, deadline: float | None = 90,
+    until: tuple[str, ...] = ("merged",),
+) -> Document:
     return owner.execute(CONSUMER, "register", {
         "request_id": request_id, "issued_at": 1, "number": 42,
         "until": until, "deadline_at": deadline,
     }, expires_at=100)
 
 
-def target(*receipts):
+def target(*receipts: Document) -> ObservationTarget:
     return ObservationTarget(
         CONSUMER.account, CONSUMER.repo, 42,
         frozenset(receipt["registration_id"] for receipt in receipts),
     )
 
 
-def observe(owner, evidence, *, second=0, captured=None):
+def observe(
+    owner: ReplayStore, evidence: Document, *, second: int = 0,
+    captured: ObservationTarget | None = None,
+) -> Document:
     return ConversationStore(owner).observe_workspace(
         generation(evidence, second), expires_at=100,
         terminal_target=captured if captured is not None else target(),
     )
 
 
-def admit(owner, evidence):
+def admit(owner: ReplayStore, evidence: Document) -> tuple[Document, Document]:
     value = generation(evidence)
     position = observe(owner, evidence)["cursor"]
     owner._review_transaction(
@@ -72,8 +88,8 @@ def admit(owner, evidence):
 
 @pytest.mark.parametrize("uncertain", [False, True])
 def test_terminal_replace_is_one_tombstone_fence_and_original_notification(
-    owner, evidence, monkeypatch, uncertain,
-):
+    owner: ReplayStore, evidence: Document, monkeypatch: pytest.MonkeyPatch, uncertain: bool,
+) -> None:
     from agent_pull_requests import watch_replay_store as storage
 
     receipt = register(owner)
@@ -82,7 +98,7 @@ def test_terminal_replace_is_one_tombstone_fence_and_original_notification(
     evidence["sections"]["pull_request"]["data"]["status"] = "completed"
     write = storage._atomic_write_json
 
-    def interrupt(path, state):
+    def interrupt(path: Path, state: Document) -> None:
         if uncertain:
             write(path, state)
             raise StateCommitUncertain("synthetic post-replace interruption")
@@ -111,7 +127,9 @@ def test_terminal_replace_is_one_tombstone_fence_and_original_notification(
     assert first["retirement"]["drain"] == "pending"
 
 
-def test_frozen_pending_payload_other_registrations_and_exact_ack_survive(owner, evidence):
+def test_frozen_pending_payload_other_registrations_and_exact_ack_survive(
+    owner: ReplayStore, evidence: Document,
+) -> None:
     frozen = register(owner, "frozen", until=("review_changed",))
     fresh = register(owner, "fresh")
     unrelated = owner.execute(
@@ -155,7 +173,9 @@ def test_frozen_pending_payload_other_registrations_and_exact_ack_survive(owner,
     assert len(owner.execute(CONSUMER, "pending", {}, expires_at=100)["events"]) == 1
 
 
-def test_terminal_fences_selection_attempt_and_capture_but_keeps_unknown_custody(owner, evidence):
+def test_terminal_fences_selection_attempt_and_capture_but_keeps_unknown_custody(
+    owner: ReplayStore, evidence: Document,
+) -> None:
     intent, value = admit(owner, evidence)
     attempt = owner.begin_review_action(
         intent["operation_id"], intent["scope"], "comment-a", expires_at=100,
@@ -169,7 +189,7 @@ def test_terminal_fences_selection_attempt_and_capture_but_keeps_unknown_custody
     with pytest.raises(TerminalAdmissionClosed):
         owner.begin_review_action(intent["operation_id"], intent["scope"], "verdict-a", expires_at=100)
     with pytest.raises(TerminalAdmissionClosed):
-        ReviewSelectionStore(owner).allocate(intent, compose=lambda *a, **k: None, expires_at=100)
+        ReviewSelectionStore(owner).allocate(intent, compose=no_composition, expires_at=100)
     feedback = ReviewFeedback(
         owner, value, FeedbackInputs(value["id"], (Interest("maintainer", True, "consumer-a"),), 60),
         expires_at=100, checkpoint=lambda: None,
@@ -188,7 +208,9 @@ def test_terminal_fences_selection_attempt_and_capture_but_keeps_unknown_custody
 
 
 @pytest.mark.parametrize("control", ["reader", "capacity", "deadline", "incomplete", "target"])
-def test_no_implicit_adoption_eviction_timeout_policy_or_terminal_inference(owner, evidence, control):
+def test_no_implicit_adoption_eviction_timeout_policy_or_terminal_inference(
+    owner: ReplayStore, evidence: Document, control: str,
+) -> None:
     observe(owner, evidence)
     captured = target()
     if control == "reader":
@@ -225,7 +247,9 @@ def test_no_implicit_adoption_eviction_timeout_policy_or_terminal_inference(owne
         assert owner.path.read_bytes() == before
 
 
-def test_actual_selection_allocation_finishes_before_terminal_fence_and_cannot_admit(owner, evidence):
+def test_actual_selection_allocation_finishes_before_terminal_fence_and_cannot_admit(
+    owner: ReplayStore, evidence: Document,
+) -> None:
     intent, _ = admit(owner, evidence)
     owner.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=100)
     selections = ReviewSelectionStore(owner)
@@ -234,20 +258,22 @@ def test_actual_selection_allocation_finishes_before_terminal_fence_and_cannot_a
     intent["actions"] = [intent["actions"][-1]]
     entered, release = threading.Event(), threading.Event()
 
-    def validate(_intent):
+    def validate(_intent: Document) -> None:
         entered.set()
         assert release.wait(5)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
-            selections.allocate, intent, compose=lambda *a, **k: None,
+            selections.allocate, intent, compose=no_composition,
             expires_at=100, validate_intent=validate,
         )
         try:
             assert entered.wait(5)
             evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+            # Transactions now wait within their caller budget; probe the same kernel lock.
             with pytest.raises(OperationLockedError):
-                observe(owner, evidence, second=2)
+                with owner._lock():
+                    pytest.fail("allocation must retain replay custody")
         finally:
             release.set()
         retained = future.result(timeout=5)["operation"]
@@ -258,7 +284,9 @@ def test_actual_selection_allocation_finishes_before_terminal_fence_and_cannot_a
         owner.admit_review(retained["intent"], expires_at=100)
 
 
-def test_later_replay_poll_uses_body_free_terminal_facts_without_changing_original_events(owner, evidence):
+def test_later_replay_poll_uses_body_free_terminal_facts_without_changing_original_events(
+    owner: ReplayStore, evidence: Document,
+) -> None:
     first = register(owner)
     evidence["sections"]["pull_request"]["data"]["status"] = "completed"
     observe(owner, evidence, captured=target(first))
@@ -277,8 +305,8 @@ def test_later_replay_poll_uses_body_free_terminal_facts_without_changing_origin
 
 @pytest.mark.parametrize("started", ["live", "terminal", "uncaptured"])
 def test_delayed_native_replay_read_cannot_reintroduce_retired_bodies_after_reopen(
-    owner, evidence, started,
-):
+    owner: ReplayStore, evidence: Document, started: str,
+) -> None:
     observe(owner, evidence)
     if started == "live":
         receipt = register(owner)
@@ -293,6 +321,7 @@ def test_delayed_native_replay_read_cannot_reintroduce_retired_bodies_after_reop
     evidence["sections"]["pull_request"]["data"]["status"] = "active"
     observe(owner, evidence, second=4)
     refreshed = owner.waiting_target(captured, expires_at=100)
+    assert refreshed is not None
     assert refreshed.retention_epoch == captured.retention_epoch
     before = owner.path.read_bytes()
     result = owner.observe(
@@ -308,7 +337,9 @@ def test_delayed_native_replay_read_cannot_reintroduce_retired_bodies_after_reop
         assert len(pending["events"]) == 1 and "snapshot" not in pending["events"][0]
 
 
-def test_missed_reopen_updates_terminal_facts_without_replacing_frozen_closed_event(owner, evidence):
+def test_missed_reopen_updates_terminal_facts_without_replacing_frozen_closed_event(
+    owner: ReplayStore, evidence: Document,
+) -> None:
     closed = register(owner, "closed", until=("closed",))
     merged = register(owner, "merged", until=("merged",))
     captured = target(closed, merged)

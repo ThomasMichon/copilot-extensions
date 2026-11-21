@@ -7,6 +7,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+class NativeSendBusy(ValueError):
+    """The native holder is busy; this request did not enter prompt submission."""
+
+
 class NativeSendPrompt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -79,6 +83,8 @@ async def submit(
                 raise DaemonDrainingError("turn")
             if request.no_resume and session.status == SessionStatus.STOPPED:
                 raise ValueError("native_session_stopped")
+            if request.no_resume and session.status != SessionStatus.IDLE:
+                raise NativeSendBusy(f"Session {session_id} is {session.status.value}, not idle")
             if may_resume and session.status == SessionStatus.STOPPED:
                 return None
             try:

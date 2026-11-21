@@ -6,8 +6,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from .client import DispatchError
-from .queue import SpawnState, Status
+from .admission_holds import supervisor_resume_inhibited
+from .client_errors import DispatchError
+from .queue_records import SpawnState, Status
 from .spawn_factories import (
     _parse_fleet_body_handle,
     _parse_local_body_handle,
@@ -16,11 +17,11 @@ from .spawn_factories import (
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
-IdleConfirmNudgeFn = Callable[[str, dict], bool]
+IdleConfirmNudgeFn = Callable[[str, dict[str, Any]], bool]
 IDLE_CONFIRM_COOLDOWN = 60.0
 
 
-def idle_confirm_message(task: dict) -> str:
+def idle_confirm_message(task: dict[str, Any]) -> str:
     """Work-bearing idle nudge: the session went idle while the task did not.
 
     Composed from the task's own recorded objective (``goal``/``prompt``) and
@@ -55,7 +56,7 @@ def idle_confirm_message(task: dict) -> str:
     )
 
 
-def default_idle_confirm_nudge(target: str, task: dict) -> bool:
+def default_idle_confirm_nudge(target: str, task: dict[str, Any]) -> bool:
     """Resume the idle session with a real prompt (not a notify-kind nudge)."""
     from . import bridge
 
@@ -117,7 +118,7 @@ def nudge_idle_headless_tasks(supervisor: Any, *, now: float) -> int:
             or local_sid
             or (fleet[1] if fleet is not None else None)
         )
-        if not target:
+        if not target or supervisor_resume_inhibited(supervisor, task, res):
             continue
         payload = dict(task)
         if fleet is not None:

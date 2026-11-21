@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify v2 watch sealing against historical readers and abrupt controller exit",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

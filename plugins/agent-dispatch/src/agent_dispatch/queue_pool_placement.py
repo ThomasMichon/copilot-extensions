@@ -7,6 +7,7 @@ import json
 import sqlite3
 
 from .pool_instances import PoolInstanceDefinition
+from .admission_holds import inhibited, waiter_hold_snapshot
 from .queue_common import Task, machine_matches
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_pool_accountability import ReservationAccountability, reservation_accountable as reservation_accountable
@@ -257,6 +258,7 @@ def pool_lane_load(
     cutoff: int | None = None,
     exclude_key: str | None = None,
     exclude_waiter: str | None = None,
+    waiter_holds: frozenset[str] = frozenset(),
 ) -> int:
     """Lanes held by running bodies plus suspended reactivations waiting for one.
 
@@ -272,7 +274,8 @@ def pool_lane_load(
     accountable attempts of the same task still count.
     """
     waiting = conn.execute(
-        "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
+        "SELECT a.task_id, a.lane_wait_since, t.labels, t.kind, s.driver, s.reserved_by, s.agent_info"
+        " FROM task_pool_assignments a"
         " JOIN tasks t ON t.id = a.task_id"
         " JOIN spawn_reservations s ON s.key = a.reservation_key AND s.state = ?"
         " AND s.release_requested = 0 AND s.startup_fenced = 0 AND s.conversation_retired = 0"
@@ -281,14 +284,22 @@ def pool_lane_load(
         " AND a.recovery_requested_at IS NULL AND t.status = ? AND t.resume_requested = 1"
         " AND t.hold_reason IS NULL AND t.awaiting_steer = 0",
         (SpawnState.COLD, *identity, Status.SUSPENDED),
-    ).fetchall()
-    load = sum(
-        1 for row in waiting
-        if row["task_id"] != exclude_waiter
-        and (ahead_of is None or (row["lane_wait_since"], row["task_id"]) < ahead_of)
     )
-    if cutoff is not None and load >= cutoff:
-        return load
+    load = 0
+    for row in waiting:
+        if row["task_id"] == exclude_waiter or (
+            ahead_of is not None and (row["lane_wait_since"], row["task_id"]) >= ahead_of
+        ):
+            continue
+        if waiter_holds and inhibited(
+            pool=row["reserved_by"], instance=identity, labels=json.loads(row["labels"]), kind=row["kind"], agents=(),
+            reservation={"driver": row["driver"], "agent_info": json.loads(row["agent_info"] or "null")},
+            holds=waiter_holds,
+        ):
+            continue
+        load += 1
+        if cutoff is not None and load >= cutoff:
+            return load
     accounting = accounting or ReservationAccountability(conn)
     for row in conn.execute(
         "SELECT s.*, t.recovery_requested_at AS lane_recovery_requested_at"
@@ -311,7 +322,7 @@ def pool_lane_load(
 
 def select_pool(
     conn: sqlite3.Connection, task: Task, definitions: tuple[PoolInstanceDefinition, ...],
-    *, execution_machine: str | None = None,
+    *, execution_machine: str | None = None, scoped_admission: bool = False,
 ) -> PoolInstanceDefinition:
     """Recheck retained routing and count accountable reservations, never caller slots."""
     accounting = ReservationAccountability(conn)
@@ -337,11 +348,12 @@ def select_pool(
         )
         if not candidates or not _permits(candidates[0], task):
             raise TaskError("retained pool assignment is unavailable or routing is unsatisfiable")
+    holds = waiter_hold_snapshot(scoped_admission)
     for pool in candidates:
         if not _permits(pool, task):
             continue
         if pool_lane_load(
-            conn, pool.identity, accounting=accounting, cutoff=pool.max_concurrent,
+            conn, pool.identity, accounting=accounting, cutoff=pool.max_concurrent, waiter_holds=holds,
         ) < pool.max_concurrent:
             return pool
     if retained is not None:

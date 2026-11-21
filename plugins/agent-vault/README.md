@@ -156,6 +156,42 @@ Selection does not opt into runtime activation, unlock a database, configure
 credentials or change service policy. See [SSH key custody](docs/ssh-key-preparation.md)
 and the [configuration reference](docs/configuration.md#dependency-selection).
 
+### Independently packaged providers
+
+Provider distributions remain separate from the core dependency profiles. Declare
+their desired distribution names and extras for the addressed installation:
+
+```powershell
+python plugins\agent-vault\scripts\runtime_profile.py --root C:\Example\Vault providers --roots '["example-vault-provider"]' --persist
+```
+
+The same helper works on POSIX. `providers` without `--roots` reads the selection;
+an explicit empty list removes it for the next reconstruction. This writes
+`runtime-provider-roots.json`, not a runtime selector, credential, service setting
+or completed environment. It grants no source, feed or installation authority.
+
+The existing source-profile producer includes these roots in its native
+dependency resolution and final inspected wheel closure, under the installation's
+existing acquisition policy. The provider must be available through that
+configured source/feed path; the selection does not invent a package source or
+copy an installed provider. Complete closed-wheel input can also supply the
+current core and providers together. Windows closed-wheel selection retains the
+admitted provider roots when its installer persists dependency selection.
+
+Only unconditional distribution roots seed this names-and-extras declaration.
+A conditional dependency root is not promoted into unconditional provider intent,
+even when its distribution is present transitively. To retain a provider across
+updates, declare it explicitly and include its unconditional root in the complete
+incoming profile; the existing producer does this for the recorded selection.
+
+All canonical candidate paths, including POSIX and prepared applications, check
+the recorded provider roots before constructing or reusing a candidate. An
+ordinary update without complete matching inputs fails rather than silently
+dropping a provider. Dependency versions may change while the selected provider
+names and extras remain. A producer reconstructs a new immutable candidate; no
+supplemental package install mutates a completed slot. An older installation
+without this explicit selection is not scanned or migrated automatically.
+
 ## Source-qualified runtimes
 
 Prepared applications support explicit client-only installation by forwarding

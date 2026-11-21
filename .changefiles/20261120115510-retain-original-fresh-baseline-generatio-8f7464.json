@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original fresh-baseline generation associations before cache publication without legacy backfill",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

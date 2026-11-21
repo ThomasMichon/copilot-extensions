@@ -1,6 +1,8 @@
 """Ordinary application route and middleware registration."""
 
 from __future__ import annotations
+from typing import Any, cast
+from collections.abc import Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -23,7 +25,7 @@ from .routes import (
 
 
 def configure_serving_app(
-    cfg: ServiceConfig, auth_token: str, *, lifespan, auth_custody: AuthCustody | None = None,
+    cfg: ServiceConfig, auth_token: str, *, lifespan: Any, auth_custody: AuthCustody | None = None,
 ) -> FastAPI:
     """Register the ordinary serving surfaces with the caller's lifespan."""
     app = FastAPI(
@@ -43,13 +45,15 @@ def configure_serving_app(
     # Websocket transport bypasses the HTTP auth middleware.
     app.state.auth_token = auth_token
     app.state.auth_custody = auth_custody if auth_custody is not None else AuthCustody()
-    app.state.live_event_store = LiveEventStore()
+    app.state.live_event_store = LiveEventStore(
+        telemetry_legacy=cfg.consumer_telemetry_harnesses is None,
+    )
     app.state.live_inbox_runtime = LiveInboxRuntime()
     app.state.live_questions = LiveQuestions()
     app.state.live_delivery_state = LiveDeliveryState()
     app.state.mux_questions = MuxQuestions()
     from .status_runtime import StatusRuntime
-    app.state.status_runtime = StatusRuntime(app)
+    app.state.status_runtime = cast(Callable[[FastAPI], Any], StatusRuntime)(app)
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
     app.add_middleware(AuthCustodyMiddleware, custody=app.state.auth_custody)
     for router in (

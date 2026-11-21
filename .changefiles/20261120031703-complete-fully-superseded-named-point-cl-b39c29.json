@@ -1,0 +1,9 @@
+{
+  "comment": "Complete fully superseded named point claims before body acquisition with qualified native coverage and revalidating retries.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

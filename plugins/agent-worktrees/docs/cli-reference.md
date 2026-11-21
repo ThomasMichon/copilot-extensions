@@ -2303,6 +2303,21 @@ an explicit stderr diagnostic; it must not be interpreted as an absent project
 or retried as an effectful registration. This entry supplies incoming inspection,
 not completed caller adoption, installed readiness or whole-flow recovery.
 
+### Registry sync (`repos sync`)
+
+An ordinary clean, attached checkout with no configured remotes reports
+`skipped (local-only repository (no remotes configured))` before any branch
+switch, fetch or merge. Dirty and detached checkouts keep their existing skip
+reasons. A failed local remote-name observation remains an error; registry
+metadata alone is not evidence that the checkout has no remotes.
+
+Remote-backed checkouts retain declared-default-branch repair and the
+repository-account-aware `origin` fetch. A configured non-`origin` remote
+does not cause automatic remote selection or turn a missing `origin` into a
+local-only skip. Authentication, transport and timeout failures remain errors.
+Each entry's result is collected independently; a local-only skip does not
+make the command fail, while any error still produces a nonzero exit.
+
 ### Bare-anchor sync (`repos sync`)
 
 `repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its

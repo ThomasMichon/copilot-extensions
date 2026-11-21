@@ -70,6 +70,23 @@ still requires the existing owner's bounded contribution claim.
 
 ## Coordination
 
+The proposed #9056 read-only category belongs to this effort's existing
+unified Bridge/session-acquisition boundary, not a second launcher, session
+index or recovery engine. Existing Bridge/native-host, selected-backend
+permission, workspace/task, transport and resource owners retain their
+responsibilities. No implementer is appointed. This is a distinct explicit
+session category for existing managed-worktree or standalone callers, not
+a declaration that its caller has no worktree. Preserve real originating
+worktree obligations; apply the explicit non-worktree caller policy only
+when no worktree exists. Ordinary per-request CLI-mode opt-in and mux
+behavior remain unchanged. Review the focused contract against
+`visions/session-hosting` before implementation. This maintainer-owned shared
+capability does not impose upstream contribution on a consumer.
+Normal review, actual complete receiving delivery and current permitted
+source/receiver/owner readback precede any separate tracking judgment.
+#9056 stays OPEN during the proposal; no runtime, launch, resource or custody
+effect is authorized.
+
 The finite #4118 intake below receives only Bridge creation/session-record/API
 provenance. Existing launch, session, API and transport owners retain their
 scopes. Worktrees/Dispatch/other-producer stamping and the Manager consumer
@@ -745,6 +762,48 @@ from hosted Linux execution, which remains open under #6934 and the broader
 - [ ] Complete the Phase 6 validation matrix and update authoritative bridge,
       dispatch, and worktree/venue documentation where their contracts change.
 
+#### Explicit non-allocating read-only session category - #9056
+
+_Agent-recommended additive retention within unified acquisition; not an
+allocation-failure fallback or a change to ordinary CLI-mode defaults._
+
+- [ ] **P9056-R1:** Provide an explicit first-class read-only category for
+  questions, code review and planning in an already declared context, with
+  no task, development-worktree or mux allocation. Never infer this category
+  from CLI/ACP presentation, caller identity, missing worktree metadata or
+  failed ordinary allocation.
+- [ ] **P9056-R2:** Reuse the existing Bridge/native-host session owner for
+  durable identity, discovery, admission, subscriptions, observation, results,
+  follow-up/resume, concurrency and lifetime. Keep shared state/subscriptions
+  at that host boundary; do not add a parallel CLI launcher, session index,
+  recovery backend or native lifecycle/replay owner.
+- [ ] **P9056-R3:** Enforce read-only behavior through the selected backend's
+  actual tool/capability policy, denying writes, mutating shell/tool calls
+  and unapproved authority. A prompt or UI label is not enforcement.
+  Feature-detect stable public native/AHP support; an inadequate backend
+  must report unsupported before effects, never silently broaden tools or
+  allocate a workspace/mux to make the request succeed.
+- [ ] **P9056-R4:** Preserve the declared context, exact native conversation
+  and originating responsibility through reconnect and follow-up. Use
+  existing obligation tracking, including real originating managed-worktree
+  obligations when present; use an explicit non-worktree caller policy only
+  for callers without a worktree. Neither discard existing nor fabricate
+  absent worktree ownership, and never bypass source/repository/hosting
+  admission because the requested category is read-only.
+- [ ] **P9056-R5:** Retain exact-conversation selection, concurrent-turn
+  fencing and truthful interrupted/unknown resume acceptance and follow-up
+  delivery. Reconcile lost acknowledgements against authoritative host
+  evidence on the original conversation; resolve accepted/rejected outcomes
+  when evidence permits, otherwise retain unknown without unsafe replay.
+  Never report a replacement conversation or workspace allocation as
+  successful recovery; native-owned lifecycle and replay remain native-owned.
+- [ ] **P9056-R6:** Cover actual client/backend create/resume, denied effects,
+  unchanged context, zero allocation, unavailable enforcement, interrupted/
+  unknown outcomes and concurrent callers with synthetic fixtures. Separate
+  unit proof from installed qualification; preserve #6076 acquisition,
+  #7041 parallel standalone/anchor modes and #7237 external obligations as
+  independent work rather than declaring them complete.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -826,6 +885,33 @@ or a claim that the historical failure was newly reproduced._
   reception by #7212, retry caller mutations or terminate unrelated work.
 
 ## Validation Plan
+
+- [ ] **V9056-R1:** Prove explicit category selection serves questions,
+  review and planning in the declared context with zero task/worktree/mux
+  allocation, including ordinary-allocation failure and missing worktree
+  metadata negatives. Ordinary CLI opt-in/mux defaults remain unchanged.
+- [ ] **V9056-R2:** Exercise the existing host's identity, discovery,
+  admission, subscription, observation, result and follow-up paths; no
+  separate session index, launcher, recovery or lifecycle engine is used.
+- [ ] **V9056-R3:** At the real selected client/backend policy boundary,
+  prove writes, mutating shell/tools and unauthorized effects are denied;
+  unsupported native/AHP capabilities refuse honestly before effects.
+  Neither labels, prompts nor silent broader tools count as enforcement.
+- [ ] **V9056-R4:** Verify context, exact native identity, origin and existing
+  obligations survive reconnect/follow-up for BOTH managed-worktree and
+  standalone callers. Preserve real worktree responsibility and apply the
+  non-worktree policy only where applicable, without invented ownership or
+  relaxed repository/source/hosting admission.
+- [ ] **V9056-R5:** Exercise concurrent-turn exclusion and interrupted/
+  unknown resume and follow-up outcomes on the original conversation.
+  Cover authoritative accepted/rejected reconciliation and still-unknown
+  evidence without unsafe replay, replacement conversations, duplicate
+  effects, new allocation or appropriation of native lifecycle/replay.
+- [ ] **V9056-R6:** Resolve every P9056-R1 through R6 at its stated synthetic
+  client/backend tier and separately report any installed qualification.
+  Preserve all incumbent work, owners, historical credit and independent
+  #6076/#7041/#7237 gates; documentary intake is not implementation,
+  installed acceptance or source/resource release.
 
 - [ ] **B4118-G:** Resolve the finite Bridge Plan/local Validation at its
   session-record/API boundary, retaining independent interface/origin,
@@ -946,11 +1032,24 @@ or a claim that the historical failure was newly reproduced._
 Realized for the local case: worktree-keyed reservation + server-side claim
 at registration time (Phase 2), plus an opt-in local launch verb that
 automates reserve-then-run for a real interactive `copilot` process (Phase
-3). Still pending: Phase 4's remote-venue discovery mechanism and its
-symmetric venue-launch surface (needed once a venue's own daemon differs
-from the host's).
+3). Phase 4's remote-venue discovery and symmetric venue launch have their
+historical delivery and validation credit above. Phase 5 documentation,
+broader Phase 6 acquisition, retained transport/native acceptance and the
+proposed #9056 read-only category remain unfinished at their stated scopes.
 
 ## Journal
+
+### 2026-11-19 - Proposed explicit non-allocating read-only category
+
+Retain #9056 in Phase 6 through six direct Plan and six actual global
+Validation rows, with existing host/backend and source/resource owners.
+The declared category is distinct from ordinary opt-in muxed CLI mode;
+unsupported enforcement fails honestly, not through an allocating fallback.
+The [campaign record](../backlog-reconciliation/journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+records the union, adjacent-owner distinctions and separate disposition gate.
+All new rows remain unchecked. No code, launch, installation, native test,
+implementation appointment, issue disposition or custody release occurred.
+Corrected Proposal's stale Phase 4 status without reopening its credited work.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3323:Journal -->
 

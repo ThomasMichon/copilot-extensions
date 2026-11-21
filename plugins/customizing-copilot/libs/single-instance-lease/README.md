@@ -29,6 +29,12 @@ Linked/nonregular lock files are refused, `assert_owned()` verifies the
 opened file still occupies that path, and only the acquiring process and
 thread may assert or release custody. Separate handles in the same process
 also exclude one another on Windows.
+For an existing peer whose Windows lock contract uses byte zero, explicitly
+pass `byte_zero=True` to acquire that same byte; an empty file is initialized
+with one byte. The default retains the high-offset protocol, including the
+PowerShell helper's interoperability. POSIX uses the same whole-file lock in
+either mode. This option does not establish a peer's identity or authorize its
+service effects.
 Acquisition publication and release use the same process-local guard, so a
 losing concurrent attempt on one instance cannot clear its successful owner.
 Fork preparation serializes descriptor setup/close; the child closes inherited
@@ -126,6 +132,22 @@ Keying on the optional `port` lets an active and a passive daemon coexist on one
 `lock_dir` during a zero-downtime cutover (they bind different ports, so they
 take different locks), while two starts on the *same* port still collide.
 Cross-platform: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows.
+
+`acquire(expected_file_identity=(device, inode))` is an opt-in existing-file
+operation: it creates neither a directory nor a lock file, rejects non-regular
+or linked/reparse paths, and compares the opened descriptor and current path
+with that identity before locking and again before recording the PID.
+Ordinary `acquire()` retains its create-if-missing behavior. After a fork,
+`release()` on an inherited object closes only the child's descriptor; it
+does not unlock the parent's shared POSIX open-file description.
+
+`held_file_identity()` returns the held descriptor's `(device, inode)` only
+while this process owns the lease and its pathname still names that ordinary,
+non-link file. Missing custody, inherited objects, replacement and reparse/link
+paths refuse. The read neither reopens nor transfers the lease and never uses
+the PID text as ownership proof. Consumers must serialize their lifecycle and
+recheck identity at their own consequential boundaries; this is not a
+filesystem compare-and-swap or proof that prior work settled.
 
 ### `supersession` -- the self-retire decision
 

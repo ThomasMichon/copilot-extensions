@@ -759,9 +759,9 @@ def test_private_mux_preserves_selected_backend_version(
     assert file_version(shim) == file_version(str(backend)) == version
     if version < MINIMUM_VERSION:
         with pytest.raises(RuntimeError, match="require version 3.4"):
-            require_creation_binary(shim)
+            require_creation_binary(shim, search_roots=())
     else:
-        assert require_creation_binary(shim) == shim
+        assert require_creation_binary(shim, search_roots=()) == shim
 
 
 def test_private_mux_preserves_creation_refusal_without_version_metadata(tmp_path: Path) -> None:
@@ -772,4 +772,4 @@ def test_private_mux_preserves_creation_refusal_without_version_metadata(tmp_pat
     assert file_version(str(backend)) is None
     _private_psmux(tmp_path / "mux-bin", str(backend), "version-fixture", _test_env(tmp_path))
     with pytest.raises(RuntimeError, match="require version 3.4"):
-        require_creation_binary(str(tmp_path / "mux-bin" / "psmux.exe"))
+        require_creation_binary(str(tmp_path / "mux-bin" / "psmux.exe"), search_roots=())

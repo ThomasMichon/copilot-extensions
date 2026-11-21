@@ -149,6 +149,20 @@ It requires explicit owner-v3 adoption and embedding opt-in; default hosts and
 legacy verbs are unchanged. Journal tombstones do not compact other caches
 or pending effect receipts.
 
+The standalone host can explicitly provision
+[fresh-baseline generation associations](../../services/pr/README.md#optional-fresh-baseline-generation-associations).
+The executing core records original immutable generation/observation identities
+before cache publication, with bounded pending/confirmed custody and no legacy
+backfill. A separately selected
+[recorded-generation terminal transition](../../services/pr/README.md#recorded-generation-terminal-transition)
+preserves associated cache reads without manufacturing native watch targets.
+Default workspace publication is unchanged.
+An additional explicitly selected
+[original native-target writer](../../services/pr/README.md#original-native-target-capture)
+captures the admitted target and journal epoch before acquisition in the same
+association owner. It does not enable active-native retained adoption or
+backfill legacy targets.
+
 Source embeddings additionally expose the finite
 [workspace service/client API](docs/workspace-integration.md) through the
 existing PR owner. These library interfaces do not install a writer, acquire
@@ -596,23 +610,183 @@ original restore semantics.
 
 The shared storage owner now observes the fixed-path
 `watch-state-transition.json` marker before state reads and before atomic
-replacement. Its internal version-1 header uses schema
+replacement. Its internal header uses schema
 `agent-pull-requests.watch-state-transition` and phases `prepared`,
-`sealed-legacy`, `import-ready` and `active`. Reading a phase establishes
+`sealed-legacy`, `import-ready` and `active` for version 1; version 2 currently
+admits `prepared` and `sealed-legacy`. Reading a phase establishes
 neither sealing nor custody. This groundwork refuses **every** present
 transition rather than selecting the legacy file or isolated candidate.
 Malformed, linked, oversized or unreadable markers also refuse. An
-unjournaled historical-lock directory, retained transition lock, staged
+unjournaled historical-lock directory, original-inode pin, retained transition lock, staged
 barrier or `watch-state` path is not ordinary absence. Missing transition
 evidence preserves existing legacy behavior, including a regular historical
 lease file; inspecting an empty root does not create it.
 
-No publisher or migration command creates these markers yet. Do not write
-one by hand or delete transition evidence to regain startup. Guarded
-preparation, physical sealing, boot qualification, authority validation and
-recovery are separate, still-unimplemented steps; this receiver alone does
-not make any transition phase usable. It performs no boot probe, lease
-transfer or automatic migration, and does not change installation selection.
+The internal `WatchWriter.prepare_state_transition()` API can now publish
+only a bound `prepared` record after completed quiescence. It rechecks the
+caller's `prepare-state-transition` authorization, optional current installation,
+original held lease inode and journal at the final no-replace publication
+boundary, checking the deadline after those reads. Acquisition opens only
+the prechecked original file, without creating or changing a raced inode.
+Its strict legacy-state and native-custody guards run before drain and at
+the final drain-state replacement, preserving rejected bytes. The writer
+retains its native lease and disables read readiness after completed
+quiescence, before any marker publication. An incomplete drain retains prior
+read readiness for authorized same-owner abort; lost custody or malformed
+legacy state instead invalidates that readiness. Failed drain, authority
+checks or durability acknowledgement never grant a later phase.
+Prepared-only recovery validates that same root, installation and original
+inode before acquiring the historical lease, then confirms journal durability.
+Preparation hardlinks the original lease at `watch-state-transition.pin` and
+confirms file/directory persistence through the existing platform policy before
+publishing the prepared record. The retained link prevents inode recycling
+after release; device/inode numbers alone are not recovery evidence. A missing,
+foreign or non-regular pin refuses recovery. The pin is never acquired as a
+writer lease and is not the later retained-path exchange or admission barrier.
+
+`WatchWriter.recover_prepared_state_transition()` is the explicit prepared-only
+version-2 receiver/adapter. It requires completed quiescence, no queued legacy
+callbacks and fresh `recover-prepared-state-transition` authorization. Governed
+callers must also supply the current installation and its actually held native
+transaction guard. The adapter reads the complete version-1 record from the
+private journal, retains it unchanged as `origin`, and preserves its `binding`
+and `lease` at the top level. A separate `controller` records current admission;
+stored controller evidence never authorizes recovery. Later compatible
+controllers revalidate the original scope without requiring either older
+payload to exist.
+
+Precondition refusal leaves an existing owner unchanged. Fresh installation
+checks use the already selected cell rather than a stale launch-payload
+environment. Admission is checked again after the initial source read, before
+acquisition. Only `COPILOT_PLUGIN_ROOT` is omitted from current admission;
+WSL distribution identity and all other current environment evidence remain.
+Candidate serialization must fit the reader's 1 MiB metadata limit
+before custody or publication changes. The final source and admission work
+precedes the unchanged-journal and full-topology check.
+
+Before native acquisition and at guarded atomic publication, recovery validates
+the exact root, original lease/pin, absence of physical-transition artifacts,
+strict legacy source and full current installation admission. It acquires only
+the unchanged historical inode, never the pin or retained path. A retry confirms
+an unchanged version-2 publication rather than rewriting it. Unknown durability
+retains native custody and legacy sole authority. Sealed version-1 records and
+conflicting version-2 evidence refuse without adaptation. Version-1 preparation
+and sealing validators still refuse version 2; ordinary entry refuses both.
+This API does not drain an active owner, qualify a domain or boot, seal, import,
+activate, or provide a CLI/control-plane migration operation.
+
+`WatchWriter.recover_sealed_state_transition()` separately receives a completed
+Windows seal under `recover-sealed-state-transition` authorization, the same
+fresh current installation/transaction checks, completed quiescence and no
+queued legacy callbacks. It validates the actual private journal and reuses
+the Windows sealing owner's original-record/topology validator, including the
+original inode pin, retained file, installed barrier and absence of conflicting
+staging or isolated state. Only then may it acquire the inner `writer.lock`;
+it never acquires the retained original inode. Prepared or moved-but-unsealed
+topologies are not inputs to this receiver.
+
+The version-2 sealed record retains the complete original version-1 journal as
+`origin`, with unchanged top-level `schema`, `binding` and `lease`. An actual
+prepared origin may progress to `sealed-legacy` without rewriting its phase.
+Any seal already present in the origin remains unchanged; a newly recorded
+seal must match the actual installed Windows topology. The origin is validated
+as its original version-1 record, separately from current physical facts.
+Its separate `controller` is revalidated scope history, not admission
+authority. Publication and unchanged-record retry use the same bounded,
+guarded persistence owner as prepared adaptation. Final source validation,
+current admission, native inner-lease custody, unchanged journal and actual
+topology are rechecked before publication. Unknown acknowledgement retains
+origin, native custody and legacy sole authority without import or effects.
+Version-1 readers still reject this version-2 record; ordinary readers/writers
+refuse every present phase. POSIX sealed records refuse before custody or
+publication: their version-1 boot epoch lacks qualified domain evidence,
+and no current host identity may be retroactively attached to it. This adds
+no fresh sealed epoch, domain/boot probe, version-2 sealing writer, isolated
+publisher, ordinary entry or migration command.
+
+An unjournaled pin is retained interruption evidence, not legacy absence or
+permission to erase it or recreate a record. Preparation's state and marker
+writes require an existing parent and never recreate a moved historical root.
+Legacy source validation uses a stable, plain-file descriptor read, rejecting
+symlinks/reparse points without imposing a new legacy-state size cap.
+
+While preparation owns a drain, its source/custody guard protects every
+in-flight persistence attempt and final replacement. On invalid evidence it
+closes admission and drains without persisting rejected state; an unfinished
+worker retains the lease and the guard. Safe timeout abort rechecks actual
+descriptor/path custody again before resume. Storage validation failures
+invalidate readiness, so a later repair requires strict state readoption
+instead of resuming a stale registry. Activation cannot substitute for the
+separately authorized guarded resume. Readoption itself uses the plain-file
+reader, validates custody on both sides, and refuses transition evidence
+before opening or recreating a historical lease.
+Final worker-startup admission and removal of the preparation guard share
+the persistence/refusal boundary. A startup refusal raises instead of
+reporting success and retains the guard, including its installation check.
+
+Successful readoption or safe resume clears the full preparation snapshot/
+installation guard, not the recovery safety boundary. That writer instance
+keeps native custody checks before notification and persistent-write admission,
+plain-file/existing-parent storage, and refusal-to-readiness propagation.
+Healthy writers that have never entered guarded recovery keep the ordinary
+legacy path; no periodic validation worker is added.
+
+Rejected callback admission fences queued legacy work instead of starting it
+during cleanup. Already-running callbacks must still settle under the retained
+lease. Strict readoption transfers unattempted legacy work, its process-local
+history and concurrency limit without duplication; a later authorized
+activation or resumption unfences and wakes it. Readoption and cleanup keep
+the queue fenced. Preparation refuses to publish a marker while unattempted
+legacy callbacks remain queued; authorized activation and a completed drain
+must settle them first. Closure, release and passive cleanup cannot discard
+that retained queue. Guard rejection does not spend a legacy attempt or falsely
+acknowledge/increment an acknowledged event. This adds no durable legacy
+delivery guarantee or new callback wire fields.
+
+The separate internal `WatchWriter.seal_state_transition()` API requires
+`seal-state-transition` authorization and completed preparation quiescence.
+Its Linux backend durably stages an empty private barrier and records its
+identity before `renameat2(RENAME_EXCHANGE)` atomically swaps the historical
+lock and retained path. Every pre-exchange attempt confirms journal durability
+and rechecks custody, including retries after an uncertain staging commit.
+No move/mkdir or no-replace fallback exists.
+Other unsupported platforms refuse before staging or acquisition. A filesystem
+that refuses exchange retains the staged evidence and original lock.
+Recovery validates the journal, original pin and both actual path identities
+before reusing or acquiring only the original inode; it never creates the new
+writer lease or exchanges an installed barrier back. Unjournaled staging and
+conflicting evidence remain retained refusals.
+
+After barrier/parent synchronization, sealing records a native Linux boot epoch
+under `sealed-legacy`. It does not compare boots or qualify descriptor retirement.
+Authorization, current installation when supplied, custody, strict legacy
+source, unchanged journal/topology and deadline are rechecked at publication.
+Readiness and all persistent-write/callback fences remain closed after success
+or uncertain failure. Legacy subscriptions remain the only authority; neither
+registry adoption nor isolated-state publication follows from a seal.
+
+On Windows the same internal operation stages an owner-private directory and
+durably records its identity before releasing the already-drained original
+lease. Native write-through, no-replace moves first retain the original file
+and then install that directory at the historical name. An open historical
+handle refuses the first move. A cold caller that creates a file in the gap
+blocks the second; both files are preserved, and recovery never opens the
+retained inode as another lease. Only the exact installed barrier permits
+acquiring `writer.lock` inside it for final journal publication. Recovery
+inspects actual topology rather than trusting a prepared/sealed label.
+Windows records no boot epoch. This native guard is not a complete historical
+runtime census, migration command or activation qualification.
+
+No CLI or control-plane operation invokes preparation or sealing yet, and
+ordinary startup/restart still refuses every present phase. Do not write markers
+by hand or delete evidence to regain startup. Full Windows historical-runtime/
+controller-exit qualification, native Linux exchange/interruption qualification,
+boot qualification and authority selection remain open.
+Preparation itself performs no boot probe, lease transfer, import
+or automatic migration; neither internal API changes installation selection.
+Preparation is not an authoritative
+subscription snapshot: later historical writes remain in the sole legacy file
+and must survive final import qualification.
 
 This is a receiver expansion baseline, not a migration tool, map/callback-cwd
 support or a cross-process writer lease. Existing writer/lifecycle ownership remains required.
@@ -702,6 +876,19 @@ and rechecks governance after acquisition. The shared orchestrator must borrow
 that exact guard; startup and mutating reconciliation must use the same run
 root. This binding alone supplies neither completed-runtime/process evidence
 nor transaction authorization.
+
+`require_transition_origin()` is a read-only prerequisite for the version-2
+subscriber-state recovery adapter. Under that same held transaction it brackets
+a complete historical installation-evidence check with fresh current governance.
+Every source, installation, receipt and durable-root field must still match;
+historical generations must be positive and no newer than the current receipts.
+The original absolute payload location remains provenance and need not exist.
+The method neither rewrites that evidence nor reactivates the old binding.
+Its caller must obtain the origin from the validated private transition journal
+and separately prove exact runtime/process authorization and native
+lease/pin/barrier custody. A caller-supplied dictionary is not adoption authority.
+This prerequisite alone does not adapt or write a journal, qualify an execution
+domain or boot, select a subscription authority, or enable ordinary entry.
 
 `WatchRuntime` composes that current binding with canonical immutable snapshot,
 slot ownership and build completion evidence. A freshly governed action can

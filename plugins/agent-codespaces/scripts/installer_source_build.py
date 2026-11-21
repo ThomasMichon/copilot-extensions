@@ -28,11 +28,12 @@ else:
     from installer_dependency_policy import _toml_parser
     tomllib = _toml_parser()
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, BinaryIO, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, TypedDict, cast
 import subprocess
+import versioned_runtime as runtime
 
 from installer_dependency_policy import (
-    RetainedUVInstall,
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained,
     _argument_pairs, _native_retained_path, _private_retained_root, _temporary_inputs,
     _write_toml, retain_uv_install,
 )
@@ -53,6 +54,91 @@ _Tree = dict[str, tuple[str, int]]
 
 if TYPE_CHECKING:
     from installer_engine import FrozenInputs
+
+
+_ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], None]}, total=False)
+
+
+def _package_roots(plugin: Path, *, closed_wheels: bool = False) -> tuple[Path, ...]:
+    if type(closed_wheels) is not bool:
+        raise ValueError("Closed-wheel source selection must be a boolean")
+    pending: list[tuple[Path, str | None]] = [(plugin, None)]
+    roots: set[Path] = set()
+    names: dict[str, Path] = {}
+    while pending:
+        declared, expected_name = pending.pop()
+        if declared.is_symlink():
+            raise ValueError(f"Runtime package input is a symlink: {declared}")
+        root = declared.resolve(strict=True)
+        manifest = root / "pyproject.toml"
+        if not stat.S_ISREG(manifest.lstat().st_mode):
+            raise ValueError(f"Runtime package manifest is not a regular file: {manifest}")
+        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        project = data.get("project", {})
+        if not isinstance(project, dict):
+            raise ValueError(f"Runtime package project metadata must be a table: {manifest}")
+        name = project.get("name")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+            raise ValueError(f"Runtime package has no ordinary distribution name: {manifest}")
+        key = re.sub(r"[-_.]+", "-", name).lower()
+        if expected_name is not None and key != re.sub(r"[-_.]+", "-", expected_name).lower():
+            raise ValueError(f"Runtime dependency {expected_name} resolves to {name}: {manifest}")
+        if root in roots:
+            continue
+        if key in names and names[key] != root:
+            raise ValueError(f"Runtime input declares two sources for {name}: {names[key]}, {root}")
+        names[key] = root
+        roots.add(root)
+        tool = data.get("tool", {})
+        if not isinstance(tool, dict):
+            raise ValueError(f"Runtime package tool metadata must be a table: {manifest}")
+        uv = tool.get("uv", {})
+        if not isinstance(uv, dict):
+            raise ValueError(f"Runtime package uv metadata must be a table: {manifest}")
+        sources = uv.get("sources", {})
+        if not isinstance(sources, dict):
+            raise ValueError(f"Runtime package sources must be a table: {manifest}")
+        if closed_wheels:
+            # Retain this application's original metadata and files. Its runtime
+            # dependencies come exclusively from the independently inspected wheels.
+            continue
+        for dependency, source in sources.items():
+            if not isinstance(source, dict):
+                raise ValueError(f"Unsupported runtime source for {dependency}: {manifest}")
+            if "path" not in source:
+                raise ValueError(f"Unsupported nonlocal runtime source for {dependency}: {manifest}")
+            path = source["path"]
+            if not isinstance(path, str) or not path:
+                raise ValueError(f"Runtime dependency path is invalid for {dependency}: {manifest}")
+            child = root / path
+            if child.is_file():
+                child = _contained(child, (root,))
+                if not cast(Callable[[str, str, Path], bool], _bundled_dbus_next)(key, dependency, child):
+                    raise DependencyPolicyError("local UV artifacts cannot prove release age")
+                # The admitted artifact is already covered by its owning package's files.
+                continue
+            pending.append((child, dependency))
+    return tuple(sorted(roots))
+
+
+def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
+    local_packages: tuple[str, ...] | None = None,
+    *, on_progress: Callable[[], None] | None = None,
+    file_hashes: dict[Path, str] | None = None    ) -> str:
+
+    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
+    source_hash = runtime.fingerprint_source(
+        files, file_hashes=file_hashes, **progress,
+    )
+    if not extras and local_packages is None:
+        return source_hash
+    profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
+    if local_packages is not None:
+        profile["local_packages"] = local_packages
+    return hashlib.sha256(json.dumps({
+        "schema": "installer-engine.dependency-profile", "version": 1,
+        **profile,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
@@ -105,10 +191,14 @@ def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
 
 def revalidate_input_content(engine: ModuleType, inputs: FrozenInputs) -> None:
     if (
-        engine._package_roots(inputs.plugin) != inputs.packages
+        engine._package_roots(
+            inputs.plugin, **({"closed_wheels": True} if inputs.closed_wheel_source else {}),
+        ) != inputs.packages
         or engine._wheel_construction_hash(
             engine._construction_hash(
-                engine._source_files(inputs.packages), inputs.extras, inputs.local_packages,
+                engine._source_input_files(
+                    inputs.packages, closed_wheel_source=inputs.closed_wheel_source,
+                ), inputs.extras, inputs.local_packages,
             ),
             inputs.wheel_inputs,
         ) != inputs.payload_hash
@@ -138,10 +228,14 @@ def retained_input_graph(
             frozen = engine.freeze_inputs(
                 inputs.plugin, root / "source", deadline=inputs.wheel_inputs.deadline,
                 on_progress=on_progress,
+                **({"closed_wheel_source": True} if inputs.closed_wheel_source else {}),
             )
             if engine._wheel_construction_hash(
                 engine._construction_hash(
-                    engine._source_files(frozen.packages, on_progress=on_progress), inputs.extras,
+                    engine._source_input_files(
+                        frozen.packages, closed_wheel_source=inputs.closed_wheel_source,
+                        on_progress=on_progress,
+                    ), inputs.extras,
                     inputs.local_packages, on_progress=on_progress,
                 ),
                 inputs.wheel_inputs,
@@ -153,6 +247,7 @@ def retained_input_graph(
                     retained_hash=frozen.payload_hash, extras=inputs.extras,
                     local_packages=inputs.local_packages, wheel_inputs=inputs.wheel_inputs,
                     application=inputs.application,
+                    closed_wheel_source=inputs.closed_wheel_source,
                 )
                 return
             with engine.retain_closed_wheel_install(
@@ -161,6 +256,7 @@ def retained_input_graph(
                 yield engine.FrozenInputs(
                     frozen.plugin, frozen.packages, inputs.payload_hash, transaction,
                     frozen.payload_hash, inputs.extras, inputs.local_packages, inputs.wheel_inputs,
+                    closed_wheel_source=inputs.closed_wheel_source,
                 )
         return
     files = engine._source_files(inputs.packages, on_progress=on_progress)

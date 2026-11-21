@@ -86,8 +86,8 @@ class _Envelope:
     runtime: _RuntimeState
 
 
-_ADAPTER = TypeAdapter(_Envelope)
-_MANAGER_ADAPTER = TypeAdapter(_ManagerState)
+_ADAPTER: TypeAdapter[_Envelope] = TypeAdapter(_Envelope)
+_MANAGER_ADAPTER: TypeAdapter[_ManagerState] = TypeAdapter(_ManagerState)
 _MANAGER_ONLY = {
     "session_host_state_dir", "drain_auto_release_s", "drain_warn_interval_s",
 }
@@ -276,7 +276,10 @@ def restore_runtime(payload: object) -> RestoredRuntime:
             from .worktree_runtime import restore_worktrees
 
             worktrees = restore_worktrees(state.worktrees, resolver)
-        live_events = restore_live_events(state.live_events) if state.live_events is not None else None
+        live_events = restore_live_events(
+            state.live_events,
+            telemetry_legacy=state.config.consumer_telemetry_harnesses is None,
+        ) if state.live_events is not None else None
         authentication = (
             restore_authentication(state.authentication) if state.authentication is not None else None
         )

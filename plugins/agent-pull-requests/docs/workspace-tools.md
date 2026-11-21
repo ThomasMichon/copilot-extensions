@@ -264,6 +264,71 @@ owner-v3 storage and serving adoption. It is read-only and capability-selected;
 unbound/prior hosts remain usable for their existing operations. A returned
 cursor is not an ACK or a handled-review baseline.
 
+### Original active-operation recovery library
+
+The executing core's `review_recovery.recovery_contract()` declares
+`agent-pull-requests.retained-active-review-recovery/v1`. Its source-only
+`ReplayStore.inspect_retained_review` reads a scoped original v1 active
+operation without live execution admission, including after terminal closure
+or reopen. It preserves the immutable intent, original attempt, native receipts
+and unattempted actions. Prepared/mapping and compact representations are not
+selected by this reader.
+
+`review_recovery.reconcile_review` requires the existing owner's actual typed
+protected context and a finite invocation budget. It calls that context's
+original reconciliation method, accepts only attributable native readback and
+records it through the original-attempt receipt transaction. Principal/scope,
+current authority, credential binding and expiry remain checked; matching
+current content or vote cannot confirm an old effect. Unsupported actions stay
+unknown. It never admits an operation, allocates an attempt or enters a sender.
+An uncertain receipt replacement is read through the same owner, not resent.
+No new recovery deadline is attached to an active operation.
+
+The library does not itself select retained-volume adoption, configure a
+protected factory or substitute observation credentials. Existing `inspect`
+and submission defaults remain unchanged.
+
+### Original active-operation inspection
+
+An explicitly selected recorded terminal host can adopt original active v1
+operations using the [existing local transition](../../../services/pr/README.md#original-active-operation-inspection).
+Its capabilities retain the exact terminal body-reading operation list and
+add a separate `retained_active_review_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.retained-active-review-inspection/v1",
+  "operations": ["inspect"],
+  "representation": "original_active_v1",
+  "storage_extension": "retained_active_review_version:1",
+  "effects": "none",
+  "reconciliation": false,
+  "max_response_bytes": 1048576
+}
+```
+
+Native and Gateway clients negotiate this declaration before sending the
+existing scoped `inspect` request, selecting that protocol in
+`workspace_contract`. `WorkspaceTools` exposes `pr_workspace_inspect` only when
+that optional contract is supported. A prior body-only client keeps its
+original reads; a missing or incompatible declaration never falls back to
+submission, acquisition or a less restrictive inspection path.
+
+Inspection returns the original intent and action/attempt/receipt state,
+including its permanent `recovery_only` marker, without live execution
+admission. It remains usable after closure/reopen and does not change owner
+bytes. Wrong scope, unimported operations and prepared/compact representations
+refuse. This optional contract configures no protected context and exposes no
+reconcile or receipt-confirmation operation; library readback still requires
+the original actual protected owner.
+
+The negotiated inspection response has a one-MiB bound within the existing
+Gateway channel's response ceiling; ordinary workspace responses keep their
+32-KiB bound. The request size is unchanged. This covers the full bounded
+original intent and action receipts, not only small comment bodies.
+Receipt validation derives each action's allowable growth from the preserved
+operation reservation rather than assuming the default receipt capacity.
+
 ## Optional local comment preparation
 
 An existing host may supply `WorkspaceTools(client, comment_preparer=prepare)`.

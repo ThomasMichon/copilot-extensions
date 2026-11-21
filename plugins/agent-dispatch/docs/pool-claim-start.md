@@ -205,6 +205,55 @@ a managed instance; an unreadable installed binding refuses rather than falling
 through to a different authority. Registration scope remains literal: a physical
 host name is not silently equated with a distinct execution-environment identity.
 
+To enable one instance rather than every eligible child, set the operator-owned
+environment variable to a single JSON object. Use the actual spelling of all
+three registered fields; comparison is literal and case-sensitive. For example,
+the portable `KEY=VALUE` line for the Source installation's `service.env` is:
+
+```dotenv
+AGENT_DISPATCH_POOL_ALLOCATION={"registration_id":"review","machine":"build-host","env":"linux"}
+```
+
+For several eligible pools, use an `instances` list rather than the
+system-wide boolean:
+
+```dotenv
+AGENT_DISPATCH_POOL_ALLOCATION={"instances":[{"registration_id":"review","machine":"build-host","env":"linux"},{"registration_id":"docs","machine":"build-host","env":"linux"}]}
+```
+
+List 1 to 128 distinct exact instances. An invalid or duplicate entry
+invalidates the entire list; an unlisted pool gets no allocation permission.
+This is the positive allocation policy, not a way to clear an admission hold.
+
+In that file the double quotes are JSON; **do not** wrap the value in shell
+quotes or add `export`. Source startup captures the service environment for
+the master and its children. For other launchers, set the same value in the
+supervisor process environment. For example, when launching the existing
+master from a POSIX shell, prefix its command with
+`AGENT_DISPATCH_POOL_ALLOCATION='{"registration_id":"review","machine":"build-host","env":"linux"}'`.
+In PowerShell set
+`$env:AGENT_DISPATCH_POOL_ALLOCATION='{"registration_id":"review","machine":"build-host","env":"linux"}'`
+in the launching process. Shell quotes are not part of the child environment.
+For a launcher that takes a per-child environment mapping, set this entry in
+the existing child's inherited environment (JSON syntax shown):
+
+```json
+{"AGENT_DISPATCH_POOL_ALLOCATION":"{\"registration_id\":\"review\",\"machine\":\"build-host\",\"env\":\"linux\"}"}
+```
+
+The escapes belong only to the outer JSON. This is not a registration spec
+field or a task setting; do not launch a separate allocator.
+
+Nonmatching and unqualified children get no scoped opt-in. Malformed JSON,
+duplicate, missing or extra keys, and non-string or blank values enable
+nothing. The existing broad opt-ins (`1`, `true`, `yes`, `on`, ignoring case
+and surrounding whitespace) still enable all otherwise qualified instances.
+Use `0` or remove the setting to roll back, then use the normal lifecycle to
+replace processes that inherited the previous environment. This stops new
+managed allocations, not reconciliation of existing reservations. Selection
+does not change global election: if another instance wins, the selected
+caller still cannot claim in its place.
+
 The managed caller first reads the ordinary data-authorized
 `/health.pool_cohort` version-1 revision observation. A positively unprojected
 queue needs no control-token catalog read and retains legacy supervision.

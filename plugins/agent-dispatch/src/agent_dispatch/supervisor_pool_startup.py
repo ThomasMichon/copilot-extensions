@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -21,7 +21,7 @@ log = logging.getLogger("agent-dispatch.supervisor")
 
 
 def supervise_pool_startup(
-    owner: Supervisor, reservation: dict, task: dict, *,
+    owner: Supervisor, reservation: dict[str, Any], task: dict[str, Any], *,
     now: float | None = None, observe_only: bool = False,
 ) -> bool | None:
     """Return None for legacy work, otherwise retain this startup's custody.
@@ -145,6 +145,9 @@ def supervise_pool_startup(
             session.get("session_id") != native or session.get("worktree_id") != worktree
         ):
             return False
+        from .admission_holds import supervisor_inhibited
+        if supervisor_inhibited(owner, assigned, current):
+            return False
         if completed_failure:
             from .pool_startup_delivery import deliver_retry
             pending = owner.client.retry_pool_startup(
@@ -215,7 +218,7 @@ def supervise_pool_startup(
 
 
 def _close_decline(
-    owner: Supervisor, reservation: dict, task: dict, snapshot: dict, *, observe_only: bool,
+    owner: Supervisor, reservation: dict[str, Any], task: dict[str, Any], snapshot: dict[str, Any], *, observe_only: bool,
 ) -> bool:
     """Only the existing allocator may ask the coordinator to observe; never finalize here."""
     current, assigned, decline = snapshot["reservation"], snapshot["task"], snapshot["worker_decline"]

@@ -25,6 +25,7 @@ usable standalone.
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 
 class HandoffFallbackMixin:
@@ -51,6 +52,9 @@ class HandoffFallbackMixin:
         succeeded, or failed. There is no expiry and no retry budget: at most
         one fallback launch is ever attempted per task by this mechanism.
         """
+        from .queue import TaskQueue
+        from .queue_records import TaskError
+        assert isinstance(self, TaskQueue)
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -60,6 +64,11 @@ class HandoffFallbackMixin:
                 conn.execute("COMMIT")
                 return False
             self.require_worker_admission()
+            if self._spawn_admission is not None:
+                task = self._fetch(conn, task_id)
+                if task is None:
+                    raise TaskError("handoff fallback requires its stored task")
+                self._spawn_admission(task, None, None, "handoff-fallback")
             try:
                 conn.execute(
                     "INSERT INTO handoff_fallback_attempts"
@@ -84,6 +93,8 @@ class HandoffFallbackMixin:
         """Record the outcome of a claimed fallback attempt (observability only;
         the claim in :meth:`claim_handoff_fallback` already fences the launch
         itself, so a missing/failed outcome update never permits a retry)."""
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute(
@@ -93,8 +104,10 @@ class HandoffFallbackMixin:
                 (outcome, detail, ts, task_id),
             )
 
-    def get_handoff_fallback_attempt(self, task_id: str) -> dict | None:
+    def get_handoff_fallback_attempt(self, task_id: str) -> dict[str, Any] | None:
         """Return the recorded attempt for ``task_id``, or ``None`` if never claimed."""
+        from .queue import TaskQueue
+        assert isinstance(self, TaskQueue)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT task_id, attempted_at, outcome, detail, updated_at"

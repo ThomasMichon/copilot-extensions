@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -41,9 +42,13 @@ _UNWRAP_SNIPPET = (
 _BIN = Path(__file__).resolve().parents[1] / "bin"
 _LAUNCH_SCRIPT = _BIN / "launch-session.sh"
 _LAUNCH_PS1 = _BIN / "launch-session.ps1"
+if sys.platform == "win32":
+    _NO_WINDOW = subprocess.CREATE_NO_WINDOW
+else:
+    _NO_WINDOW = 0
 
 
-def _bash_grammar_executable():
+def _bash_grammar_executable() -> str:
     if os.name == "nt":
         git = shutil.which("git")
         bash = Path(git).resolve().parents[1] / "bin" / "bash.exe" if git else None
@@ -54,7 +59,7 @@ def _bash_grammar_executable():
     return str(bash)
 
 
-def _unwrap(plan: dict) -> dict:
+def _unwrap(plan: dict[str, Any]) -> dict[str, Any]:
     out = subprocess.run(
         [sys.executable, "-c", _UNWRAP_SNIPPET],
         input=json.dumps(plan),
@@ -62,7 +67,8 @@ def _unwrap(plan: dict) -> dict:
         text=True,
         check=True,
     )
-    return json.loads(out.stdout)
+    unwrapped: dict[str, Any] = json.loads(out.stdout)
+    return unwrapped
 
 
 def _shell_interpreter_refresh() -> str:
@@ -71,7 +77,7 @@ def _shell_interpreter_refresh() -> str:
     return source[start:source.index("    # Patch a stale", start)]
 
 
-def test_nested_plan_unwraps_to_launch():
+def test_nested_plan_unwraps_to_launch() -> None:
     nested = {
         "worktree": {"id": "wt-1"},
         "launch": {
@@ -87,12 +93,12 @@ def test_nested_plan_unwraps_to_launch():
     assert flat["no_mux"] is True
 
 
-def test_flat_plan_passes_through_unchanged():
+def test_flat_plan_passes_through_unchanged() -> None:
     flat_in = {"action": "exec", "work_dir": "/w/wt", "cmd": ["copilot"]}
     assert _unwrap(flat_in) == flat_in
 
 
-def test_explicit_context_recovery_never_reads_legacy_project_config():
+def test_explicit_context_recovery_never_reads_legacy_project_config() -> None:
     posix = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
     powershell = _LAUNCH_PS1.read_text(encoding="utf-8")
 
@@ -112,20 +118,20 @@ def test_explicit_context_recovery_never_reads_legacy_project_config():
     assert "Split-Path -Parent" in powershell
 
 
-def test_none_action_plan_passes_through():
+def test_none_action_plan_passes_through() -> None:
     assert _unwrap({"action": "none", "exit_code": 0}) == {
         "action": "none",
         "exit_code": 0,
     }
 
 
-def test_launch_script_contains_unwrap_snippet():
+def test_launch_script_contains_unwrap_snippet() -> None:
     """Drift guard: the script must still apply the unwrap we test here."""
     text = _LAUNCH_SCRIPT.read_text()
     assert "d['launch'] if isinstance(d, dict) and 'launch' in d else d" in text
 
 
-def test_bash_launcher_avoids_bash4_mapfile():
+def test_bash_launcher_avoids_bash4_mapfile() -> None:
     """macOS ships Bash 3.2; fixed maintenance requests need no JSON argv reads."""
     text = _LAUNCH_SCRIPT.read_text()
     assert "mapfile" not in text
@@ -140,8 +146,8 @@ def test_bash_launcher_avoids_bash4_mapfile():
 @pytest.mark.parametrize("ahp", [False, True])
 @pytest.mark.parametrize("populated", [False, True])
 def test_shell_pane_environment_preserves_literal_values_and_ahp_exclusions(
-    tmp_path, ahp, populated,
-):
+    tmp_path: Path, ahp: bool, populated: bool,
+) -> None:
     source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
     start = source.index("    # Export profile env vars")
     exports = source[start:source.index("    # Build command array from JSON", start)]
@@ -190,7 +196,7 @@ def test_shell_pane_environment_preserves_literal_values_and_ahp_exclusions(
     assert arguments == [part for key, value in expected.items() for part in ("-e", f"{key}={value}")]
 
 
-def test_powershell_launcher_contains_unwrap():
+def test_powershell_launcher_contains_unwrap() -> None:
     """The Windows launcher must unwrap the nested plan too, else `--json`
     ACP launches to Windows targets fail ($plan.action is null)."""
     text = _LAUNCH_PS1.read_text()
@@ -203,7 +209,9 @@ def test_powershell_launcher_contains_unwrap():
     ["--interactive", "--resume=literal", "--model", "--ahp"],
 ])
 @pytest.mark.parametrize("positionals", [[], ["--", "--resume=literal-position", "--ahp", "--experimental", ""]])
-def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_args, positionals):
+def test_shell_ahp_binding_preserves_literal_option_values(
+    tmp_path: Path, literal_args: list[str], positionals: list[str],
+) -> None:
     source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
     start = source.index('    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then\n        _AHP_HELPER=')
     mutate = source[start:source.index("    # Identity vars", start)]
@@ -227,7 +235,7 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
     result = subprocess.run(
         [_bash_grammar_executable(), "-c", code], cwd=tmp_path, env=environment,
         capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [
@@ -256,7 +264,7 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
     ["env", "-i", "--chdir", "--resume=directory", "OTHER_FIXTURE=value",
      "bash", "default-setup.sh", "--runtime-python", "--ahp=python"],
 ])
-def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
+def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path: Path, prefix: list[str]) -> None:
     result = subprocess.run(
         [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "json",
          "http://127.0.0.1:1234", "authoritative", "--", *prefix,
@@ -264,7 +272,7 @@ def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
         cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
             _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
         )), capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [
@@ -273,18 +281,52 @@ def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
     ]
 
 
+def test_passthrough_append_joins_setup_native_argument_envelope(tmp_path: Path) -> None:
+    envelope = json.dumps({"args": ["--experimental", "--", "positional"]})
+    prepared = ["pwsh", "-NoProfile", "-File", "default-setup.ps1", "-NativeArgumentsJson", envelope]
+    passthrough = ["--acp", "--stdio", "--no-auto-update"]
+    result = subprocess.run(
+        [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "append",
+         str(len(passthrough)), "--", *passthrough, *prepared],
+        cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
+            _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
+        )), capture_output=True, text=True, timeout=15,
+        creationflags=_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    command = json.loads(result.stdout)
+    assert command[:-1] == prepared[:-1]
+    assert json.loads(command[-1])["args"] == [
+        "--experimental", "--acp", "--stdio", "--no-auto-update", "--", "positional",
+    ]
+
+
+def test_passthrough_append_refuses_a_malformed_request(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "append",
+         "5", "--", "--acp", "copilot"],
+        cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
+            _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
+        )), capture_output=True, text=True, timeout=15,
+        creationflags=_NO_WINDOW,
+    )
+    assert result.returncode != 0 and not result.stdout
+
+
 @pytest.mark.parametrize("command", [
     ["env", "-S", "copilot --resume=opaque"],
     ["env", "-u"],
 ])
-def test_ahp_binding_refuses_opaque_or_incomplete_env_before_emitting_command(tmp_path, command):
+def test_ahp_binding_refuses_opaque_or_incomplete_env_before_emitting_command(
+    tmp_path: Path, command: list[str],
+) -> None:
     result = subprocess.run(
         [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "json",
          "http://127.0.0.1:1234", "authoritative", "--", *command],
         cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
             _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
         )), capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=_NO_WINDOW,
     )
     assert result.returncode != 0 and not result.stdout
     assert "Unsupported prepared env arguments" in result.stderr
@@ -296,7 +338,7 @@ def test_ahp_binding_refuses_opaque_or_incomplete_env_before_emitting_command(tm
     ["old-python", "-m", "agent_worktrees.launch_seed_exec", "--", "copilot"],
     ["env", "BASH_ENV=", "bash", "default-setup.sh"],
 ])
-def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
+def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path: Path, command: list[str]) -> None:
     expected = "selected-python" if command[0] == "old-python" else command[0]
     if os.name == "nt":
         source = _LAUNCH_PS1.read_text(encoding="utf-8")
@@ -315,7 +357,7 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
         result = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-Command", code],
             cwd=tmp_path, capture_output=True, text=True, timeout=15,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=_NO_WINDOW,
         )
     else:
         refresh = _shell_interpreter_refresh()
@@ -344,8 +386,8 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
     (True, False, "copilot"),
 ])
 def test_shell_refreshes_only_the_inner_python_owner(
-    tmp_path, environment_prefix, recovery, executable,
-):
+    tmp_path: Path, environment_prefix: bool, recovery: bool, executable: str,
+) -> None:
     command = [
         *(["/usr/bin/env", "BASH_ENV="] if environment_prefix else []),
         "/bin/bash", "/retained/launch-command.sh",
@@ -368,7 +410,7 @@ def test_shell_refreshes_only_the_inner_python_owner(
     result = subprocess.run(
         [_bash_grammar_executable(), "-c", code], cwd=tmp_path, env=environment,
         capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     expected = list(command)
@@ -377,7 +419,7 @@ def test_shell_refreshes_only_the_inner_python_owner(
     assert json.loads(result.stdout) == expected
 
 
-def test_launchers_pass_project_to_resolve_and_post_exit():
+def test_launchers_pass_project_to_resolve_and_post_exit() -> None:
     """Bare launches run from HOME, so every CLI call must carry project context."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
@@ -405,7 +447,7 @@ def test_launchers_pass_project_to_resolve_and_post_exit():
     assert "WORKTREE_RECOVERY" not in sh
 
 
-def test_launchers_publish_managed_mux_observation_from_worktree_path():
+def test_launchers_publish_managed_mux_observation_from_worktree_path() -> None:
     """Bare resume launches Copilot in HOME, so the Manager-owned mux mapping
     still has to publish the real worktree path from ``status_path`` -- not
     ``work_dir`` (HOME) -- or the resident monitor loses the worktree's repo:id4
@@ -423,7 +465,7 @@ def test_launchers_publish_managed_mux_observation_from_worktree_path():
 
 
 @pytest.mark.guard
-def test_launchers_deliver_new_worktree_pending_seed_only_on_create():
+def test_launchers_deliver_new_worktree_pending_seed_only_on_create() -> None:
     """Open must never inject a turn. Fresh-create fallback stays intact."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
@@ -454,7 +496,7 @@ def test_launchers_deliver_new_worktree_pending_seed_only_on_create():
     assert create_branch_idx_sh < create_seed_call_sh_idx < attach_idx_sh
 
 
-def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
+def test_windows_launcher_encodes_wrapped_psmux_pane_argv() -> None:
     """A data-only manifest preserves complete argv through psmux's space join."""
     ps = _LAUNCH_PS1.read_text()
     # The collapse helper must be gone. Wrapped pane argv travels through a
@@ -472,7 +514,7 @@ def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
     assert ") + $envFlags + $paneCmd" in ps[pane_start:pane_create]
 
 
-def test_windows_launcher_applies_psmux_passthrough_per_session():
+def test_windows_launcher_applies_psmux_passthrough_per_session() -> None:
     """psmux runs a SEPARATE server per wt-<id> and command-line
     bind-key/unbind-key silently no-op there, so the launcher must `source-file`
     the passthrough fragment per session at BOTH create and join -- restoring the
@@ -484,7 +526,7 @@ def test_windows_launcher_applies_psmux_passthrough_per_session():
     assert ps.count("Invoke-AwPsmuxPassthroughSafe $sessName") >= 2
 
 
-def test_windows_launcher_applies_companion_keybind_after_passthrough():
+def test_windows_launcher_applies_companion_keybind_after_passthrough() -> None:
     """mux-bind-relay: the Mux Companion's Ctrl+K popup bind must be applied
     at both create and join (same two call sites as the passthrough fragment),
     and strictly AFTER Invoke-AwPsmuxPassthroughSafe at each one -- passthrough's
@@ -508,7 +550,7 @@ def test_windows_launcher_applies_companion_keybind_after_passthrough():
         )
 
 
-def test_companion_keybind_fragment_builds_the_popup_command():
+def test_companion_keybind_fragment_builds_the_popup_command() -> None:
     """mux-bind-relay Step 1: the generated root-table directive must bind
     Ctrl+K to a `display-popup` through the payload-local interactive runtime
     helper (no separately-published `worktree-manager` binstub needed) --
@@ -534,21 +576,21 @@ def test_companion_keybind_fragment_builds_the_popup_command():
     assert not any("MouseDown1Status" in ln for ln in code)
 
 
-def test_session_options_source_files_passthrough_fragment():
+def test_session_options_source_files_passthrough_fragment() -> None:
     so = (_BIN / "session-options.ps1").read_text()
     assert "function Invoke-AwPsmuxPassthrough" in so
     assert "source-file -t $Session" in so
     assert "psmux-passthrough.conf" in so
 
 
-def test_psmux_passthrough_fragment_carries_the_directives():
+def test_psmux_passthrough_fragment_carries_the_directives() -> None:
     frag = (_BIN / "psmux-passthrough.conf").read_text()
     assert "unbind-key -a -T root" in frag
     assert "WheelUpPane" in frag and "WheelDownPane" in frag
     assert "paste-detection off" in frag
 
 
-def test_apply_mux_keybinds_source_files_every_session():
+def test_apply_mux_keybinds_source_files_every_session() -> None:
     """The opt-in/restore script must apply per SERVER (source-file each live
     session), not just the last_session server -- command-line binds no-op."""
     amk = (_BIN / "apply-mux-keybinds.ps1").read_text()
@@ -556,14 +598,14 @@ def test_apply_mux_keybinds_source_files_every_session():
     assert "psmux-passthrough.conf" in amk
 
 
-def test_tmux_launcher_does_not_use_psmux_passthrough():
+def test_tmux_launcher_does_not_use_psmux_passthrough() -> None:
     """psmux-only: tmux (one shared server) keeps the opt-in apply-mux-keybinds.sh
     so worktree tuning never leaks onto a user's personal tmux sessions."""
     sh = _LAUNCH_SCRIPT.read_text()
     assert "psmux-passthrough.conf" not in sh
 
 
-def test_launchers_fail_closed_without_explicit_no_mux():
+def test_launchers_fail_closed_without_explicit_no_mux() -> None:
     """Mux discovery/creation failures must never start a duplicate bare
     Copilot. Direct launch is reserved for the explicit no-mux contract."""
     ps = _LAUNCH_PS1.read_text()
@@ -584,7 +626,7 @@ def test_launchers_fail_closed_without_explicit_no_mux():
     assert "Falling back to direct launch" not in sh
 
 
-def test_windows_failed_psmux_creation_reaps_only_the_named_session():
+def test_windows_failed_psmux_creation_reaps_only_the_named_session() -> None:
     """A partially-started PSMux server may own a live pane before returning
     nonzero. Cleanup must target the exact failed session and its descendants."""
     ps = _LAUNCH_PS1.read_text()
@@ -605,7 +647,7 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 5
 
 
-def test_windows_post_attach_session_gone_still_reaps_owned_tree():
+def test_windows_post_attach_session_gone_still_reaps_owned_tree() -> None:
     """A zombie mux session (`has-session` reports gone) must not skip the
     owned-tree reap before post-exit finalization -- see #2830, where a
     935-process pwsh/copilot/conhost tree survived a session that psmux's own
@@ -619,7 +661,7 @@ def test_windows_post_attach_session_gone_still_reaps_owned_tree():
     assert reap_idx < post_exit_idx, "reap must run before post-exit finalization"
 
 
-def test_launchers_retry_mux_creation_and_preserve_recovery_context():
+def test_launchers_retry_mux_creation_and_preserve_recovery_context() -> None:
     """Transient mux startup failures get bounded automatic recovery, while
     exhaustion names the already-created worktree instead of silently losing
     it when the launcher exits."""
@@ -647,7 +689,7 @@ def test_launchers_retry_mux_creation_and_preserve_recovery_context():
     assert 'RECOVERY_PROJECT="${LAUNCH_PROJECT:-agent-worktrees}"' in sh
 
 
-def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
+def test_launchers_propagate_attach_failures_without_killing_shared_sessions() -> None:
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
 
@@ -669,7 +711,7 @@ def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
     assert sh.count('_aw_cleanup_owned_tmux_session "$TMUX_SESS"') == 1
 
 
-def test_launchers_prefer_resolved_plan_project_over_ambient():
+def test_launchers_prefer_resolved_plan_project_over_ambient() -> None:
     """Migrated from plugins/agent-worktrees/tests/test_launch_project_scoping.py
     (regression guard for #2338). Once the plan carries `project`, the
     launcher scripts must let it win over whatever ambient/starting project

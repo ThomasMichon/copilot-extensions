@@ -4,6 +4,11 @@ Edit canonical implementation files here. Contributors do not refresh committed
 developer copies to publish a change: the Dev-to-Main composer materializes the
 declared installer family in its candidate tree before freezing that tree.
 
+The optional [protected installation-owner entry](protected-installation.md)
+composes the existing prepared-application constructor through an independently
+installed Linux root-owned bootstrap and policy. It adds no elevation,
+acquisition, ordinary-caller migration or native qualification by itself.
+
 `tools/materialize_installer_engine.py` uses `installer_engine_ref.py`'s existing
 shell, Python and standalone-native consumer registries. It replaces stale or
 absent derived slots only in existing declared consumers. Candidate content must

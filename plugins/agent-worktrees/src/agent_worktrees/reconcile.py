@@ -57,7 +57,14 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from typing import TypedDict
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    class _BudgetOptions(TypedDict, total=False):
+        budget: OwnedExecutionBudget
 
 import yaml
 
@@ -668,7 +675,7 @@ class RuntimeInstallationResolution:
     runtime_root: Path
     context: Path | None
     actual_mode: str
-    desired_mode: str
+    desired_mode: str | None
     status: str
     reason: str
 
@@ -714,7 +721,7 @@ def _run_installation_mode_helper(
     *,
     context: Path | None,
     action: str = "probe-legacy",
-    budget=None,
+    budget: OwnedExecutionBudget | None = None,
 ) -> dict[str, Any]:
     durable_home = _home() / ".copilot-extensions"
     common = {
@@ -911,7 +918,7 @@ def _select_runtime_installation(
         return RuntimeInstallationResolution(
             runtime_root=legacy_root,
             context=None,
-            actual_mode=actual_mode,
+            actual_mode="legacy",
             desired_mode=desired_mode,
             status=status,
             reason=reason,
@@ -952,7 +959,7 @@ def _select_runtime_installation(
         return RuntimeInstallationResolution(
             runtime_root=expected_root,
             context=expected_context,
-            actual_mode=actual_mode,
+            actual_mode="namespaced",
             desired_mode=desired_mode,
             status=status,
             reason=reason,
@@ -969,7 +976,7 @@ def resolve_runtime_installation(
     plugin_dir: Path,
     *,
     home: Path | None = None,
-    budget=None,
+    budget: OwnedExecutionBudget | None = None,
 ) -> RuntimeInstallationResolution:
     """Resolve the authoritative runtime root without activating any mode.
 
@@ -1017,13 +1024,14 @@ def resolve_runtime_installation(
             # capture this plugin, but malformed core evidence still fails closed.
             _selected_runtime_root(plugin_name, plugin_dir, home=home)
 
+    helper_options: _BudgetOptions = {"budget": budget} if budget is not None else {}
     result = _run_installation_mode_helper(
         plugin_name,
         plugin_dir,
         helper,
         runtime_dir(plugin_name, home),
         context=context,
-        **({"budget": budget} if budget is not None else {}),
+        **helper_options,
     )
     return _select_runtime_installation(plugin_name, result, home=home)
 
@@ -1081,7 +1089,7 @@ def hook_shims_drifted(plugin_dir: Path, home: Path | None = None) -> bool:
     )
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_alive(pid: object) -> bool:
     """Best-effort: is a process with ``pid`` currently running?
 
     Used to treat a stale ``running-version.json`` (whose process has exited) as
@@ -1096,7 +1104,7 @@ def _pid_alive(pid: int) -> bool:
 
             process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
             still_active = 259  # STILL_ACTIVE
-            kernel32 = ctypes.windll.kernel32
+            kernel32 = getattr(ctypes, "windll").kernel32
             handle = kernel32.OpenProcess(process_query, False, pid)
             if not handle:
                 return False
@@ -1592,47 +1600,6 @@ def apply_uninstall_plan(
 # Machine gate (control-harness manifest -> per-plugin deploy_machines)
 # --------------------------------------------------------------------------
 
-def _ingest_gate_entries(entries: Any, gate: dict[str, set[str]]) -> None:
-    """Merge a list of ``{name, deploy_machines}`` service entries into ``gate``.
-
-    Best-effort: malformed entries (non-dict, missing name, non-list machines)
-    are skipped so a partially-bad manifest degrades to a smaller gate rather
-    than raising.
-    """
-    if not isinstance(entries, list):
-        return
-    for svc in entries:
-        if not isinstance(svc, dict):
-            continue
-        nm = svc.get("name")
-        dm = svc.get("deploy_machines")
-        if nm and isinstance(dm, list):
-            gate.setdefault(str(nm), set()).update(str(m) for m in dm)
-
-
-def _parse_gate_manifest(raw: Any, gate: dict[str, set[str]]) -> None:
-    """Populate ``gate`` from one parsed manifest, accepting either schema.
-
-    * **Native** (``services.yaml``): a top-level ``plugins:`` list of
-      ``{name, deploy_machines}`` -- the coherently-named shape.
-    * **Legacy** (``external-repos.yaml``): ``repos.<group>.services[]`` --
-      whose top-level ``repos``/``<group>`` keys are a free-form bucket the
-      reconciler flattens (grouped by concern, not by source repo).
-
-    A top-level ``services:`` key is deliberately NOT read as a gate list: it is
-    reserved for a future non-plugin (dotfiles-service) section so the two
-    concerns never collide.
-    """
-    if not isinstance(raw, dict):
-        return
-    _ingest_gate_entries(raw.get("plugins"), gate)  # native services.yaml shape
-    repos_block = raw.get("repos")
-    if isinstance(repos_block, dict):
-        for _repo, rdata in repos_block.items():
-            if isinstance(rdata, dict):
-                _ingest_gate_entries(rdata.get("services"), gate)
-
-
 def _gate_candidate_paths(repo_dir: Path) -> list[Path]:
     """Ordered gate-manifest candidate paths: the current repo first, then the
     configured anchor repo (resolved via the repos registry), each tried for
@@ -1687,6 +1654,8 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
     manifest that yields a non-empty gate wins (so a migrated ``services.yaml``
     shadows a lingering legacy file during transition).
     """
+    from repository_policy.runtime_gate import parse_gate_manifest
+
     candidates = _gate_candidate_paths(repo_dir)
 
     gate: dict[str, set[str]] = {}
@@ -1698,7 +1667,7 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
                 raw = yaml.safe_load(f) or {}
         except Exception:
             continue
-        _parse_gate_manifest(raw, gate)
+        parse_gate_manifest(raw, gate)
         if gate:
             break
     return gate
@@ -2037,15 +2006,15 @@ def apply_plan(
                 argv[0] = copilot
             _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
             try:
-                diagnostic = execution_diagnostic(upd)
-                if diagnostic is not None:
+                execution_error = execution_diagnostic(upd)
+                if execution_error is not None:
                     _log(
-                        f"provision: {service} [{diagnostic['reason']}] "
-                        f"{diagnostic['message']}"
+                        f"provision: {service} [{execution_error['reason']}] "
+                        f"{execution_error['message']}"
                     )
                     executed.append({
                         "service": service, "argv": argv, "ok": False,
-                        "returncode": 3, "diagnostic": diagnostic,
+                        "returncode": 3, "diagnostic": execution_error,
                     })
                     continue
                 rc = (

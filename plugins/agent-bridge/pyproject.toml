@@ -20,7 +20,7 @@ dependencies = [
     "agent-configuration-layers",
     "agent-update-driver",
     "agent-repository-policy",
-    "agent-process-telemetry",
+    "agent-process-telemetry[command]",
     "fastapi>=0.141.1",
     # Plain uvicorn (not the [standard] extra) so the HTTP path stays pure
     # Python (h11) on every platform. agent-bridge serves low-traffic localhost
@@ -134,6 +134,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 # The /ui control surface's page, scripts, and stylesheet (routes/ui.py).
 agent_bridge = [
+    "metadata/*.json",
     "ui_static/*.html", "ui_static/*.js", "ui_static/*.css",
     "receiving_assets/mux/*.sh",
     "receiving_assets/plugins/*/*.json",

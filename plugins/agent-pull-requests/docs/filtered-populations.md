@@ -33,6 +33,9 @@ The executing descriptor must also advertise `query_rotation: offset/v1`.
 Successive bounded cycles rotate the native query cover, so one author's pages
 cannot indefinitely prevent later authors from being observed. Incomplete
 cycles still report partial coverage rather than proving absence.
+Rotation advances only when population capture is admitted, including a failed
+capture attempt. Qualification or insufficient-lifetime refusal leaves that
+repository's next query branch unchanged.
 
 The initial native population driver is Azure DevOps. Its user IDs are native
 canonical lowercase IdentityRef UUIDs; assignment means reviewer users, not
@@ -52,6 +55,17 @@ and raises rather than silently discarding that evidence.
 Demand must still match before starting new native work. Once started, a shared
 read may finish for any remaining captured registration generation rather than
 discarding another owner's result when one participant withdraws.
+
+Qualification and population capture share the observation cycle's original
+remaining lifetime. Each population pass is capped at 60 seconds including
+qualification; it reserves time for native startup/output, exact process cleanup
+and replay validation/publication rather than requesting a fresh 60-second
+native scan. Insufficient remaining time refuses new native work. A partial
+scan can publish only while the original authority and captured interest remain
+current; it never becomes complete coverage. Delayed cleanup keeps its existing
+owner until settlement, even when the observation can no longer publish.
+The native allowance is finalized after the last potentially blocking interest
+checkpoint, before capture admission advances the query cursor.
 
 Each consumer has independent membership and entry/change/departure/coverage
 events and its own last-projected fact snapshots, including when a new subscriber

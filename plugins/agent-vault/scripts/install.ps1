@@ -631,8 +631,9 @@ function Ensure-UvIndex {
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Test-VaultRuntimeProfilePresent {
+    param([string]$Name = 'runtime-profile.json')
     try {
-        [void][IO.File]::GetAttributes((Join-Path $InstallDir 'runtime-profile.json'))
+        [void][IO.File]::GetAttributes((Join-Path $InstallDir $Name))
         return $true
     } catch [IO.FileNotFoundException] {
         return $false
@@ -716,6 +717,11 @@ function Invoke-VersionedSlotClean {
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not $WheelProfile -and (Test-VaultRuntimeProfilePresent -Name 'runtime-provider-roots.json')) {
+        [void](Invoke-Hidden -FilePath $py -ArgList @('-I', '-B',
+            (Join-Path $ScriptDir 'runtime_profile.py'), '--root', $InstallDir, 'require-inputs'))
+        if ($LASTEXITCODE -ne 0) { throw 'Selected runtime providers require a complete native wheel profile' }
+    }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $helpers = (Invoke-Hidden -FilePath $py -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
@@ -2081,6 +2087,12 @@ try {
         $LinkPython = $VenvPython
     }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
+    if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision', 'stamp') -and
+        (Test-VaultRuntimeProfilePresent -Name 'runtime-provider-roots.json')) {
+        [void](Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @('-I', '-B',
+            (Join-Path $ScriptDir 'runtime_profile.py'), '--root', $InstallDir, 'require-inputs'))
+        if ($LASTEXITCODE -ne 0) { throw 'Selected runtime providers require a complete native wheel profile' }
+    }
     if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
         Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir

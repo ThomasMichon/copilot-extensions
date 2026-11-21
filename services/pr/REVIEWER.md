@@ -85,13 +85,21 @@ An absent, empty or whitespace-only author remains `author-unavailable`,
 including for author-owned rebase recommendations; it cannot establish that the
 selected reviewer is a different actor.
 
-When a submitted record from the selected reviewer is dismissed, the unchanged
-unavailable-item shape reports `reason: review-dismissed` instead of the generic
-`review-activity-unavailable`. This is a diagnostic refinement, not a new
-eligibility rule: dismissal does not prove that the reviewer never acted, that
-a prior review still applies, or that its head precedes the current candidate.
-The query preserves the cached history and does not manufacture an initial or
-follow-up verdict. Consumers must retain unavailable coverage regardless of
+Dismissed submitted records are never current-review or causal evidence. When
+no independently qualified undismissed verdict remains for the selected reviewer,
+the unchanged unavailable-item shape reports `reason: review-dismissed`.
+With complete, valid history, distinct undismissed verdicts can independently
+supply the existing current-head or observed-before-candidate basis. Every
+qualifying undismissed signature must belong to the original candidate basis
+for a follow-up; a newly observed verdict cannot borrow an older dismissal's
+position. Current-head matching still reports `reviewed-base-unknown`.
+Malformed selected-reviewer metadata remains `review-activity-unavailable`,
+including malformed dismissed history or a review ID reported as both dismissed
+and undismissed. The query preserves cached records and
+signatures and never turns a dismissal into initial-review evidence.
+The known native `DISMISSED` state is accepted for metadata validation only;
+neither its original verdict nor an evidence signature is inferred.
+Consumers must retain unavailable coverage regardless of
 the reason string; reasons are explanatory, not an exhaustive action enum.
 Independent author-owned rebase recommendations and higher-priority missing
 or stale evidence keep their existing behavior.

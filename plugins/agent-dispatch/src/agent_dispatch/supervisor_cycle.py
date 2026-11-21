@@ -6,8 +6,9 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from .client import DispatchError
+from .client_errors import DispatchError
 from .action_controls import action_inhibited
+from .admission_holds import supervisor_inhibited
 from .spawn_diagnostics import SpawnDiagnostics, diagnostic_text
 
 if TYPE_CHECKING:
@@ -29,9 +30,8 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
     from . import bridge
     from .embody import EmbodyUnavailable
     from .ordinary_bridge import reserve_for_backend
-    from .spawn_factories import SpawnPreparationRetained
-    from . import supervisor as owner
-    from .supervisor_pool_allocator import begin_cycle
+    from .spawn_factories import SpawnPreparationRetained, request_failed_created_spawn_release
+    from .supervisor_pool_allocator import begin_cycle, instance_allocation_enabled
 
     try:
         configured_pool = begin_cycle(self)
@@ -80,7 +80,10 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         return []
     with trace.stage("selection") as selected:
         eligible = list(self._eligible(now))
-        if configured_pool and not self.pool_allocation_enabled:
+        pool_enabled = configured_pool and instance_allocation_enabled(
+            self.pool_instance, broad_enabled=self.pool_allocation_enabled,
+        )
+        if configured_pool and not pool_enabled:
             eligible = [task for task in eligible if task.get("source") == "ci-repair"]
             trace.event("scheduling", "blocked", reason="pool_allocation_disabled")
         selected["eligible_count"] = len(eligible)
@@ -104,6 +107,10 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         with trace.stage("active_reservations"):
             active = len(self._active_reservations()) if legacy_needed else 0
     spawned: list[str] = []
+    # A spawn fn with per-cycle placement state (a fleet provider) starts fresh.
+    begin_placement = getattr(self.spawn_fn, "begin_placement_cycle", None)
+    if callable(begin_placement):
+        begin_placement()
     for task in eligible:
         task_trace = SpawnDiagnostics(
             supervisor_id=self.supervisor_id, cycle_id=trace.cycle_id,
@@ -142,12 +149,15 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             if action_inhibited("worker-admission", logger=log):
                 task_trace.event("scheduling", "blocked", reason="worker_admission_inhibited")
                 break
+            if supervisor_inhibited(self, task):
+                task_trace.event("scheduling", "blocked", reason="scoped_worker_admission_hold")
+                continue
             with task_trace.stage("reserve") as reserved:
                 resp = reserve_for_backend(
                     self.client, task, self.supervisor_id,
                     ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task),
                     restricted=getattr(self.spawn_fn, "restricted_bridge_for", lambda _: False)(task),
-                    instance=self.pool_instance if configured_pool and self.pool_allocation_enabled else None,
+                    instance=self.pool_instance if pool_enabled else None,
                     startup_timeout=self.reserving_timeout,
                     pool_driver=self._spawn_attribute(task, "pool_placement_driver", "") or None,
                 )
@@ -265,7 +275,7 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
                              task["id"], key, diagnostic_text(str(handle.get("error")), task_trace.secrets))
                 elif spawn_task.get("spawn_worktree_ownership") == "created" and not handle.get("preserve_workspace"):
                     with task_trace.stage("request_failed_created_spawn_release"):
-                        owner.request_failed_created_spawn_release(
+                        request_failed_created_spawn_release(
                             self.client, key, handle, spawn_task, detail,
                         )
                     log.warning("spawn failed for task %s (%s): %s", task["id"], key,

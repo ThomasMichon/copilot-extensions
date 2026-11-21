@@ -449,7 +449,7 @@
       ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-service-index-requirements.txt"
+      "requirements": "tools/typecheck-dispatch-requirements.txt"
     },
     {
       "name": "agent-index",
@@ -573,8 +573,8 @@
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-telemetry/src",
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src",
-        "worktree-manager/tests",
         "plugins/agent-worktrees/tests",
+        "worktree-manager/tests",
         "tools"
       ]
     },

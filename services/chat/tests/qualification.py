@@ -280,7 +280,7 @@ PARAMETER_COUNTS.update({
     "test_client.py::test_malformed_success_objects_do_not_confirm_an_operation": 6,
     "test_client.py::test_scan_validates_body_free_returned_only_progress_without_reading": 4,
     "test_distribution.py::test_installed_catalog_worker_preserves_isolation": 2,
-    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 6,
+    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 7,
     "test_distribution.py::test_source_independent_wheel": 2,
     "test_hosting.py::test_absolute_ingress_deadline_retires_slow_input_and_releases_admission": 2,
     "test_hosting.py::test_configuration_refuses_without_echoing_values": 7,

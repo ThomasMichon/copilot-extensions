@@ -5954,6 +5954,56 @@ above, not release-index discovery or new approval authority. It does not reuse 
 approve a native dependency profile; complete that profile through its existing
 owner before runtime installation.
 
+**Explicit artifact-first application Source.** The selected preparation
+provider may instead expose `local_install_closed_wheels.CONTRACT` with schema
+`copilot-extensions.closed-wheel-source-preparation`, version `1`, and its
+`prepare` function. Callers must discover that declaration from their actual
+selected tooling owner before using this path. An absent/withdrawn declaration
+is unsupported; do not infer support from a newer payload or retry the ordinary
+builder. The installed application owner separately advertises
+`closed-wheel-source/v1` in its existing application-install capabilities.
+
+The callable accepts one admitted repository/full Git commit, one explicitly
+declared independent project, fresh output, complete existing wheel paths and
+independently selected digests, native target, explicit runtime roots, original
+artifact provenance, policy/acquisition identities, selected absolute UV and
+one monotonic deadline. It admits the existing Git source through the canonical
+archive/extraction owner and computes the actual Source identity. Reserved
+deployment metadata refuses before stamping. The source-associated application
+wheel must match the original static Python, package-data, runtime-metadata and
+entry-point declarations. The inspected complete closure must exactly equal the
+selected roots, extras and native target. An independent SDK is an explicit
+runtime input, not a substitution for an unselected development extra.
+Static setuptools association supports the existing src layout and an explicit
+flat package-discovery root with nonempty include selectors; selected package
+Python members must match the wheel exactly. Unsupported discovery forms still
+refuse rather than executing a backend to discover their meaning.
+
+Preparation preserves the application's original bytes, including development
+`tool.uv.sources` mappings and local artifacts. A recorded `input_mode` of
+`closed-wheels` selects only the application as local source while the existing
+freezer, retained-input and construction owners use the independently inspected
+runtime wheels. No rewritten manifest or handwritten lock is involved.
+The existing profile/application owners emit the real associated snapshot and
+run the selected UV offline under the existing finite process owner.
+The result uses the same Source/profile readers and application construction
+bindings; the original artifact provenance remains separate from the computed
+runtime identity. Association changes during retained use refuse.
+The ordinary source/building path retains its existing graph discovery and
+local-artifact release-age rules.
+
+This path builds no backend, acquires no dependency, creates no tooling or
+application environment, publishes no selector/command and invokes no
+application/setup callback. It currently prepares one independent application.
+Declared `application-sources` behind unselected optional extras remain inert;
+only applicable dependencies in the inspected root/extra/target closure require
+their separate owning preparation. A selected missing or unassociated input
+refuses rather than silently resolving through the registry. Occupied output refuses,
+and partial output remains retained after failure or an uncertain child result;
+there is no automatic replay. Preparation, installed protection and actual
+readiness remain separate acceptance stages. Existing state-preserving
+replacement and independently scoped outgoing retirement are unchanged.
+
 `tools/local_install_profile.py --prepare-profile` completes one selected
 component's native dependency closure through the existing configured-feed
 compiler and acquisition owners. Supply `--component worktree-manager` or
@@ -6143,6 +6193,19 @@ builds a downstream project's initial snapshot, grants deployment authority or
 provides a new service supervisor. Its caller retains independent source
 approval and the application's installation ownership throughout consumption.
 It is a supported composition entry, not a complete packaged installer toolkit.
+
+### Protected native ownership handoff
+
+The optional [Linux installation-owner entry](../libs/installer-engine/protected-installation.md)
+composes that same adapter from an independently installed root-protected
+bootstrap, policy, seed and prepared Source. Its
+`copilot-extensions.protected-installation` version-one `linux-root/v1`
+declaration belongs to the actual selected provider and native entry.
+Missing or unsupported protected semantics refuse without invoking the
+ordinary controller with elevation or trying a legacy installation form.
+Ordinary callers remain unchanged. The provider does not install its own
+trusted seed, grant privilege/deployment authority or establish positive native
+qualification; Windows and macOS are explicitly unsupported by this provider.
 
 ### Bridge and MCP application startup
 

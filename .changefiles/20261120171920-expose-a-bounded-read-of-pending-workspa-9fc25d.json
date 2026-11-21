@@ -1,0 +1,9 @@
+{
+  "comment": "Expose a bounded read of pending workspace conclusions without claiming a cleanup retry.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
