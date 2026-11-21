@@ -25,8 +25,8 @@ def test_retained_conclusion_uses_identity_columns_not_task_payload(tmp_path: Pa
         )
         columns: set[str] = set()
 
-        def observe(action: int, table: str, column: str, *unused: object) -> int:
-            if action == sqlite3.SQLITE_READ and table == "tasks":
+        def observe(action: int, table: str | None, column: str | None, *unused: object) -> int:
+            if action == sqlite3.SQLITE_READ and table == "tasks" and column is not None:
                 columns.add(column)
             return sqlite3.SQLITE_OK
 
