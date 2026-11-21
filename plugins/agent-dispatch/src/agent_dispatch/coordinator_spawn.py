@@ -119,6 +119,7 @@ class RecordSpawnWorktreeBody(BaseModel):
     allocation_project: str | None = None
     worktree_path: str | None = None
     creation_nonce: str | None = Field(default=None, min_length=1)
+    pool_creation_nonce: str | None = Field(default=None, min_length=1)
     worktree_writer_requirement: Json | None = None
 
 
@@ -626,6 +627,8 @@ def register_spawn_routes(
         optional: Json = {}
         if body.creation_nonce is not None:
             optional["creation_nonce"] = body.creation_nonce
+        if body.pool_creation_nonce is not None:
+            optional["pool_creation_nonce"] = body.pool_creation_nonce
         if body.worktree_writer_requirement is not None:
             optional["worktree_writer_requirement"] = body.worktree_writer_requirement
         result = _reservation_guard(

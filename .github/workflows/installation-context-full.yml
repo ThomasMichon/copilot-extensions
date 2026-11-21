@@ -50,6 +50,7 @@ on:
           - manager-uninstall
           - komodo-recovery
           - manager-suite
+          - manager-worktrees-source
           - manager-lifecycle
           - manager-engine-routing
           - worktrees-git-probes
@@ -1678,14 +1679,14 @@ jobs:
           retention-days: 2
 
   manager-suite-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
-    name: Manager whole-suite acceptance (Windows, ${{ matrix.mode }})
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["manager-suite", "manager-worktrees-source"]'), inputs.portfolio)
+    name: Manager replacement (Windows, ${{ matrix.mode }})
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        mode: [normal, repair, fresh]
+        mode: ${{ fromJSON(inputs.portfolio == 'manager-worktrees-source' && '["source"]' || '["normal","repair","fresh"]') }}
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -1729,11 +1730,34 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE) {
             throw 'Suite replacement source does not match the dispatch SHA'
           }
-      - name: Qualify the selected installed suite through the real Manager
+      - name: Freeze authentic Main and merged-Dev source objects
+        if: matrix.mode == 'source'
         shell: pwsh
-        run: >-
-          python tools\run-manager-suite-acceptance.py
-          --root .v --mode ${{ matrix.mode }}
+        env:
+          SELECTED_DEV: ${{ inputs.source_sha }}
+        run: |
+          if ($env:SELECTED_DEV -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'Source portfolio requires source_sha naming an exact merged-Dev commit'
+          }
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heads/dev:refs/remotes/origin/dev'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not acquire complete source histories' }
+          git merge-base --is-ancestor $env:SELECTED_DEV origin/dev
+          if ($LASTEXITCODE -ne 0) { throw 'Selected Dev input is not merged' }
+          $main = git rev-parse origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Could not freeze Main' }
+          "SOURCE_MAIN=$main" >> $env:GITHUB_ENV
+          "SOURCE_DEV=$env:SELECTED_DEV" >> $env:GITHUB_ENV
+      - name: Qualify installed V1 to V2 through the real Manager
+        shell: pwsh
+        env:
+          QUALIFICATION_MODE: ${{ matrix.mode }}
+        run: |
+          $sourceArgs = @()
+          if ($env:QUALIFICATION_MODE -eq 'source') {
+            $sourceArgs = @('--main-commit', $env:SOURCE_MAIN, '--dev-commit', $env:SOURCE_DEV)
+          }
+          python tools\run-manager-suite-acceptance.py --root .v --mode $env:QUALIFICATION_MODE @sourceArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Retain installed suite qualification diagnostics
         if: always()
         uses: actions/upload-artifact@v4

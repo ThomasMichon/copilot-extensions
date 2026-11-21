@@ -11218,6 +11218,26 @@ path, its whole-checkout scan and the package guard's real CLI smoke remain
 unchanged outside the packet. Version tests read the already hash-bound Chat
 initializer as data; they do not import or start Chat. Original assertions,
 parameter IDs and the production guards are unchanged.
+The Picker inbox-discipline adapter exports all 32 original cases and their
+original temporary-repository fixture. The real guard analyzes synthetic
+Python source, including aliases, scopes, branches, suppression comments and
+syntax errors; CLI argument handling runs in-process. No Picker, UI thread or
+native CLI starts. Actual effect-audited development execution reads only
+the adapter, original test module and production guard, with real guard
+call-phase coverage for every case. Full packet qualification remains a
+separate normal source-CI requirement.
+The effort/vision structure and marketplace-isolation adapters export seven
+and seventeen original temporary-document cases respectively. The original
+rewritten-history Git test and actual-checkout capability inventory remain
+unchanged outside the packet. Selected cases retain actual document parsing,
+lexical/AST scanning and in-process argument handling; no fixture text is
+executed. Each adapter, original test module and production guard is hash-bound.
+The vendored-library synchronization adapter exports eighteen original
+temporary-tree cases and the original `fake_repo` fixture. It retains real
+TOML/source-byte comparisons, pointer/reference inventory and in-process list/
+CLI diagnostics. The original native symlink case remains outside this packet.
+The existing editable-reference, artifact-inventory and standalone-consumer
+helpers stay hash-bound; no library is installed, rewritten or synchronized.
 Keep `tools/promotion-unit-manifest.json` node entries compact while retaining
 the source map's existing layout so independent hash updates can merge cleanly.
 Its closed admission data is nearing the existing non-image file-size cap.
@@ -11476,10 +11496,69 @@ python tools/run-manager-suite-acceptance.py --root .v --mode repair
 python tools/run-manager-suite-acceptance.py --root .v --mode fresh
 ```
 
-These commands refuse local execution before creating fixtures. Normal and repair
-each construct
-V1 and V2 through canonical materialization, start the applicable
-V1 portfolio, and call the real installed Manager for normal updates or its
+The same runner has a separate, explicitly selected authentic-source case:
+`portfolio=manager-worktrees-source`, with `source_sha` set to a full commit
+already merged into Dev. The job freezes the fetched Main commit and verifies
+Dev ancestry before fixture construction. It copies those real Git objects into
+an independent fixture repository; it does not synthesize versions or commits.
+Its constructor requires an owner-admitted governed package feed. The protected
+Windows qualification feed is not available to this candidate-branch job;
+missing feed configuration is a failed prerequisite, never native acceptance
+or permission for a public-index fallback.
+Its direct, disposable-hosted-Windows-only invocation is:
+
+```text
+python tools/run-manager-suite-acceptance.py --root .v --mode source --main-commit <full-main-commit> --dev-commit <full-merged-dev-commit>
+```
+
+Only Manager, Worktrees and their producer-owned application/wheel closure
+participate. The canonical application producer prepares both frozen inputs
+before installation. After the fresh Main installation, the generated installed
+Manager command performs an ordinary `update --project example`, with both
+independent source policies selecting the frozen Dev repository. The fixture
+does not inject a source packet or mock the producer. Evidence compares the
+actual installed application declarations and source identities, physical
+environments, native command-routing proofs and retained fixture data.
+Source acquisition uses the existing context-owned read-only Git HTTP owner,
+serving a bare clone of the actual frozen objects without a transport commit.
+Fresh snapshot provenance comes from the actual donor origin through the
+existing producer normalizer and descriptor input.
+Manager launcher proofs query the existing terminal capability for the actual
+interpreter; equal package versions cannot hide a stale generation.
+Fresh Worktrees installation uses the selected snapshot's complete-application
+receiver, not the direct-wheel installer. Its startup receives the independently
+delivered original command owner, selected source pin and fixture project context,
+matching the ordinary source-update planner rather than assigning ownership to
+the prepared source payload. The original owner's existing lifecycle wrapper
+reserves ownership before the fresh receiver writes any application launcher;
+fresh reservation is not deferred until startup. Its generated CMD and PowerShell
+launchers are checked through UV's actual interpreter-selection diagnostics
+(`RUST_LOG=debug`); they do not emit the legacy payload-resolver trace.
+Contained controls exercise the complete receiver's installed application layout
+and reject both stale launcher variants even with identical command output.
+The source case uses one compact private allocation in the disposable runner's
+home, not the checkout's potentially foreign-owned ancestor chain. `--root .v`
+still selects the diagnostic destination. Every stage and the observer use the
+same private execution root; evidence is copied back before removing it, and
+removal requires confirmed settlement. Unsettled or failed evidence/cleanup
+retains the allocation explicitly in `source-runner.json`. No shared ancestor
+ACL is changed or producer ownership check disabled. Transport startup is also
+covered in a fresh `python -I` fixture process, and mocked observer controls do
+not require PowerShell to be installed; actual native observation still does.
+Owned allocation cleanup uses the existing read-only-aware native temporary
+directory owner, including actual read-only Git-object controls.
+The original 1,800/900/300/90-second preparation/exercise/assertion/settlement
+allocations and process observer remain unchanged; settlement inventories
+remaining fixture-owned tasks and runtime processes. This case does not launch
+New/Resume actors or installation-survival tests, qualify the whole suite, or
+establish production adoption. Staging-failure, cutoff and removal acceptance
+remain separate requirements; neither contained controls nor a source merge
+substitute for a successful hosted result.
+
+The normal and repair commands refuse local execution before creating fixtures.
+Each of those whole-suite cases
+constructs V1 and V2 through canonical materialization, starts the applicable
+V1 portfolio, and calls the real installed Manager for normal updates or its
 native bootstrap repair entrypoint for repair, against the same default HOME
 and durable data. The private repaired-engine handoff is not a substitute for
 constructing the fresh Manager first. Controlled acquisition replaces only external artifact

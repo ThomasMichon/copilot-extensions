@@ -800,6 +800,23 @@ running it nor proving historical cleanup is required for an ordinary update.
 The [historical cleanup pattern](../../docs/patterns/historical-installation-cleanup.md)
 keeps detector support, current resource authority and observed outcomes separate.
 
+### regenerable-bytecode-reclamation
+
+Recognized suite-produced bytecode has a complete, bounded lifecycle, including
+legacy unsealed and retired installed namespaces. Normal maintenance can
+reclaim classified cache data automatically only with current content,
+live-reference and runtime-retention proof. Age, names, old receipts and a
+successful rename alone are not disposal authority. Unknown or still-active
+writers retain their caches with an actionable explanation.
+
+Large backlogs receive resumable, owner-held catch-up work with finite budgets
+and measured progress, not permanent abandonment behind a tiny per-update cap.
+Selection and ordinary status stay responsive. Reports distinguish measured,
+eligible, held and unmeasured bytes and give the exact supported relief command.
+Cleanup cannot veto incoming readiness or delete current/retained runtimes,
+source, durable data, unrelated installations or active session state.
+This does not turn general historical cleanup into a periodic reaper.
+
 ### foreground-update-and-independent-service-startup
 
 An ordinary attended update follows its caller through completion. Cancellation,

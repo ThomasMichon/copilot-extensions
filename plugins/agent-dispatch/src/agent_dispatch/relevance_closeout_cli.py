@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from .review_closeout_submission import ABANDON, SUBMIT
+from .task_relevance_contract import RESERVATION_OWNER as MODE
 
 import argparse
 import os
@@ -38,13 +39,15 @@ def _captured(value: dict[str, Any], task_id: str, worker_id: str, native: str) 
             409, "closeout does not name this original worker/native; custody retained"
         )
     binding = value.get("resource_binding")
+    reserved = isinstance(binding, dict) and binding.get("state") == MODE
     if (
         not isinstance(binding, dict)
-        or binding.get("state") != "captured"
+        or (not reserved and binding.get("state") != "captured")
         or not isinstance(binding.get("reservation_key"), str)
         or not binding["reservation_key"]
-        or type(binding.get("assignment_event_id")) is not int
-        or binding["assignment_event_id"] < 1
+        or (not reserved and (type(binding.get("assignment_event_id")) is not int
+                              or binding["assignment_event_id"] < 1))
+        or (reserved and ("assignment_event_id" in binding or value.get("finish_action") != SUBMIT))
         or type(binding.get("startup_revision")) is not int
         or binding["startup_revision"] < 0
     ):
@@ -52,13 +55,21 @@ def _captured(value: dict[str, Any], task_id: str, worker_id: str, native: str) 
             409, "closeout lacks its captured managed allocation; custody retained"
         )
     try:
-        workspace = AssignmentWorkspace.from_dict(binding.get("workspace"))
+        raw = binding.get("workspace")
+        if reserved and isinstance(raw, dict):
+            machine, tree, path = raw.get("machine"), raw.get("worktree"), raw.get("path")
+            if not isinstance(path, str) or not all(isinstance(v, str) and v for v in (machine, tree, path, raw.get("project"))):
+                raise TaskError("missing reservation workspace")
+            owner, directory = f"{machine}/{tree}", Path(path)
+        else:
+            workspace = AssignmentWorkspace.from_dict(raw)
+            owner, directory = workspace.worker_id, Path(workspace.path)
     except TaskError as exc:
         raise DispatchError(409, "closeout workspace is unconfirmed; custody retained") from exc
     if (
-        not same_assignment_worker(workspace.worker_id, worker_id)
-        or not Path(workspace.path).is_absolute()
-        or Path(workspace.path).resolve() != Path.cwd().resolve()
+        not same_assignment_worker(owner, worker_id)
+        or not directory.is_absolute()
+        or directory.resolve() != Path.cwd().resolve()
     ):
         raise DispatchError(
             409, "closeout is not the invoking worker's own checkout; custody retained"
@@ -75,6 +86,11 @@ def _acknowledged(value: dict[str, Any], task_id: str, arguments: dict[str, Any]
     receipt = value.get("acknowledgement")
     if receipt is None:
         return False
+    nonce = binding["workspace"]["creation_nonce"]
+    if binding.get("state") == MODE:
+        nonce = (value.get("readiness") or {}).get("observation", {}).get("creation_nonce")
+        if not isinstance(nonce, str) or not nonce.strip():
+            raise DispatchError(502, "reservation closeout acknowledgement lacks prepared nonce")
     if not _matches(
         receipt,
         {
@@ -87,7 +103,7 @@ def _acknowledged(value: dict[str, Any], task_id: str, arguments: dict[str, Any]
         receipt.get("observation"),
         {
             "status": "finalized",
-            "creation_nonce": binding["workspace"]["creation_nonce"],
+            "creation_nonce": nonce,
         },
     ):
         raise DispatchError(502, "closeout acknowledgement is unconfirmed; custody retained")
@@ -107,7 +123,7 @@ def _allocation(prepared: dict[str, Any], task_id: str, arguments: dict[str, Any
         },
     ) or not _matches(
         relationship,
-        {
+        {"state": "not-required"} if binding.get("state") == MODE else {
             "event_id": binding["assignment_event_id"],
             "state": "closed",
         },
@@ -120,6 +136,13 @@ def _allocation(prepared: dict[str, Any], task_id: str, arguments: dict[str, Any
         raise DispatchError(502, "closeout readiness is unavailable")
     observation = receipt.get("observation")
     workspace = binding["workspace"]
+    nonce = workspace["creation_nonce"]
+    if binding.get("state") == MODE:
+        actual = observation.get("creation_nonce") if isinstance(observation, dict) else None
+        if (not isinstance(observation, dict) or not isinstance(actual, str) or not actual.strip()
+                or nonce not in (None, actual) or observation.get("reservation_key") != binding["reservation_key"]):
+            raise DispatchError(502, "reservation preparation changed its allocation")
+        nonce = actual
     if not isinstance(observation, dict) or not _matches(
         observation,
         {
@@ -129,7 +152,7 @@ def _allocation(prepared: dict[str, Any], task_id: str, arguments: dict[str, Any
             "task_id": task_id,
             "native_id": arguments["native_id"],
             "worktree_id": workspace["worktree"],
-            "creation_nonce": workspace["creation_nonce"],
+            "creation_nonce": nonce,
             "project": workspace["project"],
             "path": workspace["path"],
         },
@@ -175,7 +198,7 @@ def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict[str, 
         _finalize(
             {"task_id": task_id, "native_id": native, "reservation_key": original_key},
             binding["workspace"]["worktree"],
-            expected_creation_nonce=binding["workspace"]["creation_nonce"],
+            expected_creation_nonce=prepared["receipt"]["observation"]["creation_nonce"],
         )
         finished = client.finish_relevance_closeout(task_id, finish_arguments)
         if not _matches(
@@ -194,7 +217,7 @@ def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict[str, 
         "status": "submitted" if action == SUBMIT else "abandoned",
         "generation": arguments["expected_generation"],
         "workspace_closeout": "finalized",
-        "task_relationship": "closed",
+        "task_relationship": "not-required" if binding.get("state") == MODE else "closed",
         "task_release": False,
         "process_retirement": False,
     }
