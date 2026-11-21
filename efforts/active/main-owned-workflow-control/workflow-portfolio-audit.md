@@ -1917,6 +1917,92 @@ review and Linux source CI remain required. This is a bounded census
 increment, not fewer workflow invocations, native qualification, every-release
 or full-census acceptance. Existing owner gates and retained custody remain.
 
+Source #13841 merges at `2026-11-21T10:42:46Z` as
+`f43e440735478c62d36b29166ae84f921d077724`. Fresh Copilot approval
+`6004696970` targets published head `dc7faa088c23d137f64ec10b5e006d0cfaeb0c22`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44895043250` and trusted metadata CI `44895040874` pass.
+Unit job `136818776329` freshly qualifies the complete packet from
+`10:35:58Z` to `10:39:11Z`, then uploads its evidence. Seven fresh live scoped
+reads through the source merge-time verifier precede the normal managed
+Maintainer merge; no failing CI is bypassed. Closing references are empty and
+parent #6237 stays open. The full parent is reread and only this finite leaf
+is resolved; broader acceptance and retained custody remain open.
+
+The earlier published head had passing review and source CI but a later
+superseded direct attribution failure. One explicitly authorized metadata-only
+refresh `44894461789` reconciles that PR's owned check series; all other jobs
+skip and no unit/native suite is rerun for the refresh. Subsequent Dev
+conflict resolution preserves the independently admitted cohorts and requires
+the fresh approval and CI above. That single refresh grant is consumed, not
+standing dispatch authority.
+
+### November 21 rebase-push native trigger expansion
+
+The actual #13841 contribution at `dc7faa088c23d137f64ec10b5e006d0cfaeb0c22`
+contains six files: three documents, the packet manifest and two actor-free
+test adapters. Rewriting its previously published
+`bef9c6fc42a6b73c31c0b5c7f545ef56e8ff5ce2` head after Dev reconciliation,
+however, changes 220 paths in the push's before/after comparison. Imported
+Dev changes match three native workflows' explicit `push` / `pr/**` filters:
+
+| Workflow | Matching rewritten-push paths | Actual push run | Materialized jobs |
+|---|---:|---|---:|
+| Consumer telemetry command native acceptance | 24 | `44895038053` | 2 |
+| MCP owner exec source controls | 2 | `44895038151` | 2 |
+| Prepared membership native acceptance | 2 | `44895038124` | 15 |
+
+This is three observed automatic push invocations and nineteen materialized
+jobs, not nineteen test executions or evidence that all native tests passed.
+The MCP matches are the imported session-host bundle/launcher files; prepared
+membership matches imported `hook-facts.ps1` and `test_post_tool_shell.py`.
+None is part of the six-file contribution. No manual native selector is
+dispatched, retried or cancelled to produce this observation.
+
+This provides a concrete next consolidation seam: distinguish contribution
+changes from rebase-imported Dev paths before extra native allocation. It does
+not prove those native results redundant, preserve all required feedback by
+itself or license deletion of triggers. Existing workflow/native and CI/release
+owners must accept any implementation seam, retain actual changed-input native
+coverage and freshness/refusal behavior, and qualify the real consumer before
+claiming a reduction. No workflow edit, new execution or activation follows
+from this source trace.
+
+### November 21 independent-program typing control admission
+
+The original independent-program typing suite collects fifteen cases. Three
+exact original functions provide ten in-process controls, exported with their
+exact original autouse `_isolated_scratch` fixture. Collection verifies every
+function/fixture object and parameter identity. Four actual MyPy subprocess
+cases and the real toolkit-declaration case remain unchanged outside the
+packet; their native and non-admitted data boundaries are not rewritten.
+The shared fixture module has no import-time statements beyond imports and
+function/class declarations, and no decorator-argument calls.
+
+Selected cases retain physical source byte, file-identity and directory-
+identity change refusal between program checks, manifest round trips and
+invalid/cross-program import rejection. The existing original mocked checker
+boundary remains; no real MyPy witness is replaced. All ten pass the actual
+`UnitRun` effect auditor with zero prohibited effects and their own production
+call-phase coverage. The observed Python read closure has 25 inputs, all
+hash-bound; only the adapter and two original test modules are new admissions.
+Existing shared checker, source-view, installer-policy and lease modules are
+imported, not provisioned or used to start a process or acquire a live lease.
+Focused audited execution takes 1.703 development seconds, not full-packet
+timing. The existing parameter-strategy warning and four timeout-mark
+declaration warnings remain visible; no test marker or deadline is changed.
+
+Positive admission adds ten nodes and three source hashes, retaining every
+current Dev node, digest and target: 6,399 nodes, 1,034 sources and 434 targets.
+The typing production targets were already admitted. Profile, 300-second
+packet budget, all 88 release-helper decisions, unindented node entries,
+source-map layout and file-size cap are unchanged. The manifest is 1,025,536
+bytes. The adapter passes whole-file strict typing on Linux and Windows
+targets and fatal Ruff checks. Complete current-head review and Linux source
+CI remain required. This bounded census increment is not native qualification,
+every-release observation, workflow-count reduction or full-census completion.
+Existing workflow/native owners and retained custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import os
+from argparse import Namespace
 from pathlib import Path
 import re
+from typing import Any
 
 
-def ensure_coordinator_command(args) -> int:
+def ensure_coordinator_command(args: Namespace) -> int:
     """Share local user-mode ensure without a data command's repository effects.
 
     Explicit lifecycle startup retains disabled start intent and action controls,
@@ -23,9 +25,9 @@ def ensure_coordinator_command(args) -> int:
 
 
 def windows_policy(
-    root: Path, *, reconcile=False, observe_supervisor=True,
-    supervisor_profile=None, include_primary=False,
-) -> dict:
+    root: Path, *, reconcile: bool = False, observe_supervisor: bool = True,
+    supervisor_profile: str | None = None, include_primary: bool = False,
+) -> dict[str, Any]:
     default = {"windows_scheduled_task": "preserve", "start_coordinator": True, "start_supervisor": True}
     if include_primary:
         default["primary_start_supervisor"] = True
@@ -37,8 +39,9 @@ def windows_policy(
     from agent_procutil.owned_process import run_caller_owned
     from .install_paths import installation_suffix
     from .procutil import powershell_host
+    from .source_start import _path_name
 
-    def quote(value):
+    def quote(value: str | Path) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
     suffix = installation_suffix(root)
@@ -49,7 +52,12 @@ def windows_policy(
         if re.fullmatch(r"[A-Za-z0-9_-]+", supervisor_profile) is None:
             raise ValueError("invalid native supervisor profile name")
         observed_supervisor += "-" + supervisor_profile
-    helper = Path(__file__).with_name("windows-scheduling.ps1")
+    installed = Path(__file__).with_name("windows-scheduling.ps1")
+    helper = _path_name(installed)
+    if not helper.is_absolute() or not helper.is_file() or not helper.samefile(installed):
+        raise ValueError("Dispatch scheduling helper is not the installed file")
+    if _path_name(helper.resolve(strict=True)) != helper:
+        raise ValueError("Dispatch scheduling helper must not be redirected")
     command = (
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2; "
         f". {quote(helper)}; $root={quote(root)}; "
@@ -93,7 +101,7 @@ if($policy.start_coordinator){
     )
     if result.returncode:
         raise RuntimeError("Dispatch scheduling intent is unavailable: " + result.stderr)
-    policy = json.loads(result.stdout)
+    policy: dict[str, Any] = json.loads(result.stdout)
     if (
         not isinstance(policy, dict) or set(policy) != set(default)
         or policy["windows_scheduled_task"] not in {"preserve", "enabled", "absent"}

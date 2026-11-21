@@ -10,7 +10,7 @@ Public-safe operator request, verbatim:
 - **Repo:** copilot-extensions
 - **Branch(es):** dependency-ordered PRs against `dev`
 - **Created:** 2026-11-20
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [regenerable bytecode reclamation](../../../visions/installer/README.md#regenerable-bytecode-reclamation) and [authoritative replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #12886
 - **Parent:** [Derived Disk Hygiene](../derived-disk-hygiene/README.md), bytecode follow-on
@@ -80,30 +80,30 @@ An approved design or dry run does not grant those effects.
 
 - [x] Record the installed baseline and claim #12886.
 - [x] Trace explicit pruning, shared legacy collection and runtime protection.
-- [ ] Reconcile and land this proposal through Copilot review and required CI.
+- [x] Reconcile and land this proposal through Copilot review and required CI.
 
 ### Phase 2 - Qualify whole-prefix custody
 
-- [ ] Implement native Windows cache-reference observation for the installation
+- [x] Implement native Windows cache-reference observation for the installation
   owner, including environment and interpreter-argument references, stable
   process identity, opaque-process outcomes and bounded native operations.
-- [ ] Combine reference proof with existing construction/selection/retention
+- [x] Combine reference proof with existing construction/selection/retention
   custody; preserve selected, rollback, retained and live runtime consumers.
-- [ ] Admit only recognized, old, bytecode-only, non-linked namespace trees.
+- [x] Admit only recognized, old, bytecode-only, non-linked namespace trees.
   Keep an explicit hold when any required proof is missing.
-- [ ] Prove the race boundary and restart-safe progress with actual Windows
+- [x] Prove the race boundary and restart-safe progress with actual Windows
   disposable consumers before enabling automatic whole-prefix effects.
 
 ### Phase 3 - Deliver drain work and reporting
 
-- [ ] Reuse one planner for explicit dry run/apply and automatic maintenance,
+- [x] Reuse one planner for explicit dry run/apply and automatic maintenance,
   with installed-prefix support rather than a second destructive implementation.
-- [ ] Add bounded, resumable catch-up work and an aggregate drain deadline.
+- [x] Add bounded, resumable catch-up work and an aggregate drain deadline.
   Use the existing native process/maintenance owner, not an unowned shell or
   new permanent reaper service.
-- [ ] Surface measured, eligible, held and unmeasured bytes, reasons, progress,
+- [x] Surface measured, eligible, held and unmeasured bytes, reasons, progress,
   observation age and the exact command in update/status/doctor.
-- [ ] Keep ordinary status reads cheap and update selection independent of
+- [x] Keep ordinary status reads cheap and update selection independent of
   maintenance failures, pending work or a large backlog.
 
 ### Phase 4 - Validate and deliver
@@ -143,6 +143,84 @@ See [design.md](design.md). Its gates deliberately do not promise eligible
 bytes until the installed ownership and live-reference proof passes.
 
 ## Journal
+
+### 2026-11-21 - Review corrections
+
+- The second review exposed mixed-case Windows references, missing recorded
+  foreign-consumer observation and interrupted prefixes stranded by a stale
+  admission cutoff. Regressions now cover each path through the production
+  runtime owner, including opaque consumers, fresh grace-period admission and
+  newly visible runtime slots. The shared packet passed 166 cases with eight
+  platform/privilege skips; strict Windows and Linux type checks passed.
+- The unchanged Gateway build-context admission test found five missing cache
+  modules in the Docker context whitelist. Added the exact closure; its full
+  77-case module passed. Generated copies, source-size ceilings, focused lint
+  and the install contract passed. Updated only changed source digests;
+  preserved the 6,378-node inventory, coverage targets, effect restrictions and
+  execution budgets. Required current-head CI and a fresh review remain gates.
+- Preserved empty runtime-association stubs during automatic Windows leaf
+  maintenance. Existing retired-leaf relief under a live shared prefix remains
+  active. A normal-GC-then-catch-up regression proves that the remaining base
+  bytecode can still be reclaimed.
+- Bound multi-pass coverage to the latest complete namespace inventory.
+  An unavailable inventory now retains an unknown unmeasured count rather than
+  reporting an empty complete scan. Both explicit CLI paths persist successful
+  apply observations through the common runtime-owner API.
+- The corrected packets passed 157 shared-cache cases and 78 Worktrees cases,
+  with eight platform/privilege skips. A separate native backlog fixture removed
+  8,456,704 logical bytes in eight entry-limited passes over 3.36 seconds
+  (about 2.52 MB/s). Its process/runtime proof universe is a fixture, not a
+  real-host eligibility or performance claim.
+- Source CI identified additional transitive release consumers and stale
+  admitted unit inputs. The release intents and source closure were updated;
+  the 6,373-node inventory, coverage targets, effect restrictions and execution
+  budgets remain unchanged.
+- Optional Windows-native unit-packet qualification stopped before collection
+  on the existing bytecode-attribution observer's Windows path handling.
+  No observer or budget was weakened. The required ordinary CI packet remains
+  the publication gate. No real cache cleanup or rollout occurred.
+
+### 2026-11-20 - Design accepted
+
+- #13828 merged with current-head Copilot approval and required CI green.
+- Source implementation and native qualification remain open. No live cleanup,
+  candidate installation or fleet rollout occurred.
+
+### 2026-11-21 - Qualification and delivery gates
+
+- The focused shared packet passed 148 tests with eight platform/privilege
+  skips. The Worktrees cache/status/doctor packet passed 77 tests. The prefix
+  packet then passed 19 tests, including two additional native link controls.
+  The runtime packet includes a fresh disposable
+  virtual environment that ran the retained CLI through the native finite-worker
+  owner, bound to that runtime's own SDK, and persisted its terminal observation.
+- A real disposable Windows interpreter's arguments and environment prevented
+  prefix removal. After its confirmed exit, the fixture's native prefix birth
+  and filesystem operations permitted reclamation. Its process universe and
+  runtime admission were scoped fixture controls, not evidence that a real
+  host's full backlog is safe.
+- Restart, replacement, fresh-content grace, native hard-link/reparse-point
+  preservation, held-prefix fairness and byte/entry/time budget controls passed. Cached
+  observations do not recursively scan the cache and do not claim a cached
+  in-progress worker is still alive. Install-contract, source module-size and
+  focused Python lint checks passed.
+- A bounded, non-elevated, read-only source assessment measured 71,206,733 bytes
+  across a partial prefix inventory. It reported zero eligible or removed bytes
+  and `process-principal-unavailable`; most prefixes remained unmeasured in
+  that pass. No runtime custody capable of mutation was acquired.
+- The canonical Worktrees type-check environment cannot currently install its
+  pinned `types-commonmark==0.9.2.20250330`: the dependency policy reports a
+  publication timestamp inside its seven-day quarantine. That policy was not
+  bypassed. The source-only strict checker iteration is separate evidence, not
+  a substitute for the canonical or provider gate.
+- Broader Windows diagnosis tests exposed unchanged fixture failures:
+  `test_no_drift_when_consistent` supplies only a Linux registration;
+  two pair-integrity cases expect a legacy controller relation that the current
+  diagnosis does not report. Their failures do not authorize unrelated repairs
+  or a required-check bypass. Cache-specific and other selected tests passed.
+- Source publication, current-head review, required CI, release and authorized
+  installation remain separate gates. There is still no host cleanup or
+  rollout grant.
 
 ### 2026-11-20 - Baseline and proposal
 

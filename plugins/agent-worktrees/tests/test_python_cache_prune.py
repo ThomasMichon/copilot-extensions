@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -40,6 +41,29 @@ def test_dry_run_reports_without_removing(tmp_path: Path) -> None:
     assert _statuses(report) == {target.name: ("eligible", "")}
     assert report.summary()["bytes"] == 120
     assert target.is_dir()
+
+def test_unproven_bytes_remain_visible_without_becoming_eligible(tmp_path: Path) -> None:
+    target = _bytecode_dir(tmp_path, "unsealed-" + "7" * 32)
+    report = prune.prune_unsealed(tmp_path, liveness=("unavailable", None))
+    payload = report.as_dict()
+    assert payload["summary"]["bytes"] == 0
+    assert payload["summary"]["held_bytes"] == 120
+    assert payload["summary"]["measured_bytes"] == 120
+    assert payload["summary"]["unmeasured"] == 0
+    assert payload["bytes_by_reason"]["liveness-unproven"] == {
+        "count": 1, "measured_bytes": 120, "unmeasured": 0,
+    }
+    assert target.is_dir()
+
+
+def test_incomplete_inventory_is_not_presented_as_zero_measured_bytes(tmp_path: Path) -> None:
+    target = _bytecode_dir(tmp_path, "unsealed-" + "8" * 32)
+    (target / "notes.txt").write_text("retain evidence", encoding="utf-8")
+    report = prune.prune_unsealed(tmp_path, liveness=PROVEN).as_dict()
+    assert report["summary"]["bytes"] == 0
+    assert report["summary"]["unmeasured"] == 1
+    assert report["bytes_by_reason"]["non-bytecode-content"]["unmeasured"] == 1
+    assert (target / "notes.txt").is_file()
 
 
 def test_apply_removes_only_unsealed_bytecode(tmp_path: Path) -> None:
@@ -142,6 +166,20 @@ def test_cli_json_dry_run(
     assert payload["roots"][0]["summary"]["eligible"] == 1
     assert target.is_dir()
 
+def test_cli_human_reports_held_bytes_and_scoped_inspection_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(prune, "live_unsealed_names", lambda: ("unavailable", None))
+    root = tmp_path / "runtime with 'quote"
+    target = _bytecode_dir(root / "cache" / "python", "unsealed-" + "6" * 32)
+    assert prune.cmd_python_cache(_args(root)) == 0
+    output = capsys.readouterr().out
+    assert "120 B measured held" in output and "0 unmeasured" in output
+    assert "Inspect: agent-worktrees python-cache prune --root" in output
+    assert "--min-age-hours 1 --json" in output
+    assert "--apply" not in output
+    assert target.is_dir()
+
 
 def test_cli_apply_requires_grace_period(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     target = _bytecode_dir(tmp_path / "cache" / "python", "unsealed-" + "3" * 32)
@@ -183,7 +221,7 @@ def test_default_discovery_reports_inaccessible_cache(
     (tmp_path / ".agent-file").write_text("not a runtime", encoding="utf-8")
     original = os.stat
 
-    def inspect(path, *args, **kwargs):
+    def inspect(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
         if isinstance(path, (str, os.PathLike)) and Path(prune._display(os.fspath(path))) == cache:
             raise error
         return original(path, *args, **kwargs)
@@ -266,7 +304,7 @@ def test_real_cli_runs_from_neutral_directory(tmp_path: Path) -> None:
     target = _bytecode_dir(tmp_path / "rt" / "cache" / "python", "unsealed-" + "c" * 32)
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [str(Path(prune.__file__).resolve().parents[1]), os.environ.get("PYTHONPATH", "")])}
-    kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+    kwargs: dict[str, Any] = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 
     result = subprocess.run(
         [sys.executable, "-B", "-m", "agent_worktrees", "python-cache", "prune",
