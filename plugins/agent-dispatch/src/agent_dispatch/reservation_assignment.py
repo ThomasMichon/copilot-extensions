@@ -59,12 +59,26 @@ def supersedable(conn: sqlite3.Connection, repo: str | None, key: str | None) ->
 
 def protects_disposition(conn: sqlite3.Connection, task_id: str) -> bool:
     """Only a live pool allocation or an accepted source closeout owns automatic disposal."""
+    return pending_source_closeout(conn, task_id) or _pool_retains(conn, task_id)
+
+
+def pending_source_closeout(conn: sqlite3.Connection, task_id: str) -> bool:
     from .queue_relevance import closeout_request
 
     closeout = closeout_request(conn, task_id)
-    return bool(closeout is not None and closeout["acknowledgement"] is None) or _pool_retains(
-        conn, task_id,
-    )
+    return closeout is not None and closeout["acknowledgement"] is None
+
+
+def liveness_custody(conn: sqlite3.Connection, task_id: str) -> tuple[object, ...]:
+    from .queue_pool_placement import pool_assignment
+
+    row = conn.execute(
+        "SELECT * FROM spawn_reservations WHERE task_id=? "
+        "AND state IN ('reserving','spawned','cold','releasing') "
+        "ORDER BY attempt DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return pool_assignment(conn, task_id), tuple(row) if row is not None else None
 
 
 def _pool_retains(conn: sqlite3.Connection, task_id: str) -> bool:

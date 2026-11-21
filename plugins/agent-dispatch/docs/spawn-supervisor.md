@@ -1140,7 +1140,10 @@ An ordinary started owner whose current same-native wake is still pending or
 delivering stays started instead: that wake is how the Bridge resumes the
 stopped native, and suspending would fence it stale. A `gone` verdict is also
 ignored when the task's current wake changed while the probe ran, because the
-verdict predates that delivery; the next pass probes again.
+verdict predates that delivery; the next pass probes again. The same rule
+applies when its active reservation or allocator placement changed during the
+probe. Pending source-closeout requests remain held for their original owner,
+not auto-suspended by the generic liveness pass.
 Restricted owners retain
 their existing immutable binding. Stranded-cold cleanup likewise does not release
 either driver's conversation to make a replacement. `live` bodies
