@@ -252,6 +252,8 @@ delivery from an SDK promise or a timer.
 
 ## Journal
 
+### [2026-11-21 - History observation isolation source accepted](journal/2026/11.21-history-observation-isolation.md)
+
 ### 2026-11-21 - Require positive POSIX group settlement
 
 - The first exact-head Linux run passed 140 cases and failed all four pinned
