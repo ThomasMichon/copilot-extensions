@@ -139,10 +139,13 @@ def test_qualified_release_replay_keeps_own_transport_capacity(q: TaskQueue, sta
         )
     replay = q.request_spawn_release(original.key, session_handle="native", worktree="worktree")
     assert not replay.native_release_pending
+    with pytest.raises(TaskError, match="retains assignment"):
+        q.abandon(t.id, permitted=True)
     with pytest.raises(TaskError, match="capacity"):
         place(q, task(q))
     with q._connect() as conn:
         conn.execute("UPDATE execution_send_custody SET state='not_sent' WHERE send_id='send'")
+    assert q.abandon(t.id, permitted=True).status == "abandoned"
     assert place(q, task(q))[1]
 
 

@@ -68,17 +68,21 @@ def protects_disposition(conn: sqlite3.Connection, task_id: str) -> bool:
 
 
 def _pool_retains(conn: sqlite3.Connection, task_id: str) -> bool:
+    from .queue_execution_custody import reservation_transport_accountable
     from .queue_pool_placement import pool_assignment
 
     allocation = pool_assignment(conn, task_id)
     if allocation is None:
         return False
-    if conn.execute(
-        "SELECT 1 FROM spawn_reservations WHERE task_id=? AND key=?",
+    row = conn.execute(
+        "SELECT * FROM spawn_reservations WHERE task_id=? AND key=?",
         (task_id, allocation.reservation_key),
-    ).fetchone() is None:
+    ).fetchone()
+    if row is None:
         return True  # A dangling allocator placement is not evidence of retirement.
-    return retains_assignment(conn, task_id, key=allocation.reservation_key)
+    return retains_assignment(conn, task_id, key=allocation.reservation_key) or (
+        reservation_transport_accountable(conn, row)
+    )
 
 
 def retains_assignment(conn: sqlite3.Connection, task_id: str, *, key: str | None = None) -> bool:
