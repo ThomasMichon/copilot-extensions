@@ -268,17 +268,28 @@ def test_configured_target_is_enqueued_before_handoff(
 def test_configured_manager_target_remains_visible_in_durable_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from worktree_manager import installation_updates
+    from worktree_manager import agent_plugin_runtime, installation_updates
 
     log = tmp_path / "request.log"
     log.write_bytes(b"configured target\n")
+    engine = tmp_path / "selected-engine"
+    context = {"COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / "engine-install.json")}
     request = SimpleNamespace(
-        spec=SimpleNamespace(backend="manager", source="fixture-source", argv=("--target", "agent-index")),
+        spec=SimpleNamespace(
+            backend="manager", source="fixture-source", argv=("--target", "agent-index"),
+            context=tuple(context.items()),
+        ),
         id="fixture-request", state="completed", error=None, exit_code=0, log_path=log,
     )
+
+    def resolve(plugin: str, *, environment: dict[str, str]) -> tuple[list[str], Path]:
+        assert plugin == "agent-worktrees" and environment == context
+        return (["/fixture/engine"], engine)
+
     monkeypatch.setattr(update_driver, "status", lambda: (request,))
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "fixture-source")
-    operation = installation_updates._operations()["agent-index"]
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation", resolve)
+    operation = installation_updates._operations(engine_source=str(engine))["agent-index"]
     assert operation["state"] == "succeeded"
     assert operation["request_id"] == request.id
     assert operation["progress"] == "configured target\n"
