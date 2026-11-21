@@ -210,6 +210,16 @@ No whole-backlog acyclicity claim follows from these finite relationships.
 
 ## Finite integration research queue
 
+The [two publication-safety contributions](roadmap-selected-publication-safety.md)
+retain #2861 pre-batch authored-destination refusal and #5904 present-UNKNOWN
+cleanup under their existing owners. Current source/vision/contract evidence
+supports these finite P1 slices without another unchanged implementation study.
+They and the framing contribution are parallel, not new hard dependencies;
+whole-home gaps and all six broader integration gates remain explicit.
+The [current census journal](journal/2026/11.21-current-publication-safety.md)
+counts 898 open at 07:30 PST, including 443 excluded creators, without rewriting
+the earlier frozen cohort or claiming other owners' closure credit.
+
 The [selected current framing contribution](roadmap-selected-framing-contribution.md)
 advances the priority/receiver and scoped-wave lane with exact reused current
 source, current vision and complete unchanged contract metadata. #1803's

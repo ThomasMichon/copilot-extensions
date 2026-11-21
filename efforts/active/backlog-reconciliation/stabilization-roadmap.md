@@ -53,6 +53,14 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [two current publication-safety contributions](roadmap-selected-publication-safety.md)
+qualify finite #2861/#5904 source, vision, priority, custody and exit decisions,
+not whole-effort intake or new implementation. Their
+[journal](journal/2026/11.21-current-publication-safety.md) records actual
+#13916 delivery and the complete 07:30 PST 898-open census: 455 creator-eligible,
+443 excluded and 169 above fixed 729. The selected contributions remain
+independent of framing and changed unread handoff source; all six gates remain.
+
 The [selected current framing contribution](roadmap-selected-framing-contribution.md)
 adds a current source-identity and vision-qualified P1 contribution for #1803,
 with original custody, an explicit whole-effort-home gap and finite

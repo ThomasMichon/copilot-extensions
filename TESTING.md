@@ -11409,6 +11409,18 @@ composition. The existing real compatibility-CLI controls exercise both storage
 forms without running Git or release actors. These source results do not prove
 deployed reader adoption, installed/native qualification or full-census coverage.
 
+The version-bump guard packet exports eleven original cases through eight exact
+test objects and the original `guard_module` fixture. Mocked Git protocol and
+diff-error controls retain their original CLI result/output checks without
+starting Git. Fixture-only dependency traversal covers transitive consumers,
+cycles, aliases, malformed inputs and simulated symlink refusal; packaged-root
+charging reads only temporary declarations. No fixture script or installer runs.
+All eight Python reads are hash-bound and every case requires actual call-phase
+coverage in the shared version-bump diff engine, which remains used by
+changefile/release consumers. The 28 other original cases remain outside this
+slice, including actual Git/process contracts. Their source and assertions are
+unchanged; unit admission does not replace release, native or full-census proof.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:
