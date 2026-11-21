@@ -1545,6 +1545,52 @@ Linux CI and source review remain required. Every-release observation,
 full-census acceptance, #13598 and the existing workflow/native/custody owners
 remain separate; this source item changes no workflow or operational authority.
 
+Source #13801 merges at `2026-11-21T03:09:14Z` as
+`5ab627967b0a6a6555c9fbd680cc3b16c01292fc`. Copilot approval `6002454308`
+targets exact published head `b14b22ad254223f0c9f662188c01d71e1736436d`;
+complete review/thread reads report no active findings. Required source CI
+`44859052187` passes guards, the full unit consumer and the required aggregate.
+Unit job `136707943801` freshly qualifies the exact-input packet and uploads its
+evidence; trusted lockdown, attribution and identifier enforcement pass
+independently. The source merge-time verifier reads live policy/results and
+returns the exact head before the managed, role-authorized merge. No failing
+CI is bypassed. Closing references are empty and parent #6237 remains open.
+
+The full canonical parent is reread after merge; only this bounded source
+census item is resolved. Continue separately accepted workflow reductions and
+the retained census. Native subprocess residuals remain unexecuted by this
+packet; release observation, whole-flow measurements, native/candidate
+acceptance and all retained custody remain open.
+
+### November 21 install-contract guard-unit admission
+
+The complete `tools/test_install_contract_guard.py` suite contains nine test
+functions and 42 cases. They exercise lexical masking and escaping, persistent-
+environment diagnostic ordering and line numbers, canonical-adapter boundaries,
+and generated-versus-source scan paths. PowerShell and registry expressions are
+synthetic input text, not executed commands. The production helper's unrelated
+runtime-retention function is not invoked or represented as qualified.
+
+The packet adapter exports the exact original test objects with their existing
+parameterization and assertions. The original suite and production helper are
+unchanged. Collection checks original-object identity for all 42 cases. A focused
+development observation runs them with the actual `UnitRun` effect auditor and
+coverage contexts: all pass, no prohibited effects occur, and every case reaches
+the production helper in its call phase. Repository Python reads are exactly
+the adapter, original suite and helper.
+
+Positive admission adds 42 nodes, three hash-bound sources and one coverage
+target: 6,165 nodes, 978 sources and 414 targets. All preceding 6,123 nodes,
+975 source digests and 413 targets remain unchanged, as do the profile,
+300-second packet budget and all 88 release-helper decision targets. The
+adapter passes whole-file strict checks on Linux and Windows targets.
+Focused development evidence is not complete-packet qualification; normal
+current-head Linux CI and review remain required. This is a bounded census
+increment, not fewer workflow invocations, broader install-contract integration,
+native execution, every-release observation or full-census acceptance.
+The ten previously retained sibling-scanner native cases, #13598, workflow-owner
+decisions and all native/candidate/custody holds remain separate and unchanged.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
