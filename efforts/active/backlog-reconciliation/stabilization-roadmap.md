@@ -156,6 +156,14 @@ which slices can start and which must wait.
 
 ## Integration deliverables and exit
 
+The [finite outside-wave register](roadmap-coverage-reconciliation.md)
+begins the existing current-coverage lane with 32 explicit receipt or gap
+decisions, not 32 new investigations or technical completions. It preserves
+the remaining 121 cohort identities, thirteen later outside-wave identities
+and the 292 historical assignments at its pinned census. Three pagination-only
+admission gaps are resolved by complete metadata, without clearing actual
+source/copy restrictions or checking any of the six gates below.
+
 The [current integration assessment](#2026-11-20-integration-assessment)
 distinguishes delivered historical research from the remaining current-plan
 acceptance. These six gates remain unchecked; the assessment does not turn
