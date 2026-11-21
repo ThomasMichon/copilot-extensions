@@ -11453,13 +11453,15 @@ source-tree immutability. Canonical producer and template inputs are bound;
 generated script text is not executed. Eleven originals that still reach the
 real Git-head child remain unchanged outside the packet.
 
-Sixteen original materializer cases use thirteen exact test objects without
+Thirteen original materializer cases use twelve exact test objects without
 changing their fixtures, parameter suffixes or assertions. They retain
-file-pointer expansion/refusal, root containment, mocked Windows token
-selection, fixture-only snapshot replacement and real in-process CLI output.
+file-pointer expansion/refusal, root containment, fixture-only snapshot
+replacement and real in-process CLI output.
 The original multi-plugin, reader-thread, native Git and symlink witnesses are
-not replaced or mocked for admission. All 149 other original cases remain
-unchanged outside this slice. Each selected case has positive production
+not replaced or mocked for admission. Windows token-selection cases also stay
+outside: their first `ctypes` import performs a native load before their mocks.
+All 152 other original cases remain unchanged outside this slice. Each selected
+case has positive production
 call-phase coverage and effect-audited execution with source-bound Python
 reads; fixture Python text is copied, never executed.
 

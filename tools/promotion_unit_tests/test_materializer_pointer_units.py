@@ -20,7 +20,6 @@ _SELECTED = (
     "test_resolve_within_allows_legitimate_nested_source",
     "test_find_file_pointers_ignores_non_pointer_files",
     "test_file_pointer_candidates_cannot_write_outside_extracted_root",
-    "test_parallel_pointer_reads_require_the_windows_process_identity",
     "test_build_materializes_file_pointers_end_to_end",
     "test_main_smoke",
     "test_main_returns_nonzero_when_a_retired_pointer_marker_survives",

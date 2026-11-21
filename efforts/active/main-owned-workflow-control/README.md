@@ -840,10 +840,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13930 merges at `8faa88c9973499a27675a36ba20a7ff3de1d5014` after
   exact-head Copilot approval and complete required Linux CI with all 6,692
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land sixteen original actor-free materializer cases through
-  thirteen exact test objects, preserving original fixtures, parameter
-  suffixes and assertions. Retain all 149 other originals outside this slice,
-  including actual multi-plugin/thread, Git and symlink witnesses. Preserve
+- [ ] Qualify and land thirteen original actor-free materializer cases through
+  twelve exact test objects, preserving original fixtures, parameter
+  suffixes and assertions. Retain all 152 other originals outside this slice,
+  including actual multi-plugin/thread, Git, native-import and symlink
+  witnesses. Preserve
   every preceding node/hash/target/helper decision and the 300-second limit;
   require source closure, positive per-case production call coverage, zero
   prohibited effects, strict typing, current-head review and complete Linux
