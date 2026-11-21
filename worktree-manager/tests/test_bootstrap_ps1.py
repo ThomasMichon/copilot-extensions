@@ -722,6 +722,63 @@ def test_failed_managed_python_lookup_preserves_os_refusal_without_ambient_fallb
         assert calls == [lookup, "python install --no-bin --no-registry 3.11"]
 
 
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("scenario", ["prepared", "missing", "blocked", "relative"])
+def test_managed_python_inspection_never_acquires_or_uses_ambient_python(
+    tmp_path: Path, host_name: str, scenario: str,
+) -> None:
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    selected = tmp_path / "managed-python" / "python.exe"
+    selected.parent.mkdir()
+    selected.touch()
+    trace = tmp_path / "uv-calls"
+    uv = tmp_path / "uv.ps1"
+    response = (
+        "Write-Error 'No interpreter found for Python 3.11' -ErrorAction Continue; exit 2"
+        if scenario == "missing" else
+        "Write-Error 'interpreter query denied (os error 448)' -ErrorAction Continue; exit 2"
+        if scenario == "blocked" else
+        "Write-Output 'relative-python.exe'; exit 0"
+        if scenario == "relative" else
+        f"Write-Output {_quote(selected)}; exit 0"
+    )
+    uv.write_text(
+        f"Add-Content -LiteralPath {_quote(trace)} -Value ($args -join ' ')\n"
+        "if ($args[1] -eq 'install') { throw 'inspection attempted acquisition' }\n"
+        + response + "\n", encoding="utf-8",
+    )
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "function Get-Command { throw 'inspection attempted ambient discovery' }\n"
+        "$selected = $null; $failure = $null\n"
+        f"try {{ $selected = Find-BootstrapPython {_quote(uv)} -Operation Inspect }}\n"
+        "catch { $failure = $_.Exception.Message }\n"
+        "@{python=$selected;error=$failure} | ConvertTo-Json -Compress\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert trace.read_text(encoding="utf-8-sig").splitlines() == [
+        "python find --no-project --system --managed-python --no-python-downloads 3.11",
+    ]
+    if scenario == "prepared":
+        assert Path(observed["python"]).samefile(selected)
+        assert observed["error"] is None
+    else:
+        assert observed["python"] is None
+        assert observed["error"]
+        if scenario == "missing":
+            assert "setup" in observed["error"].lower()
+        if scenario == "blocked":
+            assert "blocked by operating-system policy" in observed["error"]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter protocol")
 @pytest.mark.parametrize("report", [
     {"version": [3, 14], "base": False},

@@ -35,9 +35,17 @@ Main refs. Native acquisition fetches Main ancestry independently and retains
 one commit/tree. Main selection refuses to silently override a configured
 non-Main policy. No selection rewrites that policy.
 
-The entry requires existing Git and physical Python 3.11+, fetches a fresh
-upstream Main toolkit, and never invokes an installed dispatcher on acquisition
-failure. Preview may clone and export disposable source data; it does not build
+The entry requires existing Git, PATH uv 0.8.0+ and an already prepared
+uv-managed Python 3.11. It reuses the normal bootstrap's qualified uv selector
+in inspection mode, with project discovery and interpreter downloads disabled.
+It does not discover PATH/registry Python, acquire uv or install Python.
+Missing prerequisites refuse before toolkit staging or cloning, with an
+instruction to run explicit Manager setup. Normal setup retains its existing
+preparation behavior; neither route assumes a uv interpreter-storage location.
+
+Recovery fetches a fresh upstream Main toolkit and never invokes an installed
+dispatcher on acquisition failure. Preview may clone and export disposable
+source data; it does not build
 or publish a runtime, install prerequisites, change registrations, or select,
 start or stop a generation. Repair decisions remain with the authorized
 native apply path. Preview obtains read-only footprint inventory
