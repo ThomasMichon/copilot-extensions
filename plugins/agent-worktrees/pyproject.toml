@@ -134,6 +134,8 @@ dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
     "psutil>=6",
+    "setuptools>=83.0.0",
+    "wheel>=0.45.1",
     # Exercise the runtime's Python 3.10 TOML fallback on newer test interpreters too.
     "tomli>=2",
 ]
