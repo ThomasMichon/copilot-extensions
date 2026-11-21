@@ -69,6 +69,29 @@ Windows exit-evidence/reporting implementation, and expressly preserves
 separate #13221 custody. Preserve the original OR alternative without
 claiming a fix, global absence of a fix or another live-token condition.
 
+## Later managed-Python consumer and fixture-debt comparison
+
+The [later qualified comparison](journal/2026/11.21-managed-python-consumers-and-fixture-debt.md)
+updates #13775, #13848 and #13866 without rewriting the earlier observation
+above. #13775's original and six prior discussions remain unchanged; its
+qualified seventh discussion credits merged #13851 command/setup, #13893
+prepared finite removal and #13911 index discovery. It expressly retains
+Budget Guidance startup/posture consumers, the other twelve Invocation
+declarations, the remote driver, non-Python plugins with Python children and
+standalone service/tool ingress. Partial production adoption now exists;
+the earlier provider-only observation is not a permanent absence claim.
+Actual #13972 remains OPEN at this comparison, under its existing owner.
+
+The whole merged #13851 description explicitly retains #13848's six
+CWD/HUP and Docker creation/index fixture failures and #13866's fifteen
+external-cache and shell-startup census failures. None of the four current
+PR file inventories includes those affected fixture files. This is a finite
+negative correspondence result, not a repository-wide absence proof.
+Both unchanged original requests remain OPEN, distinct from each other and
+from #13818's offline-recovery fixture. Source reports and selected native
+counts do not waive their assertions or grant another test or implementation
+assignment.
+
 ## Continuing exit
 
 Current metadata admission, reused research, accepted planning and actual
