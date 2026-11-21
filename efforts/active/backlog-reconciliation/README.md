@@ -410,6 +410,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [roadmap planning assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+compares the actual #13934 integrated-plan review and exact public-register/
+current-census identity join with all six planning conditions. It resolves
+the three Phase 2b priority/sequencing/integration deliverables while retaining
+explicit research/home gaps, all global Validation and continuing Phase 2.
+This is planning acceptance, not implementation or the fixed 729 checkpoint.
+
 The [integrated execution-wave proposal](roadmap-execution-waves.md) composes
 six reviewed P1 contributions and independent P2/qualification lanes with
 the exact current 455-identity coverage classes, specific refresh gaps,
@@ -5239,13 +5246,19 @@ closure credit, resource release or parent checkbox change follows.
   The four reviewed waves cover all 682 eligible identities; 252 excluded
   records remain counted, metadata-only gaps. Later inflow and changed
   acceptance remain continuing Phase 2 work, not silently completed coverage.
-- [ ] Identify high-priority fixes and their actual existing efforts, retained
+- [x] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [reviewed integrated selection](roadmap-execution-waves.md) and
+  [condition-by-condition assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+  supply the evidence-cited shortlist, actual original work homes and explicit
+  whole-home uncertainties. This closes the planning identification duty,
+  not those original issues or ongoing changed-contract research.
   The [selected startup wave](roadmap-startup-wave.md) adds evidence-ranked
   #12657/#12691 contributions with original homes, parallel local precedences
   and finite source/release/consumer exits. It retains actual home uncertainty
-  and pending author PRs rather than appointing implementers; broader current
-  selection and all roadmap integration gates remain open.
+  and then-pending author PRs rather than appointing implementers; broader
+  selection and all roadmap gates remained open at that earlier publication.
+  Their later planning assessment above does not assert those PRs current.
   The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
   directs two historical selected slices to their audited OPEN receivers:
   #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
@@ -5265,11 +5278,17 @@ closure credit, resource release or parent checkbox change follows.
   named intake into #6476 and verified non-actionable retirement, not a fix.
   Existing keepers,
   actual parks and withdrawn experiments remain distinguished.
-  #9426 publishes those twelve bounded qualifications and the three-arrival
-  inflow delta; this broader identification/selection item remains open.
-- [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
+  #9426 published those twelve bounded qualifications and the three-arrival
+  inflow delta; the later integrated selection supplies this item's planning
+  acceptance without retroactively changing that observation.
+- [x] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
+  The [reviewed integrated waves](roadmap-execution-waves.md) compose the
+  retained 145 scoped relationships, selected local precedences, independent
+  contributions and explicit unresolved alternatives. The
+  [assessment](journal/2026/11.21-roadmap-planning-acceptance.md) resolves this
+  planning deliverable, not a whole-backlog DAG or implementation.
   The [2026-11-15 route refresh](roadmap-current-qualification.md#2026-11-15-routing-and-completed-nomination-correction)
   adds #4220's accepted Index/#5768 route and qualifies #9377's completed
   original agenda-companion source nomination, removing stale Phase 1 admission
@@ -5296,16 +5315,18 @@ closure credit, resource release or parent checkbox change follows.
   with the later 72-identity refresh demonstrating continuing delta use.
   New inflow and changed acceptance remain open under Phase 2's graph
   maintenance and whole-queue refresh items; this does not complete them.
-- [ ] _(Agent-recommended)_ Integrate the
+- [x] _(Agent-recommended)_ Integrate the
   [stabilization roadmap](stabilization-roadmap.md), including per-issue
   coverage, provisional decisions, priority rationale and wave exit criteria,
   with the [cross-wave sequencing proposal](roadmap-sequencing.md) through
   normal review before treating it as an execution plan.
   The [selected integrated waves](roadmap-execution-waves.md) now name the
   reviewed leaf contributions, original work homes and explicit gaps, parallel
-  work, scoped precedences and source/release/consumer exits. Their normal
-  review and an actual gate assessment remain distinct from review of the
-  component inputs; no implementation or automatic checkbox completion follows.
+  work, scoped precedences and source/release/consumer exits. Actual #13934
+  reviewed that integration itself; the
+  [six-condition assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+  records its planning acceptance. No implementation or automatic issue,
+  resource, release or parent completion follows.
 
 ### Phase 3 - Threshold guidance
 
