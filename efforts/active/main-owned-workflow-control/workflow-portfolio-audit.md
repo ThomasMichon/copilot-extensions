@@ -1865,6 +1865,58 @@ source CI remain required. This is a bounded census increment, not a reduction
 in workflow invocations, native qualification, every-release observation or
 full-census acceptance. All existing owner gates and retained custody remain.
 
+Source #13840 merges at `2026-11-21T05:35:24Z` as
+`7dfefbb42ed36d9238844a52555ad513671c9f9f`. Copilot approval `6003164909`
+targets exact published head `cf8bad4501bab1d8817ce55e4cb62bab58f4b88c`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44871139234` and trusted metadata CI `44871139450` pass.
+Unit job `136745732870` freshly qualifies the complete packet from
+`05:30:20Z` to `05:33:30Z`, then uploads its evidence. Seven live scoped reads
+through the source merge-time verifier precede the normal managed Maintainer
+merge; no failing CI is bypassed. Closing references are empty and parent
+#6237 remains open. The full canonical parent is reread after merge and only
+this finite admission item is resolved. Continue the retained census and
+separately accepted workflow reductions; broader integration, native,
+every-release, whole-flow and retained-custody acceptance remain open.
+
+### November 21 local-Git evidence and repository-probe control admission
+
+The original Bridge-contract suite collects 56 cases; five exact original
+functions provide ten already-mocked local-Git controls. The original
+module-size suite collects 38 cases; one exact original function provides its
+already-mocked repository-probe timeout control. Two adapters retain every
+selected function object, parameter identity and assertion. All 83 remaining
+native/schema/policy cases stay unchanged outside the packet. No native
+fixture is replaced, registry capture executed, baseline refreshed or retired
+Bridge-registry CI gate restored.
+
+The Git controls retain delimiter refusal before object reads, opportunistic
+local commit availability, the existing ten-second headless timeout,
+`GIT_NO_LAZY_FETCH`, repeated-read cache reuse and Git-version refusal before
+object access. The module-size control executes the actual script through
+`runpy` with its original mocked timeout and verifies controlled stderr and
+exit status. All eleven pass the actual `UnitRun` effect auditor with zero
+prohibited effects and their own production call-phase coverage. Repository
+Python reads close over exactly nine source files. Focused audited development
+execution takes 1.750 seconds, not a canonical complete-packet timing.
+
+Positive admission adds eleven nodes, eight new source hashes and one target.
+After reconciling intervening Dev admissions, the packet has 6,389 nodes,
+1,031 sources and 434 targets. The existing Git evidence helper
+retains its admitted hash and coverage target. Every preceding node, source
+digest and target remains, with the same profile, 300-second packet budget,
+all 88 release-helper decisions and file-size cap. The combined data would
+occupy 1,049,341 bytes with the preceding node indentation. Removing only
+those node-entry indentation spaces yields 1,023,785 bytes with exactly the
+same decoded manifest and canonical data digest; the source map keeps its
+existing layout. No node, source, target or guard is removed to meet the cap.
+Rebased exact-object collection and actual effect-audited execution pass all
+eleven cases again in 1.359 development seconds. Both adapters pass whole-file strict typing
+for Linux and Windows targets and fatal Ruff checks. Complete current-head
+review and Linux source CI remain required. This is a bounded census
+increment, not fewer workflow invocations, native qualification, every-release
+or full-census acceptance. Existing owner gates and retained custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

@@ -655,12 +655,20 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and complete required Linux CI with freshly executed packet evidence.
   Native installation/materialization, every-release and full-census
   acceptance remain separate.
-- [ ] Qualify and land thirty original large-file Git protocol and source-AST
+- [x] Qualify and land thirty original large-file Git protocol and source-AST
   subprocess-control cases through exact test objects. Preserve all fifty
   original real Git/process residuals outside the packet, real per-case
   production call coverage, source closure, preceding admission, helper gates
-  and the 300-second budget. Require current-head review and complete Linux CI;
-  broader native, every-release, workflow-count and full-census gates stay open.
+  and the 300-second budget. #13840 merges at
+  `7dfefbb42ed36d9238844a52555ad513671c9f9f` after exact-head Copilot approval
+  and complete required Linux CI with freshly executed packet evidence.
+  Broader native, every-release, workflow-count and full-census gates stay open.
+- [ ] Qualify and land eleven original mocked local-Git evidence and
+  module-size probe controls through exact test objects. Retain all 83
+  native/schema/policy residuals and the retired Bridge-registry CI boundary;
+  require source closure, actual per-case production call coverage, unchanged
+  prior admission/helper/budget gates, current-head review and complete Linux
+  CI. Broader native, every-release, workflow-count and full-census gates stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
