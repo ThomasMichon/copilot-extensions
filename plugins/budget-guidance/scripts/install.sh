@@ -493,10 +493,8 @@ _ensure_uv_index() {
     fi
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
-# Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
-# venv's `python -m budget_guidance`; otherwise it provisions on first use -- announcing
-# (a human line + a machine-readable ::agent-provisioning:: signal so a caller can
-# extend its timeout), lock-serialized, fail-fast.
+# Deploy the prepared-only binstub. The existing resolver selects the runtime;
+# missing preparation reports the owning explicit provision action.
 # Co-deploy the canonical marker-only resolver so the binstub (and any launcher)
 # resolves the interpreter the ONE uniform way (uniform-runtime-resolution, #765).
 deploy_resolver() {
@@ -647,7 +645,7 @@ case "$ACTION" in
         ;;
 esac
 # Cheap 'stamp': snapshot the exact owning payload, then splat the binstub and
-# defer the venv build to first use. The wrapper provisions only from this
+# defer the venv build to explicit provision. Preparation uses this
 # immutable versioned snapshot and never searches other marketplace payloads.
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
@@ -712,7 +710,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     fi
     _ok "Snapshot: $snap_dir"
     deploy_binstub
-    _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    _ok "Stamped: run the snapshot scripts/install.sh provision before command use; retain the same --install-dir."
     exit 0
 fi
 

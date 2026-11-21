@@ -707,10 +707,9 @@ function Deploy-SelfProvisioningBinstub {
     # (#1393): resolve the interpreter the ONE uniform way -- the deployed
     # canonical resolve-runtime.ps1 marker chain (uniform-runtime-resolution,
     # #765): current-version -> last-known-good -> newest complete slot, never a
-    # `.venv` junction, never a PATH python. If no slot is built yet (a `stamp`
-    # deferred the venv), provision on first use by running the slot-local
-    # snapshot's `scripts/install.ps1 provision`, then dispatch. Opt out with
-    # BUDGET_GUIDANCE_NO_SELFPROVISION=1. POSIX gets its sh shim from install.sh.
+    # `.venv` junction, never a PATH python. A stamped snapshot needs explicit
+    # `scripts/install.ps1 provision` before command use; launch never prepares it.
+    # POSIX gets its sh shim from install.sh.
     # Co-deploy the canonical resolvers so every launcher resolves identically.
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
@@ -836,11 +835,11 @@ function Invoke-Stamp {
     Test-SourceRuntimeUnchanged
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
     # into a per-version snapshot under ~/.budget-guidance/snapshots/<ver>/, record
-    # markers, and deploy the self-provisioning binstub -- deferring the heavy
-    # venv build to the binstub's first use. No venv, no uv; fits a sessionStart
+    # markers, and deploy the prepared-only binstub -- deferring the heavy
+    # venv build to explicit provision. No venv, no uv; fits a sessionStart
     # grace window and NEVER holds the marketplace payload open (it copies from
     # the already self-staged $PluginDir, freeing the singleton immediately).
-    Write-Step 'budget-guidance stamp; runtime deferred to first use'
+    Write-Step 'budget-guidance stamp; explicit runtime provision required'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -912,7 +911,7 @@ function Invoke-Stamp {
     }
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: budget-guidance binstub on PATH; runtime provisions on first use.'
+    Write-Ok 'Stamped: run the snapshot scripts/install.ps1 provision before command use; retain the same -InstallDir.'
 }
 
 function Get-InstallLockTimeoutSec {
