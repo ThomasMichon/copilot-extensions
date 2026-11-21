@@ -1,0 +1,9 @@
+{
+  "comment": "Use acquisition-free uv-managed Python inspection for fresh-source recovery instead of PATH or registry Python discovery.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
