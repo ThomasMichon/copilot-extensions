@@ -6,6 +6,12 @@ Capture the agreed worktree dehydration idea as a canonical effort, extend the
 agent-worktrees vision, develop an architectural proposal, and file the delivery
 work. This kickoff is design and planning, not runtime implementation or rollout.
 
+Latest operator requirement:
+
+> We need to move `.effort-agenda` out of the worktrees' actual footprints; it needs to be in ~/.<repo>/worktrees/<worktree-id>
+
+> We'll need a "doctor" for that
+
 - **Slug:** `worktree-dehydration`
 - **Repo:** copilot-extensions
 - **Branch(es):** one reviewed design PR; later dependency-ordered delivery PRs
@@ -13,7 +19,7 @@ work. This kickoff is design and planning, not runtime implementation or rollout
 - **Status:** Draft
 - **Vision:** [checkout hydration](../../../visions/plugins/agent-worktrees/checkout-hydration/README.md)
 - **Umbrella issue:** #13781
-- **Sub-issues:** #13783 (storage/recovery), #13784 (automatic lifecycle), #13785 (Manager/qualification)
+- **Sub-issues:** #13790 (agenda placement/doctor), #13783 (storage/recovery), #13784 (automatic lifecycle), #13785 (Manager/qualification)
 
 ## Guiding Intent
 
@@ -32,7 +38,7 @@ Disk reclamation must not require pretending that unfinished work is complete.
 
 ## Coordination
 
-- **Topology:** one kickoff design PR; storage precedes automatic entry, then Manager integration.
+- **Topology:** one kickoff design PR; agenda placement/doctor precedes storage activation, then automatic entry and Manager integration.
 - **Host (owns PRs):** design-driver owns only the current planning publication.
 - **Delegates:** none; no implementation worker has been launched.
 - **Handoff:** the canonical plan is here; assign later execution explicitly.
@@ -41,6 +47,8 @@ Disk reclamation must not require pretending that unfinished work is complete.
 ## Context
 
 - [Architecture proposal](architecture.md): proposed mechanics, recovery and qualification.
+- [Agenda placement and doctor](agenda-placement-doctor.md): external data home,
+  explicit migration, interrupted recovery and legacy-history acceptance.
 - [Public request capture](inception.md): original public-safe wording and amendments.
 - [Current lifecycle](../../../plugins/agent-worktrees/docs/worktree-lifecycle.md):
   displayed classification, finalization and terminal collection are distinct.
@@ -85,6 +93,14 @@ provenance destinations. No public artifact links back to private material.
 - **Existing integration constraint:** retain the worktree-data owner's hold
   for legacy checkout-local durable agenda history until supported preservation
   and explicit source retirement. This does not add a per-build-artifact policy.
+- **Latest operator placement requirement:** move `.effort-agenda` out of the
+  checkout footprint into the per-repository worktree data home
+  `~\.<repo>\worktrees\<worktree-id>`. Plan the existing-lane migration before
+  enabling automatic dehydration; do not treat a path change as proof of
+  preserved history or authority to discard the original.
+- **Latest operator recovery requirement:** provide a doctor for the agenda
+  placement transition. Report-first inspection and explicit owner-mediated
+  repair must precede retiring legacy checkout-local data.
 - **Not assigned by this kickoff:** runtime implementation, automatic deletion
   on this host, shared-worktree cleanup, live migration, installation or rollout.
   Review of these documents does not grant those effects.
@@ -96,22 +112,28 @@ provenance destinations. No public artifact links back to private material.
 - [x] Capture the request and its superseded alternatives separately from recommendations.
 - [x] Extend standing intent without presenting the feature as implemented.
 - [x] Describe storage transitions, catalog recovery, branch preservation, entry ordering and qualification.
-- [x] File #13781 with dependency-ordered work in #13783, #13784 and #13785.
+- [x] File #13781 with dependency-ordered work in #13790, #13783, #13784 and #13785.
 - [ ] Publish and merge the kickoff after the repository's review and CI gates.
 
-### Phase 2 - Prove reversible storage (#13783; execution not assigned)
+### Phase 2 - Prove external agenda placement and doctor (#13790; execution not assigned)
+
+- [ ] Put new managed agendas under `~\.<repo>\worktrees\<worktree-id>`, outside actual checkouts, through the existing data-placement owner.
+- [ ] Provide report-first doctor inspection and explicit lossless repair/migration for existing checkout-local lanes.
+- [ ] Prove history and store identity, single-writer relocation, target/locator conflicts and interrupted recovery before source retirement.
+
+### Phase 3 - Prove reversible storage (#13783; execution not assigned)
 
 - [ ] Implement the owner-mediated catalog and a real clean WIP round trip at the original path.
 - [ ] Prove branch retention, interrupted-transition recovery and catalog-aware roster reconstruction.
 - [ ] Integrate claims, paired worktrees, cleanup, Git GC and durable-data placement without semantic finalization.
 
-### Phase 3 - Prove automatic stop and resume (#13784; execution not assigned)
+### Phase 4 - Prove automatic stop and resume (#13784; execution not assigned)
 
 - [ ] Extend existing post-exit/resident work with actual retirement checks and a shared entry/removal fence.
 - [ ] Hydrate before every path-dependent mux and Bridge entry; preserve prompts and session lineage.
 - [ ] Prove repeated automatic cycles, concurrent requests, restart recovery and supported provider skew.
 
-### Phase 4 - Prove the complete operator flow (#13785; execution not assigned)
+### Phase 5 - Prove the complete operator flow (#13785; execution not assigned)
 
 - [ ] Add `(D)`, visible hold/refusal reasons, auto/manual policy and manual Manager actions.
 - [ ] Qualify native Windows and Linux/WSL flows, storage reduction and resume cost with disposable fixtures.
@@ -132,6 +154,8 @@ provenance destinations. No public artifact links back to private material.
 - [ ] Staged, modified, untracked, detached/unexpected branch, unfinished Git operations and unknown evidence refuse.
 - [ ] Ignored build output is disposable; projections and declared checkout settings are restored before entry.
 - [ ] Ignored legacy `.effort-agenda` history blocks removal until its owner preserves it and explicitly retires the source; unknown/partial homes and copy-only evidence do not bypass the hold.
+- [ ] Doctor report is non-mutating; explicit migration preserves complete agenda history, store/lane identity and one writer across restart, conflict, failed copy and locator cutover.
+- [ ] New agenda allocation and later discovery use the external per-repository home; a migrated agenda remains usable after real checkout removal and recreation.
 - [ ] The retained local branch protects commits through Git GC; external branch movement is detected without reset.
 - [ ] Failure injection at each persisted transition is recoverable, including a failed final catalog removal.
 - [ ] Removing operational tracking in an isolated fixture permits catalog-based reconstruction without fabricated authority.
@@ -160,3 +184,6 @@ kickoff; the full capability remains future work under #13781.
 - Filed #13781, #13783, #13784 and #13785. Implementation remains unassigned.
 - Review identified the existing ignored checkout-local agenda-history hold;
   retained that guard and added a preservation/refusal qualification case.
+- The operator then required the external per-repository worktree data home and
+  a doctor. Added #13790 as the placement/migration prerequisite; no live
+  migration or runtime implementation was performed.

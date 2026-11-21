@@ -3,7 +3,7 @@
 **Status:** proposed; no runtime behavior is implemented by this document.
 Back to the [canonical effort](README.md). Standing intent:
 [checkout hydration](../../../visions/plugins/agent-worktrees/checkout-hydration/README.md).
-Tracking: #13781; delivery order #13783 -> #13784 -> #13785.
+Tracking: #13781; delivery order #13790 -> #13783 -> #13784 -> #13785.
 
 ## 1. Contract and boundaries
 
@@ -25,6 +25,11 @@ local source through the supported procedure. Empty, malformed, linked or
 unreadable homes retain the existing conservative hold. A branch, locator or
 copied snapshot cannot restore this history or discharge that hold. This is an
 existing ownership constraint, not a new per-build-artifact approval policy.
+
+The operator requires agendas to move out of the checkout footprint into
+`~\.<repo>\worktrees\<worktree-id>` and requires a doctor for that transition.
+The [agenda placement/doctor proposal](agenda-placement-doctor.md) defines the
+new default and explicit, lossless migration before automatic dehydration.
 
 This is not terminal cleanup, branch archival, a source backup, checkout
 relocation or a new scratch owner. Preserve existing behavior for unmanaged,
@@ -250,6 +255,7 @@ Extend existing owners rather than importing another plugin's internals:
 | Roster population, `prune.py`, `gc.py`, claimant reads | Catalog-aware membership, owner liveness and preservation instead of GONE/terminal inference |
 | Manager/pivot projection | Additive storage status and provider-owned actions, not a second Git scan |
 | Worktree-data, pairing and relocation | Preserve locators and relationships across registered roots and absent checkouts |
+| Existing doctor and agenda placement/domain owner | Report and explicitly migrate checkout-local agendas to the external per-repository worktree home before enabling automatic removal |
 
 Source inspection is a starting map, not a complete call-site audit. The
 implementation slices must inventory all removal, branch-mutation and launch

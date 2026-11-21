@@ -24,6 +24,19 @@ separately; put the main version in copilot-extensions with tracking items, visi
 updates and architectural design. Private provenance destinations are omitted.
 This changes no behavioral requirement.
 
+## Agenda placement amendment
+
+> We need to move `.effort-agenda` out of the worktrees' actual footprints; it needs to be in ~/.<repo>/worktrees/<worktree-id>
+
+> We'll need a "doctor" for that
+
+The per-repository worktree data home is outside the actual checkout. Existing
+lane migration and history-preservation qualification precede automatic
+dehydration. The exact lane layout beneath that home and safe migration are
+architectural details; this instruction does not authorize deleting old history
+without preservation. The transition needs an explicit doctor; report-first
+inspection and a separate repair path are the proposed interaction.
+
 ## Supersession and recommendations
 
 - The nearby catalog replaces both a marker inside the checkout and the
