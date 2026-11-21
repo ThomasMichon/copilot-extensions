@@ -163,6 +163,7 @@ def test_prepared_uv_command_preserves_generation_arguments_streams_and_exit(
     arguments = [
         "", "space 'quoted' \"double\" \\slash &|<>()$?;", "λ", "line1\nline2",
         "trailing space\\", 'backslash before quote \\" and trailing \\\\',
+        "--%", "%FIXTURE_EXIT%",
     ]
     command = [host, str(shim)] if posix else [host, "-NoProfile", "-File", str(shim)]
     for code in (0, 37, None):

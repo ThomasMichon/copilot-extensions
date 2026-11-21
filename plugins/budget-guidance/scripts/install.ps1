@@ -768,10 +768,18 @@ if ($_py) {
     $_uvForwardedArguments = @($args)
     $_nativeArgumentMode = Get-Variable PSNativeCommandArgumentPassing -ErrorAction SilentlyContinue
     if ($null -eq $_nativeArgumentMode -or $_nativeArgumentMode.Value -eq 'Legacy') {
+        # Windows PowerShell counts escaped quotes when deciding whether to wrap an argument.
+        $_nativeQuoteReplacement = if ($PSVersionTable.PSVersion.Major -lt 6) { '$1$1""' } else { '$1$1\"' }
         $_uvForwardedArguments = @($args | ForEach-Object {
             if ($_ -and $_ -notmatch '[\s"]') { $_ }
-            else { '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }
+            else { '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', $_nativeQuoteReplacement), '(\\+)$', '$1$1') + '"' }
         })
+    }
+    # Keep a literal stop-parsing marker as data, including when arguments are splatted.
+    for ($_index = 0; $_index -lt $_uvForwardedArguments.Count; $_index++) {
+        if ($_uvForwardedArguments[$_index] -ceq '--%') {
+            $_uvForwardedArguments[$_index] = [Text.StringBuilder]::new('--%')
+        }
     }
     & $_uv run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @_uvForwardedArguments
     exit $LASTEXITCODE
