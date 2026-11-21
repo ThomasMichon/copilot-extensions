@@ -11453,6 +11453,28 @@ source-tree immutability. Canonical producer and template inputs are bound;
 generated script text is not executed. Eleven originals that still reach the
 real Git-head child remain unchanged outside the packet.
 
+Thirteen original materializer cases use twelve exact test objects without
+changing their fixtures, parameter suffixes or assertions. They retain
+file-pointer expansion/refusal, root containment, fixture-only snapshot
+replacement and real in-process CLI output.
+The original multi-plugin, reader-thread, native Git and symlink witnesses are
+not replaced or mocked for admission. Windows token-selection cases also stay
+outside: their first `ctypes` import performs a native load before their mocks.
+All 152 other original cases remain unchanged outside this slice. Each selected
+case has positive production
+call-phase coverage and effect-audited execution with source-bound Python
+reads; fixture Python text is copied, never executed.
+
+Thirty additional original UV-reference cases use 27 exact test objects.
+They retain escaping-entry discovery, complete file copies, surgical TOML
+rewrites, aliases, standalone consumers, nested closure/cycles and
+missing/malformed/traversing/stale-input refusals. The two discovery cases
+require actual call-phase coverage in the shared reference reader; the other
+28 require it in the materializer. All writes stay fixture-owned and copied
+Python text is never executed. Together with the pointer slice, 43 of the
+165 original cases are mapped once; 122 remain unchanged outside these
+slices, including actual worker, Git, native-import and symlink witnesses.
+
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:

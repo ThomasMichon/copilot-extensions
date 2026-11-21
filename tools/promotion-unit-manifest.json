@@ -3,6 +3,59 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_materializer_uv_reference_units.py",
+      [
+        "test_find_uv_editable_refs_only_returns_escaping_entries_regardless_of_editable",
+        "test_find_uv_editable_refs_includes_a_non_editable_escaping_entry",
+        "test_materialize_uv_editable_ref_into_copies_full_tree_and_rewrites_entry",
+        "test_materialize_uv_editable_ref_into_skips_missing_canonical",
+        "test_materialize_uv_editable_ref_into_refuses_a_non_editable_entry",
+        "test_materialize_uv_editable_ref_into_refuses_escaping_canonical_root",
+        "test_materialize_uv_editable_ref_into_refuses_a_path_outside_the_libs_tree",
+        "test_materialize_uv_editable_refs_whole_repo",
+        "test_materialize_whole_repo_also_expands_uv_editable_refs",
+        "test_materialize_uv_editable_ref_into_preflights_rewrite_before_copying",
+        "test_materialize_uv_editable_ref_into_refuses_a_malformed_canonical_lib",
+        "test_materialize_uv_editable_ref_into_refuses_a_canonical_lib_missing_pyproject",
+        "test_materialize_uv_editable_ref_into_refuses_an_unsafe_lib_name",
+        "test_materialize_uv_editable_ref_into_refuses_a_malformed_manifest",
+        "test_materialize_one_uv_editable_ref_accepts_editable_before_path_key_order",
+        "test_materialize_one_uv_editable_ref_scopes_rewrite_to_uv_sources_table",
+        "test_materialize_one_uv_editable_ref_copies_files_outside_the_four_known_subpaths",
+        "test_materialize_uv_editable_ref_into_rewrites_all_aliases_of_the_same_lib",
+        "test_materialize_one_uv_editable_ref_accepts_a_quoted_key_and_trailing_comment",
+        "test_materialize_one_uv_editable_ref_accepts_a_single_quoted_path",
+        "test_materialize_complete_nested_closure_without_editable_edges[False-False]",
+        "test_materialize_complete_nested_closure_without_editable_edges[False-True]",
+        "test_materialize_complete_nested_closure_without_editable_edges[True-False]",
+        "test_materialize_complete_nested_closure_without_editable_edges[True-True]",
+        "test_materialize_uv_editable_refs_fixes_up_a_nested_canonical_dependency",
+        "test_materialize_uv_editable_refs_nested_dependency_already_materialized",
+        "test_materialize_nested_uv_editable_refs_refuses_a_missing_editable_true",
+        "test_materialize_nested_uv_editable_refs_refuses_a_path_traversal_raw_path",
+        "test_materialize_nested_uv_editable_refs_refuses_a_non_directory_sibling",
+        "test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_content"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_materializer_pointer_units.py",
+      [
+        "test_materialize_expands_file_pointer_from_canonical",
+        "test_materialize_skips_file_pointer_with_missing_canonical",
+        "test_materialize_refuses_absolute_source_path",
+        "test_materialize_refuses_traversal_source_path",
+        "test_resolve_within_allows_legitimate_nested_source",
+        "test_find_file_pointers_ignores_non_pointer_files",
+        "test_file_pointer_candidates_cannot_write_outside_extracted_root[outside.md]",
+        "test_file_pointer_candidates_cannot_write_outside_extracted_root[repo/../outside.md]",
+        "test_build_materializes_file_pointers_end_to_end",
+        "test_main_smoke",
+        "test_main_returns_nonzero_when_a_retired_pointer_marker_survives",
+        "test_build_overwrites_a_stale_existing_dest",
+        "test_materialize_refuses_a_retired_directory_pointer_marker"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_preview_release_units.py",
       [
         "test_build_unknown_plugin_raises",
@@ -8341,6 +8394,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_materializer_uv_reference_units.py": "1ab9e05be6d68641a0df1db8960349aefa6dc4ab24415c4a50c57d17f379d776",
+    "tools/promotion_unit_tests/test_materializer_pointer_units.py": "dad666e90ef19c669af857556cc2215b543b51965f6e7b4a78b45ee7a090fbd0",
+    "tools/test_materialize_main.py": "52e5d9d2a8182a8fdd753cd020d02e333fcbb6828e64865f43254fb996711568",
     "tools/promotion_unit_tests/test_preview_release_units.py": "868c518cb89a065fe9d0c984892187c3350a24d4216be1289691b2115555c5ee",
     "tools/test_preview_release.py": "b36e512d6938aa000c1b29e29f5ed26cebfdda1387233198838d6521518c9c0f",
     "tools/preview_release.py": "8e13ce2c64e4e6b810e97644d1de61a37818eef853d8c8de9b6026dcc6577809",

@@ -830,13 +830,39 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13927 merges at `76e0a0b850c65fc21ca8c4635ff60467df36113c` after
   exact-head Copilot approval and complete required Linux CI with all 6,686
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land six original preview cases through four exact test
+- [x] Qualify and land six original preview cases through four exact test
   objects and the original isolation fixture. Retain all eleven real-Git-head
   residuals, unchanged preceding admission/helper/budget gates, exact
   producer/template inputs, positive per-case production call coverage and
   zero prohibited effects. Require strict typing, current-head review and
   complete Linux source CI; this does not qualify an installed preview or
   native/release/full-census/whole-flow behavior.
+  #13930 merges at `8faa88c9973499a27675a36ba20a7ff3de1d5014` after
+  exact-head Copilot approval and complete required Linux CI with all 6,692
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify and land thirteen original actor-free materializer cases through
+  twelve exact test objects, preserving original fixtures, parameter
+  suffixes and assertions. Retain all 152 other originals outside this slice,
+  including actual multi-plugin/thread, Git, native-import and symlink
+  witnesses. Preserve
+  every preceding node/hash/target/helper decision and the 300-second limit;
+  require source closure, positive per-case production call coverage, zero
+  prohibited effects, strict typing, current-head review and complete Linux
+  source CI. This is not installed materialization, release, native,
+  full-census or whole-flow acceptance.
+  #13932 merges at `34c846bf2294791c5e1673eb50231e3334f9d010` after
+  corrected-head Copilot approval and complete required Linux CI with all
+  6,705 units freshly executed. The failed initial native-import selection
+  remains recorded; no guard or original witness is weakened.
+  Broader parent gates stay open.
+- [ ] Qualify and land thirty additional original fixture-only UV-reference
+  cases through 27 exact test objects. Preserve the thirteen mapped pointer
+  cases, all 122 remaining originals, exact parameter suffixes/assertions,
+  source closure, positive per-case reader/materializer call coverage, effect
+  auditing, preceding admission/helper/budget gates and compact/flat-v1
+  contracts. Require strict typing, current-head review and complete Linux
+  source CI; this is not native, installed, release, full-census or whole-flow
+  acceptance.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
