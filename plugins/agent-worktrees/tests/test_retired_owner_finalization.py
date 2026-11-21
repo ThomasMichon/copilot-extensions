@@ -654,3 +654,59 @@ def test_orphaned_owner_repair_refuses_journal_receiving_custody(orphaned: Simpl
         code, report = _doctor(orphaned, *extra)
         assert code == 1 and "receiving allocation metadata" in report["error"]
     assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+
+
+@pytest.mark.parametrize("journal", ["unfinished", "invalid"])
+def test_orphaned_owner_repair_refuses_unsettled_child_relocation(
+    orphaned: SimpleNamespace, journal: str,
+) -> None:
+    from agent_worktrees import checkout_relocation_state
+
+    name = orphaned.checkout.name
+    target = orphaned.checkout.resolve().parent / "moved"
+    data: dict[str, Any] = {"schema": "unsupported"} if journal == "invalid" else {
+        "schema": "agent-worktrees.checkout-relocation.v1", "phase": "copying",
+        "identity": {"worktree_id": name}, "source": str(orphaned.checkout.resolve()),
+        "destination": str(target / name), "stage": str(target / f"{name}.relocating-{'0' * 16}"),
+        "fingerprint": "a" * 64, "permissions": {"trust": None, "permissions": None},
+        "head": "b" * 40, "ledger_sha256": "c" * 64,
+    }
+    checkout_relocation_state.write(orphaned.ledger, data)
+    before = orphaned.ledger.read_bytes()
+    for extra in ((), ("--fix",)):
+        code, report = _doctor(orphaned, *extra)
+        assert code == 1 and "child checkout relocation is not settled" in report["error"]
+    assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+
+
+@pytest.mark.parametrize("race", ["parent-created", "parent-lock-held"])
+def test_orphaned_owner_repair_holds_parent_lock_through_final_proof(
+    orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, race: str,
+) -> None:
+    from agent_worktrees import orphaned_owner_repair
+
+    prove = orphaned_owner_repair.prove
+    calls: list[str] = []
+
+    def contested(record_id: str) -> dict[str, Any]:
+        calls.append(record_id)
+        if len(calls) == 2 and race == "parent-created":
+            orphaned.parent.write_text(yaml.safe_dump(orphaned.parent_data), encoding="utf-8")
+        if len(calls) == 2 and race == "parent-lock-held":
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                probe = pool.submit(
+                    lambda: tracking._RecordLock(orphaned.parent, timeout=0, blocking=False)
+                    .__enter__().acquired,
+                ).result()
+            assert probe is False
+        return prove(record_id)
+
+    monkeypatch.setattr(orphaned_owner_repair, "prove", contested)
+    before = orphaned.ledger.read_bytes()
+    code, report = _doctor(orphaned, "--fix")
+    assert len(calls) == 2
+    if race == "parent-created":
+        assert code == 1 and "parent tracking state is still present" in report["error"]
+        assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
+    else:
+        assert (code, report["repaired"]) == (0, True)

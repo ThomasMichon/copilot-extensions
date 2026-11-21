@@ -131,8 +131,15 @@ sidecar made only of empty directories therefore do not refuse. They are listed
 under `residual_parent_artifacts` in the evidence, and the repair never removes
 them.
 
-`--fix` takes the publication-authority guard and the child's record lock,
-then proves everything again. It removes only the `owner_ref` line, and
+The child must have no unfinished checkout relocation: an active or invalid
+relocation journal refuses both the report and `--fix`.
+
+`--fix` takes the publication-authority guard, then the child's record lock
+and the parent ID's record lock in a fixed path order, and proves everything
+again while holding both. Record creation takes the same parent-ID lock, so a
+parent record cannot appear between that final proof and the write. Taking the
+parent-ID lock can leave an empty lock file behind, the same residue as
+ordinary record removal. It removes only the `owner_ref` line, and
 verifies that no other field changed. Next to the record it writes the exact
 original bytes to a private `<id>.yaml.orphaned-owner-<digest>.bak`, plus a
 `.json` audit file containing the evidence and a UTC timestamp. The repair

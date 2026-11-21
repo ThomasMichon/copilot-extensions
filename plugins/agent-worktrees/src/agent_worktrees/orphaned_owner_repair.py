@@ -5,7 +5,8 @@ parent's tracking record (live or archived), checkout, branch and Git
 registration have all disappeared from this execution space, ordinary and
 retired-owner finalization cannot establish custody. This doctor repair proves
 that absence and, only with ``--fix``, removes the child's ``owner_ref`` line
-under the record lock, retaining an exact-bytes backup and a JSON audit entry.
+while holding both the child's and the parent ID's record locks, retaining an
+exact-bytes backup and a JSON audit entry.
 It never touches checkout content, branches, or any other record.
 """
 
@@ -17,6 +18,7 @@ import json
 import os
 import re
 import subprocess
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -261,6 +263,12 @@ def prove(record_id: str) -> dict[str, Any]:
     record = tracking.load_record(path)
     if record.worktree_id != record_id or not record.owner_ref:
         raise OrphanedOwnerRefused("child record has no owner reference to repair")
+    from . import checkout_relocation_state
+
+    try:
+        checkout_relocation_state.require_idle(path)
+    except ValueError as exc:
+        raise OrphanedOwnerRefused(f"child checkout relocation is not settled: {exc}") from exc
     owner = _parse_claim_ref(record.owner_ref)
     if (
         owner is None or not owner.machine or not owner.project
@@ -312,6 +320,7 @@ def prove(record_id: str) -> dict[str, Any]:
         raise OrphanedOwnerRefused("owner_ref removal would change other fields")
     return {
         "path": path, "observed": observed, "fixed": fixed, "project": project,
+        "parent_path": records / f"{owner.worktree_id}.yaml",
         "evidence": {
             "owner_ref": record.owner_ref, "parent_project": owner.project,
             "parent_worktree_id": owner.worktree_id,
@@ -338,16 +347,24 @@ def _write_private(path: Path, content: bytes) -> None:
 
 
 def apply(record_id: str) -> dict[str, Any]:
-    """Re-prove under the record lock, then remove only ``owner_ref``."""
+    """Re-prove under the child and parent-ID record locks, then remove only ``owner_ref``.
+
+    The parent-ID lock is the one ``create_new_record_if_absent`` takes, so no
+    parent record can appear between the final proof and the write. Holding it
+    may leave an empty lock file behind, the same residue as record removal.
+    """
     proof = prove(record_id)
-    path = proof["path"]
-    with pr_authority.guard(timeout=0), tracking._RecordLock(
-        path, blocking=False, require_sidecar=True,
-    ) as lock:
-        if not lock.acquired:
-            raise TimeoutError("tracking record is busy; repair refused")
+    path, parent = proof["path"], proof["parent_path"]
+    ordered = sorted({path, parent}, key=lambda item: os.path.normcase(os.path.abspath(item)))
+    with pr_authority.guard(timeout=0), ExitStack() as held:
+        for target in ordered:
+            lock = held.enter_context(
+                tracking._RecordLock(target, blocking=False, require_sidecar=True),
+            )
+            if not lock.acquired:
+                raise TimeoutError(f"tracking record lock {target.stem} is busy; repair refused")
         current = prove(record_id)
-        if current["observed"] != proof["observed"]:
+        if current["observed"] != proof["observed"] or current["parent_path"] != parent:
             raise ValueError("tracking record changed; inspect again before repair")
         digest = hashlib.sha256(current["observed"]).hexdigest()[:16]
         backup = path.with_name(f"{path.name}.orphaned-owner-{digest}.bak")
