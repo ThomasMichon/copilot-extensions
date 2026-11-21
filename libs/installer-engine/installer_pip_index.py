@@ -15,7 +15,7 @@ def _index(value: str | None) -> str | None:
     if not value:
         return None
     value = value.strip()
-    if any(character.isspace() for character in value):
+    if not value or any(character.isspace() for character in value):
         raise ValueError("Invalid pip index configuration")
     return value or None
 

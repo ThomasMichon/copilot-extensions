@@ -602,6 +602,12 @@ def config_inputs(
     explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
     if explicit:
         return [(base / explicit, False)]
+    system_flag = environment.get("UV_NO_SYSTEM_CONFIG")
+    true_values = {"y", "yes", "t", "true", "on", "1"}
+    false_values = {"n", "no", "f", "false", "off", "0"}
+    if system_flag is not None and system_flag.lower() not in true_values | false_values:
+        raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")
+    no_system = system_flag is not None and system_flag.lower() in true_values
     candidates = []
     project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
     if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
@@ -623,7 +629,7 @@ def config_inputs(
     if os.name == "nt":
         if environment.get("APPDATA"):
             candidates.append((Path(environment["APPDATA"]) / "uv" / "uv.toml", False))
-        if environment.get("SYSTEMDRIVE"):
+        if not no_system and environment.get("SYSTEMDRIVE"):
             candidates.append((
                 Path(environment["SYSTEMDRIVE"] + "\\") / "ProgramData" / "uv" / "uv.toml", False,
             ))
@@ -632,15 +638,16 @@ def config_inputs(
             Path(environment.get("HOME") or Path.home()) / ".config"
         )) / "uv" / "uv.toml"
         candidates.append((user, False))
-        system = Path("/etc/uv/uv.toml")
-        for config_directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
-            if not config_directory:
-                continue
-            candidate = base / config_directory / "uv" / "uv.toml"
-            if candidate.is_file():
-                system = candidate
-                break
-        candidates.append((system, False))
+        if not no_system:
+            system = Path("/etc/uv/uv.toml")
+            for config_directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
+                if not config_directory:
+                    continue
+                candidate = base / config_directory / "uv" / "uv.toml"
+                if candidate.is_file():
+                    system = candidate
+                    break
+            candidates.append((system, False))
     return [(path, is_project) for path, is_project in candidates if path.is_file()]
 
 

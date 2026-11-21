@@ -232,6 +232,80 @@ def test_effective_named_uv_default_respects_configuration_precedence(
     assert output.err == ""
 
 
+@pytest.mark.parametrize(("flag", "system_selected", "user_default"), [
+    (None, True, False), ("0", True, False), ("1", False, False), ("YES", False, True),
+], ids=["unset", "false", "true", "boolish"])
+def test_system_uv_flag_preserves_user_and_project_retention_inputs(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    flag: str | None, system_selected: bool, user_default: bool,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    project_config = project / "uv.toml"
+    project_config.write_text("", encoding="utf-8")
+    user = tmp_path / "user/uv/uv.toml"
+    user.parent.mkdir(parents=True)
+    user.write_text(
+        '[[index]]\nurl = "https://user.example/simple"\ndefault = true\n' if user_default else "",
+        encoding="utf-8",
+    )
+    system = project / "system/uv/uv.toml"
+    system.parent.mkdir(parents=True)
+    system.write_text(
+        '[[index]]\nurl = "https://system.example/simple"\ndefault = true\n', encoding="utf-8",
+    )
+    policy = reader._dependency_policy()
+    monkeypatch.setattr(policy._configuration, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    environment = {
+        "HOME": str(tmp_path / "home"), "XDG_CONFIG_HOME": str(tmp_path / "user"),
+        "XDG_CONFIG_DIRS": "system", "PIP_INDEX_URL": "https://pip.example/simple",
+    }
+    if flag is not None:
+        environment["UV_NO_SYSTEM_CONFIG"] = flag
+    inputs = policy._config_inputs([], environment, project)
+    assert (project_config, False) in inputs and (user, False) in inputs
+    assert ((system, False) in inputs) is system_selected
+    assert policy._config_inputs([], {**environment, "UV_CONFIG_FILE": str(system)}, project) == [
+        (system, False),
+    ]
+    monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
+    assert reader._uv_default(environment, project) is (system_selected or user_default)
+
+
+def test_system_uv_flag_rejects_invalid_values(reader: ModuleType, tmp_path: Path) -> None:
+    policy = reader._dependency_policy()
+    with pytest.raises(RuntimeError, match="UV_NO_SYSTEM_CONFIG"):
+        policy._config_inputs([], {"UV_NO_SYSTEM_CONFIG": "invalid"}, tmp_path)
+
+
+def test_system_uv_flag_keeps_windows_user_configuration(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = tmp_path / "user/uv/uv.toml"
+    user.parent.mkdir(parents=True)
+    user.write_text("", encoding="utf-8")
+    system = Path(str(tmp_path / "drive") + "\\") / "ProgramData/uv/uv.toml"
+    system.parent.mkdir(parents=True)
+    system.write_text("", encoding="utf-8")
+    policy = reader._dependency_policy()
+    monkeypatch.setattr(policy._configuration, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    inputs = policy._config_inputs([], {
+        "UV_ISOLATED": "1", "APPDATA": str(tmp_path / "user"),
+        "SYSTEMDRIVE": str(tmp_path / "drive"), "UV_NO_SYSTEM_CONFIG": "1",
+    }, tmp_path)
+    assert (user, False) in inputs and (system, False) not in inputs
+
+
+@pytest.mark.parametrize("value", [" ", "\t"], ids=["spaces", "tabs"])
+def test_whitespace_pip_environment_refuses_instead_of_falling_back(
+    reader: ModuleType, tmp_path: Path, value: str,
+) -> None:
+    with pytest.raises(ValueError):
+        reader.configured_index(
+            {"PIP_INDEX_URL": value}, home=tmp_path, prefix=tmp_path, global_files=[],
+        )
+
+
 def test_invalid_config_fails_without_exposing_values(
     reader: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     tmp_path: Path,

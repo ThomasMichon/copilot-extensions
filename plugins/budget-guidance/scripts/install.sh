@@ -39,8 +39,9 @@ _install_budget_guidance_package() {
     fi
     _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
     if [[ "$HAVE_UV" -eq 1 ]]; then
-        local uv_rc=0
-        invoke_uv_bootstrap_environment "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
+        local uv_rc=0 index_helper
+        index_helper="$(_budget_pip_index_helper)" || return 1
+        invoke_uv_bootstrap_environment "$VENV_PYTHON" -I "$(dirname "$index_helper")/installer_dependency_policy.py" \
             --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "${dependencies[@]}" "$PLUGIN_DIR" --quiet || uv_rc=$?
         for dependency in "${dependencies[@]}"; do _remove_budget_build_artifacts "$dependency" || return 1; done
         _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
@@ -332,6 +333,49 @@ _bootstrap_python() {
     resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt"
 }
 
+_budget_pip_index_helper() {
+    local helper="$SCRIPT_DIR/pip-index-config"
+    if [[ -f "$helper" ]] && ! grep -Fqx \
+        '<!-- VENDOR_POINTER: source=libs/installer-engine/installer_pip_index.py kind=file -->' "$helper"; then
+        printf '%s\n' "$helper"
+        return 0
+    fi
+    local canonical="$SCRIPT_DIR/../../../libs/installer-engine/installer_pip_index.py"
+    if [[ -z "$SOURCE_RUNTIME_IDENTITY" && -f "$helper" && -f "$canonical" &&
+          "$(basename "$(dirname "$PLUGIN_DIR")")" == plugins &&
+          -f "$PLUGIN_DIR/../../.github/plugin/marketplace.json" &&
+          -f "$SCRIPT_DIR/../../../tools/materialize_main.py" ]]; then
+        printf '%s\n' "$canonical"
+        return 0
+    fi
+    _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+    return 1
+}
+
+_materialize_budget_source_snapshot() {
+    local snapshot="$1" helper py
+    helper="$(_budget_pip_index_helper)" || return 1
+    [[ "$helper" != "$SCRIPT_DIR/pip-index-config" ]] || return 0
+    . "$SCRIPT_DIR/bootstrap-uv.sh"
+    py="$(_bootstrap_python)" || return 1
+    invoke_uv_bootstrap_environment "$py" -I -B - "$PLUGIN_DIR" "$snapshot" <<'PY'
+import sys
+from pathlib import Path
+
+plugin, destination = map(Path, sys.argv[1:])
+root = plugin.resolve().parents[1]
+sys.path.insert(0, str(root / "tools"))
+from materialize_main import materialize_file_pointers, materialize_installer_engine_ref_into
+
+results = materialize_file_pointers(destination, canonical_root=root)
+results.extend(materialize_installer_engine_ref_into(
+    source_consumer_dir=plugin, dest_consumer_dir=destination, canonical_root=root,
+))
+if any(line.startswith("SKIP ") for line in results):
+    raise RuntimeError("Canonical snapshot helper materialization refused")
+PY
+}
+
 _source_runtime_identity() {
     local py
     py="$(_bootstrap_python)" || return 1
@@ -480,14 +524,15 @@ _ensure_uv() {
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local py idx site_prefix=""
+    local py idx helper site_prefix=""
     if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
         site_prefix="$VIRTUAL_ENV"
     elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
         site_prefix="$CONDA_PREFIX"
     fi
     py="$(_bootstrap_python)" || return 1
-    idx="$(invoke_uv_bootstrap_environment "$py" -I -B "$SCRIPT_DIR/pip-index-config" \
+    helper="$(_budget_pip_index_helper)" || return 1
+    idx="$(invoke_uv_bootstrap_environment "$py" -I -B "$helper" \
         --site-prefix "$site_prefix")" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
@@ -660,6 +705,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$snap_tmp"
     cp -a "$PLUGIN_DIR/." "$snap_tmp/"
     if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
+    _materialize_budget_source_snapshot "$snap_tmp" || exit 1
     procutil="$(_budget_procutil_source)" || exit 1
     if [[ ! -d "$snap_tmp/libs/agent-procutil" ]]; then
         mkdir -p "$snap_tmp/libs"
