@@ -117,12 +117,40 @@ def has_retained_receiving_operation(
         return _classify_retained_receiving_operation(record, records)
 
 
-def _classify_retained_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
+def orphan_retains_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
+    """Classify receiving custody for a child whose creator is proven gone.
+
+    Receiving journal rows still refuse, but a non-receiving child no longer
+    needs its creator's ledger, which the caller has proven absent. Without
+    qualified native locking, the classifier's stable-snapshot checks (no
+    SQLite sidecar, identical identity, size and mtime around an immutable
+    read) stand in for the shared lock.
+    """
+    if not record.owner_ref or not record.creation_nonce:
+        return False
+    if os.name != "nt":
+        return _classify_retained_receiving_operation(record, records, require_parent=False)
+    path = records.parent / "workspace-creation.sqlite3"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("original receiving classification is redirected or unsupported")
+    stream = path.open("rb")
+    with stream, _original_snapshot_lock(stream, path):
+        return _classify_retained_receiving_operation(record, records, require_parent=False)
+
+
+def _classify_retained_receiving_operation(
+    record: tracking.WorktreeRecord, records: Path, *, require_parent: bool = True,
+) -> bool:
     path = records.parent / "workspace-creation.sqlite3"
     try:
         before = path.lstat()
     except FileNotFoundError:
-        _require_ordinary_parent(record)
+        if require_parent:
+            _require_ordinary_parent(record)
         return False
     sidecars = ("-journal", "-wal", "-shm")
     if (
@@ -168,7 +196,7 @@ def _classify_retained_receiving_operation(record: tracking.WorktreeRecord, reco
     if len(rows) > 1:
         raise ValueError("original receiving classification is ambiguous")
     receiving = any(row[1] is not None for row in rows)
-    if not receiving:
+    if not receiving and require_parent:
         _require_ordinary_parent(record)
     return receiving
 

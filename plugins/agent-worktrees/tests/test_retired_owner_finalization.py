@@ -602,3 +602,46 @@ def test_orphaned_owner_repair_refuses_unenumerable_sidecar(orphaned: SimpleName
         hidden.chmod(0o700)
     assert code == 1 and "(retired-parent/)" in report["error"]
 
+
+def _write_creation_journal(fixture: SimpleNamespace, facts: dict) -> None:
+    import sqlite3
+
+    connection = sqlite3.connect(fixture.ledger.parent.parent / "workspace-creation.sqlite3")
+    try:
+        connection.execute(
+            "CREATE TABLE creations(key_digest TEXT,version INTEGER,facts TEXT,status TEXT,worktree TEXT)"
+        )
+        connection.execute("INSERT INTO creations VALUES(?,?,?,?,?)", (
+            "original-key", 1, json.dumps(facts), "terminal", json.dumps({
+                "worktree": {"id": fixture.checkout.name, "creation_nonce": "backfilled-nonce"},
+            }),
+        ))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("journal", ["absent", "ordinary-row"])
+def test_orphaned_owner_repair_classifies_nonce_bearing_child_without_parent(
+    orphaned: SimpleNamespace, journal: str,
+) -> None:
+    orphaned.data["creation_nonce"] = "backfilled-nonce"
+    orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
+    if journal == "ordinary-row":
+        _write_creation_journal(orphaned, {})
+    code, report = _doctor(orphaned)
+    assert (code, report["error"], report["repairable"]) == (0, None, True)
+    code, report = _doctor(orphaned, "--fix")
+    assert (code, report["repaired"]) == (0, True)
+    assert _run(orphaned, recover_retired_owner=None) == 0
+
+
+def test_orphaned_owner_repair_refuses_journal_receiving_custody(orphaned: SimpleNamespace) -> None:
+    orphaned.data["creation_nonce"] = "backfilled-nonce"
+    orphaned.ledger.write_text(yaml.safe_dump(orphaned.data), encoding="utf-8")
+    _write_creation_journal(orphaned, {"receiving_allocation": {"origin": orphaned.data["owner_ref"]}})
+    before = orphaned.ledger.read_bytes()
+    for extra in ((), ("--fix",)):
+        code, report = _doctor(orphaned, *extra)
+        assert code == 1 and "receiving allocation metadata" in report["error"]
+    assert orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)

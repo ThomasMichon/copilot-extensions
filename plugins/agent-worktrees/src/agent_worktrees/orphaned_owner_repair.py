@@ -255,9 +255,13 @@ def prove(record_id: str) -> dict:
     if record.is_paired or record.pair_ref:
         raise OrphanedOwnerRefused("paired records keep their reciprocal relation")
     config = execution_spaces.project_record_config(record)
-    if record.receiving_allocation_present or receiving_allocation.has_retained_receiving_operation(
-        record, path.parent,
-    ):
+    try:
+        receiving = record.receiving_allocation_present or (
+            receiving_allocation.orphan_retains_receiving_operation(record, path.parent)
+        )
+    except ValueError as exc:
+        raise OrphanedOwnerRefused(f"receiving custody cannot be classified: {exc}") from exc
+    if receiving:
         raise OrphanedOwnerRefused("child retains receiving allocation metadata")
     record_reporting.require_current_subject(record, config)
     if not retained_checkout.is_local(record, config):

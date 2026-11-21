@@ -117,6 +117,14 @@ local configuration. The repair refuses if any of these is present:
 Missing or unreadable evidence also refuses; it never counts as proof of
 absence.
 
+Receiving custody is classified without the parent's ledger, which the repair
+has just proven absent. A creation-journal row recording a receiving
+allocation for the child refuses. A child with a creation nonce (including a
+backfilled legacy nonce) and no journal, or only an ordinary journal row, is
+accepted. Where qualified native locking is unavailable, the journal is read
+as an immutable snapshot that must have no SQLite sidecar files and the same
+identity, size and modification time before and after the read.
+
 Ordinary record removal leaves the sidecar lock behind, and handoff sidecars
 can outlive their record as empty directory trees. An unheld empty lock and a
 sidecar made only of empty directories therefore do not refuse. They are listed
