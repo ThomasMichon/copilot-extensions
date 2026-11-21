@@ -1641,6 +1641,16 @@ increment, not fewer workflow invocations, broader/native execution,
 every-release observation or full-census acceptance. #13598 and the existing
 workflow, native/candidate and retained-custody owners remain separate.
 
+The first hosted head `71d0bc765ea9e4bfd58ebc838b8740dfde06404e` passes
+full unit qualification, but both source and trusted guards correctly reject
+the four-space-indented manifest at 1,049,359 bytes against the unchanged
+1,048,576-byte cap. Two-space serialization reduces it to 1,018,663 bytes.
+Direct comparison proves identical decoded contents and canonical manifest
+digest; every node, source hash, target, budget and helper obligation remains.
+This fixes the caused guard failure without a size exemption, reduced coverage
+or altered eligibility. The changed head still requires fresh review and
+complete required CI.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
