@@ -62,6 +62,12 @@ def test_powershell_writer_ignores_path_python_and_foreign_venv(tmp_path: Path, 
         "PATH": str(scripts) + os.pathsep + os.environ.get("PATH", ""),
         "CUE_IDENTITY": str(identity), "CUE_ORIGINAL": str(original),
     }
+    bootstrap = env.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON")
+    installed = tmp_path / ".budget-guidance"
+    installed.mkdir()
+    (installed / "deploy-manifest.json").write_text(json.dumps({
+        "service": "budget-guidance", "bootstrap_python": bootstrap,
+    }))
     result = subprocess.run(
         [shell, "-NoProfile", "-File", str(entry)],
         input=json.dumps({"sessionId": "test-session", "cwd": str(tmp_path)}),
@@ -104,7 +110,7 @@ def test_powershell_writer_bounds_maximum_stdin_delivery_to_stalled_child(tmp_pa
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("prerequisite", ["uv", "managed-python", "request"])
+@pytest.mark.parametrize("prerequisite", ["uv", "managed-python", "request", "bootstrap"])
 def test_powershell_writer_missing_prerequisite_never_uses_path_python(
     tmp_path: Path, host: str, prerequisite: str,
 ) -> None:
@@ -131,8 +137,11 @@ def test_powershell_writer_missing_prerequisite_never_uses_path_python(
         )
     elif prerequisite == "managed-python":
         env["UV_PYTHON_INSTALL_DIR"] = str(tmp_path / "unprepared-managed-store")
-    else:
+    elif prerequisite == "request":
         (payload / "scripts/bootstrap-python-version.txt").unlink()
+    else:
+        env.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON")
+        env["USERPROFILE"] = str(tmp_path)
     result = subprocess.run(
         [shell, "-NoProfile", "-File", str(entry)],
         input="{}", text=True, capture_output=True, env=env, timeout=9, **no_window_kwargs(),
@@ -169,7 +178,8 @@ def test_powershell_selector_capture_shares_the_writer_deadline(tmp_path: Path, 
     )
     # A direct, descendant-free surrogate isolates the native capture clock.
     # Real uv/version/request/environment selection is exercised separately.
-    (scripts / "bootstrap-uv.ps1").write_text(
+    provider = scripts / "bootstrap-uv.ps1"
+    provider.write_text(provider.read_text() +
         "function Resolve-UvBootstrapPython {\n"
         "param($RequestFile, $Operation, [switch]$IsolateSelection, $InvokeCaptured)\n"
         "foreach ($stage in @(1, 2)) {\n"
@@ -181,6 +191,9 @@ def test_powershell_selector_capture_shares_the_writer_deadline(tmp_path: Path, 
         **os.environ, "COPILOT_PLUGIN_ROOT": str(payload),
         "CUE_PYTHON": str(Path(getattr(sys, "_base_executable", sys.executable)).resolve()),
         "CUE_PHASES": str(phases), "CUE_WORKLOAD": workload,
+        "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": str(
+            Path(getattr(sys, "_base_executable", sys.executable)).resolve()
+        ),
     }
     started = time.monotonic()
     result = subprocess.run(
@@ -248,6 +261,7 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
     environment.update(
         COPILOT_PLUGIN_ROOT=str(payload), UV_PYTHON_INSTALL_DIR=str(managed),
         UV_CACHE_DIR=str(tmp_path / "cold-cache"),
+        COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON=str(private / source.name),
     )
     kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -309,10 +323,12 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
             assert stderr.strip() == b"budget-guidance: session cue could not be written"
             assert not writer.exists()
     finally:
+        cleanup_deadline = time.monotonic() + 5
         job.terminate_and_wait(5)
-        process.wait(timeout=5)
+        process.wait(timeout=max(0.01, cleanup_deadline - time.monotonic()))
         for handle in handles:
-            assert kernel.WaitForSingleObject(handle, 0) == 0, "fixture cleanup did not settle owned process"
+            remaining = max(0, int((cleanup_deadline - time.monotonic()) * 1000))
+            assert kernel.WaitForSingleObject(handle, remaining) == 0, "fixture cleanup did not settle owned process"
             kernel.CloseHandle(handle)
         for stream in (process.stdin, process.stdout, process.stderr):
             if stream is not None:

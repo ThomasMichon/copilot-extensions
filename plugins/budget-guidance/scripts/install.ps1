@@ -1174,6 +1174,7 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+    bootstrap_python = $pythonCmd
 }
 if (-not $SourceRuntimeIdentity) { Test-SourceRuntimeUnchanged }
 if ($SourceRuntimeIdentity) {

@@ -10,6 +10,7 @@ on:
       - libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
       - libs/agent-procutil/tests/test_daemon_python_selection.py
       - libs/installer-engine/bootstrap-uv.ps1
+      - libs/installer-engine/bootstrap_uv_capture.py
       - libs/installer-engine/bootstrap-uv.sh
       - libs/installer-engine/installer_dependency_arguments.py
       - libs/installer-engine/installer_dependency_config.py
@@ -107,10 +108,10 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
           for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall','budget-provider','budget-cue')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16,'budget-provider':2,'budget-cue':16};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':16,'budget-provider':2,'budget-cue':18};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, nine installer, four prerequisite-lock, 16 uninstall, two native provider and 16 managed cue controls passed without skips')"
+          print('29 command, nine installer, four prerequisite-lock, 16 uninstall, two native provider and 18 managed cue controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

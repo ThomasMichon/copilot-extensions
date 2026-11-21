@@ -25,6 +25,8 @@ def prepare_cue_assets(payload: Path) -> None:
     for name, owner in (
         ("bootstrap-uv.ps1", "installer-engine"),
         ("versioned_runtime_native.ps1", "versioned-runtime"),
+        ("bootstrap_uv_capture.py", "installer-engine"),
+        ("daemon_instance_runtime.pyz", "agent-procutil"),
     ):
         source = PLUGIN / "scripts" / name
         if not source.is_file():
@@ -63,4 +65,5 @@ def managed_cue_environment() -> dict[str, str]:
     )
     if selected.returncode:
         _unavailable("cue wrapper's declared managed interpreter is not prepared")
+    environment["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = selected.stdout.strip()
     return environment
