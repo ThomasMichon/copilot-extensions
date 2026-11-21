@@ -290,7 +290,10 @@ runpy.run_module("agent_machines", run_name="__main__")
 
 
 @pytest.mark.timeout(150)
-@pytest.mark.parametrize("failure", ["storage-unwritable", "startup-timeout"])
+@pytest.mark.parametrize("failure", [
+    "storage-unwritable", "startup-timeout",
+    pytest.param("collection-child-timeout", id="collector_deadline"),
+])
 def test_native_failure_is_not_reported_as_success_and_remains_removable(
     native_root: Path, native_scope: Path, failure: str,
 ) -> None:
@@ -301,6 +304,8 @@ def test_native_failure_is_not_reported_as_success_and_remains_removable(
         fixture.StartupDelayInstallation(installed, times, expires, marker)
         if failure == "startup-timeout" else fixture.FiniteInstallation(installed, times, expires)
     )
+    if failure == "collection-child-timeout":
+        fixture.stall_collection_child(installed, marker)
     owner = enrollment.Enrollment(first, selector=lambda *_args, **_kwargs: first)
     backend = cast(NativePair, owner.backend)
     assert not backend.call("read")["configured"]
@@ -335,6 +340,11 @@ def test_native_failure_is_not_reported_as_success_and_remains_removable(
             if failure == "startup-timeout":
                 assert marker.is_file() and int(marker.read_text()) > 0
                 assert observed["last_result"] is None and observed["last_run"] is None
+                assert requests == []
+            elif failure == "collection-child-timeout":
+                assert marker.is_file() and int(marker.read_text()) > 0
+                assert not (Path("/proc") / marker.read_text()).exists()
+                assert observed["last_result"] == {"result": "exit-code", "code": "1", "status": "124"}
                 assert requests == []
             else:
                 assert observed["last_result"]["result"] == "exit-code"
@@ -410,4 +420,139 @@ def test_persistent_late_start_coalesces_missed_triggers_without_replay(
                 "resumed": resumed.isoformat(), "observation": observed,
             })
     finally:
+        _cleanup(owner, native_scope, native_root / "cleanup.json")
+
+
+@pytest.mark.timeout(150)
+def test_second_native_start_during_actual_collection_does_not_duplicate(
+    native_root: Path, native_scope: Path,
+) -> None:
+    installed = fixture.installed(native_root / "runtime", "1.0")
+    times, expires = fixture.calendar(datetime.now(timezone.utc))
+    delay = timedelta(seconds=40)
+    times, expires = (times[0] + delay, times[1] + delay), expires + delay
+    first = fixture.FiniteInstallation(installed, times, expires)
+    owner = enrollment.Enrollment(first, selector=lambda *_args, **_kwargs: first)
+    backend = cast(NativePair, owner.backend)
+    assert not backend.call("read")["configured"]
+    fixture.write_receipt(native_root / "fixture-owner.json", {
+        **first.receipt(owner.owner), "scenario": "active-collection-overlap", "enabled": True,
+    })
+    overlap: list[dict[str, Any]] = []
+
+    def request_overlapping_start() -> None:
+        # The real observer is waiting for this response, not a pre-start child.
+        before = backend._properties(backend.units[0])
+        assert before["ActiveState"] == "activating"
+        assert int(before["MainPID"]) > 0 and before["InvocationID"]
+        backend._command("start", backend.units[0], "--no-block")
+        after = backend._properties(backend.units[0])
+        assert after["ActiveState"] == "activating"
+        assert after["MainPID"] == before["MainPID"]
+        assert after["InvocationID"] == before["InvocationID"]
+        overlap.append({
+            "pid": int(after["MainPID"]), "invocation": after["InvocationID"],
+            "before": before["ActiveState"], "after": after["ActiveState"],
+        })
+
+    try:
+        with observe.listener(
+            observe.response(observe.QUALIFYING_BODY), count=2,
+            before_response=request_overlapping_start,
+        ) as (port, requests):
+            store = _store(native_root / "store", port)
+            desired = {
+                "store": str(store), "policy_token": health_run.policy_preview(store)[2],
+                "account_uid": enrollment.local_uid(), "enabled": True,
+            }
+            preview = owner.configure(desired)
+            result = owner.configure(desired, apply=True, expected=preview["preview_token"])
+            assert result["status"] == "converged" and result["enabled"], result
+            assert datetime.now(timezone.utc) < times[0]
+            backend._command("start", backend.units[0], timeout=60)
+            time.sleep(3)
+            observed = backend.call("read")
+            assert len(requests) == len(overlap) == 1
+            assert not observed["instances"] and observed["enabled"]
+            assert observed["last_result"] == {"result": "success", "code": "1", "status": "0"}
+            assert datetime.now(timezone.utc) < times[0]
+            records = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in store.glob("*.json") if path.name != "policy.json"
+            ]
+            assert len(records) == 1 and records[0]["revision"] == 1
+            assert records[0]["observation"]["domains"]["local_listener"]["state"] == "ok"
+            fixture.write_receipt(native_root / "active-overlap.json", {
+                "requests": len(requests), "revisions": records[0]["revision"],
+                "overlap": overlap, "observation": observed,
+            })
+    finally:
+        _cleanup(owner, native_scope, native_root / "cleanup.json")
+
+
+@pytest.mark.timeout(150)
+def test_unknown_native_client_settlement_fences_fresh_cli_until_owner_cleanup(
+    native_root: Path, native_scope: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import owned_process
+
+    first = fixture.installed(native_root / "runtime", "1.0")
+    owner = enrollment.Enrollment(first, selector=lambda *_args, **_kwargs: first)
+    backend = cast(NativePair, owner.backend)
+    assert not backend.call("read")["configured"]
+    store = _store(native_root / "store")
+    fixture.write_receipt(native_root / "fixture-owner.json", {
+        "units": list(backend.units), "owner": owner.owner, "runtime": str(first.root),
+        "fault": "withheld-native-client-settlement-after-real-reload",
+    })
+    original = owned_process.run_caller_owned
+    withheld: list[int] = []
+    cleanup = owned_process.OwnedCleanupError(None, cleanup_retry=lambda _deadline: None)
+
+    def unconfirmed(argv: list[str], **kwargs: Any) -> Any:
+        if argv[-1] == "daemon-reload" and not withheld:
+            # The real bounded client settles; only its acknowledgement is faulted.
+            kwargs.pop("on_settled")
+            completed = original(argv, **kwargs)
+            assert completed.returncode == 0
+            withheld.append(completed.returncode)
+            raise cleanup
+        return original(argv, **kwargs)
+
+    try:
+        desired = {
+            "store": str(store), "policy_token": health_run.policy_preview(store)[2],
+            "account_uid": enrollment.local_uid(), "enabled": False,
+        }
+        preview = owner.configure(desired)
+        with monkeypatch.context() as fault:
+            fault.setattr(owned_process, "run_caller_owned", unconfirmed)
+            result = owner.configure(desired, apply=True, expected=preview["preview_token"])
+        assert withheld == [0] and result["status"] == "unknown"
+        assert owner.read()["pending"]["native_unsettled"]
+        prefix = _peer_launch.retained_runtime_prefix(
+            first.root, first.python, "agent_machines", runtime_identity=first.identity,
+        )
+        refused = run_caller_owned(
+            [*prefix, "health", "job", "converge"], timeout=65,
+            max_stdout_bytes=64 * 1024, max_stderr_bytes=4096, cwd=first.slot,
+        )
+        assert refused.returncode == 2
+        assert "native-health-task-cleanup-unconfirmed" in refused.stdout + refused.stderr
+        assert owner.read()["pending"]["native_unsettled"]
+        with pytest.raises(ValueError, match="reference transaction is pending"):
+            owner.leases.read_runtime_references(first.root)
+        assert enrollment.settle_native_cleanup(owner)
+        assert not owner.read()["pending"]["native_unsettled"]
+        recovered = _cli(first, "job", "converge")
+        assert recovered["status"] == "disabled" and not recovered["recovery_required"]
+        assert owner.read()["pending"] is None
+        assert owner.leases.read_runtime_references(first.root)[enrollment.REFERENCE] == ["1.0"]
+        fixture.write_receipt(native_root / "client-settlement.json", {
+            "fault": "withheld-acknowledgement", "native_client_exit": withheld[0],
+            "fresh_cli_exit_while_unconfirmed": refused.returncode,
+            "owner_cleanup_confirmed": True, "recovered": recovered,
+        })
+    finally:
+        enrollment.settle_native_cleanup(owner)
         _cleanup(owner, native_scope, native_root / "cleanup.json")

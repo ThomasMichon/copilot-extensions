@@ -273,6 +273,11 @@ _bootstrap_find_uv() {
     return 1
 }
 
+_bootstrap_uv_python() (
+    unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON
+    exec "$UV" python "$@"
+)
+
 if [ "${1-}" = --system-python ]; then
     _bootstrap_progress '--system-python is a Windows WinGet bootstrap mode; unsupported on POSIX.' failed
     exit 2
@@ -534,9 +539,9 @@ if [ -n "$toolchain_config" ] || [ "$toolchain_only" -eq 1 ]; then
         exit 2
     fi
 fi
-if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
-    "$UV" python install --no-bin --no-registry 3.11
-    PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11)"
+if ! PYTHON="$(_bootstrap_uv_python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
+    _bootstrap_uv_python install --no-bin --no-registry 3.11
+    PYTHON="$(_bootstrap_uv_python find --no-project --system --managed-python --no-python-downloads 3.11)"
 fi
 export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$PYTHON"
 

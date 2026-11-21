@@ -746,15 +746,29 @@ def test_managed_python_inspection_never_acquires_or_uses_ambient_python(
     )
     uv.write_text(
         f"Add-Content -LiteralPath {_quote(trace)} -Value ($args -join ' ')\n"
+        "foreach ($key in @('UV_PYTHON','UV_PYTHON_PREFERENCE','UV_MANAGED_PYTHON','UV_NO_MANAGED_PYTHON')) {\n"
+        " if ($null -ne [Environment]::GetEnvironmentVariable($key, 'Process')) {\n"
+        "  throw 'inherited Python selector reached uv'\n"
+        " }\n"
+        "}\n"
+        "if ($env:UV_PYTHON_INSTALL_DIR -cne 'retained-custom-store') { throw 'managed storage changed' }\n"
+        "if ($env:UV_PYTHON_DOWNLOADS -cne 'never') { throw 'download policy changed' }\n"
         "if ($args[1] -eq 'install') { throw 'inspection attempted acquisition' }\n"
         + response + "\n", encoding="utf-8",
     )
     script = (
         "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
         "function Get-Command { throw 'inspection attempted ambient discovery' }\n"
+        "$env:UV_PYTHON = 'foreign-python'; $env:UV_PYTHON_PREFERENCE = 'only-system'\n"
+        "$env:UV_MANAGED_PYTHON = 'false'; $env:UV_NO_MANAGED_PYTHON = 'true'\n"
+        "$env:UV_PYTHON_INSTALL_DIR = 'retained-custom-store'; $env:UV_PYTHON_DOWNLOADS = 'never'\n"
         "$selected = $null; $failure = $null\n"
         f"try {{ $selected = Find-BootstrapPython {_quote(uv)} -Operation Inspect }}\n"
         "catch { $failure = $_.Exception.Message }\n"
+        "if ($env:UV_PYTHON -cne 'foreign-python' -or $env:UV_PYTHON_PREFERENCE -cne 'only-system' -or\n"
+        "    $env:UV_MANAGED_PYTHON -cne 'false' -or $env:UV_NO_MANAGED_PYTHON -cne 'true') {\n"
+        " throw 'inspection changed caller selectors'\n"
+        "}\n"
         "@{python=$selected;error=$failure} | ConvertTo-Json -Compress\n"
     )
     result = subprocess.run(
@@ -777,6 +791,32 @@ def test_managed_python_inspection_never_acquires_or_uses_ambient_python(
             assert "setup" in observed["error"].lower()
         if scenario == "blocked":
             assert "blocked by operating-system policy" in observed["error"]
+
+
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+def test_managed_python_inspection_real_uv_ignores_conflicting_inherited_selectors(
+    tmp_path: Path, host_name: str,
+) -> None:
+    host, uv = shutil.which(host_name), shutil.which("uv")
+    if host is None or uv is None:
+        pytest.skip("native PowerShell host and uv are required")
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "$env:UV_PYTHON_PREFERENCE='only-system'; $env:UV_NO_MANAGED_PYTHON='true'\n"
+        f"$env:UV_PYTHON_INSTALL_DIR={_quote(tmp_path / 'managed')}\n"
+        f"$env:UV_CACHE_DIR={_quote(tmp_path / 'cache')}; $env:UV_PYTHON_DOWNLOADS='never'\n"
+        f"try {{ Find-BootstrapPython {_quote(uv)} -Operation Inspect; throw 'missing interpreter accepted' }}\n"
+        "catch { [Console]::Out.Write($_.Exception.Message) }\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "No interpreter found" in result.stdout
+    assert "cannot be used with" not in result.stdout
+    assert not list((tmp_path / "managed").glob("*"))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter protocol")
