@@ -42,6 +42,9 @@ It does not discover PATH/registry Python, acquire uv or install Python.
 Missing prerequisites refuse before toolkit staging or cloning, with an
 instruction to run explicit Manager setup. Normal setup retains its existing
 preparation behavior; neither route assumes a uv interpreter-storage location.
+Inherited Python-selection/preference switches cannot contradict this explicit
+request. Their caller values are restored even after a refusal; configured
+managed storage and download policy are retained.
 
 Recovery fetches a fresh upstream Main toolkit and never invokes an installed
 dispatcher on acquisition failure. Preview may clone and export disposable

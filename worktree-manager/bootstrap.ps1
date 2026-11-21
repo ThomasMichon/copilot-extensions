@@ -516,43 +516,60 @@ function Find-BootstrapPython {
         [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Prepare'
     )
     $ErrorActionPreference = 'Continue'
-    $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
-    $lookupExit = $LASTEXITCODE
-    if ($lookupExit -eq 0) {
-        $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
-        if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
-            if ($Operation -eq 'Inspect') {
-                $selected = [string]$output[0]
-                $root = [IO.Path]::GetPathRoot($selected)
-                if (-not [IO.Path]::IsPathRooted($selected) -or -not $root -or
-                    ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
-                        ($root -in @('\', '/') -or $root -match '^[A-Za-z]:$'))) {
-                    throw 'Manager managed Python inspection returned an invalid executable.'
+    # Inherited switches must not contradict this bootstrap's explicit Python request.
+    $selectors = @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON')
+    $savedSelectors = @{}
+    foreach ($key in $selectors) {
+        $savedSelectors[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+    }
+    try {
+        foreach ($key in $selectors) { Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue }
+        $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
+        $lookupExit = $LASTEXITCODE
+        if ($lookupExit -eq 0) {
+            $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+            if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
+                if ($Operation -eq 'Inspect') {
+                    $selected = [string]$output[0]
+                    $root = [IO.Path]::GetPathRoot($selected)
+                    if (-not [IO.Path]::IsPathRooted($selected) -or -not $root -or
+                        ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+                            ($root -in @('\', '/') -or $root -match '^[A-Za-z]:$'))) {
+                        throw 'Manager managed Python inspection returned an invalid executable.'
+                    }
+                    return Resolve-BootstrapExecutable $selected
                 }
-                return Resolve-BootstrapExecutable $selected
+                return [string]$output[0]
             }
-            return [string]$output[0]
+            throw 'Manager Python lookup returned an invalid executable.'
         }
-        throw 'Manager Python lookup returned an invalid executable.'
+        if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
+            throw ('Manager managed Python lookup is blocked by operating-system policy: ' + ($lookup -join "`n"))
+        }
+        if ($Operation -eq 'Inspect') {
+            throw ('Recovery requires prepared uv-managed Python 3.11; run explicit Manager setup first. ' +
+                'No interpreter was installed. Lookup failed: ' + ($lookup -join "`n"))
+        }
+        & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+        if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
+        $python = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
+        }
+        $python = @($python | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+        if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
+            throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
+        }
+        return [string]$python[0]
+    } finally {
+        foreach ($key in $selectors) {
+            if ($null -eq $savedSelectors[$key]) {
+                Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($key, $savedSelectors[$key], 'Process')
+            }
+        }
     }
-    if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
-        throw ('Manager managed Python lookup is blocked by operating-system policy: ' + ($lookup -join "`n"))
-    }
-    if ($Operation -eq 'Inspect') {
-        throw ('Recovery requires prepared uv-managed Python 3.11; run explicit Manager setup first. ' +
-            'No interpreter was installed. Lookup failed: ' + ($lookup -join "`n"))
-    }
-    & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
-    if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-    $python = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
-    }
-    $python = @($python | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
-    if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
-        throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
-    }
-    return [string]$python[0]
 }
 
 if ($args -ccontains '--recover-source' -or $args -ccontains '--describe-recovery-source') {
