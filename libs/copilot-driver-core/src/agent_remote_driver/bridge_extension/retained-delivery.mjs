@@ -251,7 +251,8 @@ export function createRetainedInbox({
         onConsumed(sid, receipt.message_id);
         await report(receipt, "consumed");
         observed.add(receipt.message_id);
-      } else {
+      } else if (receipt.handoff_started_at !== null) {
+        // An offered snapshot may predate a concurrent begin and its live input.
         forgetNativeInput(sid, receipt.message_id);
       }
     };

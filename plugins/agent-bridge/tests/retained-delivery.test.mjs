@@ -862,6 +862,33 @@ for (const failure of ["rejected", "pending"]) {
   });
 }
 
+test("a stale offered recovery reply preserves input observed after the original begin", async () => {
+  const f = fixture();
+  f.capabilities.compatible_native_inbox = 1;
+  Object.assign(f.add(), {
+    handoff_id: "handoff-1", handoff_stage: "offered",
+    consumer: { session_id: sid, incarnation: "original-consumer" },
+  });
+  const owner = f.consumer("original-consumer", { receivingApi: "native-sdk-v1" });
+  const observer = f.consumer("observer", { receivingApi: "native-sdk-v1" });
+  f.session.getEvents = async () => { throw new Error("history unavailable"); };
+  f.after = async (method, path) => {
+    if (method === "GET" && path.includes("/recovery?")) {
+      f.after = null;
+      await owner.tick(sid);
+      observer.observe(sid, f.event());
+    }
+  };
+  await observer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  await observer.tick(sid, { allowSend: false });
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.historyReads, 0);
+  owner.close();
+  observer.close();
+});
+
 test("live input beyond an older history page settles without skipping historical recovery", async () => {
   const f = fixture();
   f.capabilities.compatible_native_inbox = 1;
