@@ -72,6 +72,7 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 | `digest_date` / `sink` | Digest mode only: day and routed sink id for the daily chronicle. |
 | `digest_template` | Digest mode only: compact daily-log template with tokens `{date} {machine} {sink} {session_count} {sessions}`. |
 | `sessions[].segment_ref` | Digest mode only: reserved `<parent_session_id>:<segment_index>` identity. Preserve it in JSON results if present. |
+| `sessions[].metrics` | Optional caller-supplied `agent-logger metrics` block for this session (kickoff, wall-clock and working seconds, turn counts). When present, quote its values verbatim rather than re-deriving them; `null` or absent means no measurement was supplied -- never present an estimate as one. |
 | `existing_log_path` | If present, a log already exists for this session -- see [Existing logs](#existing-logs). |
 | `output_root` | Root directory for emitted logs. |
 | `target_log_path` | Optional exact target for `single` mode, prepared and validated by the caller. When present, use it verbatim instead of deriving a path. |
