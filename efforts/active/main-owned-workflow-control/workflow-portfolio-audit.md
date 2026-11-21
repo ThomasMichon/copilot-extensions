@@ -2049,6 +2049,57 @@ source CI remain required. This bounded census increment is not native,
 every-release, full-census, workflow-count or whole-flow qualification.
 Existing shared workflow owners and every retained custody hold remain.
 
+Source #13884 merges at `2026-11-21T11:24:18Z` as
+`5a2410ebb51119343ee3366a6f87dcfc4bb9ba67`. Copilot approval `6004860064`
+targets exact published head `29e3cfcfbe4234a91d49c70b54bb16bc7c9c56ab`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44898414082` and trusted metadata CI `44898414375` pass.
+Unit job `136828924843` freshly qualifies the complete packet from
+`11:18:15Z` to `11:21:24Z`, then uploads its evidence. Seven fresh live scoped
+reads through the source merge-time verifier precede the normal managed
+Maintainer merge; no failing CI is bypassed. Closing references are empty and
+parent #6237 stays open. The full canonical parent is reread and only this
+finite admission item is resolved. Continue the retained census and separately
+accepted workflow reductions; broader native, every-release, full-census,
+whole-flow and retained-custody acceptance remain open.
+
+### November 21 dependency release-age unit admission
+
+The original dependency-age suite collects 203 cases. Thirteen exact original
+functions provide 58 in-process release-age controls. Their adapter copies no
+assertions and changes no original test, fixture, scanner or installer policy.
+Collection verifies every function object and parameter identity. All 145
+remaining originals stay outside the packet, including repository-inventory,
+source-attribution, transport and real native-toolchain controls; those
+residuals are not all classified as native or silently waived.
+
+Selected cases retain the inclusive seven-day boundary, unknown/naive/future
+timestamp refusal, newest-file/yanked metadata rejection, Python literal floors
+and satisfiability, controlled npm release metadata, and UV duration/absolute
+cutoff and package/pip/index-override refusal. The `native_uv` names describe
+settings evaluated in-process, not native execution. The original unselected
+npm-toolchain skip marker still observes executable presence during import.
+No npm/UV/installer process, registry query, checkout inventory or installation
+preparation executes. Existing canonical policy helpers are only imported.
+
+All 58 pass the actual `UnitRun` effect auditor with zero prohibited effects
+and their own production call-phase coverage. The complete observed Python
+read closure has twelve inputs, all hash-bound; only the adapter and original
+test module are new sources. Focused audited execution takes 2.937 development
+seconds, not full-packet timing. The existing parameter-strategy warning remains
+visible; no marker, eligibility rule, dependency-age rule or deadline changes.
+
+Positive admission adds 58 nodes, two source hashes and one production coverage
+target, retaining every current Dev node, digest and target: 6,469 nodes,
+1,044 sources and 436 targets. The dependency-age source was already admitted.
+All 88 release-helper decisions, the profile and 300-second packet budget
+remain unchanged. The manifest is 1,036,312 bytes under the existing cap, with
+unchanged unindented node entries and source-map layout. Whole-file strict
+typing passes Linux and Windows targets, and fatal Ruff checks pass. Complete
+current-head review and Linux source CI remain required. This bounded census
+increment is not registry, installed/native, every-release, full-census,
+workflow-count or whole-flow qualification. Existing owners and custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
