@@ -15,33 +15,26 @@ for value in paths:
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 print(Path(sys.executable).resolve(strict=True))
 '@
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+    $capture = {
+        param($FilePath, $ArgList, $Environment)
+        $nativeError = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+            -Environment $Environment -ErrorOutput ([ref]$nativeError)
+        [pscustomobject]@{ExitCode=$LASTEXITCODE; Stdout=[string]$output; Stderr=$nativeError}
     }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
-                    $candidates += $match.Groups[1].Value
-                }
-            }
-        } catch { }
+    $bootstrap = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $PSScriptRoot 'bootstrap-python-version.txt') `
+        -InvokeCaptured $capture -Operation Inspect -IsolateSelection
+    if ($bootstrap.Status -cne 'selected') {
+        throw ('Uninstall requires prepared managed Python; run explicit setup: ' + $bootstrap.Reason)
     }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-                return $selected.Trim()
-            }
-        } catch { }
+    $nativeError = ''
+    $selected = Invoke-Hidden -FilePath $bootstrap.Python -ArgList @(
+        '-I', '-B', '-c', $probe, $InstallRoot, $bootstrap.Python
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+        return $selected.Trim()
     }
     return $null
 }
@@ -53,7 +46,7 @@ function Invoke-FiniteRuntimeUninstall {
         $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
     }
     $python = Get-FiniteUninstallPython -InstallRoot $InstallRoot
-    if (-not $python) { throw 'Runtime uninstall requires an existing external Python 3.10+ outside runtime and prefix closure' }
+    if (-not $python) { throw 'Runtime uninstall requires prepared managed Python outside runtime and prefix closure' }
     $mode = if ($Check) { '--check' } else { '--remove-runtime' }
     $output = Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', $helper, '--payload-root', (Split-Path -Parent $PSScriptRoot),

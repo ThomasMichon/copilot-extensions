@@ -41,8 +41,8 @@ Missing uv or an unprepared runtime reports setup instructions. `stamp` still
 creates a source snapshot and command, but first command use no longer performs
 installation: invoke the snapshot's `scripts/install.* provision` explicitly.
 Retained completed environments are not relabeled or deleted by this launch
-change. Startup/publication, posture-guidance and removal helper migration
-remain separate from this command/setup slice.
+change. Startup/publication and posture-guidance helper migration remain
+separate from these command/setup and removal boundaries.
 
 Both native installers accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). The verified
@@ -59,6 +59,13 @@ runtime slots, snapshots, selectors, generated hook/resolver files and deploymen
 metadata, retaining configuration, data and unknown files. It is a CLI-only
 plugin and does not stop a daemon. Live consumers, linked roots, foreign
 manifests and held runtime/snapshot/publication custody refuse removal.
+Both native removal adapters inspect the declared, already-prepared managed
+Python through uv. They do not enumerate PATH Python or registry launchers,
+download an interpreter or fall back when prerequisites are missing. The
+selected executable, prefixes and resolved aliases must remain outside the
+entire runtime removal closure. Missing prerequisites require explicit setup;
+uninstall never repairs them. PowerShell finite cleanup is native Windows,
+while POSIX cleanup uses its native shell.
 The payload packages the canonical finite-removal helper, native engine and
 installer lifecycle SDK; its version-1 generation-selection/catalog behavior is
 retained, with the explicit command-preparation boundary described above.

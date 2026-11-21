@@ -1,0 +1,9 @@
+{
+  "comment": "Keep Budget foreign-removal checks in its prepared managed payload qualification",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    }
+  ]
+}

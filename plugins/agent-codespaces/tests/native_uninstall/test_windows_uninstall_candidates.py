@@ -1,4 +1,4 @@
-"""Real Windows candidate launches and finite metadata removal, without service STOP."""
+"""Legacy PATH candidate launches and finite metadata removal, without service STOP."""
 
 # ruff: noqa: S101
 from __future__ import annotations
@@ -22,12 +22,11 @@ FILES = {
     "agent-dispatch": "uninstall-runtime.ps1",
     "agent-index": "install.ps1",
     "agent-vault": "uninstall-runtime.ps1",
-    "budget-guidance": "uninstall-runtime.ps1",
     "agent-logger": "install.ps1",
     "agent-mcp": "init.ps1",
 }
 HOSTS = ("pwsh", "powershell")
-FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+FLAGS = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="real native Windows PE/candidate lane")
 
 
@@ -340,7 +339,7 @@ def test_supported_selection_runs_real_finite_metadata_cleanup_and_preserves_sta
 
 @pytest.mark.parametrize("shell", HOSTS)
 @pytest.mark.parametrize(
-    "plugin", ("agent-bridge", "agent-dispatch", "agent-index", "agent-vault", "budget-guidance")
+    "plugin", ("agent-bridge", "agent-dispatch", "agent-index", "agent-vault")
 )
 def test_actual_finite_admission_invoker_recovers_from_process_start_failure(
     tmp_path: Path,
@@ -402,7 +401,9 @@ def test_real_external_venv_with_internal_base_prefix_is_not_selected(
 ) -> None:
     _host(shell)
     payload, root, durable = _case(tmp_path, plugin)
-    base = Path(sys._base_executable)
+    base_executable = getattr(sys, "_base_executable", None)
+    assert isinstance(base_executable, str)
+    base = Path(base_executable)
     internal_base = root / "base"
     internal_base.mkdir()
     copied = internal_base / base.name

@@ -47,6 +47,9 @@ on command use. Snapshot provisioning holds the existing install transaction
 lock, including prerequisite preparation before source helpers. The
 [command/setup contract](../README.md) owns the supported entrypoints.
 Wrappers do not search other marketplace installations for a same-named plugin.
+Finite removal uses the same prepared managed selector while retaining its
+external-prefix and alias-closure admission; the [removal contract](../README.md)
+owns prerequisites and refusal behavior.
 Session bootstrap also reads deployed and payload versions without ambient
 Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
