@@ -1534,6 +1534,9 @@ def test_application_run_requires_prepared_environment(
     result = invoke(slot / ("fixture-app" + extension), [], caller, environment)
     assert result.returncode != 0
     assert "not staged" in result.stderr
+    assert f"install{extension}" in result.stderr
+    assert "--stage" in result.stderr
+    assert (slot / ("install" + extension)).is_file()
     assert not (slot / ".venv").exists()
 
 

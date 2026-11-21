@@ -89,25 +89,25 @@ def slot_binstubs(
             ps_prepare = (
                 "foreach ($file in @('uv.lock', '.venv/pyvenv.cfg')) {\n"
                 "    if (-not (Test-Path -LiteralPath (Join-Path $slot $file) -PathType Leaf)) {\n"
-                "        throw 'Application is not staged; run bin/setup --stage'\n"
+                "        throw ('Application is not staged; run the installer with --stage: ' + (Join-Path $slot 'install.ps1'))\n"
                 "    }\n"
                 "}\n"
                 "if (-not ((Test-Path -LiteralPath (Join-Path $slot '.venv/Scripts/python.exe') -PathType Leaf) -or\n"
                 "          (Test-Path -LiteralPath (Join-Path $slot '.venv/bin/python') -PathType Leaf))) {\n"
-                "    throw 'Application is not staged; run bin/setup --stage'\n"
+                "    throw ('Application is not staged; run the installer with --stage: ' + (Join-Path $slot 'install.ps1'))\n"
                 "}\n"
             )
             cmd_prepare = (
                 "for %%F in (uv.lock .venv\\pyvenv.cfg .venv\\Scripts\\python.exe) do (\r\n"
                 '    if not exist "%SLOT%\\%%F" (\r\n'
-                "        >&2 echo Application is not staged; run bin\\setup --stage\r\n"
+                '        >&2 echo Application is not staged; run the installer with --stage: "%SLOT%\\install.cmd"\r\n'
                 "        exit /b 1\r\n    )\r\n)\r\n"
             )
             sh_preflight = (
                 'if [ ! -f "$slot/uv.lock" ] || [ ! -f "$slot/.venv/pyvenv.cfg" ] || {\n'
                 '    [ ! -f "$slot/.venv/bin/python" ] && [ ! -f "$slot/.venv/Scripts/python.exe" ];\n'
                 "}; then\n"
-                "    echo 'Application is not staged; run bin/setup --stage' >&2\n"
+                "    printf 'Application is not staged; run the installer with --stage: %s\\n' \"$slot/install.sh\" >&2\n"
                 "    exit 1\nfi\n"
             )
         ps_target = target or f"-I -X utf8 -B (Join-Path $slot '{script}')"
