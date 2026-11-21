@@ -2950,8 +2950,10 @@ arguments and nonzero exits. Stalled input and an exited root whose descendant
 holds its pipes cannot bypass that deadline. Timeout evidence distinguishes
 direct-child exit from unconfirmed tree cleanup; these controls retain the
 existing enclosing process owner to settle descendants. Invalid bounded
-streaming/reserve policies refuse before starting a child. These are capture
-provider controls, not adoption or native bootstrap qualification.
+streaming/reserve policies refuse before starting a child. An undrained
+stderr sink separately proves that bounded calls without an `ErrorOutput`
+reference refuse before launch rather than synchronously relaying diagnostics.
+These are capture provider controls, not adoption or native bootstrap qualification.
 The same file exercises
 stderr-only streaming through both native PowerShell hosts. Actual no-newline
 output outlives the quiet allowance while captured stdout, diagnostics, stdin
@@ -8085,8 +8087,18 @@ interrupted/failed cleanup remains owned recovery, not automatic deletion.
 pending-job controls, plus explicit T2 retained-helper and real-interpreter
 expiry checks. Passing those controls, or skipping
 the native cases on another platform, is not Linux installed qualification.
-Process-death recovery, late-start/overlap and deadline/storage failure
-qualification remain separate acceptance items.
+Selected publisher-exit recovery, late-start and native deadline/storage failure
+qualification is explicit within this packet: a fixture publisher exits after
+the first real unit-file publication, then a fresh installed CLI completes the
+approved disabled pair or removes it. A stopped persistent timer misses both
+finite triggers and resumes as one catch-up collection, not per-trigger replay.
+The unwritable-store case requests a real loopback observation before refusing
+staging and preserving store bytes. A test-only pre-start child exercises the
+unchanged manager startup deadline without modifying installed code, the real
+action, its lease or cgroup limits; a startup timeout is not reported as a
+completed collection. Each case retains its own result and exact cleanup receipt.
+Active-collection overlap, the collector's own child deadline and recovery from
+an unconfirmed native-client cleanup remain separate acceptance items.
 
 The actor-free `test_health_composition.py` packet executes the existing domain
 age projection, normal report/parser and SVG composition. Substituted storage
@@ -11178,6 +11190,20 @@ rules still scan every production root. Adoption and file eligibility are
 recomputed on every invocation. Each AST visitor resolves its bound dispatch
 method once per node type and file, retaining the same traversal and scope
 handling without repeated dynamic method lookup.
+The promotion unit adapter `tools/promotion_unit_tests/test_headless_guard_units.py`
+exports the original guard test functions, parameterization and `repo` fixture
+from `tools/test_check_headless_launch.py`, rather than copying assertions.
+The fixture roots the public headless allowlist in its temporary repository.
+Its isolation regression supplies a contrary checkout allowance in memory and
+requires the original spawn assertion to pass without reading that allowance.
+Every admitted case must reach the actual guard during its call phase; fixture
+isolation does not alter production allowances or qualify native launches.
+The sibling tracking-write and asyncio-timeout adapters likewise export their
+original analysis tests and the latter's original `guard` fixture. They admit
+91 tracking-write cases and twelve asyncio cases with real guard call coverage.
+The tracking-write checkout subprocess smoke and nine asyncio CLI subprocess
+cases remain unchanged in their original suites, outside the actor-free packet;
+unit admission neither replaces nor claims execution of those native cases.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored

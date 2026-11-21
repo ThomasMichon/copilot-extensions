@@ -165,11 +165,12 @@ def test_bounded_native_capture_deadline_includes_stalled_input(
     )
     script = f"""
 $clock = [Diagnostics.Stopwatch]::StartNew()
+$nativeError = ''
 $inputOptions = @{{}}
 if (${str(blocked_input).lower()}) {{ $inputOptions.InputText = 'x' * 1048576 }}
 try {{
     Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
-        -TimeoutMilliseconds 1500 -CleanupMilliseconds 500 @inputOptions
+        -ErrorOutput ([ref]$nativeError) -TimeoutMilliseconds 1500 -CleanupMilliseconds 500 @inputOptions
     throw 'deadline was ignored'
 }} catch [TimeoutException] {{
     if ($_.Exception.Data['CleanupConfirmed'] -cne $false -or
@@ -199,9 +200,10 @@ def test_bounded_native_capture_does_not_confuse_root_exit_with_tree_cleanup(
         "creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0)"
     )
     script = f"""
+$nativeError = ''
 try {{
     Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
-        -TimeoutMilliseconds 1500 -CleanupMilliseconds 500
+        -ErrorOutput ([ref]$nativeError) -TimeoutMilliseconds 1500 -CleanupMilliseconds 500
     throw 'inherited pipes bypassed the deadline'
 }} catch [TimeoutException] {{
     if ($_.Exception.Data['RootExitConfirmed'] -cne $true -or
@@ -216,6 +218,35 @@ try {{
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_bounded_native_capture_refuses_uncaptured_stderr_before_an_undrained_sink(
+    tmp_path: Path, host: str,
+) -> None:
+    marker = tmp_path / "started"
+    code = (
+        f"import sys; from pathlib import Path; Path({str(marker)!r}).touch(); "
+        "sys.stderr.write('e'*131072); sys.exit(7)"
+    )
+    script = f"""
+try {{
+    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
+        -TimeoutMilliseconds 1500 -CleanupMilliseconds 500
+    throw 'uncaptured diagnostics were accepted'
+}} catch {{
+    if ($_.Exception.Message -notlike 'Bounded native capture*ErrorOutput*') {{ throw }}
+}}
+[Console]::Out.Write('refused-before-launch')
+"""
+    read_fd, write_fd = os.pipe()
+    try:
+        result = _run_progress(host, script, tmp_path, output_fds={"stderr": write_fd})
+    finally:
+        os.close(write_fd)
+        os.close(read_fd)
+    assert result.stdout == "refused-before-launch"
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
 @pytest.mark.parametrize("options", [
     "-StreamOutput -TimeoutMilliseconds 10000",
     "-StreamErrorOutput -TimeoutMilliseconds 10000",
@@ -227,8 +258,10 @@ def test_bounded_native_capture_rejects_invalid_policy_before_launch(
     marker = tmp_path / "started"
     code = f"from pathlib import Path; Path({str(marker)!r}).touch()"
     script = f"""
+$nativeError = ''
 try {{
-    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) {options}
+    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
+        -ErrorOutput ([ref]$nativeError) {options}
     throw 'invalid policy was accepted'
 }} catch {{
     if ($_.Exception.Message -notlike 'Bounded native capture*') {{ throw }}

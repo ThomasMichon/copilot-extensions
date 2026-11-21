@@ -66,10 +66,16 @@ single successful hourly run or restart is not that finish line.
 
 The installed local Windows collection/report slice has recorded verification.
 The Linux retained finite-action foundation, native enrollment and pair-recovery
-source are merged. Real-user-manager and closed installed-runtime qualification
-remain open; the next slice prepares and exercises the isolated native fixture
-only in an explicitly available, authorized Linux test venue. Receiver
-selection and broader carrier, preference and domain gates remain open.
+source and bounded native fixture are merged. The real-user-manager packet now
+passes closed installed CLI execution, two finite calendar cycles,
+replacement/rollback and exact cleanup. Its first native run exposed an empty
+no-job readback value; #13794 merged the source fix and regression checks.
+The next opt-in packet now proves disabled-pair publisher-exit recovery,
+persistent late-start coalescing, actual unwritable-store staging refusal and
+the unchanged manager startup deadline; source review is next.
+Active-collection overlap, collector-child deadline and unknown native-client
+cleanup recovery remain open, without provisioning or production enrollment.
+Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
 
@@ -225,6 +231,12 @@ units/services, credentials, carrier writes, rollout and production enrollment.
 The exact private venue selector and approval response remain in adopter records;
 this grant does not release receiving or carrier-selection holds.
 
+A subsequent explicit answer permits test-only preparation in a new private
+timestamped directory: a pinned source packet, private test tools/dependencies
+and the canonical fixture. Global installs, shell/profile changes, `sudo`,
+host provisioning and existing-service changes remain excluded. This preparation
+authority does not broaden the already-approved finite fixture-unit scope.
+
 ## Plan
 
 ### Phase 1 - Reviewed architecture and design
@@ -350,6 +362,81 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-21 - Native interruption, storage and late-start controls
+- Two real publisher-exit cases pass through fresh installed CLI processes after
+  the first unit file is durably published. Convergence completes the approved
+  disabled pair and retains its runtime reference; explicit removal clears the
+  partial pair and reference. Exact final cleanup settles both.
+- A real unwritable store with a requested loopback observation reports native
+  exit failure without modifying store bytes. The unchanged manager startup
+  deadline terminates a fixture-only pre-start child; no collection is falsely
+  reported and exact pair cleanup succeeds. Both cases pass.
+- A stopped persistent timer misses both finite absolute UTC triggers, then
+  resumes as exactly one collection and one observed hour. No per-trigger
+  replay or historical uptime is invented; cleanup releases the pair.
+- Initial fixture assertions incorrectly expected disabled recovery to roll
+  back, and an empty collection policy made the first storage control a no-op.
+  Corrected the expected consent-preserving state and required real observation
+  staging. These were test-preparation failures, not product regressions;
+  their evidence and successful exact cleanups remain distinct.
+- This is not active-collection overlap, a collector-child deadline or unknown
+  native-client cleanup recovery qualification. Those and actual hourly,
+  carrier and broader domain/preference acceptance remain open.
+
+### 2026-11-21 - Real Linux installed packet qualified
+- Merged #13794 as `306bab03cd7c0fb33e7370d1e905f8566d5a6767` after
+  exact-head Copilot approval, no review findings and all required CI green.
+  The complete rebased execution packet passed both native cases in 78.55
+  seconds, or 83.93 seconds including runner preparation and cleanup. Refreshed
+  focused tests, strict Linux/Windows checks, lint and installation contracts
+  also passed. Source merge is not release availability or rollout.
+- The first native run failed at initial readback before unit creation:
+  the real user manager reports no pending job as an empty `Job` property.
+  The adapter incorrectly accepted only zero. Exact read-only reconciliation
+  confirmed both failed-preflight pairs absent and inactive.
+- Accept empty or zero no-job values while retaining refusal of queued or
+  unrecognized values. Eighty focused adapter, enrollment and finite-fixture
+  controls pass. The unchanged native assertions then pass both installed
+  cases in 78.39 seconds, with 83.47 seconds including runner preparation and
+  cleanup.
+- The packet proves normal disabled installed CLI enrollment/collection/removal,
+  two absolute UTC calendar cycles, retained execution after build-input
+  removal, failed replacement with confirmed rollback, successful replacement
+  and successor execution. Both exact pair cleanup receipts report no
+  configuration, active instance or unconfirmed native cleanup.
+- Retain the initial failure and successful candidate evidence separately.
+  A preparation retry refused an already-used JUnit directory before collection;
+  run-specific evidence paths resolved it without changing native assertions.
+  Interruption recovery, late-start/overlap, deadline/storage failures and
+  actual hourly publication remain open. No production enrollment, carrier
+  publication or receiving authority follows from this fixture result.
+
+### 2026-11-20 - Selected native test route available
+- Restored the selected test route through its existing setup and connectivity
+  owners, retaining the existing identity and preserving unrelated SSH profiles.
+  Authenticated native commands and the existing user manager pass readback.
+- Distinguished a redirected Windows caller-context stall from the healthy
+  route; qualified native SSH controls and the normal consumer in a fresh
+  invocation context both complete. This is not a deployed caller-code fix.
+- The route prerequisite is resolved, not the Linux installed-job acceptance.
+  Native fixture execution, cleanup and remaining platform/failure/hourly
+  evidence still need qualification. No production enrollment, carrier or
+  receiving gate is released.
+
+### 2026-11-19 - Linux fixture source merged; execution boundary remains open
+- Merged #13424 as `a19894bde47f026a21da8798b88f07f95915425c` after
+  exact-head Copilot approval, resolved threads and required CI. A newer
+  metadata-triggered CI run had to finish before managed completion; no CI gate
+  was bypassed.
+- Review corrections include the shipped retained-runtime archive, retry of
+  only transient pending native jobs within the unchanged polling deadline,
+  and explicit host-state opt-in for the approved config/evidence paths.
+  Eleven focused controls pass; the two Linux-native cases remain skipped.
+- Reconciled the accepted squash history only after verifying all local
+  additions/removals exactly match the merged patch, preserving unrelated
+  upstream documentation. The real Linux execution boundary remains
+  unavailable; no platform, carrier or parent acceptance item closes.
 
 ### 2026-11-19 - Bounded Linux native fixture prepared
 - Prepared an opt-in closed installed-CLI and real-user-manager packet with

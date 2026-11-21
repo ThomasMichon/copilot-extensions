@@ -283,6 +283,9 @@ function Invoke-Hidden {
         [ValidateRange(1, 2147483647)][int]$CleanupMilliseconds = 3000
     )
     if ($TimeoutMilliseconds -gt 0) {
+        if (-not $PSBoundParameters.ContainsKey('ErrorOutput') -or $null -eq $ErrorOutput) {
+            throw 'Bounded native capture requires a non-null ErrorOutput reference.'
+        }
         if ($StreamOutput -or $StreamErrorOutput -or $CleanupMilliseconds -ge $TimeoutMilliseconds) {
             throw 'Bounded native capture requires captured streams and cleanup reserved inside its timeout.'
         }
@@ -324,11 +327,7 @@ function Invoke-Hidden {
                 -TimeoutMilliseconds $TimeoutMilliseconds -CleanupMilliseconds $CleanupMilliseconds `
                 -InputText $InputText
             $global:LASTEXITCODE = $result.ExitCode
-            if ($ErrorOutput) { $ErrorOutput.Value = $result.Stderr }
-            elseif ($result.Stderr) {
-                if ($result.ExitCode -ne 0) { [Console]::Error.Write($result.Stderr) }
-                else { Write-Verbose $result.Stderr }
-            }
+            $ErrorOutput.Value = $result.Stderr
             return $result.Stdout
         }
         if ($StreamErrorOutput) {

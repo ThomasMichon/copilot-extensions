@@ -157,10 +157,13 @@ def test_missing_scope_does_not_hide_non_directory_ancestry(
         native._link(scope, NAME + ".timer", 1000)
 
 
+@pytest.mark.parametrize("job", ["", "0"])
 def test_native_readback_keeps_timestamps_and_execution_unknown_when_absent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job: str,
 ) -> None:
     pair, _, properties = snapshot_case(tmp_path, monkeypatch)
+    for value in properties.values():
+        value["Job"] = job
     observed = pair.snapshot()
     assert observed["loaded"] and observed["configured"] and not observed["enabled"]
     assert observed["last_run"] is None and observed["next_run"] is None and observed["last_result"] is None
@@ -189,11 +192,12 @@ def test_native_readback_refuses_foreign_loaded_or_overridden_units(
         pair.snapshot()
 
 
+@pytest.mark.parametrize("job", ["1234", "1234 /org/freedesktop/systemd1/job/1234", "unknown"])
 def test_native_readback_refuses_queued_manager_work(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job: str,
 ) -> None:
     pair, _, properties = snapshot_case(tmp_path, monkeypatch)
-    properties[pair.units[1]]["Job"] = "1234"
+    properties[pair.units[1]]["Job"] = job
     with pytest.raises(ValueError, match="operation-unconfirmed"):
         pair.snapshot()
 

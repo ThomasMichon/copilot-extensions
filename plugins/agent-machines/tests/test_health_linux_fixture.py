@@ -76,6 +76,24 @@ def test_fixture_refuses_unbounded_or_ambiguous_clocks(kind: str) -> None:
         fixture.FiniteInstallation(_installed(), times, expires)
 
 
+def test_startup_fault_preserves_the_finite_definition_and_real_action() -> None:
+    times, expires = fixture.calendar(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    source = _installed()
+    desired = {"store": "/example/store", "policy_token": "a" * 64}
+    expected = fixture.FiniteInstallation(source, times, expires).definition(
+        desired, OWNER, enabled=False,
+    )
+    marker = Path("/example/evidence/pre start pid")
+    value = fixture.StartupDelayInstallation(source, times, expires, marker).definition(
+        desired, OWNER, enabled=False,
+    )
+    service = next(name for name in value["artifacts"] if name.endswith(".service"))
+    command = next(line for line in value["artifacts"][service].splitlines() if line.startswith("ExecStartPre="))
+    assert shlex.split(command.split("=", 1)[1])[-1] == str(marker)
+    value["artifacts"][service] = value["artifacts"][service].replace(command + "\n", "")
+    assert value == expected
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.parametrize("expired", [False, True])
