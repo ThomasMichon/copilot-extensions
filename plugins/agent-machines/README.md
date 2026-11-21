@@ -328,6 +328,10 @@ hash unrelated payload files or qualify installer executables. Its purpose-bound
 digest cannot authorize ordinary repair apply, including for an empty required
 set. Full repair planning and apply retain their existing payload hashes,
 per-leaf path checks and installer qualification.
+Full payload hashing streams content in 64 KiB chunks, admitting up to 256 MiB
+across at most 8,192 files, with an 8 MiB per-file limit. Larger or changing
+inputs remain refused; content beyond the former 64 MiB total participates in
+the same stale-plan identity.
 Declaration and action paths are checked in their original form, including
 payload-relative ancestors, before resolving a target. Symlinks and reparse
 points remain refused even when their destinations stay inside the payload.

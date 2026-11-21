@@ -1,0 +1,9 @@
+{
+  "comment": "Stream repair payload identity within bounds that admit current shipped payloads",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
