@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -723,9 +724,59 @@ def test_posix_cleanroom_snapshot_provisions_without_index_environment(tmp_path:
     assert (root / "current-version").read_text().strip() == VERSION
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable search semantics")
+@pytest.mark.parametrize("lookup", ["relative-command", "relative-path", "empty-path-entry"])
+def test_system_flag_pins_provider_in_actual_launch_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lookup: str,
+) -> None:
+    from contextlib import contextmanager
+    from collections.abc import Iterator
+
+    parent, child = tmp_path / "parent", tmp_path / "child"
+    for base, version in ((parent, "0.8.0"), (child, "0.11.16")):
+        executable = base / "bin/uv"
+        executable.parent.mkdir(parents=True)
+        executable.write_text(f"#!/bin/sh\nprintf 'uv {version}\\n'\n", encoding="utf-8")
+        executable.chmod(0o755)
+    monkeypatch.chdir(parent)
+    source = PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    spec = importlib.util.spec_from_file_location("installer_pip_index", source)
+    assert spec and spec.loader
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    configuration = reader._dependency_policy()._configuration
+    uv, path, cwd = (
+        ("bin/uv", "/missing", child) if lookup == "relative-command"
+        else ("uv", "bin", child) if lookup == "relative-path"
+        else ("uv", "", child / "bin")
+    )
+    environment = {"UV_NO_SYSTEM_CONFIG": "1", "PATH": path}
+    expected = str(child / "bin/uv")
+
+    @contextmanager
+    def retain(selected: str, _arguments: list[str], **options: object) -> Iterator[str]:
+        assert options["env"] == environment
+        yield selected
+
+    with configuration.retain_local_exclusions(
+        retain, uv, [], excluded_local_packages=(), error_type=ValueError,
+        env=environment, cwd=cwd,
+    ) as selected:
+        assert selected == expected
+        assert subprocess.check_output([selected, "--version"], env=environment, text=True) == "uv 0.11.16\n"
+    configuration.require_system_config_provider(
+        uv, environment, cwd=cwd, error_type=ValueError,
+    )
+    with pytest.raises(ValueError, match="0.11.16"):
+        configuration.require_system_config_provider(
+            "bin/uv", environment, cwd=parent, error_type=ValueError,
+        )
+
+
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX checkout reference coverage")
 @pytest.mark.parametrize("operation", [
-    "install", "stamp", "stamp-artifacts", "stamp-linked-file", "stamp-linked-parent", "missing-reader",
+    "install", "stamp", "stamp-artifacts", "stamp-linked-file", "stamp-linked-parent",
+    "stamp-missing-source", "missing-reader",
 ])
 def test_posix_checkout_reader_reference_and_stamped_closure(
     tmp_path: Path, operation: str,
@@ -784,11 +835,15 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
     if is_stamp:
         native_bin = tmp_path / "native-bin"
         native_bin.mkdir()
-        for name in ("dirname", "basename", "sed", "head", "tr", "grep", "mkdir", "rm",
-                     "ln", "sleep", "date", "cat", "awk", "cp", "mv", "chmod"):
+        for name in ("bash", "dirname", "basename", "sed", "head", "tr", "grep", "mkdir", "rm",
+                     "ln", "readlink", "id", "cut", "stat", "wc", "mktemp",
+                     "uname", "sort", "sleep", "date", "cat", "awk", "cp", "mv", "chmod"):
             executable = shutil.which(name)
             assert executable
             (native_bin / name).symlink_to(executable)
+        for name in ("realpath", "sha256sum", "shasum"):
+            if executable := shutil.which(name):
+                (native_bin / name).symlink_to(executable)
         stamp_env = {**env, "PATH": str(native_bin)}
         assert not (payload / "scripts/bootstrap-uv.sh").exists()
         assert not (payload / "scripts/bootstrap-python-version.txt").exists()
@@ -801,6 +856,17 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
                 artifact.parent.mkdir(parents=True, exist_ok=True)
                 artifact.write_text("must not enter the snapshot", encoding="utf-8")
             (source / "stale.pyc").write_bytes(b"excluded bytecode")
+            (source / "uv.lock").write_text("ignored local resolver state", encoding="utf-8")
+        previous = sys.path.copy()
+        sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
+        try:
+            planner = importlib.import_module("materialize_installer_engine")
+            plans = planner.native_snapshot_plans(checkout)
+        finally:
+            sys.path[:] = previous
+        assert plans[payload / "scripts/installer-source-assets.tsv"] == (
+            payload / "scripts/installer-source-assets.tsv"
+        ).read_text(encoding="utf-8")
     elif operation == "stamp-linked-file":
         source = checkout / "libs/agent-procutil/src/agent_procutil/__init__.py"
         target = checkout / "linked-source.py"
@@ -811,15 +877,36 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
         target = checkout / "linked-package"
         source.rename(target)
         source.symlink_to(target, target_is_directory=True)
+    elif operation == "stamp-missing-source":
+        (checkout / "libs/agent-procutil/src/agent_procutil/__init__.py").unlink()
+    if operation == "stamp":
+        for name in ("cp", "mkdir", "dirname"):
+            executable = shutil.which(name)
+            assert executable
+            wrapper = native_bin / name
+            wrapper.unlink()
+            wrapper.write_text(
+                f"#!{BASH}\nprintf '%s\\n' {name} >> '{tmp_path / 'native-work'}'\n"
+                f"exec '{executable}' \"$@\"\n", encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
     result = subprocess.run(
         [BASH, str(payload / "scripts/install.sh"), "stamp" if is_stamp else "install"],
         cwd=tmp_path, env=stamp_env, capture_output=True, text=True, timeout=120,
     )
-    if operation.startswith("stamp-linked-"):
+    if operation.startswith("stamp-linked-") or operation == "stamp-missing-source":
         assert result.returncode != 0
-        assert "Linked source snapshot asset refused" in result.stdout + result.stderr
+        if operation.startswith("stamp-linked-"):
+            assert "Linked source snapshot asset refused" in result.stdout + result.stderr
         assert not (root / "payload-dir").exists()
         assert not (root / "current-version").exists()
+        assert not list((root / "snapshots").glob("*.tmp-*"))
+        repeated = subprocess.run(
+            [BASH, str(payload / "scripts/install.sh"), "stamp"], cwd=tmp_path, env=stamp_env,
+            capture_output=True, text=True, timeout=120,
+        )
+        assert repeated.returncode != 0
+        assert not list((root / "snapshots").glob("*.tmp-*"))
         return
     if operation == "missing-reader":
         assert result.returncode != 0
@@ -827,6 +914,37 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
         assert not (root / "current-version").exists()
         return
     assert result.returncode == 0, result.stdout + result.stderr
+    if operation == "stamp":
+        work = (tmp_path / "native-work").read_text().splitlines()
+        assert work.count("cp") < 45, work
+        assert work.count("mkdir") < 20, work
+        assert work.count("dirname") < 20, work
+        import time
+
+        for name in ("cp", "mkdir", "dirname"):
+            wrapper = native_bin / name
+            wrapper.unlink()
+            executable = shutil.which(name)
+            assert executable
+            wrapper.symlink_to(executable)
+        hook_home = tmp_path / "hook-home"
+        hook_home.mkdir()
+        started = time.monotonic()
+        timed = subprocess.run(
+            [BASH, str(payload / "scripts/bootstrap-check.sh")],
+            cwd=tmp_path, env={
+                **stamp_env, "HOME": str(hook_home), "USERPROFILE": str(hook_home),
+                "COPILOT_HOME": str(hook_home / ".copilot"),
+                "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_EXTENSIONS_CONTEXT": "",
+                "TMPDIR": str(tmp_path),
+            },
+            capture_output=True, text=True, timeout=2,
+        )
+        assert timed.returncode == 0, timed.stdout + timed.stderr
+        assert timed.stdout == "{}"
+        assert (hook_home / ".budget-guidance/payload-dir").is_file()
+        assert (hook_home / ".local/bin/budget-guidance").is_file()
+        assert time.monotonic() - started < 2
     if is_stamp:
         snapshot = Path((root / "payload-dir").read_text().strip())
         assert not (root / "current-version").exists()
@@ -839,6 +957,7 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
                 ".venv", "build", "dist", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
             } or part.endswith(".egg-info") for part in path.relative_to(snapshot / "libs").parts)
             assert path.suffix not in {".pyc", ".pyo"}
+            assert path.name != "uv.lock"
         assert (snapshot / "scripts/pip-index-config").read_bytes() == (
             checkout / "libs/installer-engine/installer_pip_index.py"
         ).read_bytes()

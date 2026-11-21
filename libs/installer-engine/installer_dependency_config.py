@@ -178,21 +178,25 @@ _FALSE_VALUES = {"n", "no", "f", "false", "off", "0"}
 
 def require_system_config_provider(
     uv: str, environment: Mapping[str, str], *, deadline: float | None = None,
-    error_type: _Error,
-) -> None:
+    error_type: _Error, cwd: Path | None = None,
+) -> str:
     """Do not reinterpret an option that the selected UV would silently ignore."""
     flag = environment.get("UV_NO_SYSTEM_CONFIG")
     if flag is None:
-        return
+        return uv
     if flag.lower() not in _TRUE_VALUES | _FALSE_VALUES:
         raise error_type("UV_NO_SYSTEM_CONFIG must contain a supported boolean value")
     if flag.lower() in _FALSE_VALUES:
-        return
+        return uv
     if not uv:
         raise error_type("UV_NO_SYSTEM_CONFIG requires its selected UV provider")
+    if not _WINDOWS:
+        uv = _arguments.uv_launch_path(uv, environment, cwd, error_type=error_type)
+    elif not Path(uv).is_absolute():
+        uv = select_uv_executable(os.path.abspath(uv), error_type=error_type)
     try:
         result = subprocess.run(
-            [uv, "--version"], env=dict(environment), capture_output=True, text=True,
+            [uv, "--version"], env=dict(environment), cwd=cwd, capture_output=True, text=True,
             timeout=remaining_timeout(deadline, error_type=error_type, cap=30),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if _WINDOWS else 0,
         )
@@ -201,6 +205,7 @@ def require_system_config_provider(
     version = re.fullmatch(r"uv ([0-9]+)\.([0-9]+)\.([0-9]+)(?: \([^\r\n]*\))?\s*", result.stdout)
     if result.returncode or version is None or tuple(map(int, version.group(1, 2, 3))) < (0, 11, 16):
         raise error_type("UV_NO_SYSTEM_CONFIG requires UV 0.11.16 or newer")
+    return uv
 
 
 def immutable_install_arguments(
@@ -284,7 +289,7 @@ def prepare_uv_install(
 ) -> list[str]:
     remaining_timeout(deadline, error_type=error_type)
     uv = select_uv(uv)
-    require_system_config_provider(uv, environment, deadline=deadline, error_type=error_type)
+    uv = require_system_config_provider(uv, environment, cwd=cwd, deadline=deadline, error_type=error_type)
     if native_target and environment.get("UV_PYTHON_PLATFORM"):
         raise error_type("native source lock export cannot override its selected target")
     if operation in ("compile", "source-compile"):
@@ -539,8 +544,9 @@ def retain_local_exclusions(
     )
     retained_options["env"] = environment
     uv = select_uv_executable(uv, error_type=error_type)
-    require_system_config_provider(
-        uv, environment, deadline=retained_options.get("deadline"), error_type=error_type,
+    uv = require_system_config_provider(
+        uv, environment, cwd=retained_options.get("cwd"),
+        deadline=retained_options.get("deadline"), error_type=error_type,
     )
     if not names:
         with retain(uv, arguments, **retained_options) as transaction:

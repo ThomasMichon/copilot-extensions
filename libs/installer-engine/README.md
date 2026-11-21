@@ -126,6 +126,10 @@ enumerate ordinary files rather than recursively copying a developer's library
 directory. Stamping refuses a link at any declared source/destination path
 component, so later-added caches are not copied and checkout links cannot
 become dangling snapshot dependencies.
+Validated files are copied in directory batches, not one process per file.
+Ignored library lockfiles are excluded by the materializer's shared filter;
+failed stamping removes its newly created temporary snapshot before releasing
+the install lock, without touching earlier snapshots.
 This embeds the reader, policy family and deferred interpreter request before
 publishing the snapshot; explicit provision can then run after the checkout is
 removed. Source and materialized verification check that the plan still matches
@@ -140,6 +144,10 @@ A true value requires the actual selected provider to report UV 0.11.16 or
 newer before discovery or retention; older supported UV versions otherwise
 ignore this option, so that combination refuses rather than changing feeds.
 The index-reader caller supplies that same provider through `--uv`.
+Qualification resolves the provider in its actual launch directory and captured
+environment, retaining that absolute executable when source retention changes
+the working directory. Provider-version failures remain actionable without
+printing configuration or captured subprocess output.
 The installer passes a valid active venv/Conda site prefix as configuration data
 before isolating interpreter hints; it never executes that environment's Python.
 Discovery runs only for package construction, not completed-slot reuse.

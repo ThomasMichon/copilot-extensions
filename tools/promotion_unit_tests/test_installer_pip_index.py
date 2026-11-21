@@ -274,7 +274,9 @@ def test_system_uv_flag_preserves_user_and_project_retention_inputs(
     monkeypatch.setattr(policy._configuration.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
         returncode=0, stdout="uv 0.11.16\n",
     ))
-    assert reader._uv_default(environment, project, "selected-uv") is (system_selected or user_default)
+    assert reader._uv_default(
+        environment, project, str(tmp_path / "selected-uv"),
+    ) is (system_selected or user_default)
 
 
 @pytest.mark.parametrize("version", ["0.8.0", "0.11.15", "0.11.16", "0.12.5"])
@@ -290,23 +292,42 @@ def test_system_flag_qualifies_the_selected_provider_before_discovery_or_retenti
         return SimpleNamespace(returncode=0, stdout=f"uv {version}\n")
 
     monkeypatch.setattr(policy._configuration.subprocess, "run", run)
+    uv = str(tmp_path / "selected-uv")
     environment = {"UV_NO_SYSTEM_CONFIG": "1"}
     supported = version in {"0.11.16", "0.12.5"}
     actions: tuple[Callable[[], object], ...] = (
-        lambda: reader._uv_default(environment, tmp_path, "selected-uv"),
-        lambda: policy.prepare_uv_install("selected-uv", [], env=environment, cwd=tmp_path),
-        lambda: policy.retain_uv_install("selected-uv", [], env=environment, cwd=tmp_path).__enter__(),
+        lambda: reader._uv_default(environment, tmp_path, uv),
+        lambda: policy.prepare_uv_install(uv, [], env=environment, cwd=tmp_path),
+        lambda: policy.retain_uv_install(uv, [], env=environment, cwd=tmp_path).__enter__(),
     )
     if not supported:
         for action in actions:
             with pytest.raises((ValueError, RuntimeError), match="0.11.16"):
                 action()
-        assert probes == [["selected-uv", "--version"]] * len(actions)
+        assert probes == [[uv, "--version"]] * len(actions)
     else:
         policy._configuration.require_system_config_provider(
-            "selected-uv", environment, error_type=ValueError,
+            uv, environment, error_type=ValueError,
         )
-        assert probes == [["selected-uv", "--version"]]
+        assert probes == [[uv, "--version"]]
+
+
+def test_reader_reports_safe_provider_requirement(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    policy = reader._dependency_policy()
+    monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
+    monkeypatch.setattr(policy._configuration.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="uv 0.8.0\n", stderr="private-feed-value",
+    ))
+    monkeypatch.setenv("UV_NO_SYSTEM_CONFIG", "1")
+    for variable in ("UV_INDEX_URL", "UV_DEFAULT_INDEX"):
+        monkeypatch.delenv(variable, raising=False)
+    assert reader.main(["--uv", str(tmp_path / "uv")]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "UV_NO_SYSTEM_CONFIG requires UV 0.11.16 or newer\n"
 
 
 def test_system_uv_flag_rejects_invalid_values(reader: ModuleType, tmp_path: Path) -> None:

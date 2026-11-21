@@ -11,6 +11,10 @@ import types
 from typing import Any
 
 
+class ProviderQualificationError(ValueError):
+    """A fixed, safe provider diagnostic, never configuration or subprocess output."""
+
+
 def _index(value: str | None) -> str | None:
     if not value:
         return None
@@ -52,7 +56,8 @@ def _dependency_policy() -> types.ModuleType:
 def _uv_default(environment: Mapping[str, str], base: Path, uv: str = "") -> bool:
     policy = _dependency_policy()
     policy._configuration.require_system_config_provider(
-        policy._select_uv_executable(uv), environment, error_type=ValueError,
+        policy._select_uv_executable(uv), environment, cwd=base,
+        error_type=ProviderQualificationError,
     )
     config_inputs: Callable[[list[str], dict[str, str], Path], list[tuple[Path, bool]]] = (
         policy._config_inputs
@@ -142,6 +147,9 @@ def main(arguments: Sequence[str] = ()) -> int:
             return 0
         prefix = Path(options.site_prefix) if options.site_prefix else Path(sys.prefix)
         index = configured_index(os.environ, home=Path.home(), prefix=prefix)
+    except ProviderQualificationError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     except (OSError, UnicodeError, configparser.Error, ValueError, RuntimeError, ImportError):
         print("Cannot read package index configuration.", file=sys.stderr)
         return 1

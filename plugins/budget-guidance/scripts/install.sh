@@ -352,9 +352,22 @@ _budget_pip_index_helper() {
     return 1
 }
 
-_materialize_budget_source_snapshot() {
-    local snapshot="$1" helper root operation source target extra base relative component
+_budget_snapshot_path_unlinked() {
+    local base="$1" relative="$2" component
     local -a components
+    [[ "$relative" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
+        ! "$relative" =~ (^|/)\.\.?(/|$) ]] || return 1
+    IFS=/ read -ra components <<< "$relative"
+    for component in "${components[@]}"; do
+        base="$base/$component"
+        [[ ! -L "$base" ]] || { _fail 'Linked source snapshot asset refused'; return 1; }
+    done
+}
+
+_materialize_budget_source_snapshot() {
+    local snapshot="$1" helper root operation source target extra directory previous="" index
+    local request="" request_target=""
+    local -a sources=() targets=() directories=() batch=()
     helper="$(_budget_pip_index_helper)" || return 1
     [[ "$helper" != "$SCRIPT_DIR/pip-index-config" ]] || return 0
     root="$(cd "$PLUGIN_DIR/../.." && pwd)" || return 1
@@ -367,33 +380,52 @@ _materialize_budget_source_snapshot() {
     while IFS=$'\t' read -r operation source target extra; do
         [[ -z "$extra" && "$target" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
             ! "$target" =~ (^|/)\.\.?(/|$) ]] || return 1
-        for base in "$root" "$snapshot"; do
-            relative="$source"
-            [[ "$base" != "$snapshot" ]] || relative="$target"
-            [[ "$operation" != request || "$base" != "$root" ]] || continue
-            [[ "$relative" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
-                ! "$relative" =~ (^|/)\.\.?(/|$) ]] || return 1
-            IFS=/ read -ra components <<< "$relative"
-            for component in "${components[@]}"; do
-                base="$base/$component"
-                [[ ! -L "$base" ]] || { _fail 'Linked source snapshot asset refused'; return 1; }
-            done
-        done
+        _budget_snapshot_path_unlinked "$snapshot" "$target" || return 1
+        directories+=("$snapshot/${target%/*}")
         case "$operation" in
             copy)
+                _budget_snapshot_path_unlinked "$root" "$source" || return 1
                 [[ -f "$root/$source" && ( "$source" == "$target" ||
                     ( "$target" == scripts/* && "$source" == libs/installer-engine/* ) ) ]] || return 1
-                mkdir -p "$(dirname "$snapshot/$target")" || return 1
-                cp -p "$root/$source" "$snapshot/$target" || return 1
+                sources+=("$source")
+                targets+=("$target")
                 ;;
             request)
                 [[ "$target" == scripts/bootstrap-python-version.txt &&
                     "$source" =~ ^cpython@3\.[0-9]+\.[0-9]+$ ]] || return 1
-                printf '%s\n' "$source" > "$snapshot/$target" || return 1
+                request="$source"
+                request_target="$target"
                 ;;
             *) return 1 ;;
         esac
     done < "$SCRIPT_DIR/installer-source-assets.tsv"
+    mkdir -p "${directories[@]}" || return 1
+    # Ordinary same-name files share one native copy per destination directory.
+    for ((index=0; index<${#sources[@]}; index++)); do
+        source="${sources[index]}" target="${targets[index]}"
+        directory="$snapshot/${target%/*}"
+        if [[ "$directory" != "$previous" && ${#batch[@]} -gt 0 ]]; then
+            cp -p "${batch[@]}" "$previous/" || return 1
+            batch=()
+        fi
+        previous="$directory"
+        if [[ "${source##*/}" != "${target##*/}" ]]; then
+            cp -p "$root/$source" "$snapshot/$target" || return 1
+        else
+            batch+=("$root/$source")
+        fi
+    done
+    if [[ ${#batch[@]} -gt 0 ]]; then
+        cp -p "${batch[@]}" "$previous/" || return 1
+    fi
+    if [[ -n "$request" ]]; then
+        printf '%s\n' "$request" > "$snapshot/$request_target" || return 1
+    fi
+    for ((index=0; index<${#sources[@]}; index++)); do
+        _budget_snapshot_path_unlinked "$root" "${sources[index]}" || return 1
+        _budget_snapshot_path_unlinked "$snapshot" "${targets[index]}" || return 1
+        [[ -f "$snapshot/${targets[index]}" ]] || return 1
+    done
 }
 
 _source_runtime_identity() {
@@ -610,6 +642,7 @@ STUBEOF
 
 __install_lock_link=""
 __install_lock_fd=""
+__owned_snapshot_tmp=""
 
 _install_lock_timeout() {
     local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
@@ -621,6 +654,10 @@ _install_lock_timeout() {
 }
 
 _exit_install_lock() {
+    if [[ -n "$__owned_snapshot_tmp" ]]; then
+        rm -rf -- "$__owned_snapshot_tmp"
+        __owned_snapshot_tmp=""
+    fi
     if [[ -n "$__install_lock_link" ]]; then
         local __owner
         __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
@@ -721,8 +758,9 @@ if [[ "$ACTION" == "stamp" ]]; then
         }
     else
     snap_tmp="$snap_dir.tmp-$$"
-    rm -rf -- "$snap_tmp"
-    mkdir -p "$snap_tmp"
+    mkdir -p "${snap_dir%/*}"
+    mkdir "$snap_tmp" || exit 1
+    __owned_snapshot_tmp="$snap_tmp"
     cp -a "$PLUGIN_DIR/." "$snap_tmp/"
     if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
     _materialize_budget_source_snapshot "$snap_tmp" || exit 1
@@ -758,6 +796,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$(dirname "$snap_dir")"
     rm -rf -- "$snap_dir"
     mv "$snap_tmp" "$snap_dir"
+    __owned_snapshot_tmp=""
     if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
         printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$snap_dir/.payload-source"
     fi
