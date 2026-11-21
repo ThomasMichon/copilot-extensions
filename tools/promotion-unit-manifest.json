@@ -6920,7 +6920,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_uv_policy_invocation.py": "fbb9c9dd6b97d81825e316bd4a98d7524ba6736d314d8ee8dc0823fd04f2a2da",
+        "tools/promotion_unit_tests/test_uv_policy_invocation.py": "9f94fc7c3642781afc0de8b90889512e961bfdc04487f4d3de63df65d5320807",
         "tools/promotion_unit_tests/test_dependency_age_release_units.py": "179a9cb34178616a0a09c4f864bb73cfe4a8dbec8c83ec6d4229e31795803d96",
         "tools/test_dependency_age.py": "b019c533b68d607844044ca7647308ff37e0d746ddbb04e6c0a689157f0f6dc5",
         "tools/promotion_unit_tests/test_identifier_git_protocol_units.py": "ef063a19d9d58f39db2065129f5478df764b3dc7bfbb7876c6d74ddec1bbe6c4",
@@ -6979,7 +6979,7 @@
         "tools/check-version-consistency.py": "97a22f6d4c3201172f158aca0b4fed4e85f07729e4f4ae0597d86b0d78f29c97",
         "tools/promotion_unit_tests/test_install_contract_guard_units.py": "ee402e70379e8684a4569c5b675baca0aedaaff5b853e2302087c116a754fdfa",
         "tools/test_install_contract_guard.py": "927f539fc135024211f4b8299e3c4999a8e46ca5b6438158b4622218488c5eef",
-        "tools/install_contract_guard.py": "49bb2f42dca9e18367609db21c42870b5a480543c79098254e1af43b59d73519",
+        "tools/install_contract_guard.py": "9936e86a8c8993f20be885a66fce2ee7e9a01315b64212d34889f23b928fe295",
         "tools/promotion_unit_tests/test_tracking_write_guard_units.py": "82aac12f6c9cd55d1633cda89df94ac91313b2a8cad598e30662764ccf21cef7",
         "tools/test_check_no_sibling_tracking_writes.py": "10a4702ef4f5e0880d50a7aaa889806aadfbca8d5392cd39abd6b28b97c6e9e5",
         "tools/check-no-sibling-tracking-writes.py": "763f22efe87473151e1de8e962cbab537d24c25884df86765d038671faf3fd4c",
@@ -7685,7 +7685,7 @@
         "worktree-manager/src/worktree_manager/runtime_source.py": "0a5147b874398f5e4e541e7e919eb82566563a603b314b436a73b9888b8dc2a5",
         "tools/artifact_release_discovery.py": "6a22f3d76e031b550bcc79d67e919b39ce54acb69bdf37710f52dd2e608bcaa6",
         "tools/update_machine_gate_contract.py": "4912553de058a769a823778c52bd26a6e4f86b3c34d57f7f82eda2eeb79c6984",
-        "tools/check-install-contract.py": "e8ce67b0ca7af27ddb3a86fde6578718b351f0a488a8450ac9f0296602df5f07",
+        "tools/check-install-contract.py": "375680b9f71adf8ec594224facf307d707d89c60a90f4bc97158c2fb63e4ec13",
         "tools/promotion_unit_tests/test_update_receipt_contract.py": "373b1a5fdc2485573f222eabb7c8371249335e499efb1346a5c744f10a785f67",
         "tools/promotion_unit_tests/test_monitor_outcome_contract.py": "aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py": "4b72d33379121b3db4188d918b23c1c7eaf22a8d73f1aee1b5095ba2fe6257a9",
