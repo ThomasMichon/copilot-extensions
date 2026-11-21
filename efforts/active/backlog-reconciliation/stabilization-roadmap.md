@@ -53,6 +53,13 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [current claim-custody contribution](roadmap-selected-claim-custody.md)
+adds a qualified #5842 ordinary acceptance/finalization delta, retained P1
+rationale, independent gates and original owners. It credits stronger
+nonterminal checks without mistaking them for consumer/resource commitment.
+Its [journal](journal/2026/11.21-current-claim-custody.md) records actual
+#13919 delivery. Whole-home mapping and all six roadmap gates remain open.
+
 The [two current publication-safety contributions](roadmap-selected-publication-safety.md)
 qualify finite #2861/#5904 source, vision, priority, custody and exit decisions,
 not whole-effort intake or new implementation. Their

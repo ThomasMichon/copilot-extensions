@@ -95,6 +95,13 @@ work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
 
+The [current claim-custody contribution](roadmap-selected-claim-custody.md)
+retains #5842's P1 ordinary transaction residual after its actual changed
+source was qualified and read. Operator direction, actual consumer readiness
+and source/consumer/resource commitment stay independent, as do the original
+custodians. Its finite fault follows successful preflight; it introduces no
+new edge to framing, publication safety or whole daemon/installer programs.
+
 The [later relationship and Dispatch delivery comparison](roadmap-current-qualification.md#2026-11-21-independent-relationship-and-dispatch-deliveries)
 distinguishes an opt-in provider from its caller, new allocation evidence from
 historical custody, and launch admission from readiness. It credits the
