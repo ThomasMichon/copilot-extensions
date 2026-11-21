@@ -3,6 +3,17 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_runtime_sync_fixture_units.py",
+      [
+        "test_main_repairs_ordinary_missing_and_stale_files_and_is_idempotent",
+        "test_instance_only_sync_preserves_unrelated_runtime_bytes",
+        "test_instance_only_sync_ships_ps_binding_and_complete_source_to_wsl_payload",
+        "test_native_wheel_fanout_is_not_an_available_build_route",
+        "test_lifecycle_source_archive_requires_native_accounting_dependency",
+        "test_package_archive_publishes_the_same_complete_closure[ordinary]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_materializer_ancestor_units.py",
       [
         "test_ordinary_descendant_needs_no_path_resolution[materialize_installer_engine-False]",
@@ -8581,6 +8592,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_runtime_sync_fixture_units.py": "acd3cbd20dca89c2881f6534cd5d2d49d8cfd9107ae31e21cb993b4b5d3d8553",
+    "tools/test_sync_versioned_runtime.py": "085c5c4d06385c0d85b8eed7643c43f13f4462a961c80140ebbbdab28737bf32",
+    "tools/sync-versioned-runtime.py": "db7947be276df61f181a5aa9985fcac10a98746eeeb1a2485542db08638da412",
     "tools/promotion_unit_tests/test_materializer_ancestor_units.py": "2fd71a0ef515c18f04fb8e74e94d63a6ed3e266a99a86451e85177a868001a59",
     "tools/test_materialize_installer_engine.py": "c5642438e2114b49e45151e7804616956b4ccf8cb08c9c37a339844f483d7c6b",
     "tools/promotion_unit_tests/test_bootstrap_declaration_units.py": "02410b3924c049bc54b19f28cbe786eb03c5edd410ef30b7b99711ab89cf6f04",
@@ -9663,6 +9677,8 @@
     "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47"
   },
   "coverage_targets": [
+    "tools/sync-versioned-runtime.py",
+    "tools/daemon_lifecycle_assets.py",
     "tools/sync-installer-engine.py",
     "tools/preview_release.py",
     "libs/payload-invocation/command_binding.py",

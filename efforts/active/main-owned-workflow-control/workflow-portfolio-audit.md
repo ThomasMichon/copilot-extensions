@@ -3366,6 +3366,53 @@ external lanes are not exercised because no provisioning/runtime behavior or
 activation changes. Native, installed, release, full-census, comparable
 whole-flow and retained-custody gates remain open.
 
+### November 21 synthetic ancestor and declaration unit delivery
+
+Three adapters preserve exact original test/fixture objects, assertions and
+parameter suffixes: all thirty synthetic ancestor-metadata cases, three of
+four bootstrap-declaration cases, and only the serial `eligible=False` case
+of the two-case plugin-copy matrix. The isolated subprocess and real-worker
+cases remain outside. Original metadata simulations are not native-link proof.
+The materializer map now covers 122 of 165 originals; all 43 residuals remain.
+
+Effect-guarded development execution passes 34 cases with one worker
+deselection in 4.843 seconds, zero prohibited effects, 24 explicitly bound
+Python files opened and actual per-case production call coverage. The compact
+manifest admits 6,872 nodes and 1,080 sources in 787,651 bytes. Every preceding
+6,838 node/hash, 442 targets, 89 helper decisions, compact/flat-v1 contract and
+the 300-second bound remains. Only three adapters and two original test modules
+are newly bound; no coverage target is added. Ruff and whole-file strict
+Linux/Windows typing pass for all three adapters.
+
+Copilot approval `6007718513` names exact head
+`7e101b6ba2c275b876c04d5f4c36a638000d31d2`. Complete review/comments/thread
+pagination finds no finding. Required source CI `44941866320` and trusted
+metadata CI `44941866509` succeed. Actual unit job `136960613342` freshly
+executes all 6,872 cases with 38 deselections in 97.74 pytest seconds and
+112.749 packet seconds; lookup takes 517 ms. No reuse or controlled
+whole-flow saving is credited.
+
+The fresh merge verifier initially refuses the later direct source-attribution
+check `136961676902`, whose result says the metadata result is superseded.
+No merge or replay follows that refusal. The operator separately authorizes
+one existing Main `workflow-lockdown-guard.yml` dispatch with only
+`pull_request_number=13957`; run `44943098257` and job `136964398682` succeed.
+Its actual log selects only that PR, and affected-head check `136964494011`
+reports success. The one-run grant is consumed, not a standing repair grant.
+Seven fresh scoped verifier reads and a fresh review/veto/hold/head check pass
+before the managed Maintainer merge without bypassing CI.
+
+Source #13957 merges at `2026-11-21T19:53:05Z` as
+`edb955910d6b64ac57260d9e1a527182fced8e57`. Independent readback confirms
+merged state, no closing references and open parent #6237. Scoped source
+synchronization preserves the published head and reconciles the intervening
+Dev advance. After rereading the full canonical parent, only this finite leaf
+is resolved. Continue synthetic runtime-sync source qualification. Unchanged
+originals exercise real ancestor/materializer/serial-copy consumers; fresh-
+install and live external lanes are not exercised because no provisioning/
+runtime behavior or activation changes. Native, installed, release,
+full-census, comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
