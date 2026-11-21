@@ -981,17 +981,11 @@ function Set-BudgetRuntimeVersion([string]$Version) {
     $script:LinkPython = $VenvPython
 }
 
-if ($Action -in @('install', 'update', 'provision')) {
-    if ($WheelProfile) {
-        $setupUv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if (-not $setupUv) {
-            throw 'Closed-wheel command publication requires prepared uv on PATH; -WheelUv supplies construction only. Prepare command prerequisites before retrying.'
-        }
-    } else {
-        $setupUv = Ensure-Uv -InstallRoot $env:USERPROFILE -ToolDirectory '.local\bin'
-        if (-not $setupUv) { throw 'uv prerequisite setup failed' }
-        Get-BootstrapPython -Prepare | Out-Null
+if ($WheelProfile -and $Action -in @('install', 'update', 'provision')) {
+    $setupUv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $setupUv) {
+        throw 'Closed-wheel command publication requires prepared uv on PATH; -WheelUv supplies construction only. Prepare command prerequisites before retrying.'
     }
 }
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
@@ -1000,6 +994,11 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
     exit 1
 }
 try {
+if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision')) {
+    $setupUv = Ensure-Uv -InstallRoot $env:USERPROFILE -ToolDirectory '.local\bin'
+    if (-not $setupUv) { throw 'uv prerequisite setup failed' }
+    Get-BootstrapPython -Prepare | Out-Null
+}
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
 if ($WheelProfile) {
     $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `

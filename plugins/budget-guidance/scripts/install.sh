@@ -621,11 +621,6 @@ _enter_install_lock() {
     return 0
 }
 
-if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == provision ]]; then
-    . "$SCRIPT_DIR/bootstrap-uv.sh"
-    _ensure_uv || { _fail 'uv prerequisite setup failed'; exit 1; }
-    BUDGET_BOOTSTRAP_PYTHON="$(resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt" Prepare)" || exit 1
-fi
 if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision || "$ACTION" == uninstall ]]; then
     _enter_install_lock || {
         _fail "Could not acquire the install transaction lock within $(_install_lock_timeout)s -- refusing to proceed unlocked"
@@ -634,6 +629,11 @@ if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACT
     trap '_exit_install_lock' EXIT
     trap '_exit_install_lock; exit 130' INT
     trap '_exit_install_lock; exit 143' TERM
+fi
+if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == provision ]]; then
+    . "$SCRIPT_DIR/bootstrap-uv.sh"
+    _ensure_uv || { _fail 'uv prerequisite setup failed'; exit 1; }
+    BUDGET_BOOTSTRAP_PYTHON="$(resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt" Prepare)" || exit 1
 fi
 if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
     _initialize_source_runtime || exit 1

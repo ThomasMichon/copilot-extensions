@@ -12,6 +12,7 @@ budget-guidance status --config ./budget.json
 
 Explicit `scripts/install.sh install` / `scripts/install.ps1 install` prepares
 the manifest-declared uv-managed bootstrap Python before running Python helpers.
+Preparation holds the existing install transaction lock, including uv acquisition.
 New runtime environments use that prepared base, with no system/PATH-Python or
 signed-system fallback. Explicit closed-wheel inputs keep their admitted
 interpreter/profile contract. Missing PATH uv is established by the existing

@@ -6,6 +6,7 @@ import re
 
 
 def template_values(uv: bool) -> dict[str, str]:
+    """Return launch substitutions while retaining legacy direct defaults."""
     values = {
         "POSIX_SHELL_OPTIONS": "eu",
         "UV_RUNTIME_PRELUDE_POSIX": "",
@@ -101,6 +102,7 @@ def template_values(uv: bool) -> dict[str, str]:
 
 
 def render(template: str, values: dict[str, str], uv: bool) -> str:
+    """Expand the closed token table and seal an in-process catalog digest."""
     values.update(template_values(uv))
     rendered = template
     for key, value in values.items():

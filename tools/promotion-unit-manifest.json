@@ -6927,7 +6927,7 @@
     "sources": {
         "worktree-manager/packaged-assets.json": "e99590dd09ad93e274601c3324a2ae828bef90f1e7c952da6ecd551a463e9863",
         "worktree-manager/launch-wrapper-assets.json": "90feee1fa65b52ce5caa0b1678d2847c79edd6e32e0265f5fc4d2d16a25500fb",
-        "libs/payload-invocation/template_rendering.py": "340a602e93833b7d6e78eb6eb3697a019c28919676f44dd357adc639fc97b518",
+        "libs/payload-invocation/template_rendering.py": "ac5e4975d788164aa4b2db5ebde406d781592ebca5cc861e319e30739138bd32",
         "tools/promotion_unit_tests/test_uv_policy_invocation.py": "9f94fc7c3642781afc0de8b90889512e961bfdc04487f4d3de63df65d5320807",
         "tools/promotion_unit_tests/test_dependency_age_release_units.py": "179a9cb34178616a0a09c4f864bb73cfe4a8dbec8c83ec6d4229e31795803d96",
         "tools/test_dependency_age.py": "b019c533b68d607844044ca7647308ff37e0d746ddbb04e6c0a689157f0f6dc5",
@@ -7721,7 +7721,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "9fb653ecf0b59c1b08540b1d4c86a2b2dc59a7939bcae85a56bd05ed490f3296",
-        "libs/payload-invocation/python-catalog-inputs.json": "d986e1b5f60dee2ee0dab028f4862408ee4463c06e1955bd500c77c87d9a8e72",
+        "libs/payload-invocation/python-catalog-inputs.json": "b02eed0e87c1bf9cd3eae9720eca0678c4391b670072b6194c0e6ec3755a05e3",
         "tools/promotion_unit_tests/test_typecheck_catalog.py": "7095a9a8a4a0be5a57bb91b66b5e828004c0a05964256bde381b0a63116c5fa4",
         "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
         "libs/payload-invocation/templates/dispatcher-posix.tmpl": "c8cbc41689aa28cb98dced319f91cb451dd444ab5c3523407657db5459eb5f08",

@@ -97,10 +97,12 @@ def test_all_budget_mutating_actions_share_the_install_transaction_gate() -> Non
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("source_contender", [False, True])
+@pytest.mark.parametrize("contender_action", ["stamp", "install"], ids=["snapshot", "prerequisites"])
 def test_source_and_source_free_writers_contend_before_snapshot_publication(
     tmp_path: Path,
     shell: str,
     source_contender: bool,
+    contender_action: str,
 ) -> None:
     if shell == "bash" and os.name == "nt":
         pytest.skip("Full POSIX transaction requires real PID symlink and flock authority")
@@ -111,6 +113,8 @@ def test_source_and_source_free_writers_contend_before_snapshot_publication(
     else:
         (contender_payload / "runtime-source.json").unlink()
     env = _native_environment(tmp_path)
+    preparation = tmp_path / "uv-preparation"
+    env["TEST_UV_PREPARATION"] = str(preparation)
     root = tmp_path / "install"
     root.mkdir()
     previous = {"payload-dir": b"previous-payload", "stamped-version": b"previous-version"}
@@ -170,8 +174,17 @@ try {
             if ready.strip() != "READY":
                 assert holder.stderr is not None
                 pytest.fail(f"Lock-holder initialization failed: {ready}{holder.stderr.read()}")
+            if contender_action == "install":
+                driver = Path(env["TEST_UV_DRIVER"])
+                driver_source = driver.read_text(encoding="utf-8")
+                marker = 'if args[:2] == ["python", "install"]:\n'
+                assert driver_source.count(marker) == 1
+                driver.write_text(driver_source.replace(
+                    marker, marker + '    from pathlib import Path\n'
+                    '    Path(os.environ["TEST_UV_PREPARATION"]).write_text("prepared")\n',
+                ), encoding="utf-8")
             contender = subprocess.run(  # noqa: S603 - isolated native installer fixture
-                _native_command(shell, contender_payload, root, "stamp"),
+                _native_command(shell, contender_payload, root, contender_action),
                 cwd=tmp_path,
                 env=env,
                 capture_output=True,
@@ -183,6 +196,7 @@ try {
             detail = contender.stdout + contender.stderr
             assert contender.returncode != 0, detail
             assert "refusing to proceed unlocked" in detail, detail
+            assert not preparation.exists(), "A lock contender prepared prerequisites before admission"
             for name, content in previous.items():
                 assert (root / name).read_bytes() == content
             assert not (root / "snapshots").exists()
