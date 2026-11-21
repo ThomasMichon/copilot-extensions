@@ -1631,8 +1631,8 @@ and Chat initializer. The latter is read as fixture data, not imported or
 executed. All original suites and production files remain unchanged.
 
 Positive admission adds 89 nodes, eighteen source hashes and six targets:
-6,254 nodes, 996 sources and 420 targets. Every previous 6,165 node, 978 source
-digest and 414 target remains, with the same profile, 300-second budget and
+6,254 nodes, 996 sources and 420 targets. All 6,165 current-base nodes, 978 source
+digests and 414 targets remain, with the same profile, 300-second budget and
 all 88 release-helper decision targets. All six adapters pass whole-file strict
 typing on Linux and Windows targets and fatal Ruff checks. Focused audited
 development execution is not complete-packet qualification; normal current-head
@@ -1650,6 +1650,16 @@ digest; every node, source hash, target, budget and helper obligation remains.
 This fixes the caused guard failure without a size exemption, reduced coverage
 or altered eligibility. The changed head still requires fresh review and
 complete required CI.
+
+Concurrent Dev changes subsequently advance three existing admitted source
+hashes: Worktrees resource relationships, the native process-runtime archive
+and the native versioned-runtime script. The safe backed replay retains every
+current Dev hash and all 89 owned additions, with no changed original guard
+test or helper. The only replay conflict is the manifest's indentation change;
+its resolution uses the current-base admission plus the owned additions, then
+two-space serialization. Counts, limits and file size remain unchanged.
+Prior-head review and CI do not qualify these new complete packet inputs;
+fresh exact-head review and full required CI remain mandatory.
 
 ### November 20 path-gated audit-guard native boundary
 
