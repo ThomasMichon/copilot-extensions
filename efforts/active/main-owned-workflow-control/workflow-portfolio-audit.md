@@ -3092,6 +3092,79 @@ without conflict, reset, stash, peer edit or resource release. Continue the
 remaining original-source census; broader acceptance and retained custody
 remain unchanged.
 
+### November 21 original installer and wrapper asset source admission
+
+The next adapter exports twelve exact original functions and fourteen expanded
+cases from `test_materialize_main.py`. Original installer-copy/refusal,
+source-line comment-preservation and wrapper-manifest copy/refusal assertions
+remain unchanged. The native symlink and broader driver-refresh witnesses stay
+outside this slice. All 57 mapped original materializer cases are disjoint;
+108 originals remain outside the packet.
+
+Development collection retains every original parameter suffix and object.
+The real effect auditor passes all fourteen in 1.813 seconds with zero
+prohibited effects, eleven source-bound Python reads and positive actual
+call-phase coverage for every case in its materializer or reference writer.
+Fixture installer and wrapper text never executes. The sole new source
+binding is the adapter; all 6,735 preceding node identities, source hashes and
+order remain. The 6,749-node, 1,066-source packet retains all 441 coverage
+targets, 89 helper decisions and the 300-second bound. Compact source storage
+is 774,454 bytes and still normalizes to the unchanged flat-v1 contract.
+Ruff and whole-file strict Linux/Windows typing pass.
+
+Source #13940 merges at `2026-11-21T17:56:25Z` as
+`dc1b8b2e70331d1cbe803144477f59879aafade9`. Copilot approval `6007111853`
+names exact head `cbfebbf9a7acdb0da7ae004b50b3d90092d746c8`; complete review
+and thread pagination finds no outstanding finding. Required source CI
+`44932236522` and trusted metadata CI `44932236618` succeed. Actual unit job
+`136931165335` freshly executes all 6,749 cases with 35 deselections in
+161.26 pytest seconds and 181.722 packet seconds. Lookup takes 573 ms; this is
+not a reuse or controlled whole-flow saving.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent readback confirms merged state, empty
+closing references and open parent #6237. Scoped synchronization retains the
+published head and advances to the merge. After rereading the full canonical
+parent, only this finite source item is resolved. Continue the fixture-only
+packaged-asset census; native, installed, release, full-census, comparable
+whole-flow and retained-custody gates remain open.
+
+### November 21 original packaged-asset source admission
+
+Seven exact original functions contribute twenty fixture-only cases, retaining
+original assertions, fixtures and expanded suffixes. They exercise packaged
+projection into the owning payload, standalone selection without plugins,
+complete multi-root preflight, exact-byte reuse with preserved stat identity,
+escaping-directory and unsafe-member refusal, and preserved nested layout.
+The native linked-directory cases remain unchanged outside the packet.
+All 77 mapped original materializer cases are disjoint; 88 remain outside.
+
+Development collection proves exact original object identity. Actual effect
+auditing passes all twenty in 2.484 seconds with zero prohibited effects,
+eleven source-bound Python reads and positive call-phase coverage in the real
+asset reader for every case. Fixture Python and JavaScript remain data.
+Only the adapter source binding is new; all 6,749 preceding nodes and hashes,
+441 coverage targets, 89 helper decisions and the 300-second bound remain.
+The 6,769-node, 1,067-source compact manifest is 776,349 bytes and retains
+flat-v1 normalization. Ruff and whole-file strict Linux/Windows typing pass.
+
+Source #13942 merges at `2026-11-21T18:07:03Z` as
+`abcc2aa18809e690ad9af846a30eee047caa4040`. Copilot approval `6007174185`
+names exact head `2d7d59eaf2527b24dfe1d24ed3359eeb54905301`; complete review
+and thread pagination finds no outstanding finding. Required source CI
+`44933238257` and trusted metadata CI `44933238323` succeed. Actual unit job
+`136934221989` freshly executes all 6,769 cases with 35 deselections in
+135.66 pytest seconds and 154.633 packet seconds. Lookup takes 432 ms; no reuse
+or controlled whole-flow saving is credited.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. Scoped synchronization retains
+the published head and advances to the merge. After rereading the full
+canonical parent, only this finite source item is resolved. Continue the
+fixture-only local-source closure census. Native, installed, release,
+full-census, comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

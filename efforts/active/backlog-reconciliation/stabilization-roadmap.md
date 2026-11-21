@@ -57,6 +57,14 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [current Python-prerequisite study](journal/2026/11.21-current-python-prerequisite-contract.md)
+qualifies #6888's complete constructor, dtssh, shared-helper and ordinary
+consumer contract after resolving its specific reference-derived stop.
+Reported source leaves, later managed-Python intent and independent claimants
+are credited without claiming installed convergence or a whole-home fit.
+The same entry records actual #13939 delivery, a separate thirty-case
+#13937 portfolio slice and the complete 900-open/171-above-target census.
+
 The [specific receipt follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
 replaces generic correspondence placeholders with actual retained controls,
 including #6082's incomplete copied-source boundary, without inventing
