@@ -25,6 +25,19 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 selected current framing contribution
+
+The [bounded framing proposal](roadmap-selected-framing-contribution.md)
+reuses exact previously admitted IPC-caller and server file identities at
+current `042f4fa`, qualifies the changed current vision publications before
+reading its relevant section, and retains the narrowed #1803 client-limit
+residual. Complete current contract metadata matches the admitted selection.
+Its P1 rationale, original custodian, explicit whole-effort-home gap and
+source/review/release/consumer exits are distinct from an implementation
+assignment or new runtime result. The
+[dated journal](journal/2026/11.21-current-framing-contribution.md) records
+actual #13913 delivery. Other pinned findings below are not silently refreshed.
+
 ## 2026-11-21 independent relationship and Dispatch deliveries
 
 The [four-publication comparison](journal/2026/11.21-relationship-and-dispatch-receiving.md#new-delivery-evidence)

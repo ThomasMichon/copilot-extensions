@@ -770,13 +770,17 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13900 merges at `6174ac7d9588c33b6162f6e0be22ae5eb55fedbf` after
   exact-head Copilot approval and complete required Linux CI with freshly
   executed packet evidence. Broader parent gates stay open.
-- [ ] Land reader-first compact source-manifest support with ordered file groups
+- [x] Land reader-first compact source-manifest support with ordered file groups
   and normalization to the unchanged flat logical v1 identity. Preserve every
   preceding selection/hash/target, required assurance and budget; retain v1
   storage and emitted packets. Qualify strict malformed/duplicate/overflow
   refusal, actual source/packet loading, candidate composition and compatibility
   CLI consumers, including old-reader v1 acceptance/v2 refusal. Complete affected
   whole-file strict typing, current-head review and required Linux source CI.
+  #13905 merges at `725346e538fc4e1329549ff6f8af7f490e9c4518` after fresh
+  corrected-head Copilot approval and complete required Linux CI.
+  The Manager packaged-helper patch intent is included. V1 storage remains;
+  writer migration and broader parent gates stay open.
 - [ ] Migrate the source manifest writer only after the actual selected readers
   support the new storage contract, raw node-list consumers are reconciled and
   supported rollback or pre-effect refusal is proven. Preserve every original

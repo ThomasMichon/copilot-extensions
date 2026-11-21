@@ -53,6 +53,15 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [selected current framing contribution](roadmap-selected-framing-contribution.md)
+adds a current source-identity and vision-qualified P1 contribution for #1803,
+with original custody, an explicit whole-effort-home gap and finite
+source/review/release/consumer exits. It corrects no product and introduces no
+new hard edge or whole-roadmap completion. Its
+[journal](journal/2026/11.21-current-framing-contribution.md) records actual
+#13913 delivery and the distinction between completed historical accounting
+and the still-open selected integration work.
+
 The [retained historical receipt register](roadmap-historical-retained-receipts.md)
 accounts for 161 of the existing 292 identities without repeating unchanged
 original/source studies: the previous 144 plus seventeen specific owner/causal

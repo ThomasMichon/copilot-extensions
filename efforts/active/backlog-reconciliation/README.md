@@ -1471,6 +1471,12 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [selected current framing contribution](roadmap-selected-framing-contribution.md)
+advances the priority/receiver and scoped-wave integration with #1803's exact
+current source identity, current vision, retained owner and finite exits.
+Its [journal](journal/2026/11.21-current-framing-contribution.md) records actual
+#13913 delivery; accepted whole-effort-home and broader integration gaps remain.
+
 The [retained historical receipt register](roadmap-historical-retained-receipts.md)
 and [continuation controls](roadmap-historical-continuation-controls.md)
 account for all 292 selected identities: 161 preceding decisions plus 131
