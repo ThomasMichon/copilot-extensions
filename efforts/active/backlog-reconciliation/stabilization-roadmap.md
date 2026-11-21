@@ -53,6 +53,13 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
+adds 89 receipt/gap decisions to the preceding 64, accounting for all 153
+original outside-wave identities without claiming 153 technical assessments.
+The thirteen later identities and changed-contract gaps among the 292 retained
+historical assignments remain separate current-coverage duties. This does not
+check the coverage gate or any other integration gate.
+
 The [outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
 extends the existing [coverage register](roadmap-coverage-reconciliation.md)
 through numeric position 64 of its fixed 153-identity cohort. These are

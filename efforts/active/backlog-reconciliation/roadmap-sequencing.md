@@ -30,6 +30,12 @@ identities stay separate; no implementation assignment follows.
 
 ## Select by evidence class before scheduling
 
+The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
+completes identity-level continuation accounting for the original 153, not
+whole-current coverage or a new execution order. Its research, keeper,
+completion and unresolved-gap classes remain distinct; all original owners,
+conditional acceptance and actual source/copy boundaries survive.
+
 The following queues can advance independently under their own permissions.
 Their order is not a requirement to exhaust one queue before starting another.
 
