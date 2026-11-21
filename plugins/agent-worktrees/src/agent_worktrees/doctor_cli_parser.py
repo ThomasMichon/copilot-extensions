@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 
-def add_parser(sub) -> None:
+
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     sp = sub.add_parser(
         "doctor",
         help="Diagnose (and with --fix, repair) worktree/session health: "

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable
 
 import pytest
 import yaml
@@ -14,8 +15,9 @@ import yaml
 from agent_worktrees import claimant, context_cli, execution_spaces, finalize, finalize_cli
 from agent_worktrees import git_ops, retired_owner_finalization as recovery, tracking
 from agent_worktrees import status_monitor_runtime, tracking_write
-from agent_worktrees import output, session_liveness, sessions
-from agent_worktrees.tracking_claims import canonicalize_ref
+from agent_worktrees import output, procs, session_liveness, sessions
+from agent_worktrees.finalize_lock import FinalizeLock
+from agent_worktrees.tracking_claims import ClaimRef, canonicalize_ref, format_claim_ref
 from pr_test_helpers import _git
 from test_local_worktree_authority import local_worktree  # noqa: F401
 
@@ -37,7 +39,7 @@ def local_git_checkout(tmp_path: Path) -> tuple[Path, Path]:
 
 @pytest.fixture
 def retired(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    fixture = request.getfixturevalue("local_worktree")
+    fixture: SimpleNamespace = request.getfixturevalue("local_worktree")
     fixture.data.pop("creation_nonce")
     fixture.data["resources"] = []
     fixture.data["owner_ref"] = "old-host/example/retired-parent"
@@ -58,13 +60,13 @@ def retired(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(claimant, "_confirmed_record_death", lambda record, config: False)
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
     monkeypatch.setattr(sessions, "mux_status_many", lambda *a, **k: {})
-    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
     monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
     monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
     return fixture
 
 
-def _run(fixture: SimpleNamespace, **changes) -> int:
+def _run(fixture: SimpleNamespace, **changes: Any) -> int:
     options = dict(
         worktree_id=fixture.checkout.name, worktree_id_flag=None, config=None, json=True,
         dry_run=False, abandon=False, handoff_to=None, force_open_pr=False,
@@ -74,7 +76,7 @@ def _run(fixture: SimpleNamespace, **changes) -> int:
     return finalize_cli.cmd_finalize(Namespace(**options))
 
 
-def test_explicit_recovery_removes_landed_legacy_child_on_actual_branch(retired: SimpleNamespace, capsys) -> None:
+def test_explicit_recovery_removes_landed_legacy_child_on_actual_branch(retired: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     _git("switch", "-c", "reviewed-topic", cwd=retired.checkout)
     parent = retired.parent.read_bytes()
     assert _run(retired, recover_retired_owner=None) == 1
@@ -179,7 +181,7 @@ def test_removal_excludes_parent_claim_writers(retired: SimpleNamespace) -> None
     assert try_writer() is True
 
 
-def test_selected_runtime_advertises_its_recovery_parser(retired: SimpleNamespace, capsys) -> None:
+def test_selected_runtime_advertises_its_recovery_parser(retired: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import __main__ as cli
 
     assert context_cli.cmd_get(Namespace(key="finalize-recovery")) == 0
@@ -208,7 +210,7 @@ def test_recovery_rechecks_absence_when_ordinary_custody_becomes_valid(
 @pytest.mark.parametrize("metadata", [{"producer": {"namespace": "unknown"}}, {"future": "opaque"}])
 @pytest.mark.parametrize("canonical", [False, True])
 def test_recovery_rejects_mixed_duplicate_claims(
-    retired: SimpleNamespace, after_admission: bool, metadata: dict, canonical: bool,
+    retired: SimpleNamespace, after_admission: bool, metadata: dict[str, Any], canonical: bool,
 ) -> None:
     from contextlib import nullcontext
 
@@ -239,14 +241,14 @@ def test_recovery_keeps_session_settlement_inside_admitted_process(
         record = tracking.load_record(retired.ledger)
         retired.data["resources"].append({
             "kind": "session", "state": "active",
-            "ref": tracking.format_claim_ref(
+            "ref": format_claim_ref(
                 record.execution_machine, record.repo, record.worktree_id,
                 session="recovery-session",
             ),
         })
         retired.ledger.write_text(yaml.safe_dump(retired.data), encoding="utf-8")
 
-    def daemon(*args, **kwargs):
+    def daemon(*args: Any, **kwargs: Any) -> None:
         pytest.fail("process-local recovery admission must not be sent to a resident daemon")
 
     monkeypatch.setattr(tracking_write, "dispatch", daemon)
@@ -274,7 +276,9 @@ def test_recovery_checks_actual_parent_binding_probe(
     retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
     seen = []
 
-    def bindings(*, worktree_id, session_ids, strict=False):
+    def bindings(
+        *, worktree_id: str, session_ids: list[str], strict: bool = False,
+    ) -> list[dict[str, str]]:
         seen.append((worktree_id, session_ids, strict))
         if probe == "unknown":
             raise OSError("native binding observation unavailable")
@@ -316,10 +320,10 @@ def test_recovery_malformed_record_is_a_json_refusal(
 def test_recovery_retries_a_freeze_after_original_custody_is_restored(
     retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    acquire = finalize.FinalizeLock.acquire
+    acquire = FinalizeLock.acquire
     changed = False
 
-    def invalidate_after_freeze(lock):
+    def invalidate_after_freeze(lock: FinalizeLock) -> Any:
         nonlocal changed
         result = acquire(lock)
         if not changed:
@@ -328,7 +332,7 @@ def test_recovery_retries_a_freeze_after_original_custody_is_restored(
             retired.parent.write_text(yaml.safe_dump(retired.parent_data), encoding="utf-8")
         return result
 
-    monkeypatch.setattr(finalize.FinalizeLock, "acquire", invalidate_after_freeze)
+    monkeypatch.setattr(FinalizeLock, "acquire", invalidate_after_freeze)
     head = _git("rev-parse", "HEAD", cwd=retired.checkout)
     assert _run(retired) == 1
     assert tracking.load_record(retired.ledger).status == "finalizing"
@@ -351,7 +355,7 @@ def orphaned(retired: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simpl
     return retired
 
 
-def _doctor(fixture: SimpleNamespace, *extra: str) -> tuple[int, dict]:
+def _doctor(fixture: SimpleNamespace, *extra: str) -> tuple[int, dict[str, Any]]:
     from agent_worktrees import __main__ as cli, maintenance_cli
 
     args = cli.build_parser().parse_args([
@@ -367,7 +371,7 @@ def _repair_files(fixture: SimpleNamespace) -> list[Path]:
 
 
 def test_orphaned_owner_repair_reports_fixes_then_plain_finalize_applies(
-    orphaned: SimpleNamespace, capsys,
+    orphaned: SimpleNamespace, capsys: pytest.CaptureFixture[str],
 ) -> None:
     original = orphaned.ledger.read_bytes()
     assert _run(orphaned, recover_retired_owner=None) == 1
@@ -423,7 +427,7 @@ def test_orphaned_owner_repair_refuses_unproven_absence_without_writes(
     elif fault == "live-terminal":
         monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **k: True)
     elif fault == "unknown-terminal":
-        def unavailable(*args, **kwargs):
+        def unavailable(*args: Any, **kwargs: Any) -> bool:
             raise OSError("terminal multiplexer observation unavailable")
 
         monkeypatch.setattr(sessions, "has_mux_session", unavailable)
@@ -440,14 +444,17 @@ def test_orphaned_owner_repair_refuses_unproven_absence_without_writes(
     assert orphaned.checkout.exists()
 
 
-def _legacy_owner(fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, resolved) -> list:
+def _legacy_owner(
+    fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    resolved: Callable[[SimpleNamespace], Path | None],
+) -> list[ClaimRef]:
     from agent_worktrees import legacy_wsl_record_locality
 
     fixture.data["owner_ref"] = "legacy-host-label/example/retired-parent"
     fixture.ledger.write_text(yaml.safe_dump(fixture.data), encoding="utf-8")
-    probes = []
+    probes: list[ClaimRef] = []
 
-    def resolve(ref, config):
+    def resolve(ref: ClaimRef, config: object) -> Path | None:
         probes.append(ref)
         return resolved(fixture)
 
@@ -476,7 +483,8 @@ def test_orphaned_owner_repair_accepts_resolved_legacy_wsl_owner_label(
     lambda fixture: fixture.ledger.parent / "some-other-record.yaml",
 ], ids=["unresolved", "other-record"])
 def test_orphaned_owner_repair_refuses_unproven_legacy_owner_label(
-    orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, resolved,
+    orphaned: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    resolved: Callable[[SimpleNamespace], Path | None],
 ) -> None:
     probes = _legacy_owner(orphaned, monkeypatch, resolved)
     before = orphaned.ledger.read_bytes()
@@ -486,7 +494,7 @@ def test_orphaned_owner_repair_refuses_unproven_legacy_owner_label(
     assert probes and orphaned.ledger.read_bytes() == before and not _repair_files(orphaned)
 
 
-def _shared_legacy_label(fixture: SimpleNamespace, owner_machine: str, **raw) -> None:
+def _shared_legacy_label(fixture: SimpleNamespace, owner_machine: str, **raw: Any) -> None:
     for key in ("machine_identity_version", "environment", "execution_machine"):
         fixture.data.pop(key, None)
     fixture.data.update(raw)
@@ -590,8 +598,9 @@ def test_orphaned_owner_repair_refuses_live_parent_residue(
 
 def test_orphaned_owner_repair_refuses_unenumerable_sidecar(orphaned: SimpleNamespace) -> None:
     import os
+    import sys
 
-    if os.name == "nt" or os.geteuid() == 0:
+    if sys.platform == "win32" or os.geteuid() == 0:
         pytest.skip("POSIX permission denial required")
     hidden = orphaned.parent.with_suffix("") / "handoff"
     hidden.mkdir(parents=True)
@@ -603,7 +612,7 @@ def test_orphaned_owner_repair_refuses_unenumerable_sidecar(orphaned: SimpleName
     assert code == 1 and "(retired-parent/)" in report["error"]
 
 
-def _write_creation_journal(fixture: SimpleNamespace, facts: dict) -> None:
+def _write_creation_journal(fixture: SimpleNamespace, facts: dict[str, Any]) -> None:
     import sqlite3
 
     connection = sqlite3.connect(fixture.ledger.parent.parent / "workspace-creation.sqlite3")

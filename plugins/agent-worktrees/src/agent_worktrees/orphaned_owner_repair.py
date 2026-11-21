@@ -11,6 +11,7 @@ It never touches checkout content, branches, or any other record.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -19,10 +20,14 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 import yaml
 
 from . import config as cfg, git_ops, output, pr_authority, tracking
+
+if TYPE_CHECKING:
+    from .tracking_claims import ClaimRef
 
 _OWNER_LINE = re.compile(r"(?m)^owner_ref: [^\r\n]*(?:\r?\n|$)")
 _OTHER_PASSES = (
@@ -36,7 +41,16 @@ class OrphanedOwnerRefused(ValueError):
     """The parent's absence is not positively proven; nothing may change."""
 
 
-def add_doctor_arguments(parser) -> None:
+def _detect_platform() -> str:
+    return cast("Callable[[], str]", getattr(cfg, "detect_platform"))()
+
+
+def _parse_claim_ref(ref: str) -> ClaimRef | None:
+    parse = cast("Callable[[str], ClaimRef | None]", getattr(tracking, "parse_claim_ref"))
+    return parse(ref)
+
+
+def add_doctor_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--repair-orphaned-owner", metavar="WORKTREE_ID",
         help="Prove this child's local owner worktree is permanently gone; "
@@ -44,7 +58,7 @@ def add_doctor_arguments(parser) -> None:
     )
 
 
-def _git(anchor: Path, *args: str) -> subprocess.CompletedProcess:
+def _git(anchor: Path, *args: str) -> subprocess.CompletedProcess[str]:
     try:
         return git_ops.git(
             *args, cwd=anchor, timeout=10, kill_tree=True,
@@ -148,7 +162,7 @@ def _parent_git_absent(anchor: Path, checkout: Path, branch: str) -> None:
             raise OrphanedOwnerRefused("parent checkout is still registered with Git")
 
 
-def _no_live_evidence(record: tracking.WorktreeRecord, owner) -> None:
+def _no_live_evidence(record: tracking.WorktreeRecord, owner: ClaimRef) -> None:
     from . import sessions
 
     try:
@@ -175,7 +189,8 @@ def _no_live_evidence(record: tracking.WorktreeRecord, owner) -> None:
 
 
 def _owner_locality(
-    owner, record: tracking.WorktreeRecord, raw: dict, path: Path, config: cfg.Config,
+    owner: ClaimRef, record: tracking.WorktreeRecord, raw: dict[str, Any], path: Path,
+    config: cfg.Config,
 ) -> str:
     """Prove the owner label names the current execution space, or refuse.
 
@@ -196,23 +211,26 @@ def _owner_locality(
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
     from .tracking_claims import ClaimRef
 
-    if retained_owner_is_current(owner.machine, config):
+    owner_machine = owner.machine
+    if not owner_machine:
+        raise OrphanedOwnerRefused("owner belongs to another machine or execution space")
+    if retained_owner_is_current(owner_machine, config):
         return "current execution space"
-    probe = ClaimRef(worktree_id=record.worktree_id, machine=owner.machine, project=record.repo)
+    probe = ClaimRef(worktree_id=record.worktree_id, machine=owner_machine, project=record.repo)
     resolved = resolve_legacy_wsl_owner_ref(probe, config)
     if resolved is not None and Path(resolved).resolve() == path.resolve():
         return "legacy alias of current execution space"
     stored = raw.get("machine")
     nested = raw.get("machine_identity")
-    explicit = [raw.get("execution_machine")]
+    explicit: list[object] = [raw.get("execution_machine")]
     if isinstance(nested, dict):
         explicit.append(nested.get("execution_machine"))
     elif nested is not None:
         explicit.append(nested)
-    actual = cfg.detect_platform()
+    actual = _detect_platform()
     if (
         isinstance(stored, str) and stored
-        and owner.machine.casefold() == stored.casefold()
+        and owner_machine.casefold() == stored.casefold()
         and raw.get("platform") == actual and record.platform == actual
         and retained_checkout.is_local(record, config)
         and all(
@@ -224,7 +242,7 @@ def _owner_locality(
     raise OrphanedOwnerRefused("owner belongs to another machine or execution space")
 
 
-def prove(record_id: str) -> dict:
+def prove(record_id: str) -> dict[str, Any]:
     """Return evidence that the child's local owner is gone, or refuse."""
     from . import execution_spaces, receiving_allocation, record_reporting, retained_checkout
 
@@ -243,9 +261,10 @@ def prove(record_id: str) -> dict:
     record = tracking.load_record(path)
     if record.worktree_id != record_id or not record.owner_ref:
         raise OrphanedOwnerRefused("child record has no owner reference to repair")
-    owner = tracking.parse_claim_ref(record.owner_ref)
+    owner = _parse_claim_ref(record.owner_ref)
     if (
-        owner is None or not owner.is_qualified or owner.session or owner.is_anchor
+        owner is None or not owner.machine or not owner.project
+        or owner.session or owner.is_anchor
         or not cfg._PROJECT_NAME_RE.fullmatch(owner.project)
         or Path(owner.worktree_id).name != owner.worktree_id
         or owner.worktree_id in {"", ".", ".."}
@@ -318,7 +337,7 @@ def _write_private(path: Path, content: bytes) -> None:
         os.fsync(handle.fileno())
 
 
-def apply(record_id: str) -> dict:
+def apply(record_id: str) -> dict[str, Any]:
     """Re-prove under the record lock, then remove only ``owner_ref``."""
     proof = prove(record_id)
     path = proof["path"]
@@ -344,10 +363,10 @@ def apply(record_id: str) -> dict:
     return {**current, "backup": backup.name, "audit": audit.name}
 
 
-def targeted_doctor(args) -> int:
+def targeted_doctor(args: argparse.Namespace) -> int:
     record_id = args.repair_orphaned_owner
     fix = getattr(args, "fix", False)
-    report = {
+    report: dict[str, Any] = {
         "version": 1, "scope": "orphaned-owner", "worktree_id": record_id,
         "mode": "fix" if fix else "report", "repairable": False,
         "repaired": False, "error": None, "evidence": None,

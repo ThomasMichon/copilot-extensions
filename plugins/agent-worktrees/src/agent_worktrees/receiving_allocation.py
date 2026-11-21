@@ -14,24 +14,40 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Any, BinaryIO, Callable, Iterator, cast
 
 from . import owned_worktree as allocation, resource_producer as producer
 from .resource_relationship import valid_request_id
 
 if TYPE_CHECKING:
     from . import config as cfg, tracking
+    from .tracking_claims import ClaimRef
 
 _writing: ContextVar[frozenset[str]] = ContextVar("receiving_allocation_writes", default=frozenset())
 
 
+def _parse_claim_ref(ref: str) -> ClaimRef | None:
+    from . import tracking
+
+    parse = cast("Callable[[str], ClaimRef | None]", getattr(tracking, "parse_claim_ref"))
+    return parse(ref)
+
+
+def _format_claim_ref(machine: str | None, project: str | None, worktree_id: str) -> str:
+    from . import tracking
+
+    render = cast("Callable[[str | None, str | None, str], str]", getattr(tracking, "format_claim_ref"))
+    return render(machine, project, worktree_id)
+
+
 def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
-    from . import config as cfg, record_reporting, tracking
+    from . import config as cfg, record_reporting
     from .checkout_relocation_plan import read_record
 
-    owner = tracking.parse_claim_ref(record.owner_ref)
+    owner = _parse_claim_ref(record.owner_ref or "")
     if (
-        owner is None or not owner.is_qualified or owner.canonical() != record.owner_ref
+        owner is None or not owner.machine or not owner.project
+        or owner.canonical() != record.owner_ref
         or not all(allocation._component(part) for part in (
             owner.machine, owner.project, owner.worktree_id, *([owner.session] if owner.session else []),
         ))
@@ -50,7 +66,7 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
         owner.machine, owner.project, owner.worktree_id,
     ):
         raise ValueError("ordinary creator ledger identity is unproven")
-    ref = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
+    ref = _format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
     claims = [claim for claim in parent.resources if claim.kind == "worktree" and claim.ref == ref]
     if (
         len(claims) != 1 or claims[0].state not in {"at-rest", "released"}
@@ -62,23 +78,27 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
     from . import claim_handoffs
 
     if claim_handoffs.active_bundle_for_claim(
-        tracking.format_claim_ref(parent.execution_machine, parent.repo, parent.worktree_id),
+        _format_claim_ref(parent.execution_machine, parent.repo, parent.worktree_id),
         claims[0].ref, maximum_bytes=1024 * 1024,
     ):
         raise ValueError("ordinary creator responsibility is handoff-reserved")
 
 
 @contextmanager
-def _original_snapshot_lock(stream, path: Path):
+def _original_snapshot_lock(stream: BinaryIO, path: Path) -> Iterator[None]:
     if os.name != "nt":
         raise ValueError("original receiving classification requires qualified native locking")
     import msvcrt
+
+    locking = cast("Callable[[int, int, int], None]", getattr(msvcrt, "locking"))
+    shared_nonblocking = cast(int, getattr(msvcrt, "LK_NBRLCK"))
+    unlock = cast(int, getattr(msvcrt, "LK_UNLCK"))
 
     before = os.fstat(stream.fileno())
     # SQLite's pending, reserved and shared lock bytes lie beyond database data.
     stream.seek(0x40000000)
     try:
-        msvcrt.locking(stream.fileno(), msvcrt.LK_NBRLCK, 512)
+        locking(stream.fileno(), shared_nonblocking, 512)
     except OSError as error:
         raise ValueError("original receiving classification is busy") from error
     try:
@@ -93,7 +113,7 @@ def _original_snapshot_lock(stream, path: Path):
             raise ValueError("original receiving classification changed during inspection")
     finally:
         stream.seek(0x40000000)
-        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 512)
+        locking(stream.fileno(), unlock, 512)
 
 
 def has_retained_receiving_operation(
@@ -206,7 +226,7 @@ class ReceivingAllocation:
     origin: str
     request_id: str
     token: str
-    target: dict
+    target: dict[str, Any]
 
     @classmethod
     def from_fields(cls, value: object) -> ReceivingAllocation:
@@ -222,7 +242,7 @@ class ReceivingAllocation:
         )
         return cls(value["origin"], value["request_id"], value["token"], copy.deepcopy(value["target"]))
 
-    def to_fields(self) -> dict:
+    def to_fields(self) -> dict[str, Any]:
         return {
             "origin": self.origin, "request_id": self.request_id, "token": self.token,
             "target": copy.deepcopy(self.target),
@@ -246,7 +266,7 @@ class ReceivingAllocation:
         ):
             raise ValueError("receiving allocation does not select this execution space/project")
 
-    def receipt(self, record: tracking.WorktreeRecord) -> dict:
+    def receipt(self, record: tracking.WorktreeRecord) -> dict[str, Any]:
         identity = record_identity(record) if record.receiving_allocation_present else (
             allocation.AllocationIdentity.from_dict({
                 "ref": f"{self.target['machine']}/{self.target['project']}/{record.worktree_id}",
@@ -269,8 +289,6 @@ class ReceivingAllocation:
 
 
 def record_identity(record: tracking.WorktreeRecord) -> allocation.AllocationIdentity:
-    from . import tracking
-
     receipt = record.receiving_allocation
     original = (
         allocation.AllocationIdentity.from_dict(receipt["identity"])
@@ -278,14 +296,14 @@ def record_identity(record: tracking.WorktreeRecord) -> allocation.AllocationIde
         else None
     )
     current = allocation.AllocationIdentity.from_dict({
-        "ref": original.ref if original is not None else tracking.format_claim_ref(
+        "ref": original.ref if original is not None else _format_claim_ref(
             record.execution_machine, record.repo, record.worktree_id,
         ),
         "creation_nonce": record.creation_nonce,
         "path": record.worktree_path, "branch": record.branch,
     })
     if original is not None:
-        subject = tracking.parse_claim_ref(original.ref)
+        subject = _parse_claim_ref(original.ref)
         if (
             subject is None or not subject.is_qualified
             or (subject.project, subject.worktree_id, original.creation_nonce, original.branch)
@@ -360,7 +378,7 @@ def require_record(
 
 
 def _require_retained_finality(
-    record: tracking.WorktreeRecord, row: dict, admission: ReceivingAllocation,
+    record: tracking.WorktreeRecord, row: dict[str, Any], admission: ReceivingAllocation,
 ) -> None:
     from .receiving_creation_journal import concluded_identity
 
@@ -481,7 +499,7 @@ def preserve(
             old = current.receiving_allocation
             new = record.receiving_allocation
             if (
-                not isinstance(old, dict)
+                not isinstance(old, dict) or not isinstance(new, dict)
                 or {key: value for key, value in old.items() if key != "phase"}
                 != {key: value for key, value in new.items() if key != "phase"}
                 or old["phase"] not in ("created", "linked")
