@@ -30,7 +30,7 @@ def _run(
 
 
 @pytest.fixture(scope="module")
-def managed() -> tuple[Path, Path]:
+def managed() -> tuple[Path, Path, Path]:
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("Prepared uv is unavailable")
@@ -43,7 +43,12 @@ def managed() -> tuple[Path, Path]:
     )
     if result.returncode:
         pytest.skip("The declared managed interpreter has not been prepared")
-    return Path(uv), Path(result.stdout.strip())
+    directory = subprocess.run(  # noqa: S603 - query the selected uv's actual managed storage
+        [uv, "python", "dir"], capture_output=True, text=True, timeout=30,
+        env=environment, creationflags=NO_WINDOW,
+    )
+    assert directory.returncode == 0, directory.stderr
+    return Path(uv), Path(result.stdout.strip()), Path(directory.stdout.strip())
 
 
 @pytest.fixture
@@ -163,15 +168,15 @@ def _supply_inside_candidate(
 @pytest.mark.skipif(os.name == "nt", reason="Native POSIX uninstall boundary")
 @pytest.mark.parametrize("mode", ("prepared", "missing-uv", "missing-managed", "inside-runtime"))
 def test_posix_uninstall_uses_prepared_managed_python(
-    tmp_path: Path, managed: tuple[Path, Path],
+    tmp_path: Path, managed: tuple[Path, Path, Path],
     payload: tuple[Path, Path, Path, dict[str, str]], mode: str,
 ) -> None:
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("Bash is unavailable")
-    uv, selected = managed
+    uv, selected, store = managed
     scripts, root, receipt, environment = payload
-    environment["UV_PYTHON_INSTALL_DIR"] = str(selected.parents[2])
+    environment["UV_PYTHON_INSTALL_DIR"] = str(store)
     _prepare_path(tmp_path, uv, environment, mode)
     if mode == "inside-runtime":
         _supply_inside_candidate(scripts, root, selected, environment)
@@ -198,12 +203,12 @@ def ps1(request: pytest.FixtureRequest) -> str:
 @pytest.mark.skipif(os.name != "nt", reason="Finite PowerShell cleanup requires native Windows")
 @pytest.mark.parametrize("mode", ("prepared", "missing-uv", "missing-managed", "inside-runtime"))
 def test_ps1_uninstall_uses_prepared_managed_python(
-    ps1: str, tmp_path: Path, managed: tuple[Path, Path],
+    ps1: str, tmp_path: Path, managed: tuple[Path, Path, Path],
     payload: tuple[Path, Path, Path, dict[str, str]], mode: str,
 ) -> None:
-    uv, selected = managed
+    uv, selected, store = managed
     scripts, root, receipt, environment = payload
-    environment["UV_PYTHON_INSTALL_DIR"] = str(selected.parents[1 if os.name == "nt" else 2])
+    environment["UV_PYTHON_INSTALL_DIR"] = str(store)
     _prepare_path(tmp_path, uv, environment, mode)
     if mode == "inside-runtime":
         _supply_inside_candidate(scripts, root, selected, environment)
