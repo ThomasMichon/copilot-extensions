@@ -56,9 +56,25 @@ History intentionally spans successive sessions in the same continuing
 worktree, not only the current session; rereading it does not reactivate old
 objectives.
 
-Snapshots pin all record hashes. Replay and facts include the first bounded
-page; call `read_intent_corpus` with its snapshot and `next` record/offset until
-`next: null`. A long individual prompt is split without discarding characters.
+Snapshots pin all record hashes. Automatic recovery supplies an outline of at
+most 4,096 UTF-8 bytes (plus the short event wrapper), not a corpus page. It
+starts with one goal paragraph of at most 512 bytes, labelled as a source
+excerpt. Without a canonical Goal, an original operator-request excerpt is
+explicitly unqualified as the current goal. Short limits/holds, live obligations
+and one next action follow, then source pointers with one-line descriptions.
+An effort can supply those short lines through `Authorization Evidence & Limits`
+(or `Scope Approvals`), `Outstanding Background Flows & External State`, and
+`Next Action` sections. Missing summaries remain explicitly unknown; shortened
+lines are not substitutes for the source approval or completion gate.
+Locators that exceed the outline's display budget are identified as long
+references, not emitted as unusable truncated paths. Explicit facts retain the
+exact locators.
+
+Read only the sources needed for the current next step. There is no full-history
+reread prerequisite. Explicit facts retain the first bounded page; call
+`read_intent_corpus` with its snapshot and optional record/offset cursor for
+relevant exact text, following `next` only as needed. A long individual prompt
+is split without discarding characters.
 Each default page fits 12,000 UTF-8 bytes of compact serialized JSON, including
 provenance, offsets and escaping; many short steers therefore page too.
 An unchanged corpus reuses its immutable snapshot without another write.

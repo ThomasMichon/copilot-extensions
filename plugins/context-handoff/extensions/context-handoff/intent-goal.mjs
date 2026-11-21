@@ -94,11 +94,17 @@ export function readCanonicalGoal(cwd, execute) {
     const goal = intentSection(text, "Goal");
     const selected = goal || intentSection(text, "Guiding Intent");
     const status = goal ? "goal" : "legacy-guiding-intent";
+    const recovery = {
+      limits: intentSection(text, "Authorization Evidence & Limits") || intentSection(text, "Scope Approvals"),
+      obligations: intentSection(text, "Outstanding Background Flows & External State"),
+      nextAction: intentSection(text, "Next Action"),
+    };
     if (selected && Buffer.byteLength(JSON.stringify(selected), "utf8") > 12000) {
-      return { ...reference, status: `${status}-reference`, path, goal: null,
+      return { ...reference, status: `${status}-reference`, path, goal: null, recovery,
+        excerpt: selected.slice(0, 512),
         instruction: "Read the selected current or legacy intent in bounded file ranges; no text was truncated." };
     }
-    return { ...reference, status, path, goal: selected };
+    return { ...reference, status, path, goal: selected, recovery };
   } catch {
     return { ...reference, status: "unavailable", path: candidate, goal: null,
       instruction: "Resolve the current canonical effort with planning-efforts; do not infer its Goal." };
