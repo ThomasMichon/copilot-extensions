@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [native-timeout disposition continuation](journal/2026/11.21-native-timeout-disposition-boundaries.md)
+qualifies thirteen new #11175 discussions while reusing its unchanged
+original and ten earlier discussions. Exact historical dispositions, one
+PR-scoped class policy, diagnostic nonreproduction and new failures remain
+distinct; eight current PR states do not establish whole-request fulfillment.
+Six finite retained-delivery judgments and unchanged #11494 ownership are
+carried without another implementation study. Actual #13975 delivery and
+the complete 14:06:03 PST 900-open census are recorded; no new issue, native
+or resource effect occurs.
+
 The [managed-Python consumer and fixture-debt continuation](journal/2026/11.21-managed-python-consumers-and-fixture-debt.md)
 qualifies #13775's changed seventh discussion while reusing its unchanged
 original and six earlier discussions. Actual command/setup, finite removal
