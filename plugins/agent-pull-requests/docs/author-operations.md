@@ -23,6 +23,17 @@ The frontend checks that actual response before the dependent operation.
 Missing or older peers refuse: no raw forge fallback, automatic update,
 credential workaround or silent switch to GitHub.
 
+For a GitHub fork head such as `contributor:topic`, `create` also accepts
+`--source-repo contributor/actual-fork-name`. It requires the selected Worktrees
+peer's additive `operations.foreign-source-repo: true` capability before
+forwarding that identity; old peers refuse without attempting creation.
+This frontend separately declares `frontend.foreign-source-repo: true`.
+Alternatively, a reachable source workspace can resolve its actual push
+repository. Without either input, the existing qualified head form resolves
+the selected target's actual fork network and requires a unique owner match.
+Incomplete or ambiguous reads refuse; no route invents the fork name from the
+target repository.
+
 ## GitHub and Gitea title and description updates
 
 For an enabled GitHub or Gitea target, `operations.metadata-update: true` admits the

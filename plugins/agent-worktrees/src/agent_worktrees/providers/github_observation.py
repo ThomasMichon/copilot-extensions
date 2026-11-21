@@ -6,12 +6,17 @@ import json
 import re
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
+from collections.abc import Callable
+from subprocess import CompletedProcess
+from typing import TYPE_CHECKING
 
 from .base import ProviderError, PullResult
 from .observation_credentials import github_endpoint
+if TYPE_CHECKING:
+    from .github import GitHubProvider
 
 
-def observe_branch(provider, repo, branch, *, api_base="", token=None, run):
+def observe_branch(provider: GitHubProvider, repo: str, branch: str, *, api_base: str = "", token: str | None = None, run: Callable[..., CompletedProcess[str]]) -> dict[str, str]:
     owner, separator, name = repo.partition("/")
     if not owner or not separator or not name or "/" in name:
         raise ProviderError("Branch observation needs an exact owner/repository")
@@ -47,7 +52,7 @@ def observe_branch(provider, repo, branch, *, api_base="", token=None, run):
     return {"repository": repo, "branch": branch, "head_sha": sha.lower()}
 
 
-def observe_head(provider, repo, number, *, api_base="", token=None, run):
+def observe_head(provider: GitHubProvider, repo: str, number: int, *, api_base: str = "", token: str | None = None, run: Callable[..., CompletedProcess[str]]) -> PullResult:
     """Read the exact head and GitHub's HTTP Date in one response."""
     host = provider.authority_endpoint(api_base)
     proc = run(

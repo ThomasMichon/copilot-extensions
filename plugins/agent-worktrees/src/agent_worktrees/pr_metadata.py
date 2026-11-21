@@ -2,11 +2,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .config import Config
 from .pr_publication_labels import PublicationOrigin
 from .providers.base import PullResult, ProviderError
+
+if TYPE_CHECKING:
+    from .tracking import PRRecord
+
+
+def pr_to_dict(pr: PRRecord) -> dict[str, Any]:
+    from . import pr_creation_reconcile
+    return {
+        "pr_id": pr.pr_id, "pr_revision": pr.pr_revision, "creation": dict(pr.creation),
+        **({"local_disposition": "retired", "publication_outcome": "unknown"}
+           if pr_creation_reconcile.retired(pr) else {}),
+        "state": pr.state, "branch": pr.branch, "base_sha": pr.base_sha,
+        "head_sha": pr.head_sha, "patch_id": pr.patch_id, "url": pr.url,
+        "number": pr.number, "provider": pr.provider, "repo": pr.repo,
+        "opened_at": pr.opened_at, "closed_at": pr.closed_at,
+    }
 
 
 @dataclass
@@ -25,13 +41,15 @@ def draft_confirmation(observed: object) -> dict[str, Any] | None:
     }
 
 
-def include_publication_metadata(result: dict[str, Any], pull: PullResult, *,
+def include_publication_metadata(result: dict[str, Any], pull: PullResult | None, *,
                                  requested_draft: bool = False,
                                  require_draft_observation: bool = False) -> None:
-    if type(getattr(pull, "draft", None)) is bool:
-        result["draft"] = pull.draft
-    if getattr(pull, "label_error", ""):
-        result["pr_label_error"] = pull.label_error
+    observed_draft = getattr(pull, "draft", None)
+    if type(observed_draft) is bool:
+        result["draft"] = observed_draft
+    label_error = getattr(pull, "label_error", "")
+    if label_error:
+        result["pr_label_error"] = label_error
     metadata = getattr(pull, "metadata", None) or {}
     if requested_draft and require_draft_observation:
         action = draft_confirmation(getattr(pull, "draft", None))

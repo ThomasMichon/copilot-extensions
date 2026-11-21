@@ -10,13 +10,17 @@ and re-checks liveness plus its idle grace before removing anything.
 from __future__ import annotations
 
 from contextlib import ExitStack
+from collections.abc import Callable
 import os
 from pathlib import Path
 from typing import Any
 
 from . import config as cfg
-from . import finalize, git_ops, paired_claims, sessions, tracking
+from . import finalize as finalize, git_ops, paired_claims, sessions, tracking
 from . import terminal_pair_progress
+from .retirement_safety import pending_prs
+from .tracking_claims import ResourceClaim, release_resource_claim
+from .tracking_lifecycle import conclude_session
 from .terminal_ownership import (  # noqa: F401 -- re-exported policy names
     BRIDGE_CREATION_POLICY,
     CONCLUSION_POLICIES,
@@ -82,7 +86,7 @@ def _save_session_conclusion(
             "session": session_id,
         }, False
     already = entry.state == "concluded"
-    tracking.conclude_session(
+    conclude_session(
         record,
         session_id,
         state="concluded",
@@ -99,7 +103,7 @@ def _release_dispatch_session_claims(
     record: tracking.WorktreeRecord,
     *,
     session_id: str | None,
-) -> list[tracking.ResourceClaim]:
+) -> list[ResourceClaim]:
     """Release the live ``session``-kind resource claim(s) for
     ``session_id`` specifically -- never every live session claim on the
     record, which could over-release an unrelated still-relevant claim
@@ -139,7 +143,7 @@ def _release_dispatch_session_claims(
         claim for claim in self_claims(record, session_id) if claim.is_live
     ]
     for claim in released:
-        tracking.release_resource_claim(record, claim.ref, save=False)
+        release_resource_claim(record, claim.ref, save=False)
     return released
 
 
@@ -169,7 +173,7 @@ def _preservation_reason(
         return "outstanding-obligations"
     if record.is_paired and not pair_clear:
         return "outstanding-obligations"
-    if record.has_live_pr():
+    if pending_prs(record, live_only=True):
         return "open-pull-request"
     return None
 
@@ -199,7 +203,7 @@ def _sibling_preservation_reason(
     )
     if sibling.live_resources or (sibling.owner_ref and not creator_link):
         return "pair-sibling-outstanding-obligations"
-    if sibling.has_live_pr():
+    if pending_prs(sibling, live_only=True):
         return "pair-sibling-open-pull-request"
     if sibling.resolved_head_session is not None:
         # A tracked, still-resumable lifecycle head is independent of live
@@ -248,10 +252,8 @@ def _reciprocal_pair_valid(
            for ref, member in zip(refs, (sibling, record))):
         if not local_pair_subjects(record, sibling):
             return False
-    return terminal_pair_progress.reciprocal_identity_valid(
-        terminal_pair_progress.primary_identity(record),
-        terminal_pair_progress.primary_identity(sibling),
-    )
+    identity: Callable[[tracking.WorktreeRecord], dict[str, Any]] = terminal_pair_progress.primary_identity
+    return terminal_pair_progress.reciprocal_identity_valid(identity(record), identity(sibling))
 
 
 def _resolve_pair_sibling(
@@ -279,14 +281,19 @@ def _resolve_pair_sibling(
     return sibling, path
 
 
-def _pair_progress_valid(record, sibling, path) -> bool:
+def _pair_progress_valid(
+    record: tracking.WorktreeRecord, sibling: tracking.WorktreeRecord, path: Path,
+) -> bool:
     if _reciprocal_pair_valid(record, sibling, path):
         return True
     snapshot = terminal_pair_progress.reciprocal_snapshot(record, sibling, path)
     return snapshot is not None and _reciprocal_pair_valid(record, snapshot, path)
 
 
-def _pair_shape_unresolved(record, *, policy, reservation_key, owner, creation_nonce=None) -> bool:
+def _pair_shape_unresolved(
+    record: tracking.WorktreeRecord, *, policy: str, reservation_key: str | None,
+    owner: str, creation_nonce: str | None = None,
+) -> bool:
     return (
         record.is_paired
         and (record.pair_kind or "").strip() != "anchor"
@@ -546,7 +553,7 @@ def _identity_reason(
     return None
 
 
-def conclude_disposable_worktree(
+def _conclude_disposable_worktree(
     record_path: Path,
     repo: Any,
     *,
@@ -594,7 +601,10 @@ def conclude_disposable_worktree(
     except TimeoutError as exc:
         raise RuntimeError("timed out waiting for the worktree lifecycle lock") from exc
 
+    conclusion_fence = ExitStack()
     try:
+        from .pr_retirement_consumers import conclusion_guard
+        conclusion_fence.enter_context(conclusion_guard(record_path, repo))
         with tracking._RecordLock(
             record_path,
             timeout=3,
@@ -873,7 +883,7 @@ def conclude_disposable_worktree(
                 result.update(action="skipped", reason=reason)
                 return result
             if pair_clear and (ref := paired_claims.paired_ref(record)):
-                tracking.release_resource_claim(record, ref, save=False)
+                release_resource_claim(record, ref, save=False)
             session_result, _session_changed = _save_session_conclusion(
                 record,
                 record_path,
@@ -883,9 +893,11 @@ def conclude_disposable_worktree(
             if record.resolved_head_session is not None:
                 result.update(action="skipped", reason="active-lifecycle-head")
                 return result
+            from .pr_retirement_consumers import conclusion_status
+            target_status = conclusion_status(record)
             already_primed = (
                 record.kind in tracking.MANAGED_KINDS
-                and record.status in {"complete", "finalized"}
+                and (record.status in {"complete", "finalized"} or target_status == "archived")
                 and record.owner == owner
                 and record.resolved_origin == "delegate"
             )
@@ -894,7 +906,7 @@ def conclude_disposable_worktree(
             record.owner = owner
             record.interface = interface
             record.origin = "delegate"
-            tracking.update_status(record, "complete", save=False)
+            tracking.update_status(record, target_status, save=False)
             tracking.save_record(record, record_path)
 
             result.update(
@@ -956,7 +968,20 @@ def conclude_disposable_worktree(
                     result["managed_gc_eligible"] = False
             return result
     finally:
+        conclusion_fence.close()
         lock.release()
+
+
+def conclude_disposable_worktree(
+    record_path: Path, repo: Any, *, session_id: str | None, owner: str, policy: str,
+    reservation_key: str | None = None, creation_nonce: str | None = None,
+) -> dict[str, Any]:
+    """Qualify retirement receipts before concluding an exact disposable owner."""
+    from .pr_retirement_consumers import conclude
+    return conclude(
+        record_path, repo, session_id=session_id, owner=owner, policy=policy,
+        reservation_key=reservation_key, creation_nonce=creation_nonce,
+    )
 
 
 __all__ = [

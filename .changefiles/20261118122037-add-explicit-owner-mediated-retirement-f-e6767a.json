@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit owner-mediated retirement for ambiguous legacy PR creation attempts without fabricating publication outcomes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

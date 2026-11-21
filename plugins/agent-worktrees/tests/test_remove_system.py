@@ -3,53 +3,60 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import types
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, NoReturn
 from unittest.mock import patch
 
 import pytest
+from machine_transport import detect_platform
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import git_ops
+from agent_worktrees import config as cfg, git_ops, sessions
 from agent_worktrees import tracking
+from agent_worktrees.tracking_claims import ResourceClaim, format_claim_ref
 
 
 @pytest.fixture(autouse=True)
-def receiving_project_authority(monkeypatch, tmp_path):
-    config = _config(tmp_path / "receiving")
+def receiving_project_authority(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = _config(tmp_path)
 
-    def load_project_config(project, *, include_control_plane_related_pr=True):
-        return cli.cfg.load_config()
+    def load_project_config(project: str, *, include_control_plane_related_pr: bool = True) -> cfg.Config:
+        return cfg.load_config()
 
     monkeypatch.setattr(
-        cli.cfg, "load_config",
+        cfg, "load_config",
         lambda *, include_control_plane_related_pr=True: config,
     )
-    monkeypatch.setattr(cli.cfg, "load_project_config", load_project_config)
-    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
+    monkeypatch.setattr(cfg, "load_project_config", load_project_config)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: tmp_path / "project")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda project=None: tmp_path / "project" / "worktrees")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: {})
 
 
 @pytest.mark.guard
 @pytest.mark.parametrize("include_control_plane_related_pr", [False, True])
 def test_receiving_project_authority_accepts_overlay_scope(
-    include_control_plane_related_pr,
-):
-    assert cli.cfg.load_project_config(
+    include_control_plane_related_pr: bool,
+) -> None:
+    assert cfg.load_project_config(
         "demo", include_control_plane_related_pr=include_control_plane_related_pr,
-    ) is cli.cfg.load_config()
+    ) is cfg.load_config()
 
 
 def _record(tmp_path: Path) -> tuple[tracking.WorktreeRecord, Path]:
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
+    worktree = tmp_path / "worktree_root" / "managed-1"
+    worktree.mkdir(parents=True)
     record = tracking.WorktreeRecord(
         worktree_id="managed-1",
         branch="worktree/managed-1",
         worktree_path=str(worktree),
         repo="demo",
-        machine="machine",
-        platform="windows",
+        machine=socket.gethostname().lower(),
+        platform=detect_platform(),
         started_at="2026-09-01T00:00:00",
         last_resumed_at="2026-09-01T00:00:00",
         resume_count=0,
@@ -60,25 +67,25 @@ def _record(tmp_path: Path) -> tuple[tracking.WorktreeRecord, Path]:
         prs=[],
         kind="bridge",
     )
-    tracking_dir = tmp_path / "tracking"
-    tracking_dir.mkdir()
+    tracking_dir = tmp_path / "project" / "worktrees"
+    tracking_dir.mkdir(parents=True)
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     return record, tracking_dir
 
 
-def _config(tmp_path: Path):
+def _config(tmp_path: Path) -> cfg.Config:
     anchor = tmp_path / "anchor"
     anchor.mkdir(parents=True, exist_ok=True)
-    return cli.cfg.Config(
-        srcroot=str(tmp_path), machine="machine", platform="windows", repo_name="demo",
-        repos={"demo": cli.cfg.RepoConfig(
+    return cfg.Config(
+        srcroot=str(tmp_path), machine=socket.gethostname().lower(), platform=detect_platform(), repo_name="demo",
+        repos={"demo": cfg.RepoConfig(
             anchor=str(anchor), remote="origin", default_branch="master",
             worktree_root=str(tmp_path / "worktree_root"),
         )},
     )
 
 
-def test_remove_system_waits_for_same_worktree_launch_even_with_force(tmp_path, monkeypatch):
+def test_remove_system_waits_for_same_worktree_launch_even_with_force(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import managed_worktree_guard, worktree_lifecycle
 
     record, tracking_dir = _record(tmp_path)
@@ -86,7 +93,7 @@ def test_remove_system_waits_for_same_worktree_launch_even_with_force(tmp_path, 
     before = path.read_bytes()
     remove = types.SimpleNamespace(called=False)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         remove.called = True
         pytest.fail("Removal crossed an active launch")
 
@@ -105,8 +112,8 @@ def test_remove_system_waits_for_same_worktree_launch_even_with_force(tmp_path, 
 
 
 def test_remove_system_retains_record_when_worktree_removal_fails(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
@@ -137,8 +144,8 @@ def test_remove_system_retains_record_when_worktree_removal_fails(
 
 
 def test_remove_system_deletes_record_after_worktree_removal_succeeds(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
@@ -161,8 +168,8 @@ def test_remove_system_deletes_record_after_worktree_removal_succeeds(
 
 
 def test_remove_system_deletes_unregistered_leftover_and_record(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
@@ -192,8 +199,8 @@ def test_remove_system_deletes_unregistered_leftover_and_record(
 
 
 def test_remove_system_preserves_unregistered_nonempty_path(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     data = Path(record.worktree_path) / "keep.txt"
     data.write_text("unrelated data", encoding="utf-8")
@@ -213,8 +220,8 @@ def test_remove_system_preserves_unregistered_nonempty_path(
 
 
 def test_managed_gc_uses_non_force_removal_for_registered_worktree(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     record.branch = ""
     repo = _config(tmp_path).default_repo
@@ -249,8 +256,8 @@ def test_managed_gc_uses_non_force_removal_for_registered_worktree(
 
 
 def test_remove_system_retains_record_when_registration_probe_fails(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True)
 
@@ -271,8 +278,8 @@ def test_remove_system_retains_record_when_registration_probe_fails(
 
 
 def test_remove_system_retains_missing_path_when_still_registered(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     Path(record.worktree_path).rmdir()
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True)
@@ -293,8 +300,8 @@ def test_remove_system_retains_missing_path_when_still_registered(
 
 
 def test_remove_system_retains_record_when_yaml_unlink_fails(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     record, tracking_dir = _record(tmp_path)
     record.worktree_path = ""
     record.branch = ""
@@ -303,7 +310,7 @@ def test_remove_system_retains_record_when_yaml_unlink_fails(
     original_unlink = Path.unlink
     attempted = []
 
-    def unlink(path, *args, **kwargs):
+    def unlink(path: Path, *args: Any, **kwargs: Any) -> None:
         if path == yaml_path:
             attempted.append(path)
             raise PermissionError("locked")
@@ -323,7 +330,7 @@ def test_remove_system_retains_record_when_yaml_unlink_fails(
     assert yaml_path.exists()
 
 
-def test_worktree_registration_probe_can_fail_closed(tmp_path):
+def test_worktree_registration_probe_can_fail_closed(tmp_path: Path) -> None:
     failure = types.SimpleNamespace(
         returncode=128,
         stdout="",
@@ -340,7 +347,7 @@ def _init_dirty_git_worktree(worktree: Path) -> None:
     uncommitted change, so ``git_ops.classify_worktree`` reports DIRTY."""
     import subprocess
 
-    def _git(*args):
+    def _git(*args: str) -> None:
         subprocess.run(
             ["git", *args], cwd=worktree, check=True,
             capture_output=True, text=True,
@@ -355,7 +362,7 @@ def _init_dirty_git_worktree(worktree: Path) -> None:
     (worktree / "uncommitted.txt").write_text("scratch", encoding="utf-8")
 
 
-def test_remove_system_refuses_dirty_worktree_by_default(tmp_path):
+def test_remove_system_refuses_dirty_worktree_by_default(tmp_path: Path) -> None:
     record, tracking_dir = _record(tmp_path)
     _init_dirty_git_worktree(Path(record.worktree_path))
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
@@ -374,7 +381,7 @@ def test_remove_system_refuses_dirty_worktree_by_default(tmp_path):
     assert (Path(record.worktree_path) / "uncommitted.txt").exists()
 
 
-def test_remove_system_refuses_open_pr_by_default(tmp_path):
+def test_remove_system_refuses_open_pr_by_default(tmp_path: Path) -> None:
     record, tracking_dir = _record(tmp_path)
     record.prs = [tracking.PRRecord(state="open", url="https://example/pulls/9", number=9)]
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
@@ -393,10 +400,10 @@ def test_remove_system_refuses_open_pr_by_default(tmp_path):
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_refuses_live_resource_claim_by_default(tmp_path):
+def test_remove_system_refuses_live_resource_claim_by_default(tmp_path: Path) -> None:
     record, tracking_dir = _record(tmp_path)
     record.resources = [
-        tracking.ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
+        ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
     ]
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
@@ -414,10 +421,10 @@ def test_remove_system_refuses_live_resource_claim_by_default(tmp_path):
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_bridge_kind_blocker_mentions_owning_service(tmp_path):
+def test_remove_system_bridge_kind_blocker_mentions_owning_service(tmp_path: Path) -> None:
     record, tracking_dir = _record(tmp_path)
     record.resources = [
-        tracking.ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
+        ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
     ]
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
@@ -432,12 +439,12 @@ def test_remove_system_bridge_kind_blocker_mentions_owning_service(tmp_path):
     assert "agent-bridge" in message
 
 
-def test_remove_system_force_bypasses_all_guards(tmp_path):
+def test_remove_system_force_bypasses_all_guards(tmp_path: Path) -> None:
     record, tracking_dir = _record(tmp_path)
     _init_dirty_git_worktree(Path(record.worktree_path))
     record.prs = [tracking.PRRecord(state="open", url="https://example/pulls/9", number=9)]
     record.resources = [
-        tracking.ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
+        ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
     ]
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
@@ -459,13 +466,16 @@ def test_remove_system_force_bypasses_all_guards(tmp_path):
     assert not (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_help_does_not_advertise_force():
+def test_remove_system_help_does_not_advertise_force() -> None:
     """--force exists (tested above) but must not appear in --help output --
     a caller should hit the refusal message and resolve the blocking state,
     not discover this escape hatch by reading --help."""
     parser = cli.build_parser()
     remove_system_parser = None
+    assert parser._subparsers is not None
     for action in parser._subparsers._group_actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
         for choice_name, subparser in action.choices.items():
             if choice_name == "remove-system":
                 remove_system_parser = subparser
@@ -474,16 +484,16 @@ def test_remove_system_help_does_not_advertise_force():
     assert "--force" not in help_text
 
 
-def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
+def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path: Path) -> None:
     """A missing checkout directory must not bypass the unpushed-commit
     check -- the branch ref (and any commits on it) lives in the shared
     anchor repo regardless of whether the working directory still exists."""
     record, tracking_dir = _record(tmp_path)
     anchor = tmp_path / "anchor"
-    anchor.mkdir()
+    anchor.mkdir(exist_ok=True)
     import subprocess
 
-    def _git(*args, cwd=anchor):
+    def _git(*args: str, cwd: Path = anchor) -> None:
         subprocess.run(
             ["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
         )
@@ -533,7 +543,7 @@ def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_treats_unknown_classification_as_blocker(tmp_path):
+def test_remove_system_treats_unknown_classification_as_blocker(tmp_path: Path) -> None:
     """A classify_worktree timeout reports UNKNOWN with dirty=0 -- must not
     be read as 'clean' and fall through to forced removal."""
     record, tracking_dir = _record(tmp_path)
@@ -554,11 +564,11 @@ def test_remove_system_treats_unknown_classification_as_blocker(tmp_path):
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_refuses_creating_pr_by_default(tmp_path):
+def test_remove_system_refuses_creating_pr_by_default(tmp_path: Path) -> None:
     """`creating` is as live as `open` -- an in-flight PR is still an
     obligation even before it has finished opening."""
     record, tracking_dir = _record(tmp_path)
-    record.prs = [tracking.PRRecord(state="creating")]
+    record.prs = [tracking.PRRecord(state="creating", branch=record.branch)]
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
@@ -572,7 +582,7 @@ def test_remove_system_refuses_creating_pr_by_default(tmp_path):
     assert "in-progress or open PR" in json_error.call_args.args[0]
 
 
-def test_remove_system_allows_squash_merged_branch(tmp_path):
+def test_remove_system_allows_squash_merged_branch(tmp_path: Path) -> None:
     """A worktree branch whose content was squash-merged upstream keeps its
     original (pre-squash) commits locally -- those must not read as
     'unpushed' forever after. `is_branch_merged` (tree/patch-id aware, not
@@ -585,6 +595,7 @@ def test_remove_system_allows_squash_merged_branch(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.sessions.kill_tmux_session"), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
+         patch("agent_worktrees.git_ops.current_branch", return_value=record.branch), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
          patch("agent_worktrees.git_ops.list_worktree_paths"), \
          patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
@@ -600,7 +611,7 @@ def test_remove_system_allows_squash_merged_branch(tmp_path):
     json_output.assert_called_once_with({"removed": "managed-1"})
 
 
-def test_remove_system_rechecks_immediately_before_removal(tmp_path):
+def test_remove_system_rechecks_immediately_before_removal(tmp_path: Path) -> None:
     """The initial check and the removal are not one atomic step -- a claim
     that appears in between (a concurrent writer) must still block removal,
     not just the very first check."""
@@ -609,7 +620,7 @@ def test_remove_system_rechecks_immediately_before_removal(tmp_path):
 
     clean_calls = {"n": 0}
 
-    def _blockers(rec, repo):
+    def _blockers(rec: tracking.WorktreeRecord, repo: cfg.RepoConfig) -> list[str]:
         clean_calls["n"] += 1
         if clean_calls["n"] == 1:
             return []  # initial check: looked clean
@@ -630,7 +641,7 @@ def test_remove_system_rechecks_immediately_before_removal(tmp_path):
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_force_skips_the_immediate_recheck(tmp_path):
+def test_remove_system_force_skips_the_immediate_recheck(tmp_path: Path) -> None:
     """--force means the caller already accepted the risk -- it must skip
     both the initial check AND the immediate pre-removal recheck."""
     record, tracking_dir = _record(tmp_path)
@@ -655,7 +666,7 @@ def test_remove_system_force_skips_the_immediate_recheck(tmp_path):
     json_output.assert_called_once_with({"removed": "managed-1"})
 
 
-def test_remove_system_refuses_checkout_branch_drift(tmp_path):
+def test_remove_system_refuses_checkout_branch_drift(tmp_path: Path) -> None:
     """The checkout was switched to a different branch than tracked -- must
     not silently discard whatever that drifted branch carries."""
     record, tracking_dir = _record(tmp_path)
@@ -680,7 +691,7 @@ def test_remove_system_refuses_checkout_branch_drift(tmp_path):
     assert "reconcile the drift" in message
 
 
-def test_remove_system_refuses_empty_state_pr_record(tmp_path):
+def test_remove_system_refuses_empty_state_pr_record(tmp_path: Path) -> None:
     """A PR record whose state hasn't been populated yet ("") is still a
     live/non-terminal PR per has_live_pr() -- not yet-open is not the same
     as never-going-to-open."""
@@ -699,7 +710,7 @@ def test_remove_system_refuses_empty_state_pr_record(tmp_path):
     assert "in-progress or open PR" in json_error.call_args.args[0]
 
 
-def test_remove_system_resolves_record_repo_not_default(tmp_path):
+def test_remove_system_resolves_record_repo_not_default(tmp_path: Path) -> None:
     """A managed worktree belonging to a different configured repo than the
     invoking context's default must be checked/removed against ITS OWN repo,
     not against config.default_repo."""
@@ -712,13 +723,13 @@ def test_remove_system_resolves_record_repo_not_default(tmp_path):
     default_anchor.mkdir()
     other_anchor = tmp_path / "other-anchor"
     other_anchor.mkdir()
-    other_repo = cli.cfg.RepoConfig(
+    other_repo = cfg.RepoConfig(
         anchor=str(other_anchor), remote="origin", default_branch="master",
-        worktree_root=str(tmp_path / "other-worktree-root"),
+        worktree_root=str(Path(record.worktree_path).parent),
     )
-    config = cli.cfg.Config(
-        srcroot=str(tmp_path), machine="machine", platform="windows", repo_name="demo",
-        repos={"demo": cli.cfg.RepoConfig(
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine=socket.gethostname().lower(), platform=detect_platform(), repo_name="demo",
+        repos={"demo": cfg.RepoConfig(
             anchor=str(default_anchor), remote="origin", default_branch="master",
             worktree_root=str(tmp_path / "default-worktree-root"),
         ), "other-repo": other_repo},
@@ -743,7 +754,7 @@ def test_remove_system_resolves_record_repo_not_default(tmp_path):
     remove_worktree.assert_called_once_with(str(other_anchor), record.worktree_path)
 
 
-def test_remove_system_refuses_gone_zombie_checkout(tmp_path):
+def test_remove_system_refuses_gone_zombie_checkout(tmp_path: Path) -> None:
     """A checkout directory that exists but has no .git entry (a zombie from
     a partial/aborted creation) must not silently pass -- it can still hold
     real, uninspected files."""
@@ -767,7 +778,7 @@ def test_remove_system_refuses_gone_zombie_checkout(tmp_path):
     assert (Path(record.worktree_path) / "leftover.txt").exists()
 
 
-def test_remove_system_refuses_orphan_checkout(tmp_path):
+def test_remove_system_refuses_orphan_checkout(tmp_path: Path) -> None:
     """No merge-base could be established (unrelated history) -- ahead/
     behind can't be trusted, so this must not pass unclassified."""
     record, tracking_dir = _record(tmp_path)
@@ -788,7 +799,7 @@ def test_remove_system_refuses_orphan_checkout(tmp_path):
     assert "orphan" in message
 
 
-def test_remove_system_refuses_when_inbound_owner_claimant_alive(tmp_path):
+def test_remove_system_refuses_when_inbound_owner_claimant_alive(tmp_path: Path) -> None:
     """A worktree that is ITSELF another worktree's outbound resource
     (rec.owner_ref) must not be discarded while its owner still expects it
     -- matching prune.assess()'s claimed-resource-not-reclaimed rule, which
@@ -815,7 +826,7 @@ def test_remove_system_refuses_when_inbound_owner_claimant_alive(tmp_path):
     assert "claimant alive" in message
 
 
-def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path):
+def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path: Path) -> None:
     """An unconfirmed (None) claimant liveness is spared, not assumed gone --
     same direction prune.assess() fails toward."""
     record, tracking_dir = _record(tmp_path)
@@ -838,7 +849,7 @@ def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path)
     assert "claimant liveness unconfirmed" in json_error.call_args.args[0]
 
 
-def test_remove_system_allows_inbound_owner_claimant_confirmed_gone(tmp_path):
+def test_remove_system_allows_inbound_owner_claimant_confirmed_gone(tmp_path: Path) -> None:
     """A claimant confirmed gone (probe returns False) frees the OWNER-CLAIM
     blocker specifically, same as prune.assess() -- even though the branch
     isn't merged (so this worktree is still blocked overall for that
@@ -865,12 +876,13 @@ def test_remove_system_allows_inbound_owner_claimant_confirmed_gone(tmp_path):
     assert "not merged into" in message
 
 
-def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
+def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path: Path) -> None:
     """A finalized resource is collectable garbage even under a live
     claimant -- prune.assess()'s owner_moved_on narrowing -- so
     remove-system must not probe claimant liveness at all here."""
     record, tracking_dir = _record(tmp_path)
-    record.owner_ref = "machine-a/some-project/some-worktree-id"
+    record = tracking.load_record(tracking_dir / "managed-1.yaml")
+    record.owner_ref = format_claim_ref(record.execution_machine, "demo", "some-worktree-id")
     record.status = "finalized"
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
@@ -881,6 +893,7 @@ def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
          patch("agent_worktrees.sessions.kill_tmux_session"), \
          patch("agent_worktrees.claimant.resolve_claimant_alive") as resolve_alive, \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
+         patch("agent_worktrees.git_ops.current_branch", return_value=record.branch), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
          patch("agent_worktrees.git_ops.list_worktree_paths"), \
          patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
@@ -892,12 +905,12 @@ def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
 
-    assert result == 0
+    assert result == 0, json_output.call_args_list
     resolve_alive.assert_not_called()
     json_output.assert_called_once_with({"removed": "managed-1"})
 
 
-def test_remove_system_refuses_detached_head_checkout(tmp_path):
+def test_remove_system_refuses_detached_head_checkout(tmp_path: Path) -> None:
     """A detached HEAD reports current_branch=None, which is falsy --
     branch_drift alone never catches it, so an unmerged commit sitting under
     no branch name could otherwise reach forced removal unchecked."""
@@ -919,7 +932,7 @@ def test_remove_system_refuses_detached_head_checkout(tmp_path):
     assert "detached" in json_error.call_args.args[0]
 
 
-def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path):
+def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path: Path) -> None:
     """A record whose repo name is non-empty but not a registered repo must
     not silently fall back to config.default_repo -- that could check/
     remove against a completely different repo's anchor (e.g. after a repo
@@ -944,7 +957,7 @@ def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path):
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
-def test_remove_system_refuses_empty_scaffold_owner_claim_despite_trivial_merge(tmp_path):
+def test_remove_system_refuses_empty_scaffold_owner_claim_despite_trivial_merge(tmp_path: Path) -> None:
     """is_branch_merged is trivially true for a branch with zero commits
     beyond upstream (a just-created, still-empty scaffold) -- that must NOT
     count as 'owner moved on'. prune._content_verdict deliberately keeps the

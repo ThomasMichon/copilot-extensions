@@ -19,12 +19,15 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+from collections.abc import Callable
+from typing import cast
 
 from agent_procutil import no_window_kwargs
 
 from . import config as cfg
 from . import git_ops, output, tracking
 from .creation_identity import IdentityMode, new_tracking_identity, validate_mode
+from .tracking_claims import format_claim_ref
 
 
 def _worktree_id_from_git(cwd: Path, *, isolated_repository: bool = False) -> str | None:
@@ -44,7 +47,7 @@ def _worktree_id_from_git(cwd: Path, *, isolated_repository: bool = False) -> st
     try:
         result = git_ops.git(
             "rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10,
-            **({"isolated_repository": True} if isolated_repository else {}),
+            isolated_repository=isolated_repository,
         )
     except Exception:
         return None
@@ -173,7 +176,11 @@ def _adopt_linked_worktree(
         if not branch:
             return None
         tracking_path = cfg.tracking_dir()
-        record, _created = tracking.create_new_record_if_absent(
+        create = cast(
+            Callable[..., tuple[tracking.WorktreeRecord, bool]],
+            getattr(tracking, "create_new_record_if_absent"),
+        )
+        record, _created = create(
             worktree_id=worktree_id,
             branch=branch,
             worktree_path=str(root),
@@ -220,7 +227,7 @@ def reference_owner(
 ) -> str:
     """Format ownership from the receiving project's retained execution identity."""
     machine = reference_machine(config, worktree_id, project=project)
-    return tracking.format_claim_ref(machine, project, worktree_id, session_id)
+    return format_claim_ref(machine, project, worktree_id, session_id)
 
 
 def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:
@@ -313,7 +320,12 @@ def _infer_worktree_id_from_cwd(
         # never will when agent-worktrees isn't even installed there. Falls
         # through to the pre-existing path-match-or-git_id behavior when
         # adoption isn't possible (no active project, foreign anchor, etc.).
-        adopted_id = _adopt_linked_worktree(cwd, identity_mode="tuple-v1")
+        from . import source_path_admission
+        try:
+            with source_path_admission.nonblocking_creation():
+                adopted_id = _adopt_linked_worktree(cwd, identity_mode="tuple-v1")
+        except TimeoutError:
+            adopted_id = None
         if adopted_id:
             return adopted_id
         # Tracking YAML briefly missing: prefer a path match if one exists,

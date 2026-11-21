@@ -6,7 +6,7 @@ import argparse
 import shlex
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from . import config as cfg, output, pr_ops, tracking, worktree_identity
 from . import context_cli, pr_config
@@ -15,7 +15,14 @@ if TYPE_CHECKING:
     from .pr_selected_publication import Publication
 
 
-def add_parsers(sub) -> None:
+def _failure(message: str, use_json: bool) -> int:
+    if use_json:
+        return output._json_error(message)
+    output.err(message)
+    return 1
+
+
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser("set-pr", help="Record PR metadata (URL/number/state) on a worktree")
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--url", default=None, help="PR URL")
@@ -75,7 +82,10 @@ def add_parsers(sub) -> None:
         "--pr", type=int, default=None, help="Select which tracked PR to abandon by number"
     )
     selector.add_argument("--creation", default=None, help="Cancel one unpublished local attempt by immutable PR ID")
+    selector.add_argument("--reconcile-creation", help="Retire one owner-stamped legacy publishing attempt by immutable PR ID; publication outcome remains unknown")
     p.add_argument("--expected-revision", type=int, default=None, help="Exact creation revision being confirmed")
+    p.add_argument("--expected-head", help="Full source HEAD explicitly confirmed for legacy reconciliation")
+    p.add_argument("--merged-pr", type=int, help="Legacy reconciliation only: existing exact-head merged association")
     p.add_argument(
         "--reason", default=None, required=True,
         help="Why this PR is being abandoned (required on every call, not "
@@ -202,7 +212,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id, project=config.repo_name)
 
     result = pr_ops.set_pr(
@@ -276,21 +286,35 @@ def cmd_pr_abandon(args: argparse.Namespace) -> int:
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
-    result = pr_ops.abandon_pr(
-        worktree_id,
-        config,
-        target_repo=getattr(args, "repo", None),
-        pr_number=getattr(args, "pr", None),
-        reason=getattr(args, "reason", None) or "",
-        confirm=getattr(args, "confirm", False),
-        creation_id=getattr(args, "creation", None),
-        expected_revision=getattr(args, "expected_revision", None),
-    )
+    if getattr(args, "reconcile_creation", None) is not None:
+        from .pr_creation_reconcile import reconcile
+        if getattr(args, "repo", None):
+            return _failure("Legacy reconciliation does not accept a target override.", use_json)
+        result = reconcile(
+            worktree_id, config, creation_id=args.reconcile_creation,
+            expected_revision=args.expected_revision, expected_head=args.expected_head or "",
+            merged_pr=args.merged_pr, reason=args.reason, confirm=args.confirm,
+        )
+    elif getattr(args, "expected_head", None) is not None or getattr(args, "merged_pr", None) is not None:
+        result = {"success": False, "error": "--expected-head and --merged-pr require --reconcile-creation."}
+    else:
+        result = pr_ops.abandon_pr(
+            worktree_id,
+            config,
+            target_repo=getattr(args, "repo", None),
+            pr_number=getattr(args, "pr", None),
+            reason=getattr(args, "reason", None) or "",
+            confirm=getattr(args, "confirm", False),
+            creation_id=getattr(args, "creation", None),
+            expected_revision=getattr(args, "expected_revision", None),
+        )
     if use_json:
         output._json_output(result)
+    elif result.get("creation_reconciled"):
+        output.ok("Legacy local attempt retired; publication outcome remains unknown. No provider PR or claim changed.")
     elif result.get("creation_cancelled"):
         output.ok(
             f"Local PR creation {result['pr_id']} cancelled; no provider PR was closed. "
@@ -320,7 +344,7 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
         ctx = output.stdout_to_stderr()
         ctx.__enter__()
     else:
-        ctx = None  # type: ignore[assignment]
+        ctx = None
 
     try:
         try:
@@ -396,7 +420,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     repo_cfg = config.default_repo
@@ -576,7 +600,7 @@ def cmd_pr_nudge(args: argparse.Namespace) -> int:
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     result = pr_nudge_ops.pr_nudge(worktree_id, config=config)
@@ -609,7 +633,9 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
     if any(getattr(args, name, None) is not None for name in ("repo", "expected_branch", "expected_head")):
         from . import pr_source_complete
 
-        return pr_source_complete.emit(args, pr_source_complete.complete(args))
+        complete = cast(Callable[[argparse.Namespace], dict[str, Any]], pr_source_complete.complete)
+        emit = cast(Callable[[argparse.Namespace, dict[str, Any]], int], pr_source_complete.emit)
+        return emit(args, complete(args))
     use_json = getattr(args, "json", False)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
@@ -620,7 +646,7 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     result = pr_complete.complete_worktree(
@@ -655,7 +681,7 @@ def cmd_pr_diff(args: argparse.Namespace) -> int:
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     result = pr_reviewer_ops.pr_diff(worktree_id, config=config)
@@ -692,7 +718,7 @@ def cmd_pr_comment(args: argparse.Namespace, *, publication: Publication | None 
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     result = pr_reviewer_ops.pr_comment(worktree_id, args.body, config=config)
@@ -726,7 +752,7 @@ def cmd_pr_review(args: argparse.Namespace, *, publication: Publication | None =
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return output._json_error(msg) if use_json else (output.err(msg) or 1)
+        return _failure(msg, use_json)
     worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     result = pr_reviewer_ops.pr_review(

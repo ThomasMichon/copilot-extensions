@@ -3,12 +3,52 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from typing import Any, cast
 
 from . import pr_publication_checks as checks
+from .config import RepoConfig
+from .providers.base import PRProvider
 from .pr_worker_config import matches_remote
 
 
-def observe(provider, repository: str, branch: str, *, api_base: str, token) -> str:
+def source_binding(
+    repository: str, head: str, source_repository: str | None,
+    workspace: str | None, repo: RepoConfig, provider: PRProvider, *, token: str | None = None,
+) -> tuple[str, str]:
+    """Resolve the actual GitHub fork, never a target-derived repository name."""
+    owner, separator, branch = head.partition(":")
+    if not separator:
+        if source_repository and source_repository.casefold() != repository.casefold():
+            raise checks.CheckError("An unqualified head must use the target repository.")
+        return repository, head
+    selected = source_repository
+    if not selected and workspace:
+        from .pr_publish import _identity
+        urls = checks._git(Path(workspace), "remote", "get-url", "--push", "--all", repo.remote).splitlines()
+        identities = {_identity(url, workspace) for url in urls}
+        if len(identities) == 1:
+            endpoint, _, candidate = identities.pop().partition("/")
+            target_identity = _identity("https://" + provider.authority_endpoint(repo.pr.api_base) + "/" + repository, workspace)
+            if endpoint.casefold() == target_identity.partition("/")[0]:
+                selected = candidate
+    if not selected and not workspace:
+        reader = getattr(provider, "resolve_head_repository", None)
+        if callable(reader):
+            selected = reader(repository, owner, api_base=repo.pr.api_base, token=token)
+    if not selected:
+        raise checks.CheckError("A qualified foreign head needs its actual fork; pass --source-repo owner/repository.")
+    parts = selected.split("/")
+    if (
+        len(parts) != 2 or not all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts)
+        or any(part in (".", "..") for part in parts) or parts[0].casefold() != owner.casefold()
+        or not branch or ":" in branch or branch.startswith("refs/")
+    ):
+        raise checks.CheckError("--source-repo must name the exact fork owned by the qualified head.")
+    return selected, branch
+
+
+def observe(provider: PRProvider, repository: str, branch: str, *,
+            api_base: str, token: str | None) -> str:
     reader = getattr(provider, "observe_branch", None)
     if not callable(reader):
         raise checks.CheckError("provider cannot qualify an authoritative source branch")
@@ -20,12 +60,14 @@ def observe(provider, repository: str, branch: str, *, api_base: str, token) -> 
         or re.fullmatch(r"[0-9a-f]{40,64}", result["head_sha"]) is None
     ):
         raise checks.CheckError("provider returned a mismatched or invalid branch observation")
-    return result["head_sha"]
+    return cast(str, result["head_sha"])
 
 
 def qualify(
-    workspace: str, repository: str, branch: str, expected_head: str, repo, provider, *, token=None,
-) -> dict:
+    workspace: str, repository: str, branch: str, expected_head: str, repo: RepoConfig,
+    provider: PRProvider, *, token: str | None = None,
+    source_repository: str | None = None,
+) -> dict[str, Any]:
     """Run current target checks and fence them with authoritative ref observations."""
     if (
         not isinstance(expected_head, str)
@@ -42,13 +84,14 @@ def qualify(
         raise checks.CheckError("source workspace is not on the selected publication branch")
     if checks._commit(root, "HEAD") != expected_head:
         raise checks.CheckError("source workspace no longer contains the expected candidate")
+    source_repository = source_repository or repository
     urls = checks._git(root, "remote", "get-url", "--push", "--all", repo.remote).splitlines()
-    if len(urls) != 1 or not matches_remote(urls[0], repository, repo.pr, str(root)):
+    if len(urls) != 1 or not matches_remote(urls[0], source_repository, repo.pr, str(root)):
         raise checks.CheckError("source push destination does not match the selected target")
     if branch == repo.default_branch or not branch or branch.startswith("-"):
         raise checks.CheckError("foreign creation needs a feature branch, not the target default")
     endpoint = repo.pr.api_base
-    source = observe(provider, repository, branch, api_base=endpoint, token=token)
+    source = observe(provider, source_repository, branch, api_base=endpoint, token=token)
     target = observe(provider, repository, repo.default_branch, api_base=endpoint, token=token)
     if source != expected_head:
         raise checks.CheckError("authoritative source branch differs from the reviewed candidate")
@@ -61,7 +104,7 @@ def qualify(
     if not result["ok"]:
         raise checks.CheckError(checks.failure_detail(result))
     if (
-        observe(provider, repository, branch, api_base=endpoint, token=token) != source
+        observe(provider, source_repository, branch, api_base=endpoint, token=token) != source
         or observe(provider, repository, repo.default_branch, api_base=endpoint, token=token) != target
         or checks._commit(root, "HEAD") != expected_head
     ):
@@ -70,15 +113,18 @@ def qualify(
         "ok": True, "adapter": "reachable-workspace", "repository": repository,
         "branch": branch, "head": source, "base": repo.default_branch, "base_head": target,
         "checks": result,
+        "source_repository": source_repository,
         "atomic": False,
     }
 
 
-def after_create(evidence: dict, repository: str, repo, provider, *, token=None) -> dict:
+def after_create(evidence: dict[str, Any], repository: str, repo: RepoConfig,
+                 provider: PRProvider, *, token: str | None = None) -> dict[str, Any]:
     """Report a forge race without discarding the newly created PR identity."""
     try:
         source = observe(
-            provider, repository, evidence["branch"], api_base=repo.pr.api_base, token=token,
+            provider, evidence.get("source_repository", repository), evidence["branch"],
+            api_base=repo.pr.api_base, token=token,
         )
         base = observe(
             provider, repository, repo.default_branch, api_base=repo.pr.api_base, token=token,
