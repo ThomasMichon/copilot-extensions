@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Windows cue and offline protocol continuation](journal/2026/11.21-windows-cue-and-offline-protocol.md)
+records scoped source delivery, unresolved crosswalks and the complete 900-open census without changing acceptance or ownership.
+
 The [native-timeout disposition continuation](journal/2026/11.21-native-timeout-disposition-boundaries.md)
 qualifies thirteen new #11175 discussions while reusing its unchanged
 current body and ten earlier discussions. Its unavailable original-edit

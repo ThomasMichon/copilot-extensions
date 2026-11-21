@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Windows cue delivery and offline protocol correspondence](journal/2026/11.21-windows-cue-and-offline-protocol.md)
+
 - [2026-11-21 - Native timeout reports and scoped historical dispositions](journal/2026/11.21-native-timeout-disposition-boundaries.md)
 
 - [2026-11-21 - Managed-Python consumers and distinct fixture debt](journal/2026/11.21-managed-python-consumers-and-fixture-debt.md)
