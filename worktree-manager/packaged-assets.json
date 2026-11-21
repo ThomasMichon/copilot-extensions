@@ -137,6 +137,11 @@
       "files": ["install_source.py"]
     },
     {
+      "canonicalDir": "fleet-manager/src/fleet_manager",
+      "payloadDir": "scripts/runtime-source-tools/fleet_role_policy",
+      "files": ["__init__.py", "planning.py", "role_bindings.py", "target_policy.py"]
+    },
+    {
       "canonicalDir": "fleet-manager",
       "payloadDir": "scripts/runtime-source-tools/fleet-manager",
       "files": [
