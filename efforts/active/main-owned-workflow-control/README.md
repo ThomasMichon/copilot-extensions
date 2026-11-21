@@ -779,13 +779,25 @@ authorizes critical main-path acceptance or a bounded administrative change.
   whole-file strict typing, current-head review and required Linux source CI.
   #13905 merges at `725346e538fc4e1329549ff6f8af7f490e9c4518` after fresh
   corrected-head Copilot approval and complete required Linux CI.
-  The Manager packaged-helper patch intent is included. V1 storage remains;
-  writer migration and broader parent gates stay open.
-- [ ] Migrate the source manifest writer only after the actual selected readers
+  The Manager packaged-helper patch intent is included. This reader milestone
+  retains v1 storage; the subsequent writer milestone is separate.
+- [x] Migrate the source manifest writer only after the actual selected readers
   support the new storage contract, raw node-list consumers are reconciled and
   supported rollback or pre-effect refusal is proven. Preserve every original
   unit identity and limit; source reader support alone does not activate a
   separately owned control or qualify full-census/every-release acceptance.
+  #13915 merges at `835e608e2280e03f901ade84d866b19792233053` after exact-head
+  Copilot approval and complete required Linux CI with all 6,629 units freshly
+  executed from compact source storage into unchanged flat-v1 evidence.
+  Every logical field/order/digest remains identical, old-runner pre-effect
+  refusal and matched-v1 rollback are proven, and broader parent gates stay open.
+- [ ] Qualify and land eleven original version-bump guard cases through eight
+  exact test objects and the original fixture. Preserve all 28 other original
+  cases, including real Git/process contracts, unchanged prior admission,
+  source closure, positive per-node call coverage, helper decisions and the
+  300-second budget. Require whole-file strict typing, current-head review and
+  complete Linux source CI; retain compact source storage and flat-v1 evidence.
+  Broader native, release, full-census and whole-flow gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
