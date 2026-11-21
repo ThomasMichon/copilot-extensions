@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-codespaces"
-version = "0.5.378-dev2"
+version = "0.5.378-dev3"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"

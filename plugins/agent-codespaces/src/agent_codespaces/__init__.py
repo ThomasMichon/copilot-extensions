@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # Fallback only for running from a source tree with no installed distribution.
-_FALLBACK_VERSION = "0.5.378-dev2"
+_FALLBACK_VERSION = "0.5.378-dev3"
 
 
 def __getattr__(name: str) -> str:

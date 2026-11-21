@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING, cast
+from zipfile import ZipFile
 
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.daemon_instances import (
@@ -142,6 +143,67 @@ def test_manager_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
+@pytest.mark.parametrize("build_wheel", [False, True])
+def test_manager_application_inputs_close_declared_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build_wheel: bool,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    candidate = tmp_path / "source"
+    candidate.mkdir()
+    deadline = time.monotonic() + 240
+    source, _dependencies, _resources = _prepare_manager_application_inputs(candidate, deadline=deadline)
+    assert source == candidate / "worktree-manager"
+    policy = ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py")
+    for name in policy:
+        relative = Path("fleet-manager") / "src" / "fleet_manager" / name
+        assert (candidate / relative).read_bytes() == (ROOT / relative).read_bytes()
+    if build_wheel:
+        wheels = tmp_path / "wheels"
+        wheels.mkdir()
+        result = run_caller_owned(
+            [sys.executable, "-I", "-B", "-c",
+             "import setuptools.build_meta as backend;"
+             "backend.build_wheel(__import__('sys').argv[1], {'--global-option': ['--quiet']})",
+             str(wheels)],
+            cwd=source, env=dict(os.environ, UV_OFFLINE="1"),
+            timeout=max(0.01, deadline - time.monotonic()),
+            max_stdout_bytes=1048576, max_stderr_bytes=65536,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        archives = list(wheels.glob("*.whl"))
+        assert len(archives) == 1
+        with ZipFile(archives[0]) as built:
+            prefix = "worktree_manager/_runtime_assets/"
+            for name in policy:
+                relative = Path("fleet-manager") / "src" / "fleet_manager" / name
+                assert built.read(prefix + "scripts/runtime-source-tools/fleet_role_policy/" + name) == (
+                    ROOT / relative
+                ).read_bytes()
+            for name in ("launch-session.ps1", "launch-session.sh"):
+                assert built.read(prefix + "bin/" + name) == (source / "bin" / name).read_bytes()
+
+
+def _prepare_manager_application_inputs(
+    candidate: Path, *, deadline: float,
+) -> tuple[Path, list[tuple[str, Path]], tuple[Path, ...]]:
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder
+        from tools import prepare_runtime_source as preparation, standalone_python_artifacts as standalone
+    else:
+        import build_python_artifacts as builder
+        import prepare_runtime_source as preparation
+        import standalone_python_artifacts as standalone
+
+    source = candidate / "worktree-manager"
+    preparation._materialize(ROOT, "worktree-manager", source, deadline=deadline)
+    for resource in standalone.standalone_build_resources("worktree-manager", source_root=ROOT):
+        shutil.copytree(
+            resource, candidate / resource.relative_to(ROOT),
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    return standalone.source_closure("worktree-manager", candidate, builder)
+
+
 def _qualify_manager_application(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str, *,
     worktrees_python: Path | None = None, worktrees_root: Path | None = None,
@@ -156,13 +218,10 @@ def _qualify_manager_application(
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     if TYPE_CHECKING:
         from tools import build_python_artifacts as builder, local_install_profile as profiles
-        from tools import prepare_runtime_source as preparation, standalone_python_artifacts as standalone
         from tools.governed_feed_trust import _governed_feed_configured
     else:
         import build_python_artifacts as builder
         import local_install_profile as profiles
-        import prepare_runtime_source as preparation
-        import standalone_python_artifacts as standalone
         from governed_feed_trust import _governed_feed_configured
 
     if not _governed_feed_configured():
@@ -178,13 +237,7 @@ def _qualify_manager_application(
     candidate = inputs / "source"
     source, artifacts = candidate / "worktree-manager", inputs / "wheels"
     candidate.mkdir(parents=True)
-    preparation._materialize(ROOT, "worktree-manager", source, deadline=deadline)
-    for name in ("versioned-runtime", "installer-engine"):
-        shutil.copytree(
-            ROOT / "libs" / name, candidate / "libs" / name,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
-    selected, dependencies, resources = standalone.source_closure("worktree-manager", candidate, builder)
+    selected, dependencies, resources = _prepare_manager_application_inputs(candidate, deadline=deadline)
     assert selected == source
     with monkeypatch.context() as patch:
         patch.setattr(builder, "REPO", candidate)

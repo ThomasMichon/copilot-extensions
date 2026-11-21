@@ -246,6 +246,11 @@ single UTF-8 BOM emitted by existing PowerShell 5.1 deployment writers.
 Lifecycle manifest reads use that reader without changing protocol receipts or
 `read_json`'s strict language. Duplicate keys, invalid UTF-8 and malformed JSON
 still refuse; digest evidence continues to describe the original file bytes.
+The native `json-query.awk` reader's `string` mode returns a decoded string
+without normalizing its bytes and refuses nonstrings or NUL before shell
+capture. Its explicit `deployment-string` compatibility mode also accepts the
+single legacy deployment BOM. Other modes retain the strict protocol language;
+this scalar read is not installation or executable admission.
 
 ## CLI
 
