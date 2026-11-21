@@ -3292,6 +3292,42 @@ parent, only this finite fixture/output item is resolved. Continue qualification
 of the four serial cases in the mixed pointer-discovery matrix, preserving its
 two real-worker cases outside. Every broader gate and retained hold stays open.
 
+### November 21 original serial pointer-discovery admission
+
+The adapter exports the exact original six-case discovery function without
+wrapping, reparameterizing or changing fixtures and assertions. Collection
+compares all six adapted/original object and parameter identities. Only the
+four cases whose actual `parallel` parameter is false enter the manifest;
+both real-worker cases remain explicitly outside.
+
+Development UnitRun passes the four selections in 1.453 seconds with two
+deselections, zero prohibited effects, eleven bound source reads and actual
+per-case materializer call coverage. The 6,813-node, 1,072-source compact
+manifest is 781,385 bytes. All 6,809 preceding nodes/hashes, 441 targets,
+89 helper decisions, compact/flat-v1 contracts and the 300-second bound remain.
+The adapter is the sole new binding. Ruff and strict Linux/Windows typing pass.
+No native token import, prefilter or worker is preloaded or replaced.
+
+Source #13953 merges at `2026-11-21T19:11:59Z` as
+`6ffd1d3094b966d03416a812dbf80dde9184589c`. Copilot approval `6007547073`
+names exact head `fc2ca0a7ab54fc973039d92c4badd7e2f968cd77`; complete review
+and thread pagination finds no outstanding finding. Required source CI
+`44939043026` and trusted metadata CI `44939043242` succeed. Actual unit job
+`136951963836` freshly executes all 6,813 cases with 37 deselections in
+101.20 pytest seconds and 114.508 packet seconds. The two additional
+deselections are the retained worker cases. Lookup takes 2,303 ms; no reuse
+or controlled whole-flow saving is credited.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. Scoped synchronization retains
+the published head and advances to the merge. After rereading the full canonical
+parent, only this finite serial-discovery item is resolved. The original
+materializer map covers 121 of 165 cases; all 44 residuals remain outside.
+Continue the synthetic installer-sync unit closure rather than widening the
+refused real-asset contract. Native, installed, release, full-census,
+comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
