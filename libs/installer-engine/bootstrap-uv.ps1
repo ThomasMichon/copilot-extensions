@@ -27,7 +27,8 @@ function Invoke-UvBootstrapCapturedProcess {
     $remaining = [int]($TimeoutMilliseconds - $clock.ElapsedMilliseconds)
     if ($remaining -le 250) { throw 'Prepared tree capture deadline expired before launch.' }
     Invoke-Hidden -FilePath $BootstrapPython -ArgList $arguments -Environment $Environment `
-        -InputText '' -ErrorOutput $ErrorOutput -TimeoutMilliseconds $remaining -CleanupMilliseconds 250
+        -InputText '' -ErrorOutput $ErrorOutput -TimeoutMilliseconds $remaining -CleanupMilliseconds 250 `
+        -CaptureEncoding ([Text.UTF8Encoding]::new($false))
 }
 
 function Get-UvBootstrapEnvironment {

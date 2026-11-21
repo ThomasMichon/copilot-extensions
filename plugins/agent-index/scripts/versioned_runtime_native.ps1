@@ -280,7 +280,8 @@ function Invoke-Hidden {
         [switch]$StreamErrorOutput,
         [hashtable]$Environment,
         [ValidateRange(0, 2147483647)][int]$TimeoutMilliseconds = 0,
-        [ValidateRange(1, 2147483647)][int]$CleanupMilliseconds = 3000
+        [ValidateRange(1, 2147483647)][int]$CleanupMilliseconds = 3000,
+        [Text.Encoding]$CaptureEncoding
     )
     if ($TimeoutMilliseconds -gt 0) {
         if (-not $PSBoundParameters.ContainsKey('ErrorOutput') -or $null -eq $ErrorOutput) {
@@ -325,6 +326,10 @@ function Invoke-Hidden {
     }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    if ($CaptureEncoding) {
+        $psi.StandardOutputEncoding = $CaptureEncoding
+        $psi.StandardErrorEncoding = $CaptureEncoding
+    }
     $psi.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
     $proc = [System.Diagnostics.Process]::Start($psi)
     try {

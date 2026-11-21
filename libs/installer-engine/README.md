@@ -118,6 +118,8 @@ spawn an interpreter query, so a direct-process timeout is not tree custody.
 The helper reuses the process owner's strict Job and bounded stream capture,
 with settlement and relay inside the original one-second cleanup reserve.
 It neither discovers ambient Python nor acquires a missing prerequisite.
+Its isolated Python helper emits UTF-8, and the shared native capture requests
+matching per-process stream decoders without changing the caller's console.
 Budget's POSIX installer also uses that selected interpreter for the canonical
 `installer_pip_index.py` helper, never a PATH `pip` or `pip3`. Its
 `scripts/pip-index-config` file pointer lets already-installed source preparers

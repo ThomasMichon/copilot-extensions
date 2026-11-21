@@ -15,6 +15,27 @@ import pytest
 from cue_fixture import PLUGIN, managed_cue_environment, prepare_cue_assets
 
 
+@pytest.fixture(scope="module")
+def private_cue_python(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Copy the prepared runtime once; every query still gets its own cold cache."""
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("already-prepared uv required")
+    environment = managed_cue_environment()
+    request = json.loads((PLUGIN / "payload-invocation.json").read_bytes())["bootstrapPython"]
+    selected = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", f"cpython@{request}"],
+        env=environment, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert selected.returncode == 0, selected.stderr
+    source = Path(selected.stdout.strip()).resolve()
+    managed = tmp_path_factory.mktemp("cue-managed") / "managed-\u00e9"
+    private = managed / source.parent.name
+    shutil.copytree(source.parent, private)
+    return private / source.name
+
+
 @pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
 def test_powershell_writer_ignores_path_python_and_foreign_venv(tmp_path: Path, host: str) -> None:
     shell = shutil.which(host)
@@ -212,7 +233,7 @@ def test_powershell_selector_capture_shares_the_writer_deadline(tmp_path: Path, 
 @pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("outcome", ["complete", "timeout"])
 def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_cleanup(
-    tmp_path: Path, host: str, outcome: str,
+    tmp_path: Path, host: str, outcome: str, private_cue_python: Path,
 ) -> None:
     import ctypes
     from ctypes import wintypes
@@ -221,17 +242,8 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
     if shell is None or uv is None:
         pytest.skip(f"{host} and already-prepared uv required")
     environment = managed_cue_environment()
-    request = json.loads((PLUGIN / "payload-invocation.json").read_bytes())["bootstrapPython"]
-    selected = subprocess.run(
-        [uv, "python", "find", "--no-project", "--system", "--managed-python",
-         "--no-python-downloads", f"cpython@{request}"],
-        env=environment, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
-    )
-    assert selected.returncode == 0, selected.stderr
-    source = Path(selected.stdout.strip()).resolve()
-    managed = tmp_path / "managed"
-    private = managed / source.parent.name
-    shutil.copytree(source.parent, private)
+    private = private_cue_python.parent
+    managed = private.parent
     record, release = tmp_path / "query.json", tmp_path / "release-query"
     # Instrument only a private managed runtime. The real uv query uses -I but
     # still imports its own sitecustomize; the cue writer deliberately uses -S.
@@ -261,7 +273,14 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
     environment.update(
         COPILOT_PLUGIN_ROOT=str(payload), UV_PYTHON_INSTALL_DIR=str(managed),
         UV_CACHE_DIR=str(tmp_path / "cold-cache"),
-        COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON=str(private / source.name),
+        COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON=str(private_cue_python),
+    )
+    entry = tmp_path / "legacy-console-encoding.ps1"
+    entry.write_text(
+        "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)\n"
+        "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/write-session-guidance.ps1')\n"
+        "if ([Console]::OutputEncoding.CodePage -ne 437) { exit 99 }\n",
+        encoding="ascii",
     )
     kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -279,7 +298,7 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
     handles = []
     started = time.monotonic()
     process, job = spawn_sync_in_kill_on_close_job(
-        [shell, "-NoProfile", "-File", str(scripts / "write-session-guidance.ps1")],
+        [shell, "-NoProfile", "-File", str(entry)],
         env=environment, cwd=tmp_path, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, require_job=True, allow_breakaway=False, **no_window_kwargs(),
     )
@@ -291,7 +310,7 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
         assert record.exists(), "a genuinely cold uv metadata query was not observed"
         query = json.loads(record.read_text())
         births = []
-        for pid, image in ((query["pid"], private / source.name), (query["parent"], Path(uv))):
+        for pid, image in ((query["pid"], private_cue_python), (query["parent"], Path(uv))):
             handle = kernel.OpenProcess(0x00100000 | 0x1000, False, pid)
             assert handle, "cannot pin the original query/uv process"
             handles.append(handle)
@@ -317,7 +336,7 @@ def test_powershell_selector_cold_query_has_no_console_and_settles_before_outer_
         assert query["console"] == 0 and not query["visible"], query
         if outcome == "complete":
             assert stderr == b""
-            assert Path(json.loads(writer.read_text())["executable"]).resolve() == private / source.name
+            assert Path(json.loads(writer.read_text())["executable"]).resolve() == private_cue_python
         else:
             assert time.monotonic() - started < 9
             assert stderr.strip() == b"budget-guidance: session cue could not be written"
