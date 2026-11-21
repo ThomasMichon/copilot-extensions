@@ -5,7 +5,9 @@ every tool call and user message appends to the session's ``events.jsonl``.
 Reusing those modification times adds no hook writes. A lease that has not
 been renewed within its TTL is treated as released, so a missed
 ``sessionEnd`` cannot pin a worktree forever. Missing or unreadable activity
-evidence is never proof of expiry: those verdicts are ``None``.
+evidence is never proof of expiry: those verdicts are ``None``. Only an
+absent optional activity file is skipped; any other stat failure makes the
+whole verdict unknown.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
-from . import obligations, tracking, tracking_claims
+from . import obligations, session_self_claims, tracking, tracking_claims
 
 #: Idle period after which an ``active`` session lease is released.
 ACTIVE_LEASE_TTL_S = 2 * 60 * 60
@@ -54,8 +56,10 @@ def last_activity(session_id: str) -> float | None:
     for name in _ACTIVITY_FILES:
         try:
             stamps.append((directory / name).stat().st_mtime)
-        except OSError:
+        except (FileNotFoundError, NotADirectoryError):
             continue
+        except OSError:
+            return None
     return max(stamps) if stamps else None
 
 
@@ -97,17 +101,28 @@ def expired_finalized_self_claim(
     """True for a finalized record's own at-rest session claim whose lease expired.
 
     Such a claim no longer blocks cleanup or retirement. Only positive
-    expiry evidence counts; non-finalized records, other kinds, other
-    owners and unknown activity always keep the claim held.
+    expiry evidence counts; non-finalized records, other kinds, claims that
+    are not this record's exact self claim (project, worktree, tracked
+    session and receiving-local owner) and unknown activity keep it held.
     """
     if record.status != "finalized" or claim.kind != "session" or claim.has_producer:
         return False
     if not claim.is_live or claim.is_unsettled:
         return False
-    parsed = tracking_claims.parse_claim_ref(claim.ref)
-    if parsed is None or not parsed.session or parsed.worktree_id != record.worktree_id:
+    if not _is_self_claim(record, claim):
         return False
     return lease_expired(record, claim, now=now) is True
+
+
+def _is_self_claim(
+    record: tracking.WorktreeRecord, claim: tracking_claims.ResourceClaim,
+) -> bool:
+    parsed = tracking_claims.parse_claim_ref(claim.ref)
+    if parsed is None or not parsed.session:
+        return False
+    return any(
+        own is claim for own in session_self_claims.self_claims(record, parsed.session)
+    )
 
 
 def release_expired_finalized(
@@ -135,8 +150,9 @@ def idle_finalized(
     """True when only expired session leases keep a finalized record live.
 
     Every known session (observed live ids plus live self-claims) must have
-    positive expiry evidence; no known session or any unknown verdict keeps
-    the conservative live classification.
+    positive expiry evidence; no known session, a live session claim that is
+    not an exact self claim, or any unknown verdict keeps the conservative
+    live classification.
     """
     if record.status != "finalized":
         return False
@@ -145,7 +161,7 @@ def idle_finalized(
         if claim.kind != "session" or not claim.is_live:
             continue
         parsed = tracking_claims.parse_claim_ref(claim.ref)
-        if parsed is None or not parsed.session:
+        if parsed is None or not parsed.session or not _is_self_claim(record, claim):
             return False
         if obligations.normalize(claim.state) == obligations.ACTIVE:
             states[parsed.session] = obligations.ACTIVE

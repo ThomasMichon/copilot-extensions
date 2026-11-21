@@ -11,7 +11,10 @@ from typing import cast
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import cleanup_reap, git_ops, local_cache_worker, prune, reclaim
+import argparse
+
+from agent_worktrees import activity, claim_history, claims_cli, cleanup_reap, execution_spaces
+from agent_worktrees import git_ops, local_cache_worker, output, prune, reclaim
 from agent_worktrees import config as cfg
 from agent_worktrees import retirement_safety, session_lease, sessions, sweep, tracking
 from agent_worktrees import tracking_claims
@@ -69,14 +72,37 @@ def _finalized(path: Path, *claims: tracking_claims.ResourceClaim) -> tracking.W
         worktree_id="wt", branch="worktree/wt", worktree_path=str(path), repo="p",
         machine="m", platform="wsl", started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
-        status="finalized", completed_at=None, sessions=[], resources=list(claims),
+        status="finalized", completed_at=None,
+        sessions=[tracking.SessionEntry(session_id="sess-1", started_at="2026-06-01T10:00:00")],
+        resources=list(claims),
     )
+
+
+def _self_ref(
+    rec: tracking.WorktreeRecord, *, machine: str | None = None, project: str = "p",
+) -> str:
+    return tracking_claims.format_claim_ref(
+        machine or rec.execution_machine, project, rec.worktree_id, "sess-1")
+
+
+def _finalized_self(
+    path: Path, state: str = "at-rest", *, saved_at: Path | None = None,
+) -> tracking.WorktreeRecord:
+    rec = _finalized(path)
+    if saved_at is not None:
+        # Saving stamps the receiving machine identity the self ref must name.
+        tracking.save_record(rec, saved_at)
+    rec.resources.append(
+        tracking_claims.ResourceClaim(kind="session", ref=_self_ref(rec), state=state))
+    if saved_at is not None:
+        tracking.save_record(rec, saved_at)
+    return rec
 
 
 def test_expired_idle_session_no_longer_keeps_finalized_active(
     state_dir: Path, tmp_path: Path,
 ) -> None:
-    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec = _finalized_self(tmp_path / "wt")
     norm = sessions._normalize_path(rec.worktree_path)
     _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
     active = {norm}
@@ -92,7 +118,7 @@ def test_expired_idle_session_no_longer_keeps_finalized_active(
 def test_recent_conversation_or_unknown_session_keeps_finalized_active(
     state_dir: Path, tmp_path: Path,
 ) -> None:
-    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec = _finalized_self(tmp_path / "wt")
     norm = sessions._normalize_path(rec.worktree_path)
     _touch(state_dir, "sess-1", 60)
     active = {norm}
@@ -144,7 +170,7 @@ def _scan(rec: tracking.WorktreeRecord, monkeypatch: pytest.MonkeyPatch, bridge:
 def test_unregistered_bridge_session_keeps_finalized_active_despite_expired_lease(
     state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec = _finalized_self(tmp_path / "wt")
     norm = sessions._normalize_path(rec.worktree_path)
     _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
     _touch(state_dir, "bridge-sess", 5)
@@ -155,7 +181,7 @@ def test_unregistered_bridge_session_keeps_finalized_active_despite_expired_leas
 def test_fresh_bound_live_hint_keeps_finalized_active_despite_expired_lease(
     state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec = _finalized_self(tmp_path / "wt")
     _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
     monkeypatch.setattr(m, "_fresh_bound_live_hint", lambda r: True)
     assert _scan(rec, monkeypatch, set()) == {sessions._normalize_path(rec.worktree_path)}
@@ -164,8 +190,8 @@ def test_fresh_bound_live_hint_keeps_finalized_active_despite_expired_lease(
 def test_expired_self_claim_is_admitted_only_on_positive_expiry(
     state_dir: Path, tmp_path: Path,
 ) -> None:
-    claim = _claim("at-rest")
-    rec = _finalized(tmp_path / "wt", claim)
+    rec = _finalized_self(tmp_path / "wt")
+    claim = rec.resources[0]
     assert not session_lease.expired_finalized_self_claim(rec, claim)  # unknown activity
     _touch(state_dir, "sess-1", 60)
     assert not session_lease.expired_finalized_self_claim(rec, claim)  # fresh
@@ -175,6 +201,9 @@ def test_expired_self_claim_is_admitted_only_on_positive_expiry(
     worktree = tracking_claims.ResourceClaim(kind="worktree", ref="m/p/wt", state="at-rest")
     assert not session_lease.expired_finalized_self_claim(rec, foreign)
     assert not session_lease.expired_finalized_self_claim(rec, worktree)
+    untracked = _finalized_self(tmp_path / "wt")
+    untracked.sessions = []
+    assert not session_lease.expired_finalized_self_claim(untracked, untracked.resources[0])
     rec.status = "active"
     assert not session_lease.expired_finalized_self_claim(rec, claim)
 
@@ -184,7 +213,7 @@ def test_expired_finalized_session_claim_no_longer_blocks_cleanup(
 ) -> None:
     tdir = tmp_path / "tracking"
     tdir.mkdir()
-    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec = _finalized_self(tmp_path / "wt", saved_at=tdir / "wt.yaml")
     rec.checkout_managed = False
     tracking.save_record(rec, tdir / "wt.yaml")
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
@@ -212,7 +241,7 @@ def test_expired_finalized_session_claim_no_longer_blocks_cleanup(
 def test_sweep_releases_only_positively_expired_finalized_session_claims(
     state_dir: Path, tmp_path: Path,
 ) -> None:
-    rec = _finalized(tmp_path / "wt", _claim("at-rest"))
+    rec = _finalized_self(tmp_path / "wt")
     _touch(state_dir, "sess-1", 60)
     assert tracking_claims.sweep_abandoned_obligations(
         rec, gone_of=lambda c: True, safe_of=lambda c: True, save=False) == []
@@ -220,3 +249,85 @@ def test_sweep_releases_only_positively_expired_finalized_session_claims(
     swept = tracking_claims.sweep_abandoned_obligations(
         rec, gone_of=lambda c: True, safe_of=lambda c: True, save=False)
     assert [c.state for c in swept] == ["released"]
+
+
+@pytest.mark.parametrize(
+    "owner", [{"machine": "other-machine"}, {"project": "other-project"}],
+    ids=["other-machine", "other-project"],
+)
+def test_foreign_owner_session_claim_never_expires_by_lease(
+    state_dir: Path, tmp_path: Path, owner: dict[str, str],
+) -> None:
+    rec = _finalized(tmp_path / "wt")
+    ref = _self_ref(rec, **owner)
+    foreign = tracking_claims.ResourceClaim(kind="session", ref=ref, state="at-rest")
+    rec.resources.append(foreign)
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    assert session_lease.lease_expired(rec, foreign) is True
+    assert not session_lease.expired_finalized_self_claim(rec, foreign)
+    assert session_lease.release_expired_finalized(rec) == []
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    assert not prune.cleanup_disposition(rec, info).cleanable
+    assert retirement_safety.retirement_blocker(rec) is not None
+    assert tracking_claims.sweep_abandoned_obligations(
+        rec, gone_of=lambda c: True, safe_of=lambda c: True, save=False) == []
+    assert not session_lease.idle_finalized(rec, ["sess-1"])
+
+
+def test_activity_stat_failure_is_unknown_not_expired(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_dir = state_dir / "sess-1"
+    session_dir.mkdir()
+    workspace = session_dir / "workspace.yaml"
+    workspace.write_text("{}\n", encoding="utf-8")
+    stamp = time.time() - session_lease.ACTIVE_LEASE_TTL_S * 10
+    os.utime(workspace, (stamp, stamp))
+    assert session_lease.last_activity("sess-1") == pytest.approx(stamp)
+
+    real_stat = Path.stat
+
+    def _stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if self.name == "events.jsonl":
+            raise PermissionError(13, "denied", str(self))
+        return real_stat(self)
+
+    monkeypatch.setattr(Path, "stat", _stat)
+    assert session_lease.last_activity("sess-1") is None
+    rec = _finalized_self(tmp_path / "wt")
+    assert session_lease.lease_expired(rec, rec.resources[0]) is None
+    assert not session_lease.expired_finalized_self_claim(rec, rec.resources[0])
+
+
+def test_claims_sweep_apply_releases_expired_finalized_self_claim(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tdir = tmp_path / "tracking"
+    tdir.mkdir()
+    rec_path = tdir / "wt.yaml"
+    rec = _finalized_self(tmp_path / "wt", saved_at=rec_path)
+    monkeypatch.setattr(cfg, "load_config", lambda: types.SimpleNamespace())
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tdir)
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", lambda r, c: None)
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (rec, True))
+    monkeypatch.setattr(sessions, "session_id_is_live", lambda r, sid: True)
+    history: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        claim_history, "record_event",
+        lambda **kw: history.append((str(kw["event"]), str(kw["note"]))))
+    monkeypatch.setattr(activity, "log_event", lambda *a, **kw: None)
+    monkeypatch.setattr(output, "_json_output", lambda payload: None)
+    args = argparse.Namespace(apply=True, json=True)
+
+    _touch(state_dir, "sess-1", 60)
+    assert claims_cli._claims_sweep(args) == 0
+    assert [c.state for c in tracking.load_record(rec_path).resources] == ["at-rest"]
+    assert history == []
+
+    _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
+    assert claims_cli._claims_sweep(args) == 0
+    reloaded = tracking.load_record(rec_path)
+    assert [c.state for c in reloaded.resources] == ["released"]
+    assert history == [("released", "lease-expired")]
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    assert prune.cleanup_disposition(reloaded, info).cleanable
