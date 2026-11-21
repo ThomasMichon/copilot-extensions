@@ -91,16 +91,17 @@ def test_suspended_pool_placement_is_not_a_slot(
     assert relationship is not None and relationship["request"]["workspace"] == asdict(workspace)
     with transport.api((*assignment, [])) as api:
         found = claimant(api, task.id, monkeypatch, capsys)
-        queue.release_suspended(task.id, workspace.worker_id, reason="explicit reassignment")
-        released = claimant(api, task.id, monkeypatch, capsys)
+        with pytest.raises(TaskError, match="retains assignment"):
+            queue.release_suspended(task.id, workspace.worker_id, reason="explicit reassignment")
+        retained = claimant(api, task.id, monkeypatch, capsys)
     assert found["status"] == "suspended" and found["owner_session_id"] == "native"
     assert found["worktree"] == workspace.worktree and found["resolved_from"] == "assignment"
     assert found["pool_assignment"] == {
         "registration_id": original.registration_id,
         "machine": original.machine, "env": original.env,
     }
-    assert released["status"] == "queued" and released["worktree"] is None
-    assert released["pool_assignment"] is None
+    assert retained["status"] == "suspended" and retained["worktree"] == workspace.worktree
+    assert retained["pool_assignment"] == found["pool_assignment"]
     history = queue.task_relationship(task.id)
     assert history is not None
     assert history["request"]["reservation_key"] == original.reservation_key

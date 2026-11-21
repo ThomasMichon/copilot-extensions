@@ -1,0 +1,9 @@
+{
+  "comment": "Keep task assignments while their worker reservation still holds execution or closeout.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

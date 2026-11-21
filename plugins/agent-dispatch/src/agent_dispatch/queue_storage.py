@@ -24,22 +24,22 @@ else:
 from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import is_blob_ref
 from .queue_common import (
+    _TASK_SELECT,
     AttachmentRecord,
     CreationOutcome,
     StructuredResult,
     Task,
     TaskAttachmentEntry,
     WakeOperation,
-    _TASK_SELECT,
     encode_result,
 )
+from .queue_dedup import find_live_dedup_task
+from .queue_execution_handoff import require_execution_admission
 from .queue_producer_fences import (
     ProducerFenceError,
     ProducerScopeValidationError,
 )
-from .queue_execution_handoff import require_execution_admission
 from .queue_records import Status, TaskError
-from .queue_dedup import find_live_dedup_task
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -813,6 +813,8 @@ class QueueStorageMixin(StorageOwner):
                             conn, standing_parent_id, canonical_repo,
                         )
                     if supersede_exclusive_key:
+                        from .reservation_assignment import retains_assignment
+
                         superseded = conn.execute(
                             "SELECT id, status FROM tasks "
                             "WHERE repo = ? AND exclusive_key = ? "
@@ -825,6 +827,10 @@ class QueueStorageMixin(StorageOwner):
                             ),
                         ).fetchall()
                         for prior in superseded:
+                            if retains_assignment(conn, prior["id"]):
+                                raise TaskError(
+                                    "cannot supersede a reserved task; request owner closeout"
+                                )
                             conn.execute(
                                 "UPDATE tasks SET status = ?, owner = NULL, "
                                 "lease_expires_at = NULL, activity = NULL, "

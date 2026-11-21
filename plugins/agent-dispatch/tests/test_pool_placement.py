@@ -25,6 +25,7 @@ from agent_dispatch.queue_records import SpawnReservation, Status, TaskError
 from agent_dispatch.queue_pool_placement import PoolAssignment, PoolPlacement, select_pool
 from agent_dispatch.queue_pool_placement import pool_placement_contract
 from agent_dispatch.workspace_binding import record_prepared
+from tests._legacy_pool_history import seed_pre_retention_yield
 
 
 @pytest.fixture
@@ -98,8 +99,8 @@ class TaskOptions(TypedDict, total=False):
     source: str
 
 
-def task(q: TaskQueue, **kw: Unpack[TaskOptions]) -> Task:
-    created = q.create("work", repo="example", **kw)
+def task(q: TaskQueue, title: str = "work", **kw: Unpack[TaskOptions]) -> Task:
+    created = q.create(title, repo="example", **kw)
     assert isinstance(created, Task)
     return created
 
@@ -718,7 +719,7 @@ def test_failed_native_remains_counted_after_the_current_assignment_moves(q: Tas
     q.start(t.id, "host-a/worktree", owner_session_id="native",
             expected_generation=current_task(q, t.id).generation)
     q.fail_spawn(old.key)
-    q.yield_task(t.id, "host-a/worktree")
+    seed_pre_retention_yield(q, old)
     current, _ = place(q, current_task(q, t.id))
     assert current.key != old.key
     assert assignment_for(q, t.id).reservation_key == current.key
@@ -739,7 +740,7 @@ def test_later_exact_same_native_retirement_releases_historical_completed_startu
     q.start(t.id, "host-a/worktree", owner_session_id="native",
             expected_generation=current_task(q, t.id).generation)
     q.fail_spawn(old.key)
-    q.yield_task(t.id, "host-a/worktree")
+    seed_pre_retention_yield(q, old)
     current, _ = place(q, current_task(q, t.id))
     record_native(q, current)
     with pytest.raises(TaskError, match="capacity"):
@@ -884,9 +885,9 @@ def test_http_response_retains_its_transactional_assignment_after_retry_advances
             q.start(t.id, "host-a/worktree", owner_session_id="native",
                     expected_generation=original.assignment.task_generation)
             q.fail_spawn(original.reservation.key)
-            q.yield_task(t.id, "host-a/worktree")
             q.request_spawn_release(original.reservation.key, finished_startup_revision=1)
             q.retire_spawn(original.reservation.key, exact_absence=True, conclusion_state="skipped")
+            q.yield_task(t.id, "host-a/worktree")
             current = place_task(t.id, reserved_by="allocator", catalog_revision=revision)
             assert current.assignment.task_generation > original.assignment.task_generation
         finally:
@@ -909,9 +910,9 @@ def retired_predecessor_retry(q: TaskQueue) -> tuple[Task, SpawnReservation, Spa
     q.start(t.id, "host-a/worktree", owner_session_id="old-native",
             expected_generation=current_task(q, t.id).generation)
     q.fail_spawn(old.key)
-    q.yield_task(t.id, "host-a/worktree")
     q.request_spawn_release(old.key, finished_startup_revision=1)
     q.retire_spawn(old.key, exact_absence=True, conclusion_state="skipped")
+    q.yield_task(t.id, "host-a/worktree")
     retry, _ = place(q, current_task(q, t.id))
     assert retry.conversation_retired and retry.session_handle is None
     return t, old, retry
@@ -992,7 +993,7 @@ def test_late_exact_retirement_of_a_carried_native_prevents_retry_acceptance(q: 
     q.start(t.id, "host-a/worktree", owner_session_id="native",
             expected_generation=current_task(q, t.id).generation)
     q.fail_spawn(old.key)
-    q.yield_task(t.id, "host-a/worktree")
+    seed_pre_retention_yield(q, old)
     retry, _ = place(q, current_task(q, t.id))
     record_native(q, retry)
     assert not reservation_for(q, retry.key).conversation_retired

@@ -16,8 +16,10 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
 from .queue_records import SpawnState, Status
+from .reservation_assignment import retains_assignment
 
 #: Upper bound on concurrent per-task liveness probes across ALL
 #: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
@@ -58,6 +60,14 @@ def _get_probe_executor() -> ThreadPoolExecutor:
 class LivenessMixin:
     """Liveness, orphan-reaping, and backlog-health methods for
     :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _now(self, now: float | None) -> float: ...
+        def _canonical_repo(self, repo: str | None) -> str | None: ...
+        def _audit(self, conn: sqlite3.Connection, task_id: str, *, ts: float,
+                   from_status: str, to_status: str, worker: str | None = None,
+                   note: str | None = None) -> None: ...
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.
@@ -312,9 +322,10 @@ class LivenessMixin:
                 ordinary_native = (
                     retained is not None and retained["driver"] == "ordinary-bridge"
                 )
-                if ordinary_native and (not owner_session_id or status != Status.STARTED):
+                reserved = retains_assignment(conn, task_id)
+                if reserved and (not owner_session_id or status != Status.STARTED):
                     continue
-                if ordinary_native and tuple(conn.execute(
+                if reserved and tuple(conn.execute(
                     "SELECT t.wake_operation_id, w.status FROM tasks t"
                     " LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id WHERE t.id = ?",
                     (task_id,),
@@ -323,7 +334,7 @@ class LivenessMixin:
                 # A current wake still being delivered to the same ordinary
                 # native is how the Bridge resumes it (e.g. a rejected
                 # submission); suspending here would fence that wake stale.
-                if ordinary_native and conn.execute(
+                if reserved and conn.execute(
                     "SELECT 1 FROM tasks t JOIN wake_outbox w ON w.id = t.wake_operation_id"
                     " WHERE t.id = ? AND t.status = ? AND t.generation = ?"
                     " AND t.owner_session_id = ? AND w.task_id = t.id"
@@ -334,7 +345,7 @@ class LivenessMixin:
                     (task_id, Status.STARTED, generation, owner_session_id),
                 ).fetchone():
                     continue
-                suspend = (cli_embodied or ordinary_native) and status == Status.STARTED
+                suspend = (cli_embodied or reserved) and status == Status.STARTED
                 if suspend:
                     to_status = Status.SUSPENDED
                 else:
@@ -386,7 +397,9 @@ class LivenessMixin:
                     if to_status == Status.QUEUED:
                         note = "owner-gone"
                     elif to_status == Status.SUSPENDED:
-                        kind = "ordinary native" if ordinary_native else "CLI-embodied"
+                        kind = "reserved" if reserved else "CLI-embodied"
+                        if ordinary_native:
+                            kind = "ordinary native"
                         note = f"owner-gone: auto-suspended ({kind} session ended)"
                     else:
                         note = "owner-gone: abandoned (max attempts exhausted)"
@@ -474,6 +487,8 @@ class LivenessMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             for task_id, generation, status in victims:
+                if retains_assignment(conn, task_id):
+                    continue
                 cur = conn.execute(
                     "UPDATE tasks SET status = ?, updated_at = ?, completed_at = ?,"
                     " owner = NULL, lease_expires_at = NULL"
@@ -524,10 +539,10 @@ class LivenessMixin:
         with self._connect() as conn:
 
             def _count(status: str) -> int:
-                return conn.execute(
+                return int(conn.execute(
                     f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
                     (status, *args),
-                ).fetchone()[0]
+                ).fetchone()[0])
 
             queued = _count(Status.QUEUED)
             proposed = _count(Status.PROPOSED)

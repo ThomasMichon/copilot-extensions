@@ -10,6 +10,13 @@ and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
 There is no default automatic task scrubber.
 
+A stopped process is not an unassigned task. If a spawn reservation still
+holds the assignment, an ordinary yield, release, abandon, orphan sweep or
+exclusive-key supersession must not remove the owner. An obsolete task with
+an attached agent goes through source relevance: one durable closeout steer
+and its original-owner wake, not a replacement task. Cooling a worker can
+free execution capacity without releasing the task or its workspace.
+
 ## Existing owners and integration seams
 
 | Responsibility | Existing owner |
