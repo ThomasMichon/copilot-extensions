@@ -11283,8 +11283,8 @@ propagation. All 54 remaining original cases stay outside this packet,
 including real Git/process fixtures and controls coupled to those fixtures.
 The original tests and scanner are unchanged; no Git command, live identifier
 sweep or real denylist read executes in the selected cases.
-The dependency release-age adapter exports 133 original in-process cases through
-43 exact test functions. It retains inclusive timestamp bounds, newest-
+The dependency release-age adapter exports 134 original in-process cases through
+44 exact test functions. It retains inclusive timestamp bounds, newest-
 file/yank refusal, Python floor and satisfiability rules, controlled npm
 metadata and UV cutoff/override rejection. Synthetic manifest trees additionally
 exercise scoped OTLP prerelease seasoning, declaration inventory, local-source
@@ -11298,7 +11298,13 @@ Seven original transport controls additionally retain CA/registry/TLS argument
 handling, insecure-environment refusal, bounded malformed/error responses and
 authoritative-public-URL selection. These originals already mock the npm command,
 subprocess result and default fetch; no executable or network request runs.
-All 70 remaining original cases stay outside this packet.
+One original fixture selector case also exercises the real dependency-age
+wrapper and snapshot installer's npm selector, retaining attributable CLI
+selection and missing-CLI refusal. Only executable lookup is already mocked;
+the temporary Node/shim/CLI files are never executed. The selector module is
+hash-bound and a positive production coverage target; its installer entrypoint
+does not run.
+All 69 remaining original cases stay outside this packet.
 Inventory operates only on fixture-owned
 trees, never the actual checkout; shared build and installer-policy modules are
 imported, not invoked to build, query a registry or prepare an installation.
