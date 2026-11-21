@@ -178,6 +178,21 @@ def test_apply_session_register_creates_a_new_session_entry(record_path: Path) -
     assert record.session_entry("sess-1") is not None
 
 
+def test_session_registration_does_not_reopen_finalized_worktree(record_path: Path) -> None:
+    """Finalize latches: a resumed session records an at-rest claim only."""
+    record = tracking.load_record(record_path)
+    record.status, record.completed_at = "finalized", "2026-06-02T10:00:00"
+    save_record(record, record_path)
+    result = tracking_session_registration_write.apply_session_register(
+        {"worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-2"}
+    )
+    assert result["ok"] is True
+    record = tracking.load_record(record_path)
+    assert record.status == "finalized"
+    assert record.session_entry("sess-2") is not None
+    assert [(c.kind, c.state) for c in record.resources] == [("session", "at-rest")]
+
+
 def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_path: Path) -> None:
     args = {
         "worktree_id": "wt-reg", "yaml_path": str(record_path),

@@ -372,7 +372,12 @@ def cleanup_disposition(
     # ``reopen_finalized_owner``), so it had no effect on this check either
     # -- purely cosmetic, not worth a subprocess spawn on every submitted
     # prompt.
-    held_claims = [c for c in rec.resources if c.is_live or c.is_unsettled]
+    from . import session_lease
+    held_claims = [
+        c for c in rec.resources
+        if (c.is_live or c.is_unsettled)
+        and not session_lease.expired_finalized_self_claim(rec, c)
+    ]
     if held_claims and (
         rec.status == "finalized" or info.state == S.COMPLETED
         or v.category in ("merged", "empty", "conversation-only")

@@ -505,7 +505,7 @@ def _claim_reopens_owner(
     record: tracking.WorktreeRecord,
     claim: ResourceClaim,
 ) -> bool:
-    if not claim.is_live:
+    if not claim.is_live or claim.kind == "session":  # finalize latch: own session never reopens
         return False
     existing = next((existing for existing in record.resources if existing.ref == claim.ref), None)
     if existing is None:
@@ -727,7 +727,7 @@ def sweep_abandoned_obligations(
     path: Path | None = None,
 ) -> list[ResourceClaim]:
     tracking = _tracking()
-    from . import paired_claims
+    from . import paired_claims, session_lease
 
     reclaimed: list[ResourceClaim] = []
     for claim in record.resources:
@@ -738,7 +738,11 @@ def sweep_abandoned_obligations(
         # sweep must never reclaim one, even with a gone+safe verdict.
         if claim.kind == "derived":
             continue
-        if not claim.is_unsettled or claim_handoff_reservation(record, claim):
+        lease = session_lease.expired_finalized_self_claim(record, claim)
+        if (
+            (not claim.is_unsettled and not lease)
+            or claim_handoff_reservation(record, claim)
+        ):
             continue
         try:
             paired_claims.require_clearable(record, claim.ref)
@@ -764,7 +768,8 @@ def sweep_abandoned_obligations(
             # content was independently proven safe -- genuinely a
             # reclaim, not a normal completion).
             claim.state = (
-                obligations.RELEASED if claim.kind == "pr" else obligations.ABANDONED
+                obligations.RELEASED if claim.kind == "pr" or lease
+                else obligations.ABANDONED
             )
             reclaimed.append(claim)
     if reclaimed and save:
