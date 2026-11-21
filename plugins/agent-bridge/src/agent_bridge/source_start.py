@@ -210,7 +210,11 @@ def start_installed_slot() -> bool:
         raise ServingReconcileError("Bridge callback must execute from its installed slot")
     core = _core()
     root = Path(layout[2])
-    if install_dir().resolve() != root.resolve():
+    try:
+        same_root = install_dir().samefile(root)
+    except OSError as exc:
+        raise ServingReconcileError("Bridge callback installation root differs from its slot") from exc
+    if not same_root:
         raise ServingReconcileError("Bridge callback installation root differs from its slot")
     package = version("agent-bridge")
     reported = effective_runtime_version(package, prefix=prefix, module_path=Path(__file__))
