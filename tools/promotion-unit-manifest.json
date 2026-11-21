@@ -6884,7 +6884,7 @@
         "plugins/agent-vault/src/agent_vault/cli.py": "1b3af6cde8c1a16ec4392e4e0fe76903bbc5505f324c08361078feeeb032c7f8",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
         "tools/promotion_unit_tests/test_vault_transport_order.py": "2afbf9703e5244e71df06ef5ed0f09573cb199637276b3a5521897bc35036344",
-        "tools/application_footprint.py": "524a1c9f0689e7ca54723452776c0b2b84fda7b8bb1962139b83bf03206077d1",
+        "tools/application_footprint.py": "7595493b3bf531df5fd6e9c25f86cdee235ec340338b7afc15acbbc8e3da4d23",
         "tools/daemon_lifecycle_assets.py": "8d6435f7bf14e29f2049829cb6a2f05bff30da9af88ba166acc6670a504924b5",
         "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
         "tools/promotion_unit_tests/test_application_sources.py": "f8e064a7cd3e421d20061da985de0b2f51476252d42acb8f5c16597343588783",
