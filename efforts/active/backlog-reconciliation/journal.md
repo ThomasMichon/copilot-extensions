@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Orphan-owner source fulfillment and new delivery boundaries](journal/2026/11.21-orphan-owner-and-new-delivery-boundaries.md)
+
 - [2026-11-20 - Passive roster freshness and the delivery frontier](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md)
 
 - [2026-11-20 - Finite source fulfillment and new inflow](journal/2026/11.20-source-fulfillment-and-new-inflow.md)
