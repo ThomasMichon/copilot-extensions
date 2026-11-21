@@ -3,6 +3,27 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_dependency_retention_controls.py",
+      [
+        "test_install_execution_uses_budget_remaining_after_retention[3-None]",
+        "test_install_execution_uses_budget_remaining_after_retention[3-2]",
+        "test_install_execution_uses_budget_remaining_after_retention[11-None]",
+        "test_generated_local_exclusions_refuse_invalid_names_before_uv[names0]",
+        "test_generated_local_exclusions_refuse_invalid_names_before_uv[example]",
+        "test_generated_local_exclusions_refuse_invalid_names_before_uv[names2]",
+        "test_generated_local_exclusions_refuse_invalid_names_before_uv[names3]",
+        "test_generated_local_exclusions_refuse_invalid_names_before_uv[names4]",
+        "test_generated_local_exclusions_canonicalize_owned_temp_aliases",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[1]",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[12]",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[123]",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[1234]",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[12345]",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[123456]",
+        "test_absolute_cutoff_fraction_is_python310_compatible_and_conservative[123456789]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_uv_executable_fixture_units.py",
       [
         "test_windows_absolute_uv_selection_preserves_the_selected_target",
@@ -8713,6 +8734,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_dependency_retention_controls.py": "feebb728fd835274c4007a8984d38609e4b1b982d8f8141c422a91803e37dcfb",
     "tools/promotion_unit_tests/test_uv_executable_fixture_units.py": "9c468cf8f61ded25396bdebd6185cb89ffef3c3ee3e9335e8a937b08c6dc10c5",
     "tools/test_dependency_uv_executable.py": "6488e916ba2e46d43b86e9eae7dfcc618f281b4aa857e27d002013271c600c1e",
     "tools/test_installer_dependency_policy.py": "94a8069e366c93e0116af10b837f1b47dfaea154e398a49920d1ee17933eb80f",

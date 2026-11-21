@@ -1018,13 +1018,27 @@ authorizes critical main-path acceptance or a bounded administrative change.
   merged-tree units freshly executed, including 52 concurrent peer additions.
   Only failed guards are retried after a transient public-metadata failure;
   the successful unit execution is retained. Broader parent gates stay open.
-- [ ] Qualify and land twelve original UV-executable fixture cases through
+- [x] Qualify and land twelve original UV-executable fixture cases through
   seven unchanged original functions, retaining every assertion, parameter
   identity and original callback. Keep all nine ctypes, real-link and Windows
   native-retention cases outside, including the case correctly refused on
   `ctypes.dlopen`; do not replace native ACL work or preload a library for
   admission. Require actual per-case configuration/projection owner calls,
   zero prohibited effects, complete Python read closure, unchanged preceding
+  nodes/hashes/targets/helper decisions, compact/flat-v1 contracts and the
+  300-second bound, strict typing, current-head review and complete Linux source
+  CI. No installer behavior or broader native, installed, release, full-census,
+  whole-flow or custody acceptance changes.
+  #13968 merges at `028ed693902466b4244b50a57281fe04f88a738d` after
+  exact-head Copilot approval and complete required Linux CI with all 6,974
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land sixteen original retention controls through four exact
+  unchanged test functions: remaining execution budget, invalid exclusions,
+  temporary-path canonicalization and conservative fractional cutoffs. Preserve
+  all assertions, parameter identities and original callbacks; copied-module
+  cases remain outside because the existing coverage gate requires canonical
+  owner calls. Require positive per-case production call coverage, zero
+  prohibited effects, complete Python read closure, unchanged preceding
   nodes/hashes/targets/helper decisions, compact/flat-v1 contracts and the
   300-second bound, strict typing, current-head review and complete Linux source
   CI. No installer behavior or broader native, installed, release, full-census,
