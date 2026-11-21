@@ -228,6 +228,16 @@ legacy record. Legacy repaired mappings may be reformatted while preserving
 alias-referenced values; the exact original bytes remain in the private backup.
 See [scoped repair and byte/data preservation](../skills/repairing-worktrees/SKILL.md).
 
+## Orphaned-owner repair
+
+`doctor --repair-orphaned-owner <exact-id> [--fix] [--json]`, scoped with
+`-p <project>`, proves that a child's local owner worktree is permanently gone:
+no record, lock or checkout remains, no branch or Git registration exists, and
+there is no live session evidence. Report mode changes nothing. `--fix`
+removes only the child's `owner_ref` under its record lock and writes a
+private backup and audit file. Afterwards, plain `finalize` applies. See
+[permanently gone parent](retired-owner-finalization.md#permanently-gone-parent).
+
 ## Disposable producer ownership
 
 `resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json
