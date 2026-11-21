@@ -17,6 +17,79 @@ ROOT = Path(__file__).resolve().parents[1]
 PROVIDER = ROOT / "libs/installer-engine/bootstrap-uv.ps1"
 
 
+@pytest.mark.parametrize("operation", ["Inspect", "Prepare"])
+def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
+    tmp_path: Path, operation: str,
+) -> None:
+    bash = shutil.which("bash")
+    if not bash or os.name == "nt":
+        pytest.skip("This control exercises the POSIX shell provider")
+    request = tmp_path / "request.txt"
+    request.write_bytes(b"cpython@3.13.12\r\n")
+    python = tmp_path / "managed python"
+    python.touch(mode=0o700)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "calls"
+    uv = tools / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        '[ -z "${UV_PYTHON-}${UV_NO_MANAGED_PYTHON-}${VIRTUAL_ENV-}" ] || exit 95\n'
+        'printf "%s\\n" "$*" >> "$CALLS"\n'
+        'case "$*" in\n'
+        '  --version) printf "uv 0.12.6\\n";;\n'
+        '  "python install --no-bin --no-registry cpython@3.13.12") exit 0;;\n'
+        '  "python find --no-project --system --managed-python --no-python-downloads cpython@3.13.12")\n'
+        '    printf "%s\\n" "$MANAGED";;\n'
+        '  *) exit 96;;\nesac\n',
+    )
+    uv.chmod(0o700)
+    result = subprocess.run(
+        [bash, "-c", '. "$1"; resolve_uv_bootstrap_python "$2" "$3"', "bootstrap",
+         str(PROVIDER.with_suffix(".sh")), str(request), operation],
+        capture_output=True, text=True, timeout=15,
+        env={
+            **os.environ, "PATH": str(tools) + os.pathsep + os.defpath,
+            "CALLS": str(log), "MANAGED": str(python), "UV_PYTHON": "foreign",
+            "UV_NO_MANAGED_PYTHON": "1", "VIRTUAL_ENV": "foreign",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == str(python) + "\n"
+    assert log.read_text().splitlines() == [
+        "--version",
+        *(["python install --no-bin --no-registry cpython@3.13.12"] if operation == "Prepare" else []),
+        "python find --no-project --system --managed-python --no-python-downloads cpython@3.13.12",
+    ]
+
+
+@pytest.mark.parametrize("content", [
+    b"3.13.12\n", b"cpython@3.13.12", b"cpython@3.13.12\n\n", b"cpython@3.13.12\0\n",
+])
+def test_posix_bootstrap_rejects_malformed_requests_before_uv(
+    tmp_path: Path, content: bytes,
+) -> None:
+    bash = shutil.which("bash")
+    if not bash or os.name == "nt":
+        pytest.skip("This control exercises the POSIX shell provider")
+    request = tmp_path / "request.txt"
+    request.write_bytes(content)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    uv = tools / "uv"
+    uv.write_text('#!/bin/sh\nprintf "UV_MUST_NOT_RUN\\n" >&2\nexit 97\n')
+    uv.chmod(0o700)
+    result = subprocess.run(
+        [bash, "-c", '. "$1"; resolve_uv_bootstrap_python "$2" Prepare', "bootstrap",
+         str(PROVIDER.with_suffix(".sh")), str(request)],
+        capture_output=True, text=True, timeout=15,
+        env={**os.environ, "PATH": str(tools) + os.pathsep + os.defpath},
+    )
+    assert result.returncode == 1
+    assert "must declare one exact stable CPython" in result.stderr
+    assert "UV_MUST_NOT_RUN" not in result.stderr
+
+
 @pytest.fixture(params=("pwsh", "powershell"))
 def host(request: pytest.FixtureRequest) -> str:
     executable = shutil.which(str(request.param))

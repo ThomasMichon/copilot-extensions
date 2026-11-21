@@ -11,13 +11,20 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_installers import BASE_PYTHON, NO_WINDOW, _fake_uv_environment
 from test_source_install_transactions import SCRIPTS, _function, _host, _payload, _setup
 
 
 def _native_environment(root: Path) -> dict[str, str]:
-    home = root / "home"
-    home.mkdir()
-    paths = [str(Path(sys.executable).parent)]
+    fake_bin, fixture_environment = _fake_uv_environment(root)
+    home = Path(fixture_environment["HOME"])
+    if os.name == "nt":
+        (fake_bin / "uv").unlink()
+        (fake_bin / "uv.cmd").write_text(
+            f'@echo off\n"{BASE_PYTHON}" "{fixture_environment["TEST_UV_DRIVER"]}" %*\n'
+            "exit /b %errorlevel%\n",
+        )
+    paths = [str(fake_bin), str(Path(sys.executable).parent)]
     if os.name == "nt":
         paths.extend(os.environ.get("PATH", "").split(os.pathsep))
     else:
@@ -28,7 +35,7 @@ def _native_environment(root: Path) -> dict[str, str]:
                 paths.append(str(Path(executable).parent))
         paths.extend(os.defpath.split(os.pathsep))
     env = {
-        **os.environ,
+        **fixture_environment,
         "HOME": str(home),
         "USERPROFILE": str(home),
         "PATH": os.pathsep.join(dict.fromkeys(paths)),
@@ -155,7 +162,7 @@ try {
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     ) as holder:
         try:
             assert holder.stdout is not None
@@ -171,7 +178,7 @@ try {
                 text=True,
                 timeout=30,
                 check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=NO_WINDOW,
             )
             detail = contender.stdout + contender.stderr
             assert contender.returncode != 0, detail
@@ -190,7 +197,7 @@ try {
         text=True,
         timeout=30,
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert retry.returncode == 0, retry.stdout + retry.stderr
     assert (root / "payload-dir").read_bytes() != previous["payload-dir"]
@@ -235,7 +242,7 @@ def test_source_free_uninstall_preserves_transaction_and_staging_authority(
         text=True,
         timeout=30,
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert lock.stat().st_ino == identity
     if ownership == "owned":

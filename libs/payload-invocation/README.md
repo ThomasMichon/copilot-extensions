@@ -69,7 +69,7 @@ Both producer helper loads and bootstrap validation suppress bytecode writes
 and restore the caller's prior setting on success or refusal.
 
 This is declaration delivery, not launcher adoption or acquisition authority.
-No production manifest currently opts in. A setup owner must qualify the
+Budget Guidance declares its helper version. A setup owner must qualify the
 shell-native PATH-UV provider before using the declaration; ordinary launch
 remains acquisition-free. Older generators ignore this optional field and do
 not emit the scalar. A future consumer must report a missing declaration as
@@ -82,6 +82,25 @@ a different Python version from its addressed application. Application
 existing application/profile admission owners (`runtime_profile.py` and
 `runtime_source_lock.py`); publishing this scalar does not admit an application
 or bypass those checks.
+
+`pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
+the default remains `direct` for consumers not yet migrated. Adoption requires
+the helper declaration and refuses custom dispatchers. The existing resolver
+still selects the completed application generation. uv receives that exact
+environment as `--python`, with no project discovery, configuration lookup or
+Python download; it does not select a different generation or resolve package
+dependencies. Both the cache-policy probe and the final module launch use this
+path. Inherited Python-selection/active-environment hints are removed in the
+shim process. Missing uv or a missing completed runtime reports prerequisite
+or explicit setup instructions, never implicit provisioning.
+
+Budget Guidance is the first adopter. Its explicit native setup prepares the
+declared managed base before source/runtime helper execution and constructs
+new environments from that base. Existing completed-generation selection and
+explicit closed-wheel inputs retain their original contracts; the flag does
+not attest or relabel an older retained environment's base interpreter.
+Its remaining startup, guidance and removal consumers are separate migration
+work, not qualified by the command/setup adoption.
 
 Manifest version 2 renames `runtimeRoot` to `legacyRuntimeRoot` and may set
 `installationContext: "required"`. Required-context adoption is accepted only

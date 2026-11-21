@@ -274,6 +274,13 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
     runtime_admission = data.setdefault("runtimeAdmissionToolkit", False)
     if not isinstance(runtime_admission, bool):
         raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
+    python_launcher = data.setdefault("pythonLauncher", "direct")
+    if python_launcher not in ("direct", "uv"):
+        raise ValueError(f"{path}: pythonLauncher must be direct or uv")
+    if python_launcher == "uv" and (
+        "bootstrapPython" not in data or any(normalized_dispatcher.values())
+    ):
+        raise ValueError(f"{path}: uv Python launch requires a bootstrap declaration and simple shims")
     if runtime_admission and installation_context != "required":
         raise ValueError(f"{path}: runtimeAdmissionToolkit requires installation context")
     if installer_lifecycle and (
@@ -751,6 +758,54 @@ def render(
             separators=(",", ":"),
         ),
     }
+    values.update({
+        "UV_RUNTIME_PRELUDE_POSIX": "",
+        "UV_RUNTIME_PRELUDE_POWERSHELL": "",
+        "PREPARED_RUNTIME_POSIX": "",
+        "PREPARED_RUNTIME_POWERSHELL": "",
+        "RUNTIME_PYTHON_POSIX": '"$AGENT_RT_PY"',
+        "CACHE_PYTHON_POWERSHELL": "$Python",
+        "RUNTIME_PYTHON_POWERSHELL": "$_py",
+        "PROVISIONED_PYTHON_POWERSHELL": "$_provisionedPy",
+    })
+    if data["pythonLauncher"] == "uv":
+        uv_arguments = (
+            "run --no-project --no-config --no-python-downloads "
+            "--managed-python --python"
+        )
+        values.update({
+            "RUNTIME_PYTHON_POSIX": f'"$_uv" {uv_arguments} "$AGENT_RT_PY" python',
+            "CACHE_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $Python python",
+            "RUNTIME_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $_py python",
+            "PROVISIONED_PYTHON_POWERSHELL": f"$_uv {uv_arguments} $_provisionedPy python",
+            "UV_RUNTIME_PRELUDE_POSIX": (
+                "unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON "
+                "VIRTUAL_ENV CONDA_PREFIX\n"
+                "_uv=\"$(command -v uv 2>/dev/null || true)\"\n"
+                "case \"$_uv\" in /*) [ -x \"$_uv\" ] || _uv='' ;; *) _uv='' ;; esac\n"
+                "if [ -z \"$_uv\" ]; then\n"
+                "    printf 'uv is unavailable; prepare the command prerequisites before launch.\\n' >&2\n"
+                "    exit 127\nfi\n"
+            ),
+            "UV_RUNTIME_PRELUDE_POWERSHELL": (
+                "foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', "
+                "'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX')) {\n"
+                "    Remove-Item \"Env:$key\" -ErrorAction SilentlyContinue\n"
+                "}\n"
+                "$_uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source\n"
+                "if (-not $_uv) {\n"
+                "    [Console]::Error.WriteLine('uv is unavailable; prepare the command prerequisites before launch.')\n"
+                "    exit 127\n}\n"
+            ),
+            "PREPARED_RUNTIME_POSIX": (
+                "printf '[%s] runtime is not prepared; run the owning scripts/install.sh install.\\n' \"$_command\" >&2\n"
+                "exit 1\n"
+            ),
+            "PREPARED_RUNTIME_POWERSHELL": (
+                "[Console]::Error.WriteLine(\"[$_command] runtime is not prepared; run the owning scripts/install.ps1 install.\")\n"
+                "exit 1\n"
+            ),
+        })
     rendered = template
     for key, value in values.items():
         rendered = rendered.replace(f"@@{key}@@", value)

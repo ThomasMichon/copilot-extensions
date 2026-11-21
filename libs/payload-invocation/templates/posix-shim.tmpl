@@ -3,7 +3,7 @@
 set -eu
 
 export PYTHONUTF8=1
-_plugin="@@PLUGIN@@"
+@@UV_RUNTIME_PRELUDE_POSIX@@_plugin="@@PLUGIN@@"
 _command="@@COMMAND@@"
 _module="@@MODULE@@"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
@@ -165,7 +165,7 @@ _resolve_runtime() {
             *.exe) _selector_root="$(cygpath -aw "$_runtime_root")" || _selector_root="" ;;
         esac
         if [ -n "$_selector_root" ]; then
-            _selected_cache="$("$AGENT_RT_PY" -I -B -X utf8 -c '
+            _selected_cache="$(@@RUNTIME_PYTHON_POSIX@@ -I -B -X utf8 -c '
 import sys
 try:
     from agent_procutil.python_cache import POLICY_VERSION, policy_arguments
@@ -192,9 +192,9 @@ pycache_prefix='*)
 
 _dispatch_runtime() {
     if [ "$_python_cache_option" = "-X" ]; then
-        exec "$AGENT_RT_PY" -X "$_python_cache_value" -m "$_module" "$@"
+        exec @@RUNTIME_PYTHON_POSIX@@ -X "$_python_cache_value" -m "$_module" "$@"
     fi
-    exec "$AGENT_RT_PY" -B -m "$_module" "$@"
+    exec @@RUNTIME_PYTHON_POSIX@@ -B -m "$_module" "$@"
 }
 
 @@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime
@@ -203,7 +203,7 @@ if [ -n "${AGENT_RT_PY:-}" ]; then
     _boot_trace dispatch shim '' '' '' fast
     _dispatch_runtime "$@"
 fi
-if [ -n "${@@NO_SELFPROVISION_ENV@@:-}" ]; then
+@@PREPARED_RUNTIME_POSIX@@if [ -n "${@@NO_SELFPROVISION_ENV@@:-}" ]; then
     printf '[%s] runtime not provisioned (%s set).\n' \
         "$_command" "@@NO_SELFPROVISION_ENV@@" >&2
     exit 1

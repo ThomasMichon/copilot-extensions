@@ -340,7 +340,7 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
     local _n
     for _n in "${PASS_ENV[@]}"; do
         [ -z "$_n" ] && continue
-        if [ -z "${!_n:-}" ]; then
+        if [ "$(printenv "$_n" 2>/dev/null | wc -c)" -le 1 ]; then
             echo "warn: --pass-env '$_n' is not set on the host -- not forwarding" >&2
             continue
         fi

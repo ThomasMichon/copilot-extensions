@@ -517,54 +517,28 @@ function Remove-ConsoleTrampolines {
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
+$script:BudgetBootstrapPython = ''
 function Get-BootstrapPython {
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Uses the active link's python or a real base python via the `py`
-       launcher, never the candidate owned by construction -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
+    param([switch]$Prepare)
     if ($WheelProfile) { return $WheelPython }
-    foreach ($d in @($LinkDir)) {
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
+    if (-not $Prepare -and $script:BudgetBootstrapPython) { return $script:BudgetBootstrapPython }
+    . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+    $capture = {
+        param($FilePath, $ArgList, $Environment)
+        $errors = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+            -Environment $Environment -ErrorOutput ([ref]$errors)
+        [pscustomobject]@{ExitCode=$LASTEXITCODE; Stdout=[string]$output; Stderr=$errors}
     }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $launcher = (Get-Command py -ErrorAction Stop).Source
-        $exe = (Invoke-Hidden -FilePath $launcher -ArgList @('-3', '-c', 'import sys; print(sys.executable)')).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+    $operation = if ($Prepare) { 'Prepare' } else { 'Inspect' }
+    $selected = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $PSScriptRoot 'bootstrap-python-version.txt') `
+        -InvokeCaptured $capture -Operation $operation -IsolateSelection
+    if ($selected.Status -cne 'selected') {
+        throw ('Managed bootstrap Python is not prepared; run scripts/install.ps1 install: ' + $selected.Reason)
     }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
-        if ($c -and $c.Source -notmatch 'WindowsApps') {
-            $exe = (Invoke-Hidden -FilePath $c.Source -ArgList @('-I', '-c', 'import sys; print(sys.executable)')).Trim()
-            if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-        }
-    }
-    $uv = Get-Command uv -ErrorAction SilentlyContinue
-    if ($uv) {
-        foreach ($arguments in @(
-            'python find 3.11',
-            'run --no-project --python 3.11 python -I -c "import sys; print(sys.executable)"'
-        )) {
-            $psi = New-Object Diagnostics.ProcessStartInfo
-            $psi.FileName = $uv.Source
-            $psi.Arguments = $arguments
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow = $true
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $process = [Diagnostics.Process]::Start($psi)
-            $out = $process.StandardOutput.ReadToEndAsync()
-            $err = $process.StandardError.ReadToEndAsync()
-            $process.WaitForExit()
-            [Threading.Tasks.Task]::WaitAll($out, $err)
-            $base = $out.Result.Trim()
-            $code = $process.ExitCode
-            $process.Dispose()
-            if ($code -eq 0 -and $base -and (Test-Path -LiteralPath $base -PathType Leaf)) {
-                return $base
-            }
-        }
-    }
-    return $null
+    $script:BudgetBootstrapPython = $selected.Python
+    return $script:BudgetBootstrapPython
 }
 
 function Get-SourceRuntimeIdentity {
@@ -750,8 +724,11 @@ function Deploy-SelfProvisioningBinstub {
             '_root="$HOME/.budget-guidance"',
             'AGENT_RT_PY=""',
             'if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi',
-            '[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m budget_guidance "$@"',
-            'echo "[budget-guidance] runtime not provisioned; run scripts/install.sh" >&2; exit 1'
+            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX',
+            '_uv="$(command -v uv)" || exit 127',
+            'case "$_uv" in /*) ;; *) echo "uv must be a PATH executable" >&2; exit 127;; esac',
+            '[ -n "$AGENT_RT_PY" ] && exec "$_uv" run --no-project --no-config --no-python-downloads --managed-python --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"',
+            'echo "[budget-guidance] runtime not prepared; run scripts/install.sh install" >&2; exit 1'
         ) -join "`n"
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
@@ -760,6 +737,14 @@ function Deploy-SelfProvisioningBinstub {
     $ps1Path = Join-Path $LocalBin 'budget-guidance.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
+foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX')) {
+    Remove-Item "Env:$key" -ErrorAction SilentlyContinue
+}
+$_uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+if (-not $_uv) {
+    [Console]::Error.WriteLine('budget-guidance: uv is unavailable; prepare the command prerequisites.')
+    exit 127
+}
 $_root = Join-Path $env:USERPROFILE '.budget-guidance'
 $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
 function _Resolve-Py {
@@ -768,44 +753,12 @@ function _Resolve-Py {
     return $AgentRtPy
 }
 $_py = _Resolve-Py
-if ($_py) { & $_py -m budget_guidance @args; exit $LASTEXITCODE }
-if ($env:BUDGET_GUIDANCE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[budget-guidance] runtime not provisioned (BUDGET_GUIDANCE_NO_SELFPROVISION set).'); exit 1 }
-if (-not (Test-Path -LiteralPath $_root)) { New-Item -ItemType Directory -Path $_root -Force | Out-Null }
-$_lockPath = Join-Path $_root '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open($_lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
+if ($_py) {
+    $ErrorActionPreference = 'Continue'
+    & $_uv run --no-project --no-config --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @args
+    exit $LASTEXITCODE
 }
-$_provisionRc = 0
-try {
-    $_py = _Resolve-Py
-    if (-not $_py) {
-        $_snap = ''
-        try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-        $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-        if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
-            [Console]::Error.WriteLine("[budget-guidance] cannot self-provision: owning snapshot installer unavailable: $_inst")
-            $_provisionRc = 127
-        } else {
-            [Console]::Error.WriteLine('[budget-guidance] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-            [Console]::Error.WriteLine('::agent-provisioning:: plugin=budget-guidance eta_seconds=120 reason=first-use')
-            $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-            $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-            & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-            $_provisionRc = $LASTEXITCODE
-            if ($_provisionRc -eq 0) { $_py = _Resolve-Py }
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-if ($_provisionRc -ne 0) { exit $_provisionRc }
-if ($_py) { & $_py -m budget_guidance @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[budget-guidance] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
+[Console]::Error.WriteLine('[budget-guidance] runtime is not prepared; run the owning scripts/install.ps1 install.')
 exit 1
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
@@ -828,7 +781,7 @@ if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) e
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
-    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
+    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, prepared uv runtime)"
 }
 
 function Invoke-Stamp {
@@ -980,12 +933,10 @@ function Set-BudgetRuntimeVersion([string]$Version) {
     $script:LinkPython = $VenvPython
 }
 
-if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
-if ($WheelProfile) {
-    $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `
-        -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
-        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'budget-guidance'
-    Set-BudgetRuntimeVersion $NativeWheelSelection.runtime_version
+if ($Action -in @('install', 'update', 'provision') -and -not $WheelProfile) {
+    $setupUv = Ensure-Uv -InstallRoot $env:USERPROFILE -ToolDirectory '.local\bin'
+    if (-not $setupUv) { throw 'uv prerequisite setup failed' }
+    Get-BootstrapPython -Prepare | Out-Null
 }
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -993,6 +944,13 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
     exit 1
 }
 try {
+if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
+if ($WheelProfile) {
+    $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `
+        -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'budget-guidance'
+    Set-BudgetRuntimeVersion $NativeWheelSelection.runtime_version
+}
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
 if ($Action -in @('install', 'update', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
@@ -1049,43 +1007,10 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-$hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Step 'uv not found -- installing via winget...'
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        $env:PATH = (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine') + ';' + (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User')
-        if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
-    }
-}
 $uvCommand = if ($WheelProfile) {
-    Get-Command $WheelUv -CommandType Application -ErrorAction Stop
-} else { Get-Command uv -ErrorAction SilentlyContinue }
-
-$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
-foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
-    $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $testOut = & $found.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
-                $pythonCmd = $found.Source
-            }
-        } catch { }
-        $ErrorActionPreference = $prevEAP
-        if ($pythonCmd) { break }
-    }
-}
-if (-not $uvCommand -and -not $pythonCmd) {
-    Write-Fail 'Neither standalone uv nor Python 3.10+ is available'
-    exit 1
-}
-if ($pythonCmd) { Write-Ok "Python fallback: $pythonCmd" }
+    Get-Command $WheelUv -CommandType Application -ErrorAction Stop | Select-Object -First 1
+} else { Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1 }
+$pythonCmd = Get-BootstrapPython
 
 foreach ($dir in @($InstallDir, $LocalBin)) {
     if (-not (Test-Path $dir)) {
@@ -1111,39 +1036,15 @@ if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $signedBase = $null
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-        foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
-            }
-        }
-    }
-    if ($signedBase -and (Test-Path $VenvPython)) {
-        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
-    }
-    if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-    }
     if (-not (Test-Path $VenvPython)) {
-        if ($uvCommand) {
-            Write-Step 'Creating Python 3.10+ venv via uv...'
-            Invoke-VersionedSlotClean
-            & $uvCommand.Source venv $VenvDir --python 3.10 --allow-existing 2>&1 |
-                Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                if (-not $pythonCmd) {
-                    $ErrorActionPreference = $prevEAP
-                    Write-Fail 'uv could not obtain a compatible Python interpreter'
-                    exit 1
-                }
-                Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
-        } else {
-            Write-Step 'Creating venv via python -m venv...'
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+        Write-Step 'Creating managed Python venv via uv...'
+        Invoke-VersionedSlotClean
+        & $uvCommand.Source venv $VenvDir --python $pythonCmd --managed-python `
+            --no-python-downloads --allow-existing 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail 'uv could not construct the declared managed Python environment'
+            exit 1
         }
     }
     $ErrorActionPreference = $prevEAP

@@ -1,6 +1,6 @@
 {
   "name": "budget-guidance-solo",
-  "description": "Credential-free first-use installation and offline posture/extension contracts from an exact local source snapshot; requires Python 3.10+ and Node.js 20+.",
+  "description": "Credential-free explicit managed-Python installation and offline posture/extension contracts from an exact local source snapshot; requires Python for candidate composition and Node.js 20+.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -12,7 +12,7 @@
   "base": "standalone-without-siblings",
   "validates": [
     "Stamping creates a self-contained payload without provisioning the runtime.",
-    "The first binstub use provisions after the original source copy is removed.",
+    "Unprepared command use does not install; explicit snapshot setup prepares managed Python after the original source copy is removed.",
     "Installed source/version identity, unavailable posture, and synthetic static posture are preserved.",
     "The installed snapshot's extension passes candidate-owned SDK fixtures without a live session or credentials."
   ],
@@ -28,7 +28,7 @@
   "stages": [
     { "n": 0, "title": "fresh credential-free environment and candidate source" },
     { "n": 1, "title": "stamp a self-contained payload snapshot" },
-    { "n": 2, "title": "first-use provision after removing the original copy" },
+    { "n": 2, "title": "explicit snapshot setup after removing the original copy" },
     { "n": 3, "title": "installed identity and offline posture" },
     { "n": 4, "title": "isolated foreground extension contract" }
   ]
