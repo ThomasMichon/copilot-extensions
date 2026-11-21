@@ -203,6 +203,73 @@ function Enter-NativeInstallerDriver {
     }
 }
 
+function Invoke-BoundedNativeCapture {
+    param(
+        [Diagnostics.Process]$Process,
+        [Diagnostics.Stopwatch]$Clock,
+        [int]$TimeoutMilliseconds,
+        [int]$CleanupMilliseconds,
+        [string]$InputText
+    )
+    $inputWrite = $null
+    $failure = $null
+    $workDeadline = $TimeoutMilliseconds - $CleanupMilliseconds
+    try {
+        $stdout = $Process.StandardOutput.ReadToEndAsync()
+        $stderr = $Process.StandardError.ReadToEndAsync()
+        if ($Process.StartInfo.RedirectStandardInput) {
+            $encoding = New-Object Text.UTF8Encoding($false)
+            $bytes = $encoding.GetBytes($InputText)
+            $inputWrite = $Process.StandardInput.BaseStream.WriteAsync($bytes, 0, $bytes.Length)
+        }
+        while ($true) {
+            if ($Clock.ElapsedMilliseconds -ge $workDeadline) {
+                throw [TimeoutException]::new('Bounded native capture exceeded its execution deadline.')
+            }
+            if ($inputWrite -and $inputWrite.IsCompleted) {
+                [void]$inputWrite.GetAwaiter().GetResult()
+                $Process.StandardInput.Close()
+                $inputWrite = $null
+            }
+            foreach ($task in @($stdout, $stderr)) {
+                if ($task.IsCompleted) { [void]$task.GetAwaiter().GetResult() }
+            }
+            if (-not $inputWrite -and $stdout.IsCompleted -and $stderr.IsCompleted -and
+                $Process.WaitForExit(0)) {
+                return [pscustomobject]@{
+                    ExitCode = $Process.ExitCode; Stdout = $stdout.Result; Stderr = $stderr.Result
+                }
+            }
+            [Threading.Thread]::Sleep([int][Math]::Min(10, [Math]::Max(
+                1, $workDeadline - $Clock.ElapsedMilliseconds
+            )))
+        }
+    } catch {
+        $failure = $_
+        $global:LASTEXITCODE = 1
+        $rootExited = $false
+        try {
+            if (-not $Process.HasExited) { $Process.Kill() }
+            $remaining = [Math]::Max(0, $TimeoutMilliseconds - $Clock.ElapsedMilliseconds)
+            $rootExited = $Process.WaitForExit([int]$remaining)
+        } catch { }
+        # This handle owns the direct child, not its enclosing Job/process tree.
+        $failure.Exception.Data['RootExitConfirmed'] = $rootExited
+        $failure.Exception.Data['CleanupConfirmed'] = $false
+        throw $failure
+    } finally {
+        $streams = @($Process.StandardOutput, $Process.StandardError)
+        if ($Process.StartInfo.RedirectStandardInput) { $streams += $Process.StandardInput }
+        foreach ($stream in $streams) {
+            try { $stream.Dispose() }
+            catch {
+                if (-not $failure) { throw }
+                $failure.Exception.Data['CaptureDisposalFailure'] = $_.Exception.Message
+            }
+        }
+    }
+}
+
 function Invoke-Hidden {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -211,8 +278,19 @@ function Invoke-Hidden {
         [string]$InputText,
         [switch]$StreamOutput,
         [switch]$StreamErrorOutput,
-        [hashtable]$Environment
+        [hashtable]$Environment,
+        [ValidateRange(0, 2147483647)][int]$TimeoutMilliseconds = 0,
+        [ValidateRange(1, 2147483647)][int]$CleanupMilliseconds = 3000
     )
+    if ($TimeoutMilliseconds -gt 0) {
+        if (-not $PSBoundParameters.ContainsKey('ErrorOutput') -or $null -eq $ErrorOutput) {
+            throw 'Bounded native capture requires a non-null ErrorOutput reference.'
+        }
+        if ($StreamOutput -or $StreamErrorOutput -or $CleanupMilliseconds -ge $TimeoutMilliseconds) {
+            throw 'Bounded native capture requires captured streams and cleanup reserved inside its timeout.'
+        }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+    }
     if ($StreamOutput -and ($PSBoundParameters.ContainsKey('ErrorOutput') -or
         $PSBoundParameters.ContainsKey('InputText'))) {
         throw 'Streaming native output cannot be combined with captured streams.'
@@ -244,6 +322,14 @@ function Invoke-Hidden {
     $psi.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
     $proc = [System.Diagnostics.Process]::Start($psi)
     try {
+        if ($TimeoutMilliseconds -gt 0) {
+            $result = Invoke-BoundedNativeCapture -Process $proc -Clock $clock `
+                -TimeoutMilliseconds $TimeoutMilliseconds -CleanupMilliseconds $CleanupMilliseconds `
+                -InputText $InputText
+            $global:LASTEXITCODE = $result.ExitCode
+            $ErrorOutput.Value = $result.Stderr
+            return $result.Stdout
+        }
         if ($StreamErrorOutput) {
             $stdout = $proc.StandardOutput.ReadToEndAsync()
             $stderrStream = [Console]::OpenStandardError()

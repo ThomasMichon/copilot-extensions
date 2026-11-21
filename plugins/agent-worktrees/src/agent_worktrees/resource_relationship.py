@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from typing import Any
 
 from . import resource_producer as producer
 
@@ -15,7 +16,7 @@ LIFETIME = "retained-relationship"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 
 
-def writer_contract() -> dict:
+def writer_contract() -> dict[str, Any]:
     """Describe this executing writer, never an installed or resident peer."""
     return {
         "schema": "copilot-extensions.worktree-record-writer", "version": 1,
@@ -23,7 +24,7 @@ def writer_contract() -> dict:
     }
 
 
-def writer_identity() -> dict:
+def writer_identity() -> dict[str, Any]:
     """Identify this executing installation and its cached installed build."""
     from . import config, runtime_identity
 
@@ -49,7 +50,7 @@ def valid_request_id(value: object) -> bool:
     return isinstance(value, str) and _REQUEST_ID.fullmatch(value) is not None
 
 
-def claim_ref(metadata: dict) -> str:
+def claim_ref(metadata: dict[str, Any]) -> str:
     """Keep a terminal receipt tied to the pending/bound subject it retired."""
     envelope = {
         key: metadata[key]
@@ -67,7 +68,7 @@ def claim_ref(metadata: dict) -> str:
     return ref
 
 
-def decode_ref(ref: str) -> dict:
+def decode_ref(ref: str) -> dict[str, Any]:
     """Decode only canonical retained-relationship callback subjects."""
     from . import claim_providers
 
@@ -87,7 +88,7 @@ def decode_ref(ref: str) -> dict:
     metadata = {**data, "namespace": namespace, "lifetime": LIFETIME} if isinstance(data, dict) else {}
     if not valid_metadata(metadata) or claim_ref(metadata) != ref:
         raise ValueError("invalid or noncanonical relationship callback envelope")
-    return data
+    return dict(data)
 
 
 def verified_retirement(result: object, ref: str) -> bool:
@@ -125,13 +126,32 @@ def retirement_refusal(result: object) -> str:
     return f" ({text[:512]})" if text else ""
 
 
+def valid_head_pin(head: object) -> bool:
+    return (
+        isinstance(head, dict) and set(head) == {"session_id", "revision"}
+        and isinstance(head["session_id"], str) and bool(head["session_id"].strip())
+        and type(head["revision"]) is int and head["revision"] > 0
+    )
+
+
 def valid_metadata(value: object) -> bool:
     """Unknown lifetimes/phases remain blocking, including unshipped transfer."""
-    from . import claim_providers, tracking
+    from . import claim_providers
+    from .tracking_claims import parse_claim_ref
 
     required = {"version", "lifetime", "token", "namespace", "phase", "creator", "request_id", "recovery"}
-    if not isinstance(value, dict) or not required.issubset(value) or set(value) - (required | {"identity", "closeout"}):
+    optional = {"identity", "closeout", "head_bind"}
+    if not isinstance(value, dict) or not required.issubset(value) or set(value) - (required | optional):
         return False
+    if "head_bind" in value:
+        marker = value["head_bind"]
+        if (
+            value["phase"] not in ("bound", "closed") or not isinstance(value.get("identity"), dict)
+            or not isinstance(marker, dict) or set(marker) != {"head", "creation_nonce", "writer"}
+            or not valid_head_pin(marker["head"]) or not valid_writer_identity(marker["writer"])
+            or not isinstance(marker["creation_nonce"], str) or not marker["creation_nonce"].strip()
+        ):
+            return False
     if type(value["version"]) is not int or value["version"] != METADATA_VERSION or value["lifetime"] != LIFETIME:
         return False
     if not producer.is_valid_token(value["token"]) or not valid_request_id(value["request_id"]):
@@ -141,7 +161,7 @@ def valid_metadata(value: object) -> bool:
     creator = value["creator"]
     if not isinstance(creator, str):
         return False
-    parsed = tracking.parse_claim_ref(creator)
+    parsed = parse_claim_ref(creator)
     if parsed is None or not parsed.is_qualified or parsed.session or parsed.canonical() != creator:
         return False
     phase = value["phase"]

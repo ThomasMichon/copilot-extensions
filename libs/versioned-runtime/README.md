@@ -184,6 +184,23 @@ or installing Python. Removal still requires the base outside the target runtime
 Selector results use ASCII-safe JSON so redirected legacy Python output can
 preserve non-ASCII installation paths.
 
+Captured calls with a non-null `-ErrorOutput ([ref]$diagnostics)` may opt into
+`Invoke-Hidden -TimeoutMilliseconds N`, reserving
+`-CleanupMilliseconds` (3,000 by default) **inside** that invocation's budget.
+The caller supplies its remaining stage allowance, rather than restarting an
+installation clock. This mode includes asynchronous stdin delivery, child exit
+and both stream drains in the execution allowance; streaming modes retain
+their existing behavior and reject this option. Bounded calls require captured
+diagnostics before launch: they never synchronously write stderr to the caller's
+possibly undrained pipe. On timeout or capture failure
+the helper attempts to stop its original direct child within the remaining
+allowance and throws, retaining `RootExitConfirmed` separately from
+`CleanupConfirmed = false`. It does not own or certify descendant cleanup.
+Use it inside the existing enclosing Job/process owner, which must settle the
+whole operation before any retry. The option alone is not a contained
+bootstrap provider and does not migrate Python discovery or permit acquisition.
+Calls without a timeout keep the previous capture/streaming contract.
+
 Because plugins are pulled **independently** from the marketplace, the file
 cannot be a shared runtime import — it must physically exist in each plugin. So
 this canonical copy is **vendored (synced) byte-identically** into every Python

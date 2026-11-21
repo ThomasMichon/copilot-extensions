@@ -2945,6 +2945,16 @@ These are scoped cache-entry controls, not full dispatcher/adoption or macOS
 qualification.
 
 `libs/versioned-runtime/tests/test_runtime_source_native.py` separately exercises
+opt-in bounded capture with large concurrent streams, UTF-8 stdin, empty/quoted
+arguments and nonzero exits. Stalled input and an exited root whose descendant
+holds its pipes cannot bypass that deadline. Timeout evidence distinguishes
+direct-child exit from unconfirmed tree cleanup; these controls retain the
+existing enclosing process owner to settle descendants. Invalid bounded
+streaming/reserve policies refuse before starting a child. An undrained
+stderr sink separately proves that bounded calls without an `ErrorOutput`
+reference refuse before launch rather than synchronously relaying diagnostics.
+These are capture provider controls, not adoption or native bootstrap qualification.
+The same file exercises
 stderr-only streaming through both native PowerShell hosts. Actual no-newline
 output outlives the quiet allowance while captured stdout, diagnostics, stdin
 and nonzero exit results remain unchanged. Native byte relays preserve BOM,
