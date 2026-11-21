@@ -58,6 +58,13 @@ sessions, and Dispatch creates distinct queued tasks. The property retains all
 HTTP, database, assertion and timer costs. They do not measure terminating a live agent or an installed
 daemon. Independent legacy/disabled/reading/slow/nonreading/failing cases
 preserve the same ordinary operation results.
+The Bridge reading fixture waits, after producer timing, for a finite
+receiver-written witness that all 98 records completed fsync. This settlement
+has a five-second fixture bound and is reported as
+`receiver_settlement_wait_ns`, outside the producer samples. It prevents
+bounded best-effort shutdown from racing the positive readback assertion;
+production write/shutdown budgets and negative receiver modes are unchanged.
+The witness is fixture-only, not a transport acknowledgment or replay facility.
 
 Receiver measurements, when EOF is reached, include its receive loop, delay,
 write, flush and per-record fsync, plus its own process CPU. They exclude

@@ -4,7 +4,7 @@ files). A sibling that isn't installed is ``disabled`` (a-la-carte): it never
 degrades the queue.
 
 **bridge.** Candidates are the bridge-managed sessions (``agent-bridge --json
-sessions``) and the live registered interactive ones (``agent-bridge --json
+sessions``, accepting its array or typed catalog form) and the live registered interactive ones (``agent-bridge --json
 live-sessions list``), keyed by their logical delegate reference,
 ``wt:<machine>/<project>/<worktree-id>``: a session in both registries, or a
 successor after a restart, takeover or handoff, is one entity. Each is read by
@@ -31,12 +31,14 @@ source.
 from __future__ import annotations
 
 import json
+from functools import partial
 import queue
 import threading
 import time
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from . import attention_contract as ac
+from .bridge_listing import managed_rows
 
 #: Each source's own deadline (seconds), inside which every read it makes runs.
 #: A ``pr bar`` read takes several provider calls (~10 s each), so the pr source
@@ -212,7 +214,7 @@ def _presence_item(ref: str, body: Any, lifecycle: str | None, session_id: str, 
         return None, True
     if state != "awaiting_input":
         return None, False
-    confidence = presence.get("confidence") if presence.get("confidence") in ("scanned", "heuristic") else "scanned"
+    confidence = cast(str, presence.get("confidence")) if presence.get("confidence") in ("scanned", "heuristic") else "scanned"
     reason = "its transcript is waiting on you" + (f": {presence['reason']}" if presence.get("reason") else "")
     return _session_item(ref, "awaiting_input", confidence, reason, lifecycle, session_id, read_at), False
 
@@ -240,6 +242,11 @@ def read_bridge(read_at: str, *, prefix: list[str], machine: str | None, include
     run = run or _default_run()
     deadline = time.monotonic() + timeout - _MARGIN
     sessions, error, code = _call_json(run, [*prefix, "--json", "sessions"], deadline)
+    if error is None and not code:
+        try:
+            sessions = managed_rows(sessions)
+        except ValueError as exc:
+            error = str(exc)
     if problem := _listing_problem(sessions, error, code):
         return _failed(f"agent-bridge sessions: {problem}")
     live, error, code = _call_json(run, [*prefix, "--json", "live-sessions", "list"], deadline)
@@ -278,8 +285,9 @@ def read_bridge(read_at: str, *, prefix: list[str], machine: str | None, include
         row = candidates[ref]["bridge"].get(session_id)
         if row is None or (_is_remote(row) and not include_remote):
             continue  # an interactive session, or a remote transcript the caller didn't opt into
-        presence_jobs.append((ref, session_id, lambda s=session_id: _call_json(
-            run, [*prefix, "--json", "presence", s], deadline)))
+        presence_jobs.append((ref, session_id, partial(
+            _call_json, run, [*prefix, "--json", "presence", session_id], deadline,
+        )))
     results = _parallel([job for _ref, _sid, job in presence_jobs], deadline)
     for (ref, session_id, _job), result in zip(presence_jobs, results):
         body, error = (result[0], result[1]) if result else (None, "no answer before the deadline")
@@ -342,8 +350,9 @@ def read_pr(read_at: str, *, prefix: list[str], env: dict[str, str] | None = Non
             candidates.setdefault((str(authority), repo.lower(), number),
                                   (str(entry["project"]), str(authority), repo, number))
     reads = list(candidates.values())
-    results = _parallel([lambda p=p, r=r, n=n: _call_json(
-        run, [*prefix, "-p", p, "pr", "bar", r, str(n), "--json"], deadline, env=env)
+    results = _parallel([partial(
+        _call_json, run, [*prefix, "-p", p, "pr", "bar", r, str(n), "--json"], deadline, env=env,
+    )
         for p, _a, r, n in reads], deadline, workers=PR_WORKERS)
     items = []
     for (project, authority, repo, number), result in zip(reads, results):

@@ -8,12 +8,16 @@ model-facing submission receipt, and a timed post-tool content fallback that
 cannot duplicate a later SDK delivery. Drive the source fix through tests,
 review and merge in the layer that actually owns delivery.
 
-The immediate assigned source slice is P13734-1/2: restore prompt idle-inbox
-submission through the existing SDK owner, including resume/re-registration,
-and remove unsupported end-turn promises from the post-tool hint. Complete
-focused tests, normal review and required CI without bypass, then return to
-the continuing Driver objective. This priority does not grant rollout or
-complete the broader receipt/fallback campaign.
+The immediate assigned source scope is complete machine-wide registration and
+session discovery: every worktree session, active anchor session across
+registered repositories, mux session and ACP Session Host must remain
+discoverable across Bridge restart/update and session resume. The ordinary
+sessions listing must include the complete listed-worktree inventory without
+inventing native conversations or liveness. Complete focused tests, a live
+catalog/worktree comparison, normal review, required CI and the repository's
+Maintainer self-merge flow, then return to the continuing Driver objective.
+This priority does not grant rollout or complete the broader receipt/fallback
+campaign.
 
 - **Slug:** `bridge-queued-steering`
 - **Repo:** copilot-extensions
@@ -55,8 +59,9 @@ dated Journal/intake route. Current complete slice and source/discussion
 readback accepted only that idle/hint scope; the separate carrier observation
 remains unreceived. Keep the whole source OPEN while
 its separate carrier observation lacks complete accepted handling; an idle
-slice merge is not whole-source receiving. All five new technical rows remain
-unchecked. Existing Goal, Request, Scope Approvals, checked source-notification
+slice merge is not whole-source receiving. Source implementation and controlled
+coverage from #13770 are recorded below; native qualification remains open.
+Existing Request, Scope Approvals, checked source-notification
 credit and provider-contract limits remain unchanged; no live prompt replay,
 session replacement, new native probe, rollout or resource transfer is granted.
 
@@ -106,6 +111,8 @@ and normal publication. It adds no installed-plugin update, shared service
 restart, rollout, credential acquisition, live prompt replay, session replacement,
 new spending or resource-custody authority. Existing review and CI gates remain.
 An observed receipt or matching reference is not new effect authority.
+The assigned local live catalog/worktree comparison is read-only validation;
+it adds no installation, reload, service, Job, VM, credential or prompt action.
 
 ## Plan
 
@@ -137,7 +144,7 @@ not additional operator requirements.
 
 Agent-recommended complete receiving within this same Phase 2.
 
-- [ ] **P13734-1:** Preserve the reported Windows interactive registered-session
+- [x] **P13734-1:** Preserve the reported Windows interactive registered-session
   case, including resume/re-registration: pending inbox work must reach the
   supported SDK submission path promptly on idle without waiting for another
   tool call, operator turn or scheduled prompt. Reconcile the actual idle/
@@ -148,7 +155,7 @@ Agent-recommended complete receiving within this same Phase 2.
   repeat kept the same input pending through about twenty tools after the
   next operator turn and delivered roughly thirty minutes after queuing;
   preserve it as corroborating incident evidence, not a new reproduction.
-- [ ] **P13734-2:** Make the post-tool hint truthful about that selected runtime.
+- [x] **P13734-2:** Make the post-tool hint truthful about that selected runtime.
   If ending the turn does not guarantee idle submission, do not instruct the
   agent to end its turn while promising that queued steering will be submitted.
   Keep the unsupported delivery gap explicit instead of treating a wording
@@ -165,13 +172,36 @@ Agent-recommended complete receiving within this same Phase 2.
   supported idle path rather than arriving attached to a later unrelated turn.
   Distinguish controlled source/API fixtures from actual selected Windows
   interactive qualification and honestly retain unavailable provider evidence.
-- [ ] **V13734-2:** Cover messages already pending at idle and multiple arrivals
+- [x] **V13734-2:** Cover messages already pending at idle and multiple arrivals
   while idle, plus active-turn, intentional mute and unavailable/unsupported
   submission controls. Verify the hint cannot promise an unsupported wake,
   preserve ordering and exact receipt identity, and prevent duplicate or
   falsely consumed messages if late SDK progress races existing recovery.
   Retain original containment, deadlines and cleanup; no live inbox replay,
   native session, service or process action is authorized by this plan.
+
+Source implementation and controlled API coverage above merged in #13770.
+V13734-1 and G13734 retain actual selected-runtime and model-facing qualification;
+the checked source items do not claim installed acceptance.
+
+#### Machine-wide registration and complete catalog
+
+- [ ] Reconcile the actual registration failure through the existing native
+  producer, including missing startup identity, resume and service replacement.
+  Preserve process/session identity, current ownership and explicit unavailable
+  receiver state rather than treating a visible process as a functioning SDK.
+- [ ] Cover worktree and active anchor sessions across registered repositories,
+  all mux sessions and independently launched ACP Session Hosts. Keep original
+  component and installer owners; inventory must not create another controller.
+- [ ] Make ordinary session listing a superset of the listed-worktree inventory
+  while retaining actual native IDs, source kinds, inactive inventory and unknown
+  observations separately. Preserve supported legacy consumers and optional
+  provider operation across version skew.
+- [ ] Add focused restart/update/resume, multi-repository/anchor/mux/Host,
+  identity, unavailable-source and ordering controls. Run a read-only live
+  comparison on the selected machine: no listed worktree is omitted and the
+  Bridge catalog count is at least the listed-worktree count. Record executing
+  consumer/provider versions; no fabricated rows or model-acceptance claim.
 
 ### Phase 3 - Acceptance and closeout
 
@@ -195,8 +225,9 @@ Agent-recommended complete receiving within this same Phase 2.
 
 - [ ] Admitted/no-SDK and SDK-accepted/no-consumption controls fail before the
   relevant repair and progress afterward, including an idle receiver.
-- [ ] A real supported post-tool hook supplies the end-turn notification,
-  coalesces repeats and respects intentional mute.
+- [ ] A real supported post-tool hook supplies a truthful pending-input notice,
+  coalesces repeats and respects intentional mute without an unsupported
+  end-turn promise.
 - [ ] Exact root model-facing input settles only its own message IDs, including
   consume-before-send-return, unrelated input, nesting, duplicates and arrivals
   racing with a hook snapshot.
@@ -220,6 +251,213 @@ is too late. Keep unavailable semantics explicit rather than claim exactly-once
 delivery from an SDK promise or a timer.
 
 ## Journal
+
+### 2026-11-21 - Require positive POSIX group settlement
+
+- The first exact-head Linux run passed 140 cases and failed all four pinned
+  descendant controls. The executor's default path signaled the group and
+  waited for its already-exited root, without requesting group-exit
+  confirmation; the tests correctly rejected that as completed cleanup.
+- The caller now supplies the existing settlement callback, which requests
+  positive native group confirmation while the root remains unreaped.
+  Successful results require that callback's observation. The pinned-process
+  assertions and time bounds are unchanged; no CI retry or waiver substitutes
+  for the corrected source.
+- Updated local controls require the callback and preserve the original
+  unconfirmed-cleanup receipt; seven passed with four native POSIX cases
+  correctly skipped on Windows. Both changed Python files passed whole-file
+  strict typing on Linux and Windows. A fresh exact-head Linux result remains
+  owed before resolving the finding or merging.
+
+### 2026-11-21 - Retain POSIX descendant custody after root exit
+
+- Addressed the next review's valid exited-parent cleanup gap. POSIX passive
+  inventory now uses the existing finite owned-child executor, which retains
+  its unreaped root until the original group is retired. Async cancellation
+  joins that bounded owner instead of abandoning its worker; an unconfirmed
+  cleanup receipt is not replaced by a cancellation result. The strict
+  Windows Job-owned async path is unchanged.
+- The Windows-contained source packet passed 32 cases; four native POSIX cases
+  correctly skipped on that platform. Controlled cases preserve selected
+  owner/environment, nonzero and unavailable outcomes, bounded timeout, and
+  exact unconfirmed-cleanup exceptions after cancellation.
+- The existing Linux command-receiver lane now selects two pinned-process
+  cycles each for timeout and cancellation after the root has exited while
+  its descendant retains captured pipes. All three changed Python files passed
+  whole-file strict typing on Linux and Windows; headless-launch, module,
+  documentation, install-contract and exact source-binding checks passed.
+  Native POSIX results, current-head review and required CI remain completion gates.
+  No live runtime, deployment or native Copilot probe changed.
+
+### 2026-11-21 - Qualify an empty successful startup inventory
+
+- Corrected the review's empty-registry edge case: ordinary startup now binds
+  the worktree cache after a qualified empty repository read, even without
+  agents, machines or inventory-only projects. An unavailable empty owner
+  retains its existing unavailable/incomplete distinction.
+- The focused startup/cache packet passed 54 cases, including actual daemon
+  startup through public worktree and target listings plus private snapshot
+  restoration into the forwarded catalog. Healthy empty results are complete
+  and fresh rather than permanently unbound.
+- Both changed Python files passed whole-file strict typing on Linux and
+  Windows. Exact-head review and required CI remain completion gates.
+  No installed service or native session changed.
+
+### 2026-11-21 - Degrade selected-launcher failures and reconcile upstream
+
+- Assessed the next clean review's Windows-launcher caveat against the actual
+  process owner. Job-assignment and suspended-resume failures raise
+  `RuntimeError`; daemon startup and both synchronous catalog owner reads now
+  report those inventories unavailable rather than aborting readiness or
+  discarding independent targets. No alternate launcher or replay was added.
+- Added controlled launcher-failure regressions for daemon startup, repository
+  enumeration and one failed project alongside a healthy independent project.
+  The expanded eight-file packet passed 214 cases; the five promotion units
+  and 13-plugin install-contract check passed.
+- Backed up the complete source before reconciling upstream. Only combined
+  producer metadata conflicted; canonical source archives remain consistent,
+  the regenerated producer retains contract revision 36, and all 33 owned
+  Python files are byte-identical to the pre-rebase source. All 33 changed
+  Python files passed whole-file strict typing on Linux and Windows.
+  Publication, current-head review and required CI remain completion gates.
+
+### 2026-11-21 - Keep repository status out of agent topology errors
+
+- Addressed the next review's valid streaming regression: repository-inventory
+  unavailability now has its own typed resolver status instead of entering
+  fatal agent topology diagnostics. The existing private snapshot preserves
+  that optional status, omits it for healthy legacy-compatible records and
+  refuses noncanonical explicit false values.
+- Worktree catalogs still report incomplete discovery while retaining healthy
+  independent rows. Actual agent-route and CLI streaming/initial-subscription
+  regressions prove a healthy configured agent remains listed when the
+  repository owner is unavailable, including after snapshot restoration.
+- The complete eight-file contained packet passed 211 cases, including resolver
+  and worktree-runtime compatibility. The five changed Python files passed
+  whole-file strict typing on Linux and Windows; both final stream fixtures,
+  lint, module limits, source bindings, docs and install-contract checks passed.
+  Current-head review and required CI remain completion gates; no installed
+  runtime was changed.
+
+### 2026-11-21 - Strict daemon startup inventory
+
+- Assessed the clean review's startup-discovery caveat before merging and
+  corrected an actual legacy fallback: daemon startup now shares the CLI's
+  selected-owner, strict repository reader. Explicit prepared inputs preserve
+  existing direct builder compatibility without invoking a provisioning shim
+  or silently replacing registry failure with a successful empty inventory.
+- An inventory-scoped unavailable status survives private resolver snapshots and qualifies
+  all worktree-list render modes and the forwarded target catalog. Healthy
+  independent workspace rows remain visible; a qualified empty registry is
+  still successful. No registry schema, native identity, lifecycle ownership or
+  activation boundary changed.
+- The focused listing packet passed 122 cases, including real captured
+  selected-owner processes, startup with and without topology, unavailable,
+  timed-out, nonzero, partial and malformed inventories, and snapshot continuity.
+  The four changed Python files passed whole-file strict typing on Linux and
+  Windows; four final typed snapshot/provider compatibility controls, five
+  promotion units and the 13-plugin install-contract check also passed.
+  Exact-head review and required CI remain publication gates. Source fixtures
+  do not establish installed or fleet-wide adoption.
+
+### 2026-11-21 - Listing review edge cases
+
+- Reconciled the candidate onto current `dev`, retaining upstream unit entries
+  and regenerating combined source archives and producer hashes. The prior
+  published tip remains backed up until managed publication is confirmed.
+- Inventory-only service reads now use the attributable Worktrees owner and
+  explicit project/passive arguments, with selected environment and bounded,
+  owned process cleanup. Local catalog completion rechecks earlier source
+  expiry after later repository reads, without exporting monotonic deadlines.
+- Empty-CWD Host observations require a matching instance and exact process
+  identity before coalescing; known differing scopes remain distinct.
+  Explicit terminal-status listings recover historical managed records without
+  restoring all history to the ordinary active catalog.
+- All 110 focused source regressions passed, including a real selected-owner
+  process and environment scrubbing. Strict typing passed all 33 changed Python
+  files on Linux and Windows targets. A read-only source CLI comparison
+  covered every one of 211 local workspace keys in both text and catalog
+  JSON; legacy JSON retained its array and degraded sources stayed explicit.
+  Final publication, fresh review and required CI remain completion gates.
+  These corrections do not qualify installed recovery, native model input,
+  activation or rollout, or settle any original uncertain message.
+
+### 2026-11-21 - Direct Host locators and finite receiver settlement
+
+- Caller-selected Host state files are attributed through neutral file
+  observations in the existing process registration. Runtime/artifact ownership
+  does not change; the compact dependency closure includes the observer.
+  Verified Hosts without usable metadata remain unbound and unavailable rather
+  than being omitted or acquiring a native conversation identity.
+- The Windows command-telemetry reading fixture can finish producer timing
+  before all receiver fsync work settles. Its finite receiver witness is awaited
+  outside producer timing and reported separately. The full readback assertion,
+  production budgets and negative modes remain unchanged; this bounded test
+  correction stays coordinated under #13545.
+
+### 2026-11-21 - Inventory continuity and schema-safe consumers
+
+- Inventory-only sources participate in ordinary cache startup and private
+  resolver/cache handoff without entering agent resolution. Actual local
+  execution identity prevents duplicate discovery through machine-keyed agents;
+  only enabled local agent discovery counts as existing inventory coverage.
+- The default text listing includes every source. Default JSON retains the
+  managed array; `--all-sources` explicitly selects catalog JSON. Dispatch's
+  body/attention readers accept either shape without new CLI arguments,
+  subprocesses or a lockstep peer upgrade.
+- Strict repository enumeration requires complete inventory authority. Current
+  owner status and mux fields replace stale observations while preserving Bridge
+  linkage. Launch-produced Host records normalize verified scope before dedup.
+- Refresh snapshots retain absolute expiry while deadline-free legacy records
+  retain their shape. Both source ages and elapsed read time bound freshness.
+  Focused continuity, catalog, consumer and actor-free checks pass. An actual
+  source-CLI read included every local listed workspace in both default text and
+  explicit catalog JSON, with default JSON compatibility preserved; installed
+  receiver recovery and fleet activation remain unqualified.
+
+### 2026-11-21 - Registration and complete-catalog source candidate
+
+- Corrected a load-time registration dead end: missing Bridge credentials no
+  longer prevent the extension from arming heartbeat and delivery timers.
+  Heartbeat refreshes the selected endpoint and adopts the current SDK session
+  identity even when an idle resume produces no event.
+- Reused the typed target union for ordinary session listing, preserving the
+  managed-only array through an explicit compatibility switch. Local passive
+  inventory includes registered source-only repositories without exposing them
+  as agents. Unavailable/stale rows remain observations, not live conversations.
+- Standalone Host observations reuse existing daemon registrations and exact
+  process identity, without controller adoption or a new registry. Matching
+  managed/Host observations are deduplicated by actual process birth and scope.
+- The SDK's complete package declaration includes the passive observer, and both
+  canonical synchronizers refresh its dependent caller-lifetime source archives.
+  Producer hashes change without changing uninstall contract revision 36.
+- The contained compatibility packet passed 553 Python tests; the final Host
+  deduplication packet passed 38 focused cases. Extension controls passed 156
+  Node cases and two actor-free inventory units passed. Whole-file strict
+  typing passed for all 18 changed Python files on Linux and Windows targets.
+- A read-only source-CLI comparison against real local registered-repository
+  inventories omitted no listed workspace. The executing consumer was the
+  source candidate with existing installed providers, not an installed rollout.
+  Native receiver registration, fleet restart/update and model acceptance
+  remain unqualified; no rollout or activation authority is added.
+- The optional frozen HTTP evidence checker reported stale source bindings.
+  Its owning contract policy exempts ordinary source changes from recapture;
+  no wire generation, fixture or historical provenance was rewritten.
+
+### 2026-11-21 - Idle source repair merged; complete registry follow-up assigned
+
+- #13770 merged after exact-head Copilot approval, empty inline findings and
+  all current required CI. The normal Maintainer self-merge flow retained
+  review and CI gates.
+- All 153 focused controlled source/API tests pass. Root idle, actual joined
+  session identity, resume/re-registration, missing-row heartbeat recovery,
+  multiple idle arrivals, mute, shutdown and original-receipt fences are covered.
+  Native model-facing qualification, installed adoption and the separate
+  carrier observation remain open.
+- The complete machine-wide registration/catalog repair continues in a
+  separate source workspace, independently of the completed idle-source item.
+  Existing registration failure evidence remains at #11800. This is not
+  whole-campaign completion or rollout permission.
 
 ### [2026-11-20 - Proposed finite idle-transition and truthful-hint receiving](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md)
 

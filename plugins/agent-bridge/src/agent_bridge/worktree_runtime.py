@@ -7,7 +7,7 @@ import json
 import math
 import threading
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Literal, NoReturn, cast
 
 from pydantic import TypeAdapter
 from zdd.private_protocol import PrivateIPCError, Refusal
@@ -15,7 +15,9 @@ from zdd.private_protocol import PrivateIPCError, Refusal
 from .agent_registry_resolver import AgentResolver
 from .loop_governance import LoopGovernance
 from .resolver_runtime import _encode
-from .routes.worktrees import WorktreeDiscoveryCache, _WorktreeEntry, _fresh_start_locks
+from .routes.worktree_entry import WorktreeEntry as _WorktreeEntry
+from .routes.worktrees import WorktreeDiscoveryCache, _fresh_start_locks
+from .routes.worktree_refresh import worktree_sources
 from .worktree_refresh_runtime import FrozenRefresh, capture_refresh
 
 _MAX_AGENTS = 128
@@ -33,7 +35,7 @@ class _Snapshot:
     refresh: dict[str, object]
 
 
-_ADAPTER = TypeAdapter(_Snapshot)
+_ADAPTER: TypeAdapter[_Snapshot] = TypeAdapter(_Snapshot)
 
 
 def _decode(payload: object, resolver: AgentResolver) -> _Snapshot:
@@ -42,20 +44,21 @@ def _decode(payload: object, resolver: AgentResolver) -> _Snapshot:
         if len(wire) > _MAX_BYTES:
             raise PrivateIPCError(Refusal.SIZE)
         snapshot = _ADAPTER.validate_json(wire, strict=True)
+        sources = worktree_sources(resolver)
         if (
             type(resolver) is not AgentResolver or type(snapshot.schema) is not int
             or _encode(json.loads(_ADAPTER.dump_json(snapshot))) != wire
             or not math.isfinite(snapshot.interval) or snapshot.interval < 0
             or len(snapshot.entries) > _MAX_AGENTS
             or sum(map(len, snapshot.entries.values())) > _MAX_ENTRIES
-            or not set(snapshot.entries) <= set(resolver.agents)
+            or not set(snapshot.entries) <= set(sources)
             or snapshot.classify_unsupported != sorted(set(snapshot.classify_unsupported))
-            or not set(snapshot.classify_unsupported) <= set(resolver.agents)
+            or not set(snapshot.classify_unsupported) <= set(sources)
             or snapshot.fresh_unsupported != sorted(set(snapshot.fresh_unsupported))
-            or not set(snapshot.fresh_unsupported) <= set(resolver.agents)
+            or not set(snapshot.fresh_unsupported) <= set(sources)
             or any(
-                not resolver.agents[name].project
-                or not resolver.agents[name].worktree_discovery
+                not sources[name].project
+                or not sources[name].worktree_discovery
                 or len({entry.id for entry in entries}) != len(entries)
                 or any(not entry.id or entry.agent_name != name for entry in entries)
                 for name, entries in snapshot.entries.items()
@@ -100,7 +103,7 @@ def capture_worktrees(
             or sum(map(len, cache._cache.values())) > _MAX_ENTRIES
         ):
             raise PrivateIPCError(Refusal.SIZE)
-        payload = json.loads(_encode({
+        payload = cast(dict[str, object], json.loads(_encode({
             "schema": 1, "interval": cache._interval,
             "entries": {
                 name: [asdict(entry) for entry in entries]
@@ -109,7 +112,7 @@ def capture_worktrees(
             "classify_unsupported": sorted(cache._classify_unsupported),
             "fresh_unsupported": sorted(cache._fresh_unsupported),
             "refresh": capture_refresh(cache._refresh),
-        }))
+        })))
         _decode(payload, resolver)
         return payload
     except PrivateIPCError:
@@ -153,7 +156,7 @@ class FrozenWorktrees(WorktreeDiscoveryCache):
             raise PrivateIPCError(Refusal.AUTHORITY)
         self._refresh.verify()
         _decode(payload, self._snapshot_resolver)
-        return json.loads(self._wire)
+        return cast(dict[str, object], json.loads(self._wire))
 
     def get_all(self) -> dict[str, list[_WorktreeEntry]]:
         """Return isolated entries, so a caller cannot mutate retained observations."""
@@ -179,10 +182,10 @@ class FrozenWorktrees(WorktreeDiscoveryCache):
     async def crawl(self, resolver: AgentResolver) -> None:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
-    async def probe_archived(self, worktree_id: str, resolver: AgentResolver):
+    async def probe_archived(self, worktree_id: str, resolver: AgentResolver) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
-    async def probe_live(self, worktree_id: str, resolver: AgentResolver):
+    async def probe_live(self, worktree_id: str, resolver: AgentResolver) -> NoReturn:
         raise PrivateIPCError(Refusal.AUTHORITY)
 
     async def stop(self) -> None:
