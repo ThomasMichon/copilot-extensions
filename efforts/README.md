@@ -37,7 +37,6 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Legacy Bytecode Reclamation](active/legacy-bytecode-reclamation/README.md) | Draft; whole-prefix custody, Windows proof and bounded catch-up proposal before implementation | #12886; preserves runtime selection/retention, native process ownership and the existing bytecode lifecycle; no live cleanup or rollout |
 | [Unified Bridge Inventory and Lifecycle](active/unified-bridge-inventory-and-lifecycle/README.md) | Draft; reviewed vision and inception before implementation | #13811; compose #13797 registration/catalog work and existing workspace/Driver/venue owners; no live rollout |
 | [Worktree Dehydration](active/worktree-dehydration/README.md) | Draft; external agenda placement/doctor, reversible checkout storage and automatic entry proposal | #13781; #13790 -> #13783 -> #13784 -> #13785; preserves existing data, lifecycle and roster owners; no implementation or rollout |
 | [Orphan Task Adoption](active/orphan-task-adoption/README.md) | Draft; complete four-stage controller adoption for existing headless ACP and bare scripted tasks, planning only | #3443; preserves #7237's distinct relationship owner and all existing task/workspace/provider/credential custodians; no launch, takeover or rollout |
@@ -210,6 +209,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Legacy Bytecode Reclamation](<2026/11/21 legacy-bytecode-reclamation/README.md>) | Done; #13865 merged after current-head review, required CI and native Windows/Linux qualification | #12886; source archive only, parent tracks and installed-observation gates remain open; no real cleanup or rollout |
 | [Bridge Pending Queue Controls](2026/11/20%20bridge-pending-queue-controls/README.md) | Done; released queue controls and actual Bridge-facing runtime/read-only inspection qualified | #13734/#13770 broader native receiving acceptance remains; separate #10377/P13617 full-update gate stays open; no production queue effects |
 | [Windows Machine-Protected Cache](2026/11/20%20windows-machine-cache/README.md) | Done; reviewed implementation #13022 reached Main in Vault 0.1.313-dev1 | #13009; native source qualification recorded; adopter deployment, migration and credential custody remain separate |
 | [Cancelled Handoff Obligations](2026/11/20%20cancelled-handoff-obligations/README.md) | Done for finite source scope; #13644 merged,242 contained controls plus final parser/transfer proof and strict40-file original-profile CI qualify | Only #4619 OS3-OS4/OSV2 accepted across five original/refined rows; original discussion reservation complete, parent Open and all other custodians retained; no rollout |
