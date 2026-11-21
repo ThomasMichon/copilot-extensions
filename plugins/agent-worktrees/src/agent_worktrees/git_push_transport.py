@@ -13,7 +13,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from collections.abc import Iterator, Sequence
 
-from . import git_ops, git_push_binding, pr_transport_fence, push_timeout
+from . import git_ops, git_push_binding, git_push_tracking, pr_transport_fence, push_timeout
 from .github_credentials import GitAuthArgs
 
 _destination: ContextVar[
@@ -153,6 +153,14 @@ def push(
     except git_ops.GitError as exc:
         return git_ops.PushResult(ok=False, stderr=exc.stderr)
     attempts = _auth_attempts(auth_args)
+    deletion = None
+    if not source and pinned and pinned[0] == remote:
+        try:
+            deletion = git_push_tracking.capture_deletion(
+                remote, destinations, target, cwd, fetch_url=pinned[3],
+            )
+        except (OSError, git_ops.GitError, TimeoutError, subprocess.SubprocessError) as exc:
+            return git_ops.PushResult(ok=False, stderr=f"Cannot capture pre-transport deletion tracking: {exc}")
     last_stderr = last_stdout = ""
     for prefix in attempts:
         try:
@@ -179,6 +187,7 @@ def push(
                     _refresh_tracking(
                         remote, destinations, branch, cwd, force_with_lease_expect,
                         published_oid=published_oid,
+                        **({"deletion": deletion} if not source else {}),
                     )
                 except (OSError, git_ops.GitError, TimeoutError, subprocess.TimeoutExpired) as exc:
                     if isinstance(exc, subprocess.TimeoutExpired):
@@ -232,65 +241,11 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
 
 
 def _refresh_tracking(remote: str, destinations: tuple[str, ...], refspec: str, cwd: str | Path,
-                      expected: str | None = None, *, published_oid: str) -> None:
+                      expected: str | None = None, *, published_oid: str,
+                      deletion: git_push_tracking.Deletion | None = None) -> None:
     """Preserve Git's named-remote tracking update only for the still-matching remote."""
-    from . import pr_publish
-
-    source, separator, target = refspec.partition(":")
-    if not separator:
-        target = "refs/heads/" + refspec.removeprefix("refs/heads/")
-    if not target.startswith("refs/heads/"):
-        return
-    sha = published_oid
-    if not sha and source:
-        return
-    with pr_publish.publish_lock(str(cwd), acquire_timeout=1.0):
-        current = git_ops.git("remote", "get-url", "--push", "--all", remote,
-                              cwd=cwd, check=False, isolated_repository=True)
-        if current.returncode or tuple(current.stdout.splitlines()) != destinations:
-            return
-        pinned = _destination.get()
-        if pinned and pinned[0] == remote and pinned[3] is not None:
-            current_fetch = git_ops.git("remote", "get-url", remote, cwd=cwd,
-                                        check=False, isolated_repository=True)
-            if current_fetch.returncode or current_fetch.stdout.rstrip("\r\n") != pinned[3]:
-                return
-        mappings = git_ops.git("config", "--get-all", f"remote.{remote}.fetch",
-                               cwd=cwd, check=False, isolated_repository=True).stdout.splitlines()
-        for mapping in mappings:
-            if not mapping.startswith("^"):
-                continue
-            excluded = mapping[1:]
-            if excluded == target:
-                return
-            if excluded.count("*") == 1:
-                prefix, suffix = excluded.split("*")
-                if target.startswith(prefix) and target.endswith(suffix) and len(target) >= len(prefix) + len(suffix):
-                    return
-        for mapping in mappings:
-            fetch_source, _, fetch_target = mapping.lstrip("+").partition(":")
-            if fetch_source == target and fetch_target:
-                tracked = fetch_target
-            elif fetch_source.count("*") == 1 and fetch_target.count("*") == 1:
-                prefix, suffix = fetch_source.split("*")
-                if not target.startswith(prefix) or (suffix and not target.endswith(suffix)):
-                    continue
-                end = len(target) - len(suffix) if suffix else len(target)
-                if end < len(prefix):
-                    continue
-                tracked = fetch_target.replace("*", target[len(prefix):end])
-            else:
-                continue
-            previous = git_ops.git("rev-parse", "--verify", tracked, cwd=cwd,
-                                   check=False, isolated_repository=True).stdout.strip()
-            if not sha:
-                if previous:
-                    git_ops.git("update-ref", "-d", tracked, previous, cwd=cwd, isolated_repository=True)
-                return
-            if previous and previous != expected and not git_ops.is_commit_ancestor(previous, sha, cwd=cwd):
-                # Another completed publication may already have advanced this
-                # tracking ref. Never roll it back to an older successful push.
-                return
-            git_ops.git("update-ref", tracked, sha, previous or "0" * len(sha), cwd=cwd,
-                        isolated_repository=True)
-            return
+    pinned = _destination.get()
+    git_push_tracking.refresh(
+        remote, destinations, refspec, cwd, expected, published_oid=published_oid,
+        fetch_url=pinned[3] if pinned and pinned[0] == remote else None, deletion=deletion,
+    )

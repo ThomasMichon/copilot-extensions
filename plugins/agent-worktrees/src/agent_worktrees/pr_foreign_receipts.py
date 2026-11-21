@@ -95,6 +95,13 @@ def require_settled(record: tracking.WorktreeRecord) -> None:
         raise ValueError("Foreign PR creation is unverified; reconcile it before finalization or cleanup.")
 
 
+def advisory_owner_receipts(record: tracking.WorktreeRecord) -> tuple[bool, bool]:
+    from . import foreign_receipt_summary
+
+    folder = record.yaml_path.parent.resolve() / record.yaml_path.with_suffix(".foreign-pr-receipts").name
+    return foreign_receipt_summary.read(folder, lambda: owner_receipts(record))
+
+
 class Attempt:
     def __init__(
         self, config: cfg.Config, path: Path, record: tracking.WorktreeRecord | None,
@@ -179,6 +186,8 @@ class Attempt:
         if len(raw.encode("utf-8")) > 65536:
             raise ProviderError("Foreign creation receipt history is full; reconcile before publication.")
         tracking._atomic_write(self.path, raw)
+        from . import foreign_receipt_summary
+        foreign_receipt_summary.invalidate(self.path.parent)
         self.expected = value
 
     def reserve(self, base: str, expected_head: str | None) -> dict[str, Any] | None:

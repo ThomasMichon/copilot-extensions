@@ -13356,7 +13356,7 @@ manually dispatched `PR rebase full` workflow on Linux and Windows:
 
 ```powershell
 $env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
-python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source or pr_review_reconciliation or pr_creation_review or pr_review_destination or pr_review_receipts or pr_creation_reconcile or pr_legacy_admission or github_head_reconciliation" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
 ```
 
 Use the exhaustive mode when changing replay authorization or its publication
@@ -13370,8 +13370,11 @@ The same manual lane owns `test_pr_source_binding.py`: real Git source movement
 at fence acquisition, physical GitHub endpoint aliases, nonblocking completion
 admission, differently named foreign forks and a retained-history routing
 control, plus the small `test_pr_fork_source.py` provider-response contract.
-Its local focused run keeps the existing 30-second item and 300-second
-suite bounds. The native frontend's small capability/forwarding controls are
+It also runs the retirement, physical-admission refusal and exact-head provider
+contracts in `test_pr_creation_reconcile.py`, `test_pr_legacy_admission.py` and
+`test_github_head_reconciliation.py`, alongside the four creation/review consumer
+files named in the selector above. Local focused runs keep the existing
+30-second item and 300-second suite bounds. The native frontend's small capability/forwarding controls are
 `agent-pull-requests/tests/test_native_foreign_source.py`; they require no forge
 or installed-runtime mutation.
 

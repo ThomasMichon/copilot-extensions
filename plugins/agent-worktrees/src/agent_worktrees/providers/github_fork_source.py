@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 import re
+import time
 from subprocess import CompletedProcess
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -37,6 +38,7 @@ def resolve(
         env.update({name: token for name in (
             "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
         )})
+    deadline = time.monotonic() + 120
 
     def read(slug: str, *, forks: bool = False) -> Any:
         path = "/repos/" + "/".join(quote(part, safe="") for part in slug.split("/"))
@@ -44,9 +46,15 @@ def resolve(
                 endpoint + path + ("/forks?per_page=100" if forks else "")]
         if forks:
             args += ["--paginate", "--slurp"]
-        result = run(args, env=env)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProviderError("GitHub fork resolution exceeded its observation budget; pass --source-repo.")
+        result = run(args, env=env, timeout=remaining, max_stdout_bytes=1024 * 1024)
         if result.returncode:
-            raise ProviderError(f"GitHub fork resolution failed: {result.stderr.strip()}")
+            raise ProviderError(
+                f"GitHub fork resolution could not observe the complete network: {result.stderr.strip()}. "
+                "Pass --source-repo owner/repository."
+            )
         try:
             return json.loads(result.stdout)
         except ValueError as exc:

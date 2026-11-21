@@ -132,7 +132,7 @@ def assess(
         return PruneVerdict(False, "active", "live Copilot session in use",
                             turn_count)
 
-    blocker = retirement_blocker(rec)
+    blocker = retirement_blocker(rec, advisory=True)
     if blocker is not None and blocker.bucket in ("open-pr", "unknown-publication"):
         return PruneVerdict(False, blocker.bucket, blocker.reason, turn_count)
 

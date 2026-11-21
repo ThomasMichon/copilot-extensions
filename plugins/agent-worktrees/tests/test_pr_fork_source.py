@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from copy import deepcopy
 from collections.abc import Callable
 from typing import Any, cast
@@ -11,6 +12,31 @@ import pytest
 from agent_worktrees.providers import github
 from agent_worktrees.providers.base import PRScope, ProviderError, PullResult
 from test_pr_foreign_create import _tracking_setup as _tracking_setup
+
+
+def test_fork_network_refuses_complete_observation_beyond_the_capture_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.providers.base import run_cli
+
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if "--paginate" not in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                "full_name": "upstream/target", "fork": False,
+            }), "")
+        script = (
+            "import json; print(json.dumps([[{'full_name':'contributor/copy',"
+            "'fork':True,'owner':{'login':'contributor'},'description':'x'*2000000}]]))"
+        )
+        return run_cli([sys.executable, "-c", script], **kwargs)
+
+    monkeypatch.setattr(github, "run_cli", run)
+    with pytest.raises(ProviderError, match="source-repo"):
+        github.GitHubProvider().resolve_head_repository("upstream/target", "contributor")
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("target_is_fork", [False, True])

@@ -156,6 +156,9 @@ object with another branch's destination. Transport retains that binding and
 the original hook ref. Public GitHub's documented SSH-over-443 clone alias
 shares the same physical push/provider head fence as its HTTPS repository;
 unrelated hosts and ports do not.
+A short source shared by a branch and tag is refused before object pinning,
+even when repository configuration suppresses ambiguous-ref warnings. A fully
+qualified source preserves the selected branch or tag.
 An explicit short destination preserves native Git's branch/tag selection:
 the captured remote refs are resolved using the original named source
 before pinning its object. Ambiguous or disagreeing destinations require a
@@ -163,9 +166,10 @@ fully qualified target rather than silently publishing a tag as a branch.
 Only exact native refname expansions match; an unrelated nested ref with the
 same suffix is not the selected destination. Namespace observation uses the
 captured transport settings and selected credentials within the acquisition budget.
-Successful branch deletion removes its mapped remote-tracking ref with a
-previous-object compare-and-swap; a concurrent local ref change is retained
-and reported as a tracking-refresh warning, not a failed remote deletion.
+Branch deletion captures its mapped remote-tracking ref and previous object
+before transport, then removes only that observation with a compare-and-swap.
+A tracking ref created during transport is retained. A conflicting replacement
+is retained and reported as a tracking-refresh warning, not a failed remote deletion.
 Successful named-remote tracking refresh uses that
 object, the unchanged fetch/push mapping and a local compare-and-swap; it does
 not add a second remote observation while holding the head fence. This also
@@ -187,11 +191,19 @@ receipt is not settled until its active PR claim is durable under the same
 owner lock. Ordinary unverified provider receipts also block finalization and
 forced managed removal before owner transition or physical teardown; terminal
 PR labels do not erase those receipts.
+Checkout-free GitHub fork discovery requires a complete network observation
+within a shared 120-second and 1-MiB capture budget; an unavailable or oversized
+observation requires explicit `--source-repo`, never a partial-network guess.
 Ordinary creation likewise requires an active claim before settling a
 nonterminal provider result. Malformed provider responses after a create
 retain an unknown attempt with reconciliation instructions, not a retryable
-absence. Prune and cleanup reporting expose pending publication holds even
-when no PR association or checkout directory remains.
+absence. Raw provider IDs must be positive JSON integers, and returned URLs
+must match the selected endpoint, target repository and PR number before
+follow-up mutations or receipt verification.
+Prune and cleanup reporting expose pending publication holds even when no PR
+association or checkout directory remains. Advisory displays reuse a bounded,
+invalidated receipt summary; mutation-time checks still read receipts freshly
+under the owner lock. An advisory summary never authorizes cleanup.
 Reconciliation refuses active or intervening publication. Slow remote
 observations hold neither clone-wide publication locks nor installation authority.
 The commit boundary acquires authority, then publication, then metadata locks,

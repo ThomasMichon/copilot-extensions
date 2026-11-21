@@ -1281,7 +1281,7 @@ def _open_via_provider(
         try:
             claimed_ref = pr_publication_state.persist_pull(
                 config, record, target_pr, pull,
-                head_sha=head_sha, marker_published=marker_published, session=session,
+                head_sha=head_sha, marker_published=marker_published, session=session, prcfg=prcfg,
             )
         except (OSError, ValueError, TimeoutError) as exc:
             pr_unverified_creation.retain(result, config, record, target_pr, exc, pull=pull)

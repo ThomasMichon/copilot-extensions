@@ -71,11 +71,12 @@ def pending_prs(record: WorktreeRecord, *, live_only: bool = False) -> list[PRRe
     return pending
 
 
-def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
+def retirement_blocker(record: WorktreeRecord, *, advisory: bool = False) -> RetirementBlocker | None:
     """Require terminal or freshly fenced PR disposition and released ownership."""
     from . import pr_foreign_receipts
 
-    if pr_foreign_receipts.owner_receipts(record)[1]:
+    receipts = pr_foreign_receipts.advisory_owner_receipts if advisory else pr_foreign_receipts.owner_receipts
+    if receipts(record)[1]:
         return RetirementBlocker("unknown-publication", "Foreign PR creation is pending or unconfirmed; retain its owner")
     pending = pending_prs(record)
     if pending:

@@ -41,11 +41,15 @@ def _capture(refspec: str, *, cwd: str | Path, timeout: float | None) -> Binding
         if not separator or not target:
             raise ValueError("Deletion requires an exact destination ref.")
         return Binding(refspec, "", "")
-    symbolic = git_ops.git(
-        "rev-parse", "--verify", "--symbolic-full-name", source,
+    resolved = git_ops.git(
+        "-c", "core.warnAmbiguousRefs=true",
+        "rev-parse", "--verify", "--symbolic-full-name", "--end-of-options", source,
         cwd=cwd, isolated_repository=True,
         timeout=git_acquisition_budget.remaining_timeout(timeout), kill_tree=True,
-    ).stdout.strip()
+    )
+    if resolved.stderr.strip():
+        raise ValueError("The pushed source is ambiguous; use a fully qualified source ref or exact object.")
+    symbolic = resolved.stdout.strip()
     if not separator:
         if not symbolic.startswith(("refs/heads/", "refs/tags/")):
             raise ValueError("An implicit destination requires a named branch or tag.")

@@ -65,12 +65,17 @@ def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord
 
 def persist_pull(
     config: cfg.Config, record: tracking.WorktreeRecord, target: tracking.PRRecord, pull: PullResult,
-    *, head_sha: str, marker_published: bool, session: str,
+    *, head_sha: str, marker_published: bool, session: str, prcfg: cfg.PRConfig | None = None,
 ) -> str | None:
     from . import obligations, pr_ops, pr_publish, pr_unverified_creation
+    from .providers import creation_receipt
+    from .providers.base import ProviderError
 
-    if type(pull.number) is not int or pull.number <= 0 or not pull.url:
-        raise ValueError("Provider creation has no verified pull-request identity; reconcile the retained attempt.")
+    policy = prcfg or config.default_repo.pr
+    try:
+        creation_receipt.validate(pull, target.provider or policy.provider, target.repo, policy.api_base)
+    except ProviderError as exc:
+        raise ValueError(str(exc) + " Reconcile the retained attempt.") from exc
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     with pr_publish.metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
