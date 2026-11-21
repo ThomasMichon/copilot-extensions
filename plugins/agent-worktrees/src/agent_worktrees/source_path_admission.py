@@ -37,7 +37,7 @@ def guard(workspace: str | Path | None, *, timeout: float = 3) -> Iterator[None]
         yield
         return
     identity = os.path.normcase(str(Path(workspace).resolve()))
-    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    key = hashlib.sha256(os.fsencode(identity)).hexdigest()
     lease = SingleInstance(
         cfg.install_dir() / "source-path-admission" / key,
         service="source publication or adoption", lock_name="admission.lock",

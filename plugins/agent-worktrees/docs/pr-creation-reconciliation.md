@@ -160,6 +160,9 @@ An explicit short destination preserves native Git's branch/tag selection:
 the captured remote refs are resolved using the original named source
 before pinning its object. Ambiguous or disagreeing destinations require a
 fully qualified target rather than silently publishing a tag as a branch.
+Only exact native refname expansions match; an unrelated nested ref with the
+same suffix is not the selected destination. Namespace observation uses the
+captured transport settings and selected credentials within the acquisition budget.
 Successful named-remote tracking refresh uses that
 object, the unchanged fetch/push mapping and a local compare-and-swap; it does
 not add a second remote observation while holding the head fence. This also
@@ -175,6 +178,12 @@ fence and the target's exact head-observation fence, then authoritatively
 rechecks the expected source tip before submitting creation. The qualified
 target expression `owner:branch` is not a physical base-repository branch;
 an unrelated push to the base repository's `branch` stays independent.
+Reachable foreign-source qualification resolves and rechecks the fork's push
+remote independently of the target policy's fetch remote. A verified foreign
+receipt is not settled until its active PR claim is durable under the same
+owner lock. Ordinary unverified provider receipts also block finalization and
+forced managed removal before owner transition or physical teardown; terminal
+PR labels do not erase those receipts.
 Reconciliation refuses active or intervening publication. Slow remote
 observations hold neither clone-wide publication locks nor installation authority.
 The commit boundary acquires authority, then publication, then metadata locks,

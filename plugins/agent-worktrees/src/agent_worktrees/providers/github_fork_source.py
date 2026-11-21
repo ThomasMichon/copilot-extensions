@@ -29,7 +29,7 @@ def resolve(
     token: str | None = None, run: Callable[..., CompletedProcess[str]],
 ) -> str:
     repository = _slug(repository)
-    if re.fullmatch(r"[A-Za-z0-9-]+", owner) is None:
+    if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?", owner) is None:
         raise ProviderError("GitHub fork resolution needs an exact head owner.")
     host, endpoint = github_endpoint(provider.authority_endpoint(api_base))
     env = provider._env(token, host=host)
