@@ -13,10 +13,10 @@ cases retain the provider-verified alias boundary and source/identity/root
 refusals in the eligible packet. These source controls do not qualify the
 hosted attached-caller lifetime, application startup or installed rollout.
 
-The Worktrees native application-input controls in
-`tests/native/test_native_seed_application.py` select with
+The Worktrees native application-input controls select with
+`--test-file tests/native/test_native_seed_application.py` and
 `-k "native_application_materializes or native_application_refuses"` through the
-contained plugin runner and `--allow-explicit-tiers`. They poison only copied
+contained plugin runner with `--allow-explicit-tiers`. They poison only copied
 SDK mirrors, exercise the canonical source preparer, and check both the wheel
 input boundary and an actual setuptools-built application wheel, including
 packaged command scripts and the fixture generation marker. The wheel control
