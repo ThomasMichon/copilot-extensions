@@ -1032,7 +1032,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13968 merges at `028ed693902466b4244b50a57281fe04f88a738d` after
   exact-head Copilot approval and complete required Linux CI with all 6,974
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land sixteen original retention controls through four exact
+- [x] Qualify and land sixteen original retention controls through four exact
   unchanged test functions: remaining execution budget, invalid exclusions,
   temporary-path canonicalization and conservative fractional cutoffs. Preserve
   all assertions, parameter identities and original callbacks; copied-module
@@ -1043,6 +1043,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   300-second bound, strict typing, current-head review and complete Linux source
   CI. No installer behavior or broader native, installed, release, full-census,
   whole-flow or custody acceptance changes.
+  #13969 merges at `964effefec309524633d0d55c8e4e45dcebcc14e` after
+  exact-head Copilot approval and complete required Linux CI with all 6,990
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land forty-two original cutoff-projection cases through
+  thirteen exact unchanged functions, retaining their assertions, parameters,
+  timestamp precision, malformed-input controls and package/index refusal
+  witnesses. Preserve every preceding node/hash/target/helper decision,
+  closed Python reads, positive per-case canonical-owner calls, zero prohibited
+  effects, compact/flat-v1 contracts and the 300-second bound. Require strict
+  typing, current-head review and complete Linux source CI. Do not execute UV,
+  change seasoning behavior or treat projection fixtures as native, installed,
+  release, full-census, whole-flow or custody acceptance.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
