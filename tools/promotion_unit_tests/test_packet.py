@@ -5,27 +5,32 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 import promotion_unit_packet as packet
-from promotion_unit_contract import PROFILE, UnitEvidenceError, manifest_digest, windows_native_manifest
+from promotion_unit_contract import COMPACT_PROFILE, PROFILE, UnitEvidenceError, manifest_digest, windows_native_manifest
 
 SOURCE = "a" * 40
 TEST = "tools/promotion_unit_tests/test_example.py"
 TARGET = "tools/example.py"
 NODE = TEST + "::test_example"
+JsonObject = dict[str, Any]
+PacketCase = tuple[Path, JsonObject, JsonObject, JsonObject, Path]
 
 
-def _write(path, data):
+def _write(path: Path, data: JsonObject) -> bytes:
     raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     path.write_bytes(raw)
     return raw
 
 
 @pytest.fixture
-def packet_case(tmp_path):
+def packet_case(tmp_path: Path) -> PacketCase:
     directory, root = tmp_path / "packet", tmp_path / "source"
     directory.mkdir()
     sources = {}
@@ -57,20 +62,20 @@ def packet_case(tmp_path):
     return directory, manifest, proof, coverage, root
 
 
-def _verify(case, **kwargs):
+def _verify(case: PacketCase, **kwargs: Any) -> JsonObject:
     directory, manifest, _, _, _ = case
     return packet.verify_packet(
         directory, expected_source_sha=SOURCE, expected_manifest=manifest, **kwargs,
     )
 
 
-def _coverage(case):
+def _coverage(case: PacketCase) -> None:
     directory, _, proof, coverage, _ = case
     proof["coverage_sha256"] = hashlib.sha256(_write(directory / "coverage.json", coverage)).hexdigest()
     _write(directory / "unit-proof.json", proof)
 
 
-def test_packet_returns_frozen_keys_and_canonical_raw_byte_digests(packet_case):
+def test_packet_returns_frozen_keys_and_canonical_raw_byte_digests(packet_case: PacketCase) -> None:
     directory, manifest, proof, _, root = packet_case
     result = _verify(packet_case, source_root=root)
     assert set(result) == {
@@ -104,7 +109,7 @@ def test_packet_returns_frozen_keys_and_canonical_raw_byte_digests(packet_case):
     )["profile"] == native["profile"]
 
 
-def test_packet_manifest_whitespace_changes_raw_binding_not_trusted_identity(packet_case):
+def test_packet_manifest_whitespace_changes_raw_binding_not_trusted_identity(packet_case: PacketCase) -> None:
     directory, manifest, _, _, _ = packet_case
     original = _verify(packet_case)
     (directory / "unit-manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -114,7 +119,29 @@ def test_packet_manifest_whitespace_changes_raw_binding_not_trusted_identity(pac
     assert changed["packet_sha256"] != original["packet_sha256"]
 
 
-def test_packet_refuses_copied_self_declared_manifest_and_proof_digests(packet_case):
+def test_compact_source_and_packet_normalize_without_relabelling_proof(packet_case: PacketCase) -> None:
+    from candidate_qualification_receipt import load_manifest
+
+    directory, manifest, proof, _, root = packet_case
+    compact = {**manifest, "profile": COMPACT_PROFILE, "node_groups": [[TEST, ["test_example"]]]}
+    del compact["nodes"]
+    raw = _write(root / "selection.json", compact)
+    loaded, raw_digest = load_manifest(root, "selection.json")
+    assert loaded == manifest and raw_digest == hashlib.sha256(raw).hexdigest()
+    flat = packet.verify_packet(
+        directory, expected_source_sha=SOURCE, expected_manifest=compact, source_root=root,
+    )
+    _write(directory / "unit-manifest.json", compact)
+    changed = packet.verify_packet(
+        directory, expected_source_sha=SOURCE, expected_manifest=manifest, source_root=root,
+    )
+    assert changed["manifest"] == manifest and changed["proof"] == proof
+    assert changed["profile"] == PROFILE and changed["manifest_sha256"] == flat["manifest_sha256"]
+    assert changed["manifest_file_sha256"] != flat["manifest_file_sha256"]
+    assert changed["packet_sha256"] != flat["packet_sha256"]
+
+
+def test_packet_refuses_copied_self_declared_manifest_and_proof_digests(packet_case: PacketCase) -> None:
     directory, manifest, proof, _, _ = packet_case
     untrusted = copy.deepcopy(manifest)
     untrusted["max_seconds"] = 299
@@ -126,7 +153,7 @@ def test_packet_refuses_copied_self_declared_manifest_and_proof_digests(packet_c
 
 
 @pytest.mark.parametrize("value", [None, True, 1, "A" * 40, "a" * 39, "b" * 40])
-def test_packet_requires_exact_expected_source_sha(packet_case, value):
+def test_packet_requires_exact_expected_source_sha(packet_case: PacketCase, value: Any) -> None:
     with pytest.raises(UnitEvidenceError):
         packet.verify_packet(packet_case[0], expected_source_sha=value, expected_manifest=packet_case[1])
 
@@ -138,7 +165,7 @@ def test_packet_requires_exact_expected_source_sha(packet_case, value):
     "unexpected-report-node", "skip", "effects", "effects-type", "imports-type",
     "duplicate-import", "unknown-import", "missing-test-import",
 ])
-def test_packet_refuses_incomplete_or_relabelled_unit_proof(packet_case, mutation):
+def test_packet_refuses_incomplete_or_relabelled_unit_proof(packet_case: PacketCase, mutation: str) -> None:
     directory, _, proof, _, _ = packet_case
     if mutation == "profile":
         proof["profile"] = "other"
@@ -192,7 +219,7 @@ def test_packet_refuses_incomplete_or_relabelled_unit_proof(packet_case, mutatio
 
 
 @pytest.mark.parametrize("elapsed", [True, 1, "1", -0.1, 300.0, float("nan"), float("inf")])
-def test_packet_rejects_elapsed_type_aliases_and_nonfinite_or_over_budget_values(packet_case, elapsed):
+def test_packet_rejects_elapsed_type_aliases_and_nonfinite_or_over_budget_values(packet_case: PacketCase, elapsed: object) -> None:
     directory, _, proof, _, _ = packet_case
     proof["elapsed_seconds"] = elapsed
     _write(directory / "unit-proof.json", proof)
@@ -206,7 +233,7 @@ def test_packet_rejects_elapsed_type_aliases_and_nonfinite_or_over_budget_values
     "bool-line", "float-line", "duplicate-line", "alias-line", "bool-context",
     "duplicate-context", "summary-type", "missing-overlap",
 ])
-def test_packet_refuses_incomplete_or_foreign_production_coverage(packet_case, mutation):
+def test_packet_refuses_incomplete_or_foreign_production_coverage(packet_case: PacketCase, mutation: str) -> None:
     _, _, _, coverage, _ = packet_case
     record = coverage["files"][TARGET]
     if mutation == "missing-file":
@@ -249,7 +276,7 @@ def test_packet_refuses_incomplete_or_foreign_production_coverage(packet_case, m
 
 
 @pytest.mark.parametrize("name", ["unit-manifest.json", "unit-proof.json", "coverage.json"])
-def test_packet_rejects_duplicate_json_keys(packet_case, name):
+def test_packet_rejects_duplicate_json_keys(packet_case: PacketCase, name: str) -> None:
     path = packet_case[0] / name
     raw = path.read_text()
     path.write_text('{"duplicate":0,"duplicate":1,' + raw[1:])
@@ -262,7 +289,7 @@ def test_packet_rejects_duplicate_json_keys(packet_case, name):
 
 
 @pytest.mark.parametrize("name", ["unit-manifest.json", "unit-proof.json", "coverage.json"])
-def test_packet_rejects_nonobject_or_malformed_json(packet_case, name):
+def test_packet_rejects_nonobject_or_malformed_json(packet_case: PacketCase, name: str) -> None:
     path = packet_case[0] / name
     path.write_bytes(b"[]")
     with pytest.raises(UnitEvidenceError, match="object"):
@@ -273,7 +300,7 @@ def test_packet_rejects_nonobject_or_malformed_json(packet_case, name):
 
 
 @pytest.mark.parametrize("name", ["unit-manifest.json", "unit-proof.json", "coverage.json"])
-def test_packet_requires_each_regular_bounded_file(packet_case, monkeypatch, name):
+def test_packet_requires_each_regular_bounded_file(packet_case: PacketCase, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     directory = packet_case[0]
     size = max(path.stat().st_size for path in directory.iterdir())
     monkeypatch.setattr(packet, "MAX_UNIT_EVIDENCE_FILE_BYTES", size)
@@ -284,7 +311,7 @@ def test_packet_requires_each_regular_bounded_file(packet_case, monkeypatch, nam
 
 
 @pytest.mark.parametrize("name", ["unit-manifest.json", "unit-proof.json", "coverage.json"])
-def test_packet_rejects_extra_or_missing_packet_files(packet_case, name):
+def test_packet_rejects_extra_or_missing_packet_files(packet_case: PacketCase, name: str) -> None:
     directory = packet_case[0]
     (directory / "unexpected.json").write_text("{}")
     with pytest.raises(UnitEvidenceError, match="exactly"):
@@ -295,16 +322,16 @@ def test_packet_rejects_extra_or_missing_packet_files(packet_case, name):
         _verify(packet_case)
 
 
-def test_packet_rejects_indirect_or_nonregular_files_without_opening_them(packet_case, monkeypatch):
+def test_packet_rejects_indirect_or_nonregular_files_without_opening_them(packet_case: PacketCase, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = packet_case[0]
-    original = packet.Path.lstat
+    original = Path.lstat
 
-    def indirect(path, *args, **kwargs):
+    def indirect(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
         if path == directory / "unit-proof.json":
             return SimpleNamespace(st_mode=0o120777, st_size=0)
         return original(path, *args, **kwargs)
 
-    monkeypatch.setattr(packet.Path, "lstat", indirect)
+    monkeypatch.setattr(Path, "lstat", indirect)
     with pytest.raises(UnitEvidenceError, match="regular, unlinked"):
         _verify(packet_case)
 
@@ -313,7 +340,7 @@ def test_packet_rejects_indirect_or_nonregular_files_without_opening_them(packet
     "tools/./example.py", "tools//example.py", "tools/../example.py",
     "C:example.py", "C:/example.py", "tools\\example.py", "tools/null\0.py",
 ])
-def test_packet_rejects_manifest_path_aliases(packet_case, path):
+def test_packet_rejects_manifest_path_aliases(packet_case: PacketCase, path: str) -> None:
     manifest = copy.deepcopy(packet_case[1])
     manifest["sources"][path] = manifest["sources"].pop(TARGET)
     manifest["coverage_targets"] = [path]
@@ -322,14 +349,14 @@ def test_packet_rejects_manifest_path_aliases(packet_case, path):
 
 
 @pytest.mark.parametrize("value", [True, 300.0, "300"])
-def test_packet_rejects_manifest_budget_type_aliases(packet_case, value):
+def test_packet_rejects_manifest_budget_type_aliases(packet_case: PacketCase, value: Any) -> None:
     manifest = copy.deepcopy(packet_case[1])
     manifest["max_seconds"] = value
     with pytest.raises(UnitEvidenceError):
         packet.verify_packet(packet_case[0], expected_source_sha=SOURCE, expected_manifest=manifest)
 
 
-def test_packet_does_not_require_a_specific_coverage_metadata_version(packet_case):
+def test_packet_does_not_require_a_specific_coverage_metadata_version(packet_case: PacketCase) -> None:
     coverage = packet_case[3]
     coverage["meta"] = {"future-format": {"fields": [1, "metadata"]}}
     coverage["totals"] = {"additional": {"summary": True}}
@@ -337,7 +364,7 @@ def test_packet_does_not_require_a_specific_coverage_metadata_version(packet_cas
     assert _verify(packet_case)["profile"] == PROFILE
 
 
-def test_packet_checks_optional_source_bytes(packet_case):
+def test_packet_checks_optional_source_bytes(packet_case: PacketCase) -> None:
     root = packet_case[4]
     _verify(packet_case, source_root=root)
     (root / TARGET).write_text("VALUE = 2\n")

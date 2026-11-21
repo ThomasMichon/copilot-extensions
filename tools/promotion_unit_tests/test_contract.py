@@ -1,13 +1,18 @@
 """In-process negative admission cases for the unit packet itself."""
 
+from __future__ import annotations
+
 import copy
 import hashlib
 import io
+import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from promotion_unit_contract import (
-    PROFILE, UnitEvidenceError, admit_manifest, bounded_bytes, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
+    COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, bounded_bytes, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
     requires_units, source_sha, verify_observations, verify_sources, windows_native_manifest,
 )
 
@@ -15,7 +20,7 @@ NODE = "tools/promotion_unit_tests/test_example.py::test_example"
 SOURCE = "tools/example.py"
 
 
-def manifest():
+def manifest() -> dict[str, Any]:
     return {
         "profile": PROFILE, "nodes": [NODE],
         "sources": {NODE.split("::")[0]: "a" * 64, SOURCE: "b" * 64},
@@ -23,12 +28,12 @@ def manifest():
     }
 
 
-def reports():
+def reports() -> list[dict[str, str]]:
     return [{"node": NODE, "phase": phase, "outcome": "passed"}
             for phase in ("setup", "call", "teardown")]
 
 
-def test_positive_unit_manifest_and_complete_observations():
+def test_positive_unit_manifest_and_complete_observations() -> None:
     data = manifest()
     assert admit_manifest(data) == data
     verify_observations([NODE], [NODE], reports(), [], 1.25, 300)
@@ -52,19 +57,87 @@ def test_positive_unit_manifest_and_complete_observations():
         verify_observations([NODE], [NODE], reports(), [], 600.0, native["max_seconds"])
 
 
-def test_duplicate_json_fields_cannot_hide_unit_selection():
+def test_duplicate_json_fields_cannot_hide_unit_selection() -> None:
     with pytest.raises(UnitEvidenceError, match="duplicate"):
         decode_json('{"profile":"units","profile":"full"}')
     with pytest.raises(UnitEvidenceError, match="duplicate"):
         decode_json('{"nested":{"nodes":[],"nodes":["hidden"]}}')
 
 
-@pytest.mark.parametrize("size", [3, 200001], ids=["small", "overflow"])
-def test_bounded_reads_do_not_allocate_the_packet_limit(size):
-    class ObservedStream(io.BytesIO):
-        requests = []
+def test_compact_manifest_preserves_interleaved_nodes_and_logical_identity() -> None:
+    data = manifest()
+    path = NODE.partition("::")[0]
+    other = "tools/promotion_unit_tests/test_other.py"
+    data["sources"][other] = "c" * 64
+    data["nodes"] = [NODE, other + "::test_other", path + "::TestScope::test_nested[a::b]"]
+    compact = {
+        **data, "profile": COMPACT_PROFILE,
+        "node_groups": [
+            [path, ["test_example"]],
+            [other, ["test_other"]],
+            [path, ["TestScope::test_nested[a::b]"]],
+        ],
+    }
+    del compact["nodes"]
+    original = copy.deepcopy(compact)
+    admitted = admit_manifest(decode_json(json.dumps(compact)))
+    assert admitted == data and compact == original
+    assert manifest_digest(admitted) == manifest_digest(data)
+    assert admit_manifest(data) == data
 
-        def read(self, size=-1):
+
+@pytest.mark.parametrize("groups", [
+    None, [], [[NODE.partition("::")[0]]],
+    [[NODE.partition("::")[0], []]],
+    [[NODE.partition("::")[0], "test_example"]],
+    [[NODE.partition("::")[0], [True]]],
+    [[NODE.partition("::")[0], [""]]],
+    [[NODE.partition("::")[0], ["test_\ud800"]]],
+    [[NODE.partition("::")[0], ["test_example", "test_example"]]],
+], ids=["absent", "empty", "missing-cases", "empty-cases", "scalar-cases", "boolean-case", "empty-case", "invalid-unicode", "duplicate"])
+def test_compact_manifest_refuses_incomplete_or_duplicate_groups(groups: object) -> None:
+    data = manifest()
+    data.pop("nodes")
+    data.update(profile=COMPACT_PROFILE, node_groups=groups)
+    with pytest.raises(UnitEvidenceError):
+        admit_manifest(data)
+
+
+def test_compact_manifest_cannot_waive_flat_admission_or_add_fields() -> None:
+    compact = manifest()
+    compact.pop("nodes")
+    compact.update(profile=COMPACT_PROFILE, node_groups=[[NODE.partition("::")[0], ["test_example"]]])
+    changes: tuple[dict[str, Any], ...] = (
+        {"max_seconds": 301}, {"max_seconds": True},
+        {"sources": {SOURCE: "b" * 64}}, {"coverage_targets": ["tools/unknown.py"]},
+        {"nodes": [NODE]}, {"composition": {}},
+        {"profile": "copilot-extensions.promotion-units/v3"},
+        {"node_groups": [["tools/outside.py", ["test_example"]]]},
+    )
+    for change in changes:
+        with pytest.raises(UnitEvidenceError):
+            admit_manifest({**compact, **change})
+
+
+def test_compact_manifest_bounds_expanded_utf8_before_creating_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import promotion_unit_contract as contract
+
+    data = manifest()
+    data.pop("nodes")
+    case = "test_\u00e9"
+    path = NODE.partition("::")[0]
+    data.update(profile=COMPACT_PROFILE, node_groups=[[path, [case]]])
+    monkeypatch.setattr(contract, "MAX_PACKET_FILE_BYTES", len((path + "::" + case).encode()) - 1)
+    with pytest.raises(UnitEvidenceError, match="expanded byte bound"):
+        admit_manifest(data)
+
+
+@pytest.mark.parametrize("size", [3, 200001], ids=["small", "overflow"])
+def test_bounded_reads_do_not_allocate_the_packet_limit(size: int) -> None:
+    class ObservedStream(io.BytesIO):
+        requests: list[int] = []
+
+        def read(self, size: Any=-1) -> bytes:
             self.requests.append(size)
             return super().read(size)
 
@@ -74,7 +147,7 @@ def test_bounded_reads_do_not_allocate_the_packet_limit(size):
     assert sum(stream.requests) < 400000
 
 
-def test_unit_source_inventory_cannot_have_case_aliases():
+def test_unit_source_inventory_cannot_have_case_aliases() -> None:
     data = manifest()
     data["sources"][SOURCE.upper().replace(".PY", ".py")] = "c" * 64
     with pytest.raises(UnitEvidenceError, match="case aliases"):
@@ -85,7 +158,7 @@ def test_unit_source_inventory_cannot_have_case_aliases():
     "../test.py", "/test.py", "tools/./test.py", "tools//test.py",
     "tools\\test.py", ".git/test.py", "tools/test.pyc",
 ])
-def test_noncanonical_or_git_source_is_refused(path):
+def test_noncanonical_or_git_source_is_refused(path: str) -> None:
     with pytest.raises(UnitEvidenceError):
         relative_file(path)
 
@@ -95,7 +168,7 @@ def test_noncanonical_or_git_source_is_refused(path):
     "fleet-manager/containers/gateway/Dockerfile",
     "fleet-manager/containers/gateway/Dockerfile.dockerignore",
 ], ids=["catalog", "gateway-recipe", "gateway-ignore"])
-def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path, name):
+def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path: Path, name: str) -> None:
     data = manifest()
     content = b"def emitted() -> str:\n    return 'catalog'\n"
     data["sources"][name] = hashlib.sha256(content).hexdigest()
@@ -127,7 +200,7 @@ def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path, nam
     {"max_seconds": True},
     {"selection": "-k smoke"},
 ])
-def test_invalid_manifest_is_refused(change):
+def test_invalid_manifest_is_refused(change: dict[str, Any]) -> None:
     data = manifest()
     data.update(change)
     with pytest.raises(UnitEvidenceError):
@@ -135,14 +208,14 @@ def test_invalid_manifest_is_refused(change):
 
 
 @pytest.mark.parametrize("collected", [[], [NODE, NODE], [NODE + "_unexpected"]])
-def test_missing_duplicate_or_unexpected_collection_is_refused(collected):
+def test_missing_duplicate_or_unexpected_collection_is_refused(collected: list[str]) -> None:
     with pytest.raises(UnitEvidenceError):
         verify_observations([NODE], collected, reports(), [], 1, 300)
 
 
 @pytest.mark.parametrize("phase", ["setup", "call", "teardown"])
 @pytest.mark.parametrize("outcome", ["skipped", "failed"])
-def test_every_phase_must_pass_without_skips(phase, outcome):
+def test_every_phase_must_pass_without_skips(phase: str, outcome: str) -> None:
     observed = reports()
     next(report for report in observed if report["phase"] == phase)["outcome"] = outcome
     with pytest.raises(UnitEvidenceError):
@@ -150,18 +223,18 @@ def test_every_phase_must_pass_without_skips(phase, outcome):
 
 
 @pytest.mark.parametrize("observed", [[], reports()[:-1], reports() + reports()[:1]])
-def test_missing_or_duplicate_phase_is_refused(observed):
+def test_missing_or_duplicate_phase_is_refused(observed: list[dict[str, str]]) -> None:
     with pytest.raises(UnitEvidenceError):
         verify_observations([NODE], [NODE], observed, [], 1, 300)
 
 
 @pytest.mark.parametrize("effects,elapsed", [(["subprocess.Popen"], 1), ([], 300)])
-def test_effect_attempt_and_whole_packet_timeout_are_refused(effects, elapsed):
+def test_effect_attempt_and_whole_packet_timeout_are_refused(effects: list[str], elapsed: int) -> None:
     with pytest.raises(UnitEvidenceError):
         verify_observations([NODE], [NODE], reports(), effects, elapsed, 300)
 
 
-def test_source_digest_rejects_changed_or_missing_bytes(tmp_path):
+def test_source_digest_rejects_changed_or_missing_bytes(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     path = root / "example.py"
     original = b"value = 1\n"
@@ -175,7 +248,7 @@ def test_source_digest_rejects_changed_or_missing_bytes(tmp_path):
         verify_sources(root, {"missing.py": "a" * 64})
 
 
-def test_only_known_narrative_changes_can_skip_the_admitted_packet():
+def test_only_known_narrative_changes_can_skip_the_admitted_packet() -> None:
     assert not requires_units(["docs/guide.md", "efforts/active/example/README.md"])
     assert not requires_units(["plugins/example/skills/task/SKILL.md"])
     assert requires_units(["tools/unknown.py"])
@@ -185,10 +258,10 @@ def test_only_known_narrative_changes_can_skip_the_admitted_packet():
         requires_units(["../unsafe"])
 
 
-def test_source_to_document_rename_preserves_the_deleted_source_for_impact():
+def test_source_to_document_rename_preserves_the_deleted_source_for_impact() -> None:
     commands = []
 
-    def read(arguments):
+    def read(arguments: list[str]) -> bytes:
         commands.append(arguments)
         return b"tools/deleted.py\0docs/example.md\0"
 
@@ -203,8 +276,8 @@ def test_source_to_document_rename_preserves_the_deleted_source_for_impact():
 @pytest.mark.parametrize("event,expected", [
     ("push", False), ("workflow_dispatch", True), ("unknown", True),
 ])
-def test_ci_events_preserve_promotion_ownership_and_conservative_fallback(event, expected):
-    def no_diff(arguments):
+def test_ci_events_preserve_promotion_ownership_and_conservative_fallback(event: str, expected: bool) -> None:
+    def no_diff(arguments: list[str]) -> bytes:
         pytest.fail("non-PR admission must not attempt a Git diff")
 
     assert ci_requires_units(event, "", "", no_diff) is expected
@@ -216,7 +289,7 @@ def test_ci_events_preserve_promotion_ownership_and_conservative_fallback(event,
     (b"tools/source.py\0docs/guide.md\0", True),
     (b"", True),
 ])
-def test_combined_pr_admission_preserves_exact_source_and_narrative_selection(paths, expected):
+def test_combined_pr_admission_preserves_exact_source_and_narrative_selection(paths: bytes, expected: bool) -> None:
     assert ci_requires_units("pull_request", "a" * 40, "b" * 40, lambda _: paths) is expected
 
 
@@ -225,7 +298,7 @@ def test_combined_pr_admission_preserves_exact_source_and_narrative_selection(pa
     "plugins/example/skills/task/SKILL.md", "worktree-manager/docs/usage.MD",
     ".github/workflows/example.md", "arbitrary/new-document.md",
 ])
-def test_markdown_has_no_executable_unit_or_guard_overlap(path):
+def test_markdown_has_no_executable_unit_or_guard_overlap(path: str) -> None:
     assert not requires_units([path])
     for event in ("pull_request", "push"):
         assert not ci_requires_code_checks(
@@ -237,7 +310,7 @@ def test_markdown_has_no_executable_unit_or_guard_overlap(path):
     b"docs/readme.md\0tools/source.py\0", b"docs/example.json\0",
     b".github/workflows/example.yml\0", b"tools/deleted.py\0docs/moved.md\0", b"",
 ])
-def test_code_guard_selection_keeps_mixed_unknown_and_empty_changes(paths):
+def test_code_guard_selection_keeps_mixed_unknown_and_empty_changes(paths: bytes) -> None:
     assert ci_requires_code_checks(
         "pull_request", "a" * 40, "b" * 40, lambda _: paths,
     )
@@ -247,18 +320,18 @@ def test_code_guard_selection_keeps_mixed_unknown_and_empty_changes(paths):
     ("workflow_dispatch", "", ""), ("future-event", "a" * 40, "b" * 40),
     ("push", "0" * 40, "b" * 40), ("pull_request", "", ""),
 ])
-def test_unavailable_code_guard_inputs_never_claim_no_overlap(event, base, head):
-    def no_diff(_):
+def test_unavailable_code_guard_inputs_never_claim_no_overlap(event: str, base: str, head: str) -> None:
+    def no_diff(_: list[str]) -> bytes:
         pytest.fail("unavailable input must not be mistaken for an empty diff")
 
     assert ci_requires_code_checks(event, base, head, no_diff)
 
 
 @pytest.mark.parametrize("event,merge_base", [("pull_request", True), ("push", False)])
-def test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips(event, merge_base):
+def test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips(event: str, merge_base: bool) -> None:
     calls = []
 
-    def read(argv):
+    def read(argv: list[str]) -> bytes:
         calls.append(argv)
         return b"docs/guide.md\0" if "--merge-base" in argv else b"tools/upstream.py\0docs/guide.md\0"
 
