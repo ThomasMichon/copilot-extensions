@@ -3,6 +3,37 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_materializer_local_source_units.py",
+      [
+        "test_materialize_refuses_incomplete_already_local_sources[{ path = \"libs/missing\" }]",
+        "test_materialize_refuses_incomplete_already_local_sources[{ path = \"libs/first\", editable = true }]",
+        "test_materialize_refuses_incomplete_already_local_sources[{ path = \"libs/first\", editable = \"false\" }]",
+        "test_materialize_refuses_incomplete_nested_local_sources[False]",
+        "test_materialize_refuses_incomplete_nested_local_sources[True]",
+        "test_materialize_accepts_complete_local_sibling_closure",
+        "test_materialize_requires_existing_standalone_manifest_but_allows_skill_plugins",
+        "test_materialize_refuses_direct_local_requirements[[project]\\ndependencies = [\"missing @ file:///unavailable/package\"]\\n-False]",
+        "test_materialize_refuses_direct_local_requirements[[project]\\ndependencies = [\"missing @ file:///unavailable/package\"]\\n-True]",
+        "test_materialize_refuses_direct_local_requirements[[project.optional-dependencies]\\nextra = [\"missing @ ../unavailable\"]\\n-False]",
+        "test_materialize_refuses_direct_local_requirements[[project.optional-dependencies]\\nextra = [\"missing @ ../unavailable\"]\\n-True]",
+        "test_materialize_refuses_direct_local_requirements[[build-system]\\nrequires = [\"missing @ file:///unavailable/package\"]\\n-False]",
+        "test_materialize_refuses_direct_local_requirements[[build-system]\\nrequires = [\"missing @ file:///unavailable/package\"]\\n-True]",
+        "test_materialize_declared_flat_python_modules[False-False]",
+        "test_materialize_declared_flat_python_modules[False-True]",
+        "test_materialize_declared_flat_python_modules[True-False]",
+        "test_materialize_declared_flat_python_modules[True-True]",
+        "test_retained_flat_reference_requires_explicit_boolean_false[\"false\"]",
+        "test_retained_flat_reference_requires_explicit_boolean_false[1]",
+        "test_retained_flat_reference_requires_explicit_boolean_false[None]",
+        "test_materialize_refuses_undeclared_or_invalid_flat_sources[modules0]",
+        "test_materialize_refuses_undeclared_or_invalid_flat_sources[modules1]",
+        "test_materialize_refuses_undeclared_or_invalid_flat_sources[modules2]",
+        "test_materialize_refuses_undeclared_or_invalid_flat_sources[modules3]",
+        "test_materialize_refuses_undeclared_or_invalid_flat_sources[modules4]",
+        "test_materialize_refuses_undeclared_or_invalid_flat_sources[modules5]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_materializer_packaged_asset_units.py",
       [
         "test_packaged_projection_assets_expand_into_own_payload",
@@ -8438,6 +8469,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_materializer_local_source_units.py": "9a784fe7801e7a7562affed24a6f7288359da8a44af480b068c3e23b89c95b18",
     "tools/promotion_unit_tests/test_materializer_packaged_asset_units.py": "ba4126a1ca19cf85ab31573402e3f55f9d5690f51a9baad367007c98e6379e9b",
     "tools/promotion_unit_tests/test_materializer_installer_asset_units.py": "33ecc25d74351cb1c23a249d1a461e74c5fb8dfaa9e66b757c39e4ba592b8752",
     "tools/promotion_unit_tests/test_materializer_uv_reference_units.py": "1ab9e05be6d68641a0df1db8960349aefa6dc4ab24415c4a50c57d17f379d776",

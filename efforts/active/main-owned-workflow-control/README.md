@@ -879,7 +879,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13940 merges at `dc1b8b2e70331d1cbe803144477f59879aafade9` after
   exact-head Copilot approval and complete required Linux CI with all 6,749
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land twenty original fixture-only packaged-asset cases
+- [x] Qualify and land twenty original fixture-only packaged-asset cases
   through seven exact test objects. Preserve all 57 preceding original
   materializer cases, all 88 remaining originals, original fixtures, parameter
   suffixes and assertions. Retain complete source closure, positive per-case
@@ -887,6 +887,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   target/helper decisions, compact/flat-v1 contracts and the 300-second limit.
   Require strict typing, current-head review and complete Linux source CI.
   Native symlink cases remain separate; this is not native, installed,
+  release, full-census or whole-flow acceptance.
+  #13942 merges at `abcc2aa18809e690ad9af846a30eee047caa4040` after
+  exact-head Copilot approval and complete required Linux CI with all 6,769
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land twenty-six original fixture-only local-source closure
+  cases through eight exact test objects. Preserve all 77 preceding original
+  materializer cases, all 62 remaining originals, original fixtures, expanded
+  suffixes and assertions. Retain source closure, positive per-case production
+  call coverage, zero prohibited effects, all preceding node/hash/target/helper
+  decisions, compact/flat-v1 contracts and the 300-second limit. Require strict
+  typing, current-head review and complete Linux source CI. Linked-source and
+  aliased-parent native cases remain separate; this is not native, installed,
   release, full-census or whole-flow acceptance.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
