@@ -423,10 +423,27 @@ remains finalized and its recorded HEAD/branch identity still matches, without
 requiring every normal poll to fetch again. Legacy records without a checkout
 stamp remain conservative until explicitly finalized again. An
 attached concluding shell does not erase that assertion; liveness remains
-visible independently and continues to prevent removal. New claims/session
-activation or follow-ups reopen responsibility through their owning writers;
+visible independently and continues to prevent removal. New downstream
+claims or follow-ups reopen responsibility through their owning writers;
 observed dirtiness, checkout drift, open PRs, and pending handoffs suppress
 the finalized display.
+
+Finalize is a one-way **latch** at the stamped HEAD. Continued conversation,
+tool calls, or a session resuming/re-registering on a finalized worktree do
+not reopen it: registration records an `at-rest` session claim, and session
+claims never reopen a finalized owner. Only uncommitted/untracked changes,
+commits beyond the stamped finalized HEAD (still ahead of the base), a new
+downstream claim, or a follow-up do.
+
+Session self-claims are **activity leases** that need no explicit release.
+The lease is renewed by the session's own Copilot session-state activity
+(`events.jsonl`/`workspace.yaml` mtimes, written on every prompt and tool
+call; no extra hook writes). An `active` session claim expires after 2 hours
+of inactivity (`AGENT_WORKTREES_SESSION_LEASE_TTL_S`); an `at-rest` claim on a
+finalized worktree after 30 minutes (`AGENT_WORKTREES_SESSION_LEASE_GRACE_S`).
+An expired lease makes the claim gone for sweeps and stops an idle open pane
+from keeping a finalized worktree ACTIVE. Missing activity data (for example a
+cross-machine session) stays unknown and is spared.
 
 This does not change destructive authorization: the existing `closure.final`
 and `action` fields still require fresh evidence. A cached descriptor can

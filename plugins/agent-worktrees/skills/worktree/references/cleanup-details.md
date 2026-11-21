@@ -92,12 +92,21 @@ liveness refuses recovery. Then retry ordinary non-forced cleanup; every other
 source, PR, ownership and cleanup gate remains in force. Generic
 `claims reconcile-at-rest` continues to exclude session claims.
 
+Usually no recovery is needed: session self-claims are activity leases. Once
+the session's own session-state activity is older than the lease (30 minutes
+for an `at-rest` claim on a finalized worktree, 2 hours for an `active`
+claim), sweeps treat the claim as gone and the idle pane no longer keeps the
+finalized worktree ACTIVE. Continued conversation after finalize does not
+reopen it; only new uncommitted/untracked changes, commits past the
+finalized HEAD, a new downstream claim or a follow-up do.
+
 **Known limitation:** a record whose tracking `status` is already
 `finalized` can still mask genuinely new WIP or conversation-only content added
 *after* finalize, because `_apply_tracking_override` currently collapses that
-fresh state to `COMPLETED` before `cleanup_disposition` sees it. The tests pin
-that behavior so it cannot silently drift, but the limitation itself remains
-tracked and unfixed here.
+fresh state to `COMPLETED` before `cleanup_disposition` sees it. Records with
+a finalize checkout stamp are no longer masked once HEAD has moved past the
+stamped head while still ahead of the base; legacy unstamped records keep the
+conservative masking, and the tests pin both behaviors.
 
 ## Dirty worktrees: resolve per-worktree, never blanket `--force`
 

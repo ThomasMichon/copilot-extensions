@@ -41,7 +41,13 @@ def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
         return RetirementBlocker(
             "open-pr", f"PR {numbers} still open/in review or state unconfirmed"
         )
-    held = [claim for claim in record.resources if claim.is_live or claim.is_unsettled]
+    from . import session_lease
+
+    held = [
+        claim for claim in record.resources
+        if (claim.is_live or claim.is_unsettled)
+        and not session_lease.expired_finalized_self_claim(record, claim)
+    ]
     if held:
         return RetirementBlocker(
             "held-claims", f"{len(held)} held resource claim(s) pending; inspect claims"
