@@ -3,6 +3,19 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_dependency_attribution_graph.py",
+      [
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[sibling-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[sibling-payload]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[unowned-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[unowned-payload]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[foreign-payload-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[foreign-payload-payload]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[wrong-identity-canonical]",
+        "test_canonical_materialized_graph_retains_only_its_owned_library_namespace[wrong-identity-payload]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_dependency_cli_refusals.py",
       [
         "test_probe_preserves_arguments_environment_and_cwd",
@@ -8810,6 +8823,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_dependency_attribution_graph.py": "f92810f50bc6bd0e1d37b2e0923d38b8811d6bdf2a468b5782188c9b023572b3",
     "tools/promotion_unit_tests/test_dependency_cli_refusals.py": "749eee348eef9d3048b62dc85ac39f7e8f600c233e49267af63d6d30131cca82",
     "tools/promotion_unit_tests/test_dependency_cutoff_controls.py": "60e49a49eac1db555407a1eb1fb6601f3209bdfe3a6760c4e16c3318af26bd14",
     "tools/promotion_unit_tests/test_dependency_retention_controls.py": "feebb728fd835274c4007a8984d38609e4b1b982d8f8141c422a91803e37dcfb",
