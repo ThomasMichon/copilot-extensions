@@ -8529,6 +8529,34 @@
         "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[False]",
         "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
       ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_installer_pip_index.py",
+      [
+        "test_index_uses_pip_file_precedence",
+        "test_existing_explicit_config_disables_user_files",
+        "test_explicit_index_avoids_config_reads[UV_DEFAULT_INDEX]",
+        "test_explicit_index_avoids_config_reads[UV_INDEX_URL]",
+        "test_explicit_index_avoids_config_reads[PIP_INDEX_URL]",
+        "test_null_config_disables_all_files",
+        "test_invalid_config_fails_without_exposing_values",
+        "test_empty_xdg_config_dirs_uses_unix_default[unset]",
+        "test_empty_xdg_config_dirs_uses_unix_default[empty]",
+        "test_macos_pip_paths_and_precedence[native]",
+        "test_macos_pip_paths_and_precedence[xdg]",
+        "test_macos_pip_paths_and_precedence[xdg-missing]",
+        "test_later_file_defaults_replace_earlier_global_options[index-url]",
+        "test_later_file_defaults_replace_earlier_global_options[index_url]",
+        "test_uv_config_default_precedes_pip_environment[explicit]",
+        "test_uv_config_default_precedes_pip_environment[discovered]",
+        "test_uv_config_default_precedes_pip_environment[project]",
+        "test_aliases_in_one_section_keep_the_last_normalized_value[underscore-first]",
+        "test_aliases_in_one_section_keep_the_last_normalized_value[dash-first]",
+        "test_uv_default_after_empty_system_directory_still_precedes_pip",
+        "test_effective_named_uv_default_respects_configuration_precedence[project]",
+        "test_effective_named_uv_default_respects_configuration_precedence[environment]",
+        "test_effective_named_uv_default_respects_configuration_precedence[distinct]"
+      ]
     ]
   ],
   "sources": {
@@ -8885,7 +8913,7 @@
     "libs/installation-context/_installation_context_source.py": "f377eb2bc2432742ba0b568ed0a45eddb22f371d6e3c45b661fc84e015705ad7",
     "libs/installation-context/_installation_context_worker.py": "9fa6e8b3babca28cea7502738db931afd9e15c96e6b6dc4842c4e1db8b91de05",
     "libs/installation-context/installation_context.py": "17b12e0dc590ead8b434db38a9d92c8f1fdde970346ccc58befd97a3696ba4fc",
-    "libs/installer-engine/installer_dependency_config.py": "feae756f8c302cb9992d015ffb94fb0390fe2fb3c968407e149a160f9093b11c",
+    "libs/installer-engine/installer_dependency_config.py": "061b90a87a7ee3cf951ae8440b9fc5ac28b033938170e2116bc0f8a28de09f94",
     "libs/installer-engine/installer_dependency_arguments.py": "395e0ac408c8666dc268000affdeb5730c3898a536dac5412abb7b72f43fd18f",
     "libs/installer-engine/installer_dependency_policy.py": "58bb3e9fb49cfba51fc8d7fad5f3ab6b70b2776be906a13726a8cfb492063184",
     "libs/installer-engine/installer_engine.py": "20b1e3e3c965874f2bda1554a742929e04e1ed7b2ac441b92b13c6f4d7246994",
@@ -9606,7 +9634,9 @@
     "worktree-manager/scripts/picker-snapshot/install.py": "7749f1be63c74cf546a0ce2d2549c3dfbdfc6813b8d154b48283b0995d4f90aa",
     "tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445",
     "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d",
-    "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47"
+    "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47",
+    "libs/installer-engine/installer_pip_index.py": "930924e082cbd52a3a21c328e814d3b0cff1773fd43317112f52aca6c5208529",
+    "tools/promotion_unit_tests/test_installer_pip_index.py": "3d8d66047f77db091ab55113eb0026dbcf2d6e32398210026d7a86555a411b77"
   },
   "coverage_targets": [
     "tools/sync-installer-engine.py",
@@ -10050,6 +10080,7 @@
     "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
     "libs/agent-procutil/src/agent_procutil/daemon_instances.py",
     "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
-    "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
+    "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py",
+    "libs/installer-engine/installer_pip_index.py"
   ]
 }

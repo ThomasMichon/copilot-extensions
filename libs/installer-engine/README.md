@@ -111,6 +111,25 @@ publication and service/command launcher adoption retain their existing owners.
 After lookup, pass the selected absolute Python to the existing lifetime owner.
 Do not insert `uv run` between a shell and its caller-owned worker: that changes
 the worker's original-parent relationship and is not the same custody protocol.
+Budget's POSIX installer also uses that selected interpreter for the canonical
+`installer_pip_index.py` helper, never a PATH `pip` or `pip3`. Its
+`scripts/pip-index-config` file pointer lets already-installed source preparers
+include the helper without knowing a new asset-registry entry. The clean-room
+copier likewise expands pointers before stamping a standalone snapshot.
+Existing uv environment/configuration defaults win, using the dependency-policy
+owner's discovery and TOML reader. Higher-priority named indexes shadow lower
+defaults; distinct unshadowed defaults remain effective. Only otherwise does the `global.index-url`
+bridge use `PIP_INDEX_URL` or pip's global/user/site/explicit-file order.
+The installer passes a valid active venv/Conda site prefix as configuration data
+before isolating interpreter hints; it never executes that environment's Python.
+Discovery runs only for package construction, not completed-slot reuse.
+The [pip configuration rules](https://pip.pypa.io/en/stable/topics/configuration/)
+include macOS Application Support and XDG data locations, empty-XDG defaults,
+per-file inherited defaults, explicit-file user
+suppression and null-file disabling. Malformed or unreadable configuration
+refuses the bridge without printing feed values. It does not install pip,
+mutate configuration or acquire another Python. Legacy option aliases are
+normalized after parsing, so the last spelling in a section wins.
 The native installation-context transport controls exercise the actual
 uv-selection-to-direct-worker handoff, including a large literal request,
 nonzero exit, poisoned selection hints and an unavailable managed interpreter.

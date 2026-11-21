@@ -480,17 +480,15 @@ _ensure_uv() {
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local py idx site_prefix=""
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
     fi
+    py="$(_bootstrap_python)" || return 1
+    idx="$(invoke_uv_bootstrap_environment "$py" -I -B "$SCRIPT_DIR/pip-index-config" \
+        --site-prefix "$site_prefix")" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 # Deploy the prepared-only binstub. The existing resolver selects the runtime;
@@ -754,7 +752,6 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
     exit 1
 fi
 
-_ensure_uv_index
 HAVE_UV=0
 if _ensure_uv; then HAVE_UV=1; fi
 
@@ -775,6 +772,7 @@ _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 
 _versioned_slot_clean || exit 1
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
+_ensure_uv_index
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     _step 'Creating managed Python venv via uv...'
     _versioned_slot_clean

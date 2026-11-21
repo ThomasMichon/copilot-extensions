@@ -635,7 +635,7 @@ def config_inputs(
         system = Path("/etc/uv/uv.toml")
         for config_directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
             if not config_directory:
-                break
+                continue
             candidate = base / config_directory / "uv" / "uv.toml"
             if candidate.is_file():
                 system = candidate

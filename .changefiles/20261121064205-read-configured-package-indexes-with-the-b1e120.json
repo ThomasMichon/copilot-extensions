@@ -1,0 +1,9 @@
+{
+  "comment": "Read configured package indexes with the managed bootstrap interpreter instead of PATH pip",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}
