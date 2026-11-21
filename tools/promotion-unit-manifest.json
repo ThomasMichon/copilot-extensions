@@ -9690,7 +9690,7 @@
     "plugins/agent-worktrees/src/agent_worktrees/source_owner_lookup.py": "36294015c33a45f84532776cdcc57814707e4794450913c4400b57b0214d78c5",
     "plugins/agent-worktrees/src/agent_worktrees/source_path_admission.py": "fb33508316eb591bfb13ce5407bdd97a012297b78e0da604e1bfc1560500e0ed",
     "plugins/agent-worktrees/src/agent_worktrees/providers/github_publication_labels.py": "e0afa70068d6772469978b99c4a0d5bf18b062731deb5bb7f10dc29072069d9c",
-    "plugins/agent-worktrees/src/agent_worktrees/pr_unverified_creation.py": "9a9ced3f1873e155a5b04882708a6783ff60b782636ae8c617cb3cc1f666727f"
+    "plugins/agent-worktrees/src/agent_worktrees/pr_unverified_creation.py": "18fd15a8ab42b686754805d71793eb5cdc8c68ade387ade9409b7669118ecb18"
   },
   "coverage_targets": [
     "tools/sync-versioned-runtime.py",
