@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Seed-fixture fulfillment and the separate adjacent publication](journal/2026/11.21-seed-fixture-fulfillment-and-adjacent-publication.md)
+
 - [2026-11-21 - Manual-claim resume and roster-publication contracts](journal/2026/11.21-manual-resume-and-publication-contracts.md)
 
 - [2026-11-21 - Current SSH mesh, target-live discovery and all-peer profile contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
