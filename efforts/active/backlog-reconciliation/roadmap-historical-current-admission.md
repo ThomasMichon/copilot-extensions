@@ -29,9 +29,18 @@ qualification; existing actual source/copy and ownership conditions remain.
 The [specific correspondence follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
 locates #6082's actual incomplete copied-source return and ten other
 particular historical controls without increasing the 75 bindings.
-#6888/#7208 correspondence and all current whole-home/admission gaps remain.
+At that observation, #6888/#7208 correspondence and all current
+whole-home/admission gaps remained.
 The separately reviewed #13935 planning acceptance does not turn these
 receipts or the serial metadata audit into new current authored unions.
+
+The later [Python-prerequisite study](journal/2026/11.21-current-python-prerequisite-contract.md)
+resolves that specific #6888 original/discussion gap after reconciling its
+actual reference-only refusal chain and separately qualifying the identified
+embedded originals. This is one new complete current issue study, distinct
+from the earlier 75 retained correspondences and from whole-home acceptance.
+The serial audit itself is not reclassified or rerun; other actual
+source/copy, authorship, ownership and correspondence gaps remain.
 
 ## Selection and observation boundary
 
