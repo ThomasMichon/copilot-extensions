@@ -6621,7 +6621,7 @@
         "plugins/agent-index/src/agent_index/indexing/change_hints.py": "76b8e295f0efffcf43c0b5188740fcfca9075eb649df86849a04d42eccac192f",
         "tools/promotion_unit_tests/test_paged_acquisition_requirement.py": "e1a1d3f2940c83e5cae2d858654a29d1fade73ca5a60aecb992a7859e01c63d6",
         "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py": "c04cac55a9dd6682eb7d3e354c450b8488cdef6e0905f0a80874e781d124207c",
-        "tools/promotion_unit_tests/test_checkout_disposition.py": "6fb76b462dbf84919ededfe62ecc181aa51533c61d71489b6d7dc140c70c8bc9",
+        "tools/promotion_unit_tests/test_checkout_disposition.py": "c5eb19fbca3c4b5bf3ccdb6db9fe592404be77e15fd46d2f572f0022c0cb701c",
         "plugins/agent-worktrees/src/agent_worktrees/prune.py": "5333c4f92f9dde1460b68156474d4c965360bc8d5940915fda6159a44c0d06e7",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "d287472e7ff9029b8f5d0d8fc07a6570520a8fb93176088192372e553153666c",
         "tools/promotion_unit_tests/test_watch_storage_contract.py": "b4ecc5a1eec12a6278469746846033c32957f94e42103c5a4ce60fdaf9f1e302",

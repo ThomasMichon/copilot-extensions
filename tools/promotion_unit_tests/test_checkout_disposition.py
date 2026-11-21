@@ -155,10 +155,12 @@ def test_cached_classification_uses_history_hint_without_fresh_process_work(
         "assemble_closure_descriptor", "interpret_descriptor_payload",
     ):
         vars(closure)[name] = None
+    lease = ModuleType(prefix + ".session_lease")
+    vars(lease)["expired_finalized_self_claim"] = lambda rec, claim: False
     module = ModuleType(prefix + ".prune")
     module.__package__ = prefix
     module.__file__ = str(PRUNE)
-    for imported in (git, tracking, claims, retirement, closure, module):
+    for imported in (git, tracking, claims, retirement, closure, lease, module):
         monkeypatch.setitem(sys.modules, imported.__name__, imported)
     exec(compile(PRUNE.read_bytes(), str(PRUNE), "exec"), module.__dict__)
     vars(module)["assess"] = lambda *a, **k: module.PruneVerdict(True, "completed-local", "cached Git facts")
