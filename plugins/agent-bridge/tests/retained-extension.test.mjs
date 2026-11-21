@@ -17,10 +17,14 @@ async function load(selected, version = 50, {
   snapshot, send, muted = false, eventFailure, compatible = true,
   historyReplay = false,
   historyResponse = { replay_accepted: true, ingested: 1 },
+  autoPoll = true, initialSessionId = "native-a", inboxMessages,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
+  const deferred = [];
   const shutdowns = new Map();
   const controlStarts = new Set();
+  const legacyAcked = new Set();
+  const registeredSessions = new Set();
   let closed = 0;
   let consumer;
   let joined;
@@ -38,6 +42,9 @@ async function load(selected, version = 50, {
   const binding = { installation: "synthetic-installation", epoch: 1 };
   const call = async (method, route, body) => {
     calls.push({ method, route, body });
+    if (method === "POST" && route === "/api/v1/live-sessions") {
+      registeredSessions.add(body.session_id);
+    }
     if (route.endsWith("/events") && ++eventPosts === 1 && eventFailure) {
       if (eventFailure === "throw") throw new Error("synthetic event POST reply lost");
       if (typeof eventFailure === "function") return eventFailure();
@@ -76,17 +83,25 @@ async function load(selected, version = 50, {
     else if (route.endsWith("/begin")) result = { begin: true };
     else if (route.endsWith("/outcome")) result = { stage: body.outcome };
     else if (route.includes("/messages?")) result = {
-      messages: [{
+      messages: (inboxMessages ?? [{
         id: 1, body: "legacy body", sender: "peer", kind: "prompt", delivery: "steer",
         ...(exact ? { exact_session: true, original_session_id: "native-a" } : {}),
-      }],
+      }]).filter((message) => !legacyAcked.has(message.id)),
     };
+    else if (route.endsWith("/messages/ack")) {
+      for (const id of body.ids) legacyAcked.add(id);
+      if (inboxMessages) {
+        for (let index = inboxMessages.length - 1; index >= 0; index--) {
+          if (body.ids.includes(inboxMessages[index].id)) inboxMessages.splice(index, 1);
+        }
+      }
+    }
     else if (route.endsWith("/controls")) result = { messages: [] };
     return { ok: true, status: 200, json: async () => result };
   };
   const context = vm.createContext({
     process: {
-      env: { SESSION_ID: "native-a", AGENT_BRIDGE_RETAINED_INBOX: selected,
+      env: { SESSION_ID: initialSessionId, AGENT_BRIDGE_RETAINED_INBOX: selected,
         ...(muted ? { AGENT_BRIDGE_DELIVERY: "0" } : {}),
         ...(headed ? { COPILOT_DRIVER_HEADED_CLIENT: "synthetic-selected-core" } : {}),
         ...(driver ? {
@@ -99,7 +114,18 @@ async function load(selected, version = 50, {
     },
     fetch: () => { throw new Error("real network forbidden"); },
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return { unref() {} }; },
-    clearInterval: () => {}, setTimeout, Buffer,
+    clearInterval: () => {},
+    setTimeout: (fn, ms) => {
+      if (ms !== 0) return setTimeout(fn, ms);
+      const task = { fn, cancelled: false, unref() {} };
+      deferred.push(task);
+      return task;
+    },
+    clearTimeout: (task) => {
+      if (deferred.includes(task)) task.cancelled = true;
+      else clearTimeout(task);
+    },
+    Buffer,
   });
   const dependencies = {
     "node:fs": {
@@ -186,10 +212,145 @@ async function load(selected, version = 50, {
   await settle();
   const poll = timers.find((timer) => timer.ms === 2_000);
   assert.ok(poll);
-  poll.fn();
-  await settle();
-  return { calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined, closed: () => closed };
+  if (autoPoll) {
+    poll.fn();
+    await settle();
+  }
+  const runDeferred = async () => {
+    for (let count = 0; deferred.length; count++) {
+      assert.ok(count < 10, "deferred inbox work must remain bounded");
+      const task = deferred.shift();
+      if (!task.cancelled) task.fn();
+      await settle();
+    }
+  };
+  return {
+    calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
+    closed: () => closed, runDeferred, registeredSessions,
+    rename: (sid) => { session.sessionId = sid; nativeId = sid; },
+  };
 }
+
+for (const selected of [undefined, "1"]) {
+  test(`${selected ? "retained" : "legacy"} registration drains the actual joined session without a poll tick`, async () => {
+    const f = await load(selected, 51, { autoPoll: false, initialSessionId: "stale-placeholder" });
+    await f.runDeferred();
+    assert.equal(f.sends.length, 1);
+    assert.equal(f.sends[0].mode, "enqueue");
+    const registrations = f.calls.filter((call) => call.route === "/api/v1/live-sessions");
+    assert.deepEqual(registrations.map((call) => call.body.session_id), ["native-a"]);
+  });
+}
+
+for (const resumed of [false, true]) {
+  test(`idle drains pending input ${resumed ? "after resume/re-registration" : "on the current registration"} without an unrelated turn`, async () => {
+    const messages = [];
+    let active = true;
+    const f = await load(undefined, 51, {
+      autoPoll: false, inboxMessages: messages,
+      send: () => {
+        if (active) throw new Error("SDK unavailable during the active turn");
+        return "accepted-idle-input";
+      },
+    });
+    await f.runDeferred();
+    f.handlers[0]({ type: "assistant.turn_start", data: {} });
+    messages.push({
+      id: 17, sender: "peer", body: "pending work", delivery: "steer",
+      exact_session: true, original_session_id: "native-a",
+    });
+    f.poll.fn();
+    await settle();
+    assert.equal(f.sends[0].mode, "immediate");
+    const notice = f.joined.hooks.onPostToolUse(
+      { sessionId: "native-a" }, { sessionId: "native-a" },
+    );
+    assert.match(notice.additionalContext, /pending.*SDK submission/s);
+    assert.doesNotMatch(notice.additionalContext, /END YOUR TURN/);
+    active = false;
+    if (resumed) {
+      f.rename("resumed-session");
+      messages[0].original_session_id = "resumed-session";
+    }
+    f.handlers[0]({ type: "session.idle", data: {} });
+    await f.runDeferred();
+    assert.equal(messages.length, 0);
+    assert.equal(f.sends.length, 2);
+    assert.equal(f.sends[1].mode, "enqueue");
+    assert.match(f.sends[1].prompt, /msg-id="17"/);
+    assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+    if (resumed) assert.ok(f.calls.some((call) =>
+      call.route === "/api/v1/live-sessions" && call.body.session_id === "resumed-session"));
+  });
+}
+
+test("retained resume follows the SDK session getter when idle events omit sessionId", async () => {
+  const f = await load("1", 51, { autoPoll: false });
+  await f.runDeferred();
+  assert.equal(f.sends.length, 1);
+  f.rename("resumed-session");
+  f.handlers[0]({ type: "assistant.idle", data: {} });
+  await f.runDeferred();
+  assert.equal(f.sends.length, 2);
+  assert.match(f.sends[0].prompt, /retained-session="native-a"/);
+  assert.match(f.sends[1].prompt, /retained-session="resumed-session"/);
+  assert.ok(f.calls.some((call) =>
+    call.route === "/api/v1/live-sessions/resumed-session/retained-inbox/begin"));
+  assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+});
+
+test("heartbeat re-registration rearms idle inbox delivery after the Bridge loses its row", async () => {
+  const messages = [];
+  const f = await load(undefined, 51, { autoPoll: false, inboxMessages: messages });
+  await f.runDeferred();
+  assert.equal(f.registeredSessions.has("native-a"), true);
+  f.registeredSessions.clear();
+  messages.push({ id: 21, sender: "peer", body: "pending after restart", delivery: "steer" });
+  f.timers.find((timer) => timer.ms === 30_000).fn();
+  await settle();
+  assert.equal(f.registeredSessions.has("native-a"), true);
+  await f.runDeferred();
+  assert.equal(messages.length, 0);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.sends[0].mode, "enqueue");
+  assert.match(f.sends[0].prompt, /msg-id="21"/);
+});
+
+test("idle wakes coalesce, ignore sub-agents and preserve inbox order across idle arrivals", async () => {
+  const messages = [];
+  const f = await load(undefined, 51, { autoPoll: false, inboxMessages: messages });
+  await f.runDeferred();
+  f.handlers[0]({ type: "assistant.turn_start", data: {} });
+  messages.push(...[31, 32].map((id) => ({
+    id, sender: "peer", body: `pending ${id}`, delivery: "steer",
+  })));
+  const before = f.calls.length;
+  f.handlers[0]({ type: "session.idle", agentId: "child", data: {} });
+  await f.runDeferred();
+  assert.equal(f.calls.length, before);
+  f.handlers[0]({ type: "assistant.idle", data: {} });
+  f.handlers[0]({ type: "session.idle", data: {} });
+  await f.runDeferred();
+  assert.equal(f.calls.slice(before).filter((call) => call.route.includes("/messages?")).length, 1);
+  assert.deepEqual(f.sends.map((options) => options.prompt.match(/msg-id="(\d+)"/)[1]), ["31", "32"]);
+  assert.ok(f.sends.every((options) => options.mode === "enqueue"));
+  messages.push({ id: 33, sender: "peer", body: "arrived while idle", delivery: "queue" });
+  f.poll.fn();
+  await settle();
+  assert.equal(f.sends.length, 3);
+  assert.match(f.sends[2].prompt, /msg-id="33"/);
+  f.poll.fn();
+  await settle();
+  assert.equal(f.sends.length, 3);
+});
+
+test("shutdown cancels an admitted deferred inbox wake without replacing the session", async () => {
+  const f = await load(undefined, 51, { autoPoll: false });
+  f.shutdowns.get("SIGTERM")();
+  await f.runDeferred();
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.closed(), 0);
+});
 
 test("actual retained activation reconstructs represented transcript without sending a prompt", async () => {
   const f = await load("1", 50, { historyReplay: true });
@@ -314,7 +475,8 @@ test("post-tool notification sees a stalled drain without network or false consu
   const input = { sessionId: "native-a", toolCallId: "tool-a" };
   const invocation = { sessionId: "native-a" };
   const notice = hook(input, invocation);
-  assert.match(notice.additionalContext, /1 pending.*END YOUR TURN/s);
+  assert.match(notice.additionalContext, /1 pending.*SDK submission/s);
+  assert.doesNotMatch(notice.additionalContext, /END YOUR TURN/);
   assert.equal(hook(input, invocation), undefined);
   assert.equal(f.joined.hooks.onPostToolUseFailure(input, invocation), undefined);
   assert.equal(f.calls.length, before);
@@ -426,10 +588,11 @@ test("an unconfirmed receipt retains its original native session across a bindin
   const flush = f.timers.find((timer) => timer.ms === 1_000);
   flush.fn();
   await settle();
+  f.rename("successor");
   f.handlers[0]({
     id: "successor-output", type: "assistant.message", sessionId: "successor", data: {},
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await f.runDeferred();
   release({ ok: false, status: 503 });
   await settle();
   flush.fn();
@@ -484,7 +647,7 @@ test("headed receiving preserves one-shot receipts using the public native SDK",
     assert.equal(f.driverSends.length, 0);
     assert.equal(f.headedSends.length, 0);
     assert.match(f.sends[0].prompt, /retained-handoff="handoff-a"/);
-    assert.equal(f.sends[0].mode, "immediate");
+    assert.equal(f.sends[0].mode, "enqueue");
     assert.ok(f.calls.filter((call) => /\/negotiate|\/enroll|\/begin|\/outcome/.test(call.route))
       .every((call) => call.body.receiving_api === "native-sdk-v1"));
     assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);

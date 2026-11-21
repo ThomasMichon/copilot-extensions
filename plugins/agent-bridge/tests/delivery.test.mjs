@@ -29,7 +29,9 @@ test("pending-input notice coalesces, preserves mute and ignores foreign root in
   const input = { sessionId: "root" }, invocation = { sessionId: "root" };
   notice.offered("root", [{ id: 1 }]);
   assert.equal(notice.postTool(input, invocation, "root", false), undefined);
-  assert.match(notice.postTool(input, invocation, "root", true).additionalContext, /END YOUR TURN/);
+  const hint = notice.postTool(input, invocation, "root", true).additionalContext;
+  assert.match(hint, /idle submission is not guaranteed/i);
+  assert.doesNotMatch(hint, /END YOUR TURN/);
   notice.offered("root", [{ id: 2 }]);
   assert.equal(notice.postTool(input, invocation, "root", true), undefined);
   now = 100;
@@ -436,6 +438,12 @@ test("deliveryPlan maps interrupt to abort, then an immediate send", () => {
   // enqueued messages the abort releases.
   assert.equal(plan.options.mode, "immediate");
   assert.equal(plan.options.source, DELIVERY_SOURCE);
+});
+
+test("idle peer steering enqueues a new turn rather than interjecting into no active turn", () => {
+  const msg = { id: 12, sender: "peer", body: "pending work", delivery: "steer" };
+  assert.equal(deliveryPlan(msg, { mainTurnRunning: false }).options.mode, "enqueue");
+  assert.equal(deliveryPlan(msg, { mainTurnRunning: true }).options.mode, "immediate");
 });
 
 test("deliveryPlan sends an interrupt immediately, without abort, when no main turn runs", () => {
