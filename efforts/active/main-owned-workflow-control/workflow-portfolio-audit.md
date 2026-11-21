@@ -3006,6 +3006,72 @@ reuse saving, native acceptance, runtime update or resource settlement is
 credited. Broader full-census/every-release, accepted-owner, native/lifecycle
 and comparable whole-flow gates remain open.
 
+Source #13932 merges at `2026-11-21T17:20:43Z` as
+`34c846bf2294791c5e1673eb50231e3334f9d010`. Corrected-head Copilot
+approval `6006873297` at `17:15:26Z` names
+`a80b5146c60ce3ee39c475592eadd793c1600175`; complete review and thread
+readback finds no finding or omitted page. Required source CI `44928749421`
+freshly executes all 6,705 cases with 35 deselections in 96.99 pytest seconds
+and 109.578 packet seconds; lookup takes 2,341 ms. The necessary accurate
+description correction naturally starts a second same-head source run,
+`44928795897`. Its unit job `136921248850` freshly executes all 6,705 cases
+in 160.98 pytest seconds and 181.064 packet seconds; lookup takes 750 ms.
+No exact-context equivalence, reuse saving or controlled timing gain is
+inferred from those separate executions.
+
+An initial managed merge refuses while that later run's required aggregate is
+still expected. After the existing run finishes successfully, seven fresh
+scoped source-verifier reads precede the successful managed Maintainer merge,
+without bypassing CI or manually dispatching/rerunning a workflow. Trusted
+metadata run `44928796370` also succeeds. Independent readback confirms merged
+state, empty closing references and open parent #6237.
+
+The full canonical parent is reread and only this finite source leaf is
+resolved. Ordinary pull-forward aborts on the two-commit squash history.
+Both local-only commits are verified as the published PR commits, and all
+five owned files match the confirmed merged tree before a retained backup
+and empty-range rebase advance the branch; scoped managed synchronization
+then succeeds. No unpublished work, peer files, original tests, retained
+resources or custody are discarded. Continue the remaining original-source
+census; broader acceptance remains open.
+
+### November 21 original UV-reference source admission
+
+The next coherent original materializer range contributes thirty cases through
+27 exact test objects, without new fixtures, parameter substitutions or copied
+assertions. Two cases exercise actual escaping-reference discovery. The other
+28 preserve canonical full-tree copy, missing/noneditable/unsafe/malformed
+input refusals, exact-root constraints, rewrite preflight, table/key/comment
+forms, aliases, fixture-only whole-repository/standalone selection and nested
+closure. The four cycle/order combinations and stale/non-directory sibling
+refusals retain their original file and source-immutability assertions.
+
+The range's ten other functions remain unchanged outside the packet: a real
+worker matrix, real checkout/Git reconstruction and eight native symlink
+witnesses. Earlier pointer admission remains thirteen cases; all 43 mapped
+originals are disjoint, leaving 122 original cases outside these slices.
+The cold `ctypes` cases remain excluded as recorded above; no import preload,
+mock, native execution or effect exception is introduced.
+
+Development collection proves exact original function identity and matching
+expanded suffixes. All thirty pass actual effect auditing in 4.156 seconds
+with zero prohibited effects and fifteen source-bound Python reads.
+Each discovery case has positive call-phase coverage in `uv_editable_ref.py`;
+each of the other 28 has it in `materialize_main.py`. Copied fixture Python
+text is data only. Only the new adapter binding is added: the original suite,
+both targets and reachable helpers are already bound. All preceding 6,705
+nodes retain their order and source hashes; 441 coverage targets, 89 helper
+decisions and the 300-second bound remain. The 6,735-node, 1,065-source
+manifest keeps compact-v2 storage at 773,034 bytes and flat-v1 evidence.
+
+Focused Ruff and whole-file strict typing pass the new adapter on Linux and
+Windows without suppressions. Current-head review and complete required Linux
+source CI remain delivery gates. Production, installer and workflow behavior are unchanged; a fresh-
+install lane is inapplicable. Live source Actions validates the packet consumer,
+not native or installed materialization. No workflow-count, reuse, controlled
+timing or review-throughput gain is credited. Broader full-census/every-release,
+accepted-owner, lifecycle and comparable whole-flow gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
