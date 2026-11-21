@@ -42,6 +42,10 @@ Supported native filesystems are ext2/3/4, XFS, Btrfs and tmpfs.
 The provider checks the actual mount table and device/subtree coordinates,
 so bind-mounted aliases cannot make input and output roles appear disjoint.
 Nested mounts inside an addressed tree and ambiguous stacked mounts refuse.
+Unrelated mounts may have non-filesystem origins, such as namespace identifiers;
+their origin coordinates are not interpreted. Every mountpoint must still be
+an absolute path without parent traversal, and mounts related to an addressed
+role retain all origin, filesystem and overlap checks.
 OverlayFS is refused because its merged view and directly addressed backing
 layers do not share reliable overlap coordinates. DrvFS/9p,
 network and FUSE filesystems are refused rather than treated as equivalent

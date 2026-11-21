@@ -11,6 +11,15 @@ using only the new flow before broad app refactoring. Extend the existing
 promotion and installer machinery; do not build a parallel dependency resolver,
 queue or lifecycle engine.
 
+For an independently admitted standalone Manager release, the footprint
+producer checks the release manifest against the pristine source payload
+before adding deployment metadata. It passes the verified root wheel and
+its complete native dependency set to the existing profile and footprint
+writers. The resulting slot can be copied and checked by the regular
+Manager construction reader without creating an environment or selecting a
+version. A missing dependency must fail before a footprint is published.
+This preparation step does not replace bootstrap, setup or recovery.
+
 The initial capture cleared review and merged in #12908. The operator
 subsequently selected Worktree Manager itself as the reference, through
 Manager-owned orchestration, complete Main/pinned-Dev/frozen-WIP footprints,

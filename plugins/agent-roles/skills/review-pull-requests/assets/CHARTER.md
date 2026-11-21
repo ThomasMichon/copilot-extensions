@@ -38,6 +38,9 @@ Apply [Maintainer mode](../references/maintainer-mode.md) only when selected.
   work-conserving minimum while eligible work and capacity exist, not a ceiling>`.
 - Explicit operator/host limits and expansion budget: `<actual constraints;
   additional authorized capacity may serve more work; no new resource grant>`.
+- Minimum available lanes, if explicitly requested: `<positive integer or not
+  selected; report actual available/running capacity and concrete shortfall,
+  not configured slots or retained handles>`.
 - Mode: `<continuous | finite-drain>`.
 - Stop criterion: `<explicit operator stop for continuous, or complete finite
   cohort/population outcome plus all parent obligations>`.
@@ -55,6 +58,11 @@ Apply [throughput and loop discipline](../references/throughput-and-loops.md).
 
 - Success measure: `<zero eligible PRs awaiting reviewer action in a complete
   census; terminal outcomes and explicit hand-backs per period>`.
+- Census/action counters: `<complete population, exclusions, actionable PRs,
+  retained follow-ups and holds; cold review_actions is not a complete census>`.
+- Ambiguous coverage: `<actual target-policy decisions for individual native
+  opinions versus aggregate state; unclear foreign coverage does not defer a
+  warranted authorized own review or force approval>`.
 - Re-review triggers: `<new head, author input, overlapping base change,
   relevant check/policy change; never an identical verdict on an unchanged head>`.
 - Per-PR round cap without new author input and per-PR time budget:
