@@ -1002,7 +1002,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13962 merges at `a7adc7b0eb0ae9c6ce94cdf74e6b8379139782e7` after
   exact-head Copilot approval and complete required Linux CI with all 6,881
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land twenty-nine original ordinary/simulated UV-reference
+- [x] Qualify and land twenty-nine original ordinary/simulated UV-reference
   cases by exporting the twenty-seven unchanged original functions, retaining
   every fixture, assertion and parameter identity. Leave all five real-link
   functions and their six cases outside; the original fallback/path
@@ -1013,6 +1013,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   current-head review and complete Linux source CI. This changes no helper,
   installer or workflow behavior and settles no broader native, installed,
   release, full-census, whole-flow or custody gate.
+  #13964 merges at `2108c80d318f848e2811cd0896e75a902319c2eb` after
+  exact-head Copilot approval and complete required Linux CI with all 6,962
+  merged-tree units freshly executed, including 52 concurrent peer additions.
+  Only failed guards are retried after a transient public-metadata failure;
+  the successful unit execution is retained. Broader parent gates stay open.
+- [ ] Qualify and land twelve original UV-executable fixture cases through
+  seven unchanged original functions, retaining every assertion, parameter
+  identity and original callback. Keep all nine ctypes, real-link and Windows
+  native-retention cases outside, including the case correctly refused on
+  `ctypes.dlopen`; do not replace native ACL work or preload a library for
+  admission. Require actual per-case configuration/projection owner calls,
+  zero prohibited effects, complete Python read closure, unchanged preceding
+  nodes/hashes/targets/helper decisions, compact/flat-v1 contracts and the
+  300-second bound, strict typing, current-head review and complete Linux source
+  CI. No installer behavior or broader native, installed, release, full-census,
+  whole-flow or custody acceptance changes.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
