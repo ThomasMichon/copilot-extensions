@@ -8,6 +8,13 @@ model-facing submission receipt, and a timed post-tool content fallback that
 cannot duplicate a later SDK delivery. Drive the source fix through tests,
 review and merge in the layer that actually owns delivery.
 
+The immediate assigned source slice is P13734-1/2: restore prompt idle-inbox
+submission through the existing SDK owner, including resume/re-registration,
+and remove unsupported end-turn promises from the post-tool hint. Complete
+focused tests, normal review and required CI without bypass, then return to
+the continuing Driver objective. This priority does not grant rollout or
+complete the broader receipt/fallback campaign.
+
 - **Slug:** `bridge-queued-steering`
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs targeting `dev`
