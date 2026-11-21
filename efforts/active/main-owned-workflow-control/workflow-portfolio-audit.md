@@ -2100,6 +2100,59 @@ current-head review and Linux source CI remain required. This bounded census
 increment is not registry, installed/native, every-release, full-census,
 workflow-count or whole-flow qualification. Existing owners and custody remain.
 
+Source #13887 merges at `2026-11-21T11:37:32Z` as
+`04510251c0f1551d7478bccc46f86eaef668fa41`. Copilot approval `6004955918`
+targets exact published head `0c58473bda098b2af758a03d5224a6c4cbd03780`;
+complete review/thread reads contain no active findings. Complete required
+source CI `44899605932` and trusted metadata CI `44899606017` pass.
+Unit job `136832534400` freshly qualifies the complete packet from
+`11:32:59Z` to `11:34:47Z`, then uploads its evidence. Its actual log reports
+6,469 passed and 35 deselected in 84.04 pytest seconds; the complete packet
+reports 96.151 seconds under the unchanged budget. Lookup takes 427 ms, only
+the run-inventory phase, and reports `no-qualified-completed-packet` before
+fresh execution. Lookup is not a bottleneck in this sample; these observations
+neither justify a provider rewrite nor attribute an earlier exhausted stage.
+They are not controlled before/after timing or a workflow-count reduction.
+Seven fresh live scoped verifier reads precede the normal managed Maintainer
+merge; no failing CI is bypassed. Closing references are empty and parent
+#6237 stays open. The full canonical parent is reread and only this finite
+admission item is resolved. Broader native, every-release, full-census,
+whole-flow and retained-custody acceptance remain open.
+
+### November 21 synthetic dependency-metadata unit admission
+
+Thirteen more exact original functions add 26 cases to the existing release-age
+adapter: 84 of the unchanged original suite's 203 cases are now selected.
+The other 119 originals remain outside the packet, without relabeling them all
+as native. The added cases retain their original fixture-owned manifest trees,
+synthetic metadata, function objects, parameter IDs and assertions. No producer,
+fixture or policy is rewritten to manufacture eligibility.
+
+They exercise the narrowly reviewed OTLP prerelease pin without waiving age,
+yank or parent-declaration checks; complete fixture declaration categories;
+contained local-source identity and canonical external closure; direct-URL
+and metadata-error sanitization; invocation cache reuse; unfiltered host
+markers; legacy development/npm declarations; and include cycle/escape refusal.
+The real repository inventory, bundled-wheel bytes, symlink/native-toolchain,
+transport and installer cases are not selected.
+
+All 26 pass the actual `UnitRun` auditor with zero prohibited effects and their
+own production call-phase coverage in 2.438 development seconds. The complete
+observed Python read closure has fourteen inputs, all already hash-bound.
+Fixture inventory lazily imports the standalone artifact/build definitions;
+it never invokes their builders. Collection checks exact original test objects
+and the complete parameter-ID set; adapter export order need not match original
+file order. The existing parameter-strategy warning remains visible.
+
+Admission preserves every preceding node, target and source entry, changing
+only the existing adapter's digest and adding 26 nodes: 6,495 nodes, 1,044
+sources and 436 targets. The profile, all 88 release-helper decisions and
+300-second packet budget remain unchanged. The manifest is 1,040,426 bytes
+under its unchanged 1 MiB cap, with existing node/source-map layout retained.
+Complete current-head review and Linux source CI remain required. This is
+not registry, installed/native, every-release, full-census, workflow-count or
+whole-flow qualification; existing owners and custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

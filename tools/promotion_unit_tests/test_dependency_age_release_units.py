@@ -26,6 +26,19 @@ _SELECTED = (
     "test_native_uv_package_override_cannot_disable_or_weaken",
     "test_native_uv_stronger_global_and_pip_policy_cannot_be_weakened",
     "test_index_specific_cutoffs_rejected_even_if_nominally_stronger",
+    "test_reviewed_otlp_prerelease_pin_keeps_seasoning",
+    "test_reviewed_otlp_pin_does_not_expand_to_other_declarations",
+    "test_reviewed_otlp_pin_never_waives_artifact_age_or_yank_checks",
+    "test_full_inventory_requirements_npm_and_vendor_exclusion",
+    "test_github_action_manifest_inventoried_and_age_audited",
+    "test_local_exemption_requires_contained_path_and_audits_closure",
+    "test_arbitrary_sources_do_not_exempt",
+    "test_name_alone_is_not_repository_source_attribution",
+    "test_direct_urls_and_metadata_errors_are_sanitized",
+    "test_public_metadata_cached_and_host_markers_not_filtered",
+    "test_legacy_uv_dev_declarations_and_npm_audit",
+    "test_vendored_path_source_requires_canonical_external_closure",
+    "test_includes_cycle_and_escape_are_rejected",
 )
 for _name in _SELECTED:
     globals()[_name] = getattr(_original, _name)

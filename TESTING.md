@@ -11283,13 +11283,17 @@ propagation. All 54 remaining original cases stay outside this packet,
 including real Git/process fixtures and controls coupled to those fixtures.
 The original tests and scanner are unchanged; no Git command, live identifier
 sweep or real denylist read executes in the selected cases.
-The dependency release-age adapter exports 58 original in-process cases through
-thirteen exact test functions. It retains inclusive timestamp bounds, newest-
+The dependency release-age adapter exports 84 original in-process cases through
+26 exact test functions. It retains inclusive timestamp bounds, newest-
 file/yank refusal, Python floor and satisfiability rules, controlled npm
-metadata and UV cutoff/override rejection. All 145 remaining original cases
-stay outside this packet. Shared inventory and installer-policy modules are
-imported, not invoked to inventory the checkout, query a registry or prepare an
-installation. The original unselected npm-toolchain skip marker still observes
+metadata and UV cutoff/override rejection. Synthetic manifest trees additionally
+exercise scoped OTLP prerelease seasoning, declaration inventory, local-source
+attribution and canonical closure, sanitized metadata errors, cache reuse,
+unfiltered host markers and requirements include refusal. All 119 remaining
+original cases stay outside this packet. Inventory operates only on fixture-owned
+trees, never the actual checkout; shared build and installer-policy modules are
+imported, not invoked to build, query a registry or prepare an installation.
+The original unselected npm-toolchain skip marker still observes
 tool presence at import; no npm, UV, network or installer process executes.
 Keep `tools/promotion-unit-manifest.json` node entries unindented, one per line,
 while retaining the source map's existing layout so independent hash updates
