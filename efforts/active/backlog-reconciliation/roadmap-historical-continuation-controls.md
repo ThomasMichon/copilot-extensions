@@ -190,7 +190,7 @@ arbitrary original study. Actual source/copy and ownership conditions remain.
 | Issue | Continuing discriminator |
 |---|---|
 | #6507 | Earlier actual full-default Linux evidence supersedes targeted-only characterization, not the original exact native full-suite proof OR attributable original-scope disposition. #6506 bootstrap and #6237 release/portfolio custody remain separate. A later source-history preflight is not a permanent ban from numerical citation or a new whole-read receipt. |
-| #6617 | The earlier preflight retained an unresolved specific-unit cause. A null referenced-commit identity is irrelevant to content admission; references alone do not prove a copied-source ban. Actual cause/current correspondence still needs reconciliation before affected text, not an automatic retry or blanket release. |
+| #6617 | The actual earlier collector used numerical-reference intersection, prospectively reconciled before a fresh qualified complete original and all eight discussions. Preserve task-scoped transactional authority, outbound push/backstop notification, existing-supervisor restricted execution, explicit central/local writer selection and actual container/DevBox-aware placement. Earlier merged-source reports and completed auditability selection do not prove current placement, native enrollment, exact phase acceptance or whole-home fulfillment. Existing owners, actual linked-source/copy restrictions and old withheld packets remain; no new relay proxy, queue, scheduler, implementation-absence finding or activation follows. |
 | #6620 | The prior receiving study identifies this as the canonical reclamation receiver, preserving #1488/#1666/#1918/#3114/#4101 cohort duties and #1519's different acceptance. It is not whole-parent deletion authority or a fresh current original/home comparison. |
 | #6677 | The earlier study retains manual versus supervised/park custody, no unintended rewake, explicit headed-multiplexer lineage and receipt versus actual pickup. Preserve the literal SUSPENDED OR PAUSED alternative; current whole correspondence is not newly established. |
 | #6748 | The prior study preserves republish OR fresh read PLUS stale-owner recovery; #6840 client startup and #7937 mutation receipts are not full convergence. A later qualified complete keeper read and verified OPEN preservation are already recorded; no repeated inquiry, mutation or new whole-current claim follows. |
@@ -220,6 +220,12 @@ restrictions, reopen old unknown outputs or establish retrospective compliance.
 The identified embedded #10060/#10186 original sources were separately
 qualified; an unrelated withheld #10348 PR description is not the #10060
 original. Genuine independent containing-copy conditions remain protected.
+
+The separately qualified [fleet-authority study](journal/2026/11.21-fleet-authority-current-contract.md)
+also supplies the complete current #6617 original/discussion contract after
+resolving that particular collector's reference-only cause. It updates the
+existing row above, not the 131-row membership or 75 earlier retained bindings.
+It does not inspect a linked original, product implementation or whole home.
 
 ## Owner and publication receipts
 
