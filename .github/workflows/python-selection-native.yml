@@ -23,8 +23,11 @@ on:
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
       - plugins/budget-guidance/payload-invocation.json
       - plugins/budget-guidance/scripts/install.ps1
+      - plugins/budget-guidance/scripts/uninstall-runtime.ps1
+      - plugins/budget-guidance/scripts/uninstall-runtime.sh
       - plugins/budget-guidance/tests/test_installers.py
       - plugins/budget-guidance/tests/test_install_transaction_lock.py
+      - plugins/budget-guidance/tests/test_managed_uninstall.py
 
 permissions:
   contents: read
@@ -72,15 +75,21 @@ jobs:
           --junit-dir qualification-evidence/budget-lock
           --allow-explicit-tiers
           -k "contend_before_snapshot_publication and prerequisites and not bash"
-      - name: Require actual command, installer and lock controls
+      - name: Qualify prepared-only managed uninstall on both PowerShell engines
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_managed_uninstall.py
+          --junit-dir qualification-evidence/budget-uninstall
+          --allow-explicit-tiers -k ps1
+      - name: Require actual command, installer, lock and uninstall controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4};
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock','budget-uninstall')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':9,'budget-lock':4,'budget-uninstall':8};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, nine installer and four prerequisite-lock controls passed without skips')"
+          print('29 command, nine installer, four prerequisite-lock and eight uninstall controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

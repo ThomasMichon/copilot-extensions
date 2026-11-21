@@ -22,7 +22,6 @@ SITES = (
     ("agent-dispatch", "uninstall-runtime.sh", "_finite_stop_tool"),
     ("agent-vault", "uninstall-runtime.sh", "_finite_runtime_uninstall"),
     ("agent-vault", "uninstall-runtime.sh", "_finite_stop_tool"),
-    ("budget-guidance", "uninstall-runtime.sh", "_finite_runtime_uninstall"),
     ("agent-index", "install.sh", "_finite_index_uninstall"),
     ("agent-machines", "legacy-uninstall.sh", "legacy"),
     ("agent-containers", "legacy-uninstall.sh", "legacy"),
