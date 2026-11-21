@@ -2,26 +2,33 @@
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from . import ci_launch_observation
 from . import coordinator_execution_runtime as runtime
 from .execution_scope_binding import resolve_execution_installation
 from .loop_governance import LoopGovernance
-from .queue import SpawnReservation, Task, TaskQueue
+from .queue import TaskQueue
+from .queue_common import Task
 from .queue_execution_custody import ExecutionSendIdentity, SendKind, execution_scope_qualified
 from .queue_execution_scopes import ExecutionScopeBinding
-from .queue_records import TaskError
+from .queue_records import SpawnReservation, TaskError
+from .registrations import RegistrationRecord
 
 
 @dataclass
 class ExecutionSendAttempt:
     accepted: bool = False
+    staging_handle: str | None = None
 
-    def sent(self) -> None:
+    def sent(self, *, staging_handle: str | None = None) -> None:
         self.accepted = True
+        self.staging_handle = staging_handle
 
 
 class CoordinatorExecutionProvenance:
@@ -36,6 +43,8 @@ class CoordinatorExecutionProvenance:
 
     def prepare(self) -> tuple[ExecutionScopeBinding, str] | None:
         # Historical qualification cannot disappear with a missing binding row.
+        if self.task.repo is None or self.task.source is None:
+            return None
         with self.queue._connect() as conn:
             qualified = execution_scope_qualified(conn, self.task.repo, self.task.source)
         if not qualified:
@@ -69,16 +78,46 @@ class CoordinatorExecutionProvenance:
 
 class CoordinatorExecutionSender(CoordinatorExecutionProvenance):
     def __init__(
-        self, queue: TaskQueue, task: Task, reservation: SpawnReservation, incarnation: str
+        self, queue: TaskQueue, task: Task, reservation: SpawnReservation, incarnation: str,
+        registration: RegistrationRecord | None = None,
     ) -> None:
         super().__init__(queue, task, incarnation)
         self.reservation = reservation
+        self.registration = registration
+
+    @contextmanager
+    def ci_launch(self, venue: str, workspace: str) -> Iterator[ExecutionSendAttempt]:
+        try:
+            token = ci_launch_observation.begin_if_unqualified(
+                self.queue, self.task, self.reservation, self.registration, venue, workspace,
+            )
+        except (sqlite3.Error, OSError) as exc:
+            raise ci_launch_observation.ObservationConflict(
+                "CI launch observation admission is unconfirmed"
+            ) from exc
+        if token is None:
+            with self.attempt("launch") as attempt:
+                yield attempt
+            return
+        legacy = ExecutionSendAttempt()
+        handle = None
+        try:
+            yield legacy
+            handle = legacy.staging_handle if legacy.accepted else None
+        finally:
+            try:
+                ci_launch_observation.settle(self.queue, self.reservation.key, token, handle)
+            except (TaskError, sqlite3.Error, OSError):
+                # Keep pending; observation failure must not discard an accepted body's handle.
+                logging.getLogger(__name__).exception("CI launch settlement not recorded")
 
     @contextmanager
     def attempt(self, kind: SendKind) -> Iterator[ExecutionSendAttempt]:
         attempt = ExecutionSendAttempt()
         prepared = self.prepare()
         if prepared is None:
+            if kind == "launch" and self.task.source == "ci-repair":
+                raise ci_launch_observation.ObservationConflict("CI launch requires its target")
             yield attempt
             return
         binding, runtime_id = prepared

@@ -581,13 +581,30 @@ authorizes critical main-path acceptance or a bounded administrative change.
   whole-flow latency; the full source-CI invocation remains.
 - [x] Observe qualified release adoption of #8213 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
-- [ ] Qualify and land invocation-local fieldless AST dispatch specialization
+- [x] Qualify and land invocation-local fieldless AST dispatch specialization
   for the headless guard, retaining every input read/parse, all six rules,
   allowances, custom handlers and malformed-instance fallback.
-  The [bounded source candidate](workflow-portfolio-audit.md#november-21-fieldless-visitor-dispatch-candidate)
-  has focused, strict-typing and full-corpus equivalence evidence; current-head
-  source review and required Linux CI remain before delivery. This is recipe
-  work reduction, not fewer workflow invocations or native qualification.
+  The [bounded source slice](workflow-portfolio-audit.md#november-21-fieldless-visitor-dispatch-candidate)
+  merges in #13787 at `d72add0240b7cdd4929cb10c26eee4cac29bda50` after
+  current-head Copilot approval and complete required Linux CI, with focused,
+  strict-typing and full-corpus equivalence evidence. This is recipe work
+  reduction, not fewer workflow invocations, qualified release adoption or
+  native lifecycle qualification.
+- [x] Qualify and land the original headless-guard units in the closed packet:
+  isolate their public allowlist fixture input, retain all 113 original cases,
+  parameterization and assertions, and export the original functions/fixture
+  with one isolation regression. Require actual guard call coverage for all
+  114 additions and complete current-head source CI without changing packet
+  budgets, source-admission rules or helper-coverage gates. #13798 merges at
+  `83a3973a982ed38f0791f133f5b9389e4a8c2434` after exact-head Copilot approval
+  and complete required Linux CI with freshly executed packet evidence.
+  This closes only the bounded source admission, not full-census, every-release,
+  native or workflow-consolidation acceptance.
+- [ ] Qualify and land the original sibling guard units through exact test
+  objects: 91 tracking-write cases and twelve asyncio analysis cases, preserving
+  both original suites and the ten explicit native subprocess residuals.
+  Require unchanged previous admission, real per-case production call coverage,
+  source closure, helper gates, packet budget and current-head source CI.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
