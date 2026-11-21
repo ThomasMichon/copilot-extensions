@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   createRetainedInbox, retainedDeliverySelected, retainedConsumption, retainedConsumptionReason,
 } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
@@ -13,6 +14,34 @@ const binding = { installation: "synthetic-installation", epoch: 1 };
 const identity = { pid: 102, process_started_at: 1 };
 const clone = (value) => structuredClone(value);
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("buffered native headers do not retain their large message bodies", () => {
+  const moduleUrl = new URL(
+    "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs",
+    import.meta.url,
+  ).href;
+  const child = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "--eval", `
+    import assert from "node:assert/strict";
+    import { createRetainedInbox } from ${JSON.stringify(moduleUrl)};
+    const inbox = createRetainedInbox({ session: { sessionId: "native-memory" } });
+    const observe = (id) => inbox.observe("native-memory", {
+      type: "user.message",
+      data: { source: "agent-bridge", turnId: "turn-" + id, content:
+        '<agent-message retained-session="native-memory" retained-consumer="original" '
+        + 'retained-handoff="handoff-' + id + '" msg-id="' + id + '">'
+        + "body".repeat(1024 * 1024) + id },
+    });
+    global.gc();
+    const before = process.memoryUsage().heapUsed;
+    for (let id = 1; id <= 12; id++) observe(id);
+    global.gc();
+    const retained = process.memoryUsage().heapUsed - before;
+    assert.ok(retained < 8 * 1024 * 1024, "buffer retained " + retained + " bytes");
+    inbox.close();
+  `], { encoding: "utf8", windowsHide: true, timeout: 15_000 });
+  assert.ifError(child.error);
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+});
 
 function fixture() {
   const f = {

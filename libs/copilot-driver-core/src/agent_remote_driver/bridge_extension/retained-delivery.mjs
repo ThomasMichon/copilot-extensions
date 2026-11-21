@@ -1,6 +1,7 @@
 // Opt-in retained inbox consumer. SQLite owns attempts and outcomes; this
 // module owns only the one SDK invocation authorized by a true /begin reply.
 import { randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { buildDeliveredSendOptions, deliveryPlan, escAttr, isSubAgentEvent } from "./delivery.mjs";
 import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
 
@@ -557,8 +558,8 @@ export function createRetainedInbox({
       if (end < 0 || end >= NATIVE_HEADER_LIMIT) return;
       const id = headerMessageId(candidate.slice(0, end));
       if (id === null) return;
-      // Retain correlation metadata only; the original matcher still owns proof.
-      const header = candidate.slice(0, end + 1);
+      // Copy UTF-16 code units: V8 slices can retain the entire original body.
+      const header = Buffer.from(candidate.slice(0, end + 1), "utf16le").toString("utf16le");
       const key = `${sid}:${id}:${header}`;
       if (!nativeInputs.has(key) && nativeInputs.size >= NATIVE_INPUT_LIMIT) {
         nativeInputs.delete(nativeInputs.keys().next().value);

@@ -241,7 +241,9 @@ when the root event includes the SDK's native consuming `turnId`. A caller's
 Older/unavailable live evidence keeps the existing historical recovery path;
 no new minimum provider version is inferred from a package number.
 Its callback retains only the native binding, message correlation and envelope
-header, not the message body. It performs no network, SDK, filesystem or log I/O.
+header, not the message body. Bounded headers are copied into independent string
+storage so substring backing stores cannot keep the full input alive.
+It performs no network, SDK, filesystem or log I/O.
 The existing off-loop recovery first matches those observations against the
 original receipts, rechecks native context and reports through the existing
 original-outcome owner before waiting for historical evidence. A failed or
