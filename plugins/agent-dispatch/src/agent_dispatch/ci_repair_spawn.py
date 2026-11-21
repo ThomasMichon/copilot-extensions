@@ -6,17 +6,31 @@ import json
 import sqlite3
 import subprocess
 import uuid
+from collections.abc import Callable, Collection
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from .ci_launch_observation import ObservationConflict
 from .producers.ci_repair import AdmissionRefused, _invoke, execution, failure
 from .queue_records import TaskError
 
 if TYPE_CHECKING:
     from .coordinator_execution_sender import CoordinatorExecutionSender
+    from .queue import TaskQueue
+    from .queue_common import Task
+
+Json = dict[str, Any]
+Snapshot = tuple[str, tuple[Any, ...] | None, tuple[Any, ...] | None]
 
 
-def reservation_authorized(conn, task, reserved_by: str | None, *, transition: dict | None = None) -> bool:
+class CIRepairSpawn(Protocol):
+    requires_reusable_worktree: bool
+
+    def __call__(self, task: Json) -> tuple[bool, Json]: ...
+
+
+def reservation_authorized(conn: sqlite3.Connection, task: Task, reserved_by: str | None,
+                           *, transition: Json | None = None) -> bool:
     """Fence reservations to the persisted, validated specialized lane."""
     if not reserved_by or reserved_by != task.origin_ref:
         return False
@@ -46,7 +60,7 @@ def reservation_authorized(conn, task, reserved_by: str | None, *, transition: d
         return False
 
 
-def authority_snapshot(conn, task) -> tuple:
+def authority_snapshot(conn: sqlite3.Connection, task: Task) -> Snapshot:
     """Capture task, registration and latest session identity for compare-before-write."""
     registration = conn.execute("SELECT * FROM registrations WHERE id = ?", (task.origin_ref,)).fetchone()
     reservation = conn.execute(
@@ -56,16 +70,17 @@ def authority_snapshot(conn, task) -> tuple:
     return repr(task), tuple(registration) if registration else None, tuple(reservation) if reservation else None
 
 
-def claim_admissions(queue, worker_id, caps, repo, task_id) -> dict:
+def claim_admissions(queue: TaskQueue, worker_id: str, caps: Collection[str],
+                     repo: str | None, task_id: str | None) -> dict[str, Snapshot]:
     """Probe only eligible CI tasks outside any coordinator write transaction."""
-    admitted = {}
+    admitted: dict[str, Snapshot] = {}
     if "ci-repair-admitted" not in caps or not task_id:
         return admitted
     with queue._connect() as conn:
         rows = conn.execute("SELECT id FROM tasks WHERE source = 'ci-repair' AND status = 'queued'").fetchall()
         for row in rows:
             task = queue._fetch(conn, row["id"])
-            if (task_id and task.id != task_id) or (repo and task.repo != repo):
+            if task is None or (task_id and task.id != task_id) or (repo and task.repo != repo):
                 continue
             reservation = conn.execute(
                 "SELECT session_handle FROM spawn_reservations WHERE task_id = ? AND state = 'spawned' ORDER BY attempt DESC LIMIT 1",
@@ -80,7 +95,7 @@ def claim_admissions(queue, worker_id, caps, repo, task_id) -> dict:
                 admitted[task.id] = snapshot
     return admitted
 
-def validate_bindings(bindings: list[dict]) -> None:
+def validate_bindings(bindings: object) -> None:
     """Require an explicit non-empty execution allowlist."""
     if not isinstance(bindings, list) or not bindings:
         raise AdmissionRefused("ci_repair_bindings must be a non-empty list")
@@ -98,26 +113,26 @@ def validate_admission_command(command: object) -> None:
         raise AdmissionRefused("launch admission command must be a non-empty argv list")
 
 
-def cli_bindings(bindings: object, command: object) -> tuple[list[dict], list[str]]:
+def cli_bindings(bindings: object, command: object) -> tuple[list[Json], list[str]]:
     """Parse CLI JSON once and report malformed configuration without a traceback."""
     try:
         parsed_bindings = json.loads(bindings) if isinstance(bindings, str) else bindings
         parsed_command = json.loads(command) if isinstance(command, str) else command
         validate_bindings(parsed_bindings)
         validate_admission_command(parsed_command)
-        return parsed_bindings, parsed_command
+        return cast(list[Json], parsed_bindings), cast(list[str], parsed_command)
     except (ValueError, TypeError) as exc:
         raise SystemExit(f"Invalid CI repair bindings/admission command: {exc}") from exc
 
 
 def make_ci_repair_spawn(
-    bindings: list[dict],
+    bindings: list[Json],
     *,
     route: str = "",
     admission_command: list[str] | None = None,
-    admission_runner=subprocess.run,
+    admission_runner: Callable[..., Any] = subprocess.run,
     execution_sender: CoordinatorExecutionSender | None = None,
-):
+) -> CIRepairSpawn:
     """Select only admitted task overlays; never allocate a host worktree."""
     from . import bridge, embody
 
@@ -125,7 +140,7 @@ def make_ci_repair_spawn(
     if admission_command is not None:
         validate_admission_command(admission_command)
 
-    def spawn(task: dict) -> tuple[bool, dict]:
+    def spawn(task: Json) -> tuple[bool, Json]:
         try:
             if task.get("source") != "ci-repair" or task.get("require_verification") is not True:
                 raise AdmissionRefused("not an admitted CI repair task")
@@ -135,7 +150,8 @@ def make_ci_repair_spawn(
             selected = execution(payload.get("execution"))
             if selected not in bindings:
                 raise AdmissionRefused("CI repair execution is not allowlisted")
-            evidence = failure(payload.get("failure"), task.get("target_repo") or task.get("repo"))
+            repository = task.get("target_repo") or task.get("repo")
+            evidence = failure(payload.get("failure"), cast(str, repository))
             if (
                 task.get("dedup_key")
                 != f"ci-repair:{evidence['repository']}:{evidence['signature']}"
@@ -176,8 +192,9 @@ def make_ci_repair_spawn(
         seed = seed.replace(
             f"claim --task {task['id']}", f"claim --task {task['id']} --capability ci-repair-admitted"
         )
+        venue, workspace = selected["venue"], selected["workspace"]
         custody = (
-            execution_sender.attempt("launch")
+            execution_sender.ci_launch(venue, workspace)
             if execution_sender is not None
             else nullcontext(None)
         )
@@ -187,9 +204,9 @@ def make_ci_repair_spawn(
                 try:
                     result = bridge.spawn_worker(
                         task["id"],
-                        agent=selected["venue"],
+                        agent=venue,
                         charter=selected["charter"],
-                        target_dir=selected["workspace"],
+                        target_dir=workspace,
                         worker_id=worker_id,
                         prompt="Remain idle. Do not claim or execute any task until the coordinator sends an admitted task turn.",
                         wait=False,
@@ -204,7 +221,9 @@ def make_ci_repair_spawn(
                 if not sid:
                     return False, {"error": "CI repair spawn omitted session identity"}
                 if attempt is not None:
-                    attempt.sent()
+                    attempt.sent(staging_handle=f"local-body:{sid}")
+        except ObservationConflict:
+            raise
         except (TaskError, OSError, sqlite3.Error) as exc:
             return False, {
                 "error": str(exc),
@@ -212,5 +231,6 @@ def make_ci_repair_spawn(
             }
         return True, {"session": f"local-body:{sid}", "worktree": None, "task_seed": seed}
 
-    spawn.requires_reusable_worktree = False
-    return spawn
+    factory = cast(CIRepairSpawn, spawn)
+    factory.requires_reusable_worktree = False
+    return factory
