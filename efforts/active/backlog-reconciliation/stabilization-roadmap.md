@@ -57,6 +57,13 @@ research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
 
+The [specific receipt follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
+replaces generic correspondence placeholders with actual retained controls,
+including #6082's incomplete copied-source boundary, without inventing
+whole-current coverage or releasing sources. It records actual #13935
+planning acceptance and separate #13930/#13932 unit-admission reports;
+the original technical programs and fixed whole-queue target remain open.
+
 The [selected integrated execution waves](roadmap-execution-waves.md) compose
 the reviewed leaf evidence into original-owner entry, useful slices, scoped
 precedences and source/release/consumer exits. Exact 455-identity coverage
