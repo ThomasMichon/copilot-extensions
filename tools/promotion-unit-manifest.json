@@ -2,6 +2,7 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+"tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_selector_reuses_node_and_attributable_cli_without_cmd_spawn",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_cli_respects_ca_registry_and_tls[True]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_cli_respects_ca_registry_and_tls[False]",
 "tools/promotion_unit_tests/test_dependency_age_release_units.py::test_npm_insecure_environment_refused",
@@ -6561,6 +6562,7 @@
 "tools/promotion_unit_tests/test_bridge_session_inventory.py::test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
     ],
     "coverage_targets": [
+    "worktree-manager/scripts/picker-snapshot/install.py",
     "tools/dependency_age.py",
     "tools/check-no-internal-identifiers.py",
     "tools/application_footprint.py",
@@ -7000,7 +7002,7 @@
     "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_dependency_age_release_units.py": "82b6757efb35caf40e1dd9a84554210e6ef4d6c1faeef6ac5ed543d2aa26b9e4",
+        "tools/promotion_unit_tests/test_dependency_age_release_units.py": "9d27d41d329d19412ec5aba99bee8773a2d5dee7bff8a9e1198528c9ecdb05ba",
         "tools/test_dependency_age.py": "b019c533b68d607844044ca7647308ff37e0d746ddbb04e6c0a689157f0f6dc5",
         "tools/promotion_unit_tests/test_identifier_git_protocol_units.py": "ef063a19d9d58f39db2065129f5478df764b3dc7bfbb7876c6d74ddec1bbe6c4",
         "tools/test_check_no_internal_identifiers.py": "3ae7cddea5248d019a43fe014d85fff60258ede94e2668ca8d15f7d495a08fde",
@@ -8047,6 +8049,7 @@
         "plugins/agent-bridge/src/agent_bridge/session_host/registered_inventory.py": "bd5f0cf12905c75279999d09660e700bf5d961a58643ed87a9ca23cf2d5eeb2e",
         "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py": "b2691f3fa0791e9ab3a0190729083c8671093b55c37c01298bd79be6f503936f",
         "libs/agent-procutil/src/agent_procutil/daemon_observation.py": "371bf2a0cb27b57d8fd5c421099246c209d239801dcdfc15d16827c054fbe97d",
-        "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py": "2a5607e7b5252cfa9d1121883a7dedc07637dd1eb3f7aac0d6c0217f971ec826"
+        "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py": "2a5607e7b5252cfa9d1121883a7dedc07637dd1eb3f7aac0d6c0217f971ec826",
+        "worktree-manager/scripts/picker-snapshot/install.py": "7749f1be63c74cf546a0ce2d2549c3dfbdfc6813b8d154b48283b0995d4f90aa"
     }
 }

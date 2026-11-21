@@ -2267,6 +2267,58 @@ Complete current-head review and Linux source CI remain required.
 This is not installed/native, every-release, full-census, workflow-count
 or whole-flow qualification. Existing owners and custody remain.
 
+Source #13895 merges at `2026-11-21T12:43:56Z` as
+`4c90091e566dbb0834491972c3a7d7e8c4e64bdc`. Copilot approval
+`6005243972` at `12:41:10Z` names exact head
+`ba578ae76c57d4897f117f3673de8c737ca5c066`. Complete review/thread reads
+confirm no active finding and no omitted page. The published packet is
+independently checked against its actual current base: every prior entry
+survives and all twelve observed Python reads remain byte-identical.
+
+Required source CI `44904958876` and trusted metadata CI `44904958990`
+both complete successfully. Unit job `136848448102` freshly qualifies the
+packet from `12:39:29Z` to `12:41:34Z`, then uploads evidence. Its actual
+log reports 6,557 passed and 35 deselected in 95.68 pytest seconds and
+108.346 packet seconds, under the unchanged 300-second budget. Lookup takes
+3,071 ms before fresh execution because no qualified completed packet exists.
+These natural observations are not a controlled speedup or a run-count saving.
+
+Seven fresh scoped verifier reads precede the managed Maintainer merge,
+without bypassing failing CI. Closing references are empty and parent #6237
+stays open. The full canonical parent is reread and only this finite seven-case
+leaf is resolved. Scoped managed pull-forward retains the published head and
+succeeds without conflict. Continue retained source work and accepted
+reductions; broader native, every-release, full-census, whole-flow and custody
+acceptance remain open.
+
+### November 21 fixture npm-selector unit admission
+
+One exact original case adds real fixture-only npm selection to the existing
+dependency-age adapter: 134 of the unchanged original suite's 203 cases
+are selected, with all 69 residuals retained outside the packet.
+The original executable-lookup mock and temporary Node/shim/CLI files remain.
+The production wrapper dynamically loads the real snapshot installer module
+and calls its selector, preserving attributable CLI selection and missing-CLI
+refusal. Those files are never executed, and the installer's entrypoint,
+registry queries, installation, health checks and publication are not invoked.
+The module's complete import/top-level and selected-call closure is read;
+its imports are standard-library only.
+
+Real collection verifies all exact test objects and parameter IDs.
+Actual focused `UnitRun` passes the single addition in 1.906 development
+seconds with zero prohibited effects and thirteen hash-bound Python reads.
+Positive call-phase coverage includes the real wrapper and selector bodies,
+not only imported definitions. The existing parameter-strategy warning remains.
+
+Admission adds one node, binds the selector module as source and production
+coverage target, and updates only the existing adapter digest. All preceding
+entries survive: 6,558 nodes, 1,049 sources, 438 targets and 89 helper decisions.
+The profile, 300-second budget and existing manifest layout remain.
+At 1,048,261 bytes, 315 bytes remain under the unchanged 1 MiB cap.
+Complete current-head review and Linux source CI are still required.
+This is not installed/native, every-release, full-census, workflow-count
+or whole-flow qualification. Existing owners and custody remain.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
