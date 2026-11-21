@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh caller-lifetime source closure for passive daemon observation",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}
