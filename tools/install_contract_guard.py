@@ -16,9 +16,10 @@ def _uses_dependency_policy_install(text: str, ext: str) -> bool:
     if ext != "sh":
         return False
     code = "\n".join(_non_comment_lines(text))
+    policy_root = r'(?:\$SCRIPT_DIR|\$\(dirname "\$[A-Za-z_][A-Za-z0-9_]*"\))'
     return bool(re.search(
         r'(?m)^\s*(?:invoke_uv_bootstrap_environment\s+)?"\$VENV_PYTHON"\s+-I\s+'
-        r'"\$SCRIPT_DIR/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
+        rf'"{policy_root}/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
         code,
     ))
 

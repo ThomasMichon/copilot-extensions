@@ -8563,7 +8563,8 @@
         "test_system_uv_flag_rejects_invalid_values",
         "test_system_uv_flag_keeps_windows_user_configuration",
         "test_whitespace_pip_environment_refuses_instead_of_falling_back[spaces]",
-        "test_whitespace_pip_environment_refuses_instead_of_falling_back[tabs]"
+        "test_whitespace_pip_environment_refuses_instead_of_falling_back[tabs]",
+        "test_install_guard_accepts_only_complete_resolved_owner_policy_calls"
       ]
     ]
   ],
@@ -8649,7 +8650,7 @@
     "tools/check-version-consistency.py": "97a22f6d4c3201172f158aca0b4fed4e85f07729e4f4ae0597d86b0d78f29c97",
     "tools/promotion_unit_tests/test_install_contract_guard_units.py": "ee402e70379e8684a4569c5b675baca0aedaaff5b853e2302087c116a754fdfa",
     "tools/test_install_contract_guard.py": "927f539fc135024211f4b8299e3c4999a8e46ca5b6438158b4622218488c5eef",
-    "tools/install_contract_guard.py": "9936e86a8c8993f20be885a66fce2ee7e9a01315b64212d34889f23b928fe295",
+    "tools/install_contract_guard.py": "0de213be35aba28ac2b6c2b435de39cca546c885d93c286486f53fc02d03e747",
     "tools/promotion_unit_tests/test_tracking_write_guard_units.py": "82aac12f6c9cd55d1633cda89df94ac91313b2a8cad598e30662764ccf21cef7",
     "tools/test_check_no_sibling_tracking_writes.py": "10a4702ef4f5e0880d50a7aaa889806aadfbca8d5392cd39abd6b28b97c6e9e5",
     "tools/check-no-sibling-tracking-writes.py": "763f22efe87473151e1de8e962cbab537d24c25884df86765d038671faf3fd4c",
@@ -9644,7 +9645,7 @@
     "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d",
     "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47",
     "libs/installer-engine/installer_pip_index.py": "e03dd5b5ca41a1402700ef35b0e0bbaee5de7fa4744dcc5aa2bb02556ab90dd7",
-    "tools/promotion_unit_tests/test_installer_pip_index.py": "0794e10f23d5744cd9dea439fea5c07821101f22ad193f862378c29f373c27ef"
+    "tools/promotion_unit_tests/test_installer_pip_index.py": "24fb270ecbae3e21297a10e32d245e053672ac387b6f9277602ad0a55bacedc3"
   },
   "coverage_targets": [
     "tools/sync-installer-engine.py",

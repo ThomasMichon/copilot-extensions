@@ -306,6 +306,21 @@ def test_whitespace_pip_environment_refuses_instead_of_falling_back(
         )
 
 
+def test_install_guard_accepts_only_complete_resolved_owner_policy_calls() -> None:
+    from install_contract_guard import _incomplete_dependency_policy_calls, _uses_dependency_policy_install
+
+    call = (
+        'invoke_uv_bootstrap_environment "$VENV_PYTHON" -I '
+        '"$(dirname "$index_helper")/installer_dependency_policy.py" '
+        '--uv "$uv" -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet'
+    )
+    assert _uses_dependency_policy_install(call, "sh")
+    assert _incomplete_dependency_policy_calls(call) == 0
+    assert not _uses_dependency_policy_install(call.replace("--uv", "--other-provider"), "sh")
+    assert _incomplete_dependency_policy_calls(call.replace(" -- --python", " --python")) == 1
+    assert not _uses_dependency_policy_install(call.replace("installer_dependency_policy.py", "other.py"), "sh")
+
+
 def test_invalid_config_fails_without_exposing_values(
     reader: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
