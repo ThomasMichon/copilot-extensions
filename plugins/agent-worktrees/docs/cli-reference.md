@@ -1101,14 +1101,29 @@ requires the exact repository and branch, not merely a matching owner or
 branch name. A supplied workspace must match the selected push destination,
 branch and expected HEAD even when reusing an existing PR. Sharing the
 target's owner does not remove fork-network ambiguity.
+The target base is qualified independently against a matching fetch remote
+and its configured fetched ref, so an `origin` fork can publish against
+`upstream` without borrowing the fork's default-branch tip. Qualification
+does not fetch or silently replace a stale target ref. A terminal historical
+PR does not need to contain the expected HEAD of new work on the branch.
 Qualified creation sends GitHub's explicit `head_repo` field
-and checks the returned source and target before claiming success. A created
+and checks the returned source, target and exact host/repository/number URL
+before claiming success. A created
 PR whose identity cannot be verified retains its number, available URL and
 unknown publication outcome; reconcile it rather than creating another PR.
+Foreign GitHub creation reserves an owner- and revision-fenced attempt in
+the calling project's tracking directory before the provider call.
+`<worktree-id>.foreign-pr-receipts/` retains these attempts separately from
+the caller's checkout PR list and claims. An uncertain attempt blocks another
+create for the same target/source branch, including `--new`; failed receipt
+persistence leaves the earlier reservation blocking rather than permitting
+a replay. Do not edit or remove that evidence to retry. Plain errors include
+the known unverified number and URL as well as the unknown outcome.
 The same receipt rule applies to ordinary fork `create-pr`: a malformed URL
 does not discard a valid number, and an unverified receipt is not claimed
 or automatically recreated. The command reports failure with the known receipt
-and unknown outcome, not a successful authoritative `pr` handle.
+and unknown outcome, not a successful authoritative `pr` handle. Branch-only
+numberless healing cannot replace a retained unverified provider identity.
 
 ### Owner rewrite of a private PR branch
 
