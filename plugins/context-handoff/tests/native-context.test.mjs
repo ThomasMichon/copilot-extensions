@@ -151,7 +151,9 @@ async function runExtensionFixture(fixtureName, configText) {
 async function runSdkExtensionFixture(fixtureName, configText, namespace) {
   const root = await mkdtemp(join(tmpdir(), "native-extension-"));
   try {
-    await mkdir(join(root, ".git"));
+    await mkdir(join(root, "git-metadata"));
+    await writeFile(join(root, "git-metadata", "commondir"), "..\n");
+    await writeFile(join(root, ".git"), "gitdir: git-metadata\n");
     await mkdir(join(root, ".context-handoff"));
     await writeFile(join(root, ".context-handoff", "config.yaml"), configText);
     await writeFile(join(root, "settings.json"), '{"contextManagementTools":true}');
@@ -191,7 +193,10 @@ async function runBoundExtensionFixture(namespace) {
     await mkdir(join(root, ".git"));
     await mkdir(join(root, ".context-handoff"));
     await writeFile(join(root, ".context-handoff", "config.yaml"), "mode: auto\n");
-    await mkdir(join(bound, ".git"), { recursive: true });
+    await mkdir(join(root, ".git", "worktrees", "bound"), { recursive: true });
+    await writeFile(join(root, ".git", "worktrees", "bound", "commondir"), "../..\n");
+    await mkdir(bound);
+    await writeFile(join(bound, ".git"), "gitdir: ../.git/worktrees/bound\n");
     await mkdir(join(bound, ".context-handoff"));
     await writeFile(join(bound, ".context-handoff", "config.yaml"), "mode: off\n");
     await writeFile(join(bound, "effort.md"), "# Work\n\n## Goal\n\nBound Goal.\n");

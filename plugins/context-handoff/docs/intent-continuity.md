@@ -12,6 +12,8 @@ steers; this is origin classification, not authentication or semantic approval.
 The corpus lives under `~/.copilot/context-handoff/intent/<scope>/`, outside
 the checkout and session folder. Scope uses the canonical Git worktree root
 and metadata incarnation; standalone use keys the canonical working directory.
+Anchor checkouts do not capture prompts or automatically replay shared history.
+Existing anchor snapshots remain readable by explicit snapshot ID.
 A single optional, non-provisioning binding lookup after extension join keeps
 bare resumes on their continuing worktree instead of the shell's home directory.
 When session identity arrives late, the next receipt/read/lifecycle boundary

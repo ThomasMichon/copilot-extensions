@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -138,6 +138,78 @@ test("reforked clients read the same corpus; other worktrees and cwd switches st
   assert.equal((await resumed.facts()).corpus.count, 1);
   fresh.state.cwd = f.a;
   assert.equal((await resumed.facts()).corpus.count, 1);
+});
+
+test("anchor checkouts neither capture nor replay shared history, including existing records", async (t) => {
+  const f = fixture(t);
+  const separateMetadata = join(f.root, "metadata");
+  mkdirSync(join(f.a, ".git"));
+  mkdirSync(separateMetadata);
+  writeFileSync(join(f.b, ".git"), `gitdir: ${separateMetadata}\n`);
+  for (const [anchor, git] of [[f.a, join(f.a, ".git")], [f.b, separateMetadata]]) {
+    const metadata = realpathSync(git);
+    const legacy = new IntentCorpus(anchor, { ...f.options, scope: {
+      root: realpathSync(anchor), incarnation: `${metadata}:${lstatSync(metadata).birthtimeMs}`,
+    } });
+    legacy.capture(classifyIntent(message("old", "Unrelated prior task."), "old-session"));
+    const snapshot = legacy.snapshot();
+    const nested = join(anchor, "nested");
+    mkdirSync(nested);
+    const c = client(nested);
+    const observation = registerIntentObservation(c.session, c.state, {
+      createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+      readGoal: () => ({ status: "goal", goal: "Unrelated goal." }),
+    });
+    t.after(() => observation.dispose());
+    c.session.emit("tool.execution_start", {});
+    c.session.emit("user.message", message("new", "Independent task."));
+    c.session.emit("session.context_cleared", {});
+    c.session.emit("session.compaction_complete", { data: { success: true } });
+    await observation.settle();
+    assert.equal(c.sent.length, 0);
+    assert.equal(observation.pendingInputs, 0);
+    assert.deepEqual(c.warnings, []);
+    assert.equal((await observation.facts()).corpus, null);
+    assert.equal(observation.page(snapshot.id).records[0].text, "Unrelated prior task.");
+    assert.equal(readdirSync(join(legacy.home, "records")).length, 1);
+  }
+});
+
+test("linked worktrees retain cross-session history without sharing it with sibling worktrees", async (t) => {
+  const f = fixture(t);
+  const second = join(f.root, "second");
+  mkdirSync(second);
+  for (const [directory, name] of [[f.b, "first"], [second, "second"]]) {
+    const metadata = join(f.a, ".git", "worktrees", name);
+    mkdirSync(metadata, { recursive: true });
+    writeFileSync(join(metadata, "commondir"), "../..\n");
+    writeFileSync(join(directory, ".git"), `gitdir: ${metadata}\n`);
+  }
+  const options = { createCorpus: (cwd) => new IntentCorpus(cwd, f.options) };
+  const first = client(f.b);
+  first.session.sessionId = first.state.sessionId = "first-session";
+  const original = registerIntentObservation(first.session, first.state, options);
+  first.session.emit("user.message", message("one", "First worktree mission."));
+  await original.settle();
+  await original.dispose();
+  const next = client(f.b);
+  const resumed = registerIntentObservation(next.session, next.state, options);
+  t.after(() => resumed.dispose());
+  next.session.emit("tool.execution_start", {});
+  await resumed.settle();
+  assert.match(next.sent[0].prompt, /First worktree mission/u);
+  const sibling = client(second);
+  const separate = registerIntentObservation(sibling.session, sibling.state, options);
+  t.after(() => separate.dispose());
+  sibling.session.emit("tool.execution_start", {});
+  await separate.settle();
+  assert.equal(sibling.sent.length, 0);
+  sibling.session.emit("user.message", message("two", "Second worktree mission."));
+  sibling.session.emit("session.compaction_complete", { data: { success: true } });
+  await separate.settle();
+  assert.equal((await separate.facts()).corpus.count, 1);
+  assert.equal((await resumed.facts()).corpus.count, 1);
+  assert.equal(sibling.sent[0].prompt.includes("First worktree mission."), false);
 });
 
 test("failed persistence is visible and exact pending input survives a lifecycle retry", async (t) => {

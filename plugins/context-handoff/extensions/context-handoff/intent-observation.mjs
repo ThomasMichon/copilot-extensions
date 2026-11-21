@@ -109,7 +109,7 @@ export function registerIntentObservation(session, state, {
       if (!await allowAutomaticReplay()) { startupPending = true; return; }
       if (disposed || scopeChanged()) return;
       const data = await facts(cwd);
-      if (disposed || scopeChanged()) return;
+      if (disposed || scopeChanged() || corpora.get(cwd)?.isAnchor) return;
       const unavailableReference = data.goal?.status === "unavailable" && data.goal?.ref;
       if (disposed || (!data.corpus?.count && !data.goal?.goal && !data.pendingInputs
           && data.status !== "unavailable" && !data.goal?.path && !unavailableReference)) return;
