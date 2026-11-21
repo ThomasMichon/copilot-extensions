@@ -3165,6 +3165,42 @@ canonical parent, only this finite source item is resolved. Continue the
 fixture-only local-source closure census. Native, installed, release,
 full-census, comparable whole-flow and retained-custody gates remain open.
 
+### November 21 original local-source closure admission
+
+Eight exact original functions contribute twenty-six fixture-only cases.
+They retain local/nested closure, missing standalone manifest, direct local
+requirement, declared flat-module, explicit-boolean and invalid-module
+assertions without changing fixtures or expanded suffixes. Linked-source and
+aliased-parent native witnesses remain unchanged outside the packet.
+All 103 mapped original materializer cases are disjoint; 62 remain outside.
+
+Development collection proves exact original object identity. Actual effect
+auditing passes all twenty-six in 2.438 seconds with zero prohibited effects,
+eighteen source-bound Python reads and positive call-phase coverage in the real
+local-source reader for every case. Fixture Python remains data. The sole new
+source binding is the adapter; all 6,769 preceding nodes and hashes, 441
+coverage targets, 89 helper decisions and the 300-second bound remain.
+The 6,795-node, 1,068-source compact manifest is 779,090 bytes and retains
+flat-v1 normalization. Ruff and whole-file strict Linux/Windows typing pass.
+
+Source #13944 merges at `2026-11-21T18:18:49Z` as
+`ee1c7951fa6b1db63e15d42fcadaddeba93b1939`. Copilot approval `6007221581`
+names exact head `9d75626e02deb59c084f19040f0fb32635fc2725`; complete review
+and thread pagination finds no outstanding finding. Required source CI
+`44934289150` and trusted metadata CI `44934289243` succeed. Actual unit job
+`136937429318` freshly executes all 6,795 cases with 35 deselections in
+170.65 pytest seconds and 191.385 packet seconds. Lookup takes 465 ms; no reuse
+or controlled whole-flow saving is credited.
+
+Seven fresh scoped source-verifier reads precede the managed Maintainer merge
+without bypassing CI. Independent provider readback confirms merged state,
+empty closing references and open parent #6237. Scoped synchronization retains
+the published head and advances to the merge. After rereading the full
+canonical parent, only this finite source item is resolved. Continue the
+remaining original materializer source closure without weakening its native,
+process, Git, toolkit or whole-checkout boundaries. Installed, release,
+full-census, comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_materializer_invocation_boundary_units.py",
+      [
+        "test_invocation_promotion_refuses_foreign_manifest_before_writes",
+        "test_invocation_promotion_refuses_escaping_output",
+        "test_materialize_calls_invocation_owner"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_materializer_local_source_units.py",
       [
         "test_materialize_refuses_incomplete_already_local_sources[{ path = \"libs/missing\" }]",
@@ -8469,6 +8477,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_materializer_invocation_boundary_units.py": "64f5cc791a1be853be2ada5796f7d1af079283403b6fd668ff0bc159d56d9bb2",
+    "libs/update-telemetry/src/update_telemetry/capabilities.py": "b0cc3f45cc763fbd441fbd3639434086b1ec9bcedbfb3d17290d792b006fad84",
     "tools/promotion_unit_tests/test_materializer_local_source_units.py": "9a784fe7801e7a7562affed24a6f7288359da8a44af480b068c3e23b89c95b18",
     "tools/promotion_unit_tests/test_materializer_packaged_asset_units.py": "ba4126a1ca19cf85ab31573402e3f55f9d5690f51a9baad367007c98e6379e9b",
     "tools/promotion_unit_tests/test_materializer_installer_asset_units.py": "33ecc25d74351cb1c23a249d1a461e74c5fb8dfaa9e66b757c39e4ba592b8752",
