@@ -3494,6 +3494,51 @@ Fresh-install/native/installed external lanes are not exercised because no
 provisioning or runtime behavior changes. Native, release, full-census,
 comparable whole-flow and retained-custody gates remain open.
 
+### November 21 original UV-reference fixture qualification
+
+The adapter exports 27 exact unchanged original functions as 29 cases,
+preserving all assertions, fixtures, parameter suffixes and original injected
+callbacks. Five real-link functions and their six cases remain outside.
+Original fallback/path simulations are not native-link qualification.
+Guarded development execution passes all 29 cases in 1.828 seconds with zero
+prohibited effects, four bound Python reads and positive per-case call-phase
+coverage of the existing UV-reference owner. Only the adapter and original
+test module need new bindings; no coverage target or contract changes.
+The source-head packet retains all preceding 6,881 nodes/hashes, 444 targets,
+89 helper decisions and the 300-second bound, becoming 6,910 nodes and 1,087
+sources in 791,620 compact-v2 bytes. Flat-v1 normalization, Ruff and whole-file
+strict Linux/Windows typing pass.
+
+Copilot approval `6007988600` covers exact head
+`ff6018a8737a67424dfe0d572d9985c131364116`, with no comments or open threads.
+CI `44946829655` actually checks out merge `2f66b53d5d`, combining that head
+with concurrent Dev `ed2185a569826193ed4d0b0bbe379f5fdc85ec06` from #13911.
+Readback of that actual manifest confirms all 29 additions within 6,962
+nodes, 1,090 sources and 445 targets: the peer adds 52 cases, three sources
+and one target. Unit job `136975866363` freshly passes all 6,962 cases with
+39 deselections, 140.48 pytest seconds and 159.672 packet seconds; lookup
+takes 687 ms. This is not a reuse hit or controlled whole-flow saving.
+
+Attempt one's guards fail closed on unavailable/malformed public `lancedb`
+release metadata, not dependency age or a changed declaration. One subsequent
+public lookup returns valid metadata. Only failed source-CI jobs are rerun:
+attempt two's guard `136977119424` checks all 777 declarations with zero
+violations and passes, as does aggregate `136977951296`. The original successful
+unit execution is retained as projected job `136977121098`, not repeated.
+Trusted run `44946829795`, full review/thread readback, seven fresh verifier
+reads and final veto/hold/head checks pass before managed merge; no CI bypass,
+native retry or manual metadata refresh occurs.
+
+Source #13964 merges at `2026-11-21T20:42:43Z` as
+`2108c80d318f848e2811cd0896e75a902319c2eb`. Independent readback confirms merged
+state, no closing references and open parent #6237. Scoped synchronization
+retains the combined peer packet; the full canonical parent is reread before
+resolving only this finite leaf. Continue ordinary UV-executable fixture
+qualification against the updated owners, preserving ctypes/native residuals.
+Fresh-install/native/installed external lanes are not exercised because no
+provisioning or runtime behavior changes. Native, release, full-census,
+comparable whole-flow and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
