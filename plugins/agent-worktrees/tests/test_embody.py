@@ -154,6 +154,9 @@ def _stub_config(monkeypatch):
     # These orchestration units use synthetic paths; real hosting admission
     # remains covered independently by test_repository_agent_policy.py.
     monkeypatch.setattr(agent_policy, "require", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "agent_worktrees.worktree_trust.ensure_record_trusted", lambda *a, **k: False,
+    )
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
     monkeypatch.setattr(
         m,

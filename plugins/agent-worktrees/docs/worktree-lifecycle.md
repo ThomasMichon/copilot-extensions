@@ -144,8 +144,12 @@ remote-ref-based worktree creation.
 ### Folder trust follows admitted checkout entry
 
 Creation (including paired knowledge and retained-creation repair), non-preview
-resume planning, and successful `register-session` / `bind-session` entry ensure
-the native checkout is in Copilot's `config.json` `trustedFolders`. Resume
+resume planning, cold managed `embody`, and successful `register-session` /
+`bind-session` entry ensure the native checkout is in Copilot's `config.json`
+`trustedFolders`. Cold embodiment establishes trust after launch admission and
+the final live-owner checks, before starting Copilot; an unreadable or malformed
+trust configuration refuses launch rather than starting an unattended trust prompt.
+An already-live embodiment does not change folder trust. Resume
 planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.
 Restore establishes required trust before reclaiming an existing owner;

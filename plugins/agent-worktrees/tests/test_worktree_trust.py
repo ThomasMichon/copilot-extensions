@@ -175,6 +175,72 @@ def test_terminal_managed_record_does_not_trust(
     assert not home.exists()
 
 
+@pytest.mark.parametrize("mode", ["cold", "invalid-config", "dry-run", "live"])
+def test_embody_establishes_trust_before_spawning_copilot(
+    native_checkout, sample_record, tmp_tracking_dir, monkeypatch_config, monkeypatch, capfd, mode,
+):
+    import argparse
+
+    from agent_worktrees import (
+        __main__ as command, agent_policy, config as cfg, launch_seed_exec, sessions,
+        worktree_identity,
+    )
+
+    checkout, home = native_checkout
+    config = replace(cfg.load_project_config(sample_record.repo), machine=cfg.socket.gethostname())
+    config.repos[sample_record.repo] = replace(
+        config.repos[sample_record.repo], worktree_root=str(checkout.parent),
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
+    record = replace(
+        sample_record, worktree_id=checkout.name, branch=f"worktree/{checkout.name}",
+        worktree_path=str(checkout), machine=config.machine, machine_identity=None,
+        platform=config.platform, kind="session", status="active",
+    )
+    tracking.save_record(record, tmp_tracking_dir / f"{record.worktree_id}.yaml")
+    if mode == "invalid-config":
+        home.mkdir()
+        (home / "config.json").write_text("malformed", encoding="utf-8")
+    monkeypatch.setattr(cfg, "load_config", lambda: config)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: record.worktree_id)
+    monkeypatch.setattr(agent_policy, "require", lambda *args, **kwargs: None)
+    monkeypatch.setattr(command, "_preflight_launch", lambda *args: command.LaunchPreflight())
+    monkeypatch.setattr(command, "_build_launch_cmd", lambda *args, **kwargs: ["copilot"])
+    monkeypatch.setattr(command, "_build_env", lambda *args, **kwargs: {})
+    monkeypatch.setattr(command, "_repo_session_env", lambda *args, **kwargs: {})
+    monkeypatch.setattr(sessions, "has_mux_session", lambda value: mode == "live")
+    monkeypatch.setattr(sessions, "resolve_resume_target", lambda value: None)
+    monkeypatch.setattr(launch_seed_exec, "deferred_command", lambda command, *args, **kwargs: command)
+    spawned = []
+
+    def spawn(worktree_id, work_dir, argv, environment):
+        assert mode == "cold", "inspection or failed trust must never start Copilot"
+        assert json.loads((home / "config.json").read_text()) == {
+            "trustedFolders": [str(checkout.resolve())],
+        }, "folder trust must be persisted before the process boundary"
+        spawned.append(work_dir)
+        return {"ok": True, "session": f"wt-{worktree_id}", "new_pane": "%5"}
+
+    monkeypatch.setattr(sessions, "mux_new_session", spawn)
+    args = argparse.Namespace(
+        worktree_id=record.worktree_id, new=False, codename=None, anchor=False,
+        seed=None, driver=None, seed_ready_timeout=180.0, verify_timeout=0.0,
+        recovery=False, dry_run=mode == "dry-run", ensure_mux=False,
+    )
+    result = command.cmd_embody(args)
+    output = capfd.readouterr()
+    if mode == "invalid-config":
+        assert result == 3, output.out + output.err
+        assert "folder trust" in output.out + output.err
+        assert (home / "config.json").read_text() == "malformed"
+    else:
+        assert result == 0, output.out + output.err
+    assert spawned == ([str(checkout)] if mode == "cold" else [])
+    if mode in {"dry-run", "live"}:
+        assert not home.exists()
+    assert not (home / "permissions-config.json").exists()
+
+
 @pytest.mark.parametrize("source,broken_config,other_active_project", [
     ("hook:new", False, False), ("bind", False, False),
     ("hook:new", True, False), ("bind", True, False),

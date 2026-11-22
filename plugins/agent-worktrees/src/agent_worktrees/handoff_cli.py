@@ -9,7 +9,9 @@ from contextlib import ExitStack
 
 from . import agent_policy, config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import launch_admission, launch_seed_state, embody_resume, embody_completion, embody_receipt
-from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
+from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime, worktree_trust
+from .execution_spaces import ExecutionSpaceError
+from .permissions import FolderTrustError
 from .worktree_creation import LaunchSeedStagingFailure
 from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
 from .launch_passthrough import passthrough_error as _passthrough_error
@@ -557,6 +559,10 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
             return output._json_error(refusal, exit_code=3)
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
+        try:
+            worktree_trust.ensure_record_trusted(admitted_record, config)
+        except (FolderTrustError, ExecutionSpaceError) as exc:
+            return output._json_error(str(exc), exit_code=3)
         try:
             mux_command = embody_completion.prepare_mux_command(
                 embody_resume.with_resume(launch_cmd, resume_target),

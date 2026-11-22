@@ -392,9 +392,10 @@ def _qualify_native_worktrees(
     mux_data.mkdir()
     manager = control.startswith("manager-")
     manager_target = "wt-" + worktree_id
-    (home / "config.json").write_text(
-        json.dumps({"trustedFolders": [str(checkout)]}), encoding="utf-8",
-    )
+    if control != "embody":
+        (home / "config.json").write_text(
+            json.dumps({"trustedFolders": [str(checkout)]}), encoding="utf-8",
+        )
     (home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
     requests: list[dict[str, Any]] = []
 
@@ -1340,6 +1341,10 @@ def _qualify_native_worktrees(
             home / "session-state" / native / "events.jsonl",
         ]
         assert not (home / "permissions-config.json").exists()
+        if control == "embody":
+            assert str(checkout.resolve()) in json.loads(
+                (home / "config.json").read_text(encoding="utf-8"),
+            )["trustedFolders"]
         if manager_picker and control == "manager-no-mux":
             commands = tmp_path / "mux-commands.txt"
             assert not commands.exists() or "new-session" not in commands.read_text(encoding="utf-8").splitlines()
