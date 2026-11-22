@@ -2,12 +2,14 @@ $ErrorActionPreference = 'Stop'
 $bootstrap = Join-Path $PSScriptRoot 'bootstrap.ps1'
 $caller = Join-Path $PSScriptRoot 'invoke-ssh.ps1'
 $env:SSH_CONNECTION = 'test'
+$env:GIT_INDEX_FILE = 'foreign-index-fixture'
 Remove-Item Env:GH_TOKEN, Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
 $global:calls = [Collections.Generic.List[string]]::new()
 function gh {
     throw 'Git repository access must not require GitHub CLI'
 }
 function git {
+    if ($env:GIT_INDEX_FILE) { throw 'Preflight inherited an unrelated index' }
     if ($args -notcontains 'ls-remote') { throw 'Unexpected Git mutation' }
     $global:calls.Add("git:$($args[-2])")
     $global:LASTEXITCODE = if ($global:allowRead) { 0 } else { 1 }
@@ -30,6 +32,7 @@ try {
     if ($_.Exception.Message -ne 'fixture: ready to install') { throw }
 }
 $expected = @('git:https://github.com/example/harness.git', 'git:https://dev.azure.com/example/project/_git/knowledge')
+if ($env:GIT_INDEX_FILE -ne 'foreign-index-fixture') { throw 'Caller index was not restored' }
 if (($global:calls -join ';') -cne ($expected -join ';') -or
     [string]$env:GIT_CONFIG_PARAMETERS -cne [string]$prior) { throw 'Incorrect auth preflight' }
 function ssh {

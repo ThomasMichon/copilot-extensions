@@ -17,6 +17,12 @@ if ($ClearTrial) { $argsForDriver += '--clear-trial' }
 $temporary = $null
 $savedAuthEnvironment = @{}
 try {
+    foreach ($key in @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_PREFIX','GIT_CEILING_DIRECTORIES','GIT_DISCOVERY_ACROSS_FILESYSTEM',
+        'GIT_SHALLOW_FILE','GIT_GRAFT_FILE','GIT_REPLACE_REF_BASE','GIT_CONFIG','GIT_NAMESPACE','GIT_QUARANTINE_PATH')) {
+        $savedAuthEnvironment[$key] = [Environment]::GetEnvironmentVariable($key)
+        [Environment]::SetEnvironmentVariable($key, $null)
+    }
     if (-not $ClearTrial -and ($Repo -or $KnowledgeRepo)) {
         $headless = $env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY -or
             $env:COPILOT_AGENT_SESSION_ID -or [Console]::IsInputRedirected -or

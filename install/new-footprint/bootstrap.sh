@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_CEILING_DIRECTORIES \
+    GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_SHALLOW_FILE GIT_GRAFT_FILE \
+    GIT_REPLACE_REF_BASE GIT_CONFIG GIT_NAMESPACE GIT_QUARANTINE_PATH
 
 root=$HOME/.copilot-extensions
 srcroot=$HOME/src
@@ -25,7 +29,7 @@ args=(--root "$root" --srcroot "$srcroot")
 [[ -z $repo ]] || args+=(--repo "$repo")
 [[ -z $knowledge ]] || args+=(--knowledge-repo "$knowledge")
 if ! "$cleanup"; then
-    if [[ ! -t 0 || ! -t 1 || -n ${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}${COPILOT_AGENT_SESSION_ID:-} ]]; then
+    if [[ ! -t 1 || -n ${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}${COPILOT_AGENT_SESSION_ID:-} ]]; then
         export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never
         if [[ -n ${GH_TOKEN:-}${GITHUB_TOKEN:-} ]]; then
             export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:-} 'credential.https://github.com.helper=' 'credential.https://github.com.helper=!gh auth git-credential'"

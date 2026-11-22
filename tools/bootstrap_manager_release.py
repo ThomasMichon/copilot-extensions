@@ -15,7 +15,7 @@ import local_install_source as source
 
 
 def prepare_snapshot(checkout: Path, commit: str, repository: str, output: Path, uv: Path, deadline: float,
-                     *, component: str) -> Path:
+                     *, component: str, extras: tuple[str, ...] = ()) -> Path:
     output.mkdir(parents=True, exist_ok=False)
     release = output / "release"
     release.mkdir()
@@ -58,7 +58,7 @@ def prepare_snapshot(checkout: Path, commit: str, repository: str, output: Path,
     }
     (inputs / source.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
     result = profiles.prepare_registry_lock(inputs, output / "profile", uv=str(uv), deadline=deadline,
-                                           prepare_profile=True, component=component)
+                                           prepare_profile=True, component=component, extras=extras)
     return Path(result["snapshot"])
 
 
@@ -75,8 +75,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--marketplace", action="store_true")
     parser.add_argument("--component", action="append")
+    parser.add_argument("--index-host", action="store_true")
     parser.add_argument("--frozen-seeds", nargs=2, metavar=("MAIN", "DEV"))
     args = parser.parse_args()
+    if args.index_host and "agent-index" not in (args.component or []):
+        parser.error("--index-host requires agent-index")
+    extras = {"agent-index": ("server", "store")} if args.index_host else {}
     uv = shutil.which("uv")
     if not uv:
         parser.error("Manager preparation requires uv")
@@ -94,12 +98,13 @@ def main() -> None:
         if args.frozen_seeds:
             snapshots = application_footprint.prepare_frozen(
                 checkout, args.commit, args.frozen_seeds[0], args.frozen_seeds[1], output,
-                components=components, uv=uv, deadline=deadline,
+                components=components, uv=uv, deadline=deadline, extras=extras,
             )
         else:
             output.mkdir()
             snapshots = {name: str(prepare_snapshot(checkout, args.commit, args.repository,
-                             output / name, Path(uv), deadline, component=name)) for name in components}
+                             output / name, Path(uv), deadline, component=name,
+                             extras=extras.get(name, ()))) for name in components}
         print(application_footprint.export({k: Path(v) for k, v in snapshots.items()},
                                           output / "footprint", deadline=deadline))
     elif args.frozen_seeds:

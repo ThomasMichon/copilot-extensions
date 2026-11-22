@@ -197,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
                         registered_knowledge=companion,
                     )
 
+        roles: dict[tuple[str, str], str] = {}
+
         def observe(project: str, anchor: Path) -> registered_suite.HarnessPolicy:
             companion = companions.get(project)
             dirs = (anchor, companion) if companion else (anchor,)
@@ -204,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
             target = platform.node().lower()
             fleet = companion / ".copilot-extensions/fleet-manager/config.json" if companion else None
             def activation(app: str) -> str:
+                if (project, app) in roles:
+                    return roles[project, app]
                 result = subprocess.run(
                     [sys.executable, "-I", "-B", "-m", "worktree_manager.onboarding_policy", app,
                      str(root), project, str(anchor), str(companion or ""), target],
@@ -212,7 +216,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if result.returncode:
                     raise ValueError(f"{app} activation policy could not be resolved")
-                return result.stdout.strip()
+                roles[project, app] = result.stdout.strip()
+                return roles[project, app]
             return registered_suite.HarnessPolicy(gate, (target,), fleet_config=fleet if fleet and fleet.exists() else None,
                                                   fleet_target=target if fleet and fleet.exists() else None, activation=activation)
 
@@ -220,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         produce(market, "--marketplace")
         required = registered_suite.required_applications(anchors, market, commit, observe)
         options = [arg for component in sorted(required) for arg in ("--component", component)]
+        if any(roles.get((project, "agent-index")) == "host" for project in required.get("agent-index", [])):
+            options.append("--index-host")
         if args.frozen_seeds:
             options.extend(["--frozen-seeds", *args.frozen_seeds])
         produce(workspace / "suite", *options)

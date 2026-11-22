@@ -25,6 +25,7 @@ _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 def prepare_frozen(
     repository: Path, commit: str, main_head: str, dev_head: str, output: Path, *,
     uv: str, deadline: float, components: tuple[str, ...] = ("worktree-manager",),
+    extras: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, str]:
     """Prepare an explicitly frozen WIP commit, never mutable working files."""
     import local_install_source as preparation
@@ -72,7 +73,7 @@ def prepare_frozen(
         built, record, projects=projects, uv=uv, deadline=deadline, retain_toolchain=True,
     ) as (_record, toolchain):
         snapshots = preparation._prepare_profiles(
-            built, record, output, components, {}, toolchain,
+            built, record, output, components, extras or {}, toolchain,
             uv=uv, deadline=deadline,
         )
     if snapshots is None:
