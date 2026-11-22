@@ -321,6 +321,46 @@ def test_explicit_strict_presence_uses_native_psmux_evidence(monkeypatch) -> Non
     assert not sessions.has_mux_session("missing", strict=True)
 
 
+@pytest.mark.parametrize(("namespace", "memberships", "exists", "clients"), [
+    ("", {"foreign__wt-fixture": ("wt-fixture", 1, "$1:100")}, False, 0),
+    ("", {
+        "wt-fixture": ("wt-fixture", 2, "$1:100"),
+        "foreign__wt-fixture": ("wt-fixture", 1, "$2:100"),
+    }, True, 2),
+    ("selected", {
+        "wt-fixture": ("wt-fixture", 1, "$1:100"),
+        "selected__wt-fixture": ("wt-fixture", 2, "$2:100"),
+    }, True, 2),
+    ("selected", {"selected__wt-fixture": ("wt-fixture", 0, "$1:100")}, True, 0),
+])
+def test_strict_windows_fallback_uses_qualified_membership(
+    monkeypatch: pytest.MonkeyPatch, namespace: str,
+    memberships: dict[str, tuple[str, int, str]], exists: bool, clients: int,
+) -> None:
+    from agent_remote_driver import mux_inventory
+
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", namespace)
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: mux_observation.Observation("unknown", "timeout"),
+    )
+    monkeypatch.setattr(
+        mux_inventory, "observe", lambda **kw: pytest.fail("unqualified legacy inventory"),
+    )
+    timeouts: list[float] = []
+
+    def observe_memberships(*, timeout: float) -> dict[str, tuple[str, int, str]]:
+        timeouts.append(timeout)
+        return memberships
+
+    monkeypatch.setattr(mux_inventory, "observe_memberships", observe_memberships)
+    info = sessions.mux_status_many(["fixture"], strict=True)["fixture"]
+    assert info.observed and info.exists is exists and info.clients == clients
+    assert sessions.has_mux_session("fixture", strict=True, timeout=.25) is exists
+    assert 0 < timeouts[-1] <= .25
+
+
 def test_explicit_and_display_presence_use_driver_counts_without_cli(monkeypatch) -> None:
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(

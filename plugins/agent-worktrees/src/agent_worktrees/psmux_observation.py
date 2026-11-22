@@ -15,9 +15,18 @@ if TYPE_CHECKING:
 
 
 def observe(*, timeout: float = 5) -> dict[str, int]:
+    from agent_remote_driver.mux_observation import _namespace
+
     try:
-        return mux_inventory.observe(timeout=timeout)
-    except ObservationUnavailable as exc:
+        namespace = _namespace()
+        prefix = namespace + "__" if namespace else ""
+        memberships = mux_inventory.observe_memberships(timeout=timeout)
+        return {
+            name: clients
+            for base, (name, clients, _incarnation) in memberships.items()
+            if base == prefix + name
+        }
+    except (ObservationUnavailable, ValueError) as exc:
         raise MuxObservationUnavailable(str(exc)) from exc
 
 
