@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Budget prerequisite and telemetry-planning continuation](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md)
+credits three scoped source deliveries without claiming consumer adoption or a passing full native portfolio, retains the distinct suite-wide telemetry planning request and records a complete 905-open census.
+
 The [protected-capacity and activity intake](journal/2026/11.21-protected-capacity-and-activity-intake.md)
 retains two distinct requests, scoped #14008 delivery and a complete 903-open census; it also restores the recorded later 60-second owner amendment rather than reviving a historical latency gate.
 
