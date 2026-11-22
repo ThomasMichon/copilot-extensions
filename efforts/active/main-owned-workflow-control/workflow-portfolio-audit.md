@@ -5036,6 +5036,32 @@ native, data-admission or owner-seam gaps. Fresh-install/native lanes are not
 applicable because installation, runtime, workflow and original-test behavior
 do not change.
 
+### November 22 original strict-checker import-custody qualification
+
+The existing adapter additionally exports eight unchanged original functions
+covering import-root manifests, native path-list separator refusal, ordered
+temporary import delivery, namespace/WIP membership, temporary extension aliases
+and member/root-change refusals. Complete collection verifies all 236 original
+cases, fifty adapter cases, both original autouse fixtures, exact function
+objects and original parameter values. Actual Git/MyPy/frontdoor execution,
+repository scans and native symlink fixtures remain outside this selection.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+fifty in 3.047 seconds, with zero prohibited effects, 24 bound Python reads and
+actual checker-owner call-phase lines per case. Only thirty new nodes are
+appended after the existing twenty within the first group. All 8,787 preceding
+nodes retain their relative order; only the existing adapter's source hash
+changes, preserving the other 1,227 hashes. The compact-v2 candidate contains
+8,817 nodes, 1,228 sources and 460 targets in 985,329 bytes, with unchanged
+89 helper decisions and the 300-second bound.
+
+Current-head review and complete fresh Linux CI remain pending. No new mock,
+preload, wrapper, effect exception, data allowlist, workflow, runtime or cleanup
+change is introduced. This qualification does not settle the distinct 21-case
+mutation-source failure or other retained refusals and owner seams.
+Fresh-install/native lanes are not applicable because installation, runtime,
+workflow and original-test behavior do not change.
+
 ### November 22 original machine-gate mutation-source failure
 
 The adapter preserves four original synthetic contract functions and parameter
@@ -5073,9 +5099,24 @@ preceding nodes/order, 1,227 current source hashes, targets, 89 helper decisions
 and the 300-second bound remain intact. Only the adapter becomes a new source
 binding; all production owners were already targets.
 
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6012119863` covers exact head
+`081debec19c71b196559c50d5ffda152f89d3e7f` with no active findings.
+Source CI `45020471375`, unit job `137202002147`, freshly passes all 8,787
+cases with 43 deselections, 152.76 pytest seconds and 172.888 packet seconds.
+It reports `mode=executed`, origin run `45020471375` attempt one, execution
+identity `46f974d14c85982020fcfbeadcd12a2ffab3d607c0fc4c01556e5533943779be`
+and packet digest
+`7967ab426e75196ec10dbc33e02c82b34ab159cbcc4bb081433216a4d5e03f8c`.
+Required aggregate `137203036847`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14079 merges at `2026-11-22T12:10:51Z` as
+`bdaf43f00ad3653ab8cc9129c0d125acf2e2bdc4`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the twenty-case leaf.
 No new mock, preload, wrapper, effect exception, data allowlist, workflow,
-runtime or cleanup change is introduced. Complete fresh Linux CI, current-head
-review and normal required merge checks remain necessary. This finite
+runtime or cleanup change is introduced. This finite
 qualification does not settle the distinct 21-case mutation-source failure or
 other retained refusals and owner seams. Fresh-install/native lanes are not
 applicable because installation, runtime, workflow and original-test behavior
