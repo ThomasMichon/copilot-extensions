@@ -3,6 +3,31 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py",
+      [
+        "test_inventory_rejects_new_or_ambiguous_python",
+        "test_directory_prefixes_do_not_claim_neighboring_components",
+        "test_paths_cannot_inject_response_file_arguments",
+        "test_manifest_rejects_duplicate_keys_and_path_escape",
+        "test_additional_versions_preserve_minimum_defaults_and_physical_ownership",
+        "test_manifest_rejects_invalid_additional_version_policy[None]",
+        "test_manifest_rejects_invalid_additional_version_policy[3.11]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional2]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional3]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional4]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional5]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional6]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional7]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional8]",
+        "test_manifest_rejects_invalid_additional_version_policy[additional9]",
+        "test_optional_constructor_positions_and_combined_manifest",
+        "test_combined_matrix_preserves_import_custody_and_failure_collection[False-False]",
+        "test_combined_matrix_preserves_import_custody_and_failure_collection[False-True]",
+        "test_combined_matrix_preserves_import_custody_and_failure_collection[True-False]",
+        "test_combined_matrix_preserves_import_custody_and_failure_collection[True-True]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_installer_guard_units.py",
       [
         "test_engine_usage_bypass_comments_do_not_count",
@@ -10696,6 +10721,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py": "a49b419d07c81d85667c233707b083ae1907ce0ceab6554a22f1ffacce7014f2",
     "tools/promotion_unit_tests/test_original_installer_guard_units.py": "07ad74dea05179c41390934e2e61ce06815190ad3dd9d02c333e056ed2972ccc",
     "tools/test_check_install_contract.py": "048688b68f424c34214539c1a1f62c1eaa4c0ee9d92df4f7149c733ce887e650",
     "tools/test_installer_finalizers.py": "c01cee8b28537b990e8c0ae6e3512106f456cb4e59791beaa5501c919758475d",
