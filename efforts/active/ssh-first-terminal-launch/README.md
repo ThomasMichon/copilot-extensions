@@ -25,6 +25,9 @@ through SSH. The Manager collects options and yields the terminal; it does not
 orchestrate a preliminary remote allocation. Target-local authorization,
 creation, prompt provenance and backend ownership remain intact. Remove
 completion clocks, not correctness or explicit cancellation.
+Manager exit refers to the in-place handoff; supported detached new-window
+launches retain their existing chooser lifetime and run SSH first in the new
+terminal. This does not add a new detached-launch capability.
 
 ## Participants
 

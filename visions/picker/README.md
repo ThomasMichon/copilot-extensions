@@ -186,10 +186,12 @@ without losing intent or repeating an admitted creation or handoff.
 
 ### ssh-first-terminal-handoff
 Confirming a remote launch hands the complete selected intent to the terminal,
-not to a preliminary remote creation transaction. The Picker exits before the
-terminal connects with an interactive TTY and invokes the target's ordinary
-launch flow. Project, execution destination, New or anchor selection, resume
-options, multiplexer choice and prompt arrive intact at that flow.
+not to a preliminary remote creation transaction. For an in-place handoff, the Picker exits before the terminal
+connects with an interactive TTY and invokes the target's ordinary launch flow.
+A supported detached launch leaves the Picker running and performs that same
+SSH-first flow in the new terminal window. Project, execution destination,
+New or anchor selection, resume options, multiplexer choice and prompt arrive
+intact at that flow.
 
 The target owns preparation, policy enforcement, durable prompt handling and
 Copilot startup using its own tools and services. The originating Picker does

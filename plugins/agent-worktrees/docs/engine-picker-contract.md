@@ -437,8 +437,10 @@ resident write transport. It is not a real Copilot acceptance test.
 
 The [SSH-first terminal launch effort](../../../efforts/active/ssh-first-terminal-launch/README.md)
 replaces the interactive preliminary-admission mechanism described below.
-The intended path is confirmation, complete argument packaging, Manager exit,
-TTY-enabled SSH, then the ordinary target-local worktree launch command.
+The intended in-place path is confirmation, complete argument packaging,
+Manager exit, TTY-enabled SSH, then the ordinary target-local worktree launch
+command. Supported detached launches run the same SSH-first sequence in the
+new terminal without closing the originating Picker.
 Creation, policy enforcement, prompt staging, mux and Copilot startup belong
 to that target command, with no admission/policy/creation receipt round-trip
 to the originating Manager. Initial connection establishment may be bounded;
