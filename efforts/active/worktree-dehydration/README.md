@@ -2,11 +2,10 @@
 
 ## Goal
 
-Deliver the assigned agenda-storage prerequisite so finalized-checkout cleanup
-cannot erase agenda history and the Agendas tool uses the expected external
-storage home. Preserve the larger dehydration effort and its remaining gates.
-Resolve blocked checker preparation with compatible dependencies from the
-configured feeds, without weakening dependency seasoning.
+Deliver reversible worktree dehydration and rehydration, automatic stop/resume
+integration, and complete operator controls. Preserve branch identity, agency
+records, durable data and unfinished responsibility. The agenda-storage
+prerequisite is complete; do not bypass its outstanding doctor hold.
 
 Current operator assignment:
 
@@ -60,15 +59,14 @@ Disk reclamation must not require pretending that unfinished work is complete.
 | design-driver | Owns the initial vision, architecture proposal, tracking and design PR | This effort and #13781 |
 | agenda-storage-driver | Owns #13790 source changes, consumer alignment, tests and PR delivery | This effort and #13790 |
 | checker-dependency-driver | Owns the assigned configured-feed checker dependency follow-up | This effort's dependency follow-up |
-| dehydration-owner (unassigned) | Future reversible checkout storage, automatic entry and Manager delivery | Assign through the remaining linked issues |
+| dehydration-driver | Owns reversible storage, automatic entry, Manager delivery and their dependency-ordered PRs | This effort and #13783-#13785 |
 
 ## Coordination
 
 - **Topology:** one kickoff design PR; agenda placement/doctor precedes storage activation, then automatic entry and Manager integration.
-- **Host (owns PRs):** agenda-storage-driver owns the assigned #13790 source delivery.
-- **Delegates:** none; no implementation worker has been launched.
-- **Handoff:** the canonical plan is here; assign later execution explicitly.
-  Keep the umbrella and remaining dehydration issues open after the agenda fix.
+- **Host (owns PRs):** dehydration-driver owns the assigned #13783-#13785 source delivery.
+- **Delegates:** none; implementation proceeds in dependency order.
+- **Handoff:** the canonical plan is here; keep the umbrella open until the complete operator flow is qualified.
 
 ## Context
 
@@ -106,6 +104,9 @@ Start with this effort, vision changes, architecture and tracking.
 The public-safe original words and amendments are in [inception.md](inception.md).
 The latest publication request is generalized there to exclude private
 provenance destinations. No public artifact links back to private material.
+The operator has now assigned the remaining implementation phases. The
+reviewed architecture remains the starting point; implementation must qualify
+unresolved mechanics rather than treat recommendations as settled API.
 
 ## Scope Approvals
 
@@ -142,6 +143,13 @@ provenance destinations. No public artifact links back to private material.
   changing its version. It supersedes retaining the earlier failing stub pin,
   not the feed, seasoning or integrity requirements. It does not authorize an
   agenda migration, doctor workaround or fleet rollout.
+- **Current implementation assignment:** the operator said, “Ah. Get to
+  building that then,” after being told that reversible storage, automatic
+  stop/resume and Manager controls were not implemented. This assigns Phases
+  3-5, including source changes, directly relevant tests, documentation and
+  normal PR delivery. Preserve the existing clean-Git, expected-branch,
+  durable-data and ownership boundaries. This does not authorize live agenda
+  migration, a doctor workaround, production installation or fleet rollout.
 
 ## Plan
 
@@ -160,25 +168,25 @@ provenance destinations. No public artifact links back to private material.
 - [x] Prove history and store identity, single-writer relocation, target/locator conflicts and interrupted recovery before source retirement.
 - [x] Align the Agendas tool with the same owner-published external placement and prove agenda retention across finalized-checkout cleanup.
 
-### Checker dependency follow-up (assigned)
+### Checker dependency follow-up (completed)
 
 - [x] Select a compatible checker dependency set from the configured feeds without weakening seasoning or hash checks.
 - [x] Prove the selected set with normal local checker preparation and the relevant dependency consumer checks.
-- [ ] Deliver the bounded dependency change through the repository's normal review and CI gates.
+- [x] Deliver the bounded dependency change through the repository's normal review and CI gates (#14004).
 
-### Phase 3 - Prove reversible storage (#13783; execution not assigned)
+### Phase 3 - Prove reversible storage (#13783)
 
 - [ ] Implement the owner-mediated catalog and a real clean WIP round trip at the original path.
 - [ ] Prove branch retention, interrupted-transition recovery and catalog-aware roster reconstruction.
 - [ ] Integrate claims, paired worktrees, cleanup, Git GC and durable-data placement without semantic finalization.
 
-### Phase 4 - Prove automatic stop and resume (#13784; execution not assigned)
+### Phase 4 - Prove automatic stop and resume (#13784)
 
 - [ ] Extend existing post-exit/resident work with actual retirement checks and a shared entry/removal fence.
 - [ ] Hydrate before every path-dependent mux and Bridge entry; preserve prompts and session lineage.
 - [ ] Prove repeated automatic cycles, concurrent requests, restart recovery and supported provider skew.
 
-### Phase 5 - Prove the complete operator flow (#13785; execution not assigned)
+### Phase 5 - Prove the complete operator flow (#13785)
 
 - [ ] Add `(D)`, visible hold/refusal reasons, auto/manual policy and manual Manager actions.
 - [ ] Qualify native Windows and Linux/WSL flows, storage reduction and resume cost with disposable fixtures.
@@ -193,7 +201,7 @@ provenance destinations. No public artifact links back to private material.
 - [x] Verify live issues, dependencies and published design links; preserve open implementation trackers.
 - [x] Obtain the repository's required review and CI before merging the design PR.
 
-### Implementation acceptance (future, not claimed by this kickoff)
+### Implementation acceptance
 
 - [ ] Clean CONVO, unpushed WIP, MERGED and FINAL retain their identity and classification with `(D)`.
 - [ ] Staged, modified, untracked, detached/unexpected branch, unfinished Git operations and unknown evidence refuse.
@@ -258,7 +266,13 @@ kickoff; the full capability remains future work under #13781.
 - The follow-up native Windows packet passed 192 Worktrees tests (8 skipped),
   29 efforts tests (2 skipped) and the actual Agendas-consumer retention test.
   The earlier complete-history rescue and PowerShell evidence still applies.
-  These are functional checks with a larger fixture budget, not latency results.
+- These are functional checks with a larger fixture budget, not latency results.
+- The configured-feed dependency replacement merged as #14004. Marko 2.2.5
+  passed normal checker preparation and the focused 121-test packet; this
+  delivery does not qualify installed agenda behavior or implement dehydration.
+- The operator assigned Phases 3-5: reversible storage first, then automatic
+  stop/resume, then the complete Manager flow. Work on #13783 is claimed; later
+  slices keep their existing issue and review gates.
 - Required CI exposed whole-file strict typing errors in touched files. Added
   explicit types and preserved the runtime behavior. Diagnostic MyPy passes
   all 17 changed Python files; exact installer-consumer CI remains required.
