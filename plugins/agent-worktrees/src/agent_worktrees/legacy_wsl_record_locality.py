@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import yaml
 from machine_transport import (
@@ -33,6 +33,15 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 _RESOLUTION_ERRORS = (OSError, ValueError, KeyError, TypeError, yaml.YAMLError, ExecutionSpaceError)
+
+
+def _actual_platform() -> str:
+    # Looked up through ``config`` at call time so existing test seams still apply.
+    return cast(str, getattr(cfg, "detect_platform")())
+
+
+def _hostname() -> str:
+    return cast(str, getattr(cfg, "socket").gethostname())
 
 
 def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bool:
@@ -55,6 +64,10 @@ def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bo
     )
     if current_namespace or anchor:
         return current_namespace
+    from .checkout_hydration_catalog import placement_matches
+
+    if placement_matches(record, config):
+        return True
     from .retained_checkout import matches
 
     return matches(record, config)
@@ -64,7 +77,7 @@ def _local_record_selection(
     config: cfg.Config, entries: dict[str, MachineEntry],
 ) -> tuple[MachineSelection[MachineEntry], bool]:
     """Keep actual observed/derived bindings local only within the record proof."""
-    actual = cfg.detect_platform()
+    actual = _actual_platform()
     if getattr(config, "platform", actual) != actual:
         return resolve_machine_selection(entries, config.machine, actual), False
     from .execution_spaces import _current_execution_context
@@ -99,12 +112,13 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
     if ref is None or not ref.is_qualified:
         return None
+    ref_machine = cast(str, ref.machine)  # is_qualified guarantees a non-empty str
     from . import retained_checkout
 
     local = retained_checkout.resolve_owner(ref, config)
     if local is not None:
         return local
-    actual = cfg.detect_platform()
+    actual = _actual_platform()
     if actual not in ("windows", "wsl", "linux"):
         return None
     from .execution_spaces import registry_for_config
@@ -113,14 +127,14 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         caller_entries = registry_for_config(config)
         current, caller_observed = _local_record_selection(config, caller_entries)
         observed_ref = (
-            (caller_observed and ref.machine.casefold() == config.machine.casefold())
+            (caller_observed and ref_machine.casefold() == config.machine.casefold())
             or is_observed_local_name(
-                ref.machine, config_machine=config.machine, entries=caller_entries, environment=actual,
+                ref_machine, config_machine=config.machine, entries=caller_entries, environment=actual,
             )
         )
         # Exact foreign logical entries are rejected before any ledger lookup.
         try:
-            direct = resolve_machine_selection(caller_entries, ref.machine)
+            direct = resolve_machine_selection(caller_entries, ref_machine)
         except PhysicalMachineError:
             direct = None
         except MissingExecutionSpaceError:
@@ -128,14 +142,14 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
                 raise
             direct = None
         observed_context = resolve_local_execution_context(
-            {}, hostname=cfg.socket.gethostname(), environment=actual,
+            {}, hostname=_hostname(), environment=actual,
         )
         if (
             actual == "wsl" and (direct is None or direct.entry is None)
-            and ref.machine.casefold() in {
+            and ref_machine.casefold() in {
                 observed_context.hostname.casefold(), observed_context.machine.casefold(),
             }
-            and ref.machine.casefold() != observed_context.execution_machine.casefold()
+            and ref_machine.casefold() != observed_context.execution_machine.casefold()
         ):
             return None
         if direct is not None and direct.entry is not None and direct.exact:
@@ -153,10 +167,10 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
             and (direct is None or direct.entry is None)
             and (direct is None or not direct.target.environment)
             and (
-                any(ref.machine.casefold() == entry.physical_host.casefold()
+                any(ref_machine.casefold() == entry.physical_host.casefold()
                     for entry in caller_entries.values())
                 or not any(
-                    ref.machine.casefold() in {entry.hostname.casefold(), entry.display_name.casefold()}
+                    ref_machine.casefold() in {entry.hostname.casefold(), entry.display_name.casefold()}
                     for entry in caller_entries.values()
                 )
             )
@@ -178,10 +192,10 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
         receiving_config = project_record_config(record)
         if record.machine_identity is not None and getattr(record, "_reporting_context", None) is None:
-            if ref.machine != record.execution_machine:
+            if ref_machine != record.execution_machine:
                 return None
             require_record_mutation(record, receiving_config)
-            if not require_owner_identity(ref.machine, receiving_config):
+            if not require_owner_identity(ref_machine, receiving_config):
                 return None
         receiver_entries = registry_for_config(receiving_config)
         receiving, receiver_observed = _local_record_selection(receiving_config, receiver_entries)
@@ -198,15 +212,15 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         if record.platform != actual:
             return None
         if observed_ref and (
-            (receiver_observed and ref.machine.casefold() == receiving_config.machine.casefold())
+            (receiver_observed and ref_machine.casefold() == receiving_config.machine.casefold())
             or is_observed_local_name(
-                ref.machine, config_machine=receiving_config.machine,
+                ref_machine, config_machine=receiving_config.machine,
                 entries=receiver_entries, environment=record.platform,
             )
         ):
             requested = receiving
         else:
-            requested = resolve_machine_selection(receiver_entries, ref.machine, record.platform)
+            requested = resolve_machine_selection(receiver_entries, ref_machine, record.platform)
         if (
             (
                 receiver_observed
@@ -275,7 +289,7 @@ def claim_refs_equivalent(
         return False
     try:
         if config is None or config.repo_name != left.project:
-            config = cfg.load_project_config(left.project, include_control_plane_related_pr=False)
+            config = cfg.load_project_config(cast(str, left.project), include_control_plane_related_pr=False)
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL claim equivalence: %s", exc)
         return False

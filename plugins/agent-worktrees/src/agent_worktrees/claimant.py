@@ -30,6 +30,11 @@ import os
 import subprocess
 import logging
 from pathlib import Path
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, cast
+
+import yaml
 
 from agent_procutil import no_window_kwargs
 from machine_transport import resolve_machine_selection, resolve_ssh_target
@@ -38,12 +43,13 @@ from . import config as cfg
 from . import legacy_wsl_record_locality
 from . import machine_identity
 from . import tracking
+from . import tracking_claims
 
 _LOG = logging.getLogger(__name__)
 
 
-def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking.ClaimRef, config) -> bool:
-    actual = cfg.detect_platform()
+def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking_claims.ClaimRef, config: Any) -> bool:
+    actual = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
     conflict = record.platform != actual
     if conflict:
         _LOG.warning("Claimant record platform conflicts with the actual execution context")
@@ -57,7 +63,7 @@ def _record_execution_conflicts(record: tracking.WorktreeRecord, owner: tracking
     return conflict
 
 
-def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool | None:
+def _claimant_is_local(parsed: tracking_claims.ClaimRef, config: Any) -> bool | None:
     from . import retained_checkout
     from .execution_spaces import require_current_execution_space
 
@@ -71,7 +77,7 @@ def _claimant_is_local(parsed: tracking.ClaimRef, config) -> bool | None:
     return None if machine_identity.is_local_machine(parsed.machine, config) else False
 
 
-def _confirmed_record_death(record, config) -> bool | None:
+def _confirmed_record_death(record: tracking.WorktreeRecord, config: Any) -> bool | None:
     from . import retained_checkout
     from .execution_spaces import project_record_config
 
@@ -80,7 +86,7 @@ def _confirmed_record_death(record, config) -> bool | None:
             config = project_record_config(record)
         match = retained_checkout.recorded_branch_matches(record, config)
         retained = (Path(record.worktree_path) / ".git").exists()
-    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, cfg.yaml.YAMLError):
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, yaml.YAMLError):
         return None
     if match is False or match is None and retained:
         _LOG.warning("Claimant checkout branch/metadata is unproven for its recorded incarnation")
@@ -134,7 +140,7 @@ def _parseable_iso(stamp: str | None) -> bool:
         return False
 
 
-def _owner_looks_dead(owner_rec, *, dead_after_secs: float | None = None) -> bool:
+def _owner_looks_dead(owner_rec: tracking.WorktreeRecord, *, dead_after_secs: float | None = None) -> bool:
     """Positively conclude a same-machine owner worktree's session is DEAD.
 
     Used only for the "owner record present, non-terminal status, dir still on
@@ -180,6 +186,12 @@ def _owner_looks_dead(owner_rec, *, dead_after_secs: float | None = None) -> boo
     return all(tracking._stamp_older_than(c, dead_after_secs) for c in parseable)
 
 
+def _hydration_catalog() -> ModuleType:
+    from . import checkout_hydration_catalog
+
+    return checkout_hydration_catalog
+
+
 def local_claimant_alive(owner_ref: str) -> bool | None:
     """Same-machine claimant-liveness probe (resource-claims).
 
@@ -204,7 +216,7 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     ``False``) and only a *removed anchor checkout* is ``False`` -- an anchor's
     claims settle by the resource's own proof, not by owner-death.
     """
-    parsed = tracking.parse_claim_ref(owner_ref)
+    parsed = tracking_claims.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
     try:
@@ -244,6 +256,13 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
             return False  # the anchor checkout truly went away -> gone
         return True  # anchor present -> alive (permanent)
     if not rec_path.exists():
+        # A dehydration catalog entry is a recovery candidate for a lost ledger:
+        # its agency (and claims) are retained, so the owner is not gone.
+        state = _hydration_catalog().project_entry_state(project, parsed.worktree_id, config)
+        if state == _hydration_catalog().ENTRY_PRESENT:
+            return True
+        if state != _hydration_catalog().ENTRY_ABSENT:
+            return None  # the target project's catalog could not be consulted
         return False  # owner record gone -> claim is stale
     try:
         owner_rec = tracking.load_record(rec_path)
@@ -251,13 +270,17 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         return True  # record present but unreadable -> bias to sparing
     if _record_execution_conflicts(owner_rec, parsed, config):
         return None
+    # A dehydrated owner keeps its identity and agency with no checkout or
+    # session; it still holds its claims until rehydrated or finalized.
+    if _hydration_catalog().is_dehydrated(owner_rec):
+        return True
     # Citadel E1b cascade (#877): a parent in a TERMINAL status (finalized /
     # orphaned) is done -- it no longer actively holds its outbound worktree
     # resources, so its children are orphans. Treat it as gone here so a
     # finalized-but-not-yet-pruned parent (whose dir still exists) stops pinning
     # its children as "claimed". The children remain protected by their OWN
     # git/PR/session prune safety, so nothing with real work is lost.
-    if owner_rec.status in tracking._TERMINAL_OWNER_STATUSES:
+    if owner_rec.status in tracking_claims._TERMINAL_OWNER_STATUSES:
         return _confirmed_record_death(owner_rec, config)
     if owner_rec.worktree_path and not Path(owner_rec.worktree_path).exists():
         return False  # owner's worktree dir removed -> gone
@@ -285,7 +308,7 @@ def resolve_claimant_alive(
     ``None`` (spare). Remote probing is skipped (``None``) when disabled via the
     ``AGENT_WORKTREES_NO_REMOTE_CLAIMANT`` env or ``allow_remote=False``.
     """
-    parsed = tracking.parse_claim_ref(owner_ref)
+    parsed = tracking_claims.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
     try:

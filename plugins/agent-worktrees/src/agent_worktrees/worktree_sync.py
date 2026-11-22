@@ -87,7 +87,7 @@ def sync_pair(
                 remote=repo.remote, default_branch=repo.default_branch, active_paths=active,
             )
             if raw.state in {
-                git_ops.WorktreeState.ACTIVE, git_ops.WorktreeState.GONE,
+                git_ops.WorktreeState.ACTIVE, git_ops.WorktreeState.GONE, git_ops.WorktreeState.DEHYDRATED,
                 git_ops.WorktreeState.UNKNOWN, git_ops.WorktreeState.ORPHAN,
                 git_ops.WorktreeState.DIRTY,
             }:
@@ -95,7 +95,7 @@ def sync_pair(
             info = _apply_tracking_override(member, raw)
             reason = ""
             if info.state in {
-                git_ops.WorktreeState.ACTIVE, git_ops.WorktreeState.GONE,
+                git_ops.WorktreeState.ACTIVE, git_ops.WorktreeState.GONE, git_ops.WorktreeState.DEHYDRATED,
                 git_ops.WorktreeState.UNKNOWN, git_ops.WorktreeState.ORPHAN,
             }:
                 reason = info.state.value

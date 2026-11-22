@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, tracking
+from .checkout_hydration_catalog import is_dehydrated
 from .observation_progress import observation_boundary
 
 
@@ -35,7 +36,7 @@ def apply_tracking_override(
         if (
             info.state != git_ops.WorktreeState.DIRTY
             and info.dirty == 0
-            and info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE)
+            and info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE, git_ops.WorktreeState.DEHYDRATED)
         ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
@@ -199,6 +200,8 @@ def compute(
             )
             info = dataclasses.replace(content, state=git_ops.WorktreeState.ACTIVE)
         info = tracking_override(record, info)
+    elif is_dehydrated(record):
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DEHYDRATED)
     elif record.status == "finalized":
         info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
     else:
