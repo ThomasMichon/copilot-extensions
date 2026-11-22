@@ -27,7 +27,9 @@ class InstalledPolicyTest(unittest.TestCase):
                 result = subprocess.run(
                     [sys.executable, "-I", "-B", "-c", probe, app, temp, "control",
                      str(anchor), str(companion) if bound else "", "worktrees-alias"], capture_output=True, text=True,
-                    env={**os.environ, "AGENT_INDEX_MACHINE": index_machine}, timeout=30,
+                    env={**os.environ, "AGENT_INDEX_MACHINE": index_machine,
+                         "AGENT_INDEX_CONFIG": str(root / "machine-index.yaml"),
+                         "AGENT_VAULT_CONFIG": str(root / "machine-vault.json")}, timeout=30,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 self.assertNotIn("unexpected service effect", result.stderr)
@@ -51,6 +53,14 @@ class InstalledPolicyTest(unittest.TestCase):
             observe("agent-index", "host")
             observe("agent-index", "client", index_machine="different-index-host")
             observe("agent-vault", "configured")
+            native_vault = root / "machine-vault.json"
+            native_vault.write_text('{"enabled":false}', encoding="utf-8")
+            observe("agent-vault", "configuration-empty")
+            native_vault.unlink()
+            native_index = root / "machine-index.yaml"
+            native_index.write_text("indexer:\n  machine: other-host\n", encoding="utf-8")
+            observe("agent-index", "client")
+            native_index.unlink()
             base_vault = anchor / ".agent-vault.json"
             base_vault.write_text('{"enabled":true,"port":"invalid"}', encoding="utf-8")
             observe("agent-vault", None)
