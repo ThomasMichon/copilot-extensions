@@ -235,6 +235,8 @@ def test_fleet_discovery_ignores_unrelated_missing_cwd_but_scoped_binding_is_unk
 @pytest.mark.parametrize(("case", "expected"), [
     pytest.param("native", True, id="native_cli"), ("script", True), ("foreign", False),
     ("denied", None), ("malformed", None), ("oversized", None), ("truncated", None),
+    ("foreign_checkout", False), ("foreign_executable", False), ("foreign_argument", False),
+    ("node_foreign_entry", False), ("node_symlink", True), ("node_option", None), ("node_relative", None),
 ])
 def test_darwin_registered_activity_uses_bounded_native_process_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str, expected: bool | None,
@@ -242,14 +244,23 @@ def test_darwin_registered_activity_uses_bounded_native_process_arguments(
     import ctypes
     import json
     import os
+    import posixpath
     import sys
     from agent_worktrees import process_table_cache, reclaim, session_liveness
 
-    argv = (
-        ["/usr/local/bin/node", "/usr/local/lib/node_modules/@github/copilot/index.js"] if case == "script"
-        else ["/usr/bin/python", "worker.py"] if case == "foreign"
-        else ["/usr/local/bin/copilot", "--resume=example"]
-    )
+    loader = "/usr/local/lib/node_modules/@github/copilot/npm-loader.js"
+    commands = {
+        "script": ["/usr/local/bin/node", loader],
+        "foreign": ["/usr/bin/python", "worker.py"],
+        "foreign_checkout": ["/usr/bin/python3", "/checkout/copilot-extensions/tools/worker.py"],
+        "foreign_executable": ["/opt/copilot-support/bin/copilot-helper", "worker.py"],
+        "foreign_argument": ["/usr/bin/python3", "worker.py", "--note=copilot"],
+        "node_foreign_entry": ["/usr/local/bin/node", "/checkout/copilot-extensions/worker.js", loader],
+        "node_symlink": ["/usr/local/bin/node", "/usr/local/bin/copilot"],
+        "node_option": ["/usr/local/bin/node", "-e", f"require('{loader}')"],
+        "node_relative": ["/usr/local/bin/node", "node_modules/@github/copilot/npm-loader.js"],
+    }
+    argv = commands.get(case, ["/usr/local/bin/copilot", "--resume=example"])
     argc = 0 if case == "malformed" else len(argv)
     payload = argc.to_bytes(4, sys.byteorder, signed=True) + argv[0].encode() + b"\0\0"
     payload += b"\0".join(arg.encode() for arg in argv) + b"\0"
@@ -271,6 +282,14 @@ def test_darwin_registered_activity_uses_bounded_native_process_arguments(
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(ctypes, "CDLL", lambda *_a, **_kw: types.SimpleNamespace(sysctl=sysctl))
     monkeypatch.setattr(os, "kill", lambda *_a: None)
+    original_realpath = os.path.realpath
+
+    def realpath(path: Any, *args: Any, **kwargs: Any) -> str:
+        if path == argv[1]:
+            return loader if case == "node_symlink" else posixpath.normpath(path)
+        return cast(str, original_realpath(path, *args, **kwargs))
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
     assert session_liveness.copilot_pid_state(123) is expected
     assert sessions._is_copilot_process(123) is (expected is True)
     record = _rec()
@@ -285,6 +304,7 @@ def test_darwin_registered_activity_uses_bounded_native_process_arguments(
     monkeypatch.setattr(sessions, "mux_status_many", lambda *_a, **_kw: {})
     monkeypatch.setattr(process_table_cache, "cached", lambda *_a: {})
     monkeypatch.setattr(reclaim, "homing_of", lambda *_a: "unknown")
+    monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd", lambda _cwd: "aaaa")
     monkeypatch.setattr(locks, "process_start_time", lambda _pid: "123")
     ctx = sessions.scan_sessions_fast([record])
     norm = sessions._normalize_path(record.worktree_path)
@@ -293,3 +313,7 @@ def test_darwin_registered_activity_uses_bounded_native_process_arguments(
     verdict = sessions.verify_worktree_active(record)
     assert verdict.active is (expected is True)
     assert verdict.probes_ok is (expected is not None)
+    discovered = reclaim.resolve_bound_copilots(
+        worktree_id="aaaa", worktree_path=record.worktree_path, table={},
+    )
+    assert bool(discovered) is (expected is True)

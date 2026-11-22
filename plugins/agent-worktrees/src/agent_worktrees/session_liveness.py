@@ -29,6 +29,7 @@ _ERROR_INVALID_PARAMETER = 87  # OpenProcess on a PID that doesn't exist
 def _darwin_copilot_pid_state(pid: int) -> bool | None:
     """Read one PID's bounded KERN_PROCARGS2 payload, excluding environment data."""
     import ctypes
+    import posixpath
     import sys
 
     try:
@@ -55,13 +56,27 @@ def _darwin_copilot_pid_state(pid: int) -> bool | None:
     if not executable or not separator:
         return None
     remaining = remaining.lstrip(b"\0")
-    copilot = b"copilot" in executable.lower()
+    arguments: list[bytes] = []
     for _ in range(argc):
         argument, separator, remaining = remaining.partition(b"\0")
         if not separator:
             return None
-        copilot = copilot or b"copilot" in argument.lower()
-    return copilot
+        arguments.append(argument)
+    executable_name = executable.rsplit(b"/", 1)[-1].lower()
+    if executable_name == b"copilot":
+        return True
+    if executable_name not in {b"node", b"nodejs"}:
+        return False
+    if len(arguments) < 2 or not arguments[1] or arguments[1].startswith(b"-"):
+        return None
+    entrypoint = os.fsdecode(arguments[1])
+    if not posixpath.isabs(entrypoint):
+        return None
+    try:
+        resolved = posixpath.normpath(os.path.realpath(entrypoint, strict=True))
+    except (OSError, ValueError):
+        return None
+    return resolved.split("/")[-3:] == ["@github", "copilot", "npm-loader.js"]
 
 
 def copilot_pid_state(pid: int) -> bool | None:
