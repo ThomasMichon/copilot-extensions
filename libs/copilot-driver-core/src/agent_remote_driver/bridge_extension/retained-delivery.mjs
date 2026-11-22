@@ -17,6 +17,10 @@ const HISTORY_PAGE = 100;
 const HISTORY_PAGES = 8;
 const HISTORY_SLACK_S = 60;
 const DEFERRED_LIMIT = 1_000;
+// Cached history evidence is bounded; settled originals are pruned and never
+// re-cached, and evicting evidence withdraws the coverage it supported.
+const HISTORY_INPUT_LIMIT = 1_000;
+const SETTLED_LIMIT = 1_000;
 export const RESUME_NUDGE = "All queued agent-bridge messages were already delivered; resume.";
 const STAGES = new Set(["offered", "sending", "unknown", "sdk_accepted", "consumed", "rejected"]);
 const TERMINAL = new Set(["sdk_accepted", "consumed", "rejected"]);
@@ -166,10 +170,23 @@ export function createRetainedInbox({
   let sweepUnsettled = false;
   const fullHistoryRead = new Set();
   let historyCache = null;
+  const settledIds = new Set();
+  // A settled original needs no further history evidence: drop it and skip it
+  // on later reads so long-lived sessions do not accumulate cached headers.
+  const settleHistory = (id) => {
+    settledIds.delete(id);
+    settledIds.add(id);
+    while (settledIds.size > SETTLED_LIMIT) settledIds.delete(settledIds.keys().next().value);
+    if (!historyCache) return;
+    for (const [key, input] of historyCache.inputs) {
+      if (input.id === id) historyCache.inputs.delete(key);
+    }
+  };
   const consumed = (sid, id) => {
     if (episode && episode.id === idleEpisode() && episode.awaiting.has(id)) episode.redundant.add(id);
     verified.delete(id);
     deferred.delete(id);
+    settleHistory(id);
     onConsumed(sid, id);
   };
   let lastLog = "";
@@ -289,17 +306,23 @@ export function createRetainedInbox({
   // reached so later checks only page through newer events. Only the newest
   // page's IDs are kept to detect overlap, so a deep backward scan keeps its
   // progress however many user messages precede an inherited handoff.
+  // Evidence is capped: settled originals are pruned and skipped, the rows being
+  // checked are pinned, and evicting another original's header withdraws only
+  // that original's coverage until a fresh scan re-reads it, so a removed
+  // match can never authorize a duplicate submission.
   async function readRecentHistory(sid, rows) {
     const log = session.rpc.eventLog;
     if (historyCache?.sid !== sid) {
       historyCache = {
-        sid, head: new Set(), inputs: [], inputIds: new Set(), cursor: null, reached: Infinity, done: false,
+        sid, head: new Set(), inputs: new Map(), cursor: null, reached: Infinity, done: false,
+        evicted: new Map(), evictedAt: -Infinity,
       };
     }
     const cache = historyCache;
     const reset = () => {
       Object.assign(cache, { head: new Set(), cursor: null, reached: Infinity, done: false });
     };
+    const pinned = new Set(rows.map((row) => row.message_id));
     const page = async (cursor) => {
       const result = await nativeCall(() => log.read({
         ...(cursor ? { cursor } : {}), direction: "backward", max: HISTORY_PAGE,
@@ -312,17 +335,39 @@ export function createRetainedInbox({
       }
       return result;
     };
+    const evict = () => {
+      let victim = null;
+      for (const entry of cache.inputs) {
+        const better = victim === null
+          || (pinned.has(victim[1].id) && !pinned.has(entry[1].id))
+          || (pinned.has(victim[1].id) === pinned.has(entry[1].id) && entry[1].at < victim[1].at);
+        if (better) victim = entry;
+      }
+      const [key, { id, at }] = victim;
+      cache.inputs.delete(key);
+      cache.evicted.set(id, Math.max(cache.evicted.get(id) ?? -Infinity, at));
+      while (cache.evicted.size > SETTLED_LIMIT) {
+        // Too many withdrawn originals to track individually: withdraw coverage
+        // for every row whose window reaches the oldest one's evidence.
+        const [oldId, oldAt] = cache.evicted.entries().next().value;
+        cache.evicted.delete(oldId);
+        cache.evictedAt = Math.max(cache.evictedAt, oldAt);
+      }
+    };
     const remember = (event) => {
       const input = compactRetainedInput(sid, event, acceptsSource);
-      const id = typeof event?.id === "string" ? event.id : null;
-      if (input && !(id && cache.inputIds.has(id))) {
-        if (id) cache.inputIds.add(id);
-        cache.inputs.push(input.event);
-      }
+      if (!input || settledIds.has(input.id)) return;
+      const key = typeof event?.id === "string" ? `e:${event.id}` : `h:${input.header}`;
+      if (cache.inputs.has(key)) return;
+      cache.inputs.set(key, { id: input.id, at: eventSeconds(event) ?? Infinity, event: input.event });
+      while (cache.inputs.size > HISTORY_INPUT_LIMIT) evict();
     };
     let pages = 0;
     try {
       const fresh = cache.cursor === null && !cache.done;
+      // A fresh scan re-reads everything it will claim to cover, re-recording
+      // any eviction, so earlier withdrawals no longer apply.
+      if (fresh) Object.assign(cache, { evicted: new Map(), evictedAt: -Infinity });
       let cursor = null;
       let reached = Infinity;
       let connected = false;
@@ -361,11 +406,16 @@ export function createRetainedInbox({
       reset();
       throw error;
     }
-    return {
-      events: cache.inputs,
-      covered: new Set(rows.filter((row) => cache.done
-        || cache.reached <= row.handoff_started_at - HISTORY_SLACK_S).map((row) => row.message_id)),
-    };
+    const events = [...cache.inputs.values()].map((input) => input.event);
+    const scanned = (row) => cache.done || cache.reached <= row.handoff_started_at - HISTORY_SLACK_S;
+    const withdrawn = (row) => cache.evicted.has(row.message_id)
+      || row.handoff_started_at - HISTORY_SLACK_S <= cache.evictedAt;
+    const covered = new Set(rows.filter((row) => scanned(row) && !withdrawn(row))
+      .map((row) => row.message_id));
+    // Evicted evidence these rows rely on is re-read by a fresh scan later,
+    // when they are pinned.
+    if (rows.some((row) => scanned(row) && withdrawn(row))) reset();
+    return { events, covered };
   }
 
   // Without a bounded history API, read the full log at most once per started
@@ -485,6 +535,7 @@ export function createRetainedInbox({
         verified.delete(receipt.message_id);
         deferred.delete(receipt.message_id);
       }
+      if (receipt.stage === "consumed" || receipt.stage === "rejected") settleHistory(receipt.message_id);
       if (receipt.stage === "consumed" || receipt.stage === "rejected") {
         forgetNativeInput(sid, receipt.message_id);
       } else if ([...nativeInputs.values()].some((input) => input.sid === sid
@@ -612,6 +663,7 @@ export function createRetainedInbox({
       sweepUnsettled = false;
       fullHistoryRead.clear();
       historyCache = null;
+      settledIds.clear();
       episode = null;
       submittedEpisode = null;
     }
@@ -870,6 +922,10 @@ export function createRetainedInbox({
   }
 
   return {
+    // Diagnostic: cached history headers held for unsettled originals.
+    historyEvidenceSize() {
+      return historyCache?.inputs.size ?? 0;
+    },
     observe(sid, event) {
       if (!current(sid) || !nonblank(event?.data?.turnId)) return;
       const input = compactRetainedInput(sid, event, acceptsSource);

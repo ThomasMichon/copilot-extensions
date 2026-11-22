@@ -1654,3 +1654,62 @@ test("a fresh offer whose send fails blocks the resume prompt after a redundant 
   assert.notEqual(offer.handoff_stage, "offered");
   assert.equal(f.nudges(), 0);
 });
+// Serve a fixed user.message log newest-first in bounded pages.
+function pagedLog(events) {
+  const ordered = [...events].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  return { read: async ({ cursor, max }) => {
+    const start = cursor ? Number(cursor) : 0;
+    const end = Math.min(ordered.length, start + max);
+    return { events: ordered.slice(start, end), cursor: end < ordered.length ? String(end) : null,
+      hasMore: end < ordered.length, cursorStatus: "ok" };
+  } };
+}
+
+const unrelatedInputs = (count) => Array.from({ length: count }, (_, i) => ({
+  id: `other-${i}`, type: "user.message", timestamp: new Date(4_000 + i).toISOString(),
+  data: { source: "agent-bridge", turnId: `other-turn-${i}`,
+    content: `<agent-message retained-session="${sid}" retained-consumer="consumer-old" `
+      + `retained-handoff="other-${i}" msg-id="${9_000 + i}" from="peer">x</agent-message>` },
+}));
+
+test("cached history evidence stays bounded and settled originals are pruned", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  f.session.rpc.eventLog = pagedLog([f.history(row), ...unrelatedInputs(1_500)]);
+  const inbox = f.managed();
+  f.idle();
+  let peak = 0;
+  for (let i = 0; i < 8 && row.handoff_stage !== "consumed"; i++) {
+    await inbox.tick(sid);
+    peak = Math.max(peak, inbox.historyEvidenceSize());
+    f.clock += 30_001;
+  }
+  assert.equal(row.handoff_stage, "consumed", "the pinned original's match survives the cap");
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+  assert.ok(peak <= 1_000, `cached evidence is capped (peak ${peak})`);
+  assert.ok(inbox.historyEvidenceSize() < 1_000);
+});
+
+test("evicted history evidence never authorizes a duplicate submission", async () => {
+  const f = managedFixture();
+  const original = f.started("unknown");
+  f.started("sdk_accepted");
+  f.session.rpc.eventLog = pagedLog([f.history(original), ...unrelatedInputs(1_500)]);
+  const inbox = f.managed();
+  // While running only the submitted original is checked, so the unsubmitted
+  // one's match is unpinned and the cap evicts it.
+  f.run();
+  for (let i = 0; i < 4; i++) {
+    await inbox.tick(sid);
+    assert.ok(inbox.historyEvidenceSize() <= 1_000);
+    f.clock += 30_001;
+  }
+  f.idle();
+  for (let i = 0; i < 8 && original.handoff_stage !== "consumed"; i++) {
+    await inbox.tick(sid);
+    assert.ok(inbox.historyEvidenceSize() <= 1_000);
+    f.clock += 30_001;
+  }
+  assert.equal(original.handoff_stage, "consumed");
+  assert.equal(f.sends.filter((send) => /msg-id="1"/.test(send.prompt)).length, 0);
+});

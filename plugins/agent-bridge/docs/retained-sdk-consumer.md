@@ -330,7 +330,13 @@ per read and stops at the oldest candidate's start time. It caches a
 per-session high-water mark, so later reads only examine newer events. A deep
 backward scan toward an older handoff keeps its cursor across reads; only the
 newest page's event IDs are kept to detect overlap, so progress never resets
-however many user messages precede the handoff. Without
+however many user messages precede the handoff. The cached evidence is
+bounded too: at most 1,000 compact retained headers are kept. Headers for
+settled (consumed or rejected) originals are dropped and never cached again,
+and the originals being checked are pinned. If the cap evicts another
+original's header, that original loses its history coverage until a fresh
+scan re-reads it while it is pinned, so an evicted match can never authorize
+a duplicate submission. Without
 that RPC, each started record's handoff is checked with at most one full
 `getEvents()` read for the life of the extension. Its re-attempts then rely on
 live observation; if that observation overflows its bound, the memo is cleared
