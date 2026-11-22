@@ -124,12 +124,14 @@ class QueueStorageMixin(StorageOwner):
                 (ts, detach_reason, task_id, old_session_id),
             )
         if new_session_id is not None:
-            conn.execute(
+            from .attachment_workspace import capture
+            attached = conn.execute(
                 "INSERT INTO task_attachments "
                 "(task_id, session_id, worktree_id, machine, attached_at, detached_at) "
                 "VALUES (?, ?, ?, ?, ?, NULL)",
                 (task_id, new_session_id, worktree_id, machine, ts),
             )
+            capture(conn, attached.lastrowid, task_id, new_session_id, worktree_id, machine)
 
     def attachment_history(self, task_id: str) -> list[AttachmentRecord]:
         """Every session that has ever attached to ``task_id``, newest first."""

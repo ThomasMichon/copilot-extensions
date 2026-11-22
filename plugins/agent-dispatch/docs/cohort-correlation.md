@@ -22,6 +22,15 @@ session routes use `/api/v1/sessions` and `/api/v1/live-sessions`.
 An empty result describes only that owner's retained data, not another owner's
 resources or independent proof that a process is gone.
 
+Worktree IDs are scoped to a project. When recording a new attachment, the
+queue retains its reservation key, allocation project and checkout path if
+one live reservation for that task matches the machine, worktree and native.
+It stores this evidence with the attachment in the same transaction. An
+independent worker, missing or conflicting allocation evidence, or an older
+attachment without captured provenance stays unqualified: neither its task
+repository nor a later assignment supplies the missing project. This does
+not change the attachment HTTP response or authorize cleanup.
+
 ## Keep the three origins distinct
 
 Worktrees' `dispatch_attempt` identifies workspace birth. Its `cohort` retains
