@@ -3,6 +3,17 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_historical_argv_units.py",
+      [
+        "test_closed_historical_inspection_is_not_a_launch[agent-bridge-venv]",
+        "test_closed_historical_inspection_is_not_a_launch[agent-bridge-.venv]",
+        "test_closed_historical_inspection_is_not_a_launch[agent-dispatch-venv]",
+        "test_closed_historical_inspection_is_not_a_launch[agent-dispatch-.venv]",
+        "test_closed_historical_inspection_is_not_a_launch[agent-vault-venv]",
+        "test_closed_historical_inspection_is_not_a_launch[agent-vault-.venv]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_zip_directory_boundary_units.py",
       [
         "test_stdlib_directory_count_boundaries_allow_zip32_and_zip64[65534]",
@@ -10860,6 +10871,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_historical_argv_units.py": "1ba9da0636c1545db8b5ec36a0167ee46c552299697ff1042f9d9857551e4790",
+    "tools/test_installer_engine_stop.py": "d2663dcb0272a52097d738fba1623bfcaa1f71b2d7ee091330e75b1bd9600ea7",
     "tools/promotion_unit_tests/test_original_zip_directory_boundary_units.py": "84119fd77b2b0c868ea186c0748df20fe63cf85e55cdc1d9015090aa6cf3ff7f",
     "tools/promotion_unit_tests/test_original_source_tree_budget_units.py": "d09124239abb19f97b7c29844aa53f9f1bf001c9ef7caa12a2567691635f09fa",
     "tools/promotion_unit_tests/test_original_source_phase_units.py": "5075182b1402b9acf7b505b979c100f737a083f924bbe731f55680b1b1a220ed",
@@ -12122,6 +12135,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "libs/installer-engine/installer_engine_stop.py",
     "libs/installer-engine/installer_source_build.py",
     "tools/pytest_portfolio_guard.py",
     "tools/capture_bridge_host_inspection.py",

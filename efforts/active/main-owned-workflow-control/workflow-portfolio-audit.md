@@ -6027,6 +6027,42 @@ new mock, preload, guard exception, data, production, routing or cleanup change
 is introduced. This selection does not settle any separate native-load/thread
 refusal or parent completion and makes no whole-flow savings claim.
 
+### November 22 original historical-argv inspection
+
+The adapter exports the complete original
+`test_closed_historical_inspection_is_not_a_launch`, retaining all six
+combinations of `venv`/`.venv` and the three original products. Literal
+argument vectors, the unused temporary-path fixture and the original
+positive, foreign-root and unrelated-module assertions are unchanged.
+Only the pure `admits_argv` inspection is selected; stop, capture, process
+inventory, signaling, native pidfd, unit-writer and Bash execution tests
+remain outside this adapter.
+
+Complete collection verifies all 110 original cases and exactly six adapter
+cases with original function and parameter-object identity. Initial unchanged
+effect/source auditing passes all six in 1.094 seconds, with zero prohibited
+effects, three bound canonical Python reads and actual `admits_argv`
+call-phase lines per case. The first collection-only metadata assertion
+incorrectly assumed the owner was already a coverage target; inspection
+confirms it was hash-bound but not a target. The candidate explicitly adds
+that target, without changing any guard or executing a refused case.
+
+Two Python bindings are added for the adapter and original test module, plus
+the already hash-bound owner as a coverage target. All 8,896 prior nodes retain
+relative order; all 1,260 previous source hashes, 463 previous targets,
+89 helper decisions and the 300-second bound remain intact. Compact-v2 and
+flat-v1 logical identity agree; the candidate contains 8,902 nodes,
+1,262 sources and 464 targets in 997,820 bytes. Exact-head review and complete
+fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes are not applicable because installation and
+runtime behavior do not change; normal fresh source CI supplies the external
+Linux consumer proof. This distinct selection does not replay or settle
+any refused candidate, complete the parent or demonstrate comparable
+whole-flow savings.
+
 ### November 22 original ZIP32/ZIP64 directory-count boundaries
 
 The adapter exports the complete original
@@ -6059,6 +6095,33 @@ preload, guard exception, data admission, native policy, routing or cleanup
 change is introduced. This distinct selection does not replay or settle
 any refused candidate, complete the parent or demonstrate comparable
 whole-flow savings.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6012996270` names exact head
+`9c7efce91d865e2fdef6660ef025b3667e3fb0d3`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45037706199`, unit job `137255024963`, executes all 8,896
+cases with 43 deselections in 208.24 pytest / 231.510 packet seconds.
+It reports `mode=executed`, origin run `45037706199` attempt one,
+execution identity
+`3864fb0b90754344458026936e8a728d3f87e8497a0c22bd34a151cd2bf5a775`
+and packet digest
+`58235eaf9215f093ba70fada963c4729f791fd53f031b4a00b9a8a9acbe37a92`.
+Guards, required aggregate `137256416681` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge.
+
+Source #14097 merges at `2026-11-22T15:27:23Z` as
+`85b93019f19c090f32a3bb8e1c5d0cc008244aef`. Independent provider readback
+confirms merged state and open parent #6237; the complete reviewed/merged-tree
+comparison is empty. The first managed source sync encounters a remote-ref
+race after another fetch has advanced `origin/dev` to the verified merge.
+Clean-state, exact remote-tip and identical-tree checks precede one successful
+scoped managed retry. No lock removal, reset, stash or history rewrite occurs.
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this three-case leaf. Separate native-load/thread/data refusals,
+release, owner, custody and completion gates remain open.
 
 ### November 22 original aggregate source-tree budget refusals
 
