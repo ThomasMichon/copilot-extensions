@@ -318,11 +318,11 @@ kickoff; the full capability remains future work under #13781.
   These are source/test-environment results, not an installed runtime rollout
   or a repair of the separate agenda-doctor qualification blocker.
 - Phase 3 (#13783): added manual `dehydrate`, `rehydrate` and `hydration`
-  commands with a versioned `<worktree-root>/.dehydrated/<id>.json` catalog
+  commands with a versioned `<checkout-parent>/.dehydrated/<id>.json` catalog
   written atomically before removal. Git 2.56.1 `worktree remove` deletes
   ignored files and refuses untracked or modified files, so `--force` is never
   used. Branches, pairs, claims and lifecycle are unchanged. Prune, GC, cleanup,
   reap, finalize and GONE classification hold dehydrated records. Sparse
-  checkouts and submodules are refused. 19 new real-Git tests pass; the six
+  checkouts and submodules are refused. 32 new real-Git tests pass, including the 11 review regressions; the six
   gc/prune failures seen locally also fail on the base commit. Automatic
   stop/resume (#13784) and Manager controls (#13785) remain.
