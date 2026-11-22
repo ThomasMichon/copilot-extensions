@@ -6646,6 +6646,67 @@ parent nor proves comparable whole-flow savings. Both previous PR-specific
 metadata-refresh authorizations remain consumed; no new manual workflow
 dispatch is authorized by this source slice.
 
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing, documentation
+consistency, committed changefile presence and complete diff checks pass.
+Approval `6014322297` names exact head
+`aacd6fef09821fcb20fa700c24697cf8dc9832f9`, with no active findings,
+discussion comments or unresolved threads and complete pagination.
+Fresh Linux CI `45065846750`, unit job `137341686011`, executes all 9,065
+cases with 48 deselections in 212.26 pytest / 235.563 packet seconds.
+It reports `mode=executed`, origin run `45065846750` attempt one,
+execution identity
+`e193519f1fb60ca51085b3b9c1ed58ce443b8593904a0752a1aaecdc8e7d1afc`
+and packet digest
+`84c5a2a39fb887ba8a731fcacdf127f8d5c2f377c1a773512eefa2ca907a05e3`.
+Guards, required aggregate `137343120504` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/review/thread/hold/
+parent-reference fences pass before normal managed merge. No manual workflow
+is dispatched.
+
+Source #14123 merges at `2026-11-22T20:27:15Z` as
+`b315b0441dc0feb091cb908bd226af196f33e2f2`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+23-case leaf. Separate data/native-load/thread refusals, release, owner,
+custody and completion gates remain open.
+
+### November 22 original source-owned artifact-index decisions
+
+The adapter exports four complete original source-owned artifact-index tests:
+equivalent composition across Git containers, changed source/composition
+refusal, legacy parent binding and rejection of a second container identity.
+All five cases retain original functions, parameter objects, temporary
+wheel/bundle/index helpers and assertions. No fixture is exported or changed;
+all real-Git, Windows-native and publisher-call cases remain outside this
+selection.
+
+Complete collection verifies all 16 original cases and exactly five adapter
+cases with original function-object identity, original parameter-mark row
+objects, matching parameter types/maps and exact node equivalence.
+Initial unchanged source/effect auditing passes all five in 2.656 seconds,
+with zero prohibited effects, forty bound canonical Python reads and actual
+artifact-owner call-phase lines in every case. All fifteen setup/call/teardown
+reports pass.
+
+Only the adapter and original-test source bindings are added; the production
+artifact source and target were already admitted. All 9,065 prior nodes retain
+relative order; all 1,281 current source hashes, 467 targets, 89 helper
+decisions and the 300-second bound remain intact. Compact-v2 and flat-v1
+logical identity agree; the candidate contains 9,070 nodes and 1,283 sources
+in 1,017,444 bytes. Strict checks, exact-head review and complete fresh Linux
+source CI remain required.
+
+This is a below-altitude source-test selection, not a workflow, production,
+installer, service-contract or runtime change. No new mock, preload, data
+admission, guard exception or original-test edit is introduced. Fresh-install
+and native lanes do not apply because installation and runtime behavior do
+not change; normal fresh source CI supplies external Linux consumer proof.
+The selection neither replays nor settles a retained refusal, completes the
+parent nor proves comparable whole-flow savings. Both previous PR-specific
+metadata-refresh authorizations remain consumed; no new manual workflow
+dispatch is authorized by this source slice.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original
