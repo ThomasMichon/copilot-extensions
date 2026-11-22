@@ -6061,6 +6061,102 @@ reconciliation qualification. This selection neither replays nor settles any
 refused candidate, completes the parent or demonstrates comparable whole-flow
 savings.
 
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013197364` names exact head
+`0cc7b77097ecd2da0f6f4f383a4f263865b99f13`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45042091842`, unit job `137268564360`, executes all 8,907
+cases with 43 deselections in 202.06 pytest / 224.513 packet seconds.
+It reports `mode=executed`, origin run `45042091842` attempt one,
+execution identity
+`ad3840157c580bfee1ec2b3202544c32fc06a865af4c5b01490956a646a04531`
+and packet digest
+`3183037b3243fcf4408d8c9b193fbb3cf01e0c5114c35081dd34eb631b433f81`.
+Guards, required aggregate `137269932015` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge.
+
+Source #14103 merges at `2026-11-22T16:15:00Z` as
+`20812d3d5866f4908c4455cfc0a2c42b74d6082b`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+Concurrent #14086 at `c88283de9a` advances the base with Driver work, adding
+two manifest source bindings and targets and rebinding 22 existing sources.
+This leaf's complete reviewed and merged five-file deltas retain identical
+stable patch ID `99cbb819b914d9da0b1583895cdc242fe648bc8a`; its four
+non-manifest files are byte-identical.
+
+Exact manifest composition verifies this leaf's two-node group and two
+source bindings plus the peer base, and its one target plus the peer targets.
+The existing profile and 300-second bound remain; the current combined packet
+has 8,907 nodes, 1,267 sources and 467 targets in 999,376 bytes.
+The complete reviewed/merged-tree difference is not empty, and the earlier
+exact-input CI is not claimed to cover the entire later merged tree.
+The peer guard change is confined to canonical Windows bytecode-cache source
+spelling with round-trip validation; this leaf changes no guard, and no
+retained refusal is replayed or considered settled by that independent change.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this two-case leaf. Separate native-load/thread/data refusals,
+release, owner, custody and completion gates remain open.
+
+### November 22 original deferred-dispatch recovery controls
+
+The adapter exports three complete original functions: verified merge
+completion recovers a CI advance suppressed while the promotion PR was open;
+a resume control merge drains previously paused source without another push;
+and retirement never automatically retries the same source. The original
+in-memory backend, decision/reason assertions, request assertions and both
+unchanged/changed retirement-source branches remain intact. No actual
+workflow dispatch, Main write or backend call is made.
+
+Complete collection verifies all 102 original cases and exactly three adapter
+cases with unchanged original function objects. Initial unchanged effect/source
+auditing passes all three in 0.953 seconds, with zero prohibited effects,
+six bound canonical Python reads and actual `promotion_dispatch.py`
+call-phase coverage per case. The real admission-evidence owner is also
+measured; the original backend remains the existing test dependency, not a
+new mock or preload.
+
+Only the adapter and original-module source bindings are added. All 8,907
+prior nodes retain relative order; all 1,267 current source hashes, 467
+targets, 89 helper decisions and the 300-second bound remain intact.
+Compact-v2 and flat-v1 logical identity agree; the candidate contains 8,910
+nodes and 1,269 sources in 999,982 bytes. Exact-head review and complete fresh
+Linux source CI remain required.
+
+No original test, production behavior, guard, workflow, runtime, native,
+data-admission or cleanup change is introduced. Fresh-install/native lanes
+are not applicable because installation and runtime behavior do not change;
+normal fresh source CI supplies the external Linux consumer proof.
+This finite source-only slice does not establish controlled whole-flow
+savings, close the parent or settle any retained refusal.
+
+### November 22 original invalid freeze-deadline refusal
+
+The complete original function retains all three `0`/infinite/boolean
+parameters, original engine fixture and absent-source/destination assertions.
+Complete collection verifies all 65 original cases and exactly three adapter
+cases, including function/fixture identity and exact parameter objects against
+their original function's parametrization. An earlier development-only
+collection assertion incorrectly compared an infinite-float object's identity
+across two separately imported original modules; it is corrected before any
+guard execution, without changing tests or parameter values.
+
+The first unchanged current-guard execution refuses setup of the first case:
+`tools/test_installer_closed_wheels.py:62` dynamically executes
+`installer_engine.py`, whose line 31 imports the unadmitted canonical source
+`plugins/agent-worktrees/scripts/versioned_runtime.py`. The remaining two
+cases are unexecuted. This is not a passing owner-call witness or native
+qualification. No manifest, fixture, original test, preload, mock, guard,
+source policy or deadline is changed. The refused adapter is retained outside
+test discovery with its helper, candidate, node list and refusal record;
+none is replayed. The existing data-admission owner retains the gap.
+
+All 8,907 current nodes, 1,267 bound source hashes, 467 targets, 89 helper
+decisions and the 300-second bound remain unchanged. The parent stays open;
+independent source-only consolidation continues.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original

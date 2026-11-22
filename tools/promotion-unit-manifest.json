@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py",
+      [
+        "test_actual_merge_completion_recovers_a_ci_advance_suppressed_while_pr_was_open",
+        "test_resume_control_merge_drains_previously_paused_source_without_a_new_push",
+        "test_retirement_never_automatically_retries_the_same_source"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_reconcile_early_return_units.py",
       [
         "test_implicit_contained_reconciliation_never_invokes_a_shell",
@@ -10886,6 +10894,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py": "59d54478c962b3e47137b2f535aaa6b39e66ff95080aae1d84e096c62c44ac90",
+    "tools/test_promotion_dispatch.py": "f75de93ee3906617471aac2e5d129ae8ada84755dd3ac954cb5a3fe20416198f",
     "tools/promotion_unit_tests/test_original_reconcile_early_return_units.py": "7edb279ce83e42867c286f495cb00cfb6b0dcd2abc1887099996163c27e81583",
     "tools/test_installer_instance_reconcile.py": "b7eb0cf025b974dc98333834f1989d5591d263715b8589bdf118426d13199163",
     "tools/promotion_unit_tests/test_original_vault_cache_inspection_units.py": "f67ed9cb0181fb386e14f2e47a6f1d2db3c0a6f598bc08ee08de804f816253dd",
