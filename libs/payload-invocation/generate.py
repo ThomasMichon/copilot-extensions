@@ -469,39 +469,12 @@ def render(
         ),
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,
-        "CATALOG_PYTHON_POSIX": (
-            'py="$(bash "$self_root/scripts/_bootstrap_python/select.sh")" || {\n'
-            "    printf '%s\\n' '{}'\n"
-            "    exit 0\n"
-            "}\n"
-            if data["bootstrapLauncher"] == "uv"
-            else 'py="$(command -v python3 || command -v python || true)"\n'
-        ),
         "CATALOG_GATE_POSIX": (
             f'catalog_gate="$self_root/{data["catalogGate"]}"\n'
             'if ! "$py" -B -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
             "    printf '%s\\n' '{}'\n"
             "    exit 0\n"
             "fi\n"
-            if data["catalogGate"]
-            else ""
-        ),
-        "CATALOG_GATE_POWERSHELL": (
-            "$catalogGate = Join-Path $selfRoot "
-            f"'{str(data['catalogGate']).replace('/', chr(92))}'\n"
-            + (
-                "$python = & (Join-Path $selfRoot 'scripts\\_bootstrap_python\\select.ps1')\n"
-                if data["bootstrapLauncher"] == "uv"
-                else (
-                    "$python = Get-Command python -ErrorAction SilentlyContinue\n"
-                    "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
-                    "$python = if ($python) { $python.Source } else { $null }\n"
-                )
-            )
-            + "if (-not $python) { Write-Output '{}'; exit 0 }\n"
-            "& $python -B -E -X utf8 $catalogGate --check "
-            "--cwd (Get-Location).Path *> $null\n"
-            "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
             if data["catalogGate"]
             else ""
         ),
@@ -792,7 +765,10 @@ def render(
         spec.loader.exec_module(launcher)
     finally:
         sys.dont_write_bytecode = previous_bytecode
-    rendered: str = launcher.render(template, values, data["pythonLauncher"] == "uv")
+    rendered: str = launcher.render(
+        template, values, data["pythonLauncher"] == "uv",
+        bootstrap_uv=data["bootstrapLauncher"] == "uv", catalog_gate=str(data["catalogGate"]),
+    )
     return rendered
 
 

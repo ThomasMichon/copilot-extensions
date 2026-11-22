@@ -229,7 +229,11 @@ def test_bootstrap_view_preserves_real_program_transport_and_floor(tmp_path: Pat
     assert view.content == (bootstrap._literal(quoted) + "\n").encode()
     assert consumer.count("-c $bindingBootstrap ") == 2
     diagnostic = view.diagnostics(f"{view.output}:1: error: assignment [assignment]\n", tmp_path)
-    assert diagnostic.startswith(bootstrap.CONSUMER + ":43:")
+    program_line = next(
+        number for number, line in enumerate(consumer.splitlines(), 1)
+        if line.startswith("$bindingBootstrap = ")
+    )
+    assert diagnostic.startswith(f"{bootstrap.CONSUMER}:{program_line}:")
     assert "bootstrap materialized consumer" in diagnostic
     assert f"producer {catalog.PRODUCER}:{view.producer_range[0]}-{view.producer_range[1]}" in diagnostic
     assert "full body requires Python 3.11" in diagnostic
