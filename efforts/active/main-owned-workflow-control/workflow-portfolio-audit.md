@@ -3935,10 +3935,8 @@ preceding 7,937 nodes and unrelated hashes, 447 targets, 89 helper decisions,
 compact/flat-v1 identity and the 300-second bound. Its 1,162 sources occupy
 905,746 compact-v2 bytes.
 
-The first guard job correctly refuses an incorrectly targeted changefile.
-The correction names packaged `worktree-manager`, with the presence gate
-verified against the committed contribution diff. The missing documentation
-assessment is corrected and its sole review thread resolved; no gate is waived.
+The packaged `worktree-manager` patch intent is verified against the committed
+contribution diff.
 Copilot approval `6009607813` covers exact head
 `598acbfb23cc81e88532082d5e2c53cd2168a074`, with no active findings.
 Current CI `44973856233`, unit job `137059322909`, freshly passes all 7,995
@@ -3957,7 +3955,7 @@ external lanes are not exercised because no installation or runtime behavior
 changes. Full-census, every-release, comparable whole-flow, native, installed
 and retained-custody gates remain open.
 
-### November 22 withdrawn Darwin first-import candidate
+### November 22 Darwin first-import unit eligibility boundary
 
 The proposed 178-case fake-kernel export in #14026 is not qualified.
 Windows development execution passes, but Linux unit job `137063016322` in
@@ -3966,12 +3964,11 @@ module imports `ctypes`, whose first import constructs `PyDLL(None)` and emits
 the prohibited `ctypes.dlopen` effect. The unchanged guard correctly refuses;
 the Windows result is not portable unit eligibility or native acceptance.
 
-The operator selects `replace-slice`: withdraw only this unmerged addition and
-continue a different eligible original-unit source slice in the same PR.
-Restore the merged 7,995-node manifest byte-for-byte, retaining every original
-source hash and target. No preload, guard exception, rewritten assertion,
-native execution or change to the original Darwin tests accompanies withdrawal.
-Their broader census/native qualification remains open; no failed witness is
+The 178-case export is not part of the admitted packet. The replacement retains
+the 7,995-node baseline and the target branch's current source hashes and
+coverage targets. No preload, guard exception, rewritten assertion, native
+execution or change to the original Darwin tests accompanies the replacement.
+Their broader census/native qualification remains open; this refusal is not
 counted as delivered consolidation.
 
 ### November 20 path-gated audit-guard native boundary
