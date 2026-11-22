@@ -33,6 +33,20 @@ _SELECTED = (
     "test_declared_project_manifest_refuses_unsafe_source_root",
     "test_declared_project_manifest_cannot_select_another_repository_location",
     "test_signer_requires_configured_policy_and_one_shared_lock",
+    "test_attestation_failure_stops_before_any_publication",
+    "test_verified_index_rejects_invalid_subject_set_before_bundle_attestations",
+    "test_verification_uses_read_token_not_release_authority",
+    "test_release_publication_never_clobbers_and_only_treats_404_as_absence",
+    "test_only_explicit_unambiguous_http_404_status_is_absence",
+    "test_release_tag_must_bind_the_actual_plugin_payload",
+    "test_tag_resolution_is_bounded_and_only_initial_404_means_absence",
+    "test_tag_created_between_absence_check_and_release_creation_blocks_upload",
+    "test_actual_merge_composition_mismatch_blocks_all_release_writes",
+    "test_invalid_bundle_blocks_publication_even_with_valid_index_digest",
+    "test_changed_candidate_source_blocks_publication_before_any_release_write",
+    "test_first_party_label_does_not_substitute_for_candidate_closure",
+    "test_candidate_source_binding_preserves_trusted_builder_namespace",
+    "test_invalid_candidate_identity_fails_before_git_or_source_access",
 )
 for _name in _SELECTED:
     assert _name not in globals(), f"duplicate original bundle control: {_name}"

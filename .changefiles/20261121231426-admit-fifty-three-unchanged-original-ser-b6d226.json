@@ -1,0 +1,9 @@
+{
+  "comment": "Admit fifty-three unchanged original serial publication controls to the guarded unit packet",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
