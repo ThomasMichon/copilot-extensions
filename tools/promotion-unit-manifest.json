@@ -11327,7 +11327,7 @@
     "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
     "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
     "tools/materialize_payload_invocation.py": "374952cf04ce8b8a54156f754666fc5fb622b95f3f0fe6d176724a934cea3cb2",
-    "worktree-manager/packaged-assets.json": "6476411d928c9ded4047b6d6735bd4d27d33d856943e4985aa06a223f6c7f36b",
+    "worktree-manager/packaged-assets.json": "b1851c938e6f412d25aca11d89491213a179c8a4b0a55bb46b11d1daf02d6634",
     "worktree-manager/launch-wrapper-assets.json": "90feee1fa65b52ce5caa0b1678d2847c79edd6e32e0265f5fc4d2d16a25500fb",
     "tools/promotion_unit_tests/test_invocation_materialization.py": "27c35cc37847645a3b523ce917656e8b2a4ad9c85a5d189723a1e16800a01e64",
     "tools/promotion_unit_tests/test_uv_policy_invocation.py": "9f94fc7c3642781afc0de8b90889512e961bfdc04487f4d3de63df65d5320807",
