@@ -1323,7 +1323,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #14056 merges at `447c6d4e6f6d1554894f6e36bf79d4a204c77a4d` after
   exact-head Copilot approval and complete required Linux CI with all 8,187
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify all 27 cases from six original subject-attestation verifier
+- [x] Qualify all 27 cases from six original subject-attestation verifier
   retry functions, preserving the original subject fixture, mock callbacks,
   parameter identities, monotonic deadline witnesses and assertions. This
   independent subject-verifier cohort is not a replay or replacement of
@@ -1333,6 +1333,25 @@ authorizes critical main-path acceptance or a bounded administrative change.
   compact/flat-v1 identity and the 300-second bound. Require normal strict
   typing, current-head review and complete fresh Linux CI; native, installed,
   publication and broader parent gates remain separate.
+  #14057 merges at `eddb35122c52195acbd12bba835d8d53d090854c` after
+  exact-head Copilot approval and complete required Linux CI with all 8,214
+  units freshly executed. The distinct threaded witness and broader parent
+  gates remain open.
+- [ ] Resolve the six original core manager-wheel exception cases' undeclared
+  build-data input with the existing data-admission owner. Review of #14058
+  identifies `worktree-manager/pyproject.toml` outside the admitted source/data
+  closure. Withdraw the entire original function without changing its inputs
+  or assertions; a green Python-read effect audit does not bind that TOML.
+  Do not widen the data allowlist to admit this cohort.
+- [ ] Qualify the other 23 synthetic cases from twelve original core-artifact
+  functions, preserving their exact functions, fixture helpers, build
+  callbacks, parameters and assertions. Keep the original isolated builder
+  CLI smoke with its existing integration owner. Require closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; native, installed,
+  real builds and broader parent gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
