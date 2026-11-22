@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from . import compatible_inbox, pending_queue_notice
+from . import compatible_inbox, pending_queue_notice, retained_attempts
 from .db import Database
 from .inbox_custody import handoff_stage
 from .live_delivery_state import LiveDeliveryState
@@ -65,6 +65,7 @@ def inspect(
             "ORDER BY id LIMIT ?",
             (session_id, after, limit + 1),
         ).fetchall()
+        failed = retained_attempts.failures(conn, session_id)
         try:
             compatible_inbox.require_live(conn, session_id, now)
             freshness = "current"
@@ -128,6 +129,7 @@ def inspect(
             "reason": "native delivery observation unavailable",
         },
         "messages": messages,
+        "failed": failed,
         "page": {
             "after": after,
             "limit": limit,

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge import compatible_inbox, pending_queue
+from agent_bridge import compatible_inbox, pending_queue, retained_attempts
 from agent_bridge.db import Database
 from agent_bridge.inbox_custody import InboxConsumer
 from agent_bridge.live_message_schema import INDEX
@@ -93,6 +93,38 @@ def test_original_page_uses_partial_id_index_not_settled_history(
     plan = " ".join(str(row[3]) for row in conn.execute("EXPLAIN QUERY PLAN " + pages[0]))
     assert INDEX in plan and "TEMP B-TREE" not in plan
     assert counts[0] < 1_000, (operation, counts, plan)
+
+
+def test_failed_attempts_use_session_index_not_whole_ledger(tmp_db: Database) -> None:
+    db = tmp_db
+    _register(db)
+    with db._runtime_transaction(write=True) as conn:
+        assert retained_attempts.available(conn)
+        conn.executemany(
+            f"INSERT INTO {retained_attempts.TABLE}(message_id,attempt,session_id,incarnation,at) "
+            "VALUES (?,2,'other','old',1)",
+            [(index,) for index in range(1, 10_001)],
+        )
+    conn = db._get_conn()
+    counts = [0]
+
+    def progress() -> int:
+        counts[0] += 1
+        return 0
+
+    conn.set_progress_handler(progress, 1)
+    try:
+        assert retained_attempts.failures(conn, "native") == []
+    finally:
+        conn.set_progress_handler(None, 0)
+    plan = " ".join(
+        str(row[3]) for row in conn.execute(
+            f"EXPLAIN QUERY PLAN SELECT DISTINCT message_id FROM {retained_attempts.TABLE} "
+            "WHERE session_id=?", ("native",),
+        )
+    )
+    assert retained_attempts.INDEX in plan, plan
+    assert counts[0] < 3_000, (counts, plan)
 
 
 def test_existing_read_only_database_refuses_page_until_writable_preparation(
