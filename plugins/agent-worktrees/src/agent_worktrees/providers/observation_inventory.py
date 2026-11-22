@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from typing import Any
 from urllib.parse import quote
 
 from .base import ProviderError, run_cli
@@ -19,10 +20,11 @@ MAX_BYTES = 1_048_576
 
 
 def inventory(
-    provider, repo: str, *, api_base: str, credential_source: CredentialSource,
+    provider: Any, repo: str, *, api_base: str, credential_source: CredentialSource,
     max_pages: int = 4, max_pulls: int = 200,
+    page_size: int = PAGE_SIZE,
     deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Keep accepted pages when a later read fails; only empty pages prove completion."""
     if (
         provider.name not in ("github", "gitea")
@@ -30,6 +32,7 @@ def inventory(
         or any(part in (".", "..") for part in repo.split("/"))
         or type(max_pages) is not int or not 1 <= max_pages <= MAX_PAGES
         or type(max_pulls) is not int or not 1 <= max_pulls <= 1000
+        or type(page_size) is not int or not 1 <= page_size <= PAGE_SIZE
     ):
         raise ValueError("invalid bounded observation inventory selection")
     selected_base = api_base or ("https://github.com" if provider.name == "github" else "")
@@ -56,7 +59,7 @@ def inventory(
             if provider.name == "github" and credentials.http_profile == "direct-v1":
                 from .observation_http import read_get
                 status, body = read_get(
-                    endpoint + path + f"&per_page={PAGE_SIZE}", credentials.authorization(),
+                    endpoint + path + f"&per_page={page_size}", credentials.authorization(),
                     invoke=run_cli, deadline=deadline, github=True,
                 )
                 if status != 200:
@@ -70,7 +73,7 @@ def inventory(
                     "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
                 )})
                 response = run_cli([
-                    "gh", "api", "--hostname", host, endpoint + path + f"&per_page={PAGE_SIZE}",
+                    "gh", "api", "--hostname", host, endpoint + path + f"&per_page={page_size}",
                 ], env=env, timeout=max(1, int(deadline - time.monotonic())),
                    max_stdout_bytes=MAX_BYTES, max_stderr_bytes=8192)
                 if response.returncode:
@@ -78,7 +81,7 @@ def inventory(
                 body = response.stdout
             else:
                 status, body = provider._curl(
-                    "GET", provider._api(endpoint, path + f"&limit={PAGE_SIZE}"), credentials,
+                    "GET", provider._api(endpoint, path + f"&limit={page_size}"), credentials,
                     read_deadline=deadline,
                 )
                 if status != 200:
@@ -86,7 +89,7 @@ def inventory(
             if len(body.encode("utf-8")) > MAX_BYTES:
                 raise ValueError("inventory page exceeds byte bound")
             rows = json.loads(body)
-            if not isinstance(rows, list) or len(rows) > PAGE_SIZE or any(
+            if not isinstance(rows, list) or len(rows) > page_size or any(
                 not isinstance(row, dict) or type(row.get("number")) is not int
                 or row["number"] < 1 or row.get("state") != "open" for row in rows
             ):

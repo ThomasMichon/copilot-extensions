@@ -36,8 +36,8 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     justification is gone; the gate was removed rather than kept as a
     redundant consent checkbox. Frequency/trigger stays deliberately
     bounded -- still only once per session start, only on a real version
-    drift. What DOES still bound concurrency is the single-flight +
-    stale-reap guard below (a lock file, not the removed opt-in).
+    drift. A legacy reconcile record defers automatic work; it cannot prove
+    process ownership or authorize retirement.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 $script:SessionStartJsonEmitted = $false
@@ -139,28 +139,16 @@ try {
 
     Assert-BootstrapPublication
 
-    # --- Good boot-citizen guard: single-flight + stale-reap ---
-    # This hook fires on EVERY new session now that the opt-in gate is gone
-    # (agent-bridge-unified-zdd-cutover Phase 0 review finding): without
-    # this, a slow or wedged reconcile gets re-spawned every session,
-    # stacking orphaned background installers. If a prior reconcile PID
-    # recorded in reconcile.lock is still alive:
-    #   YOUNG  -> a reconcile is already in flight; do nothing (never stack).
-    #   STALE  -> it is wedged; reap it, then relaunch (self-heal, so a
-    #             one-off wedge can't poison every future session).
-    $staleSeconds = 600
+    # A PID and file age cannot identify an owned process, even if it is live.
+    # Keep automatic work off an unsettled legacy owner; explicit setup is separate.
     $lockFile = Join-Path $InstallDir 'reconcile.lock'
     try {
-        if (Test-Path $lockFile) {
-            $lockPid = 0
-            [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
-            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
-                $ageSec = ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalSeconds
-                if ($ageSec -lt $staleSeconds) { Exit-SessionStart }         # in flight -- don't stack
-                Stop-Process -Id $lockPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
-            }
-        }
-    } catch { }
+        $null = [IO.File]::GetAttributes($lockFile)
+        [Console]::Error.WriteLine("[$name] bootstrap deferred: legacy reconcile ownership is unsettled; use explicit installation management.")
+        Exit-SessionStart
+    } catch [IO.FileNotFoundException] {
+    } catch [IO.DirectoryNotFoundException] {
+    }
 
     [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; reconciling in background...")
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue

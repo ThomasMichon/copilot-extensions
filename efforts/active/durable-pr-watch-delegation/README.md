@@ -1976,6 +1976,12 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-21 - Bounded native inventory page sizing
+
+[Receiver-first page-size source and focused controls](journal/2026/11.21%20Native%20inventory%20page%20sizing.md)
+preserve existing capture/request limits and legacy defaults; caller selection,
+release, installed qualification and the full parent remain separate.
+
 - [2026-11-20 - Expiry persistence qualification](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
 - [2026-11-20 - Windows version-2 sealing](journal/2026/11.20%20Windows%20version-2%20sealing.md)
 - [2026-11-20 - Prepared-origin phase progression](journal/2026/11.20%20Prepared-origin%20phase%20progression.md)
