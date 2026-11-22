@@ -11,6 +11,7 @@ import { registerIntentObservation } from "../extensions/context-handoff/intent-
 import { readCanonicalGoal, resolveIntentCwd } from "../extensions/context-handoff/intent-goal.mjs";
 import { formatHandoffMarkdown } from "../extensions/context-handoff/handoff-markdown.mjs";
 import { formatIntentOutline, MAX_INTENT_OUTLINE_BYTES } from "../extensions/context-handoff/intent-outline.mjs";
+import { sanitizedGitEnv } from "../extensions/context-handoff/handoff-core.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "intent-continuity-"));
@@ -635,10 +636,32 @@ test("CLI paging and consume facts retain the session-bound scope from an unrela
   assert.equal(consumed.intentContinuity.corpus.id, snapshot.id);
 });
 
-function gitFixture(cwd, args) {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 10000 });
+function gitFixture(cwd, args, env = process.env) {
+  const result = spawnSync("git", [
+    "-c", `core.hooksPath=${join(cwd, ".fixture-hooks-disabled")}`,
+    "-c", "commit.gpgsign=false", ...args,
+  ], { cwd, env: sanitizedGitEnv(env), encoding: "utf8", windowsHide: true, timeout: 10000 });
   assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
 }
+
+test("mutating Git fixtures ignore inherited selectors for another disposable repository", (t) => {
+  const f = fixture(t);
+  const commit = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+    "commit", "--allow-empty", "-qm", "fixture"];
+  gitFixture(f.a, ["init", "-q"]);
+  gitFixture(f.b, ["init", "-q"]);
+  gitFixture(f.b, commit);
+  const before = gitFixture(f.b, ["rev-parse", "HEAD"]);
+  const worktrees = gitFixture(f.b, ["worktree", "list", "--porcelain"]);
+  const poisoned = { ...process.env, GIT_DIR: join(f.b, ".git"), GIT_WORK_TREE: f.b,
+    GIT_COMMON_DIR: join(f.b, ".git"), GIT_INDEX_FILE: join(f.b, ".git", "index") };
+  gitFixture(f.a, commit, poisoned);
+  gitFixture(f.a, ["worktree", "add", "--detach", join(f.root, "confined-linked")], poisoned);
+  assert.equal(gitFixture(f.b, ["rev-parse", "HEAD"]), before);
+  assert.equal(gitFixture(f.b, ["worktree", "list", "--porcelain"]), worktrees);
+  assert.ok(gitFixture(f.a, ["worktree", "list", "--porcelain"]).includes("confined-linked"));
+});
 
 test("real Git anchors isolate sessions without importing legacy shared history", (t) => {
   const f = fixture(t);
