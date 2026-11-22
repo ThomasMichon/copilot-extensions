@@ -286,10 +286,13 @@ While the session is idle, each drain tick:
    batch per tick, at most once per 30 seconds. A match carrying the
    retained header and message ID reports `consumed`, and nothing is sent.
 2. Requests a new attempt for each remaining started record through
-   `poll(reattempt=[...])` and `begin(attempt=N)`. The backend re-grants the
+   `poll(reattempt=[...])` and `begin(attempt=N)`. The bounded re-attempt
+   list holds only unsubmitted originals; accepted receipts that are still
+   seeking consumption never occupy it. The backend re-grants the
    same original (ID, body, order, handoff and receipt history) to the
    current enrolled receiver and records the attempt in
-   `live_message_attempts`. The grant is compare-and-set on the attempt
+   `live_message_attempts`, indexed by session so `pending-queue` failure
+   reads never scan other sessions' attempts. The grant is compare-and-set on the attempt
    number, is one-shot, and keeps authentication, binding, current-session,
    worktree and mute checks. The original start counts as attempt one. When a
    fourth attempt is requested, the backend records the terminal
@@ -313,8 +316,11 @@ When a running-to-idle transition finds queued records and every one of them
 proves already delivered, so nothing is submitted, the receiver sends one short
 resume prompt for that idle episode. It sends nothing for an empty queue,
 for an episode that submitted anything, for later ticks of the same episode,
-or for the startup idle. Without the capability, the legacy behavior is
-unchanged: started records are observation-only and the notice clears for them.
+or for the startup idle. The resume prompt also requires the
+`retained_delivery_reattempt` capability and a `message_base` 1 enrollment.
+Without the capability, the legacy behavior is unchanged: started records are
+observation-only, the notice clears for them, and no unsolicited turn is
+started.
 
 History is bounded because a session's durable event log can be very large.
 The SDK's `getEvents()` takes no options and returns the whole log. When the

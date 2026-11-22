@@ -91,7 +91,8 @@ If history cannot be read, nothing is resent and the check is retried on a
 later idle tick; it is never a permanent "no resend". If the receiver goes
 idle with queued records and every one of them proves already delivered, it
 sends one short resume prompt for that idle episode only. An empty queue, a
-real submission or a later tick of the same episode sends nothing.
+real submission or a later tick of the same episode sends nothing, and a
+receiver without re-attempt support never sends the resume prompt.
 
 The command first reads the selected executing provider's
 `GET /api/v1/live-sessions/pending-queue-contract` declaration, then pins its

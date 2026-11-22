@@ -164,6 +164,7 @@ export function createRetainedInbox({
   let historyCache = null;
   const consumed = (sid, id) => {
     if (episode && episode.id === idleEpisode() && episode.awaiting.has(id)) episode.redundant.add(id);
+    verified.delete(id);
     onConsumed(sid, id);
   };
   let lastLog = "";
@@ -415,7 +416,9 @@ export function createRetainedInbox({
           consumed(sid, receipt.message_id);
           await report(receipt, "consumed");
         } else if (history.covered.has(receipt.message_id)) {
-          verified.set(receipt.message_id, idleAt);
+          // Only unsubmitted originals become re-attempt eligible; submitted
+          // ones keep seeking consumption without occupying the retry list.
+          if (receipt.stage !== "sdk_accepted") verified.set(receipt.message_id, idleAt);
         } else {
           unsettled = true;
           note(`original handoff ${receipt.message_id}/${receipt.handoff_id} beyond bounded history scan; rechecking`);
@@ -458,6 +461,7 @@ export function createRetainedInbox({
     }
     const observed = new Set();
     const settleInput = async (receipt) => {
+      if (TERMINAL.has(receipt.stage)) verified.delete(receipt.message_id);
       if (receipt.stage === "consumed" || receipt.stage === "rejected") {
         forgetNativeInput(sid, receipt.message_id);
       } else if ([...nativeInputs.values()].some((input) => input.sid === sid
@@ -822,6 +826,8 @@ export function createRetainedInbox({
   // originals and every one of them proved already delivered (none submitted).
   async function nudge(sid, allowSend) {
     const idleAt = idleEpisode();
+    // Legacy bridges keep observation-only behavior: never start a turn there.
+    if (!reattemptSupported || context?.consumer?.message_base !== 1) return;
     if (!episode || episode.nudged || !episode.swept || episode.id !== idleAt || idleAt === 0
         || submittedEpisode === idleAt || episode.awaiting.size === 0
         || [...episode.awaiting].some((id) => !episode.redundant.has(id))) return;

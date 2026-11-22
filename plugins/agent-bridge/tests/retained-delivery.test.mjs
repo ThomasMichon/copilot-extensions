@@ -1464,6 +1464,41 @@ test("a bridge without re-attempt support never resends and clears the pending n
   assert.equal(f.calls.some((call) => call.body?.reattempt), false);
 });
 
+test("submitted receipts never crowd an unsubmitted original out of the re-attempt list", async () => {
+  const f = managedFixture();
+  const accepted = Array.from({ length: 100 }, () => f.started("sdk_accepted"));
+  const row = f.started("unknown");
+  const inbox = f.managed();
+  f.idle();
+  for (let i = 0; i < 4; i++) {
+    await inbox.tick(sid);
+    f.clock += 30_001;
+  }
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.deepEqual(f.sends.map((send) => send.prompt.match(/msg-id="(\d+)"/)?.[1]), ["101"]);
+  assert.ok(accepted.every((receipt) => receipt.handoff_stage === "sdk_accepted"));
+});
+
+test("a redundant queue never prompts a session without re-attempt support or message base", async () => {
+  for (const legacy of [
+    (f) => { f.capabilities = { compatible_native_inbox: 1 }; },
+    (f) => { f.messageBase = false; },
+  ]) {
+    const f = managedFixture();
+    legacy(f);
+    const row = f.started("unknown");
+    f.events = [f.history(row)];
+    const inbox = f.managed();
+    f.run();
+    await inbox.tick(sid);
+    f.idle();
+    await inbox.tick(sid);
+    await inbox.tick(sid);
+    assert.equal(row.handoff_stage, "consumed");
+    assert.equal(f.sends.length, 0);
+  }
+});
+
 test("a queued backlog beyond the first recovery page is fully reconciled before any nudge", async () => {
   const f = managedFixture();
   const rows = Array.from({ length: 101 }, () => f.started("unknown"));

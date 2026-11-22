@@ -26,20 +26,26 @@ _SQL = (
     "late_outcome TEXT CHECK(late_outcome IS NULL OR late_outcome IN ('sdk_accepted','consumed')), "
     "late_at REAL, PRIMARY KEY(message_id,attempt))"
 )
+INDEX = "live_message_attempts_session"
+_INDEX_SQL = f"CREATE INDEX IF NOT EXISTS {INDEX} ON {TABLE}(session_id,message_id)"
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Prepare the additive attempt ledger during writable preparation only."""
     conn.execute(_SQL)
+    # Pending-queue failure reads are per session; never scan the whole ledger.
+    conn.execute(_INDEX_SQL)
 
 
 def available(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        "SELECT type,sql FROM sqlite_master WHERE name=?", (TABLE,),
-    ).fetchone()
+    rows = dict(conn.execute(
+        "SELECT name,sql FROM sqlite_master WHERE (name=? AND type='table') "
+        "OR (name=? AND type='index' AND tbl_name=?)", (TABLE, INDEX, TABLE),
+    ).fetchall())
     return (
-        row is not None and row[0] == "table" and isinstance(row[1], str)
-        and _normalized_schema(row[1]) == _normalized_schema(_SQL)
+        isinstance(rows.get(TABLE), str) and isinstance(rows.get(INDEX), str)
+        and _normalized_schema(rows[TABLE]) == _normalized_schema(_SQL)
+        and _normalized_schema(rows[INDEX]) == _normalized_schema(_INDEX_SQL)
     )
 
 
