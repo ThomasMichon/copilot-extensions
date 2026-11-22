@@ -6,7 +6,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
-. (Join-Path $PSScriptRoot 'bootstrap-capture.ps1')
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    . (Join-Path $PSScriptRoot 'bootstrap-capture.ps1')
+} else {
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+}
 $bootstrapClock = [Diagnostics.Stopwatch]::StartNew()
 $capture = {
     param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
@@ -15,9 +19,18 @@ $capture = {
         throw [TimeoutException]::new('WATCHDOG: command bootstrap Python selection timed out.')
     }
     $cleanup = [int][Math]::Min(3000, [Math]::Max(1, [Math]::Floor($remaining / 4)))
-    Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
-        -Environment $Environment -TimeoutMilliseconds ([int]$remaining) `
-        -CleanupMilliseconds $cleanup
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+            -Environment $Environment -TimeoutMilliseconds ([int]$remaining) `
+            -CleanupMilliseconds $cleanup
+    }
+    $diagnostic = ''
+    $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+        -InputText '' -ErrorOutput ([ref]$diagnostic) `
+        -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
+    [pscustomobject]@{
+        ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+    }
 }
 $selection = Resolve-UvBootstrapPython `
     -RequestFile (Join-Path (Split-Path -Parent $PSScriptRoot) 'bootstrap-python-version.txt') `

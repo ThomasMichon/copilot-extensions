@@ -86,6 +86,8 @@ or bypass those checks.
 `bootstrapLauncher: "uv"` adopts that declaration for pre-runtime command
 helpers. Invocation packages the existing Installer Engine uv selector and
 Windows native capture owner under `scripts/_bootstrap_python/`. The
+PowerShell adapter on POSIX reuses Versioned Runtime's bounded capture owner.
+The
 `bootstrap-python-launcher.txt` sidecar distinguishes adoption from an inert
 version declaration. The installation-context transport and evaluator reuse
 that selector; generated Python-backed catalogs use it directly. CMD entries

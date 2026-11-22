@@ -69,7 +69,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.7"
       - name: Prepare isolated managed interpreters, including old PATH Python
         shell: pwsh
         run: |
@@ -92,7 +92,7 @@ jobs:
           cases=[c for p in Path('qualification-evidence/command-bootstrap').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           native=[c for c in cases if c.find('skipped') is None];
-          assert len(cases)==12 and len(native)==(9 if os.name=='nt' else 3);
+          assert len(cases)==12 and len(native)==(9 if os.name=='nt' else 6);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
   budget-uv-launch:
     runs-on: windows-latest

@@ -289,7 +289,7 @@ def test_invalid_or_incomplete_uv_launch_declaration_refuses_before_writes(
 def test_generated_managed_bootstrap_ignores_path_python(
     tmp_path: Path, kind: str, failure: str | None,
 ) -> None:
-    if (kind == "sh") == (os.name == "nt"):
+    if kind == "sh" and os.name == "nt" or kind in ("cmd", "winps") and os.name != "nt":
         pytest.skip("This control requires the native shell")
     host = shutil.which(
         "bash" if kind == "sh" else "cmd.exe" if kind == "cmd"

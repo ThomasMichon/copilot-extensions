@@ -33,6 +33,7 @@ _RESOURCES = (
     "libs/installer-engine/bootstrap-uv.sh",
     "libs/installer-engine/bootstrap-capture.ps1",
     "libs/installer-engine/bootstrap-capture.exe",
+    "libs/versioned-runtime/versioned_runtime_native.ps1",
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",

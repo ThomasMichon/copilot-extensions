@@ -50,6 +50,9 @@ def expected_files(
         outputs[marker] = "uv\n"
         for name in ("bootstrap-uv.ps1", "bootstrap-uv.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
             outputs[output / name] = (provider / name).read_bytes()
+        outputs[output / "versioned_runtime_native.ps1"] = (
+            root / "libs/versioned-runtime/versioned_runtime_native.ps1"
+        ).read_bytes()
         outputs[output / "select.ps1"] = (templates / "bootstrap-python-powershell.tmpl").read_text(encoding="utf-8")
         outputs[output / "select.sh"] = (templates / "bootstrap-python-posix.tmpl").read_text(encoding="utf-8")
         inputs = [data.get("catalogGate"), *data.get("payloadDispatcher", {}).values()]
