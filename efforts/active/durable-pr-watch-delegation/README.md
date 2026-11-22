@@ -1976,6 +1976,11 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-21 - Bounded native-read concurrency
+
+- [Optional existing-owner concurrency selection and remaining qualification](journal/2026/11.21%20Native%20read%20concurrency.md).
+  Full parent acceptance remains open.
+
 ### 2026-11-21 - Bounded native inventory page sizing
 
 [Receiver-first page-size source and focused controls](journal/2026/11.21%20Native%20inventory%20page%20sizing.md)

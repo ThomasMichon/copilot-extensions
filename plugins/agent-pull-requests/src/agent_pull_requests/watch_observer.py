@@ -96,7 +96,13 @@ class ReplayObserver:
 
     def __init__(
         self, store: ReplayStore, *, bindings: tuple[NativeObservationBinding, ...],
+        native_read_concurrency: int | None = None,
     ) -> None:
+        if native_read_concurrency is not None and (
+            type(native_read_concurrency) is not int or not 1 <= native_read_concurrency <= 4
+        ):
+            raise ValueError("native_read_concurrency must be an integer from 1 to 4")
+        self.native_read_concurrency = native_read_concurrency
         if not isinstance(bindings, tuple):
             raise ValueError("native observation bindings must be immutable")
         selected: dict[tuple[str, str], NativeObservationBinding] = {}
@@ -373,9 +379,10 @@ class ReplayObserver:
         pending: dict[Future[PRSnapshot | None], ObservationTarget] = {}
         exhausted = False
         stopped = threading.Event()
+        concurrency = _MAX_READS if self.native_read_concurrency is None else self.native_read_concurrency
         # Joining the executor retains cycle/writer custody even after authority
         # loss; cancelling a Future is not proof that its native read settled.
-        readers = ThreadPoolExecutor(max_workers=_MAX_READS)
+        readers = ThreadPoolExecutor(max_workers=concurrency)
         try:
             while pending or not exhausted:
                 self.store.check_current(expires_at, checkpoint)
@@ -384,7 +391,7 @@ class ReplayObserver:
                 ) else self.store.sweep_timeouts(**authority)
                 if result["status"] == "uncertain":
                     return result
-                while not exhausted and len(pending) < _MAX_READS:
+                while not exhausted and len(pending) < concurrency:
                     self.store.check_current(expires_at, checkpoint)
                     target = next(targets, None)
                     if target is None:

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -25,6 +25,80 @@ else:
     from test_local_repository import NATIVE, configuration
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux private Unix ingress")
+
+
+@pytest.mark.parametrize("selection", [None, 1, 4])
+@pytest.mark.parametrize("filtered", [False, True])
+def test_local_host_forwards_selected_concurrency_through_actual_service_and_observer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: int | None, filtered: bool,
+) -> None:
+    from agent_pull_requests_service import hosting
+
+    path, value, _state, log = selected_config(tmp_path, sponsor=False) if filtered else configuration(tmp_path)
+    if selection is not None:
+        value["native_read_concurrency"] = selection
+    path.write_text(json.dumps(value))
+    selected = load_service_config(path)
+    assert isinstance(selected, LocalHostConfig)
+    original = WatchService
+    calls: list[dict[str, Any]] = []
+
+    class Captured(Exception):
+        pass
+
+    def create(*args: Any, **kwargs: Any) -> WatchService:
+        calls.append(kwargs)
+        service = original(*args, **kwargs)
+        assert service.observer.native_read_concurrency == selection
+        raise Captured
+
+    monkeypatch.setattr(hosting, "WatchService", create)
+    with pytest.raises(Captured):
+        asyncio.run(hosting._serve(selected, hosting.LaunchScope(selected.operation_seconds), asyncio.Event()))
+    assert len(calls) == 1
+    if selection is None:
+        assert "native_read_concurrency" not in calls[0]
+    else:
+        assert calls[0]["native_read_concurrency"] == selection
+    assert not selected.root.exists() and not log.exists()
+
+
+@pytest.mark.parametrize("selection", [None, True, False, 0, 5, -1, 1.0, "1"])
+def test_local_host_refuses_invalid_concurrency_without_state_or_native_reads(
+    tmp_path: Path, selection: Any,
+) -> None:
+    path, value, _state, log = configuration(tmp_path)
+    value["native_read_concurrency"] = selection
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="native_read_concurrency"):
+        load_service_config(path)
+    assert not Path(value["root"]).exists() and not log.exists()
+
+
+@pytest.mark.parametrize("owner", ["watch_service", "watch_observer"])
+def test_selected_concurrency_refuses_prior_executing_core_but_omission_remains_supported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: str,
+) -> None:
+    from agent_pull_requests import watch_observer, watch_service
+
+    def prior_service(*, local_socket: object) -> None:
+        pytest.fail("qualification constructed a service")
+
+    def prior_observer(*, bindings: object) -> None:
+        pytest.fail("qualification constructed an observer")
+
+    if owner == "watch_service":
+        monkeypatch.setattr(watch_service, "WatchService", prior_service)
+    else:
+        monkeypatch.setattr(watch_observer, "ReplayObserver", prior_observer)
+    path, value, _state, log = configuration(tmp_path)
+    legacy = load_service_config(path)
+    assert isinstance(legacy, LocalHostConfig)
+    value["native_read_concurrency"] = 1
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="core/SDK unsupported"):
+        load_service_config(path)
+    assert not legacy.root.exists() and not log.exists()
 
 
 def test_filtered_profile_does_not_advertise_or_adopt_unfiltered_reviewer_activity(tmp_path: Path) -> None:

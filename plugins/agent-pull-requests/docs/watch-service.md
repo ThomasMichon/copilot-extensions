@@ -76,9 +76,15 @@ Readiness requires current local authority, the held lease, live owned units,
 an attached authenticated connector and a completed observation cycle without
 unavailable or unbound targets. It is not evidence of provider enrollment,
 production latency, installed activation, volume fencing or fleet acceptance.
-The finite observer shares a four-read rolling window across authorized targets.
+The finite observer defaults to a four-read rolling window across authorized targets.
+An optional `native_read_concurrency` keyword on WatchService and ReplayObserver
+selects an integer in 1..4 for both the executor and pending snapshot admission.
+Omission (or `None` in Python) retains four; booleans and other noninteger or
+out-of-range selections refuse before observation/connector effects. Existing
+omitted calls send no new observer keyword. Inventory and retained-member
+reconciliation quotas/order are unchanged, as are per-read bounds and deadlines.
 Its single writer applies completed reads without waiting for an earlier slow
-target, while retaining every in-flight read through drain. Saturating all four
+target, while retaining every in-flight read through drain. Saturating all selected
 slots still waits for the existing native command bounds. Readiness continues
 to require a completed cycle; a partial fast-target result is not whole-service
 readiness. Representative production performance qualification remains open

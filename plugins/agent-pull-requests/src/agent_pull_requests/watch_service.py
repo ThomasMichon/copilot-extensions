@@ -8,7 +8,7 @@ import threading
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
 from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.gateway_service_channel import BODY_BYTES
@@ -21,7 +21,7 @@ from .watch_notification import positive_seconds
 from .watch_observer import NativeObservationBinding, ReplayObserver
 from .watch_replay_store import ReplayCallerExpired, ReplayStore
 from .repository_contract import RepositoryBackpressure
-from .filtered_state import Authority, Checkpoint, Document
+from .filtered_state import Authority, Document
 from .repository_stream import LocalStreamResponse
 
 if TYPE_CHECKING:
@@ -51,8 +51,8 @@ class _CacheValidation(Protocol):
     def _check(self, lock: OperationLock | None = None) -> None: ...
 
 
-class _LegacyQualify(Protocol):
-    def __call__(self, binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None: ...
+class _NativeReadSelection(TypedDict, total=False):
+    native_read_concurrency: int
 
 
 class WatchService:
@@ -78,6 +78,7 @@ class WatchService:
         local_socket: Path | str | None = None, local_peers: Iterable[tuple[int, str]] = (),
         operation_seconds: int = 60, filter_definitions: Definitions | None = None,
         filter_sponsors: Iterable[Document] = (),
+        native_read_concurrency: int | None = None,
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -95,7 +96,10 @@ class WatchService:
         self._last_cycle: Document | None = None
         self._disk: asyncio.Task[Document | None] | None = None
         self._tasks: tuple[asyncio.Task[None], ...] = ()
-        self.observer = ReplayObserver(store, bindings=observations)
+        native_options: _NativeReadSelection = (
+            {"native_read_concurrency": native_read_concurrency} if native_read_concurrency is not None else {}
+        )
+        self.observer = ReplayObserver(store, bindings=observations, **native_options)
         self.filter_sponsors = tuple(filter_sponsors)
         if filter_definitions is not None:
             if not store.repository_filtered:
@@ -248,7 +252,7 @@ class WatchService:
                                 cast("FilteredProjection", self.observer.repositories).capabilities[binding.account] = support
                             else:
                                 from .repository_native import qualify as qualify_legacy
-                                cast(_LegacyQualify, qualify_legacy)(binding, checkpoint=self._check)
+                                qualify_legacy(binding, checkpoint=self._check)
                     if self.store.repository_filtered:
                         for sponsor in self.filter_sponsors:
                             scope = self.gateway.bindings[(sponsor["principal"], sponsor["target"])]
