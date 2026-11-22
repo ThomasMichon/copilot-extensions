@@ -191,7 +191,11 @@ async function runBoundExtensionFixture(namespace) {
     await mkdir(join(root, ".git"));
     await mkdir(join(root, ".context-handoff"));
     await writeFile(join(root, ".context-handoff", "config.yaml"), "mode: auto\n");
-    await mkdir(join(bound, ".git"), { recursive: true });
+    const metadata = join(root, ".git", "worktrees", "bound");
+    await mkdir(metadata, { recursive: true });
+    await mkdir(bound);
+    await writeFile(join(bound, ".git"), `gitdir: ${metadata}\n`);
+    await writeFile(join(metadata, "commondir"), "../..\n");
     await mkdir(join(bound, ".context-handoff"));
     await writeFile(join(bound, ".context-handoff", "config.yaml"), "mode: off\n");
     await writeFile(join(bound, "effort.md"), "# Work\n\n## Goal\n\nBound Goal.\n");

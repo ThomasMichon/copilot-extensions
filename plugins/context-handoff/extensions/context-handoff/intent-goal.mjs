@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { IntentCorpus, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { IntentCorpus, intentScope, intentReferenceFacts, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 
 export function resolveIntentCwd(cwd, sessionId, execute) {
   if (!sessionId) return cwd;
@@ -37,10 +37,13 @@ export function intentSection(text, heading) {
   return lines.join("\n").trim() || null;
 }
 
-export function readCanonicalGoal(cwd, execute) {
+export function readCanonicalGoal(cwd, execute, sessionId = null) {
   let reference = {};
   let candidate = null;
   try {
+    if (intentScope(cwd).anchor) {
+      return { status: sessionId ? "session-local" : "unqualified", goal: null };
+    }
     const options = { cwd, timeout: 3000, allowProvision: false };
     const binding = JSON.parse(execute("agent-worktrees",
       ["effort-focus", "show", "--json"], options)).active_effort;
@@ -111,12 +114,13 @@ export function readCanonicalGoal(cwd, execute) {
   }
 }
 
-export function collectLocalIntentFacts(cwd, execute) {
-  const goal = readCanonicalGoal(cwd, execute);
+export function collectLocalIntentFacts(cwd, execute, sessionId = null) {
+  const goal = readCanonicalGoal(cwd, execute, sessionId);
   try {
-    const store = new IntentCorpus(cwd);
+    const store = new IntentCorpus(cwd, { sessionId });
     const corpus = store.snapshot();
     return { goal, corpus, page: corpus ? store.page(corpus.id) : null,
+      sessionId, ...intentReferenceFacts(store),
       directive: INTENT_RESEARCH_DIRECTIVE };
   } catch {
     return { goal, corpus: null, status: "unavailable",

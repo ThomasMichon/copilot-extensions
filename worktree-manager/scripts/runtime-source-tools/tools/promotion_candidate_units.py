@@ -2,19 +2,23 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
+import sys
+from typing import Any
 
+import installer_engine_ref
 from promotion_unit_contract import (
-    CANDIDATE_PROFILE, UnitEvidenceError, admit_manifest, manifest_digest,
+    BUILD_SOURCE_DATA, CANDIDATE_PROFILE, UnitEvidenceError, admit_manifest, manifest_digest,
     relative_file, source_sha, verify_sources,
 )
 
 
 def candidate_manifest(
-    template: dict, *, dev_sha: str, candidate_tree: str,
+    template: dict[str, Any], *, dev_sha: str, candidate_tree: str,
     development_sources: dict[str, bytes], candidate_sources: dict[str, bytes],
     origins: dict[str, str],
-) -> dict:
+) -> dict[str, Any]:
     """Keep positive selection fixed; bind the actual composed execution closure."""
     template = admit_manifest(template)
     if template["profile"] == CANDIDATE_PROFILE:
@@ -54,7 +58,7 @@ def candidate_manifest(
     })
 
 
-def _bytes(root: Path, names) -> dict[str, bytes]:
+def _bytes(root: Path, names: Iterable[str]) -> dict[str, bytes]:
     result = {}
     for name in names:
         path = root / relative_file(name)
@@ -70,13 +74,13 @@ def _bytes(root: Path, names) -> dict[str, bytes]:
 
 
 def derive_manifest(
-    template: dict, *, development_root: Path, candidate_root: Path,
+    template: dict[str, Any], *, development_root: Path, candidate_root: Path,
     dev_sha: str, candidate_tree: str,
-) -> tuple[dict, dict[str, bytes], dict[str, bytes]]:
-    """Admit exact copies only through the composer's declared uv vendor route."""
-    try:
+) -> tuple[dict[str, Any], dict[str, bytes], dict[str, bytes]]:
+    """Admit exact copies through declared uv and installer-engine routes."""
+    if sys.version_info >= (3, 11):
         import tomllib
-    except ModuleNotFoundError:
+    else:
         import tomli as tomllib
 
     verify_sources(development_root.resolve(), template["sources"])
@@ -110,6 +114,29 @@ def derive_manifest(
                     if copy != name:
                         candidate.update(_bytes(candidate_root, [copy]))
                         origins[copy] = name
+    for copy in sorted(BUILD_SOURCE_DATA):
+        if not copy.startswith("plugins/") or "/scripts/installer-engine." not in copy:
+            continue
+        consumer, _, filename = copy.rpartition("/scripts/")
+        ext = filename.rpartition(".")[2]
+        origin = "libs/installer-engine/" + filename
+        script = consumer + "/scripts/install." + ext
+        if origin not in development or script not in development:
+            continue
+        original_consumer, composed_consumer = development_root / consumer, candidate_root / consumer
+        before_ref = installer_engine_ref.find_engine_ref(development_root / script, ext)
+        after_ref = installer_engine_ref.find_engine_ref(candidate_root / script, ext)
+        if (
+            original_consumer.name not in installer_engine_ref.ADOPTERS
+            or before_ref is None or after_ref is None
+            or not installer_engine_ref.is_canonical_ref(
+                before_ref, original_consumer, repo_root=development_root,
+            )
+            or not installer_engine_ref.is_local_ref(after_ref, composed_consumer)
+        ):
+            raise UnitEvidenceError("installer-engine data has no declared materialization route")
+        candidate.update(_bytes(candidate_root, [copy]))
+        origins[copy] = origin
     admitted = candidate_manifest(
         template, dev_sha=dev_sha, candidate_tree=candidate_tree,
         development_sources=development, candidate_sources=candidate, origins=origins,
