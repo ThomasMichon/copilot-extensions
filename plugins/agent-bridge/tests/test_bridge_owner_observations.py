@@ -17,8 +17,42 @@ from test_worktree_metadata import metadata_boundary as metadata_boundary
 from test_worktree_native_resume import boundary as boundary
 
 
+def managed_record(
+    bound: Any,
+    target: Any,
+    native: str,
+    *,
+    status: str = "stopped",
+) -> Any:
+    """Model existing owner data without invoking launch or native-import policy."""
+    from agent_bridge.session_manager import Session
+    from agent_bridge.session_status import SessionStatus
+
+    session = Session("control-" + native, "Retained conversation", target, agent_name="example")
+    session.acp_session_id = native
+    session.status = SessionStatus(status)
+    bound.db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=session.agent_name,
+        caller_id=None,
+        target_dir=target.cwd,
+        target_type=target.type,
+        status=session.status.value,
+        now=session.created_at,
+        target_json=target.to_json(),
+        acp_session_id=session.acp_session_id,
+    )
+    bound.manager._sessions[session.session_id] = session
+    return session
+
+
 @pytest.mark.parametrize("fresh", [False, True])
-def test_actual_owner_hint_survives_parsing_but_not_its_expired_window(fresh: bool) -> None:
+@pytest.mark.parametrize("hint", ["session_bound_live", "session_lock_live"])
+def test_actual_owner_hint_survives_parsing_but_not_its_expired_window(
+    fresh: bool,
+    hint: str,
+) -> None:
     raw = {
         "version": 1,
         "worktrees": [
@@ -27,7 +61,7 @@ def test_actual_owner_hint_survives_parsing_but_not_its_expired_window(fresh: bo
                 "machine": "host-a",
                 "path": "/work/host-a/workspace-a",
                 "session_count": 1,
-                "session_bound_live": True,
+                hint: True,
                 "kind": "managed",
                 "activity": "Checking results",
                 "last_session_id": "native-owner",
@@ -293,8 +327,6 @@ async def test_idle_ssh_presence_uses_attached_client_through_real_serialization
     from agent_bridge import target_inventory
     from agent_bridge.routes import worktrees
     from agent_bridge.session_host.host_index import HostRecord
-    from agent_bridge.session_manager import Session
-    from agent_bridge.session_status import SessionStatus
 
     bound = metadata_boundary
     state = bound.request.app.state
@@ -309,22 +341,7 @@ async def test_idle_ssh_presence_uses_attached_client_through_real_serialization
         host="transport-alias",
         worktree_id=None,
     )
-    session: Any = Session("control-idle", "Idle conversation", target, agent_name="example")
-    session.acp_session_id = "native-idle"
-    session.status = SessionStatus.IDLE
-    bound.db.create_session(
-        session_id=session.session_id,
-        name=session.name,
-        agent_name=session.agent_name,
-        caller_id=None,
-        target_dir=target.cwd,
-        target_type=target.type,
-        status=session.status.value,
-        now=session.created_at,
-        target_json=target.to_json(),
-        acp_session_id=session.acp_session_id,
-    )
-    bound.manager._sessions[session.session_id] = session
+    session = managed_record(bound, target, "native-idle", status="idle")
     session.client = (
         None if connected is None else SimpleNamespace(is_running=connected, pid=12345)
     )
@@ -347,3 +364,85 @@ async def test_idle_ssh_presence_uses_attached_client_through_real_serialization
         assert row["machine"] == "execution-b"
         assert row["managed_session_id"] == session.session_id
         assert row["session_id"] == "native-idle"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remote", [False, True])
+async def test_workspace_status_hint_cannot_override_a_disconnected_client(
+    metadata_boundary: Any,
+    remote: bool,
+) -> None:
+    from agent_bridge import target_inventory
+
+    bound = metadata_boundary
+    state = bound.request.app.state
+    state.resolver._local_machine = SimpleNamespace(
+        key="observer-a" if remote else bound.entry.machine,
+    )
+    config = state.resolver.agents["example"]
+    config.worktree_discovery, config.provider = True, None
+    config.ssh_environment = None
+    config.host = bound.entry.machine if remote else None
+    state.resolver._is_local_loopback_agent = lambda _config: False
+    state.resolver.resolve_ssh_environment = lambda *_args: (
+        SimpleNamespace(key=bound.entry.machine, ssh_ready=True),
+        SimpleNamespace(alias="transport-alias"),
+    )
+    target = replace(
+        state.resolver.resolve("example"),
+        worktree_id=bound.entry.id,
+        type="ssh" if remote else "local",
+        host="transport-alias" if remote else None,
+    )
+    session = managed_record(bound, target, "native-idle", status="idle")
+    session.client = SimpleNamespace(is_running=False, pid=None)
+    state.worktree_discovery_cache._cache = {
+        "example": [replace(bound.entry, session_count=1, session_bound_live=None)],
+    }
+    catalog = await target_inventory.inventory(bound.request)
+    (workspace,) = [item["worktree"] for item in catalog["targets"] if item["kind"] == "worktree"]
+    assert workspace["session_live"] is True
+    assert (await inventory(bound.request, project="example-project", live=True))["bridges"] == []
+    (row,) = (await inventory(bound.request, project="example-project"))["bridges"]
+    assert row["status"] == "dormant"
+    assert row["live"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["same", "other-project", "other-machine"])
+@pytest.mark.parametrize("observation", ["complete", "stale", "incomplete"])
+async def test_only_complete_same_scope_omission_excludes_managed_history(
+    metadata_boundary: Any,
+    scope: str,
+    observation: str,
+) -> None:
+    bound = metadata_boundary
+    state = bound.request.app.state
+    resolver = state.resolver
+    resolver._local_machine = SimpleNamespace(key=bound.entry.machine)
+    config = resolver.agents["example"]
+    config.worktree_discovery, config.provider = True, None
+    target = replace(resolver.resolve("example"), worktree_id=bound.entry.id)
+    if scope == "other-machine":
+        target = replace(target, type="ssh", host="transport-alias")
+        resolver.resolve_ssh_environment = lambda *_args: (
+            SimpleNamespace(key="other-machine"),
+            None,
+        )
+    session = managed_record(bound, target, "native-retained")
+    if scope == "other-project":
+        config.project = "unrelated-project"
+    cache = state.worktree_discovery_cache
+    cache._cache = {}
+    source = cache._refresh.sources["example"]
+    if observation == "stale":
+        source.updated = 0.0
+    elif observation == "incomplete":
+        source.diagnostic = "fixture source unavailable"
+    result = await inventory(bound.request, local_only=True, project="example-project")
+    if scope == "same" and observation == "complete":
+        assert result["bridges"] == []
+    else:
+        (row,) = result["bridges"]
+        assert row["session_id"] == session.acp_session_id
+        assert row["status"] == "dormant"

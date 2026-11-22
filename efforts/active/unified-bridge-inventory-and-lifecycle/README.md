@@ -334,3 +334,12 @@ not another permanent public discovery path.
   native performance modes and legacy target-identity controls. Live source CI,
   review, release and the remaining lifecycle phases still require their own
   evidence; no installed runtime or retained conversation was changed.
+- Native Linux and Windows acceptance passed for the finite-receiver revision.
+  Further owner-shape controls distinguish process/lock observations from the
+  legacy running/idle display hint. Fresh, complete omission excludes retained
+  history only after matching its configured owner, project and transport;
+  stale, incomplete and unrelated observations preserve the fallback.
+- All 18 new or changed owner controls pass in a serial bounded packet. A larger
+  concurrent packet exhausted its wall budget, and a later typing pre-check was
+  stopped after prolonged local inventory work; neither is a passing result.
+  Exact-source typing, native acceptance and review remain required in CI.

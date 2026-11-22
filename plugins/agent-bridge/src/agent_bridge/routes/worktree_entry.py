@@ -67,6 +67,7 @@ class WorktreeEntry:
     activity_at: str | None = None
     last_session_id: str | None = None
     session_bound_live: bool | None = None
+    session_lock_live: bool | None = None
     head_yielded: bool | None = None
 
     def interactive_cli_state(self) -> str:
@@ -118,6 +119,7 @@ class WorktreeEntry:
             "activity_at": self.activity_at,
             "last_session_id": self.last_session_id,
             "session_bound_live": self.session_bound_live,
+            "session_lock_live": self.session_lock_live,
             "head_yielded": self.head_yielded,
         }
 
@@ -180,6 +182,7 @@ def parse_worktree_list(raw: str, agent_name: str) -> list[WorktreeEntry]:
                 activity_at=row.get("activity_at"),
                 last_session_id=row.get("last_session_id"),
                 session_bound_live=_boolean_hint(row.get("session_bound_live")),
+                session_lock_live=_boolean_hint(row.get("session_lock_live")),
                 head_yielded=_boolean_hint(row.get("head_yielded")),
             )
         )

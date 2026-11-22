@@ -161,7 +161,8 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
     count = metadata.get("session_count")
     count = count if type(count) is int and count >= 0 else 0
     bound_live = metadata.get("session_bound_live") if owner_current else None
-    process_live = bound_live is True or metadata.get("session_live") is True
+    lock_live = metadata.get("session_lock_live") if owner_current else None
+    process_live = bound_live is True or lock_live is True
     if (
         not workspace
         and not live
@@ -201,6 +202,8 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         and (session.get("status") in _TERMINAL or session.get("session_live") is False)
     )
     is_live = True if positive else False if negative else None
+    if not workspace and worktree_id and owner_current and is_live is not True:
+        return None
     anchor = not worktree_id or metadata.get("kind") in {"anchor", "bare"}
     if anchor and is_live is not True:
         return None
@@ -348,7 +351,18 @@ def project_bridges(
     bridges = []
     for group in groups:
         workspace = next((item for item in group if item.get("kind") == "worktree"), {})
-        evidence = workspace.get("observation") or sources.get("worktrees") or {}
+        evidence = (
+            (workspace.get("observation") or sources.get("worktrees") or {})
+            if workspace
+            else next(
+                (
+                    item["worktree_observation"]
+                    for item in group
+                    if item.get("worktree_observation")
+                ),
+                {},
+            )
+        )
         owner_current = evidence.get("observation_valid") is True or (
             evidence.get("freshness") == "fresh" and evidence.get("completeness") == "complete"
         )
@@ -404,7 +418,7 @@ async def inventory(request: Any, *, local_only: bool = False, **scope: Any) -> 
             )
     resolver = getattr(request.app.state, "resolver", None)
     host = local_machine(resolver)
-    targets = normalize_targets(targets, resolver)
+    targets = normalize_targets(targets, resolver, catalog["sources"].get("worktrees"))
     if local_only:
         targets = [
             item

@@ -10,7 +10,38 @@ def local_machine(resolver: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def normalize_targets(targets: list[dict[str, Any]], resolver: Any) -> list[dict[str, Any]]:
+def _worktree_observation(
+    session: dict[str, Any],
+    resolver: Any,
+    discovery: dict[str, Any],
+) -> dict[str, Any] | None:
+    from .workspace_transport_identity import identity
+
+    owner = session.get("agent_name")
+    if not isinstance(owner, str):
+        return None
+    config = getattr(resolver, "agents", {}).get(owner)
+    if (
+        config is None
+        or not getattr(config, "worktree_discovery", False)
+        or not config.project
+        or config.project != session.get("project")
+        or identity(resolver, owner)
+        != (
+            session.get("target_type"),
+            session.get("target_host"),
+        )
+    ):
+        return None
+    observation = discovery.get("sources", {}).get(owner)
+    return observation if isinstance(observation, dict) else None
+
+
+def normalize_targets(
+    targets: list[dict[str, Any]],
+    resolver: Any,
+    discovery: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Keep transport addresses separate from configured execution identities."""
     host = local_machine(resolver)
     aliases: dict[str, str | None] = {}
@@ -37,6 +68,10 @@ def normalize_targets(targets: list[dict[str, Any]], resolver: Any) -> list[dict
                 machine = machine or aliases[address]
         elif item.get("kind") == "session_host" and row.get("boundary") == "local":
             machine = machine or host
+        if item.get("kind") == "managed":
+            observation = _worktree_observation(row, resolver, discovery or {})
+            if observation is not None:
+                item = {**item, "worktree_observation": observation}
         normalized.append({**item, field: {**row, "machine": machine}} if row else item)
     return normalized
 
