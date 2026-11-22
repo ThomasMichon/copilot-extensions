@@ -4932,10 +4932,50 @@ owner becomes a new target.
 This is synthetic pure-decision coverage, not private-backend activation,
 runner allocation, native reserve proof, measured execution saving or owner-seam
 acceptance. No mock, preload, wrapper, effect exception, data allowlist,
-workflow, routing or runtime change is introduced. Complete fresh Linux CI,
-current-head review and normal required merge checks remain necessary.
+workflow, routing or runtime change is introduced.
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6011989194` covers exact head
+`a1659f70a630c96dc36fde03cf3b678154536982` with no active findings.
+Source CI `45017488836`, unit job `137192848167`, freshly passes all 8,669
+cases with 43 deselections, 119.09 pytest seconds and 133.676 packet seconds.
+It reports `mode=executed`, origin run `45017488836` attempt one, execution
+identity `7ea9e4905d3ed52526b3f0ac62e878c270d91746dce354030199b35795d009c0`
+and packet digest
+`4d398ab7dd70feb9271c76746edbcec5155cb9c2181526862ff2c30e495db40e`.
+Required aggregate `137193928443`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14074 merges at `2026-11-22T11:34:25Z` as
+`dc8ca620e2b007fcd75dc388b5203e7edf5b8e95`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 109-case leaf.
 Fresh-install/native lanes are not applicable because installation, runtime,
 workflow and original-test behavior do not change.
+
+### November 22 original module-health lookup-outcome qualification
+
+The adapter exports the three original existing-issue lookup functions,
+preserving their subprocess stubs, helpers and assertions for failed search,
+confirmed absence and a matching issue number. Complete original/adapter
+collection verifies ten original and three selected function objects in
+original order. The seven actual Git, CLI and main-entrypoint cases remain
+unchanged outside the packet.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+three in 1.375 seconds, with zero prohibited effects, three bound Python reads
+and actual watchdog-owner call-phase lines per case. The compact-v2 candidate
+contains 8,672 nodes, 1,224 sources and 459 targets in 971,201 bytes. All 8,669
+preceding nodes/order, 1,221 current source hashes, prior targets, 89 helper
+decisions and the 300-second bound remain intact. New bindings are the adapter,
+original test module and unchanged watchdog owner; only that owner becomes
+a new target.
+
+No new mock, preload, wrapper, effect exception, data allowlist, actual GitHub
+lookup, issue filing, workflow or runtime change is introduced. Complete fresh
+Linux CI, current-head review and normal required merge checks remain
+necessary. This finite qualification does not settle retained refusals or owner
+seams. Fresh-install/native lanes are not applicable because installation,
+runtime, workflow and original-test behavior do not change.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 

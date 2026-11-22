@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_module_health_lookups.py",
+      [
+        "test_existing_issue_number_raises_lookup_failed_on_a_nonzero_exit",
+        "test_existing_issue_number_returns_none_on_a_clean_no_match",
+        "test_existing_issue_number_returns_the_number_on_a_match"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_ci_partition_decisions.py",
       [
         "test_matrix_partitions_only_declared_large_suites",
@@ -10588,6 +10596,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_module_health_lookups.py": "94bde0599a5896c5671abb1e81666ee34705e4010f434013721b37f2b325ed63",
+    "tools/test_module_health_watchdog.py": "53af4689859887a40bae7641785cefb6d5941c2ac7fc7376063eb1e96502e372",
+    "tools/module-health-watchdog.py": "8132c461d96bcc9ab0db88469f7cb5e5e9d4105e6ff9c66b58cd9e0076cf6083",
     "tools/promotion_unit_tests/test_original_ci_partition_decisions.py": "8c87add022b9aae64b417ee91524f64f197303f0aa174334753a796b6d688925",
     "tools/test_ci_plugin_partitions.py": "ea7e63d2aa9b9a219c5beef83bea98826c98de860538e7ac4732bbf4358613e9",
     "tools/ci_plugin_partitions.py": "17b59be6325b3ba830d721baaf270aa918d515ae5f3e164e084eac69f7adf3ac",
@@ -11811,6 +11822,7 @@
     "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31"
   },
   "coverage_targets": [
+    "tools/module-health-watchdog.py",
     "tools/ci_plugin_partitions.py",
     "tools/ci_job_admission.py",
     "tools/ci_failure_watchdog.py",
