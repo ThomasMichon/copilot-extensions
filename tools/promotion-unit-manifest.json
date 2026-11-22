@@ -11625,7 +11625,7 @@
     "tools/plugin_test_environment.py": "52ea6846d91c74eacce935fa8225761fc2850312f4556fd19193756ad8242d06",
     "tools/plugin_test_lifecycle.py": "88ad7b2acc7fe5cc73d332f5603968d8c14168b9b5320de27dde8e49c6730e1a",
     "tools/promotion_unit_tests/test_lifecycle_pins.py": "ba6f6ab2d947eec5684be35e77421e07e00b0b6281b9a793b84287b31e6e1093",
-    "tools/promote_release.py": "b226d383d6a2a4dc9375dbfdee80bf61ed6b1249d5ddd129e611acea80c2a217",
+    "tools/promote_release.py": "fdac616944c8cfa87f02a35180989e6c965f32f6551540b99c74e534c090a345",
     "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
     "tools/promotion_artifact_readiness.py": "173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",
     "tools/promotion_candidate.py": "0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",
