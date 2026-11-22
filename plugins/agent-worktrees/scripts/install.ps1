@@ -340,6 +340,16 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if (-not $admissionPython) {
             throw "The supplied bootstrap Python must be a working $admissionRequirement executable outside removable uninstall content."
         }
+    } elseif (Test-Path -LiteralPath (Join-Path $admissionPayload 'scripts\bootstrap-python-launcher.txt')) {
+        $selector = Join-Path $admissionPayload 'scripts\_bootstrap_python\select.ps1'
+        if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
+            throw 'The declared command bootstrap selector is unavailable; update the owning payload.'
+        }
+        $selectedBootstrap = & $selector
+        $admissionPython = & $probeAdmissionPython -Candidate $selectedBootstrap
+        if (-not $admissionPython) {
+            throw "The declared uv-managed bootstrap Python must be a working $admissionRequirement executable outside removable uninstall content."
+        }
     }
     $admissionLauncher = if (-not $admissionPython -and $Action -ne 'uninstall') {
         Get-Command py -CommandType Application -ErrorAction SilentlyContinue |

@@ -90,7 +90,8 @@ PowerShell adapter on POSIX reuses Versioned Runtime's bounded capture owner.
 The
 `bootstrap-python-launcher.txt` sidecar distinguishes adoption from an inert
 version declaration. The installation-context transport and evaluator reuse
-that selector; generated Python-backed catalogs use it directly. CMD entries
+that selector, including Worktrees first-use installer admission; generated
+Python-backed catalogs use it directly. CMD entries
 continue to delegate to their PowerShell entry. The application generation
 resolver, Bridge's specialized bootstrap resolver, and explicit setup-provided
 Python paths retain their existing ownership.

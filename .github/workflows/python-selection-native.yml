@@ -81,7 +81,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_uv_runtime_launch.py
-          --allow-explicit-tiers -k generated_managed_bootstrap
+          --allow-explicit-tiers -k "generated_managed_bootstrap or first_use_bootstrap_candidates"
           --junit-dir qualification-evidence/command-bootstrap
       - name: Require each native control
         run: >-
@@ -89,7 +89,7 @@ jobs:
           cases=[c for p in Path('qualification-evidence/command-bootstrap').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           native=[c for c in cases if c.find('skipped') is None];
-          assert len(cases)==12 and len(native)==(9 if os.name=='nt' else 6);
+          assert len(cases)==15 and len(native)==9;
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

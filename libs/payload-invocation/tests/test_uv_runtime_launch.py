@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -421,3 +422,51 @@ def test_generated_managed_bootstrap_ignores_path_python(
     assert Path(value["python"]).samefile(python)
     assert value["arguments"] == ["literal", "argument"]
     assert not result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer admission")
+@pytest.mark.parametrize("selection", ["managed", "unavailable", "explicit"])
+def test_first_use_bootstrap_candidates_do_not_depend_on_path_python(
+    tmp_path: Path, selection: str,
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    scripts = tmp_path / "scripts"
+    bootstrap = scripts / "_bootstrap_python"
+    bootstrap.mkdir(parents=True)
+    (scripts / "bootstrap-python-launcher.txt").write_text("uv\n")
+    (bootstrap / "select.sh").write_text(
+        'printf "uv is unavailable\\n" >&2; exit 17\n'
+        if selection == "unavailable" else 'printf "%s\\n" "$TEST_SELECTED"\n',
+    )
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("python", "python3"):
+        (tools / name).write_text("#!/bin/sh\nexit 98\n")
+        (tools / name).chmod(0o755)
+    source = (
+        Path(__file__).resolve().parents[3] / "plugins/agent-worktrees/scripts/install.sh"
+    ).read_text(encoding="utf-8")
+    body = source.split("_bootstrap_python_candidates() {", 1)[1].split(
+        "# A structured caller supplies", 1,
+    )[0]
+    environment = {
+        **os.environ, "PATH": str(tools), "TEST_SELECTED": sys.executable,
+    }
+    environment.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", None)
+    expected = sys.executable
+    if selection == "explicit":
+        expected = str(tmp_path / "explicit-python")
+        environment["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = expected
+    result = subprocess.run(
+        [bash, "-c", 'SCRIPT_DIR="$1"\n_bootstrap_python_candidates() {' + body +
+         "\n_bootstrap_python_candidates\n", "admission", str(scripts)],
+        env=environment, capture_output=True, text=True, timeout=15,
+    )
+    if selection == "unavailable":
+        assert result.returncode != 0
+        assert not result.stdout
+        assert "uv is unavailable" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == expected + "\n"
