@@ -765,7 +765,8 @@
     {
       "name": "repository-tools",
       "include": [
-        "tools"
+        "tools",
+        "install/new-footprint"
       ],
       "import_roots": [
         "tools",
