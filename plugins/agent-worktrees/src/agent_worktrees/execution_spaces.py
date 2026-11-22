@@ -362,6 +362,10 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     local_record = retained_checkout.is_local(record, config)
     if not local_record:
+        from .paired_cleanup_state import authorizes_retired_member
+
+        local_record = authorizes_retired_member(record, config)
+    if not local_record:
         require_current_execution_space(config)
     if (
         not getattr(record, "receiving_allocation_present", False)
@@ -393,7 +397,7 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")
             if not has_receiving_allocation and retained_checkout.resolve_owner(owner, config, child=record) is None:
-                from .paired_cleanup import authorizes_retired_parent
+                from .paired_cleanup_state import authorizes_retired_parent
 
                 if not (retired_owner_authorized or authorizes_retired_parent(record, config)):
                     raise ExecutionSpaceError(
@@ -561,7 +565,10 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
             record.worktree_id != "@anchor" and getattr(record, "checkout_managed", True) and not current_namespace
             and retained_checkout.recorded_branch_matches(record, config) is not True
         ):
-            raise ExecutionSpaceError("retained checkout branch conflicts with its receiving incarnation")
+            from .paired_cleanup_state import authorizes_retired_member
+
+            if not authorizes_retired_member(record, config):
+                raise ExecutionSpaceError("retained checkout branch conflicts with its receiving incarnation")
         return
 
     try:

@@ -761,6 +761,11 @@ def _needs_session_cleanup(record: tracking.WorktreeRecord) -> bool:
     from . import paired_claims
 
     sibling = paired_claims.reciprocal_sibling(record) if record.is_paired else None
+    if sibling is not None:
+        from .paired_cleanup_state import completed_history
+
+        if completed_history(record, sibling):
+            return False
     return bool(sibling is not None and sibling.status == "finalized" and sibling.reaped_at)
 
 

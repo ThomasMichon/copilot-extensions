@@ -290,9 +290,15 @@ The native receiving authority recognizes that operation's exact reciprocal
 child after its own parent checkout is removed. This command-local authority
 requires the retained operation receipt and both identity fences; an absent
 parent without that receipt does not authorize companion removal.
+The receipt binds both original locations to their receiving Git families, so
+an allocation-root change does not erase the authority of this operation's
+already-removed member. A changed Git family or allocation incarnation remains
+a hold.
 Successful joint cleanup retains both history-bearing terminal records rather
-than hard-deleting their session and claim history. Changed identities or new
-obligations remain holds. This protects supported
+than hard-deleting their session and claim history. It atomically marks the
+journal completed. Routine session sweeps skip those completed histories;
+repeating the command reports the pair already retired without deleting a
+later branch. Changed identities or new obligations remain holds. This protects supported
 managed lifecycle operations, not arbitrary manual operating-system deletion.
 
 These are additive CLI operations. Discover support with the selected

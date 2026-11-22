@@ -20,6 +20,7 @@ from agent_worktrees import cleanup_gc_cli, cleanup_reap, context_cli, gc, git_o
 from agent_worktrees import config as cfg
 from agent_worktrees import launch_admission, launch_seed_state, paired_cleanup, procs
 from agent_worktrees import sessions, tracking, worktree_creation, worktree_lifecycle
+from agent_worktrees import reap_cli
 
 _creation_anchor_seed = fixture_source._creation_anchor_seed
 
@@ -362,10 +363,12 @@ def test_joint_cleanup_admits_both_members_and_removes_together(
     assert code == 0, json.dumps(report)
     assert report["removed"]
     assert not Path(parent.worktree_path).exists() and not Path(child.worktree_path).exists()
-    assert not paired_cleanup.journal_path(parent).exists()
+    assert json.loads(paired_cleanup.journal_path(parent).read_text(encoding="utf-8"))["phase"] == "completed"
     for member in (parent, child):
         retained = tracking.load_record(member.yaml_path)
         assert retained.reaped_at and retained.creation_nonce == member.creation_nonce
+        assert not reap_cli._needs_session_cleanup(retained)
+    assert paired_cleanup.completed_path(parent).is_file()
 
 
 def test_interrupted_joint_cleanup_preserves_records_and_can_retry(
@@ -386,9 +389,113 @@ def test_interrupted_joint_cleanup_preserves_records_and_can_retry(
     assert paired_cleanup.journal_path(parent).exists(), json.dumps(report)
     assert not Path(parent.worktree_path).exists(), json.dumps(report)
     assert Path(child.worktree_path).exists()
+    assert reap_cli._needs_session_cleanup(tracking.load_record(parent.yaml_path))
     monkeypatch.setattr(git_ops, "remove_worktree", remove)
     code, report = _joint_cli(parent, capsys)
     assert code == 0, json.dumps(report)
+
+
+@pytest.mark.parametrize("moved", ["harness", "knowledge"])
+def test_joint_cleanup_receipt_preserves_old_root_authority_through_retry(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], moved: str,
+) -> None:
+    parent, child = _finalized_pair(existing)
+    receiving = existing.configs[moved]
+    future = existing.anchors[moved].parent / f"future-{moved}-root"
+    existing.configs[moved] = replace(receiving, repos={
+        moved: replace(receiving.default_repo, worktree_root=str(future)),
+    })
+    remove = git_ops.remove_worktree
+
+    def fail_second(anchor: str | Path, path: str) -> bool:
+        if path == child.worktree_path:
+            raise OSError("fixture second-half interruption")
+        return remove(anchor, path)
+
+    monkeypatch.setattr(git_ops, "remove_worktree", fail_second)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and not Path(parent.worktree_path).exists(), json.dumps(report)
+    assert paired_cleanup.journal_path(parent).is_file()
+    assert Path(child.worktree_path).is_dir()
+    monkeypatch.setattr(git_ops, "remove_worktree", remove)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 0 and report["removed"], json.dumps(report)
+    assert not Path(child.worktree_path).exists()
+    assert not (future / (parent.worktree_id if moved == "harness" else child.worktree_id)).exists()
+
+
+def test_completed_pair_history_does_not_authorize_another_branch_removal(
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    parent, child = _finalized_pair(existing)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 0 and report["removed"], json.dumps(report)
+    anchor = existing.anchors["knowledge"]
+    git_ops.git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "retained later work", cwd=anchor,
+    )
+    git_ops.git("branch", child.branch, "HEAD", cwd=anchor)
+    tip = git_ops.git("rev-parse", child.branch, cwd=anchor).stdout.strip()
+    code, report = _joint_cli(parent, capsys)
+    assert code == 0 and report["already_retired"] and not report["removed"], json.dumps(report)
+    assert git_ops.git("rev-parse", child.branch, cwd=anchor).stdout.strip() == tip
+
+
+def test_partial_cleanup_refuses_new_work_on_a_removed_members_branch(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    parent, child = _finalized_pair(existing)
+    remove = git_ops.remove_worktree
+
+    def fail_second(anchor: str | Path, path: str) -> bool:
+        if path == child.worktree_path:
+            raise OSError("fixture second-half interruption")
+        return remove(anchor, path)
+
+    monkeypatch.setattr(git_ops, "remove_worktree", fail_second)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and not Path(parent.worktree_path).exists(), json.dumps(report)
+    before = paired_cleanup.journal_path(parent).read_bytes()
+    anchor = existing.anchors["harness"]
+    git_ops.git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "retained interrupted work", cwd=anchor,
+    )
+    git_ops.git("branch", parent.branch, "HEAD", cwd=anchor)
+    tip = git_ops.git("rev-parse", parent.branch, cwd=anchor).stdout.strip()
+    monkeypatch.setattr(git_ops, "remove_worktree", remove)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and "branch changed" in report["reason"], json.dumps(report)
+    assert Path(child.worktree_path).is_dir()
+    assert git_ops.git("rev-parse", parent.branch, cwd=anchor).stdout.strip() == tip
+    assert paired_cleanup.journal_path(parent).read_bytes() == before
+
+
+def test_joint_cleanup_refuses_a_receipt_with_another_git_family(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    parent, child = _finalized_pair(existing)
+    remove = git_ops.remove_worktree
+
+    def fail_second(anchor: str | Path, path: str) -> bool:
+        if path == child.worktree_path:
+            raise OSError("fixture second-half interruption")
+        return remove(anchor, path)
+
+    monkeypatch.setattr(git_ops, "remove_worktree", fail_second)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and not Path(parent.worktree_path).exists(), json.dumps(report)
+    path = paired_cleanup.journal_path(parent)
+    corrupted = json.loads(path.read_text(encoding="utf-8"))
+    corrupted["families"][0]["identity"][1] += 1
+    path.write_text(json.dumps(corrupted), encoding="utf-8")
+    monkeypatch.setattr(git_ops, "remove_worktree", remove)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and not report["removed"]
+    assert Path(child.worktree_path).is_dir() and child.yaml_path.is_file()
+    assert json.loads(path.read_text(encoding="utf-8")) == corrupted
 
 
 def test_joint_removal_holds_both_record_fences(
