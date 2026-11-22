@@ -42,5 +42,16 @@ _SELECTED = (
     "test_preparation_refuses_replaced_leased_directory",
     "test_readiness_is_revalidated_under_the_checker_lease",
     "test_checker_timeout_settles_targets_and_environment_lease",
+    "test_guard_alias_exact_scope_bytes_full_map_and_current_targets",
+    "test_guard_alias_refuses_drift_and_cleans_only_owned_outputs",
+    "test_source_view_accounts_for_order_bytes_and_physical_lines",
+    "test_native_fragment_loader_remains_source_mapped",
+    "test_copied_fragment_view_verifies_its_own_inputs",
+    "test_source_view_refuses_unqualified_native_loader_changes",
+    "test_source_view_refuses_loader_wide_suppressions",
+    "test_source_view_inlines_the_declared_fragment_order",
+    "test_source_view_refuses_stale_or_incomplete_composition",
+    "test_composition_cannot_drop_code_or_spread_file_wide_suppressions",
+    "test_imported_view_refuses_source_drift_and_settles_its_lease",
 )
 globals().update({name: getattr(_original, name) for name in _SELECTED})

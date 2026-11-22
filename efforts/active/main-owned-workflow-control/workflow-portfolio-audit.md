@@ -5114,7 +5114,50 @@ order; only the existing adapter's binding changes, preserving the other
 bound. The compact-v2 candidate contains 8,831 nodes and 1,245 sources in
 988,509 bytes.
 
-Current-head review and complete fresh Linux CI remain pending. No new mock,
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, committed changefile,
+documentation and diff checks pass. Source CI `45023142734`, unit job
+`137210234327`, freshly passes all 8,831 cases with 43 deselections in
+153.59 pytest / 173.444 packet seconds. It reports `mode=executed`, origin
+run `45023142734` attempt one, execution identity
+`2f7915e8fdc7fd8aed9e07520a5805ec0ce744c585eece59d4656a50c3f8fc87`
+and packet digest
+`afcc17b543a0421232d7facf3e304092b7d12431820e3f48c1c56d07a6de95ea`.
+Required aggregate `137211426837`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/parent-reference checks precede the managed merge.
+Source #14081 merges at `2026-11-22T12:42:27Z` as
+`cb2cfa00afdec9e52c3a69437a59918e8a747de3`; independent readback confirms merged
+state and open parent #6237. The managed source sync succeeds, and the complete
+reviewed-head/merged-tree comparison is empty. The actual parent Goal, own Plan
+leaf and Validation Plan are reread before resolving only the fourteen-case
+leaf. No new mock, preload, wrapper, effect exception, data allowlist, workflow,
+runtime or cleanup change is introduced. This qualification does not settle
+retained failures or owner seams. Fresh-install/native lanes are not applicable
+because installation, runtime, workflow and original-test behavior do not change.
+
+### November 22 original strict-checker source-view controls
+
+The existing adapter additionally exports eleven unchanged original functions
+covering guard-alias scope/mapping/drift, physical line mapping, native-loader
+source preservation, copied input custody, loader-mutation and directive
+refusals, declared fragment order, stale composition, code/suppression
+preservation and imported-view drift cleanup. Complete collection verifies
+236 original cases and 110 adapter cases with exact function, fixture and
+parameter-value identities. All collaborator stubs belong to the originals;
+actual MyPy, native/process, symlink, repository-catalog, platform-specific
+guard-shadow and other excluded cases remain unchanged outside the selection.
+
+Initial unchanged effect auditing passes all 110 cases in 9.000 seconds with
+zero prohibited effects, 27 bound Python reads and positive actual
+checker-owner call-phase lines per case. Only 46 new nodes are appended after
+the current 64 within the first group. All 8,831 prior nodes retain relative
+order. Only the existing adapter hash changes and the original helper's
+canonical `copilot-mention-guard.py` read binding is added; all other 1,244
+current-base hashes remain intact. Coverage targets remain 460, helper
+decisions 89 and the bound 300 seconds. Compact-v2 and flat-v1 logical
+identity agree; the candidate has 8,877 nodes and 1,246 sources in 992,850 bytes.
+
+Normal review and complete fresh Linux CI remain pending. No new mock,
 preload, wrapper, effect exception, data allowlist, workflow, runtime or cleanup
 change is introduced. This qualification does not settle retained failures or
 owner seams. Fresh-install/native lanes are not applicable because installation,
