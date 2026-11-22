@@ -4585,13 +4585,69 @@ The compact-v2 candidate contains 8,413 nodes, 1,200 bound sources, 452 targets
 and 946,612 bytes. All 8,398 preceding nodes retain relative order and all
 1,199 preceding source hashes remain intact. Existing targets, 89 helper
 decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
-enforced. Current-head review and complete fresh Linux CI remain required
-before normal merge.
+enforced. Fatal Ruff, strict Python 3.10/Linux and Windows typing,
+documentation consistency and diff checks pass.
+
+Copilot approval `6011550770` covers exact head
+`bb4cd49d4a53bcb3cd1bc178caaf7350baaa0774`, with no active findings.
+Source CI `45008854170`, unit job `137166421278`, freshly passes all 8,413
+cases with 39 deselections, 145.15 pytest seconds and 163.717 packet seconds.
+It reports `mode=executed`, origin run `45008854170` attempt one, execution
+identity `7d13188cc5eaf7a7dcf295630b2d53ba429d6540c68de9fedc4f576beb8ba345`
+and packet digest
+`c201edf113d197b52267ecc905555d698d6299760fbc71c1fb2a2fc700596dbf`.
+Required aggregate `137167328776`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14066 merges at `2026-11-22T09:48:09Z` as
+`8b999f63eb36bbb5ab0a20cd4ab9be02cd71c878`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 15-case leaf.
 
 No original test, production implementation, workflow, runtime, source/data
 policy or effect-auditor changes. This is synthetic chunk-planning/merging
 coverage, not real collection, baseline publication/adoption or threaded
 integration qualification. Fresh-install/native lanes are not exercised because
+installation/runtime behavior is unchanged. All retained refusals, shared-owner
+seams and broader parent gates remain open.
+
+### November 22 exact-original decision-orchestration census
+
+The adapter exports the complete original `TestDecide` class from
+`tools/test_coverage_guided_selection.py`. Complete collection preserves all
+eleven class/method objects and their relative order among 157 original-module
+cases. Original helper baselines, collaborator stubs and assertions remain
+unchanged. Other original-module cases remain outside this adapter; 62 are
+already admitted through the policy, correlation and chunk adapters. Importing
+the module does not execute its integration cases.
+
+The synchronized base includes the independent #14054 merge
+`c5d79da7e4f39862ca0623f42e86a962c0aa7892`: six bootstrap data bindings and
+sixteen refreshed source hashes, with unchanged nodes, targets and deadline.
+The source inventory is therefore 1,206, not the 1,200 bindings at #14066's
+qualified PR head. Collection stops on that stale-count assertion before any
+test execution; binding the current base resolves the inventory discrepancy
+without changing a test, source policy or auditor. Those peer-owned changes
+are preserved and are not this slice's work or evidence for any prior refusal.
+
+Initial guarded qualification passes all eleven in 1.515 seconds with zero
+prohibited effects, 23 bound Python reads and actual decision-owner call-phase
+lines for every case. Only the adapter requires a new binding; the already-bound
+decision module becomes a coverage target. No new mocks, preloads, real Git,
+native/thread execution or network access are added.
+
+The compact-v2 candidate contains 8,424 nodes, 1,207 bound sources, 453 targets
+and 948,538 bytes. All 8,413 preceding nodes retain relative order and all
+1,206 current-base source hashes remain intact. Existing targets, 89 helper
+decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
+enforced. Current-head review and complete fresh Linux CI remain required
+before normal merge.
+
+No original test, production implementation, workflow, runtime, source/data
+policy or effect-auditor changes. This is decision-orchestration coverage, not
+real Git debt/ancestry, asset fetching, portfolio activation or integration
+qualification. Fresh-install/native lanes are not exercised because
 installation/runtime behavior is unchanged. All retained refusals, shared-owner
 seams and broader parent gates remain open.
 

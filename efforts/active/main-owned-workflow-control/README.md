@@ -1461,7 +1461,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `bbd747b48cbab03f82c117a253d0d1c1a4a79c62` after exact-head Copilot approval
   and complete required Linux CI with all 8,398 units freshly executed.
   Only this finite leaf is complete; all broader parent gates remain open.
-- [ ] Qualify the complete original `TestPlanChunks` and
+- [x] Qualify the complete original `TestPlanChunks` and
   `TestMergeChunkResults` classes, retaining every class/method object,
   parameter, temporary-file fixture, existing subprocess stub and assertion.
   Do not add mocks, preloads, real process/thread execution or network access.
@@ -1478,7 +1478,31 @@ authorizes critical main-path acceptance or a bounded administrative change.
   baseline-owner call-phase lines per case. Only the adapter needs a new source
   binding; baseline and chunk-scheduler modules become coverage targets.
   The compact-v2 candidate contains 8,413 nodes, 1,200 sources and 452 targets.
-  Complete fresh Linux CI and current-head review remain required.
+  #14066 merges at `8b999f63eb36bbb5ab0a20cd4ab9be02cd71c878` after
+  exact-head Copilot approval and complete required Linux CI with all 8,413
+  units freshly executed. Only this finite leaf is complete; all broader
+  parent gates remain open.
+- [ ] Qualify all eleven original `TestDecide` methods, retaining the exact
+  class/method objects, helper baselines, original collaborator stubs and
+  assertions. Keep actual Git debt/ancestry, asset-fetch and integration cases
+  unchanged with their existing owners. Do not add mocks, preloads, real
+  process/thread execution or network access. Require complete selected
+  original/adapter collection identity, closed source reads, positive per-case
+  actual decision-owner calls and zero prohibited effects before admission.
+  Preserve preceding nodes, hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no portfolio
+  activation, workflow, runtime or native contract changes.
+  Complete collection maps all eleven exact class/method objects from 157
+  original cases. Initial guarded qualification passes all eleven in 1.515
+  seconds, with zero prohibited effects, 23 bound Python reads and actual
+  decision-owner call-phase lines per case. Only the adapter needs a new source
+  binding; the already-bound decision module becomes a coverage target.
+  The current base includes #14054's six independently owned bootstrap
+  bindings and sixteen refreshed hashes; these are preserved, not reauthored
+  or attributed to this slice. The compact-v2 candidate contains 8,424 nodes,
+  1,207 sources and 453 targets. Current-head review and complete fresh Linux
+  CI remain required.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
