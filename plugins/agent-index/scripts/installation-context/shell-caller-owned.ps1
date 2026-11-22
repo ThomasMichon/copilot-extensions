@@ -34,13 +34,30 @@ try {
             throw 'Bootstrap Python must be an absolute executable path.'
         }
     } else {
-        try {
-            $Python = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0].Path
-        } catch [System.Management.Automation.CommandNotFoundException] {
-            throw (
-                'Python 3.10+ must be available as python on PATH, or explicitly selected by setup. ' +
-                'Run the harness Python prerequisite setup, or install the standalone prerequisite, then retry.'
-            )
+        $payloadScripts = Split-Path -Parent $PSScriptRoot
+        $bootstrapResolver = Join-Path $payloadScripts 'resolve-bootstrap-python.ps1'
+        if (Test-Path -LiteralPath $bootstrapResolver) {
+            Assert-CallerDeadline
+            $bootstrapOptions = @{}
+            if ($TimeoutSeconds -gt 0) {
+                $bootstrapOptions.TimeoutMilliseconds = [int][Math]::Min(
+                    30000, $TimeoutSeconds * 1000.0 - $clock.ElapsedMilliseconds
+                )
+            }
+            . $bootstrapResolver
+            if ((Get-Command Resolve-PayloadBootstrapPython -CommandType Function).Parameters.ContainsKey('InstallationRequest')) {
+                $bootstrapOptions.InstallationRequest = $Request
+            }
+            $Python = Resolve-PayloadBootstrapPython @bootstrapOptions
+        } else {
+            try {
+                $Python = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0].Path
+            } catch [System.Management.Automation.CommandNotFoundException] {
+                throw (
+                    'Python 3.10+ must be available as python on PATH, or explicitly selected by setup. ' +
+                    'Run the harness Python prerequisite setup, or install the standalone prerequisite, then retry.'
+                )
+            }
         }
     }
     $windowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT

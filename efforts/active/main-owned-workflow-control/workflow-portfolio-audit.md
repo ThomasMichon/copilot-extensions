@@ -3880,6 +3880,278 @@ Fresh-install/native/installed external lanes are not exercised because no
 installation or runtime behavior changes. Full-census, every-release,
 comparable whole-flow, native, installed and retained-custody gates remain open.
 
+### November 22 original command-ownership qualification
+
+The adapter retains 704 cases from 31 exact original functions; the one
+process-global import assertion stays outside the mixed packet. Three data
+controls retain changed-byte, executable-source and coverage-target refusals.
+Four candidate-reader controls bind all six declared native engine copies,
+exercise the actual command reader, and refuse changed, missing, retargeted
+and later-drift inputs. No native program is launched.
+
+The 46 command/writer/manifest inputs remain data only. Real Git checkout
+controls preserve both the five existing LF payload guarantees and declared
+CRLF inputs, including composed copies. The bounded reader correction changes
+no materializer writer, workflow, activation, native-run authority or custody.
+Whole-file strict Linux/Windows typing and all 102 reader/data/checkout controls
+pass. The final affected guard passes 711 cases in 19.797 seconds with zero
+prohibited effects, nine bound Python reads and actual owner calls per case.
+All preceding 7,226 nodes and unrelated hashes, 89 helper decisions,
+compact/flat-v1 identity and the 300-second bound remain.
+
+Actual CI merge `73d066256a` includes head
+`3d299b6fd2418a26b9190b64aade7cf23d1277b3` and Dev `70973edc0c`.
+CI `44971343114`, unit job `137051590218`, freshly passes all 7,937 cases
+with 39 deselections, 100.92 pytest seconds and 116.101 packet seconds.
+Evidence reports `mode=executed`, origin run `44971343114` attempt one and
+digest `2589502730abdd8451d3379bf1bc10b77b64170e8099ec57339980297865c604`.
+Current-head approval `6009414715`, both resolved review threads, complete
+review/comment/thread pagination, required aggregate `137053341671`, guards,
+trusted lockdown/attribution, seven fresh verifier reads and final
+head/hold/closing-reference checks precede the managed merge.
+
+Source #13986 merges at `2026-11-22T01:38:34Z` as
+`2db9de42d9d2464e7a08554c9b3c17d9ff387097`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
+
+### November 22 original footprint-history qualification
+
+The adapter retains 56 cases from 19 exact original functions; the other 33
+original cases remain outside without replacement assertions. Two data controls
+retain changed-byte, executable-source, coverage-target and unreviewed-path
+refusals for the exact profile/history JSON inputs. Both inputs have explicit
+LF checkout policies; both real-Git autocrlf modes pass while retaining every
+prior PowerShell LF/CRLF and composed-copy guarantee.
+
+The guarded development slice passes all 58 cases in 4.047 seconds with zero
+prohibited effects, sixteen bound Python reads and actual owner calls per case.
+All 83 admission-contract cases, Ruff and whole-file strict typing of all four
+changed Python files on Linux/Windows pass. The 7,995-node packet retains the
+preceding 7,937 nodes and unrelated hashes, 447 targets, 89 helper decisions,
+compact/flat-v1 identity and the 300-second bound. Its 1,162 sources occupy
+905,746 compact-v2 bytes.
+
+The packaged `worktree-manager` patch intent is verified against the committed
+contribution diff.
+Copilot approval `6009607813` covers exact head
+`598acbfb23cc81e88532082d5e2c53cd2168a074`, with no active findings.
+Current CI `44973856233`, unit job `137059322909`, freshly passes all 7,995
+cases with 39 deselections, 111.66 pytest seconds and 125.899 packet seconds.
+Evidence reports `mode=executed`, origin run `44973856233` attempt one and
+digest `5c40c3b9bc82cf8301734941977827fa375bfa7da73020ac5bc45146b8f0ab2a`.
+Required aggregate `137060381538`, guards and trusted lockdown/attribution pass.
+Complete review/comment/thread pagination, seven fresh verifier reads and
+final head/hold/closing-reference checks precede the managed merge.
+
+Source #14019 merges at `2026-11-22T02:04:38Z` as
+`82860fb482d13b402050f1d572a3c56bad1aafef`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
+
+### November 22 Darwin first-import unit eligibility boundary
+
+The proposed 178-case fake-kernel export in #14026 is not qualified.
+Windows development execution passes, but Linux unit job `137063016322` in
+`44975069326` refuses collection before any selected test runs: the original
+module imports `ctypes`, whose first import constructs `PyDLL(None)` and emits
+the prohibited `ctypes.dlopen` effect. The unchanged guard correctly refuses;
+the Windows result is not portable unit eligibility or native acceptance.
+
+The 178-case export is not part of the admitted packet. The replacement retains
+the 7,995-node baseline and the target branch's current source hashes and
+coverage targets. No preload, guard exception, rewritten assertion, native
+execution or change to the original Darwin tests accompanies the replacement.
+Their broader census/native qualification remains open; this refusal is not
+counted as delivered consolidation.
+
+### November 22 original validation-override qualification
+
+The adapter exports all three exact original functions as five cases,
+preserving their source-level merge/parser helper and assertions. List
+clearing, omission, empty-map inheritance, empty-path replacement and machine
+precedence use admitted production source without importing or starting the
+managed runtime. The guarded development slice passes all five in 1.344 seconds
+with zero prohibited effects, three bound Python reads and actual
+configuration-owner calls for every case.
+
+The 8,000-node packet retains the preceding 7,995 nodes, the target branch's
+current source hashes, all 447 targets, 89 helper decisions, compact/flat-v1
+identity and the 300-second bound. Its 1,164 sources occupy 906,494 compact-v2
+bytes. Ruff, whole-file strict typing on Python 3.10/Linux and Windows, and
+packaged `worktree-manager` changefile verification against the committed
+contribution diff pass.
+
+Copilot approval `6010392256` covers exact head
+`8ae79d63b82750c084e44aafa6d06e6af31ea26b`, without active findings.
+CI `44986047120`, unit job `137096730693`, freshly passes all 8,000 cases
+with 39 deselections, 145.69 pytest seconds and 165.496 packet seconds.
+Evidence reports `mode=executed`, origin run `44986047120` attempt one and
+digest `f7910324b0d2b5b3b74e43b0884fdc08c8080d6133e5600103ecae7bb7762169`.
+Required aggregate `137097685973`, guards and trusted lockdown/attribution pass.
+Complete review/comment/thread pagination, seven fresh verifier reads and
+final head/hold/closing-reference checks precede the managed merge.
+
+Source #14026 merges at `2026-11-22T04:47:55Z` as
+`a0601af38db4fb964ec5781cbe3228d91a75014c`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
+
+### November 22 bundled-wheel release-age development qualification
+
+The adapter exports the exact original
+`test_bundled_dbus_next_still_requires_canonical_release_age` function as its
+two original corruption parameter cases. Both retain the original
+aged-versus-young metadata loop, canonical-wheel bytes, corrupt-wheel refusal
+and controlled fetch callback. The original source, canonical wheel and actual
+dependency-age owner are already hash-bound inputs; only the adapter is new.
+No install, resolver, external network call, fixture rewrite or additional
+mocking is introduced.
+
+A fresh guarded process passes both cases in 1.891 seconds, with zero
+prohibited effects, fourteen bound Python reads and positive actual
+dependency-age owner calls for each case. The candidate contains 8,002 nodes,
+1,165 sources and 906,889 compact-v2 bytes, retaining all preceding 8,000 nodes,
+the target branch's current source hashes, all 447 targets, 89 helper decisions,
+compact/flat-v1 identity and the 300-second deadline. Full current-head Linux
+source CI and review complete for this finite slice. Ruff, whole-file strict
+typing on Python 3.10/Linux and Windows, manifest/helper closure and packaged
+`worktree-manager` changefile verification against the committed contribution
+diff pass.
+
+Copilot approval `6010545242` covers exact head
+`de81421290af0252568366087d0328ffc90aac08`, without active findings.
+CI `44989297189`, unit job `137106615776`, freshly passes all 8,002 cases
+with 39 deselections, 189.45 pytest seconds and 211.887 packet seconds.
+Evidence reports `mode=executed`, origin run `44989297189` attempt one and
+digest `2597451fbd6b115269848e44ed81322563981a270fe85a0601e4dd4c0374fa35`.
+Required aggregate `137107759676`, guards, identifier enforcement and trusted
+lockdown/attribution pass. Complete review/comment/thread pagination, seven
+fresh verifier reads and final head/hold/closing-reference checks precede the
+managed merge.
+
+Source #14040 merges at `2026-11-22T05:32:34Z` as
+`a671fd50402011f38a8db2011156bfaed3557102`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
+
+Two other development proposals remain unadmitted. The original
+project/resource-overlap cases reach Windows private-root initialization and
+the first case is refused at `WinDLL("advapi32")` by `ctypes.dlopen`.
+The original resolver-argument group reaches Windows executable discovery
+before source validation and the first case is refused at
+`WinDLL("kernel32")` by the same guard. Both prototype adapters are withdrawn;
+the original tests and retained lanes remain unchanged. No native loader
+preload, guard exception, clock, assertion or callback-body replacement
+converts either refusal into a passing witness. These boundaries do not
+authorize another native run.
+
+The separately proposed original editable-requirement CLI refusal also
+remains unadmitted. Its inner retained-install validation precedes the inner
+selector, but the outer configuration wrapper resolves UV first. A fresh
+guarded attempt refuses that wrapper's Windows `kernel32` load on
+`ctypes.dlopen`; the one-line adapter addition is withdrawn without changing
+the original test or manifest. This confirms the earlier November 21 refusal,
+not an additional independent boundary or passing witness. Prototype evidence
+is retained. No loader preload, selector replacement or guard exception is
+introduced.
+
+### November 22 original named-UV lookup-double qualification
+
+The existing UV-selection adapter exports four additional exact original
+functions as seven cases: named lookup preserves one physical target, errors
+2 and 5 refuse without substitution, oversized lookup refuses, and named
+`.cmd`/`.bat` wrappers never enter native lookup. The original lookup doubles,
+fixtures, callbacks, parameter identities and assertions are unchanged.
+Actual Windows lookup, private-root creation, links and installed behavior
+remain separate; no native library is loaded for these controls.
+
+The 21-case original collection matches all nineteen selected adapter cases.
+A fresh guarded process passes the complete adapter in 1.390 seconds with
+zero prohibited effects, twelve bound Python reads and positive actual
+configuration-owner call lines for each of the seven additions. The candidate
+contains 8,009 nodes, 1,165 sources and 907,461 compact-v2 bytes. It preserves
+all preceding 8,002 nodes in relative order, every unrelated source hash,
+all 447 targets, 89 helper decisions, compact/flat-v1 identity and the
+300-second bound. Ruff and whole-file strict Python 3.10/Linux and Windows
+typing pass for the changed adapter.
+
+Scoped source synchronization retains an independently advanced target's
+thirteen additional nodes, three sources and one target. The rebased
+contribution has 8,020 nodes, 1,168 sources, 448 targets and 908,907 compact
+bytes; its own delta remains seven cases and one adapter hash. All twelve
+guard-observed source inputs are byte-identical after synchronization.
+Immutable-base/head strict typing and committed changefile-presence checks
+pass; a concurrently advanced shared remote-tracking ref is not treated as
+part of this contribution.
+
+Exact-head Copilot approval `6010619971` covers
+`d196d0682edfd9b320a300c1c5dc0bbc4060e155`, but Linux CI `44991242578`,
+unit job `137112545445`, refuses the first added case on `ctypes.dlopen`.
+Its original helper imports `ctypes` before installing the lookup doubles;
+Linux initializes `pythonapi = PyDLL(None)` at that import. The unchanged
+guard refuses it, after 1,043 preceding passes, with one failure and 39
+deselections in 16.71 pytest seconds. No complete packet evidence is produced
+and the required aggregate fails. This is a genuine cross-platform admission
+failure caused by this candidate, not an unrelated flake or passing review.
+
+All seven additions and the adapter-hash change are withdrawn, restoring the
+target's 8,013-node admission. No loader preload, guard exception, callback
+replacement or original-test rewrite is introduced. The local nineteen-case
+pass does not qualify this cohort on Linux. Required review and CI for any
+corrected source contribution remain independent merge gates.
+Fresh-install/native/installed lanes
+are not exercised because no installation or runtime behavior changes.
+Full-census, every-release, comparable whole-flow, owner, native, installed
+and retained-custody gates remain open.
+
+### November 22 original artifact-readiness early-refusal qualification
+
+The initial twenty-case synthetic hosted-readiness proposal is refused on
+its first success-path case when real download verification starts the
+existing thread pool. No thread-pool replacement or serial callback is
+introduced. That original success/readback path remains outside the unit
+packet; no passing result is inferred for the unexecuted cases.
+
+Three separate complete original functions stop before that parallel
+readback: source-byte mismatch refuses before any release request; failed
+preparation emits no readiness receipt and final publication never repairs
+it; and empty premerge identity refuses before release access. The adapter
+exports their exact test objects plus the original synthetic `hosted` and
+autouse `no_ambient_git_identity` fixture objects. All callbacks, assertions
+and fixture bodies remain unchanged. The 58-case original collection matches
+the three selected nodes and identities.
+
+A fresh guarded process passes three cases in 2.000 seconds, with zero
+prohibited effects, 43 bound Python reads and positive actual call-phase
+owner lines for every case. Four sources are newly bound: the adapter, its
+original module, the original artifact-fixture module and their workflow
+test-support import. No previous source binding changes. The candidate has
+8,016 nodes, 1,172 sources, 448 targets and 909,154 compact-v2 bytes,
+retaining all preceding 8,013 nodes, 89 helper decisions, compact/flat-v1
+identity and the 300-second bound.
+
+Ruff and whole-file strict Python 3.10/Linux and Windows typing pass for the
+corrected contribution, including the restored UV adapter.
+Current-head review and complete fresh Linux source CI remain required.
+No live publication, artifact download, thread, native execution, runtime
+update or Main/controller mutation occurs in this qualification. Fresh-install
+and installed external lanes are not exercised because no installation or
+runtime behavior changes. Full-census, every-release, comparable whole-flow,
+owner, native, installed and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

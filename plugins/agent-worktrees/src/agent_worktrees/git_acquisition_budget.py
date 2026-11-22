@@ -7,6 +7,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+NETWORK_HARD_TIMEOUT = 300.0
+NETWORK_SOFT_TIMEOUT = 30.0
+
 _deadline: ContextVar[float | None] = ContextVar("git_acquisition_deadline", default=None)
 
 

@@ -347,6 +347,18 @@ class _InboxCustodyMixin(DatabaseOperations):
             )
             if row["handoff_started_at"] is None:
                 raise RuntimeCustodyError("Inbox handoff never reached final admission")
+            if row["disposition_json"] is not None:
+                # A terminal disposition stays final, but late acceptance or
+                # consumption of an exhausted original is still recorded (on its
+                # attempt ledger) so its report settles instead of blocking later
+                # deliveries.
+                from . import retained_attempts
+
+                if json.loads(row["disposition_json"]).get("code") == retained_attempts.EXHAUSTED:
+                    late = retained_attempts.record_late(conn, message_id, outcome, now=now)
+                    if late is not None:
+                        return late
+                return handoff_stage(row)
             if outcome == "sdk_accepted" and row["delivered_at"] is None:
                 conn.execute("UPDATE live_messages SET delivered_at=? WHERE id=?", (now, message_id))
             elif outcome == "consumed" and row["consumed_at"] is None:

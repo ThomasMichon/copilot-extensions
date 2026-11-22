@@ -108,6 +108,7 @@ def _lifecycle_source(
     }[match]
     stubs = {
         "Ensure-Uv": "return $true",
+        "Initialize-BridgeBootstrapPython": "",
         "Enter-InstallLock": "return $true",
         "Exit-InstallLock": "$events.Add('unlock')",
         "Get-PayloadHash": "return 'hash'",

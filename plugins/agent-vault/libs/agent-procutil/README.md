@@ -98,6 +98,20 @@ Legacy `on_output` callbacks share captured storage and run only through
 `deliver()` after `finish()` and producer settlement; they are no longer live
 stdio adapters. This helper does not create keepalive output
 or change the existing generic owned-process timeout policy.
+
+`SyncProcessOutput.wait(..., soft_timeout=<seconds>, deadline=<monotonic cap>)`
+optionally reports a quiet child without terminating it. Each new captured
+stdout/stderr byte resets this warning window, including partial lines.
+Warnings and activity observations do not count as child output. A warning is
+emitted once per quiet period; continued silence never renews the absolute cap.
+`owned_process.run_owned(..., timeout=<hard seconds>, soft_timeout=<soft seconds>)`
+exposes the same opt-in policy through its existing Windows Job or POSIX
+process-group owner. It requires captured output and a finite hard timeout.
+Existing terminating inactivity timeouts remain unchanged.
+Soft-only captured commands retain descendant output until EOF, bounded by the
+same hard deadline; root exit alone does not complete their capture. UTF-8
+decoding stays strict unless the caller explicitly selects an `errors` policy.
+Git selects replacement decoding for compatibility with its existing wrapper.
 After retiring its writers, a caller may use `finish(stop_at_idle=True)`
 to drain available bytes without waiting for EOF from an escaped daemon that
 retained an otherwise idle pipe. Windows readers use native pipe availability

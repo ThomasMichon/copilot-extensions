@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import os
 import queue
 import selectors
@@ -234,19 +235,28 @@ class SyncProcessOutput:
         exit_observer: Callable[[], bool] | None = None,
         cleanup_deadline: float | None = None,
         activity_observer: Callable[[], bool] | None = None,
+        soft_timeout: float | None = None,
     ) -> None:
         """Renew from bytes or attested activity, never beyond the absolute cap.
 
         An optional caller-owned observer returns strictly bool: True only for
         new completed work. Its errors propagate for caller-owned retirement.
         Startup grace ends at the first byte or positive activity observation.
+        A soft timeout warns once per output-idle period without terminating.
+        Only new captured bytes reset it; an absolute deadline is required.
         """
         last_activity = None
+        warned_output: float | None = None
         try:
             if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
                 raise ValueError("process inactivity timeout must be finite and positive")
             if deadline is not None and not math.isfinite(deadline):
                 raise ValueError("process absolute deadline must be finite")
+            if soft_timeout is not None and (
+                type(soft_timeout) not in (int, float)
+                or not math.isfinite(soft_timeout) or soft_timeout <= 0 or deadline is None
+            ):
+                raise ValueError("process soft timeout requires a positive window and absolute deadline")
             if inactivity_start is not None and not math.isfinite(inactivity_start):
                 raise ValueError("process inactivity phase start must be finite")
             if startup_timeout is not None and (
@@ -258,7 +268,7 @@ class SyncProcessOutput:
             while True:
                 if self._input_errors:
                     raise self._input_errors.pop(0)
-                if activity_observer is not None and deadline is not None and time.monotonic() >= deadline:
+                if deadline is not None and time.monotonic() >= deadline:
                     raise subprocess.TimeoutExpired(self.process.args, cast(float, timeout), *self.output())
                 for _ in range(64):
                     try:
@@ -297,6 +307,7 @@ class SyncProcessOutput:
                 with self._lock:
                     last_progress = self._last_output
                     has_output = self._has_output
+                last_output = last_progress
                 if inactivity_start is not None:
                     last_progress = max(last_progress, inactivity_start)
                 if last_activity is not None:
@@ -317,6 +328,16 @@ class SyncProcessOutput:
                 remaining = None if expires is None else expires - time.monotonic()
                 if remaining is not None and remaining <= 0:
                     raise subprocess.TimeoutExpired(self.process.args, cast(float, timeout), *self.output())
+                if soft_timeout is not None and warned_output != last_output:
+                    soft_remaining = last_output + soft_timeout - time.monotonic()
+                    if soft_remaining <= 0:
+                        logging.getLogger(__name__).warning(
+                            "Child produced no output for %.1fs; continuing until the hard deadline",
+                            soft_timeout,
+                        )
+                        warned_output = last_output
+                    else:
+                        remaining = soft_remaining if remaining is None else min(remaining, soft_remaining)
                 if self._pending is not None:
                     time.sleep(.01 if remaining is None else min(.01, remaining))
                     continue

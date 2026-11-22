@@ -352,22 +352,39 @@ _budget_pip_index_helper() {
     return 1
 }
 
-_budget_snapshot_path_unlinked() {
-    local base="$1" relative="$2" component
-    local -a components
-    [[ "$relative" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
-        ! "$relative" =~ (^|/)\.\.?(/|$) ]] || return 1
-    IFS=/ read -ra components <<< "$relative"
-    for component in "${components[@]}"; do
-        base="$base/$component"
-        [[ ! -L "$base" ]] || { _fail 'Linked source snapshot asset refused'; return 1; }
-    done
+_budget_snapshot_relative() {
+    local relative="$1" LC_ALL=C
+    [[ ( "$relative" == scripts/?* || "$relative" == libs/?* ) &&
+        "$relative" != *[!A-Za-z0-9_./-]* ]] || return 1
+    case "/$relative/" in */./*|*/../*) return 1 ;; esac
+}
+
+_budget_snapshot_paths_unlinked() {
+    local base="$1" relative paths
+    shift
+    [[ "$#" -gt 0 ]] || return 1
+    # Share ancestor walks within a phase, never validation across the copy.
+    paths="$(printf '%s\n' "$@" | LC_ALL=C awk '
+        {
+            count = split($0, components, "/")
+            path = ""
+            for (index_value = 1; index_value <= count; index_value++) {
+                path = path (index_value == 1 ? "" : "/") components[index_value]
+                print path
+            }
+        }
+    ' | LC_ALL=C sort -u)" || return 1
+    while IFS= read -r relative; do
+        [[ ! -L "$base/$relative" ]] || { _fail 'Linked source snapshot asset refused'; return 1; }
+    done <<< "$paths"
+    return 0
 }
 
 _materialize_budget_source_snapshot() {
     local snapshot="$1" helper root operation source target extra directory previous="" index
+    local previous_directory=""
     local request="" request_target=""
-    local -a sources=() targets=() directories=() batch=()
+    local -a sources=() targets=() all_targets=() directories=() batch=()
     helper="$(_budget_pip_index_helper)" || return 1
     [[ "$helper" != "$SCRIPT_DIR/pip-index-config" ]] || return 0
     root="$(cd "$PLUGIN_DIR/../.." && pwd)" || return 1
@@ -378,13 +395,16 @@ _materialize_budget_source_snapshot() {
     [[ ! -L "$root/libs" && ! -L "$root/libs/installer-engine" &&
         ! -L "$snapshot/scripts" && ! -L "$snapshot/libs" ]] || return 1
     while IFS=$'\t' read -r operation source target extra; do
-        [[ -z "$extra" && "$target" =~ ^(scripts|libs)/[A-Za-z0-9_./-]+$ &&
-            ! "$target" =~ (^|/)\.\.?(/|$) ]] || return 1
-        _budget_snapshot_path_unlinked "$snapshot" "$target" || return 1
-        directories+=("$snapshot/${target%/*}")
+        [[ -z "$extra" ]] || return 1
+        _budget_snapshot_relative "$target" || return 1
+        directory="$snapshot/${target%/*}"
+        if [[ "$directory" != "$previous_directory" ]]; then
+            directories+=("$directory")
+            previous_directory="$directory"
+        fi
         case "$operation" in
             copy)
-                _budget_snapshot_path_unlinked "$root" "$source" || return 1
+                _budget_snapshot_relative "$source" || return 1
                 [[ -f "$root/$source" && ( "$source" == "$target" ||
                     ( "$target" == scripts/* && "$source" == libs/installer-engine/* ) ) ]] || return 1
                 sources+=("$source")
@@ -399,6 +419,10 @@ _materialize_budget_source_snapshot() {
             *) return 1 ;;
         esac
     done < "$SCRIPT_DIR/installer-source-assets.tsv"
+    all_targets=("${targets[@]}")
+    if [[ -n "$request_target" ]]; then all_targets+=("$request_target"); fi
+    _budget_snapshot_paths_unlinked "$root" "${sources[@]}" || return 1
+    _budget_snapshot_paths_unlinked "$snapshot" "${all_targets[@]}" || return 1
     mkdir -p "${directories[@]}" || return 1
     # Ordinary same-name files share one native copy per destination directory.
     for ((index=0; index<${#sources[@]}; index++)); do
@@ -421,9 +445,9 @@ _materialize_budget_source_snapshot() {
     if [[ -n "$request" ]]; then
         printf '%s\n' "$request" > "$snapshot/$request_target" || return 1
     fi
+    _budget_snapshot_paths_unlinked "$root" "${sources[@]}" || return 1
+    _budget_snapshot_paths_unlinked "$snapshot" "${all_targets[@]}" || return 1
     for ((index=0; index<${#sources[@]}; index++)); do
-        _budget_snapshot_path_unlinked "$root" "${sources[index]}" || return 1
-        _budget_snapshot_path_unlinked "$snapshot" "${targets[index]}" || return 1
         [[ -f "$snapshot/${targets[index]}" ]] || return 1
     done
 }
@@ -774,6 +798,9 @@ if [[ "$ACTION" == "stamp" ]]; then
         /^\[/ { sources=0 }
         sources && /^agent-procutil[[:space:]]*=/ {
             print "agent-procutil = { path = \"libs/agent-procutil\" }"; next
+        }
+        sources && /^agent-update-driver[[:space:]]*=/ {
+            print "agent-update-driver = { path = \"libs/update-driver\" }"; next
         }
         { print }
     ' "$snap_tmp/pyproject.toml" > "$snap_tmp/pyproject.toml.local" || exit 1

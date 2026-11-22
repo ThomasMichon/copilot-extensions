@@ -79,3 +79,13 @@ includes replacing a dependency and adapting its direct consumer while
 preserving behavior and type checking. It does not relax seasoning or integrity
 checks, replace the configured feeds, or authorize an agenda migration, doctor
 workaround or fleet rollout.
+
+## Current implementation assignment
+
+> Ah. Get to building that then
+
+This followed the status that reversible checkout storage, automatic stop and
+resume, and Manager controls were not yet implemented. It assigns the remaining
+implementation phases in the canonical effort, with their tests and normal PR
+delivery. The prior agenda-doctor hold, no-migration boundary, and separation
+between source merge and production rollout remain in force.

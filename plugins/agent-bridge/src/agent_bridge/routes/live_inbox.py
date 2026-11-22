@@ -253,7 +253,7 @@ def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPoll
             _compatible_binding(body)
             rows = compatible_inbox.poll(
                 db, _consumer(session_id, body), now=time.time(), limit=body.limit,
-                native_only=body.receiving_api is None,
+                native_only=body.receiving_api is None, reattempt=body.reattempt,
             )
     else:
         db, governance, runtime = _current_owners(request)
@@ -278,7 +278,7 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
             _compatible_binding(body)
             granted = compatible_inbox.begin(
                 db, _consumer(session_id, body), body.message_id, body.handoff_id, now=time.time(),
-                native_only=body.receiving_api is None,
+                native_only=body.receiving_api is None, attempt=body.attempt,
             )
         if granted:
             delivery_telemetry.committed(db, session_id, body.message_id, "handoff_started")

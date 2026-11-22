@@ -270,6 +270,9 @@ def receipt_disposition(receipt: dict[str, Any], raw: str | None) -> None:
         receipt["stage"] = {
             "rejected": "rejected", "started": "control_started",
             "completed": "control_completed", "unknown": "unknown",
+            # Older receipt readers know only the conservative unknown stage;
+            # the disposition carries the explicit terminal failure code.
+            "failed": "unknown",
         }[receipt["disposition"]["state"]]
 
 

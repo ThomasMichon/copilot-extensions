@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "budget-guidance"
-version = "0.1.212-dev1"
+version = "0.1.213-dev1"
 description = "Provider-neutral current AI usage budget posture."
 readme = "README.md"
 license = "MIT"
@@ -19,8 +19,10 @@ dependencies = ["agent-procutil"]
 
 [tool.uv.sources]
 agent-procutil = { path = "libs/agent-procutil" }
+agent-update-driver = { path = "libs/update-driver" }
 
 [project.optional-dependencies]
+bootstrap = ["agent-update-driver"]
 dev = [
     "pytest>=9.1.1",
 ]
