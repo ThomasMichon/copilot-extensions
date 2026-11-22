@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_zip_directory_boundary_units.py",
+      [
+        "test_stdlib_directory_count_boundaries_allow_zip32_and_zip64[65534]",
+        "test_stdlib_directory_count_boundaries_allow_zip32_and_zip64[65535]",
+        "test_stdlib_directory_count_boundaries_allow_zip32_and_zip64[65536]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_source_tree_budget_units.py",
       [
         "test_source_tree_checks_aggregate_budget_before_dispatching_reads[files]",
@@ -10852,6 +10860,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_zip_directory_boundary_units.py": "84119fd77b2b0c868ea186c0748df20fe63cf85e55cdc1d9015090aa6cf3ff7f",
     "tools/promotion_unit_tests/test_original_source_tree_budget_units.py": "d09124239abb19f97b7c29844aa53f9f1bf001c9ef7caa12a2567691635f09fa",
     "tools/promotion_unit_tests/test_original_source_phase_units.py": "5075182b1402b9acf7b505b979c100f737a083f924bbe731f55680b1b1a220ed",
     "tools/test_installer_source_build.py": "b7ffb40b340591eef00d45fe80a7d4741a7512ea0f035bba79e49edfab6eeac1",
