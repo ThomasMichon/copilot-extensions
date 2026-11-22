@@ -13,7 +13,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal, NoReturn, Protocol, TypedDict
+from typing import Literal, NoReturn, Protocol, TypedDict, cast
 
 import pytest
 
@@ -27,6 +27,18 @@ from agent_worktrees.launch_seed_state import LaunchSeed
 
 class _PendingSeedRecord(Protocol):
     pending_seed: str | None
+
+
+class _MutableRepoFixture(Protocol):
+    worktree_root: str
+
+
+class _MutableProfileConfigFixture(Protocol):
+    copilot_profiles: list[config.CopilotProfile]
+    profile_assignment: config.ProfileAssignmentPolicy | None
+
+    @property
+    def default_repo(self) -> _MutableRepoFixture: ...
 
 
 class _SpawnCapture(TypedDict, total=False):
@@ -378,7 +390,9 @@ class TestCmdEmbody:
         def _spawn(
             wt: str, wd: str, cmd: list[str], env: dict[str, str] | None, **k: object,
         ) -> dict[str, object]:
-            spawned.update(wt=wt, wd=wd, cmd=cmd)
+            spawned["wt"] = wt
+            spawned["wd"] = wd
+            spawned["cmd"] = cmd
             return {"ok": True, "session": f"wt-{wt}", "new_pane": "%5",
                     "error": None}
         monkeypatch.setattr(sessions, "mux_new_session", _spawn)
@@ -1406,7 +1420,7 @@ class TestCmdEmbody:
         from agent_worktrees import bridge_acquisition_launch, config, profile_assignment
 
         self._stub_existing(monkeypatch, tmp_path)
-        cfg = config.load_config()
+        cfg = cast(_MutableProfileConfigFixture, config.load_config())
         profile = config.CopilotProfile(name="fixture-selected", label="Fixture")
         cfg.copilot_profiles = [profile]
         cfg.profile_assignment = config.ProfileAssignmentPolicy(
@@ -1622,7 +1636,9 @@ class TestCmdEmbodyAnchor:
         def _spawn(
             wt: str, wd: str, cmd: list[str], env: dict[str, str] | None, **k: object,
         ) -> dict[str, object]:
-            spawned.update(wt=wt, wd=wd, cmd=cmd)
+            spawned["wt"] = wt
+            spawned["wd"] = wd
+            spawned["cmd"] = cmd
             return {"ok": True, "session": f"wt-{wt}", "new_pane": "%7", "error": None}
 
         monkeypatch.setattr(sessions, "mux_new_session", _spawn)
@@ -1745,7 +1761,8 @@ class TestEmbodyLaunchPassthrough:
         def _spawn(
             wt: str, wd: str, cmd: list[str], env: dict[str, str] | None, **k: object,
         ) -> dict[str, object]:
-            spawned.update(wt=wt, env=dict(env or {}))
+            spawned["wt"] = wt
+            spawned["env"] = dict(env or {})
             return {"ok": True, "session": f"wt-{wt}", "new_pane": "%9", "error": None}
 
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)

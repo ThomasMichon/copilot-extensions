@@ -396,7 +396,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
             "_resolve_codename_anywhere", _resolve_codename_anywhere
         )(codename_arg)
         if resolved_id is None:
-            return output._json_error(error_message, exit_code=1)
+            return output._json_error(cast(str, error_message), exit_code=1)
         raw_id = resolved_id
     if make_new and raw_id:
         return output._json_error(
