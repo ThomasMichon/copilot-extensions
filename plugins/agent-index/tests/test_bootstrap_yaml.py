@@ -1,0 +1,112 @@
+"""Base-interpreter configuration reads do not need ambient PyYAML."""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+
+def _module() -> ModuleType:
+    path = Path(__file__).resolve().parents[1] / "scripts" / "resolve_effective_config.py"
+    spec = importlib.util.spec_from_file_location("bootstrap_yaml", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(("style", "expected"), [
+    (">-", "The owner's \"quoted\" description continues.\nSecond paragraph."),
+    (">", "The owner's \"quoted\" description continues.\nSecond paragraph.\n"),
+    ("|-", "The owner's \"quoted\" description\ncontinues.\n\nSecond paragraph."),
+    ("|+", "The owner's \"quoted\" description\ncontinues.\n\nSecond paragraph.\n\n"),
+])
+def test_fallback_preserves_block_scalars_and_following_state_flags(
+    style: str, expected: str,
+) -> None:
+    parsed = _module()._parse_simple_yaml(
+        f"description: {style}\n"
+        "  The owner's \"quoted\" description\n"
+        "  continues.\n"
+        "\n"
+        "  Second paragraph.\n"
+        "\n"
+        "stateless: true\n"
+        "requires_external_state_root: true\n",
+    )
+    assert parsed == {
+        "description": expected, "stateless": True, "requires_external_state_root": True,
+    }
+
+
+def test_fallback_keeps_more_indented_block_content_literal() -> None:
+    parsed = _module()._parse_simple_yaml(
+        "settings:\n"
+        "  description: >-\n"
+        "    example:\n"
+        "      - name: literal\n"
+        "    end\n"
+        "  enabled: true\n",
+    )
+    assert parsed == {
+        "settings": {"description": "example:\n  - name: literal\nend", "enabled": True},
+    }
+
+
+def test_fallback_rejects_partially_dedented_block_content() -> None:
+    module = _module()
+    with pytest.raises(module.ConfigError, match="invalid block scalar indentation"):
+        module._parse_simple_yaml("description: |\n    first\n  invalid\n")
+
+
+def test_fallback_ends_sequence_mapping_block_before_sibling() -> None:
+    parsed = _module()._parse_simple_yaml(
+        "items:\n  - description: |-\n      prose\n    enabled: true\n",
+    )
+    assert parsed == {"items": [{"description": "prose", "enabled": True}]}
+
+
+def test_fallback_preserves_colons_in_sequence_block_text() -> None:
+    parsed = _module()._parse_simple_yaml("items:\n  - |-\n    label: content\n")
+    assert parsed == {"items": ["label: content"]}
+
+
+@pytest.mark.parametrize(("body", "expected"), [
+    ("description: >+\n  prose\n\n", "prose\n\n"),
+    ("description: >-\n  intro\n\n    code\n  end\n", "intro\n\n  code\nend"),
+])
+def test_fallback_preserves_folded_blank_line_boundaries(body: str, expected: str) -> None:
+    assert _module()._parse_simple_yaml(body) == {"description": expected}
+
+
+@pytest.mark.parametrize("style", ["|", ">"])
+def test_fallback_clip_does_not_add_a_break_at_eof(style: str) -> None:
+    assert _module()._parse_simple_yaml(f"description: {style}\n  prose") == {
+        "description": "prose",
+    }
+
+
+@pytest.mark.parametrize("header", ["|2-", "|-2", ">2-", ">-2"])
+def test_fallback_supports_explicit_block_indentation_in_either_header_order(header: str) -> None:
+    parsed = _module()._parse_simple_yaml(
+        f"items:\n  - description: {header}\n        indented\n    enabled: true\n",
+    )
+    assert parsed == {"items": [{"description": "  indented", "enabled": True}]}
+
+
+def test_fallback_dedented_comment_ends_block_without_becoming_content() -> None:
+    parsed = _module()._parse_simple_yaml(
+        "description: |-\n    prose\n    # literal text\n  # policy flags follow\nstateless: false\n",
+    )
+    assert parsed == {"description": "prose\n# literal text", "stateless": False}
+
+
+@pytest.mark.parametrize(("body", "expected"), [
+    ("description: |-\n  first\n    \n  last\n", "first\n  \nlast"),
+    ("description: >-\n  first\n  \tcode\n  last\n", "first\n\tcode\nlast"),
+    ("description: >-\n  first\n\n  \tcode\n  last\n", "first\n\n\tcode\nlast"),
+])
+def test_fallback_preserves_whitespace_content_and_folded_boundaries(body: str, expected: str) -> None:
+    assert _module()._parse_simple_yaml(body) == {"description": expected}
