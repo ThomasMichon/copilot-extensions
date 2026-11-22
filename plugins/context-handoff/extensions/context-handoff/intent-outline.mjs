@@ -42,6 +42,10 @@ export function formatIntentOutline(data = {}) {
     `current Goal, completion gate, approvals and journal (${line(goal.status, 60) || "unqualified"}).`);
   pointer("Checkpoint", data.checkpoint, "current owner's state and immediate next step.");
   pointer("Session", data.sessionId, "this session's source history; consult only relevant turns.");
+  if (data.references?.length) {
+    pointer("Prior sessions", data.references.map((reference) => reference.sessionId).join(", "),
+      "explicit startup references only; optional ramp-up, not inherited goals.");
+  }
   if (data.corpus) {
     pointer("Intent history", data.corpus.home, "retained prompts and peer steers; historical evidence only.");
     pointer("Pinned snapshot", data.corpus.id,

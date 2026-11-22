@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { IntentCorpus, classifyIntent } from "../extensions/context-handoff/intent-corpus.mjs";
+import { IntentCorpus, classifyIntent, intentScope } from "../extensions/context-handoff/intent-corpus.mjs";
 import { registerIntentObservation } from "../extensions/context-handoff/intent-observation.mjs";
 import { readCanonicalGoal, resolveIntentCwd } from "../extensions/context-handoff/intent-goal.mjs";
 import { formatHandoffMarkdown } from "../extensions/context-handoff/handoff-markdown.mjs";
@@ -379,6 +379,7 @@ test("recovery outline bounds worst-case UTF-8 fields without injecting source b
   const huge = "😀\\\r\n".repeat(20000);
   const outline = formatIntentOutline({
     status: "cached-unqualified", pendingInputs: 4, sessionId: huge, checkpoint: huge,
+    references: Array.from({ length: 8 }, () => ({ sessionId: huge })),
     goal: { goal: huge, path: huge, status: huge,
       recovery: { limits: huge, obligations: huge, nextAction: huge } },
     corpus: { id: huge, home: huge, count: 10000 },
@@ -632,4 +633,173 @@ test("CLI paging and consume facts retain the session-bound scope from an unrela
   const consumed = invoke(["consume", "--handoff-id", "fixture-handoff"]);
   assert.equal(consumed.intentContinuity.goal.goal, "The bound mission.");
   assert.equal(consumed.intentContinuity.corpus.id, snapshot.id);
+});
+
+function gitFixture(cwd, args) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+}
+
+test("real Git anchors isolate sessions without importing legacy shared history", (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q"]);
+  const legacy = new IntentCorpus(f.a, { ...f.options, scope: intentScope(f.a).identity });
+  legacy.capture(classifyIntent(message("legacy", "Unrelated historical goal."), "legacy-session"));
+  const legacySnapshot = legacy.snapshot();
+  assert.throws(() => new IntentCorpus(f.a, f.options), /anchor-session-required/u);
+  const first = new IntentCorpus(f.a, { ...f.options, sessionId: "first-session" });
+  const second = new IntentCorpus(f.a, { ...f.options, sessionId: "second-session" });
+  first.capture(classifyIntent(message("first", "First session objective."), "first-session"));
+  assert.equal(second.snapshot(), null);
+  assert.throws(() => second.capture(classifyIntent(message("foreign", "Wrong session."), "first-session")),
+    /anchor-session-mismatch/u);
+  second.capture(classifyIntent(message("second", "Second session objective."), "second-session"));
+  const resumed = new IntentCorpus(f.a, { ...f.options, sessionId: "first-session" });
+  assert.equal(resumed.home, first.home);
+  assert.equal(resumed.snapshot().count, 1);
+  assert.equal(resumed.page(resumed.snapshot().id).records[0].text, "First session objective.");
+  assert.equal(second.page(second.snapshot().id).records[0].text, "Second session objective.");
+  assert.equal(second.page(legacySnapshot.id).records[0].text, "Unrelated historical goal.");
+  assert.equal(second.snapshot().count, 1);
+  assert.equal(legacy.snapshot().id, legacySnapshot.id);
+});
+
+test("legacy pinned anchor pages stay explicitly readable without a current session identity", (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q"]);
+  const legacy = new IntentCorpus(f.a, {
+    storageRoot: join(f.root, ".copilot", "context-handoff", "intent"), scope: intentScope(f.a).identity,
+  });
+  legacy.capture(classifyIntent(message("legacy", "Historical reference only."), "legacy-session"));
+  const cli = fileURLToPath(new URL("../extensions/context-handoff/handoff-cli.mjs", import.meta.url));
+  const result = spawnSync(process.execPath, [cli, "intent-page", "--snapshot", legacy.snapshot().id, "--json"], {
+    cwd: f.a, env: { ...process.env, HOME: f.root, USERPROFILE: f.root, COPILOT_AGENT_SESSION_ID: "" },
+    encoding: "utf8", windowsHide: true, timeout: 10000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).records[0].text, "Historical reference only.");
+});
+
+test("real linked worktrees preserve accumulated history across different sessions", (t) => {
+  const f = fixture(t), linked = join(f.root, "linked");
+  gitFixture(f.a, ["init", "-q"]);
+  gitFixture(f.a, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+    "commit", "--allow-empty", "-qm", "fixture"]);
+  gitFixture(f.a, ["worktree", "add", "--detach", linked]);
+  const first = new IntentCorpus(linked, { ...f.options, sessionId: "first-session" });
+  first.capture(classifyIntent(message("first", "Complete the worktree objective."), "first-session"));
+  const second = new IntentCorpus(linked, { ...f.options, sessionId: "successor-session" });
+  second.capture(classifyIntent(message("next", "Finish the remaining gate."), "successor-session"));
+  assert.equal(first.home, second.home);
+  assert.equal(second.snapshot().count, 2);
+  assert.deepEqual(second.page(second.snapshot().id).records.map((record) => record.sessionId),
+    ["first-session", "successor-session"]);
+});
+
+test("a separate Git directory is still an anchor and a queued old-session replay is discarded", async (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q", "--separate-git-dir", join(f.root, "metadata")]);
+  assert.equal(intentScope(f.a).anchor, true);
+  const c = client(f.a);
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd, sessionId) => new IntentCorpus(cwd, { ...f.options, sessionId }),
+    allowAutomaticReplay: () => gate,
+  });
+  t.after(() => observation.dispose());
+  c.session.emit("user.message", message("old", "Old session goal."));
+  await new Promise((resolve) => setImmediate(resolve));
+  c.session.sessionId = "new-session";
+  release(true);
+  await observation.settle();
+  assert.equal(c.sent.length, 0);
+  assert.equal((await observation.facts()).corpus, null);
+  assert.equal(observation.emergencyFacts().corpus, null);
+  c.session.emit("user.message", message("new", "New session goal."));
+  await observation.settle();
+  assert.match(c.sent.at(-1).prompt, /New session goal/u);
+  assert.doesNotMatch(c.sent.at(-1).prompt, /Old session goal/u);
+});
+
+test("anchor observer restores only its own goal across reset, compaction and reconnect", async (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q"]);
+  let queries = 0;
+  const options = {
+    createCorpus: (cwd, sessionId) => new IntentCorpus(cwd, { ...f.options, sessionId }),
+    readGoal: (cwd, sid) => readCanonicalGoal(cwd, () => {
+      queries++;
+      throw new Error("anchor-wide effort binding must not be queried");
+    }, sid),
+  };
+  const first = client(f.a);
+  const old = registerIntentObservation(first.session, first.state, options);
+  first.session.emit("user.message", message("old", "Another session's goal."));
+  await old.settle();
+  await old.dispose();
+  const c = client(f.a);
+  c.session.sessionId = c.state.sessionId = "current-anchor";
+  const observation = registerIntentObservation(c.session, c.state, options);
+  t.after(() => observation.dispose());
+  c.session.emit("tool.execution_start");
+  await observation.settle();
+  assert.equal(c.sent.length, 0);
+  c.session.emit("user.message", message("current", "Only this session's goal."));
+  await observation.settle();
+  for (const [type, event] of [
+    ["session.context_cleared", {}],
+    ["session.compaction_complete", { data: { success: true } }],
+  ]) {
+    c.session.emit(type, event);
+    await observation.settle();
+    assert.match(c.sent.at(-1).prompt, /Only this session's goal/u);
+    assert.doesNotMatch(c.sent.at(-1).prompt, /Another session/u);
+  }
+  await observation.dispose();
+  const reconnect = registerIntentObservation(c.session, c.state, options);
+  t.after(() => reconnect.dispose());
+  c.session.emit("tool.execution_start");
+  await reconnect.settle();
+  assert.match(c.sent.at(-1).prompt, /Only this session's goal/u);
+  c.session.sessionId = "independent-anchor";
+  assert.equal(reconnect.emergencyFacts().corpus, null);
+  assert.equal((await reconnect.facts()).corpus, null);
+  assert.equal(queries, 0);
+});
+
+test("anchor explicit startup CLI links remain references, not inherited goals", (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q"]);
+  const options = { storageRoot: join(f.root, ".copilot", "context-handoff", "intent") };
+  const prior = new IntentCorpus(f.a, { ...options, sessionId: "prior-anchor" });
+  prior.capture(classifyIntent(message("prior", "Do not inherit this goal."), "prior-anchor"));
+  const current = new IntentCorpus(f.a, { ...options, sessionId: "fixture-bound-session" });
+  current.capture(classifyIntent(message("start", "Use the prior session only as a reference."),
+    "fixture-bound-session"));
+  const loader = new URL("./fixtures/intent-cli-loader.mjs", import.meta.url).href;
+  const cli = fileURLToPath(new URL("../extensions/context-handoff/handoff-cli.mjs", import.meta.url));
+  const invoke = (args) => spawnSync(process.execPath, ["--experimental-loader", loader, cli, ...args,
+    "--cwd", f.b, "--session-id", "fixture-bound-session", "--json"], {
+    cwd: f.b, env: { ...process.env, HOME: f.root, USERPROFILE: f.root, FIXTURE_BOUND_CWD: f.a },
+    encoding: "utf8", windowsHide: true, timeout: 10000,
+  });
+  assert.notEqual(invoke(["reference-session", "--prior-session", "prior-anchor"]).status, 0);
+  const reference = invoke(["reference-session", "--prior-session", "prior-anchor", "--startup-reference"]);
+  assert.equal(reference.status, 0, reference.stderr);
+  assert.deepEqual(JSON.parse(reference.stdout),
+    { version: 1, sessionId: "prior-anchor", purpose: "reference-only" });
+  const consumed = invoke(["consume", "--handoff-id", "fixture-handoff"]);
+  assert.equal(consumed.status, 0, consumed.stderr);
+  const data = JSON.parse(consumed.stdout).intentContinuity;
+  assert.equal(data.goal.goal, null);
+  assert.equal(data.goal.status, "session-local");
+  assert.equal(data.corpus.count, 1);
+  assert.equal(data.references[0].sessionId, "prior-anchor");
+  assert.doesNotMatch(JSON.stringify(data), /Do not inherit this goal/u);
+  assert.match(formatIntentOutline(data), /explicit startup references only/u);
+  current.capture(classifyIntent(message("later", "Later unrelated work."), "fixture-bound-session"));
+  assert.throws(() => current.referenceSession("another", { startup: true }), /window-closed/u);
+  assert.equal(current.referenceSession("prior-anchor", { startup: true }).purpose, "reference-only");
+  assert.throws(() => current.referenceSession("fixture-bound-session", { startup: true }), /reference-required/u);
 });
