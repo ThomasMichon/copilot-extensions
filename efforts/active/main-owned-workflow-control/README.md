@@ -2519,7 +2519,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   seconds within the unchanged bound. Reviewed and merged trees match.
   Only this 23-case leaf is complete; the separate assessment refusal,
   native qualifications, release/owner/custody gates and parent remain open.
-- [ ] Qualify the complete original 22-case compatibility-root migration
+- [x] Qualify the complete original 22-case compatibility-root migration
   scanner tests against their synthetic plugin trees. Preserve original
   functions, the original repository-redirection fixture, helper bodies,
   captured diagnostics and assertions. Compare complete original and adapter
@@ -2538,9 +2538,39 @@ authorizes critical main-path acceptance or a bounded administrative change.
   three bound canonical Python reads and actual scanner-owner call-phase
   coverage per case; all 66 phase reports pass. Compact-v2 contains 9,115
   nodes and 1,289 sources in 1,022,181 bytes, retaining all prior node order,
-  source hashes and targets and adding one production target. Exact-head
-  review and complete fresh Linux CI remain required; this local proof does
-  not complete the leaf or parent.
+  source hashes and targets and adding one production target. Fatal Ruff,
+  whole-file strict Linux/Win32 typing and documentation checks pass. #14131
+  merges at `15912163e4020dd1c11b896c16e2354d882782c7` after exact-head
+  approval and complete fresh Linux CI executes all 9,115 selected units in
+  154.522 packet seconds within the unchanged bound. Reviewed and merged
+  trees match. Only this 22-case leaf is complete; the parent, separate
+  refusals and native qualifications remain open.
+- [ ] Qualify the complete original static reproducer-boundary test file:
+  all 21 original functions, parameter-mark rows, synthetic dictionaries,
+  helpers, loops and assertions remain unchanged. Compare complete original
+  and adapter collection and exact function/parameter identity. Static
+  declaration parsing and inspection of supplied dictionaries is not Docker
+  execution, provisioning, measured capacity or resource custody. Require
+  initial unchanged source/effect auditing and actual boundary-owner
+  call-phase coverage per selected case before adding only adapter,
+  original-test and production Python source bindings plus the production
+  target. Preserve all 9,115 nodes, 1,289 current source hashes, 469 prior
+  targets, 89 helper decisions and the 300-second bound. Normal strict checks,
+  committed release intent, exact-head review and complete fresh Linux CI
+  remain required. No existing test, phase contract, effect guard, data
+  admission, workflow, runtime, native policy, routing or cleanup changes;
+  no retained refusal or consumed retry is replayed.
+  Complete original/adapter collection confirms 170 cases, all 21 original
+  function objects, each original stacked-mark parameter-row object and equal
+  cross-module parameter values/types. Initial unchanged auditing passes all
+  170 in 2.312 seconds with zero prohibited effects, only three bound canonical
+  Python reads and actual boundary-owner call-phase coverage per case; all
+  510 setup/call/teardown reports pass. Compact-v2 contains 9,285 nodes and
+  1,292 sources in 1,035,062 bytes. All prior nodes retain order, all current
+  source hashes remain intact and one production target precedes the 469
+  unchanged targets. Fatal Ruff, whole-file strict Linux/Win32 typing and
+  documentation consistency pass. Exact-head review and complete fresh Linux
+  CI remain pending; this leaf and the parent remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
