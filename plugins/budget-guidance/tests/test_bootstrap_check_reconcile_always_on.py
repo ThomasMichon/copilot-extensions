@@ -15,6 +15,7 @@ checkbox. This test proves:
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shutil
@@ -51,19 +52,19 @@ def _resolve_bash() -> str | None:
 _BASH = _resolve_bash()
 
 
-def test_hook_scripts_exist():
+def test_hook_scripts_exist() -> None:
     assert _PS1.is_file()
     assert _SH.is_file()
 
 
-def test_ps1_has_no_opt_in_gate():
+def test_ps1_has_no_opt_in_gate() -> None:
     text = _PS1.read_text(encoding="utf-8")
     assert "optInKey" not in text
     assert "optedIn" not in text
     assert "background reconcile SKIPPED" not in text
 
 
-def test_sh_has_no_opt_in_gate():
+def test_sh_has_no_opt_in_gate() -> None:
     text = _SH.read_text(encoding="utf-8")
     assert "optInKey" not in text
     assert "optedIn" not in text
@@ -71,11 +72,12 @@ def test_sh_has_no_opt_in_gate():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows generation selection")
-def test_ps1_profile_generation_uses_its_deployed_package_version(tmp_path, monkeypatch):
+def test_ps1_profile_generation_uses_its_deployed_package_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.syspath_prepend(str(_PLUGIN_ROOT.parents[1] / "tools"))
-    from test_native_wheel_installers import assert_native_bootstrap
-
-    assert_native_bootstrap(tmp_path, monkeypatch, _PLUGIN_NAME)
+    helper = importlib.import_module("test_native_wheel_installers")
+    helper.assert_native_bootstrap(tmp_path, monkeypatch, _PLUGIN_NAME)
 
 
 def _make_fake_install(home: Path, name: str) -> Path:
@@ -135,9 +137,10 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_reconciles_without_any_opt_in_config(tmp_path):
+def test_sh_reconciles_without_any_opt_in_config(tmp_path: Path) -> None:
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
+    assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -160,10 +163,11 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
+def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path: Path) -> None:
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
     now inert."""
+    assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
