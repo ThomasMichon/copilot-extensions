@@ -6671,6 +6671,59 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 22 original fixture-only construction inventory
+
+The adapter exports the complete original thirty-method
+`ConstructionInventoryTests` class, not copied methods or a subclass. Exact
+positive node selectors choose 23 fixture-only methods. Five subtest-emitting
+methods, the native symlink method and the real Git/CLI method are excluded
+before execution. Original setup, cleanup, fixture writes, patches and
+assertions remain unchanged. Collection compares all thirty original and
+adapter nodes and verifies original class, method, setup and helper identity.
+This independent class is not a replay of the retained assessment refusal.
+
+The initial unchanged effect/source guard passes all 23 selected cases in
+4.454 observation seconds, with zero prohibited effects and canonical Python
+reads limited to the adapter, original test and production inventory module.
+All 69 setup/call/teardown reports pass; every node has actual production-owner
+call-phase lines. Fixture-created rosters and project/manifest data remain
+inside each original temporary directory; no canonical data admission is added.
+
+Only those three Python source bindings and the production inventory coverage
+target are added. Compact-v2 stores 9,093 nodes and 1,286 bindings in
+1,020,285 bytes. All 9,070 prior nodes retain order, all 1,283 prior source
+hashes are unchanged, and the 467 prior coverage targets retain their order
+after the one added target. The 89 helper decisions and 300-second bound
+remain unchanged. Full packet execution, exact-head review and complete
+required CI remain pending. No native qualification, whole-flow saving,
+phase-contract change, workflow change or parent completion is claimed.
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
+documentation consistency pass before publication. A worktree-manager patch
+changefile retains release intent; it is not writer activation or rollout.
+
+### November 22 original construction-assessment phase refusal
+
+Complete collection compares all 22 original construction-qualification cases
+with exactly thirteen adapter nodes. The complete original `QualificationTests`
+class, method objects, setup, in-memory helpers, loops, subtests and assertions
+are unchanged. The nine canonical-policy-reading native-matrix sibling cases
+are outside the selection.
+
+The initial unchanged guard execution reports thirteen passing tests and
+121 passing subtests in 0.63 pytest seconds. It then exits unsuccessfully in
+`verify_observations` with `duplicate or unexpected unit phase`. The existing
+report hook records each emitted node/phase report; the evidence verifier
+rejects duplicate or unexpected node/phase identities. The error is retained
+without replay or a changed report contract. No complete observation report,
+zero-effect proof or per-node assessment-owner call coverage is claimed.
+
+No case is admitted. The compact manifest remains at 9,070 nodes, 1,283 source
+bindings, 467 coverage targets, 89 helper decisions and the unchanged
+300-second bound. The exact adapter is retained outside source discovery,
+alongside its candidate, helper and explicit refusal record. No assertion,
+fixture, subtest, data admission, effect guard, workflow, runtime or native
+policy changes. The thirteen-case leaf and parent remain open.
+
 ### November 22 original source-owned artifact-index decisions
 
 The adapter exports four complete original source-owned artifact-index tests:
@@ -6706,6 +6759,47 @@ The selection neither replays nor settles a retained refusal, completes the
 parent nor proves comparable whole-flow savings. Both previous PR-specific
 metadata-refresh authorizations remain consumed; no new manual workflow
 dispatch is authorized by this source slice.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing, documentation
+consistency, committed changefile presence and complete diff checks pass.
+Approval `6014405059` names exact head
+`32d09e43adb295975ebdf7683fe962d095cfb994`, with no active findings,
+discussion comments or unresolved threads and complete pagination.
+
+Initial CI `45067019053`, attempt one, unit job `137345341043`, executes all
+9,070 cases with 48 deselections in 227.14 pytest / 253.615 packet seconds,
+`mode=executed`, execution identity
+`517f4edd7effdc8bea0fb5816156092e6c9c48948e8c8f7ba953fe847229a2a0`
+and packet digest
+`dd2e12431a04788c8ccfec3d7bb1b36aeddba72192ce6f1b20694ea12c67bcf2`.
+The separate five-minute job limit expires immediately afterward, before
+evidence upload. GitHub explicitly annotates that deadline; required aggregate
+`137346852235` fails. Passing unit execution is not relabelled as a passing
+job or uploaded reusable evidence. No superseding run explains the cancellation.
+
+A subsequent explicit operator decision authorizes exactly one job-scoped
+retry at the unchanged head, with every test and both limits unchanged.
+That single authorization is consumed once. Attempt two's unit job
+`137352159166` executes all 9,070 cases afresh with 48 deselections in
+129.13 pytest / 145.023 packet seconds. It reports `mode=executed`,
+origin run `45067019053`, origin attempt two and packet digest
+`e6dbb55578506b03f96fa1912a5d9dbbff93082abe1ceaca46988b9657d04328`.
+The existing rerun contract requires fresh execution rather than packet reuse;
+its `pr-unit-evidence-unqualified-45067019053-2` artifact name does not assert
+future reuse qualification. Fresh packet binding and required aggregate
+`137353094501` pass. The successful guard result is retained rather than
+claimed as another guard execution; trusted metadata also passes.
+Seven fresh required-check verifier reads and final head/review/thread/hold/
+parent-reference fences pass before normal managed merge. No manual workflow,
+deadline waiver, code change or third attempt accompanies that retry.
+
+Source #14125 merges at `2026-11-22T21:01:58Z` as
+`165e6e206994266da8bb842fefcf5e07244d8933`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+five-case leaf. The first attempt's timeout, separate data/native-load/thread
+refusals, release, owner, custody and completion gates remain recorded.
 
 ### November 22 original vault cache-policy inspection
 
