@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
              "sys.path.insert(0,str(p.parent));runpy.run_path(str(p),run_name='__main__')",
              str(script), "--checkout", str(checkout), "--commit", commit, "--repository",
              origin.removeprefix("https://github.com/"), "--output", str(output), *options],
-            check=True, timeout=max(0.0, deadline - time.monotonic()),
+            executable=sys.executable, check=True, timeout=max(0.0, deadline - time.monotonic()),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     with tempfile.TemporaryDirectory(prefix="ce-suite-") as work:

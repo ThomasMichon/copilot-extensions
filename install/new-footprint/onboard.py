@@ -139,7 +139,7 @@ def main() -> None:
             handoff.extend(["--knowledge-repo", remote, "--knowledge-checkout", str(knowledge)])
         if args.stage:
             handoff.append("--stage")
-        subprocess.run(handoff, env=env, check=True, timeout=1800)
+        subprocess.run(handoff, executable=str(interpreter), env=env, check=True, timeout=1800)
 
 
 if __name__ == "__main__":
