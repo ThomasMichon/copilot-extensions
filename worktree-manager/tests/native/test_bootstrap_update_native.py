@@ -298,7 +298,7 @@ def bootstrap_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
     package.mkdir(parents=True)
     for name in (
         "__init__", "update_driver_cli", "engine_acquisition_budget", "source_config",
-        "runtime_source_config", "runtime_source", "self_install", "self_install_runtime",
+        "runtime_source_config", "runtime_source", "git_routing", "self_install", "self_install_runtime",
         "self_install_payload", "config_write_lock", "update_python_path", "runtime_identity",
         "runtime_launchers", "self_install_recovery", "mux_file_lock",
         "engine_client", "engine_progress", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",

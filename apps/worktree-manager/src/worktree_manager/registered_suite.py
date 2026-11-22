@@ -8,9 +8,12 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
-from . import application_footprints, harness_state, repository_suite_roster, runtime_source_repository, source_config
+from . import harness_state, runtime_source_repository, source_config
+
+if TYPE_CHECKING:
+    from . import application_footprints
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class HarnessPolicy:
     vault_state: Literal["configured", "configuration-empty"] | None = None
     fleet_config: Path | None = None
     fleet_target: str | None = None
+    activation: Callable[[str], str] | None = None
 
 
 def fleet_service_roles(path: Path, target: str) -> tuple[str, ...]:
@@ -98,20 +102,52 @@ def registered_plan(
     observe: Callable[[str, Path], HarnessPolicy],
 ) -> tuple[application_footprints.Application, ...]:
     """Source acquisition and harness-specific policy observations belong to the caller."""
+    from . import application_footprints
+
     default, anchors = registrations(root)
     selection = runtime_source_repository.read(anchors[default], default_repository=source_config.DEFAULT_REPO)
     suite = resolve(selection["repository"], selection["reference"])
+    wanted = required_applications(anchors, suite.marketplace, suite.commit, observe)
+    apps_root = root / "apps"
+    inventory = {app.name for app in application_footprints.plan(suite.footprint, apps_root)}
+    for app, harnesses in wanted.items():
+        if app not in inventory:
+            raise ValueError(f"Harness {', '.join(harnesses)} requires {app}, absent from selected commit {suite.commit}")
+    return application_footprints.plan(suite.footprint, apps_root, selected=tuple(sorted(wanted)))
+
+
+def required_applications(
+    anchors: dict[str, Path], marketplace: Path, commit: str, observe: Callable[[str, Path], HarnessPolicy],
+) -> dict[str, list[str]]:
+    from . import repository_suite_roster
+
     wanted: dict[str, list[str]] = {}
     for name, anchor in anchors.items():
         policy = observe(name, anchor)
         try:
             result = repository_suite_roster.plan(
-                anchor, suite.marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
+                anchor, marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
                 index_role=policy.index_role, vault_state=policy.vault_state,
             )
+            if policy.activation and (missing := result["unresolved"]):
+                index_role, vault_state = policy.index_role, policy.vault_state
+                if isinstance(missing, list) and "agent-index" in missing:
+                    role = policy.activation("agent-index")
+                    if role not in ("host", "client", "unconfigured"):
+                        raise ValueError("Invalid Index role")
+                    index_role = cast(Literal["host", "client", "unconfigured"], role)
+                if isinstance(missing, list) and "agent-vault" in missing:
+                    state = policy.activation("agent-vault")
+                    if state not in ("configured", "configuration-empty"):
+                        raise ValueError("Invalid Vault activation")
+                    vault_state = cast(Literal["configured", "configuration-empty"], state)
+                result = repository_suite_roster.plan(
+                    anchor, marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
+                    index_role=index_role, vault_state=vault_state,
+                )
             fleet = _requires_fleet(policy)
         except (ValueError, OSError) as exc:
-            raise ValueError(f"Harness {name}, selected commit {suite.commit}: {exc}") from exc
+            raise ValueError(f"Harness {name}, selected commit {commit}: {exc}") from exc
         if not result["complete"]:
             raise ValueError(f"Harness {name} has unresolved requirements: {result['unresolved']}")
         required = result["required"]
@@ -121,9 +157,4 @@ def registered_plan(
             wanted.setdefault(app, []).append(name)
         if fleet:
             wanted.setdefault("fleet-manager", []).append(name)
-    apps_root = root / "apps"
-    inventory = {app.name for app in application_footprints.plan(suite.footprint, apps_root)}
-    for app, harnesses in wanted.items():
-        if app not in inventory:
-            raise ValueError(f"Harness {', '.join(harnesses)} requires {app}, absent from selected commit {suite.commit}")
-    return application_footprints.plan(suite.footprint, apps_root, selected=tuple(sorted(wanted)))
+    return wanted

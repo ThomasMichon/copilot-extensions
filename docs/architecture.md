@@ -160,6 +160,45 @@ self-provisioning path remains independent and authoritative.
 
 ## Install topology — marketplace to local paths
 
+### New-footprint onboarding
+
+**Target architecture, not a released command.** The new footprint has a
+separate [Bash and PowerShell onboarding page](new-footprint-bootstrap.md);
+the existing Worktree Manager bootstrap continues to install its current
+footprint. The new flow divides responsibility at the incoming Manager:
+
+1. **Bootstrap discovers before it writes.** After downloading its tools,
+   it inspects the new footprint's source root, registered projects and local
+   knowledge pairings. Accept a harness remote (preferred) or local checkout
+   via argument or `HARNESS_REPO`. Reuse a matching registered checkout;
+   otherwise clone the remote under the selected source root (default `~/src`).
+   Refresh registered harnesses without discarding local changes, and register
+   the requested harness before reading the final set's install-source policy.
+2. **Bootstrap resolves one install commit before installing Manager.** The
+   bootstrap download revision does not select the installed version.
+   Resolve the registered default harness's ref and applicable machine override;
+   absent a selection, resolve current remote `main`. Install Manager from that
+   commit. On a fresh machine with no harness input, install Manager alone and
+   leave the registry empty. An interactive terminal may offer a source root
+   and starting harness; unattended use must not require a prompt.
+3. **The incoming Manager owns onboarding.** Preserve any machine-local
+   pairing. For an unbound harness, accept an explicit knowledge-repository
+   environment input; otherwise look up the harness remote in the user's
+   default pairings under `%OneDrive%\Apps\.copilot-extensions\`. If neither
+   supplies the choice, ask rather than guessing. Successful knowledge setup
+   records the harness-to-knowledge repository identities there for subsequent
+   machines. Sync identities, not local paths, credentials, or live state.
+   The binding owner still verifies access and establishes the local binding.
+4. **Manager hoists plugins and stages the union.** Use each registered
+   harness's effective settings, paired knowledge overlays and target machine
+   policy to determine required services and dependencies. Stage the complete
+   union from the selected commit before activation.
+
+The [implementation effort](../efforts/active/source-managed-runtime-installs/README.md)
+tracks the gap between a staged Manager and a complete installation. A future
+registration/authentication UI for Manager launched without a project is a
+separate design, not a prerequisite for terminal onboarding.
+
 The [Manager-owned app-footprint target](../visions/installer/application-footprints/README.md)
 separates promotion-produced copyable app directories, finite Manager
 orchestration and app-owned staged/full setup. Local Dev/WIP promotion performs
