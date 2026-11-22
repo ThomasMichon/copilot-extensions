@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [optional Budget foundation-closure follow-through](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md#optional-installation-inputs-are-not-worker-adoption)
+records the newly merged self-contained bootstrap inputs and attributed focused qualification, while retaining actual executor/readiness adoption and the failing broader portfolio.
+
 The [naming-source and Git-read deadline continuation](journal/2026/11.21-naming-source-and-git-read-deadlines.md)
 retains the unresolved ID-first naming default after a loader move and the expanded remote-read/retry/publication contract, without repeating unchanged originals or changing issue state.
 
