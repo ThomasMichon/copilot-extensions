@@ -346,13 +346,14 @@ def test_explicit_strict_presence_uses_native_psmux_evidence(
     ("selected", {"selected__wt-fixture": ("wt-fixture", 0, "$1:100")}, True, 0),
 ])
 def test_strict_windows_fallback_uses_qualified_membership(
-    monkeypatch: pytest.MonkeyPatch, namespace: str,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, namespace: str,
     memberships: dict[str, tuple[str, int, str]], exists: bool, clients: int,
 ) -> None:
     from agent_remote_driver import mux_inventory
 
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", namespace)
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         mux_observation, "observe_psmux",
         lambda *a, **kw: Observation("unknown", "timeout"),
@@ -362,7 +363,10 @@ def test_strict_windows_fallback_uses_qualified_membership(
     )
     timeouts: list[float] = []
 
-    def observe_memberships(*, timeout: float) -> dict[str, tuple[str, int, str]]:
+    def observe_memberships(
+        *, timeout: float, data_dir: Path,
+    ) -> dict[str, tuple[str, int, str]]:
+        assert data_dir == tmp_path
         timeouts.append(timeout)
         return memberships
 
@@ -394,6 +398,28 @@ def test_explicit_and_display_presence_use_driver_counts_without_cli(
     assert sessions.has_mux_session("fixture")
     assert sessions.has_mux_session_named("wt-fixture", mux="psmux")
     assert sessions.mux_active_pane_named("wt-fixture", mux="psmux") == "%2"
+
+
+def test_strict_windows_fallback_keeps_empty_scope_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_remote_driver import mux_inventory
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setenv("PSMUX_DATA_DIR", "")
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "")
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: Observation("unknown", "native-query-unavailable"),
+    )
+    monkeypatch.setattr(
+        mux_inventory, "observe_memberships",
+        lambda **kw: pytest.fail("Invalid scope must not query another profile"),
+    )
+    with pytest.raises(MuxObservationUnavailable, match="Invalid native data root"):
+        sessions.mux_status_many(["fixture"], strict=True)
+    with pytest.raises(MuxObservationUnavailable, match="Invalid native data root"):
+        sessions.has_mux_session("fixture", strict=True)
 
 
 def test_unknown_native_results_are_display_only_and_never_admit_reclaim(

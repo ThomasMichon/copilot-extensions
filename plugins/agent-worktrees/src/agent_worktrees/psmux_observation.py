@@ -15,12 +15,12 @@ if TYPE_CHECKING:
 
 
 def observe(*, timeout: float = 5) -> dict[str, int]:
-    from agent_remote_driver.mux_observation import _namespace
+    from agent_remote_driver.mux_observation import _data_dir, _namespace
 
     try:
         namespace = _namespace()
         prefix = namespace + "__" if namespace else ""
-        memberships = mux_inventory.observe_memberships(timeout=timeout)
+        memberships = mux_inventory.observe_memberships(timeout=timeout, data_dir=_data_dir())
         return {
             name: clients
             for base, (name, clients, _incarnation) in memberships.items()
