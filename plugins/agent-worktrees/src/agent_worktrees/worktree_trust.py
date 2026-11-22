@@ -12,6 +12,23 @@ from .config import Config
 from .execution_spaces import ExecutionSpaceError, require_owner_identity, require_record_mutation
 
 
+def _launch_home(environment: Mapping[str, str], work_dir: str) -> Path:
+    home = environment.get("COPILOT_HOME", os.environ.get("COPILOT_HOME"))
+    account_home = environment.get("USERPROFILE" if os.name == "nt" else "HOME")
+    if home:
+        root = Path(home)
+    elif account_home:
+        root = Path(account_home) / ".copilot"
+    else:
+        root = permissions._copilot_dir()
+    return root if root.is_absolute() else Path(work_dir) / root
+
+
+def launch_environment(environment: Mapping[str, str], work_dir: str) -> dict[str, str]:
+    """Forward one explicit home so a retained mux cannot supply a different one."""
+    return {**environment, "COPILOT_HOME": str(_launch_home(environment, work_dir))}
+
+
 def ensure_record_trusted(
     record: tracking.WorktreeRecord, config: Config | None = None,
     *, environment: Mapping[str, str] | None = None,
@@ -27,11 +44,10 @@ def ensure_record_trusted(
         raise permissions.FolderTrustError("Refusing folder trust for a terminal managed worktree")
     from . import retained_checkout
 
-    launch_environment = os.environ if environment is None else environment
-    home = launch_environment.get("COPILOT_HOME", os.environ.get("COPILOT_HOME"))
-    copilot_home = Path(home) if home else None
-    if copilot_home is not None and not copilot_home.is_absolute():
-        copilot_home = Path(record.worktree_path) / copilot_home
+    copilot_home = (
+        _launch_home(environment or {}, record.worktree_path)
+        if environment is not None or os.environ.get("COPILOT_HOME") else None
+    )
 
     def trust_folder() -> bool:
         if copilot_home is None:

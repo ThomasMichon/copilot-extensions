@@ -485,6 +485,8 @@ class TestCmdEmbody:
         from agent_worktrees import launch_seed_exec, launch_seed_state
 
         _stub_config(monkeypatch)
+        copilot_home = str((tmp_path / "copilot-home").resolve())
+        monkeypatch.setenv("COPILOT_HOME", copilot_home)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtAdmission")
         monkeypatch.setattr(config, "tracking_dir", lambda: tmp_path)
         path = tmp_path / "wtAdmission.yaml"
@@ -529,7 +531,7 @@ class TestCmdEmbody:
         command = ["copilot", *([f"--resume={resume_target}"] if resume_target else [])]
         assert observed[0] == ("prepare", command, path, {
             "admission_only": True, "preserve_seed_id": preserved_seed,
-            "environment": {}, "mux": True,
+            "environment": {"COPILOT_HOME": copilot_home}, "mux": True,
         })
         if refused:
             assert rc == 3 and "admission preparation refused" in result["error"]

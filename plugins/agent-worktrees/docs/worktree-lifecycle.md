@@ -152,6 +152,8 @@ trust configuration refuses launch rather than starting an unattended trust prom
 It uses the launch environment's effective `COPILOT_HOME` (including inherited
 values), not a different caller-default configuration, without mutating the parent
 environment. Relative launch homes resolve against the admitted checkout.
+The same resolved home is passed explicitly to the mux, so a retained mux
+server's environment cannot select a different configuration.
 An already-live embodiment does not change folder trust. Resume
 planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.

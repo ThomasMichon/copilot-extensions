@@ -459,6 +459,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
     if driver:
         env["AGENT_BRIDGE_DRIVEN_BY"] = driver
     _apply_bridge_scope(env, args)
+    env = worktree_trust.launch_environment(env, work_dir)
     if record is None:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")

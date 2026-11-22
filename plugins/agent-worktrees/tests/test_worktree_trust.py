@@ -203,7 +203,7 @@ def test_embody_establishes_trust_before_spawning_copilot(
     )
 
 
-@pytest.mark.parametrize("source", ["overlay", "relative-overlay", "inherited"])
+@pytest.mark.parametrize("source", ["overlay", "relative-overlay", "account-overlay", "inherited"])
 @pytest.mark.parametrize("mode", ["cold", "invalid-config"])
 def test_embody_establishes_trust_in_effective_launch_home(
     sample_record: tracking.WorktreeRecord, tmp_path: Path, tmp_tracking_dir: Path,
@@ -218,12 +218,19 @@ def test_embody_establishes_trust_in_effective_launch_home(
     default_config = default_home / "config.json"
     default_config.write_text("malformed default", encoding="utf-8")
     launch_home = checkout / "selected-copilot" if source == "relative-overlay" else tmp_path / "selected-copilot"
+    if source == "account-overlay":
+        launch_home = tmp_path / "selected-account" / ".copilot"
     inherited_home = tmp_path / "inherited-copilot"
     monkeypatch.setenv("USERPROFILE", str(account_home))
     monkeypatch.setenv("HOME", str(account_home))
     monkeypatch.setenv("COPILOT_HOME", str(launch_home if source == "inherited" else inherited_home))
     home_value = "selected-copilot" if source == "relative-overlay" else str(launch_home)
     environment = {} if source == "inherited" else {"COPILOT_HOME": home_value}
+    if source == "account-overlay":
+        environment = {
+            "COPILOT_HOME": "", "HOME": str(launch_home.parent),
+            "USERPROFILE": str(launch_home.parent),
+        }
     before = dict(os.environ)
     _assert_embody_trust(
         (checkout, launch_home), sample_record, tmp_tracking_dir, monkeypatch, capfd, mode,
@@ -279,6 +286,7 @@ def _assert_embody_trust(
         worktree_id: str, work_dir: str, argv: list[str], environment: dict[str, str],
     ) -> dict[str, object]:
         assert mode == "cold", "inspection or failed trust must never start Copilot"
+        assert environment["COPILOT_HOME"] == str(home)
         assert json.loads((home / "config.json").read_text()) == {
             "trustedFolders": [str(checkout.resolve())],
         }, "folder trust must be persisted before the process boundary"
