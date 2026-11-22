@@ -13,13 +13,15 @@ from promotion_unit_contract import UnitEvidenceError
 from promotion_unit_effects import UnitRun
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows cache-prefix path spelling")
-@pytest.mark.parametrize("extended", [False, True])
+@pytest.mark.parametrize("extended", [False, True] if os.name == "nt" else [False])
 @pytest.mark.parametrize("admitted", [False, True])
 def test_redirected_bytecode_keeps_exact_source_admission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extended: bool, admitted: bool,
 ) -> None:
     root = tmp_path / "source"
+    if os.name == "nt":
+        drive = "Y:" if Path.cwd().drive.upper() == "Z:" else "Z:"
+        root = Path(drive + "\\unit-guard-source") / tmp_path.name
     source = root / "example.py"
     cache = tmp_path / "cache"
     monkeypatch.setattr(sys, "pycache_prefix", str(cache))
@@ -37,7 +39,6 @@ def test_redirected_bytecode_keeps_exact_source_admission(
         assert run.effects == ["unadmitted source read: example.py"]
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows cache-prefix path spelling")
 def test_bytecode_mapping_does_not_authorize_an_outside_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

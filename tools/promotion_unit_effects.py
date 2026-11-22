@@ -159,6 +159,14 @@ class UnitRun(CoveragePlugin):
                         ):
                             raise ValueError("invalid extended-path cache spelling")
                         cache_source = restored
+                    elif (
+                        sys.platform == "win32" and sys.pycache_prefix
+                        and Path(cache_source).root == "\\" and not Path(cache_source).drive
+                    ):
+                        restored = self.root.drive + cache_source
+                        if importlib.util.cache_from_source(restored) != name:
+                            raise ValueError("invalid drive-relative cache spelling")
+                        cache_source = restored
                     path = canonical_path(cache_source)
                 except ValueError:
                     self.refuse("unattributable Python bytecode")

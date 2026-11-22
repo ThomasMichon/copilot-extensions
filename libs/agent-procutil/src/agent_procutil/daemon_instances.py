@@ -14,9 +14,10 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar, cast
 
 Purpose = Literal["production", "unattended-test", "interactive-test"]
+_EntryPoint = TypeVar("_EntryPoint", bound=Callable[..., Any])
 INSTANCE_SCHEMA = 1
 INSTANCE_ENV = "COPILOT_EXTENSIONS_DAEMON_INSTANCE"
 REGISTRY_ENV = "COPILOT_EXTENSIONS_DAEMON_REGISTRY"
@@ -274,13 +275,13 @@ def daemon_entrypoint(
     service: str, *, source: str | os.PathLike[str] | None,
     runtime_root: str | os.PathLike[str] | Callable[..., str | os.PathLike[str] | None] | None = None,
     purpose: Purpose | None = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[_EntryPoint], _EntryPoint]:
     """Retain admission across a synchronous or asynchronous service callable.
 
     ``runtime_root`` may be a literal path or a resolver with the decorated
     callable's arguments. Source defaults never classify a test as disposable.
     """
-    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+    def decorate(function: _EntryPoint) -> _EntryPoint:
         def admission(args: tuple[Any, ...], kwargs: dict[str, Any]) -> DaemonInstanceGuard:
             from ._daemon_instance_store import require_declaration
             require_declaration(purpose)
@@ -294,13 +295,13 @@ def daemon_entrypoint(
             async def asynchronous(*args: Any, **kwargs: Any) -> Any:
                 with admission(args, kwargs):
                     return await function(*args, **kwargs)
-            return asynchronous
+            return cast(_EntryPoint, asynchronous)
 
         @functools.wraps(function)
         def synchronous(*args: Any, **kwargs: Any) -> Any:
             with admission(args, kwargs):
                 return function(*args, **kwargs)
-        return synchronous
+        return cast(_EntryPoint, synchronous)
     return decorate
 
 
