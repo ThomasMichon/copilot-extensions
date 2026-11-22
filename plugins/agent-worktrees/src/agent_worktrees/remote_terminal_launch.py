@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .remote_seed_launch import shell_command
 
 
 def plan(
     project: str, alias: str, shell: str, args: list[str], *,
     seed: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
+    if any(value in {"--recovery", "-Recovery", "recovery"} for value in args):
+        raise ValueError("Recovery is unsupported for terminal handoff; use the target's recovery command explicitly")
     forwarded = list(args)
     if "--require-foreground-completion" not in forwarded:
         forwarded.append("--require-foreground-completion")

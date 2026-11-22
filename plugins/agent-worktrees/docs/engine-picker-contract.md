@@ -451,7 +451,13 @@ instruction projection, durable prompt handling, mux and Copilot startup.
 The complete selected options travel to that command; POSIX arguments are
 quoted and PowerShell commands encoded. A physical machine plus environment
 and an execution alias normalize through the existing machine-transport owner.
+Registered opaque keys and SSH profile names take precedence over suffix
+inference. Manager drops redundant environment context only when that owner's
+registry resolution proves the same destination; it never rewrites an alias.
 Supported detached presentation retains its separate terminal lifetime.
+Recovery fast-path arguments are refused for this packaged flow because the
+legacy shell preprocessors bypass ordinary target resolution for them. Run
+recovery explicitly on the target instead; normal launch options remain intact.
 
 Foreground creation and native launch boundaries opt into completion waiting.
 Tracking-write receivers advertise `tracking_write_completion_wait_version: 1`;

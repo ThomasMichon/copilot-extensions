@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
@@ -12,9 +16,11 @@ ID = "a" * 32
 
 
 @pytest.fixture
-def admitted_engine(monkeypatch, tmp_path):
-    def install(resolve):
-        def request(project, args, **kwargs):
+def admitted_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> Callable[[Callable[..., dict[str, Any]]], None]:
+    def install(resolve: Callable[..., dict[str, Any]]) -> None:
+        def request(project: str | None, args: list[str], **kwargs: Any) -> dict[str, Any]:
             if args[:2] == ["agent-policy", "check"]:
                 return {
                     "version": 1, "repository": str(tmp_path), "expose_agent": True,
@@ -25,7 +31,7 @@ def admitted_engine(monkeypatch, tmp_path):
     return install
 
 
-def _plan(action="exec", worktree_id="wt-a"):
+def _plan(action: str = "exec", worktree_id: str | None = "wt-a") -> dict[str, Any]:
     return {
         "action": action, "worktree_id": worktree_id,
         **({
@@ -43,9 +49,11 @@ def _plan(action="exec", worktree_id="wt-a"):
 
 @pytest.mark.parametrize("mode", ["new", "resume", "base", "bare-resume"])
 @pytest.mark.parametrize("remote", [False, True])
-def test_all_attempts_send_the_capability_and_require_a_bound_reply(admitted_engine, mode, remote):
-    calls = []
-    def run(project, args, **kw):
+def test_all_attempts_send_the_capability_and_require_a_bound_reply(
+    admitted_engine: Callable[[Callable[..., dict[str, Any]]], None], mode: str, remote: bool,
+) -> None:
+    calls: list[list[str]] = []
+    def run(project: str | None, args: list[str], **kw: Any) -> dict[str, Any]:
         calls.append(args)
         assert "--require-launch-attempt" in args
         assert args[args.index("--launch-attempt-id") + 1] == ID
@@ -66,7 +74,9 @@ def test_all_attempts_send_the_capability_and_require_a_bound_reply(admitted_eng
 @pytest.mark.parametrize("damage", [
     "attempt", "missing", "version", "operation", "worktree", "phase", "extra", "wrong-owner",
 ])
-def test_inexact_receipt_never_becomes_an_executable_plan(admitted_engine, damage):
+def test_inexact_receipt_never_becomes_an_executable_plan(
+    admitted_engine: Callable[[Callable[..., dict[str, Any]]], None], damage: str,
+) -> None:
     plan = _plan()
     receipt = plan["launch_attempt_receipt"]
     if damage == "attempt":
@@ -85,17 +95,22 @@ def test_inexact_receipt_never_becomes_an_executable_plan(admitted_engine, damag
         receipt["phase"] = "forwarded"
     else:
         receipt["text"] = "private fixture"
-    calls = []
-    admitted_engine(lambda *a, **kw: calls.append(True) or plan)
+    calls: list[bool] = []
+    def run(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(True)
+        return plan
+    admitted_engine(run)
     with pytest.raises(engine.EngineFeatureUnavailable, match="saved attempt"):
         engine.resolve_launch_plan("example", new=True, launch_attempt_id=ID)
     assert calls == [True]
 
 
 @pytest.mark.parametrize("flag", ["--launch-attempt-id", "--require-launch-attempt", "--base"])
-def test_journaled_base_never_retries_a_weaker_plan(admitted_engine, flag):
-    calls = []
-    def run(*args, **kwargs):
+def test_journaled_base_never_retries_a_weaker_plan(
+    admitted_engine: Callable[[Callable[..., dict[str, Any]]], None], flag: str,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    def run(*args: Any, **kwargs: Any) -> NoReturn:
         calls.append(args)
         raise engine.EngineError("unrecognized arguments: " + flag)
     admitted_engine(run)
@@ -107,15 +122,17 @@ def test_journaled_base_never_retries_a_weaker_plan(admitted_engine, flag):
 @pytest.mark.parametrize("mode", ["new", "resume", "base", "bare-resume"])
 @pytest.mark.parametrize("new_window", [False, True])
 def test_local_second_hop_keeps_attempt_and_never_reissues_new(
-    monkeypatch, tmp_path, mode, new_window,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str, new_window: bool,
+) -> None:
     from worktree_manager import new_window_spawn
 
     monkeypatch.setattr(relocated_launch, "_core", lambda: SimpleNamespace(_is_windows=lambda: True))
-    commands = []
+    commands: list[list[str]] = []
+    def spawn(argv: list[str]) -> SimpleNamespace:
+        commands.append(argv)
+        return SimpleNamespace(wait=lambda: 0)
     monkeypatch.setattr(
-        relocated_launch.subprocess, "Popen",
-        lambda argv: commands.append(argv) or SimpleNamespace(wait=lambda: 0),
+        subprocess, "Popen", spawn,
     )
     monkeypatch.setattr(new_window_spawn, "spawn_detached_new_window",
                         lambda argv, **kw: commands.append(argv))
@@ -124,7 +141,9 @@ def test_local_second_hop_keeps_attempt_and_never_reissues_new(
         no_mux=False, new_window=new_window,
     )
     plan = engine.launch_plan_from_dict(_plan())
-    assert relocated_launch._run_relocated_mux_launch(req, plan, tmp_path / "launch-session.ps1") == 0
+    assert relocated_launch._run_relocated_mux_launch(
+        req, plan, tmp_path / "launch-session.ps1",
+    ) == 0
     command = commands[0]
     assert "--require-launch-attempt" in command
     assert command[command.index("--launch-attempt-id") + 1] == ID

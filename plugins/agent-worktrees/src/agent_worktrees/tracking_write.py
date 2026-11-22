@@ -86,6 +86,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from typing import Any, cast
 
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
@@ -157,7 +158,7 @@ def foreground_completion_active() -> bool:
 LINGER_SECONDS = 8.0
 SUBSCRIBER_TTL_SECONDS = 30.0
 
-_VERBS: dict[str, Callable[[dict], dict]] = {}
+_VERBS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
 #: Per-verb schema version: reusing an existing verb NAME for an enriched
 #: ``args`` shape (e.g. adding a field a pre-upgrade daemon process's
@@ -273,7 +274,7 @@ def _ensure_verb_modules_loaded() -> None:
         _verb_modules_loaded = True
 
 
-def register_verb(name: str, fn: Callable[[dict], dict], *, version: int = 1) -> None:
+def register_verb(name: str, fn: Callable[[dict[str, Any]], dict[str, Any]], *, version: int = 1) -> None:
     """Register a mutation verb.
 
     ``fn`` receives the request's ``args`` dict and returns a JSON-safe
@@ -309,7 +310,7 @@ def registered_verbs() -> frozenset[str]:
     return frozenset(_VERBS)
 
 
-def compute(kind: str, payload: dict) -> dict:
+def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     """``CoalescingServer``-shaped ``compute(kind, payload)`` callback.
 
     Rejects any request whose ``kind`` is not :data:`KIND` (2026-09-26 PR
@@ -385,7 +386,7 @@ def compute(kind: str, payload: dict) -> dict:
 
 
 def start_server(
-    compute_fn: Callable[[str, dict], dict],
+    compute_fn: Callable[[str, dict[str, Any]], dict[str, Any]],
     *,
     on_idle: Callable[[], None] | None = None,
 ) -> CoalescingServer:
@@ -398,7 +399,7 @@ def start_server(
     )
 
 
-def rendezvous_fields(server: CoalescingServer) -> dict:
+def rendezvous_fields(server: CoalescingServer) -> dict[str, Any]:
     """Rendezvous fields namespaced so they never collide with the resident
     status-monitor's existing ``hook_ipc``/``classify_daemon``/
     ``worktree_status_daemon``/``mux_link`` fields in the same lock file.
@@ -446,7 +447,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
 
 
 def endpoint_from_rendezvous(
-    data: dict | None, *, verb: str | None = None, min_version: int = 1,
+    data: dict[str, Any] | None, *, verb: str | None = None, min_version: int = 1,
 ) -> tuple[str, int, str] | None:
     """Parse this module's rendezvous fields out of an already-read lock dict.
 
@@ -508,7 +509,7 @@ def endpoint_from_rendezvous(
     return host, port, token
 
 
-def run_direct(verb: str, args: dict, *, reason: str) -> dict:
+def run_direct(verb: str, args: dict[str, Any], *, reason: str) -> dict[str, Any]:
     """The daemon-unreachable fallback: run ``verb``'s own registered
     function directly, in-process -- the identical implementation
     :func:`compute` would have called, never a forked second one.
@@ -549,10 +550,10 @@ def _send_tracking_write_request(
     token: str,
     *,
     key: str,
-    payload: dict,
+    payload: dict[str, Any],
     request_deadline_s: float | None,
     client_id: str,
-) -> dict:
+) -> dict[str, Any]:
     """Send one ``tracking_write`` request, distinguishing a **pre-send**
     failure (the TCP connect itself failed or timed out -- nothing could
     have run server-side, raises :class:`_PreSendFailure`) from a
@@ -568,7 +569,7 @@ def _send_tracking_write_request(
     """
     timeout = request_deadline_s + 1.0 if request_deadline_s is not None else None
     deadline = time.time() + request_deadline_s if request_deadline_s is not None else None
-    message: dict = {
+    message: dict[str, Any] = {
         "action": "request",
         "kind": KIND,
         "key": key,
@@ -631,15 +632,15 @@ def _send_tracking_write_request(
 
 def write_with_boot(
     *,
-    read_lock_data: Callable[[], dict | None],
+    read_lock_data: Callable[[], dict[str, Any] | None],
     ensure_monitor: Callable[[], bool] | None,
-    payload: dict,
-    fallback: Callable[[], dict],
+    payload: dict[str, Any],
+    fallback: Callable[[], dict[str, Any]],
     request_deadline_s: float | None = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
     poll_interval_s: float = 0.1,
     min_version: int = 1,
-) -> dict:
+) -> dict[str, Any]:
     """Dial, boot-and-wait if no resident monitor currently publishes a
     tracking-write endpoint, then send one request.
 
@@ -685,7 +686,7 @@ def write_with_boot(
     """
     started = time.time()
     verb = payload.get("verb") if isinstance(payload, dict) else None
-    lock_data: dict | None = None
+    lock_data: dict[str, Any] | None = None
     unsupported_completion = False
 
     def _dial() -> tuple[str, int, str] | None:
@@ -711,7 +712,8 @@ def write_with_boot(
             return False
         from . import locks
 
-        pid, birth = lock_data.get("pid"), lock_data.get("start_time")
+        data = cast(dict[str, Any], lock_data)
+        pid, birth = data.get("pid"), data.get("start_time")
         return (
             type(pid) is int and pid > 0 and isinstance(birth, str) and bool(birth)
             and locks.pid_alive(pid) and locks.process_start_time(pid) == birth
@@ -738,7 +740,7 @@ def write_with_boot(
             recovered = None
         if recovered is None and not incompatible_live_owner():
             require_wake_allowed()
-            ensure_monitor()
+            cast(Callable[[], bool], ensure_monitor)()
         while (
             recovered is None and not incompatible_live_owner()
             and time.time() - started < boot_wait_s
@@ -797,14 +799,14 @@ def write_with_boot(
 
 def dispatch(
     verb: str,
-    args: dict,
+    args: dict[str, Any],
     *,
-    read_lock_data: Callable[[], dict | None],
+    read_lock_data: Callable[[], dict[str, Any] | None],
     ensure_monitor: Callable[[], bool] | None,
     request_deadline_s: float | None = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
     min_version: int = 1,
-) -> dict:
+) -> dict[str, Any]:
     """The public entry point a migrated call site uses in place of calling
     its verb's function directly: try the resident daemon first (booting one
     on demand if none is reachable), falling back to :func:`run_direct`
@@ -835,7 +837,7 @@ def dispatch(
         return run_direct(verb, args, reason="qualified executing session writer")
     payload = {"verb": verb, "args": args}
 
-    def _fallback() -> dict:
+    def _fallback() -> dict[str, Any]:
         return run_direct(verb, args, reason="no resident daemon reachable")
 
     return write_with_boot(

@@ -9,18 +9,23 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
+from machine_transport import MachineEntry, SSHEnvironment
 
 from agent_worktrees import config as cfg, remote_seed_launch, resolve_cli, resolve_machine_cli
 
 pytestmark = pytest.mark.guard
+Remote = tuple[cfg.Config, MachineEntry, list[dict[str, Any]]]
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell unavailable")
-def test_terminal_powershell_seed_reaches_the_normal_target_parser_literally():
+def test_terminal_powershell_seed_reaches_the_normal_target_parser_literally() -> None:
     from agent_worktrees import remote_terminal_launch
 
     seed = "--literal 'quotes' \"double\"\nUnicode \u03bb; $(not-a-command) `newline"
@@ -32,8 +37,10 @@ def test_terminal_powershell_seed_reaches_the_normal_target_parser_literally():
         "function example { ConvertTo-Json -Compress -EscapeHandling EscapeNonAscii -InputObject @($args); "
         "$global:LASTEXITCODE=0 }\n" + command
     )
+    pwsh = shutil.which("pwsh")
+    assert pwsh is not None
     completed = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-Command", driver],
+        [pwsh, "-NoProfile", "-Command", driver],
         capture_output=True, text=True, encoding="utf-8", timeout=15,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
@@ -49,17 +56,17 @@ def test_terminal_powershell_seed_reaches_the_normal_target_parser_literally():
     (["--base"], None),
 ])
 def test_terminal_handoff_packages_normal_target_command_without_contact(
-    remote, monkeypatch, selector, seed,
-):
+    remote: Remote, monkeypatch: pytest.MonkeyPatch, selector: list[str], seed: str | None,
+) -> None:
     _, _, plans = remote
     monkeypatch.setattr(
-        remote_seed_launch.subprocess, "run",
+        subprocess, "run",
         lambda *a, **k: pytest.fail("remote work ran before terminal handoff"),
     )
     args = _parse([
         "--json", "--machine", "remote-host", "--environment", "WSL",
         "--require-terminal-handoff", "--target-no-mux", *selector,
-        "--profile", "named profile", "--recovery",
+        "--profile", "named profile", "--no-resume",
         *(["--seed=" + seed, "--require-native-seed"] if seed else []),
     ])
     assert resolve_cli.cmd_resolve(args) == 0
@@ -72,11 +79,31 @@ def test_terminal_handoff_packages_normal_target_command_without_contact(
     assert target.pop(0) == "example"
     forwarded = _parse(target)
     assert forwarded.seed == seed
-    assert forwarded.no_mux and forwarded.recovery and forwarded.profile == "named profile"
+    assert forwarded.no_mux and forwarded.no_resume and forwarded.profile == "named profile"
     assert forwarded.new_worktree == args.new_worktree
     assert forwarded.base == args.base and forwarded.worktree_id == args.worktree_id
     assert forwarded.machine is None and not forwarded.require_terminal_handoff
     assert forwarded.require_foreground_completion
+
+
+def test_terminal_handoff_refuses_recovery_before_contact_or_plan_emission(
+    remote: Remote, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
+    _, _, plans = remote
+
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
+        pytest.fail("recovery reached a subprocess before terminal handoff refusal")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    args = _parse([
+        "--json", "--machine", "remote-host", "--environment", "WSL",
+        "--require-terminal-handoff", "--new", "--recovery",
+    ])
+    assert resolve_cli.cmd_resolve(args) != 0
+    assert not plans
+    captured = capfd.readouterr()
+    assert "recovery" in (captured.out + captured.err).casefold()
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -86,22 +113,22 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 
 @pytest.fixture
-def remote(monkeypatch: pytest.MonkeyPatch, tmp_path):
+def remote(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Remote:
     config = cfg.Config(
         machine="local-host", platform="windows", repo_name="example", srcroot=str(tmp_path),
         repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))},
     )
-    entry = cfg.MachineEntry(
+    entry = MachineEntry(
         key="remote-host", display_name="Remote host", environment="Linux", ssh_ready=True,
-        ssh_environments=[cfg.SSHEnvironment("wsl", "guest profile", shell="bash")],
+        ssh_environments=[SSHEnvironment("wsl", "guest profile", shell="bash")],
     )
     monkeypatch.setattr(cfg, "load_config", lambda *a, **kw: config)
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **kw: {entry.key: entry})
     monkeypatch.setattr(cfg, "project_name", lambda: "example")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(resolve_cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(resolve_machine_cli, "_in_ssh_session", lambda: False)
-    plans: list[dict] = []
+    plans: list[dict[str, Any]] = []
     monkeypatch.setattr(resolve_machine_cli, "_emit_plan", plans.append)
     return config, entry, plans
 
@@ -112,7 +139,7 @@ def remote(monkeypatch: pytest.MonkeyPatch, tmp_path):
     ["--worktree-id", "worktree id"], ["--new"], ["--base"],
 ])
 def test_remote_plan_preserves_supported_options_and_quotes_values(
-    remote, json_mode: bool, environment: str | None, selector: list[str],
+    remote: Remote, json_mode: bool, environment: str | None, selector: list[str],
 ) -> None:
     _, _, plans = remote
     options = [
@@ -150,14 +177,17 @@ def test_remote_plan_preserves_supported_options_and_quotes_values(
 @pytest.mark.parametrize("target", ["remote-host", "local-host"])
 @pytest.mark.parametrize("selector", [["--new"], ["--worktree-id", "wt-a"]])
 def test_native_seed_requirement_reaches_only_structured_remote_admission(
-    remote, monkeypatch: pytest.MonkeyPatch, capfd, target: str, selector: list[str],
+    remote: Remote, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    target: str, selector: list[str],
 ) -> None:
     _, entry, plans = remote
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: {
         entry.key: entry, "local-host": replace(entry, key="local-host"),
     })
-    calls = []
-    def prepare(config, alias, shell, args, text):
+    calls: list[tuple[list[str], str]] = []
+    def prepare(
+        config: cfg.Config, alias: str, shell: str, args: list[str], text: str,
+    ) -> dict[str, Any]:
         calls.append((args, text))
         return {"action": "remote"}
     monkeypatch.setattr(remote_seed_launch, "prepare", prepare)
@@ -178,7 +208,8 @@ def test_native_seed_requirement_reaches_only_structured_remote_admission(
     ["--", "raw argument"],
 ])
 def test_remote_request_refuses_unrepresentable_ownership_or_raw_args(
-    remote, capfd, json_mode: bool, environment: str | None, unsupported: list[str],
+    remote: Remote, capfd: pytest.CaptureFixture[str], json_mode: bool,
+    environment: str | None, unsupported: list[str],
 ) -> None:
     _, _, plans = remote
     args = _parse([
@@ -199,16 +230,16 @@ def test_json_internal_no_mux_is_not_a_remote_override(requested: bool) -> None:
         *(["--target-no-mux"] if requested else []),
     ]))
     assert state.args.no_mux
-    assert ("--no-mux" in resolve_cli._remote_selector_args(state)) is requested
+    assert ("--no-mux" in resolve_machine_cli.remote_selector_args(state)) is requested
 
 
 @pytest.mark.parametrize("option", ["--launch-request-b64", "--launch-request-status"])
 def test_target_local_request_protocol_refuses_machine_dispatch(
-    monkeypatch: pytest.MonkeyPatch, capfd, option: str,
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], option: str,
 ) -> None:
     from agent_worktrees import launch_request
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("target-local protocol reached admission, status or machine resolution")
 
     monkeypatch.setattr(launch_request, "execute", forbidden)
@@ -224,7 +255,7 @@ def test_remote_profile_starting_with_flag_prefix_round_trips() -> None:
     state = resolve_cli.ResolveCommandState.from_args(_parse([
         "--json", "--new", "--machine", "remote-host", "--profile=--special profile",
     ]))
-    assert _parse(resolve_cli._remote_selector_args(state)).profile == "--special profile"
+    assert _parse(resolve_machine_cli.remote_selector_args(state)).profile == "--special profile"
 
 
 @pytest.mark.parametrize("options", [
@@ -232,14 +263,15 @@ def test_remote_profile_starting_with_flag_prefix_round_trips() -> None:
     ["--recovery"], ["--parent-session", "parent"], ["--caller-worktree", "caller"],
 ])
 def test_json_seed_route_refuses_unsupported_intent_without_ssh(
-    remote, monkeypatch: pytest.MonkeyPatch, capfd, options: list[str],
+    remote: Remote, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    options: list[str],
 ) -> None:
     _, _, plans = remote
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("unsupported seed intent reached SSH")
 
-    monkeypatch.setattr(remote_seed_launch.subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
     args = _parse([
         "--json", "--machine", "remote-host", "--environment", "WSL",
         "--new", "--seed", "task", *options,
@@ -256,16 +288,16 @@ def test_json_seed_route_refuses_unsupported_intent_without_ssh(
 def test_structured_seed_refuses_unsupported_options_before_admission(
     monkeypatch: pytest.MonkeyPatch, flag: str,
 ) -> None:
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("unsupported prompt options reached remote admission")
 
-    monkeypatch.setattr(remote_seed_launch.subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
     with pytest.raises(ValueError, match="does not support"):
         remote_seed_launch.prepare(None, "guest", "bash", ["--new", flag], "task")
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
-def test_remote_native_resume_preserves_exact_head_and_no_resume(remote, json_mode):
+def test_remote_native_resume_preserves_exact_head_and_no_resume(remote: Remote, json_mode: bool) -> None:
     _, _, plans = remote
     args = _parse([
         "--machine", "remote-host", "--worktree-id", "example-worktree",
@@ -298,7 +330,7 @@ def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> Non
     }
 
 
-def test_powershell_remote_plan_quotes_each_value(remote) -> None:
+def test_powershell_remote_plan_quotes_each_value(remote: Remote) -> None:
     config, entry, plans = remote
     entry.ssh_environments[0] = replace(entry.ssh_environments[0], shell="pwsh")
     value = "profile with 'quotes'; $value"

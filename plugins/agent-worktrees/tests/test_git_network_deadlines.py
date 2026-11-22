@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -16,13 +17,13 @@ from agent_worktrees.tracking import PRRecord
 
 @pytest.mark.parametrize("requested,expected", [(None, None), (300, 300), (5, 5)])
 def test_foreground_creation_fetch_has_no_default_completion_deadline(
-    monkeypatch, requested, expected,
-):
+    monkeypatch: pytest.MonkeyPatch, requested: float | None, expected: float | None,
+) -> None:
     from agent_worktrees import tracking_write
 
-    calls = []
+    calls: list[tuple[float | None, float | None]] = []
 
-    def run(*args, **kwargs):
+    def run(*args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((kwargs["timeout"], git_acquisition_budget.remaining_timeout(None)))
         return subprocess.CompletedProcess(args, 0, "", "")
 

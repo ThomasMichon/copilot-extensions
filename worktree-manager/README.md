@@ -2097,6 +2097,11 @@ literal through POSIX quoting or PowerShell encoding. There is no preliminary
 remote admission, allocation or receipt round-trip. An older local engine fails
 on the required flag without a fallback to remote precreation; normal target
 syntax and its native-seed fence remain strict.
+Registered machine keys and SSH profile aliases remain opaque. Environment
+context is omitted only when registry-aware resolution proves it redundant.
+Recovery fast-path arguments are refused for this packaged flow because the
+legacy shell preprocessors bypass ordinary resolution; invoke recovery
+explicitly on the target instead.
 
 Foreground writer completion waits are capability-qualified against the running
 target service. A deadline-only resident uses the existing locked pre-send

@@ -63,19 +63,19 @@ def local_repositories(
 
 
 def test_foreground_creation_fetch_waits_without_an_aggregate_source_deadline(
-    local_repositories, monkeypatch,
-):
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import git_acquisition_budget, tracking_write
 
     seed, anchor = local_repositories
     expected = _commit(seed, "foreground.txt")
     _git("push", "origin", "trunk", cwd=seed)
     fetch = git_ops._fetch_refspecs
-    observed = []
+    observed: list[tuple[float | None, float | None]] = []
 
-    def observe(*args, **kwargs):
+    def observe(*args: Any, **kwargs: Any) -> None:
         observed.append((kwargs["timeout"], git_acquisition_budget.remaining_timeout(None)))
-        return fetch(*args, **kwargs)
+        fetch(*args, **kwargs)
 
     monkeypatch.setattr(git_ops, "_fetch_refspecs", observe)
     with tracking_write.foreground_completion():

@@ -571,14 +571,12 @@ def resolve_launch_plan(
     from .seed_launch import require_launch_capabilities, require_attempt_plan, require_attempt_target
     require_attempt_target(launch_attempt_id, target_machine=target_machine, seed=seed)
     if target_machine:
-        from machine_transport import split_machine_environment
+        from .remote_launch_selection import normalize
 
         try:
-            selected = split_machine_environment(target_machine, target_environment)
+            target_machine, target_environment = normalize(project, target_machine, target_environment)
         except ValueError as exc:
             raise EngineError(str(exc)) from exc
-        target_machine = selected.machine
-        target_environment = target_environment or selected.environment or None
     from .hosting_admission import require_owner_hosting
 
     def admit_owner() -> None:

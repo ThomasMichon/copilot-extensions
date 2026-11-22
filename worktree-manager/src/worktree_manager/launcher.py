@@ -30,8 +30,12 @@ import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .engine_client import LaunchPlan
+
+if TYPE_CHECKING:
+    from .picker_app import LaunchRequest
 
 #: Force/override the mux probe. ``off`` forces non-muxed regardless of backend.
 MUX_ENV = "WORKTREE_MANAGER_MUX"
@@ -59,7 +63,7 @@ _NO_MUX = MuxCapability()
 _capability: MuxCapability = _NO_MUX
 
 
-def uses_ahp(req, worktree_id: str) -> bool:
+def uses_ahp(req: LaunchRequest, worktree_id: str) -> bool:
     """Select the persisted backend before deciding who prepares a local launch."""
     from . import engine_client
 
@@ -116,7 +120,7 @@ class LaunchExec:
     kind: str
     argv: list[str]
     cwd: str | None
-    env: dict
+    env: dict[str, str]
     muxed: bool
     exit_code: int
     session: str | None

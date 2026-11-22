@@ -184,6 +184,20 @@ Do not globally unbound passive reads or unrelated background operations.
   not an activation alias. These are isolated validation changes, not host
   configuration changes.
 
+### 2026-11-22 - Review and required-gate corrections
+
+- Corrected registry-aware alias handling: preserve opaque registered keys and
+  SSH profile aliases, dropping an environment only when the existing resolver
+  proves the destination unchanged.
+- Refused legacy recovery fast-path arguments before packaging; actual native
+  preprocessor controls confirm why ordinary resolution would otherwise be
+  bypassed. Explicit target recovery remains separate.
+- Added actor-free foreground Git ownership coverage to the admitted unit
+  packet and refreshed its changed source inputs without weakening its gates.
+- Completed the mandatory whole-file strict typing of touched source and
+  tests; the strict ratchet passes for both Linux and Windows targets.
+- Required PR checks, current-head review and installed acceptance remain open.
+
 ### 2026-11-21 - Kickoff
 
 - Captured the explicit SSH-first replacement intent and filed #14047, #14049

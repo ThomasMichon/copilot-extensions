@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
-from typing import cast
+from typing import NoReturn, cast
 
 import pytest
 
@@ -352,6 +352,42 @@ def test_soft_capture_uses_the_existing_owned_boundary(monkeypatch: pytest.Monke
     )
     assert result.stdout == "output"
     assert calls == [{"cwd": None, "env": {}, "timeout": 5, "soft_timeout": 1, "errors": "replace"}]
+
+
+def test_foreground_fetch_keeps_caller_custody_without_a_completion_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def owned(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, b"ready", b"non-utf8: \xff")
+
+    package = ModuleType("agent_procutil")
+    package.__path__ = []
+    provider = ModuleType("agent_procutil.owned_process")
+    setattr(provider, "run_caller_owned", owned)
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
+
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
+        pytest.fail("foreground fetch lost its caller-owned process boundary")
+
+    result = PROCESS.execute(
+        ["git", "fetch"], cwd="selected", env={"PATH": "selected"},
+        capture=True, timeout=None, kill_tree=False, input_data=None,
+        observation_deadline=None, run=unexpected, bounded_run=unexpected,
+        window_options=unexpected, soft_timeout=30,
+    )
+    assert result.stdout == "ready" and result.stderr == "non-utf8: \ufffd"
+    assert len(calls) == 1
+    argv, options = calls[0]
+    assert argv == ["git", "fetch"] and options["timeout"] is None
+    assert options["cwd"] == "selected" and options["env"] == {"PATH": "selected"}
+    assert options["binary"] is True
+    stdout_limit, stderr_limit = options["max_stdout_bytes"], options["max_stderr_bytes"]
+    assert isinstance(stdout_limit, int) and stdout_limit > 0
+    assert isinstance(stderr_limit, int) and stderr_limit > 0
 
 
 @pytest.mark.parametrize("kind", ["input", "uncaptured"])

@@ -10,24 +10,31 @@ Copilot; :func:`execute` runs a harmless argv.
 from __future__ import annotations
 
 import sys
+import shutil
+import subprocess
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from worktree_manager import engine_client, launcher
+from worktree_manager import engine_client, launcher, terminal_launch
 from worktree_manager.engine_client import LaunchPlan
+
+if TYPE_CHECKING:
+    from worktree_manager.picker_app import LaunchRequest
 
 
 @pytest.fixture(autouse=True)
-def _reset_capability(monkeypatch):
+def _reset_capability(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     launcher.set_mux_capability(None)
     monkeypatch.delenv(launcher.MUX_ENV, raising=False)
     yield
     launcher.set_mux_capability(None)
 
 
-def _exec_plan(**over) -> LaunchPlan:
-    base = dict(action="exec", cmd=["copilot", "--resume=abc"], work_dir="/w/x",
+def _exec_plan(**over: Any) -> LaunchPlan:
+    base: dict[str, Any] = dict(action="exec", cmd=["copilot", "--resume=abc"], work_dir="/w/x",
                 status_path="/w/x", env={"FOO": "bar"},
                 worktree_id="m-win-1200-ab12", post_exit=True, no_mux=True,
                 exit_code=0, seed_claimed=False, raw={})
@@ -36,12 +43,12 @@ def _exec_plan(**over) -> LaunchPlan:
 
 
 def _fake_mux() -> launcher.MuxCapability:
-    def wrap(argv, session, work_dir):
+    def wrap(argv: Sequence[str], session: str, work_dir: str | None) -> list[str]:
         return ["mux", "new", "-s", session, "--", *argv]
     return launcher.MuxCapability(name="fake", available=True, wrap=wrap)
 
 
-def test_compose_direct_when_no_capability():
+def test_compose_direct_when_no_capability() -> None:
     le = launcher.compose_launch(_exec_plan())
     assert le.kind == "exec"
     assert le.muxed is False
@@ -52,7 +59,7 @@ def test_compose_direct_when_no_capability():
     assert "PATH" in le.env or "Path" in le.env
 
 
-def test_compose_muxes_ignoring_plan_no_mux():
+def test_compose_muxes_ignoring_plan_no_mux() -> None:
     # plan.no_mux is True (as --json always sets); the Manager still muxes because
     # it owns mux and the caller wants it -- DQ9's key inversion.
     le = launcher.compose_launch(_exec_plan(no_mux=True), _fake_mux())
@@ -61,26 +68,26 @@ def test_compose_muxes_ignoring_plan_no_mux():
     assert le.argv[-2:] == ["copilot", "--resume=abc"]
 
 
-def test_want_mux_false_forces_direct():
+def test_want_mux_false_forces_direct() -> None:
     le = launcher.compose_launch(_exec_plan(), _fake_mux(), want_mux=False)
     assert le.muxed is False
     assert le.argv == ["copilot", "--resume=abc"]
 
 
-def test_env_off_forces_direct(monkeypatch):
+def test_env_off_forces_direct(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(launcher.MUX_ENV, "off")
     launcher.set_mux_capability(_fake_mux())
     le = launcher.compose_launch(_exec_plan())
     assert le.muxed is False
 
 
-def test_active_capability_is_used_by_default():
+def test_active_capability_is_used_by_default() -> None:
     launcher.set_mux_capability(_fake_mux())
     le = launcher.compose_launch(_exec_plan())
     assert le.muxed is True
 
 
-def test_none_action_composes_to_noop_with_exit_code():
+def test_none_action_composes_to_noop_with_exit_code() -> None:
     plan = _exec_plan(action="none", cmd=[], exit_code=7)
     le = launcher.compose_launch(plan)
     assert le.kind == "none"
@@ -88,7 +95,7 @@ def test_none_action_composes_to_noop_with_exit_code():
     assert launcher.execute(le) == 7
 
 
-def test_remote_action_composes_to_ssh_handoff():
+def test_remote_action_composes_to_ssh_handoff() -> None:
     plan = _exec_plan(
         action="remote",
         cmd=[],
@@ -113,15 +120,15 @@ def test_remote_action_composes_to_ssh_handoff():
     assert le.session is None
 
 
-def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch):
+def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from worktree_manager import __main__ as entrypoint, process_priority
     from worktree_manager.production_picker import runner
 
-    events = []
-    requests = []
+    events: list[str] = []
+    requests: list[LaunchRequest] = []
 
-    def picker(project, **kwargs):
+    def picker(project: str | None, **kwargs: Any) -> dict[str, Any]:
         events.append("picker-exited")
         return {
             "action": "new", "project": "example", "is_local": False,
@@ -129,7 +136,7 @@ def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch):
             "options": {"seed_prompt": "literal prompt", "no_mux": True},
         }
 
-    def resolve(req, **kwargs):
+    def resolve(req: LaunchRequest, **kwargs: Any) -> tuple[LaunchPlan, int]:
         assert events == ["picker-exited"]
         requests.append(req)
         events.append("packaged")
@@ -137,7 +144,7 @@ def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch):
             "ssh_alias": "target-wsl", "remote_command": "example --new",
         }), 0
 
-    def execute(argv, **kwargs):
+    def execute(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         assert events == ["picker-exited", "packaged"]
         assert argv[:2] == ["ssh", "-t"]
         assert "timeout" not in kwargs and "capture_output" not in kwargs
@@ -147,16 +154,16 @@ def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch):
     monkeypatch.setattr(runner, "run", picker)
     monkeypatch.setattr(process_priority, "raise_current_process_priority", lambda: None)
     monkeypatch.setattr(process_priority, "restore_normal_process_priority", lambda: None)
-    monkeypatch.setattr(entrypoint._terminal_launch, "validate", lambda: None)
+    monkeypatch.setattr(terminal_launch, "validate", lambda: None)
     monkeypatch.setattr(entrypoint, "_resolve_for", resolve)
-    monkeypatch.setattr(launcher.subprocess, "run", execute)
+    monkeypatch.setattr(subprocess, "run", execute)
     assert entrypoint._run_production_picker("example") == 0
     assert events == ["picker-exited", "packaged", "ssh"]
     assert requests[0].mode == "new" and requests[0].no_mux
     assert requests[0].seed_prompt == "literal prompt"
 
 
-def test_remote_action_without_target_is_invalid():
+def test_remote_action_without_target_is_invalid() -> None:
     plan = _exec_plan(action="remote", cmd=[], raw={})
     le = launcher.compose_launch(plan)
     assert le.kind == "invalid"
@@ -164,10 +171,10 @@ def test_remote_action_without_target_is_invalid():
 
 
 @pytest.fixture
-def owner_workspace(tmp_path: Path, monkeypatch):
-    calls = []
+def owner_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    calls: list[list[str]] = []
 
-    def query(project, args):
+    def query(project: str | None, args: list[str]) -> dict[str, Any]:
         assert project is None
         assert args == [
             "agent-policy", "check", "--path", str(tmp_path), "--operation", "launch", "--json",
@@ -183,13 +190,13 @@ def owner_workspace(tmp_path: Path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_execute_runs_argv_and_returns_code(owner_workspace):
+def test_execute_runs_argv_and_returns_code(owner_workspace: Path) -> None:
     plan = _exec_plan(cmd=[sys.executable, "-c", "import sys; sys.exit(3)"],
                       work_dir=str(owner_workspace), status_path=str(owner_workspace), no_mux=True, env={})
     assert launcher.launch(plan) == 3
 
 
-def test_execute_success_path(owner_workspace):
+def test_execute_success_path(owner_workspace: Path) -> None:
     plan = _exec_plan(cmd=[sys.executable, "-c", "print('ok')"],
                       work_dir=str(owner_workspace), status_path=str(owner_workspace), env={})
     assert launcher.launch(plan) == 0
@@ -197,28 +204,34 @@ def test_execute_success_path(owner_workspace):
 
 # --- open_venue (picker-venue-pivots Phase 3) ------------------------------
 
-def test_open_venue_execs_the_provider_copilot_verb(monkeypatch):
-    monkeypatch.setattr(launcher.shutil, "which", lambda name: f"/bin/{name}")
-    calls = []
+def test_open_venue_execs_the_provider_copilot_verb(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}")
+    calls: list[list[str]] = []
 
     class _Proc:
         returncode = 42
 
+    def run(argv: list[str]) -> _Proc:
+        calls.append(argv)
+        return _Proc()
+
     monkeypatch.setattr(
-        launcher.subprocess, "run", lambda argv: calls.append(argv) or _Proc(),
+        subprocess, "run", run,
     )
 
     assert launcher.open_venue("agent-codespaces", "my-codespace") == 42
     assert calls == [["/bin/agent-codespaces", "copilot", "my-codespace"]]
 
 
-def test_open_venue_missing_provider_or_venue_is_an_error(capsys):
+def test_open_venue_missing_provider_or_venue_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert launcher.open_venue("", "my-codespace") == 1
     assert launcher.open_venue("agent-codespaces", "") == 1
     assert "missing provider/venue" in capsys.readouterr().out
 
 
-def test_open_venue_provider_not_on_path_is_an_error(monkeypatch, capsys):
-    monkeypatch.setattr(launcher.shutil, "which", lambda name: None)
+def test_open_venue_provider_not_on_path_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     assert launcher.open_venue("agent-codespaces", "my-codespace") == 1
     assert "not on PATH" in capsys.readouterr().out

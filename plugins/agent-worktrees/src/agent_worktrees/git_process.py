@@ -55,9 +55,9 @@ def execute(
     if soft_timeout is not None and observation_deadline is None:
         if input_data is not None or not capture:
             raise ValueError("soft timeout requires captured text output without input")
-        from agent_procutil.owned_process import run_caller_owned, run_owned
-
         if timeout is None:
+            from agent_procutil.owned_process import run_caller_owned
+
             result = run_caller_owned(
                 command, cwd=cwd, env=env, timeout=None, binary=True,
                 max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=8 * 1024 * 1024,
@@ -67,6 +67,8 @@ def execute(
                 result.stdout.decode("utf-8", errors="replace"),
                 result.stderr.decode("utf-8", errors="replace"),
             )
+        from agent_procutil.owned_process import run_owned
+
         return cast(ProcessResult, run_owned(
             command, cwd=cwd, env=env, timeout=timeout, soft_timeout=soft_timeout,
             errors="replace",
