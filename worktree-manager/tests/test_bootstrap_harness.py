@@ -7,6 +7,24 @@ from worktree_manager import bootstrap_harness as boot
 from worktree_manager import registered_suite, runtime_source_repository, source_config
 
 
+def test_inherited_git_selectors_do_not_redirect_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target, foreign = tmp_path / "target", tmp_path / "foreign"
+    for path in (target, foreign):
+        path.mkdir()
+        boot._git(path, "init", "--quiet")
+    for key, path in (("GIT_DIR", foreign / ".git"), ("GIT_WORK_TREE", foreign),
+                      ("GIT_INDEX_FILE", foreign / ".git/index"),
+                      ("GIT_OBJECT_DIRECTORY", foreign / ".git/objects")):
+        monkeypatch.setenv(key, str(path))
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'credential.helper=fixture-helper'")
+    assert Path(boot._git(target, "rev-parse", "--show-toplevel")).samefile(target)
+    assert boot._git(target, "config", "--get", "credential.helper") == "fixture-helper"
+    (target / "selected").write_text("fixture", encoding="utf-8")
+    boot._git(target, "add", "--", "selected")
+    assert boot._git(target, "ls-files") == "selected"
+    assert not (foreign / ".git/index").exists()
+
+
 def test_register_reopen_and_select_pin(tmp_path: Path) -> None:
     root = tmp_path / "footprint"
     source = tmp_path / "src"

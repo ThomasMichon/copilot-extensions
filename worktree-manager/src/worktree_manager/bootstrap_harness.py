@@ -11,6 +11,7 @@ import tempfile
 from urllib.parse import unquote, urlsplit
 
 from . import harness_state, registered_suite, runtime_source_repository, source_config
+from .git_routing import checkout_environment
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -19,7 +20,7 @@ def _git(directory: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "submodule.recurse=false",
          "-c", "protocol.ext.allow=never", "-C", str(directory), *args],
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=True,
+        env={**checkout_environment(os.environ), "GIT_TERMINAL_PROMPT": "0"}, check=True,
         timeout=180, stdout=subprocess.PIPE, text=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
