@@ -4395,14 +4395,60 @@ The candidate contains 8,247 nodes, 1,186 bound sources, 449 targets and
 selector owner add bindings; the selector is the sole additional target.
 All 8,240 preceding nodes, 1,183 existing source hashes, 448 preceding targets
 and 89 helper decisions remain unchanged, as do compact/flat-v1 identity,
-byte cap and the 300-second bound. Normal strict typing, current-head review
-and complete fresh Linux CI remain required.
+byte cap and the 300-second bound. Fatal Ruff, strict Python 3.10/Linux
+and Windows typing, documentation consistency and diff checks pass.
+Copilot approval `6011362966` covers exact head
+`fd2e3d832c65bc0913637bf3f28ebbcfd246657e`, with no active findings.
+
+Source CI `45004250357`, unit job `137152202459`, freshly passes all 8,247
+cases with 39 deselections, 191.97 pytest seconds and 214.364 packet seconds.
+It reports `mode=executed`, origin run `45004250357` attempt one, execution
+identity `f156d97e8c9a9a051f4e322bc1322ae9f939ae6fe1374d66a4e8b1af8c99d51b`
+and packet digest
+`34f5d8c3b89a7d4b9d1213fcd7ff6544f1a77ac08e469c9056bcd1686c388d01`.
+Required aggregate `137153696264`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14062 merges at `2026-11-22T08:53:38Z` as
+`0a27a31e0369c47c87c6db1277fde61e788cf22f`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the seven-case leaf.
 
 This tests deterministic selector logic, not the Windows workflow, platform
 support, native execution or actual scheduled-suite completeness. Those
 contracts and the host-query, undeclared-data and broader parent gates remain
 separate. Fresh-install and installed/native lanes are not exercised because
 no runtime, installation, workflow or scheduling behavior changes.
+
+### November 22 original fallback-equivalence qualification
+
+A new adapter exports all three exact functions from the original
+fallback-equivalence module, without new decorators, fixtures, wrappers or a
+copied reference algorithm. All 104 original selectors and parameter objects
+are preserved: three unusable-budget cases, the free/zero/infinite-budget
+control, and all 100 seeded greedy-reference cases. Every seed still exercises
+all nine original budgets, including negative, zero, NaN and infinity.
+
+Complete original/adapter collection identity passes. Fresh guarded execution
+passes all 104 cases in 2.562 seconds with zero prohibited effects, four bound
+Python reads and positive actual call-phase algorithm-owner lines per case.
+The execution auditor, source/data policy and helper contract are unchanged.
+
+The compact-v2 candidate contains 8,351 nodes, 1,189 bound sources, 450
+targets and 939,448 bytes. Only the adapter, original test module and
+unchanged fallback implementation add source bindings; the implementation is
+the sole new target. All 8,247 preceding nodes retain relative order, all
+1,186 source hashes and 449 targets remain intact, and all 89 helper
+decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
+enforced. Current-head review and complete fresh required Linux CI remain
+pending; the guarded subset is development evidence, not a full-packet result.
+
+This exercises the existing pure algorithm, not portfolio routing, baseline
+adoption, workflow policy, installed behavior or activation. No runtime or
+installation change requires a fresh-install or native lane. The host-query
+and undeclared-data refusals, shared-owner seams and broader parent gates
+remain open. This is not a reuse hit or a measured whole-flow saving.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 

@@ -1383,7 +1383,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,240
   units freshly executed. Both threaded witnesses, the 52-case host-query
   refusal and broader parent gates remain open.
-- [ ] Qualify seven original deterministic Windows-rotation selector cases,
+- [x] Qualify seven original deterministic Windows-rotation selector cases,
   preserving their exact functions, fixed dates, CLI arguments and assertions.
   Keep the original tier-disjointness assertion outside this call-coverage
   admission without reclassifying it or inventing an owner call.
@@ -1393,6 +1393,27 @@ authorizes critical main-path acceptance or a bounded administrative change.
   compact/flat-v1 identity and the 300-second bound. Require normal strict
   typing, current-head review and complete fresh Linux CI; no actual Windows
   workflow, platform qualification, runtime or native contract changes.
+  #14062 merges at `0a27a31e0369c47c87c6db1277fde61e788cf22f` after
+  exact-head Copilot approval and complete required Linux CI with all 8,247
+  units freshly executed. The original tier-disjointness assertion and
+  broader Windows, scheduled-integration and parent gates remain open.
+- [ ] Qualify all 104 original fallback-equivalence cases, preserving all three
+  original functions, the greedy reference implementation, all 100 seeds,
+  nine budgets per seed, parameters and assertions without reducing the matrix.
+  Require complete original/adapter collection identity, closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI. This exercises the
+  existing pure algorithm, not portfolio routing, baseline adoption, workflow
+  policy or activation; all such owners and broader parent gates remain separate.
+  Complete collection preserves all 104 original selectors, original function
+  objects and parameter objects. Fresh guarded qualification passes all 104
+  in 2.562 seconds with zero prohibited effects, four bound Python reads and
+  positive actual call-phase algorithm-owner lines per case. The compact-v2
+  candidate contains 8,351 nodes, 1,189 sources and 450 targets; all 8,247
+  preceding nodes, source hashes and 89 helper decisions remain intact.
+  Current-head review and complete fresh required Linux CI remain pending.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
