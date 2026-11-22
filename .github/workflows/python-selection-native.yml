@@ -53,13 +53,10 @@ permissions:
   contents: read
 
 jobs:
-  command-bootstrap-uv:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  command-bootstrap-uv-windows:
+    runs-on: windows-latest
     timeout-minutes: 5
-    steps:
+    steps: &command-bootstrap-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -94,6 +91,10 @@ jobs:
           native=[c for c in cases if c.find('skipped') is None];
           assert len(cases)==12 and len(native)==(9 if os.name=='nt' else 6);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
+  command-bootstrap-uv-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps: *command-bootstrap-steps
   budget-uv-launch:
     runs-on: windows-latest
     timeout-minutes: 5
