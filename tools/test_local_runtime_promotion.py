@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import ModuleType
 
 import pytest
 
@@ -19,10 +21,41 @@ import test_promote_release as support
 repo = support.repo
 
 
+@pytest.mark.parametrize("generated_application", [False, True])
+def test_generated_command_staging_preserves_attributes_and_git_configuration(
+    repo: Path, generated_application: bool,
+) -> None:
+    import promotion_source_archive as archive
+
+    (repo / ".gitattributes").write_bytes(b"*.cmd text eol=crlf\n")
+    if generated_application:
+        (repo / ".gitignore").write_bytes(b"apps/\n")
+        declaration = repo / "worktree-manager" / "application-source.json"
+        declaration.parent.mkdir()
+        declaration.write_bytes(b"{}\n")
+    support._commit(repo, "Declare generated command checkout endings")
+    support._git(["config", "core.safecrlf", "true"], repo)
+    configuration = (repo / ".git" / "config").read_bytes()
+    relative = "apps/worktree-manager/generated.cmd" if generated_application else "generated.cmd"
+    command = repo / relative
+    command.parent.mkdir(parents=True, exist_ok=True)
+    generated = b"@echo off\necho composed\n"
+    command.write_bytes(generated)
+    if generated_application:
+        (command.parent / "runtime-source.json").write_bytes(b"{}\n")
+
+    tree = local.promotion.build_promotion_tree(repo)
+
+    assert archive._git(repo, ["cat-file", "blob", f"{tree}:{relative}"]) == generated
+    assert command.read_bytes() == generated
+    assert (repo / ".git" / "config").read_bytes() == configuration
+    assert support._git(["check-attr", "eol", "--", relative], repo).endswith(": eol: crlf")
+
+
 @pytest.mark.parametrize("selected", ["example", "demo-plugin"])
 def test_main_seeded_application_export_retains_root_declaration_and_project_roster(
-    repo, tmp_path, selected,
-):
+    repo: Path, tmp_path: Path, selected: str,
+) -> None:
     import local_install_source as installer_source
     from promotion_python_artifacts import candidate_projects
 
@@ -61,12 +94,12 @@ def test_concurrent_compositions_keep_changefile_readers_in_their_own_scratch(
     support._write_changefile(repo, "pending.json", "demo-plugin", "patch")
     source = support._commit(repo, "pending source change")
     original_changefile = changefile
-    load = local.promotion._load_module
+    load: Callable[[Path, str], ModuleType] = local.promotion._load_module
     lock = threading.Lock()
     events = [threading.Event() for _ in range(3)]
-    arrivals = []
+    arrivals: list[Path] = []
 
-    def interleaved_load(path, name):
+    def interleaved_load(path: Path, name: str) -> ModuleType:
         if path.name != "accumulate_bumps.py":
             return load(path, name)
         with lock:
@@ -108,7 +141,9 @@ def test_concurrent_compositions_keep_changefile_readers_in_their_own_scratch(
 
 
 @pytest.mark.parametrize("hooks_path", ["relative", "absolute"])
-def test_composition_cannot_execute_selected_checkout_hooks(repo, tmp_path, hooks_path):
+def test_composition_cannot_execute_selected_checkout_hooks(
+    repo: Path, tmp_path: Path, hooks_path: str,
+) -> None:
     main = support._git(["rev-parse", "main"], repo)
     marker = tmp_path / "selected-hook-executed"
     hook = repo / "tools/hooks/post-checkout"
@@ -146,7 +181,9 @@ def test_composition_cannot_execute_selected_checkout_hooks(repo, tmp_path, hook
 
 
 @pytest.mark.parametrize("monitor_path", ["relative", "absolute"])
-def test_composition_cannot_execute_repository_filesystem_monitor(repo, tmp_path, monitor_path):
+def test_composition_cannot_execute_repository_filesystem_monitor(
+    repo: Path, tmp_path: Path, monitor_path: str,
+) -> None:
     main = support._git(["rev-parse", "main"], repo)
     marker = tmp_path / "filesystem-monitor-executed"
     monitor = repo / "tools/fixture-monitor"
@@ -168,7 +205,7 @@ def test_composition_cannot_execute_repository_filesystem_monitor(repo, tmp_path
     probe = subprocess.run(
         ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True,
         env=local.promotion.git_environment(),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
     )
     assert probe.returncode == 0 and marker.is_file(), probe.stderr
     executed = marker.read_bytes()

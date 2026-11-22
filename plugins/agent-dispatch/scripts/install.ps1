@@ -1882,9 +1882,18 @@ function Deploy-SelfProvisioningBinstub {
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
     foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh',
-            'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh')) {
+            'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh',
+            'bootstrap-python-version.txt', 'bootstrap-python-launcher.txt')) {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
+    $bootstrapSource = Join-Path $PSScriptRoot '_bootstrap_python'
+    if (Test-Path -LiteralPath $bootstrapSource -PathType Container) {
+        $bootstrapDestination = Join-Path $binDir '_bootstrap_python'
+        [void][IO.Directory]::CreateDirectory($bootstrapDestination)
+        foreach ($support in Get-ChildItem -LiteralPath $bootstrapSource -File) {
+            Copy-Item -LiteralPath $support.FullName -Destination (Join-Path $bootstrapDestination $support.Name) -Force
+        }
     }
     $contextDir = Join-Path $binDir 'installation-context'
     [void][IO.Directory]::CreateDirectory($contextDir)
