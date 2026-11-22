@@ -11,6 +11,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "agent-copilot-driver-core",
+    "agent-plugin-activation",
 ]
 
 [project.scripts]
@@ -23,6 +24,7 @@ sdk = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
+    "setuptools>=83.0.0",
 ]
 
 [tool.uv]
@@ -30,9 +32,15 @@ exclude-newer = "7 days"
 
 [tool.uv.sources]
 agent-copilot-driver-core = { path = "../../libs/copilot-driver-core", editable = true }
+agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.copilot-extensions.application]
+setup = []
+start = ["__source-start"]
+remove = "agent_remote_driver_app.application_removal:main"
 
 [tool.ruff]
 target-version = "py310"

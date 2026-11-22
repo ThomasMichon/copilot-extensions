@@ -6,14 +6,16 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
+from typing import Any
 
 import pytest
 
 from agent_procutil import no_window_kwargs
-from windows_qualification_lifetime import capture_native_streams, worktrees_lifetime
+from windows_qualification_lifetime import capture_native_streams, driver_service_lifetime, worktrees_lifetime
 
 
-def test_native_capture_retains_real_child_output_and_restores_streams_on_failure(tmp_path):
+def test_native_capture_retains_real_child_output_and_restores_streams_on_failure(tmp_path: Path) -> None:
     original = sys.__stdout__, sys.__stderr__, sys.stdout, sys.stderr
     stdout, stderr = tmp_path / "stdout.log", tmp_path / "stderr.log"
     with stdout.open("w", encoding="utf-8") as out, stderr.open("w", encoding="utf-8") as err:
@@ -38,8 +40,8 @@ def test_native_capture_retains_real_child_output_and_restores_streams_on_failur
     ("native-worktrees-copilot-caller-jobs", "test_public_attached_caller_job_lifetime"),
 ])
 def test_worktrees_lifetime_uses_native_owner_without_weakening_default_containment(
-    tmp_path, monkeypatch, packet, case,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packet: str, case: str,
+) -> None:
     import plugin_test_cache
     import plugin_test_containment
     import plugin_test_resources
@@ -48,43 +50,75 @@ def test_worktrees_lifetime_uses_native_owner_without_weakening_default_containm
     python = runtime / "Scripts" / "python.exe"
     python.parent.mkdir(parents=True)
     python.touch()
+    bridge_python = runtime.parent / "agent-bridge" / "Scripts" / "python.exe"
+    bridge_python.parent.mkdir(parents=True)
+    bridge_python.touch()
     monkeypatch.setattr(plugin_test_resources, "venv_root", lambda root: runtime.parent)
     monkeypatch.setattr(plugin_test_cache, "ordinary_cache_root", lambda root: root)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
-    calls = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> int:
         calls.append((command, kwargs))
         assert kwargs["native_application"] is True
         assert kwargs["limits"] == plugin_test_containment.Limits(wall_seconds=900)
         assert kwargs["daemon_lease"].ttl_seconds == 15
         assert kwargs["daemon_lease"].max_lifetime_seconds == 900
         assert kwargs["env"]["WORKTREES_NATIVE_CALLER_JOBS"] == "1"
+        assert kwargs["env"]["COPILOT_DRIVER_BRIDGE_PYTHON"] == str(bridge_python)
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert Path(kwargs["env"]["COPILOT_EXTENSIONS_TEST_SANDBOX"]) == kwargs["sandbox"]
         return 0
 
     monkeypatch.setattr(plugin_test_containment, "run_contained", run)
-    prepared = []
+    prepared: list[tuple[list[str], int]] = []
     root = tmp_path / "candidate"
     result = worktrees_lifetime(
         root, tmp_path / "output", prepare=lambda argv, timeout: prepared.append((argv, timeout)),
         packet=packet,
     )
     assert result == 0 and len(calls) == 1
-    assert prepared == [([
-        sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-worktrees", "--prepare-only",
-    ], 300)]
+    assert prepared == [
+        ([
+            sys.executable, str(root / "tools/run-plugin-tests.py"), plugin, "--prepare-only",
+        ], 300)
+        for plugin in ("agent-worktrees", "agent-bridge")
+    ]
     command = calls[0][0]
     assert command[command.index("-k") + 1] == case
     assert "--timeout=900" in command
     assert os.environ["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
 
 
-def test_worktrees_lifetime_refuses_other_packets_before_preparation(tmp_path):
+def test_worktrees_lifetime_refuses_other_packets_before_preparation(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="selected caller-Job packet"):
         worktrees_lifetime(
             tmp_path, tmp_path / "output", packet="native-worktrees-copilot",
             prepare=lambda *args: pytest.fail("unselected preparation"),
         )
+
+
+def test_driver_lifetime_prepares_only_driver_and_keeps_original_aggregate_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import qualify_driver_service
+    monkeypatch.setattr(time, "monotonic", lambda: 100)
+    prepared: list[tuple[list[str], int]] = []
+    calls: list[tuple[Path, dict[str, Any]]] = []
+    def qualify(root: Path, **options: Any) -> int:
+        calls.append((root, options))
+        return 0
+    monkeypatch.setattr(
+        qualify_driver_service, "qualify",
+        qualify,
+    )
+    output = tmp_path / "evidence"
+    assert driver_service_lifetime(
+        tmp_path, output, prepare=lambda command, timeout: prepared.append((command, timeout)),
+    ) == 0
+    assert prepared == [([
+        sys.executable, str(tmp_path / "tools/run-plugin-tests.py"), "agent-remote-driver",
+        "--prepare-only",
+    ], 300)]
+    assert calls == [(tmp_path, {"output": output, "deadline": 520})]

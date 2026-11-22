@@ -150,7 +150,16 @@ class UnitRun(CoveragePlugin):
                 self.refuse("write outside synthetic unit temporary storage")
             if path.suffix == ".pyc":
                 try:
-                    path = Path(importlib.util.source_from_cache(str(path)))
+                    cache_source = importlib.util.source_from_cache(name)
+                    if sys.platform == "win32" and sys.pycache_prefix and cache_source.startswith("\\?\\"):
+                        restored = "\\" + cache_source
+                        if (
+                            not Path(restored).is_absolute()
+                            or importlib.util.cache_from_source(restored) != name
+                        ):
+                            raise ValueError("invalid extended-path cache spelling")
+                        cache_source = restored
+                    path = canonical_path(cache_source)
                 except ValueError:
                     self.refuse("unattributable Python bytecode")
             if path.suffix == ".py" and path.is_relative_to(self.root):

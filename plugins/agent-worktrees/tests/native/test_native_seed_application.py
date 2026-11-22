@@ -826,6 +826,83 @@ def test_manager_install_retains_only_the_selected_runner_lifecycle(
         _manager_install_environment(*arguments, caller_jobs=True, worktrees_environment={})
 
 
+@pytest.mark.parametrize("outcome", ["response", "refused", "exit", "timeout"])
+def test_native_prompt_uses_selected_bridge_consumer_without_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    import test_headed_worktrees_copilot as fixture
+
+    native, nonce = "original-native", "private-fixture-key"
+    state = {"session_id": native, "child_pid": 12345, "nonce": nonce}
+    environment = {"COPILOT_DRIVER_BRIDGE_PYTHON": sys.executable}
+    calls: list[list[str]] = []
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert command[0] == sys.executable
+        assert "test_copied_core_pickup" in command[command.index("-c") + 1]
+        assert not any(nonce in argument for argument in command)
+        assert json.loads(options["input_text"]) == {
+            "state": state, "native": state["session_id"], "prompt": "one input",
+            "refused": outcome == "refused",
+        }
+        assert options["timeout"] == 25 and options["env"] == environment
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, options["timeout"])
+        return subprocess.CompletedProcess(command, 1 if outcome == "exit" else 0, json.dumps({
+            "session_id": state["session_id"], "child_pid": state["child_pid"],
+            "result": (
+                {"refused": True, "code": -32001} if outcome == "refused"
+                else {"stop_reason": "end_turn"}
+            ),
+            "events": [{"type": "agent_message", "data": {"text": "native response"}}],
+        }), "Bridge consumer failed" if outcome == "exit" else "")
+
+    monkeypatch.setattr(fixture, "run_caller_owned", run)
+    if outcome in {"exit", "timeout"}:
+        with pytest.raises(subprocess.TimeoutExpired if outcome == "timeout" else AssertionError):
+            fixture._bridge_prompt(
+                state, native=native, prompt="one input", refused=False,
+                environment=environment, cwd=tmp_path,
+            )
+    else:
+        fixture._bridge_prompt(
+            state, native=native, prompt="one input", refused=outcome == "refused",
+            environment=environment, cwd=tmp_path,
+        )
+    assert len(calls) == 1
+
+
+def test_native_control_cannot_prompt_the_core_directly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import test_headed_worktrees_copilot as fixture
+    from agent_remote_driver.session_host.client import SessionHostClient
+
+    calls: list[dict[str, Any]] = []
+    native = "original-native"
+    state = {"session_id": native, "child_pid": 12345, "port": 54321}
+    environment = {"selected": "Bridge consumer"}
+
+    async def direct_core(**options: object) -> None:
+        pytest.fail("Native prompt bypassed Bridge and connected to Core directly")
+
+    def bridge(original: dict[str, Any], **options: Any) -> None:
+        assert original is state
+        calls.append(options)
+
+    monkeypatch.setattr(SessionHostClient, "connect", direct_core)
+    monkeypatch.setattr(fixture, "_bridge_prompt", bridge)
+    asyncio.run(fixture._control_native(
+        state, native=native, environment=environment, cwd=tmp_path, prompt="one input",
+    ))
+    assert calls == [{
+        "native": state["session_id"], "environment": environment, "cwd": tmp_path,
+        "prompt": "one input", "refused": False,
+    }]
+
+
 @pytest.mark.parametrize("failure", ["exit", "timeout"])
 def test_manager_native_phase_propagates_owned_failures_without_inline_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
@@ -970,7 +1047,7 @@ def test_native_application_materializes_canonical_sdk_before_building(
         import build_python_artifacts as builder
 
     original_copy = _copy_application_inputs
-    deadline = time.monotonic() + 180
+    expected_deadline = time.monotonic() + 180
     generation = 37
     modules = {
         Path(directory) / (prefix + name): ROOT / "libs" / "payload-invocation" / name
@@ -989,7 +1066,9 @@ def test_native_application_materializes_canonical_sdk_before_building(
     def inspect_build(
         *, source_dir: Path, identity: dict[str, Any], dependencies: list[tuple[str, Path]],
         out_dir: Path, python: str | None, toolchain: builder.ToolchainLock | None,
+        uv: str, deadline: float | None,
     ) -> None:
+        assert uv == "unused" and deadline == expected_deadline
         for relative, canonical in modules.items():
             assert (source_dir / relative).read_bytes() == canonical.read_bytes(), str(relative)
         entry = source_dir / "src" / "agent_worktrees" / "__init__.py"
@@ -1001,7 +1080,7 @@ def test_native_application_materializes_canonical_sdk_before_building(
                  "backend.build_wheel(__import__('sys').argv[1], {'--global-option': ['--quiet']})",
                  str(out_dir)],
                 cwd=source_dir, env=dict(os.environ, UV_OFFLINE="1"),
-                timeout=max(0.01, deadline - time.monotonic()),
+                timeout=max(0.01, expected_deadline - time.monotonic()),
                 max_stdout_bytes=1048576, max_stderr_bytes=65536,
             )
             assert result.returncode == 0, result.stdout + result.stderr
@@ -1023,7 +1102,7 @@ def test_native_application_materializes_canonical_sdk_before_building(
     with pytest.raises(BuildBoundaryReached):
         _prepare_native_application(
             tmp_path / "inputs", tmp_path / "profile", monkeypatch=monkeypatch,
-            uv="unused", interpreter=sys.executable, deadline=deadline,
+            uv="unused", interpreter=sys.executable, deadline=expected_deadline,
             generation=generation,
         )
 
@@ -1098,6 +1177,7 @@ def _prepare_native_application(
             identity={"plugin": "agent-worktrees"}, source_dir=source,
             dependencies=dependencies,
             out_dir=artifacts, python=interpreter, toolchain=None,
+            uv=uv, deadline=deadline,
         )
     print(f"Application wheels built: {time.monotonic() - started:.2f}s", flush=True)
     source_inputs = cast(_ProfileExports, profiles).source_inputs

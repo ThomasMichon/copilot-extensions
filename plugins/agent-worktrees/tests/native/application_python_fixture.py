@@ -28,6 +28,7 @@ def managed_python_environment(
     uv: str,
     deadline: float,
     run: ApplicationCommand,
+    version: str | None = None,
 ) -> dict[str, str]:
     if time.monotonic() >= deadline:
         raise TimeoutError("Application managed-Python preparation deadline expired")
@@ -37,7 +38,7 @@ def managed_python_environment(
         "UV_PYTHON_INSTALL_DIR": str(directory),
     }
     prepared.pop("UV_PYTHON_DOWNLOADS", None)
-    version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    version = version or f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     run(
         [uv, "python", "install", "--no-bin", "--no-registry", f"cpython@{version}"],
         cwd=directory,

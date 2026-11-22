@@ -10,9 +10,11 @@ import math
 import os
 import functools
 import inspect
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 Purpose = Literal["production", "unattended-test", "interactive-test"]
 INSTANCE_SCHEMA = 1
@@ -108,7 +110,9 @@ def default_registry_root() -> Path:
     return registry_root()
 
 
-def reserve_instance(spec: DaemonInstanceSpec, *, environment=None) -> DaemonInstanceReceipt:
+def reserve_instance(
+    spec: DaemonInstanceSpec, *, environment: Mapping[str, str] | None = None,
+) -> DaemonInstanceReceipt:
     from ._daemon_instance_store import reserve
 
     return reserve(spec, environment=environment)
@@ -138,7 +142,10 @@ def cancel_instance_reservation(
     cancel_reservation(receipt, creation_refused)
 
 
-def spawn_instance(argv, *, instance: DaemonInstanceSpec, popen=None, **kwargs):
+def spawn_instance(
+    argv: Sequence[str | os.PathLike[str]], *, instance: DaemonInstanceSpec,
+    popen: Callable[..., Any] | None = None, **kwargs: Any,
+) -> Any:
     """Track a spawn without changing its existing stdio or containment policy."""
     import subprocess
     from ._daemon_instance_store import _test_context
@@ -148,7 +155,7 @@ def spawn_instance(argv, *, instance: DaemonInstanceSpec, popen=None, **kwargs):
     environment = dict(os.environ if environment is None else environment)
     if not environment.get(TEST_CONTEXT_ENV) and os.environ.get(TEST_CONTEXT_ENV):
         environment[TEST_CONTEXT_ENV] = os.environ[TEST_CONTEXT_ENV]
-    python_environment = {}
+    python_environment: dict[str, str] = {}
     if (
         instance.lease is not None or instance.lifecycle == "finite-worker"
         or _test_context(environment) is not None
@@ -195,13 +202,15 @@ def spawn_instance(argv, *, instance: DaemonInstanceSpec, popen=None, **kwargs):
             "instance commit failed", cleanup_confirmed=exited,
             process_created=True, process_identity=identity,
         )
-        failure.instance_receipt = receipt
+        setattr(failure, "instance_receipt", receipt)
         raise failure from error
-    process.instance_receipt = receipt
+    setattr(process, "instance_receipt", receipt)
     return process
 
 
-def spawn_finite_worker(argv, *, instance: DaemonInstanceSpec, **kwargs):
+def spawn_finite_worker(
+    argv: Sequence[str | os.PathLike[str]], *, instance: DaemonInstanceSpec, **kwargs: Any,
+) -> Any:
     """Finite Python work with normal daemon escape/stdio policy, not a TTL."""
     from dataclasses import replace
     from . import spawn_daemon
@@ -243,11 +252,12 @@ def inspect_instances(registry_root: Path | None = None) -> list[dict[str, str]]
 
 def cleanup_instance(
     receipt: DaemonInstanceReceipt, *, terminate: bool = True,
+    deadline: float | None = None, runtime_root: str | os.PathLike[str] | None = None,
 ) -> InstanceCleanupResult:
     """Stop only expired disposable instances, then settle exact owned artifacts."""
     from ._daemon_instance_store import cleanup
 
-    return cleanup(receipt, terminate=terminate)
+    return cleanup(receipt, terminate=terminate, deadline=deadline, runtime_root=runtime_root)
 
 
 def reconcile_instances(
@@ -260,14 +270,18 @@ def reconcile_instances(
     return reconcile(registry_root, limit, max_seconds, terminate=terminate, runtime_root=runtime_root)
 
 
-def daemon_entrypoint(service: str, *, source, runtime_root=None, purpose: Purpose | None = None):
+def daemon_entrypoint(
+    service: str, *, source: str | os.PathLike[str] | None,
+    runtime_root: str | os.PathLike[str] | Callable[..., str | os.PathLike[str] | None] | None = None,
+    purpose: Purpose | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Retain admission across a synchronous or asynchronous service callable.
 
     ``runtime_root`` may be a literal path or a resolver with the decorated
     callable's arguments. Source defaults never classify a test as disposable.
     """
-    def decorate(function):
-        def admission(args, kwargs):
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        def admission(args: tuple[Any, ...], kwargs: dict[str, Any]) -> DaemonInstanceGuard:
             from ._daemon_instance_store import require_declaration
             require_declaration(purpose)
             root = runtime_root(*args, **kwargs) if callable(runtime_root) else runtime_root
@@ -277,13 +291,13 @@ def daemon_entrypoint(service: str, *, source, runtime_root=None, purpose: Purpo
 
         if inspect.iscoroutinefunction(function):
             @functools.wraps(function)
-            async def asynchronous(*args, **kwargs):
+            async def asynchronous(*args: Any, **kwargs: Any) -> Any:
                 with admission(args, kwargs):
                     return await function(*args, **kwargs)
             return asynchronous
 
         @functools.wraps(function)
-        def synchronous(*args, **kwargs):
+        def synchronous(*args: Any, **kwargs: Any) -> Any:
             with admission(args, kwargs):
                 return function(*args, **kwargs)
         return synchronous
@@ -294,7 +308,7 @@ def daemon_test_lifecycle(
     *, owner: str, registry_root: Path, purpose: Purpose = "unattended-test",
     lease: DaemonLeasePolicy | None = None,
     deadline: float | None = None, cleanup_results: list[InstanceCleanupResult] | None = None,
-):
+) -> AbstractContextManager[dict[str, str]]:
     """Context yielding an explicit test environment, renewed by this owner.
 
     The caller layers the yielded mapping into the actual test process's

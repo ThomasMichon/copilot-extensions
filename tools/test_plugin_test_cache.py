@@ -1,10 +1,18 @@
 """Dependency-body freshness and selected test-cache rebuild contracts."""
-from pathlib import Path, PureWindowsPath
+from __future__ import annotations
+
+from pathlib import Path, PurePath, PureWindowsPath
 import os
 import shutil
 import subprocess
-import tomllib
+import sys
 from types import SimpleNamespace
+from typing import Any, NoReturn, TypeVar, cast
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 import pytest
 
@@ -12,6 +20,10 @@ from test_run_plugin_tests import runner
 from plugin_test_cache import FLEET_TEST_CONSUMERS
 import plugin_test_cache as cache_policy
 import native_test_paths
+from installer_source_build import _package_roots
+
+Graph = tuple[Path, Path, Path]
+PathKind = TypeVar("PathKind", bound=PurePath)
 
 
 def _project(root: Path, name: str, sources: str = "") -> Path:
@@ -27,7 +39,7 @@ def _project(root: Path, name: str, sources: str = "") -> Path:
 
 
 @pytest.fixture
-def graph(tmp_path, monkeypatch):
+def graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Graph:
     plugin = tmp_path / "plugins" / "example"
     _project(plugin, "example", 'direct = {path = "../../libs/direct"}')
     direct = _project(
@@ -42,7 +54,9 @@ def graph(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("index", [1, 2])
 @pytest.mark.parametrize("change", ["edit", "add", "delete"])
-def test_same_version_local_dependency_body_invalidates_cache(graph, index, change):
+def test_same_version_local_dependency_body_invalidates_cache(
+    graph: Graph, index: int, change: str,
+) -> None:
     before = runner._dep_fingerprint("example")
     body = graph[index]
     if change == "edit":
@@ -54,7 +68,7 @@ def test_same_version_local_dependency_body_invalidates_cache(graph, index, chan
     assert runner._dep_fingerprint("example") != before
 
 
-def test_generated_and_unrelated_files_do_not_invalidate_cache(graph):
+def test_generated_and_unrelated_files_do_not_invalidate_cache(graph: Graph) -> None:
     before = runner._dep_fingerprint("example")
     dependency = graph[1].parent
     for directory in ("__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"):
@@ -66,13 +80,15 @@ def test_generated_and_unrelated_files_do_not_invalidate_cache(graph):
     assert runner._dep_fingerprint("example") == before
 
 
-def test_missing_transitive_source_refuses_instead_of_reusing_stamp(graph):
+def test_missing_transitive_source_refuses_instead_of_reusing_stamp(graph: Graph) -> None:
     (graph[2].parent / "pyproject.toml").unlink()
     with pytest.raises(FileNotFoundError):
         runner._dep_fingerprint("example")
 
 
-def test_script_only_target_has_a_stable_runner_only_cache_key(tmp_path, monkeypatch):
+def test_script_only_target_has_a_stable_runner_only_cache_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
     before = runner._dep_fingerprint("script-only")
     (tmp_path / "script.py").write_text("VALUE = 1\n")
@@ -81,7 +97,9 @@ def test_script_only_target_has_a_stable_runner_only_cache_key(tmp_path, monkeyp
     assert runner._dep_fingerprint("script-only") != before
 
 
-def test_payload_fixture_driver_transitive_body_invalidates_cache(graph, monkeypatch):
+def test_payload_fixture_driver_transitive_body_invalidates_cache(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = runner.REPO
     payload = repo / "libs" / "payload-invocation"
     payload.mkdir()
@@ -95,7 +113,9 @@ def test_payload_fixture_driver_transitive_body_invalidates_cache(graph, monkeyp
     assert runner._dep_fingerprint("payload-invocation") != before
 
 
-def test_manager_bridge_test_closure_tracks_transitive_source_without_a_vendor_pointer(graph, monkeypatch):
+def test_manager_bridge_test_closure_tracks_transitive_source_without_a_vendor_pointer(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = runner.REPO
     manager = repo / "worktree-manager"
     _project(manager, "copilot-extensions-worktree-manager")
@@ -103,6 +123,8 @@ def test_manager_bridge_test_closure_tracks_transitive_source_without_a_vendor_p
         repo / "plugins" / "agent-bridge", "agent-bridge",
         'direct = {path = "../../libs/direct"}',
     )
+    for resource in cache_policy.retained_build_resources("worktree-manager", repo):
+        resource.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
     before = runner._dep_fingerprint("worktree-manager")
     graph[2].write_text("VALUE = 2\n", encoding="utf-8")
@@ -110,7 +132,9 @@ def test_manager_bridge_test_closure_tracks_transitive_source_without_a_vendor_p
     assert "[tool.uv.sources]" not in (manager / "pyproject.toml").read_text()
 
 
-def test_explicit_clean_does_not_prepare_a_busy_environment(graph, monkeypatch, capsys):
+def test_explicit_clean_does_not_prepare_a_busy_environment(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
     marker = root / "preserved"
@@ -118,10 +142,10 @@ def test_explicit_clean_does_not_prepare_a_busy_environment(graph, monkeypatch, 
     monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
 
-    def busy(*args):
+    def busy(*args: Any) -> NoReturn:
         raise runner.AlreadyRunningError(root / "lock", 123)
 
-    def unexpected(*args, **kwargs):
+    def unexpected(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("a busy clean must not prepare or remove the environment")
 
     monkeypatch.setattr(runner, "_acquire_admission", busy)
@@ -132,7 +156,7 @@ def test_explicit_clean_does_not_prepare_a_busy_environment(graph, monkeypatch, 
 
 
 @pytest.mark.parametrize("name", sorted(FLEET_TEST_CONSUMERS))
-def test_retained_build_resource_body_invalidates_fleet_consumer(graph, name):
+def test_retained_build_resource_body_invalidates_fleet_consumer(graph: Graph, name: str) -> None:
     repo = runner.REPO
     _project(repo / "fleet-manager", "fleet-manager")
     if name == "agent-dispatch":
@@ -146,8 +170,21 @@ def test_retained_build_resource_body_invalidates_fleet_consumer(graph, name):
     assert runner._dep_fingerprint(name) != before
 
 
+def test_driver_connector_build_owner_is_retained_and_invalidates_cache(graph: Graph) -> None:
+    repo = runner.REPO
+    helper = repo / "libs/versioned-runtime/standalone_build.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("VALUE = 1\n", encoding="utf-8")
+    assert cache_policy.retained_build_resources(
+        "agent-remote-driver", repo,
+    ) == (helper.parent,)
+    before = runner._dep_fingerprint("agent-remote-driver")
+    helper.write_text("VALUE = 2\n", encoding="utf-8")
+    assert runner._dep_fingerprint("agent-remote-driver") != before
+
+
 @pytest.fixture
-def released_graph(tmp_path, monkeypatch):
+def released_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Graph:
     plugin = tmp_path / "plugins" / "agent-pull-requests"
     fleet = tmp_path / "fleet-manager"
     for project, name in ((plugin, "agent-pull-requests"), (fleet, "fleet-manager")):
@@ -168,7 +205,7 @@ def released_graph(tmp_path, monkeypatch):
     return plugin, fleet, canonical
 
 
-def test_released_library_overrides_are_canonical_and_invalidate_cache(released_graph):
+def test_released_library_overrides_are_canonical_and_invalidate_cache(released_graph: Graph) -> None:
     plugin, _, canonical = released_graph
     before = runner._dep_fingerprint("agent-pull-requests")
     overrides, _ = cache_policy.canonical_test_sources(
@@ -183,7 +220,7 @@ def test_released_library_overrides_are_canonical_and_invalidate_cache(released_
 
 
 @pytest.fixture
-def preparation_metadata(tmp_path, monkeypatch):
+def preparation_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import installer_dependency_policy
     from agent_procutil import owned_process
     monkeypatch.setenv("UV_CREDENTIALS_DIR", str(tmp_path / "credentials"))
@@ -196,16 +233,18 @@ def preparation_metadata(tmp_path, monkeypatch):
     )
 
 
-def test_released_preparation_passes_overrides_through_normal_policy(released_graph, monkeypatch, preparation_metadata):
+def test_released_preparation_passes_overrides_through_normal_policy(
+    released_graph: Graph, monkeypatch: pytest.MonkeyPatch, preparation_metadata: None,
+) -> None:
     plugin, _, canonical = released_graph
     (runner.VENV_ROOT / "agent-pull-requests").mkdir(parents=True)
     monkeypatch.setattr(
         runner.subprocess, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0),
     )
-    calls = []
+    calls: list[tuple[str, dict[str, Any]]] = []
 
-    def install(uv, arguments, **options):
+    def install(uv: str, arguments: list[str], **options: Any) -> None:
         source = Path(arguments[arguments.index("--override") + 1])
         constraints = Path(arguments[arguments.index("--constraint") + 1])
         assert "shared>=1\n" in constraints.read_text()
@@ -220,7 +259,7 @@ def test_released_preparation_passes_overrides_through_normal_policy(released_gr
     assert not calls
 
 
-def test_released_constraints_follow_selected_library_extras(released_graph):
+def test_released_constraints_follow_selected_library_extras(released_graph: Graph) -> None:
     plugin, _, canonical = released_graph
     metadata = plugin / "pyproject.toml"
     metadata.write_text(metadata.read_text().replace("shared>=1", "shared[feature]>=1"))
@@ -238,7 +277,9 @@ def test_released_constraints_follow_selected_library_extras(released_graph):
 @pytest.mark.parametrize("selector", [
     "marker = \"sys_platform == 'win32'\"", 'extra = "feature"', 'group = "dev"',
 ])
-def test_released_composition_refuses_source_activation_selectors(released_graph, graph, selector):
+def test_released_composition_refuses_source_activation_selectors(
+    released_graph: Graph, graph: str, selector: str,
+) -> None:
     plugin, _, canonical = released_graph
     metadata = (
         plugin / "pyproject.toml" if graph == "original" else canonical.parent / "pyproject.toml"
@@ -258,7 +299,7 @@ def test_released_composition_refuses_source_activation_selectors(released_graph
     assert not (runner.REPO / "uncreated-venv").exists()
 
 
-def _copy_metadata_checkout(source, checkout, consumer):
+def _copy_metadata_checkout(source: Path, checkout: Path, consumer: str) -> None:
     engine = source / "libs" / "installer-engine"
     for source_file in engine.iterdir():
         if source_file.is_file():
@@ -292,7 +333,7 @@ def _copy_metadata_checkout(source, checkout, consumer):
     for manifest in (source / "libs").glob("*/pyproject.toml"):
         name = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("name")
         if name in names:
-            roots.update(cache_policy._package_roots(manifest.parent))
+            roots.update(_package_roots(manifest.parent))
     for root in roots:
         target = checkout / root.relative_to(source)
         target.mkdir(parents=True, exist_ok=True)
@@ -305,8 +346,8 @@ def _copy_metadata_checkout(source, checkout, consumer):
 @pytest.mark.parametrize("consumer", ["agent-pull-requests", "agent-dispatch"])
 @pytest.mark.parametrize("source_layout", ["checkout", "materialized"])
 def test_real_materialized_metadata_preserves_active_platform_constraints(
-    tmp_path, consumer, source_layout,
-):
+    tmp_path: Path, consumer: str, source_layout: str,
+) -> None:
     import materialize_main
 
     source = Path(__file__).resolve().parents[1]
@@ -335,8 +376,8 @@ def test_real_materialized_metadata_preserves_active_platform_constraints(
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
 def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
-    released_graph, consumer,
-):
+    released_graph: Graph, consumer: str,
+) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("actual UV resolver is unavailable")
@@ -364,15 +405,15 @@ def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
         uv, "pip", "compile", "--no-config", "--offline", "--no-build",
         str(requirements),
     ]
-    options = dict(capture_output=True, text=True, timeout=30)
+    options: dict[str, Any] = dict(capture_output=True, text=True, timeout=30)
     if os.name == "nt":
-        options["creationflags"] = subprocess.CREATE_NO_WINDOW
+        options["creationflags"] = int(getattr(subprocess, "CREATE_NO_WINDOW"))
     refused = subprocess.run(command, **options)
     assert refused.returncode != 0 and "conflicting URLs" in refused.stderr
     venv = runner.REPO / "venv"
     venv.mkdir()
 
-    def resolve():
+    def resolve() -> subprocess.CompletedProcess[str]:
         arguments = cache_policy.source_resolution_arguments(
             consumer, plugin, runner.REPO, venv,
         )
@@ -392,7 +433,9 @@ def test_real_uv_resolves_released_duplicate_sources_with_canonical_override(
 
 
 @pytest.mark.parametrize("linked_parent", [False, True])
-def test_linked_cache_root_refuses_without_touching_target(graph, monkeypatch, linked_parent, preparation_metadata):
+def test_linked_cache_root_refuses_without_touching_target(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch, linked_parent: bool, preparation_metadata: None,
+) -> None:
     target = runner.VENV_ROOT / "real"
     target.mkdir(parents=True)
     marker = target / "preserved"
@@ -409,8 +452,8 @@ def test_linked_cache_root_refuses_without_touching_target(graph, monkeypatch, l
 
 
 def test_automatic_body_drift_rebuild_refreshes_uv_and_preserves_other_cache(
-    graph, monkeypatch, preparation_metadata,
-):
+    graph: Graph, monkeypatch: pytest.MonkeyPatch, preparation_metadata: None,
+) -> None:
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
     python = root / "fixture-python"
@@ -426,15 +469,15 @@ def test_automatic_body_drift_rebuild_refreshes_uv_and_preserves_other_cache(
     identity = (root.stat().st_dev, root.stat().st_ino)
     graph[2].write_text("VALUE = 2\n", encoding="utf-8")
     monkeypatch.setattr(runner, "_venv_python", lambda _name: python)
-    calls = []
+    calls: list[list[str]] = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert command[:3] == ["uv", "venv", "--allow-existing"]
         assert not stale.exists()
         python.touch()
         return subprocess.CompletedProcess(command, 0)
 
-    def install(uv, arguments, **kwargs):
+    def install(uv: str, arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(arguments)
         return subprocess.CompletedProcess([uv, *arguments], 0)
 
@@ -448,13 +491,13 @@ def test_automatic_body_drift_rebuild_refreshes_uv_and_preserves_other_cache(
     assert (root / ".dep-fingerprint").read_text() == runner._dep_fingerprint("example")
 
 
-def _overlong_private_wheel(root):
+def _overlong_private_wheel(root: PathKind) -> PathKind:
     return root / ".bootstrap-uv-cache" / ("source-" + "s" * 96) / ("build-" + "b" * 96) / (
         "example_distribution_with_long_metadata-1.0.0-py3-none-any.whl"
     )
 
 
-def _native_private_paths(root):
+def _native_private_paths(root: Path) -> tuple[Path, Path]:
     return (
         native_test_paths.native_test_path(root / ".bootstrap-uv-cache"),
         native_test_paths.native_test_path(_overlong_private_wheel(root)),
@@ -464,16 +507,18 @@ def _native_private_paths(root):
 @pytest.mark.parametrize("root", [
     r"\\server\share\cache", r"\\?\C:\cache", r"\\?\UNC\server\share\cache",
 ])
-def test_private_fixture_preserves_unc_and_native_root_spelling(monkeypatch, root):
+def test_private_fixture_preserves_unc_and_native_root_spelling(
+    monkeypatch: pytest.MonkeyPatch, root: str,
+) -> None:
     monkeypatch.setattr(native_test_paths, "os", SimpleNamespace(name="nt"))
-    logical = PureWindowsPath(root)
+    logical = cast(Path, PureWindowsPath(root))
     cache, wheel = _native_private_paths(logical)
     assert str(cache) == str(native_test_paths.native_test_path(logical / ".bootstrap-uv-cache"))
     assert str(wheel) == str(native_test_paths.native_test_path(_overlong_private_wheel(logical)))
 
 
 @pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
-def test_private_wheel_fixture_exceeds_max_path_with_minimal_root(root):
+def test_private_wheel_fixture_exceeds_max_path_with_minimal_root(root: str) -> None:
     wheel = _overlong_private_wheel(PureWindowsPath(root))
     assert len(str(wheel)) > 260
     assert all(len(part) <= 255 for part in wheel.parts[1:])
@@ -481,8 +526,8 @@ def test_private_wheel_fixture_exceeds_max_path_with_minimal_root(root):
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows long-path cleanup")
 def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
-    graph, monkeypatch,
-):
+    graph: Graph, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
     python = root / "fixture-python"
@@ -499,16 +544,16 @@ def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
     marker.write_text("keep")
     identity = (root.stat().st_dev, root.stat().st_ino)
     monkeypatch.setattr(runner, "_venv_python", lambda _name: python)
-    calls = []
+    calls: list[list[str]] = []
 
-    def create(command, **kwargs):
+    def create(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert command[:3] == ["uv", "venv", "--allow-existing"]
         assert not native_cache.exists()
         assert (root.stat().st_dev, root.stat().st_ino) == identity
         python.touch()
         return subprocess.CompletedProcess(command, 0)
 
-    def install(uv, arguments, **kwargs):
+    def install(uv: str, arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(arguments)
         return subprocess.CompletedProcess([uv, *arguments], 0)
 
@@ -530,18 +575,22 @@ def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
     (r"\\?\C:\cache\example", r"\\?\C:\cache\example"),
 ])
 def test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix(
-    monkeypatch, path, expected,
-):
+    monkeypatch: pytest.MonkeyPatch, path: str, expected: str,
+) -> None:
     monkeypatch.setattr(native_test_paths, "os", SimpleNamespace(name="nt"))
-    assert str(native_test_paths.native_test_path(PureWindowsPath(path))) == expected
+    assert str(native_test_paths.native_test_path(cast(Path, PureWindowsPath(path)))) == expected
 
 
-def test_non_windows_cache_spelling_is_unchanged(monkeypatch, tmp_path):
+def test_non_windows_cache_spelling_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(native_test_paths, "os", SimpleNamespace(name="posix"))
     assert native_test_paths.native_test_path(tmp_path) is tmp_path
 
 
-def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(graph, monkeypatch, preparation_metadata):
+def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch, preparation_metadata: None,
+) -> None:
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
     python = root / "fixture-python"
@@ -554,16 +603,16 @@ def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(graph, monkeypatch
     identity = (root.stat().st_dev, root.stat().st_ino)
     monkeypatch.setattr(runner, "_venv_python", lambda _name: python)
 
-    real_rmtree = cache_policy.shutil.rmtree
-    def refuse(path, *args, **kwargs):
+    real_rmtree = shutil.rmtree
+    def refuse(path: str | Path, *args: Any, **kwargs: Any) -> None:
         if Path(path).name == held.name:
             raise PermissionError("owned cache is still held")
-        return real_rmtree(path, *args, **kwargs)
+        real_rmtree(path, *args, **kwargs)
 
-    def unexpected(*args, **kwargs):
+    def unexpected(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("failed cleanup must not prepare or mark an environment ready")
 
-    monkeypatch.setattr(cache_policy.shutil, "rmtree", refuse)
+    monkeypatch.setattr(shutil, "rmtree", refuse)
     monkeypatch.setattr(runner.subprocess, "run", unexpected)
     monkeypatch.setattr(runner, "run_uv_install", unexpected)
     with pytest.raises(PermissionError, match="still held"):
@@ -575,7 +624,7 @@ def test_cleanup_error_refuses_before_uv_or_ready_fingerprint(graph, monkeypatch
 
 
 @pytest.mark.parametrize("location", ["root", "ancestor", "child"])
-def test_cache_cleanup_retains_link_boundaries(tmp_path, location):
+def test_cache_cleanup_retains_link_boundaries(tmp_path: Path, location: str) -> None:
     root = tmp_path / "cache"
     root.mkdir()
     target = tmp_path / "outside"
@@ -587,7 +636,7 @@ def test_cache_cleanup_retains_link_boundaries(tmp_path, location):
         subprocess.run(
             [os.environ["COMSPEC"], "/c", "mklink", "/J", str(alias), str(target)],
             check=True, capture_output=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW")),
         )
     else:
         alias.symlink_to(target, target_is_directory=True)

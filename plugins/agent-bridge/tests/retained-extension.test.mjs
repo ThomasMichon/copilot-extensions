@@ -10,11 +10,21 @@ import * as deliveryState from "../../../libs/copilot-driver-core/src/agent_remo
 import { isRemoteDriverSource, selectedLoadout } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+async function consumeLegacy(f) {
+  for (const [index, send] of f.sends.entries()) {
+    f.handlers[0]({
+      id: `native-input-${index}`, type: "user.message", sessionId: f.nativeSession.sessionId,
+      data: { source: "agent-bridge", transformedContent: send.prompt, turnId: `native-turn-${index}` },
+    });
+  }
+  f.poll.fn();
+  await settle();
+}
 const source = readFileSync(new URL("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs", import.meta.url), "utf8");
 
 async function load(selected, version = 50, {
   exact = false, nativeId = "native-a", driver = false, headed = false, headedRefused = false,
-  snapshot, send, muted = false, eventFailure, compatible = true,
+  snapshot, send, muted = false, eventFailure, compatible = selected === "1" || driver || headed,
   historyReplay = false,
   historyResponse = { replay_accepted: true, ingested: 1 },
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
@@ -58,7 +68,8 @@ async function load(selected, version = 50, {
     }
     let result = {};
     if (route === "/health") result = {
-      protocol_version: version, capabilities: compatible ? { compatible_native_inbox: 1 } : {},
+      protocol_version: version, capabilities: compatible
+        ? { compatible_native_inbox: 1, native_consumption_inbox: 1 } : {},
     };
     else if (route.endsWith("/events?replay=true")) result = { session_id: nativeId, ...historyResponse };
     else if (route.includes("/recovery?")) result = {
@@ -263,7 +274,7 @@ for (const selected of [undefined, "1"]) {
 }
 
 for (const resumed of [false, true]) {
-  test(`idle drains pending input ${resumed ? "after resume/re-registration" : "on the current registration"} without an unrelated turn`, async () => {
+  test(`idle drains fresh input ${resumed ? "after resume/re-registration" : "on the current registration"} without retrying an uncertain effect`, async () => {
     const messages = [];
     let active = true;
     const f = await load(undefined, 51, {
@@ -290,14 +301,17 @@ for (const resumed of [false, true]) {
     active = false;
     if (resumed) {
       f.rename("resumed-session");
-      messages[0].original_session_id = "resumed-session";
     }
+    messages.push({
+      id: 18, sender: "peer", body: "fresh idle work", delivery: "steer",
+      exact_session: true, original_session_id: resumed ? "resumed-session" : "native-a",
+    });
     f.handlers[0]({ type: "session.idle", data: {} });
     await f.runDeferred();
-    assert.equal(messages.length, 0);
+    assert.ok(messages.some((message) => message.id === 17), "uncertain input must remain retained");
     assert.equal(f.sends.length, 2);
     assert.equal(f.sends[1].mode, "enqueue");
-    assert.match(f.sends[1].prompt, /msg-id="17"/);
+    assert.match(f.sends[1].prompt, /msg-id="18"/);
     assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
     if (resumed) assert.ok(f.calls.some((call) =>
       call.route === "/api/v1/live-sessions" && call.body.session_id === "resumed-session"));
@@ -330,6 +344,7 @@ test("heartbeat re-registration rearms idle inbox delivery after the Bridge lose
   await settle();
   assert.equal(f.registeredSessions.has("native-a"), true);
   await f.runDeferred();
+  await consumeLegacy(f);
   assert.equal(messages.length, 0);
   assert.equal(f.sends.length, 1);
   assert.equal(f.sends[0].mode, "enqueue");
@@ -349,6 +364,7 @@ test("idle resume re-registers the SDK identity even without any subsequent sess
   f.timers.find((timer) => timer.ms === 30_000).fn();
   await settle();
   await f.runDeferred();
+  await consumeLegacy(f);
   assert.equal(f.registeredSessions.has("resumed-without-events"), true);
   assert.equal(messages.length, 0);
   assert.equal(f.sends.length, 1);
@@ -445,17 +461,53 @@ for (const [label, historyResponse] of [
   });
 }
 
-test("actual extension default still uses legacy inbox, ACK and controls", async () => {
+test("a provider without the native retained capability keeps legacy compatibility", async () => {
   const f = await load(undefined);
   assert.equal(f.sends.length, 1);
+  assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
+  await consumeLegacy(f);
   assert.ok(f.calls.some((call) => call.route.endsWith("/messages/ack")));
   assert.ok(f.calls.some((call) => call.route.endsWith("/controls")));
   assert.equal(f.calls.some((call) => call.route.includes("/retained-inbox")), false);
 });
 
+test("a capable provider selects durable handoff by default without a legacy ACK", async () => {
+  const f = await load(undefined, 52, { compatible: true });
+  assert.equal(f.sends.length, 1);
+  const begin = f.calls.findIndex((call) => call.route.endsWith("/begin"));
+  const accepted = f.calls.findIndex((call) => call.body?.outcome === "sdk_accepted");
+  assert.ok(begin >= 0 && accepted > begin);
+  assert.match(f.sends[0].prompt, /retained-session="native-a"/);
+  assert.equal(f.calls.some((call) => call.route.includes("/messages?")), false);
+  assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
+  assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+});
+
+test("capable default selection retains an ambiguous SDK effect instead of legacy redelivery", async () => {
+  const receipts = [];
+  const f = await load(undefined, 52, {
+    compatible: true, retainedReceipts: receipts,
+    send: () => { throw new Error("SDK effect may have happened"); },
+  });
+  assert.equal(f.sends.length, 1);
+  assert.ok(f.calls.some((call) => call.body?.outcome === "unknown"));
+  const enrollment = f.calls.find((call) => call.route.endsWith("/enroll")).body.consumer;
+  receipts.push({
+    session_id: "native-a", message_id: 1, handoff_id: "handoff-a",
+    consumer: enrollment, stage: "unknown", admitted_at: 1,
+    handoff_started_at: 2, sdk_accepted_at: null, consumed_at: null,
+  });
+  f.poll.fn();
+  await settle();
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
+  assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+});
+
 test("actual extension observes exact native metadata before SDK send", async () => {
   const current = await load(undefined, 51, { exact: true });
   assert.equal(current.sends.length, 1);
+  await consumeLegacy(current);
   assert.ok(current.calls.some((call) => call.route.endsWith("/messages/ack")));
   const changed = await load(undefined, 51, { exact: true, nativeId: "successor" });
   assert.equal(changed.sends.length, 0);
@@ -484,6 +536,7 @@ test("a pending exact-native lookup stalls inbox progress while liveness stays f
   release({ sessionId: "native-a", workingDirectory: process.cwd() });
   await settle();
   assert.equal(f.sends.length, 1);
+  await consumeLegacy(f);
   assert.ok(f.calls.some((call) => call.route.endsWith("/messages/ack")));
 });
 
@@ -502,13 +555,14 @@ test("a pending SDK send holds the drain and ACK without blocking heartbeat", as
   assert.ok(f.calls.slice(before).some((call) => call.route === "/api/v1/live-sessions"));
   release("sdk-message-a");
   await settle();
+  await consumeLegacy(f);
   assert.ok(f.calls.some((call) => call.route.endsWith("/messages/ack")));
 });
 
 test("SDK acceptance alone does not produce a represented model-input event", async () => {
   const f = await load(undefined);
   assert.equal(f.sends.length, 1);
-  assert.ok(f.calls.some((call) => call.route.endsWith("/messages/ack")));
+  assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
   const flush = f.timers.find((timer) => timer.ms === 1_000);
   flush.fn();
   await settle();
@@ -696,9 +750,10 @@ test("launch-selected receiving uses the public SDK without invoking private dri
   assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
 });
 
-test("the actual retained adapter reconciles live native input without usable SDK history", async () => {
+for (const selected of [undefined, "1"]) {
+test(`${selected ? "explicit" : "default"} retained adapter reconciles native consumption without usable SDK history`, async () => {
   const receipts = [];
-  const f = await load("1", 52, { retainedReceipts: receipts });
+  const f = await load(selected, 52, { compatible: true, retainedReceipts: receipts });
   assert.equal(f.sends.length, 1);
   const enrollment = f.calls.find((call) => call.route.endsWith("/enroll")).body.consumer;
   receipts.push({
@@ -723,6 +778,7 @@ test("the actual retained adapter reconciles live native input without usable SD
   assert.equal(f.sends.length, 1);
   f.shutdowns.get("SIGTERM")();
 });
+}
 
 test("headed receiving preserves one-shot receipts using the public native SDK", async () => {
   for (const driver of [false, true]) {

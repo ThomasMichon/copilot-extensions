@@ -21,12 +21,99 @@ from agent_bridge.live_representation import LiveEventStore
 from agent_bridge.live_delivery_client import observe, send_and_wait
 from agent_bridge.send_outcome import live_outcome
 from agent_bridge.message_contracts import ensure_schema
-from test_live_inbox_runtime import current, enroll, native_enroll, serving as serving
+from test_live_inbox_runtime import (
+    PREFIX, attempt, current, enroll, native_enroll, poll, report, serving as serving,
+)
 from test_loop_governance_custody import installation as installation
 from test_retained_sdk_recovery import run_consumer
 
 Serving = tuple[FastAPI, TestClient, Database, InboxConsumer]
 consume: Callable[..., tuple[int, list[dict[str, Any]], list[str]]] = run_consumer
+
+
+@pytest.mark.parametrize("outcome", ["sdk_accepted", "unknown"])
+def test_native_interrupt_waits_for_original_consumption_before_its_one_grant(
+    serving: Serving, outcome: str,
+) -> None:
+    _, client, db, consumer = serving
+    body = native_enroll(client, replace(consumer, message_base=1))
+    first = db.enqueue_live_message(consumer.session_id, "peer", "original", time.time())
+    original = poll(client, body)
+    assert original["id"] == first
+    assert client.post(PREFIX + "/begin", json=attempt(body, original)).json() == {"begin": True}
+    assert client.post(PREFIX + "/outcome", json=report(body, original, outcome)).status_code == 200
+    response = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "interrupt only after original consumption", "delivery": "interrupt",
+    })
+    assert response.status_code == 200, response.text
+    interrupted = poll(client, body)
+    blocked = client.post(PREFIX + "/begin", json=attempt(body, interrupted))
+    assert blocked.status_code == 409 and "no abort or replay" in blocked.text
+    before = db.live_message_handoff_receipt(consumer.session_id, interrupted["id"])
+    assert before is not None and before["handoff_started_at"] is None
+    assert client.post(PREFIX + "/outcome", json=report(body, original, "consumed")).status_code == 200
+    assert client.post(PREFIX + "/begin", json=attempt(body, interrupted)).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json=attempt(body, interrupted)).json() == {"begin": False}
+    consumed = db.live_message_receipt(consumer.session_id, first)
+    assert consumed is not None and consumed["stage"] == "consumed"
+
+
+@pytest.mark.parametrize("kind,body", [
+    ("control:set-mode", "autopilot"),
+    ("control:set-mode-ready", '{"mode":"plan","plugin_readiness":{}}'),
+])
+def test_versioned_native_mode_control_retains_one_start_and_original_outcome(
+    serving: Serving, kind: str, body: str,
+) -> None:
+    _, client, db, consumer = serving
+    owner = native_enroll(client, replace(consumer, message_base=1))
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", body, time.time(), kind=kind)
+    request = {
+        **current(owner), "message_id": message_id, "state": "started",
+        "code": "mode_change_started", "reason": "Original native mode control admitted.",
+    }
+    started = client.post(PREFIX + "/disposition", json=request)
+    assert started.status_code == 200 and started.json()["begin"] is True
+    duplicate = client.post(PREFIX + "/disposition", json=request)
+    assert duplicate.status_code == 200 and duplicate.json()["begin"] is False
+    request.update(state="unknown", code="mode_change_unknown", reason="Native mode outcome is uncertain.")
+    assert client.post(PREFIX + "/disposition", json=request).status_code == 200
+    assert client.post(PREFIX + "/poll", json=current(owner)).json()["messages"] == []
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None and receipt["stage"] == "unknown"
+    assert receipt["consumed_at"] is None and receipt["sdk_accepted_at"] is None
+
+
+@pytest.mark.parametrize("operation", ["interrupt", "mode"])
+def test_native_control_cannot_start_after_installation_admission_closes(
+    serving: Serving, operation: str,
+) -> None:
+    app, client, db, consumer = serving
+    enroll(client, consumer)
+    owner = native_enroll(client, replace(consumer, incarnation="native-controls", message_base=1))
+    message_id = db.enqueue_live_message(
+        consumer.session_id, "peer", "autopilot" if operation == "mode" else "interrupt",
+        time.time(), kind="control:set-mode" if operation == "mode" else "prompt",
+        delivery="steer" if operation == "mode" else "interrupt",
+    )
+    original = poll(client, owner) if operation == "interrupt" else None
+    runtime = app.state.live_inbox_runtime
+    installation = app.state.loop_governance.runtime_installation(db)
+    db.close_runtime_epoch(
+        installation, db.runtime_epoch(installation), transition_id="close-native-controls",
+        target_assembly="next", predecessor=runtime._producer,
+    )
+    if operation == "interrupt":
+        assert original is not None
+        response = client.post(PREFIX + "/begin", json=attempt(owner, original))
+    else:
+        response = client.post(PREFIX + "/disposition", json={
+            **current(owner), "message_id": message_id, "state": "started",
+            "code": "mode_change_started", "reason": "Original native mode control admitted.",
+        })
+    assert response.status_code == 409 and "closed" in response.text
+    retained = db.execute_read("SELECT * FROM live_messages WHERE id=?", (message_id,))[0]
+    assert retained["handoff_started_at"] is None and retained["disposition_json"] is None
 
 
 @pytest.mark.parametrize("expired,empty", [(False, False), (False, True), (True, False)])

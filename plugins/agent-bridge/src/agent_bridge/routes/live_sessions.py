@@ -937,7 +937,8 @@ async def list_live_messages(
     """Pending (undelivered) messages for a live session, oldest-first.
 
     This is the extension's inbox **poll**: it drains these, injects each via
-    ``session.send``, then acks. 404 if the session is not registered.
+    the native session, then acks after observing consumption. 404 if the
+    session is not registered.
     """
     db = _db(request)
     row = db.get_live_session(session_id)
@@ -974,7 +975,7 @@ async def list_live_messages(
 async def ack_live_messages(
     session_id: str, body: AckMessagesRequest, request: Request
 ) -> AckMessagesResult:
-    """Mark delivered messages acked (the extension acks after ``session.send``).
+    """Mark delivered messages acked after the extension observes native consumption.
 
     Idempotent and scoped to ``session_id``: re-acking an already-delivered id
     is a no-op, so a redelivered ack never errors or double-counts.

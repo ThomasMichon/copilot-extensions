@@ -2,27 +2,65 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, redirect_stderr, redirect_stdout
 import os
 from pathlib import Path
 import sys
 import time
+from typing import TextIO
+
+Prepare = Callable[[list[str], int], object]
 
 
 @contextmanager
-def capture_native_streams(stdout, stderr):
+def capture_native_streams(stdout: TextIO, stderr: TextIO) -> Iterator[None]:
     """Keep native descendants' real handles in the same sanitizable evidence."""
     original = sys.__stdout__, sys.__stderr__
     try:
-        sys.__stdout__, sys.__stderr__ = stdout, stderr
+        setattr(sys, "__stdout__", stdout)
+        setattr(sys, "__stderr__", stderr)
         with redirect_stdout(stdout), redirect_stderr(stderr):
             yield
     finally:
-        sys.__stdout__, sys.__stderr__ = original
+        setattr(sys, "__stdout__", original[0])
+        setattr(sys, "__stderr__", original[1])
+
+
+@contextmanager
+def bridge_consumer(root: Path, *, prepare: Prepare) -> Iterator[Path]:
+    from _admission_protocol import acquire
+    from plugin_test_cache import ordinary_cache_root
+    from plugin_test_resources import venv_root
+
+    prepare([
+        sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge", "--prepare-only",
+    ], 300)
+    environment = ordinary_cache_root(venv_root(root) / "agent-bridge")
+    python = environment / "Scripts" / "python.exe"
+    if not python.is_file():
+        raise ValueError("Worktrees native qualification requires the prepared Bridge consumer environment")
+    lease = acquire(0, environment)
+    try:
+        yield python
+    finally:
+        lease.release()
+
+
+def driver_service_lifetime(root: Path, output: Path, *, prepare: Prepare) -> int:
+    """Use only the standalone Driver environment within one aggregate clock."""
+    from qualify_driver_service import qualify
+
+    deadline = time.monotonic() + 420
+    prepare([
+        sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-remote-driver",
+        "--prepare-only",
+    ], 300)
+    return qualify(root, output=output, deadline=deadline)
 
 
 def worktrees_lifetime(
-    root: Path, output: Path, *, prepare, packet: str = "native-worktrees-caller-jobs",
+    root: Path, output: Path, *, prepare: Prepare, packet: str = "native-worktrees-caller-jobs",
 ) -> int:
     """Prepare normally, then use the existing leased, permissive native owner."""
     from _admission_protocol import acquire
@@ -48,14 +86,22 @@ def worktrees_lifetime(
         raise ValueError("Worktrees lifetime requires its disposable hosted test owner")
     (output / "junit").mkdir(parents=True, exist_ok=True)
     lease = acquire(0, environment_root)
+    bridge_owner = bridge_consumer(root, prepare=prepare)
     try:
-        with TestSandbox(prefix="wl-", dir=Path(temporary)) as directory:
+        bridge_python = bridge_owner.__enter__()
+    except BaseException:
+        lease.release()
+        raise
+    try:
+        sandbox_factory: Callable[..., AbstractContextManager[str]] = TestSandbox
+        with sandbox_factory(prefix="wl-", dir=Path(temporary)) as directory:
             sandbox = Path(directory)
             environment = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
             environment.update({
                 "PYTHONPATH": str(root / "tools"),
                 "COPILOT_EXTENSIONS_TEST_VENV_ROOT": str(venv_root(root)),
                 "WORKTREES_NATIVE_CALLER_JOBS": "1",
+                "COPILOT_DRIVER_BRIDGE_PYTHON": str(bridge_python),
             })
             with (
                 (output / "phase-native-lifetime.stdout.log").open("w", encoding="utf-8") as stdout,
@@ -80,6 +126,7 @@ def worktrees_lifetime(
 
                     report_fixture_logs(sandbox)
     finally:
+        bridge_owner.__exit__(None, None, None)
         lease.release()
     if result:
         raise ValueError(f"Worktrees native lifetime fixture failed ({result})")

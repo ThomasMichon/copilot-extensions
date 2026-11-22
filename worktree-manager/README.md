@@ -1008,6 +1008,13 @@ without changing user or repository Git configuration. Before constructing the
 runtime, bootstrap verifies the tracked checkout is complete and unchanged;
 a zero checkout exit code alone is insufficient.
 
+Both bootstraps accept `--describe-install` alone to acquire the configured
+source and report that source's installer capability without constructing,
+selecting or launching a Manager runtime. This still performs ordinary source
+and bootstrap-tool preparation; it is not an installed-runtime readiness probe.
+Application and installation arguments cannot be combined with this option.
+An unsupported selected installer fails without falling through to installation.
+
 Only a candidate passing isolated installed-origin and real CLI-import health
 receives canonical completion and becomes `current-version`. Construction failure
 leaves the previous selector and mux untouched. A legacy payload-only or
