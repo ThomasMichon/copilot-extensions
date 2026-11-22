@@ -205,7 +205,7 @@ def test_embody_establishes_trust_before_spawning_copilot(
 
 @pytest.mark.parametrize("source", ["overlay", "relative-overlay", "account-overlay", "inherited"])
 @pytest.mark.parametrize("mode", ["cold", "invalid-config"])
-def test_embody_establishes_trust_in_effective_launch_home(
+def test_embody_establishes_trust_only_in_default_launch_home(
     sample_record: tracking.WorktreeRecord, tmp_path: Path, tmp_tracking_dir: Path,
     monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str], source: str, mode: str,
@@ -233,13 +233,16 @@ def test_embody_establishes_trust_in_effective_launch_home(
         }
     before = dict(os.environ)
     _assert_embody_trust(
-        (checkout, launch_home), sample_record, tmp_tracking_dir, monkeypatch, capfd, mode,
+        (checkout, launch_home), sample_record, tmp_tracking_dir, monkeypatch, capfd,
+        "unsupported-home" if mode == "cold" else mode,
         launch_environment=environment,
     )
     assert dict(os.environ) == before
     assert default_config.read_text(encoding="utf-8") == "malformed default"
     assert not (default_home / "config.lock").exists()
-    assert (launch_home / "config.lock").is_file()
+    assert not (launch_home / "config.lock").exists()
+    if mode == "cold":
+        assert not launch_home.exists()
     assert not inherited_home.exists()
 
 
@@ -301,10 +304,13 @@ def _assert_embody_trust(
     )
     result = command.cmd_embody(args)
     output = capfd.readouterr()
-    if mode == "invalid-config":
+    if mode in {"invalid-config", "unsupported-home"}:
         assert result == 3, output.out + output.err
         assert "folder trust" in output.out + output.err
-        assert (home / "config.json").read_text() == "malformed"
+        if mode == "invalid-config":
+            assert (home / "config.json").read_text() == "malformed"
+        else:
+            assert "non-default COPILOT_HOME" in output.out + output.err
     else:
         assert result == 0, output.out + output.err
     assert spawned == ([str(checkout)] if mode == "cold" else [])

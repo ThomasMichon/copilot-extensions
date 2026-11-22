@@ -44,18 +44,16 @@ def ensure_record_trusted(
         raise permissions.FolderTrustError("Refusing folder trust for a terminal managed worktree")
     from . import retained_checkout
 
-    copilot_home = (
-        _launch_home(environment or {}, record.worktree_path)
-        if environment is not None or os.environ.get("COPILOT_HOME") else None
-    )
-
-    def trust_folder() -> bool:
-        if copilot_home is None:
-            return permissions.ensure_trusted_folder(record.worktree_path)
-        return permissions.ensure_trusted_folder(record.worktree_path, copilot_home=copilot_home)
+    if environment is not None:
+        home = _launch_home(environment, record.worktree_path)
+        if home.resolve() != permissions._copilot_dir().resolve():
+            raise permissions.FolderTrustError(
+                "Cold embodiment folder trust currently requires the default Copilot home; "
+                "non-default COPILOT_HOME support requires matching finalization cleanup"
+            )
 
     if retained_checkout.is_local(record, config):
-        return trust_folder()
+        return permissions.ensure_trusted_folder(record.worktree_path)
     actual = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
     if record.platform != actual or config.platform != actual:
         raise ExecutionSpaceError("Folder trust requires the current native execution platform")
@@ -75,7 +73,7 @@ def ensure_record_trusted(
             raise ExecutionSpaceError("Folder trust requires a valid local claim identity")
         if resolve_legacy_wsl_owner_ref(ref, config) is None:
             raise ExecutionSpaceError("Folder trust requires a local execution-space record")
-    return trust_folder()
+    return permissions.ensure_trusted_folder(record.worktree_path)
 
 
 def prepare_for_launch(

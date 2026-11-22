@@ -20,12 +20,10 @@ import tempfile
 import warnings
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, ParamSpec, TypeVar, cast
+from typing import Any, Callable
 
 
 _PERMISSION_LOCK_TIMEOUT = 2.0
-P = ParamSpec("P")
-R = TypeVar("R", bool, list[str])
 
 
 class FolderTrustError(RuntimeError):
@@ -34,7 +32,7 @@ class FolderTrustError(RuntimeError):
 
 def _serialized(
     path_for_lock: Callable[[], Path], *, merge: bool = False, strict: bool = False,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
+) -> Callable:
     """Serialize each user-wide file's entire RMW, including first creation.
 
     Reuse the persistent ``config.lock`` / ``permissions-config.lock`` sidecars
@@ -42,9 +40,9 @@ def _serialized(
     atomic JSON replacement must not change the inode carrying the lock.
     Best-effort acquisition failures warn; strict entry failures raise.
     """
-    def decorate(mutator: Callable[P, R]) -> Callable[P, R]:
+    def decorate(mutator: Callable) -> Callable:
         @wraps(mutator)
-        def locked(*args: P.args, **kwargs: P.kwargs) -> R:
+        def locked(*args: Any, **kwargs: Any) -> Any:
             from .tracking import _RecordLock
 
             path = path_for_lock()
@@ -54,7 +52,7 @@ def _serialized(
                 except OSError as exc:
                     raise FolderTrustError(f"Could not prepare Copilot folder trust: {exc}") from exc
             if not strict and not path.parent.exists():
-                return cast(R, [] if merge else False)
+                return [] if merge else False
             lock = _RecordLock(
                 path, timeout=_PERMISSION_LOCK_TIMEOUT, require_sidecar=True,
             )
@@ -74,7 +72,7 @@ def _serialized(
                     RuntimeWarning,
                     stacklevel=2,
                 )
-                return cast(R, [] if merge else False)
+                return [] if merge else False
             try:
                 return mutator(*args, **kwargs)
             finally:
@@ -333,22 +331,22 @@ def _add_trusted_folder(config_file: Path, worktree_path: str) -> bool:
     return True
 
 
-def _ensure_trusted_folder(worktree_path: str, config_file: Path) -> bool:
+@_serialized(lambda: _config_path(), strict=True)
+def _ensure_trusted_folder(worktree_path: str) -> bool:
     try:
         root = Path(worktree_path)
         if not root.is_dir() or root.is_symlink():
             raise ValueError("native checkout disappeared before folder trust could be established")
-        return _add_trusted_folder(config_file, worktree_path)
+        return _add_trusted_folder(_config_path(), worktree_path)
     except (OSError, ValueError, TypeError) as exc:
         raise FolderTrustError(f"Could not ensure Copilot folder trust: {exc}") from exc
 
 
-def ensure_trusted_folder(worktree_path: str, *, copilot_home: Path | None = None) -> bool:
+def ensure_trusted_folder(worktree_path: str) -> bool:
     """Ensure native folder trust after the caller admits this checkout.
 
     False means already trusted, never failure. This does not clone tool
-    permissions or approve extensions. An explicit home selects both the
-    configuration file and its persistent lock without changing caller state.
+    permissions or approve extensions.
     """
     try:
         root = Path(worktree_path)
@@ -357,9 +355,7 @@ def ensure_trusted_folder(worktree_path: str, *, copilot_home: Path | None = Non
             or root.resolve() == Path(root.anchor)
         ):
             raise ValueError("folder trust requires an existing native checkout directory")
-        config_file = _config_path() if copilot_home is None else copilot_home / "config.json"
-        ensure = _serialized(lambda: config_file, strict=True)(_ensure_trusted_folder)
-        return ensure(str(root.resolve()), config_file)
+        return _ensure_trusted_folder(str(root.resolve()))
     except (OSError, ValueError, TypeError) as exc:
         raise FolderTrustError(f"Could not ensure Copilot folder trust: {exc}") from exc
 

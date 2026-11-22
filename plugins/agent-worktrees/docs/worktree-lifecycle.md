@@ -149,11 +149,12 @@ resume planning, cold managed `embody`, and successful `register-session` /
 `trustedFolders`. Cold embodiment establishes trust after launch admission and
 the final live-owner checks, before starting Copilot; an unreadable or malformed
 trust configuration refuses launch rather than starting an unattended trust prompt.
-It uses the launch environment's effective `COPILOT_HOME` (including inherited
-values), not a different caller-default configuration, without mutating the parent
-environment. Relative launch homes resolve against the admitted checkout.
-The same resolved home is passed explicitly to the mux, so a retained mux
-server's environment cannot select a different configuration.
+Cold embodiment currently supports only the default Copilot home. A different
+effective `COPILOT_HOME`, including inherited or account-home overrides, refuses
+launch before trust-file mutation until matching finalization cleanup is supported.
+Relative launch homes resolve against the admitted checkout. The default home is
+passed explicitly to the mux, so a retained mux server cannot select a different
+configuration; the parent environment is unchanged.
 An already-live embodiment does not change folder trust. Resume
 planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.
