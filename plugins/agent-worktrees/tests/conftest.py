@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+from collections.abc import Callable, Iterator
+import subprocess
+
+
 import json
 import os
 import re
@@ -17,7 +22,7 @@ from agent_worktrees import tracking
 
 
 @pytest.fixture
-def payload_subprocess_double(monkeypatch):
+def payload_subprocess_double(monkeypatch: pytest.MonkeyPatch) -> None:
     """Classification tests retain their subprocess double; native Job tests opt out."""
     from agent_worktrees import update_acquisition
 
@@ -25,7 +30,7 @@ def payload_subprocess_double(monkeypatch):
     from agent_procutil import owned_process
     import subprocess
 
-    def run(argv, *, on_settled=None, **kwargs):
+    def run(argv: list[str], *, on_settled: Callable[[], None] | None=None, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         kwargs.pop("budget", None)
         try:
             return subprocess.run(argv, capture_output=True, text=True, **kwargs)
@@ -37,7 +42,7 @@ def payload_subprocess_double(monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def native_bash():
+def native_bash() -> str:
     from native_shell_support import ShellUnavailable, resolve_native_bash
 
     try:
@@ -47,7 +52,7 @@ def native_bash():
 
 
 @pytest.fixture(scope="session")
-def native_powershell():
+def native_powershell() -> str:
     from native_shell_support import ShellUnavailable, resolve_native_powershell
 
     try:
@@ -57,7 +62,7 @@ def native_powershell():
 
 
 @pytest.fixture
-def git_only_mux(monkeypatch):
+def git_only_mux(monkeypatch: pytest.MonkeyPatch) -> None:
     """Git-only fixtures never own a mux or contact the host's mux service."""
     from agent_worktrees import sessions
 
@@ -67,12 +72,12 @@ def git_only_mux(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_identity_key(monkeypatch, tmp_path):
+def _isolate_identity_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_IDENTITY_KEY", str(tmp_path / "absent-identity.key"))
 
 
 @pytest.fixture
-def keyed_identity_payload(monkeypatch):
+def keyed_identity_payload(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     from agent_worktrees import identity_marker
 
     captured = {}
@@ -80,7 +85,7 @@ def keyed_identity_payload(monkeypatch):
     monkeypatch.setattr(identity_marker, "load_identity_key", lambda: key)
 
     class Cipher:
-        def encrypt(self, nonce, plaintext, associated_data):
+        def encrypt(self, nonce: bytes, plaintext: bytes, associated_data: bytes | None) -> bytes:
             import json
 
             captured.update(json.loads(plaintext))
@@ -113,7 +118,7 @@ _load_full_command_surface_once()
 
 
 @pytest.fixture(autouse=True)
-def _disable_resident_monitor_processes():
+def _disable_resident_monitor_processes() -> Iterator[None]:
     """Unit tests opt in explicitly when resident monitor behavior is under test."""
     import os
 
@@ -130,7 +135,7 @@ def _disable_resident_monitor_processes():
 
 
 @pytest.fixture(autouse=True)
-def _assume_interactive_terminal(monkeypatch):
+def _assume_interactive_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default the non-interactive-bare-invocation guard to "interactive".
 
     Under pytest's default output capture, ``sys.stdin.isatty()`` is False
@@ -178,7 +183,7 @@ def _headless_creationflags(flags: int) -> int:
     return flags | _CREATE_NO_WINDOW
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     import sys
 
     if sys.platform != "win32":
@@ -189,17 +194,17 @@ def pytest_configure(config):
     if getattr(orig_init, "_aw_headless", False):
         return
 
-    def _headless_init(self, *args, **kwargs):
+    def _headless_init(self: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:
         kwargs["creationflags"] = _headless_creationflags(
             kwargs.get("creationflags", 0))
         return orig_init(self, *args, **kwargs)
 
-    _headless_init._aw_headless = True
-    _headless_init._aw_orig = orig_init
-    subprocess.Popen.__init__ = _headless_init
+    setattr(_headless_init, "_aw_headless", True)
+    setattr(_headless_init, "_aw_orig", orig_init)
+    setattr(subprocess.Popen, "__init__", _headless_init)
 
 
-def pytest_unconfigure(config):
+def pytest_unconfigure(config: pytest.Config) -> None:
     import sys
 
     if sys.platform != "win32":
@@ -209,7 +214,7 @@ def pytest_unconfigure(config):
     cur = subprocess.Popen.__init__
     orig = getattr(cur, "_aw_orig", None)
     if orig is not None:
-        subprocess.Popen.__init__ = orig
+        setattr(subprocess.Popen, "__init__", orig)
 
 # ---------------------------------------------------------------------------
 # Global HOME isolation -- the suite must NEVER touch real machine state.
@@ -241,7 +246,7 @@ def pytest_unconfigure(config):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _isolate_agent_worktrees_home(tmp_path_factory):
+def _isolate_agent_worktrees_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     import os
     import pathlib
 
@@ -267,29 +272,29 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
     os.environ["HOME"] = str(fake_home)
     # ``repos.py`` and several helpers call ``Path.home()`` directly, so the env
     # vars alone are not enough -- patch the resolver on the class too.
-    pathlib.Path.home = classmethod(lambda cls: fake_home)
+    setattr(pathlib.Path, "home", classmethod(lambda cls: fake_home))
     uses_pwd = os.name != "nt"
     if uses_pwd:
         import pwd
 
-        saved_getpwuid = pwd.getpwuid
+        saved_getpwuid = cast(Callable[[int], tuple[Any, ...]], getattr(pwd, "getpwuid"))
 
-        def isolated_getpwuid(uid):
+        def isolated_getpwuid(uid: int) -> tuple[Any, ...]:
             account = saved_getpwuid(uid)
-            if uid == os.getuid():
+            if uid == getattr(os, "getuid")():
                 fields = list(account)
                 fields[5] = str(fake_home)
-                return pwd.struct_passwd(fields)
+                return cast(Callable[[list[Any]], tuple[Any, ...]], getattr(pwd, "struct_passwd"))(fields)
             return account
 
-        pwd.getpwuid = isolated_getpwuid
+        setattr(pwd, "getpwuid", isolated_getpwuid)
     try:
         yield fake_home
     finally:
         if uses_pwd:
-            pwd.getpwuid = saved_getpwuid
+            setattr(pwd, "getpwuid", saved_getpwuid)
         if saved_path_home is not None:
-            pathlib.Path.home = saved_path_home
+            setattr(pathlib.Path, "home", saved_path_home)
         else:  # pragma: no cover - defensive; home is defined on Path in CPython
             try:
                 del pathlib.Path.home
@@ -314,7 +319,7 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _reset_active_project():
+def _reset_active_project() -> Iterator[None]:
     import os
 
     from agent_worktrees import config as _cfg
@@ -335,7 +340,7 @@ def _reset_active_project():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _isolate_pivots(tmp_path_factory):
+def _isolate_pivots(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Point the picker's pivot-manifest registry at an empty tmp dir so tests
     are hermetic regardless of what a dev machine has deployed under
     ``~/.agent-worktrees/pivots/`` (e.g. the agent-dispatch manifest). Tests
@@ -370,7 +375,7 @@ def _isolate_pivots(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def _assume_valid_claimant_worktree(monkeypatch):
+def _assume_valid_claimant_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default ``pr_cli.require_claimant_worktree``'s underlying CWD->worktree
     resolution to "resolves cleanly" for every test.
 
@@ -409,7 +414,7 @@ def tmp_session_state_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
+def monkeypatch_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tmp_tracking_dir: Path) -> None:
     """Patch config helpers to use tmp dirs."""
     from agent_worktrees import config as _cfg
 
@@ -445,9 +450,9 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
         "machines: {}\n", encoding="utf-8",
     )
 
-    def _fake_load_project_config(name, **_kwargs):
+    def _fake_load_project_config(name: str, **_kwargs: Any) -> cfg.Config:
         return _cfg.Config(
-            srcroot=str(tmp_path), machine="test", platform=_cfg.detect_platform(), repo_name=name,
+            srcroot=str(tmp_path), machine="test", platform=cast(Callable[[], str], getattr(_cfg, "detect_platform"))(), repo_name=name,
             repos={name: _cfg.RepoConfig(
                 anchor=str(fake_anchor), worktree_root=str(tmp_tracking_dir),
             )},
@@ -461,18 +466,18 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
 
 
 @pytest.fixture
-def overwrite_record_nonce():
+def overwrite_record_nonce() -> Callable[[Path, str | None], tracking.WorktreeRecord]:
     """Model persisted replacement/legacy damage outside the guarded writer."""
     import yaml
 
-    def overwrite(path: Path, nonce: str | None):
+    def overwrite(path: Path, nonce: str | None) -> tracking.WorktreeRecord:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if nonce is None:
             raw.pop("creation_nonce", None)
         else:
             raw["creation_nonce"] = nonce
         path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-        record = tracking._load_record_uncached(path)
+        record = cast(Callable[[Path], tracking.WorktreeRecord], getattr(tracking, "_load_record_uncached"))(path)
         assert record.creation_nonce == (nonce or "")
         return record
 
@@ -512,7 +517,7 @@ def make_session_dir(
     lock_pid: int | None = None,
     has_events_file: bool = True,
     context_pct: int | None = None,
-    substatus: dict | None = None,
+    substatus: dict[str, Any] | None = None,
 ) -> Path:
     """Create a mock session directory with workspace.yaml and optional files."""
     sdir = session_state_dir / session_id
@@ -560,12 +565,12 @@ from agent_worktrees import config as cfg  # noqa: E402
 from agent_worktrees import git_ops  # noqa: E402
 
 
-def _pr_git(*args: str, cwd) -> str:
+def _pr_git(*args: str, cwd: str | Path) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
 
 @contextmanager
-def _seed_directory(tmp_path_factory, key):
+def _seed_directory(tmp_path_factory: pytest.TempPathFactory, key: str) -> Iterator[tuple[Path, bool]]:
     """Publish one immutable seed within the runner-owned plugin sandbox."""
     if not re.fullmatch(r"[a-z0-9-]+", key):
         raise ValueError(f"invalid fixture seed key: {key!r}")
@@ -605,7 +610,7 @@ def _seed_directory(tmp_path_factory, key):
 
 
 @pytest.fixture
-def record_repo(tmp_path: Path, monkeypatch):
+def record_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[cfg.Config, str, Path, Path]:
     """Private persisted-record inputs without native Git setup."""
     tracking_d = tmp_path / "tracking"
     tracking_d.mkdir()
@@ -627,14 +632,14 @@ def record_repo(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_d)
     monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
-    tracking.create_new_record(
+    cast(Callable[..., tracking.WorktreeRecord], getattr(tracking, "create_new_record"))(
         worktree_id, f"worktree/{worktree_id}", str(wt_path),
         "ext", "test", "linux", tracking_d,
     )
     return config, worktree_id, wt_path, tmp_path / "remote.git"
 
 
-def _build_pr_repo_seed(tmp_path):
+def _build_pr_repo_seed(tmp_path: Path) -> Path:
     remote_dir = tmp_path / "remote.git"
     anchor = tmp_path / "anchor"
     wt_root = tmp_path / "worktrees"
@@ -678,7 +683,7 @@ def _build_pr_repo_seed(tmp_path):
 
 
 @pytest.fixture(scope="session")
-def _pr_repo_seed(tmp_path_factory):
+def _pr_repo_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Build immutable topology once per contained run; copy mutable test state."""
     with _seed_directory(tmp_path_factory, "base") as (seed, build):
         if build:
@@ -707,7 +712,7 @@ def _repair_copied_worktree(seed_anchor: Path, seed_checkout: Path, anchor: Path
     assert Path(common).resolve() == (anchor / ".git").resolve()
 
 
-def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
+def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[cfg.Config, str, Path, Path]:
     """Copy private Git stores and repair the relocated administrative links."""
     shutil.copytree(
         seed, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile
@@ -771,7 +776,7 @@ def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
                 pr.pr_revision += 1
         tracking.save_record(record, record_path)
     else:
-        tracking.create_new_record(
+        cast(Callable[..., tracking.WorktreeRecord], getattr(tracking, "create_new_record"))(
             worktree_id, f"worktree/{worktree_id}", str(wt_path),
             "ext", "test", "linux", tracking_d,
         )
@@ -780,15 +785,18 @@ def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
 
 
 @pytest.fixture
-def pr_repo(tmp_path: Path, monkeypatch, _pr_repo_seed):
+def pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _pr_repo_seed: Path) -> tuple[cfg.Config, str, Path, Path]:
     """Private mutable Git topology and fresh tracking/config bindings per case."""
     return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
 
 
 @contextmanager
-def _published_seed_environment(tmp_path_factory):
+def _published_seed_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pytest.MonkeyPatch]:
     """Session setup must not use the host HOME, Git config, or identity key."""
-    isolate_home = contextmanager(_isolate_agent_worktrees_home.__wrapped__)
+    isolate_home = contextmanager(cast(
+        Callable[[pytest.TempPathFactory], Iterator[Path]],
+        getattr(_isolate_agent_worktrees_home, "__wrapped__"),
+    ))
     with isolate_home(tmp_path_factory) as home, pytest.MonkeyPatch.context() as patch:
         patch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
         patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
@@ -798,7 +806,7 @@ def _published_seed_environment(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def _published_pr_seed(tmp_path_factory, _pr_repo_seed):
+def _published_pr_seed(tmp_path_factory: pytest.TempPathFactory, _pr_repo_seed: Path) -> Path:
     from agent_worktrees import pr_ops
 
     with _seed_directory(tmp_path_factory, "published") as (seed, build):
@@ -811,13 +819,13 @@ def _published_pr_seed(tmp_path_factory, _pr_repo_seed):
 
 
 @pytest.fixture
-def published_pr_repo(tmp_path: Path, monkeypatch, _published_pr_seed):
+def published_pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _published_pr_seed: Path) -> tuple[cfg.Config, str, Path, Path]:
     """Independent real-Git published state for post-publication behavior."""
     return _copy_pr_repo(_published_pr_seed, tmp_path, monkeypatch)
 
 
 @pytest.fixture(scope="session")
-def _published_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+def _published_refspec_pr_seed(tmp_path_factory: pytest.TempPathFactory, _pr_repo_seed: Path) -> Path:
     from agent_worktrees import pr_ops
 
     with _seed_directory(tmp_path_factory, "published-refspec") as (seed, build):
@@ -835,7 +843,7 @@ def _published_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
 
 
 @pytest.fixture
-def published_refspec_pr_repo(tmp_path: Path, monkeypatch, _published_refspec_pr_seed):
+def published_refspec_pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _published_refspec_pr_seed: Path) -> tuple[cfg.Config, str, Path, Path]:
     config, wid, worktree, remote = _copy_pr_repo(
         _published_refspec_pr_seed, tmp_path, monkeypatch,
     )
@@ -848,17 +856,17 @@ def published_refspec_pr_repo(tmp_path: Path, monkeypatch, _published_refspec_pr
 
 
 @pytest.fixture(scope="session")
-def _rebased_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+def _rebased_refspec_pr_seed(tmp_path_factory: pytest.TempPathFactory, _pr_repo_seed: Path) -> Path:
     from test_pr_rewrite import publish_and_rebase
 
     with _seed_directory(tmp_path_factory, "rebased-refspec") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
-                publish_and_rebase(_copy_pr_repo(_pr_repo_seed, seed, patch), "refspec")
+                cast(Callable[..., None], publish_and_rebase)(_copy_pr_repo(_pr_repo_seed, seed, patch), "refspec")
         return seed
 
 
-def _copy_rebased_pr_repo(seed, tmp_path, monkeypatch, scheme):
+def _copy_rebased_pr_repo(seed: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scheme: str) -> tuple[cfg.Config, str, Path, Path, str]:
     config, wid, worktree, remote = _copy_pr_repo(seed, tmp_path, monkeypatch)
     config = replace(config, repos={
         config.repo_name: replace(config.default_repo, pr=replace(
@@ -867,43 +875,45 @@ def _copy_rebased_pr_repo(seed, tmp_path, monkeypatch, scheme):
     })
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    assert record.pr is not None
     return config, wid, worktree, remote, record.pr.head_sha
 
 
 @pytest.fixture
-def rebased_refspec_pr_repo(tmp_path, monkeypatch, _rebased_refspec_pr_seed):
+def rebased_refspec_pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _rebased_refspec_pr_seed: Path) -> tuple[cfg.Config, str, Path, Path, str]:
     """Independent real post-rebase state for rewrite, not rebase, contracts."""
     return _copy_rebased_pr_repo(_rebased_refspec_pr_seed, tmp_path, monkeypatch, "refspec")
 
 
 @pytest.fixture(scope="session")
-def _rebased_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
+def _rebased_snapshot_pr_seed(tmp_path_factory: pytest.TempPathFactory, _pr_repo_seed: Path) -> Path:
     from test_pr_rewrite import publish_and_rebase
 
     with _seed_directory(tmp_path_factory, "rebased-snapshot") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
-                publish_and_rebase(_copy_pr_repo(_pr_repo_seed, seed, patch), "snapshot")
+                cast(Callable[..., None], publish_and_rebase)(_copy_pr_repo(_pr_repo_seed, seed, patch), "snapshot")
         return seed
 
 
 @pytest.fixture
-def rebased_snapshot_pr_repo(tmp_path, monkeypatch, _rebased_snapshot_pr_seed):
+def rebased_snapshot_pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _rebased_snapshot_pr_seed: Path) -> tuple[cfg.Config, str, Path, Path, str]:
     return _copy_rebased_pr_repo(_rebased_snapshot_pr_seed, tmp_path, monkeypatch, "snapshot")
 
 
 @pytest.fixture
-def rebased_pr_repo(scheme, request):
-    return request.getfixturevalue(f"rebased_{scheme}_pr_repo")
+def rebased_pr_repo(scheme: str, request: pytest.FixtureRequest) -> tuple[cfg.Config, str, Path, Path, str]:
+    return cast(tuple[cfg.Config, str, Path, Path, str], request.getfixturevalue(f"rebased_{scheme}_pr_repo"))
 
 
 @pytest.fixture(scope="session")
-def _fork_pr_seed(tmp_path_factory, _published_pr_seed):
+def _fork_pr_seed(tmp_path_factory: pytest.TempPathFactory, _published_pr_seed: Path) -> Path:
     with _seed_directory(tmp_path_factory, "fork") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
                 config, wid, worktree, remote = _copy_pr_repo(_published_pr_seed, seed, patch)
                 record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+                assert record.pr is not None
                 fork = seed / "fork.git"
                 shutil.copytree(remote, fork, copy_function=shutil.copyfile)
                 _pr_git("--git-dir", str(fork), "update-ref", "-d", "refs/heads/master", cwd=fork)
@@ -921,7 +931,7 @@ def _fork_pr_seed(tmp_path_factory, _published_pr_seed):
 
 
 @pytest.fixture
-def fork_pr_repo(tmp_path: Path, monkeypatch, _fork_pr_seed):
+def fork_pr_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _fork_pr_seed: Path) -> tuple[cfg.Config, str, Path, Path]:
     """Private fork-only published head with independent feedback history."""
     return _copy_pr_repo(_fork_pr_seed, tmp_path, monkeypatch)
 
@@ -936,16 +946,16 @@ class _SubprocessRunInstaller:
     process-tree behavior opt out with ``@pytest.mark.real_installer_processes``.
     """
 
-    def __init__(self, argv, cwd, env, capture, output_fd=None):
+    def __init__(self, argv: list[str], cwd: str, env: dict[str, str] | None, capture: bool, output_fd: int | None=None) -> None:
         self._call = (list(argv), cwd, env, capture, output_fd)
-        self.returncode = None
+        self.returncode: int | None = None
         self.pid = 0
 
-    def communicate(self, timeout=None):
+    def communicate(self, timeout: float | None=None) -> tuple[str | bytes | None, None]:
         import subprocess
 
         argv, cwd, env, capture, output_fd = self._call
-        stdio = (
+        stdio: dict[str, Any] = (
             {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
             if capture else {}
         )
@@ -957,13 +967,13 @@ class _SubprocessRunInstaller:
 
 
 class _SubprocessRunOutput:
-    def __init__(self, process, *, on_output=None, output_fds=None, capture=True):
+    def __init__(self, process: _SubprocessRunInstaller, *, on_output: Callable[[str, bytes], None] | None=None, output_fds: dict[str, int] | None=None, capture: bool=True) -> None:
         self.process = process
         self.on_output = on_output
         self.output_fds = output_fds or {}
-        self.output = ("", None)
+        self.output: tuple[str | bytes | None, None] = ("", None)
 
-    def wait(self, timeout, **kwargs):
+    def wait(self, timeout: float | None, **kwargs: Any) -> None:
         self.output = self.process.communicate(timeout=timeout)
         if self.output[0] and "stdout" in self.output_fds:
             content = self.output[0]
@@ -972,17 +982,17 @@ class _SubprocessRunOutput:
                 content.encode("utf-8") if isinstance(content, str) else content,
             )
 
-    def deliver(self):
+    def deliver(self) -> None:
         if self.output[0] and self.on_output is not None:
             content = self.output[0]
             self.on_output("stdout", content.encode("utf-8") if isinstance(content, str) else content)
 
-    def finish(self, timeout, **kwargs):
+    def finish(self, timeout: float | None, **kwargs: Any) -> tuple[str | bytes | None, None]:
         return self.output
 
 
 @pytest.fixture(autouse=True)
-def _installer_processes_through_subprocess_run(request, monkeypatch):
+def _installer_processes_through_subprocess_run(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     if request.node.get_closest_marker("real_installer_processes"):
         return
     from agent_worktrees import installer_run

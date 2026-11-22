@@ -11,6 +11,9 @@ fixture-loading half is replaced by real data sources (``data_local`` / SSH).
 """
 from __future__ import annotations
 
+from typing import Any
+
+
 import datetime as _dt
 
 from . import source_identity
@@ -31,7 +34,7 @@ NOW = _dt.datetime.now()
 _PULSE_FRESH_SECS = 90
 
 
-def _pulse_level(w):
+def _pulse_level(w: dict[str, Any]) -> str | None:
     """Classify the live agent-intent pulse: 'awaiting', 'fresh', 'stale', None.
 
     'awaiting' -- the session is parked on a human (``live_rest`` ==
@@ -74,7 +77,7 @@ def _pulse_level(w):
     return "fresh"
 
 
-def _parse_pulse_ts(ts):
+def _parse_pulse_ts(ts: str | None) -> _dt.datetime | None:
     """Parse a pulse timestamp to a *naive local* datetime, or None.
 
     The live-pulse extension stamps ``new Date().toISOString()`` -- a UTC,
@@ -107,7 +110,7 @@ _STATE_LABEL = {
 }
 
 
-def _age(ts):
+def _age(ts: str | None) -> str:
     if not ts:
         return "-"
     try:
@@ -122,7 +125,7 @@ def _age(ts):
     return f"{int(s // 86400)}d"
 
 
-def _pr(w):
+def _pr(w: dict[str, Any]) -> str:
     pr = w.get("pr") or {}
     n = pr.get("number")
     if not n:
@@ -133,14 +136,14 @@ def _pr(w):
     return f"#{n}{tag}"
 
 
-def _state(w):
+def _state(w: dict[str, Any]) -> str:
     """Display label aligned with the canonical git WorktreeState vocabulary.
 
     Prefers the ``state`` field from ``list --json --classify`` (computed where
     git access exists, incl. per remote machine). Falls back to an approximation
     from tracking fields when classification is absent.
     """
-    from .. import prune
+    from .. import closure_descriptor as prune
 
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted.get("finalized_display"):
@@ -173,7 +176,7 @@ def _state(w):
             # is unavailable (an older remote without Phase 4's `closure`).
             closure_label = interpreted["label"] if interpreted["supported"] else None
             if closure_label in ("FINAL", "MERGED"):
-                return closure_label
+                return str(closure_label)
             return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
@@ -185,7 +188,7 @@ def _state(w):
     return (status or "?").upper()[:6]
 
 
-def _sess(w):
+def _sess(w: dict[str, Any]) -> str:
     if w.get("mux_observation_unavailable"):
         if (w.get("mux_last_known") or {}).get("present"):
             return "MUX(?)"
@@ -210,7 +213,7 @@ def _sess(w):
     return "·"
 
 
-def _age_secs(w):
+def _age_secs(w: dict[str, Any]) -> float:
     ts = (w.get("completed_at") if w.get("status") == "finalized"
           else w.get("started_at"))
     if not ts:
@@ -221,7 +224,7 @@ def _age_secs(w):
         return 1 << 40
 
 
-def _bucket_from_raw(w):
+def _bucket_from_raw(w: dict[str, Any]) -> str:
     """Cleanup bucket for a raw worktree dict.
 
     Prefers the authoritative ``cleanup_bucket`` emitted by
@@ -236,7 +239,7 @@ def _bucket_from_raw(w):
     """
     b = w.get("cleanup_bucket")
     if b:
-        return b
+        return str(b)
     # worktree-status-core: on the fallback path (old remote w/o an authoritative
     # cleanup_bucket), an agent-asserted follow-up downgrades a would-be clean
     # verdict to the REVIEW-class 'follow-up' bucket. (The authoritative path is
@@ -274,7 +277,7 @@ def _bucket_from_raw(w):
     return "unknown"
 
 
-def _ff_from_raw(w):
+def _ff_from_raw(w: dict[str, Any]) -> bool:
     """Whether a raw worktree dict is fast-forward eligible.
 
     Prefers the authoritative ``ff_eligible`` field; else mirrors
@@ -341,7 +344,7 @@ BUCKET_REASON = {
 }
 
 
-def _sessionless(w):
+def _sessionless(w: dict[str, Any]) -> bool:
     """True when we positively know a worktree has **no owning Copilot session**
     and is not otherwise in use -- the #1026 cold-start hazard.
 
@@ -364,16 +367,16 @@ def _sessionless(w):
 
 
 def norm(
-    w,
-    machine,
-    env,
+    w: dict[str, Any],
+    machine: str,
+    env: str,
     *,
-    source_kind=source_identity.MACHINE_SSH_KIND,
-    source_id=None,
-    source_label=None,
-    source_metadata=None,
-    source_capabilities=None,
-):
+    source_kind: str=source_identity.MACHINE_SSH_KIND,
+    source_id: str | None=None,
+    source_label: str | None=None,
+    source_metadata: dict[str, Any] | None=None,
+    source_capabilities: dict[str, Any] | None=None,
+) -> dict[str, Any]:
     """Normalize one raw worktree dict into the engine's record shape."""
     source_id = source_identity.resolve_id(
         source_kind, source_id, machine=str(machine), env=str(env)
@@ -556,13 +559,13 @@ def norm(
     }
 
 
-def for_machine(wts, machine, env):
+def for_machine(wts: list[dict[str, Any]], machine: str, env: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     here = [w for w in wts if w["machine"] == machine and w["env"] == env]
     annotate_pairs(here)
     return bucket(here)
 
 
-def for_source(wts, source_id):
+def for_source(wts: list[dict[str, Any]], source_id: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Return rows owned by one canonical source."""
     here = [w for w in wts if w.get("source_id") == source_id]
     annotate_pairs(here)
@@ -577,12 +580,12 @@ def for_source(wts, source_id):
 _PAIR_ATTENTION_STATES = frozenset({"WIP", "DIRTY", "ORPHAN"})
 
 
-def _pair_wants_attention(row) -> bool:
+def _pair_wants_attention(row: dict[str, Any]) -> bool:
     """True when a row has un-landed work (follow-up flag or a WIP/dirty state)."""
     return bool(row.get("follow_up")) or row.get("state") in _PAIR_ATTENTION_STATES
 
 
-def annotate_pairs(rows):
+def annotate_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attach each paired row's SIBLING summary + an aggregate attention flag.
 
     For every row carrying a ``pair_id`` (see :func:`norm`), match it against the
@@ -599,7 +602,7 @@ def annotate_pairs(rows):
     untouched). Idempotent. Pairs are carved on one machine, so callers annotate
     a per-machine slice (see :func:`for_machine`).
     """
-    by_pair: dict[str, list] = {}
+    by_pair: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         pid = r.get("pair_id")
         if pid:
@@ -622,7 +625,7 @@ def annotate_pairs(rows):
     return rows
 
 
-def bucket(wts):
+def bucket(wts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Split into (active, recent, completed), each most-recent-first.
 
     Sections key off the canonical *state*, not the tracking status:

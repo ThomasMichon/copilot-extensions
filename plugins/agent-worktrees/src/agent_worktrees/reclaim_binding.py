@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Iterable
+
+
 import platform
 import os
 import re
-from collections.abc import Iterable
 
 from . import locks, process_table_cache, sessions, tracking
 
@@ -15,10 +18,10 @@ def resolve_bound_copilots(
     session_id: str | None = None,
     worktree_id: str | None = None,
     worktree_path: str | None = None,
-    table: dict[int, dict] | None = None,
+    table: dict[int, dict[str, Any]] | None = None,
     session_ids: Iterable[str] | None = None,
     strict: bool = False,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Resolve lock-backed live Copilots and their mux/bare/unknown homing.
 
     ``session_ids`` selects exact registered session directories without a
@@ -35,7 +38,7 @@ def resolve_bound_copilots(
     if session_ids is None and table is None:
         table = process_table_cache.cached(reclaim.build_process_table)
     state_dir = sessions._session_state_dir()
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     if not strict and not state_dir.exists():
         return results
     if session_ids is None:
@@ -51,7 +54,7 @@ def resolve_bound_copilots(
         entries = [state_dir / sid for sid in ids]
     table = process_table_cache.cached(reclaim.build_process_table) if table is None else table
     posix = platform.system() != "Windows"
-    pane_ttys: list = [None]
+    pane_ttys: list[set[str] | None] = [None]
 
     for entry in entries:
         if not strict and not entry.is_dir():
@@ -89,12 +92,13 @@ def resolve_bound_copilots(
         if not live_pids or sessions._is_detached_session(entry):
             continue
         cwd = reclaim._session_cwd(entry)
-        if strict and worktree_path and not cwd:
+        if worktree_path and not cwd:
             from .push_timeout import ObservationUnavailable
 
             raise ObservationUnavailable("Registered session working directory is unavailable")
         if worktree_path and not reclaim._cwd_under(cwd, worktree_path):
             continue
+        wt_id: str | None
         if session_ids is not None and worktree_id:
             wt_id = worktree_id
         else:

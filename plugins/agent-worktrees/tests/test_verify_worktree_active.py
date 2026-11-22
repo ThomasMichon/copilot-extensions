@@ -8,22 +8,29 @@ catches a **bare** (un-muxed) bound Copilot the mux fleet view cannot see.
 
 from __future__ import annotations
 
+from typing import Any
+from pathlib import Path
+import pytest
+
+
 import types
 from unittest.mock import patch
 
-from agent_worktrees import sessions
+from agent_worktrees import sessions, tracking, locks
+import platform
+from typing import cast
 
 
-def _rec(wt_id="aaaa"):
-    return types.SimpleNamespace(worktree_id=wt_id, worktree_path="/tmp/wt")
+def _rec(wt_id: str="aaaa") -> tracking.WorktreeRecord:
+    return cast(tracking.WorktreeRecord, types.SimpleNamespace(worktree_id=wt_id, worktree_path="/tmp/wt"))
 
 
-def _bound(sid, homing):
+def _bound(sid: str, homing: str) -> dict[str, Any]:
     return {"session_id": sid, "pid": 123, "cwd": "/tmp/wt",
             "worktree_id": "aaaa", "homing": homing}
 
 
-def test_mux_only_is_inactive_source_mux():
+def test_mux_only_is_inactive_source_mux() -> None:
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=True, clients=1)}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots", return_value=[]):
@@ -35,7 +42,7 @@ def test_mux_only_is_inactive_source_mux():
     assert v.probes_ok is True
 
 
-def test_bare_lock_only_is_active_source_lock():
+def test_bare_lock_only_is_active_source_lock() -> None:
     """A bare bound Copilot with no mux is still ACTIVE (the case the mux fleet
     view misses); source is 'lock' and bare is flagged."""
     with patch("agent_worktrees.sessions.mux_status_many",
@@ -51,7 +58,7 @@ def test_bare_lock_only_is_active_source_lock():
     assert v.probes_ok is True
 
 
-def test_both_signals():
+def test_both_signals() -> None:
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=True, clients=2)}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots",
@@ -63,7 +70,7 @@ def test_both_signals():
     assert v.probes_ok is True
 
 
-def test_nothing_live_is_inactive():
+def test_nothing_live_is_inactive() -> None:
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=False, clients=0)}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots", return_value=[]):
@@ -73,7 +80,7 @@ def test_nothing_live_is_inactive():
     assert v.probes_ok is True
 
 
-def test_dedupes_and_sorts_session_ids():
+def test_dedupes_and_sorts_session_ids() -> None:
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=False)}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots",
@@ -85,7 +92,7 @@ def test_dedupes_and_sorts_session_ids():
     assert v.probes_ok is True
 
 
-def test_degrades_when_reclaim_raises(caplog):
+def test_degrades_when_reclaim_raises(caplog: pytest.LogCaptureFixture) -> None:
     """Mux occupancy cannot manufacture Copilot activity after a failed probe."""
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=True, clients=0)}), \
@@ -102,7 +109,7 @@ def test_degrades_when_reclaim_raises(caplog):
     assert "Could not verify registered Copilot bindings: boom" in caplog.text
 
 
-def test_degrades_when_mux_raises(caplog):
+def test_degrades_when_mux_raises(caplog: pytest.LogCaptureFixture) -> None:
     with patch("agent_worktrees.sessions.mux_status_many",
                side_effect=OSError("blocked")), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots",
@@ -115,9 +122,9 @@ def test_degrades_when_mux_raises(caplog):
     assert "Could not verify worktree mux presence: blocked" in caplog.text
 
 
-def test_verification_passes_only_the_authoritative_session_registry():
+def test_verification_passes_only_the_authoritative_session_registry() -> None:
     record = _rec()
-    record.sessions = [types.SimpleNamespace(session_id="registered-session")]
+    record.sessions = [tracking.SessionEntry(session_id="registered-session", started_at="")]
     with patch("agent_worktrees.sessions.mux_status_many", return_value={}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots", return_value=[]) as probe:
         verdict = sessions.verify_worktree_active(record)
@@ -127,7 +134,7 @@ def test_verification_passes_only_the_authoritative_session_registry():
     assert verdict.probes_ok
 
 
-def test_live_registered_lock_requires_matching_session_cwd(tmp_path, monkeypatch):
+def test_live_registered_lock_requires_matching_session_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
     from agent_worktrees import process_table_cache, reclaim
@@ -140,14 +147,14 @@ def test_live_registered_lock_requires_matching_session_cwd(tmp_path, monkeypatc
     workspace.write_text(json.dumps({"cwd": str(tmp_path / "other")}), encoding="utf-8")
     record = _rec()
     record.worktree_path = str(tmp_path / "worktree")
-    record.sessions = [types.SimpleNamespace(session_id="registered-session")]
+    record.sessions = [tracking.SessionEntry(session_id="registered-session", started_at="")]
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: state)
     monkeypatch.setattr(sessions, "_is_process_alive", lambda pid: True)
     monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: True)
     monkeypatch.setattr(sessions, "mux_status_many", lambda *_a, **_k: {})
     monkeypatch.setattr(process_table_cache, "cached", lambda *_a: {})
     monkeypatch.setattr(reclaim, "homing_of", lambda *_a: "mux")
-    monkeypatch.setattr(reclaim.locks, "process_start_time", lambda _pid: "123")
+    monkeypatch.setattr(locks, "process_start_time", lambda _pid: "123")
 
     assert sessions.worktree_session_lock_state(record)[0] is False
     assert sessions.session_id_is_live(record, "registered-session") is False
@@ -159,11 +166,18 @@ def test_live_registered_lock_requires_matching_session_cwd(tmp_path, monkeypatc
     assert sessions.session_id_is_live(record, "registered-session") is True
     assert sessions.verify_worktree_active(record).active is True
 
+    workspace.unlink()
+    verdict = sessions.verify_worktree_active(record)
+    assert not verdict.active and not verdict.probes_ok
+    from agent_worktrees import resume_seed
 
-def test_windows_session_cwd_normalizes_case_separators_and_parent_parts(monkeypatch):
+    assert resume_seed.cold_start_error(verdict) is not None
+
+
+def test_windows_session_cwd_normalizes_case_separators_and_parent_parts(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import reclaim
 
-    monkeypatch.setattr(reclaim.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     assert reclaim._cwd_under("C:/SOURCE/owned/child", r"c:\source\owned")
     assert not reclaim._cwd_under(r"C:\source\owned-sibling", r"c:\source\owned")
     assert not reclaim._cwd_under(r"C:\source\owned\..\other", r"c:\source\owned")

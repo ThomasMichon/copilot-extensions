@@ -1,11 +1,17 @@
 """Explicit paired repository sync, followed by worktree-local preparation."""
 
 from __future__ import annotations
+from typing import cast, Protocol
+from contextlib import AbstractContextManager
+from .config_cache import ConfigCacheSession
 
+from typing import Any
+from collections.abc import Callable
 import argparse
+
+
 import io
 import sys
-from collections.abc import Callable
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -15,8 +21,8 @@ from . import worktree_identity
 
 def sync_pair(
     record: tracking.WorktreeRecord, *, on_progress: Callable[[str], None] | None = None,
-) -> dict:
-    results: list[dict] = []
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
     admission = ExitStack()
     plugin_state = "skipped"
 
@@ -24,7 +30,7 @@ def sync_pair(
         if on_progress is not None:
             on_progress(message)
 
-    def failed(reason: str, detail: str = "") -> dict:
+    def failed(reason: str, detail: str = "") -> dict[str, Any]:
         return {
             "worktree_id": record.worktree_id, "updated": False, "ok": False,
             "reason": reason, "behind": 0, "detail": detail,
@@ -60,7 +66,7 @@ def sync_pair(
         for member, owner in zip(records, configs, strict=True):
             require_record_mutation(member, owner)
         report("Observing paired worktree sessions")
-        active = _build_active_paths(records, sessions.scan_sessions_fast(records))
+        active = _build_active_paths(records, sessions.scan_sessions_fast(records), copilot_only=False)
         # Fetch and inspect both members before advancing either branch.
         for member, owner in zip(records, configs, strict=True):
             repo = owner.default_repo
@@ -71,7 +77,7 @@ def sync_pair(
                 git_ops.fetch(repo.remote, cwd=repo.anchor, branch=repo.default_branch)
             except (OSError, RuntimeError, git_ops.GitError) as exc:
                 return failed("fetch-failed", str(exc))
-            tracking.record_repo_fetch_confirmed(member.repo)
+            cast(Callable[[str], None], getattr(tracking, "record_repo_fetch_confirmed"))(member.repo)
             report(f"Inspecting {member.pair_role} worktree")
             raw = git_ops.classify_worktree(
                 member.worktree_path, member.branch, fetch=False,
@@ -122,7 +128,7 @@ def sync_pair(
         prior_project = cfg.active_project()
         try:
             cfg.set_active_project(harness.repo)
-            with cfg.cached_load_config_scope() as cache:
+            with cast(Callable[[], AbstractContextManager[ConfigCacheSession]], getattr(cfg, "cached_load_config_scope"))() as cache:
                 report("Reloading paired synchronization policy")
                 cache.invalidate()
                 refreshed = [cfg.load_project_config(member.repo) for member in records]
@@ -158,6 +164,11 @@ def sync_pair(
         admission.close()
 
 
+class _SyncProgress(Protocol):
+    def stage(self, message: str) -> None: ...
+    def finish(self, result: dict[str, Any]) -> int: ...
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     if not getattr(args, "stream", False):
         return _cmd_sync(args)
@@ -166,14 +177,14 @@ def cmd_sync(args: argparse.Namespace) -> int:
         return 2
     from .sync_progress import SyncProgress
 
-    with SyncProgress() as progress:
+    with cast(AbstractContextManager[_SyncProgress], cast(Callable[[], object], SyncProgress)()) as progress:
         try:
             return _cmd_sync(args, progress=progress)
         except Exception as error:
             return progress.finish({"ok": False, "reason": "sync-failed", "detail": str(error)})
 
 
-def _cmd_sync(args: argparse.Namespace, *, progress=None) -> int:
+def _cmd_sync(args: argparse.Namespace, *, progress: _SyncProgress | None=None) -> int:
     from . import worktree_ops_cli as operations
 
     config = cfg.load_config()
@@ -211,7 +222,7 @@ def _cmd_sync(args: argparse.Namespace, *, progress=None) -> int:
         records = tracking.list_records(
             tracking_path,
             status_filter="active",
-            platform_filter=cfg.detect_platform(),
+            platform_filter=cast(Callable[[], str], getattr(cfg, "detect_platform"))(),
         )
         records = [
             r
@@ -230,12 +241,12 @@ def _cmd_sync(args: argparse.Namespace, *, progress=None) -> int:
             pass
         else:
             for synced_repo in {r.repo for r in records if r.repo}:
-                tracking.record_repo_fetch_confirmed(synced_repo)
+                cast(Callable[[str], None], getattr(tracking, "record_repo_fetch_confirmed"))(synced_repo)
 
     if progress is not None:
         progress.stage("Observing worktree sessions")
     session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = operations._build_active_paths(records, session_ctx)
+    active_paths = operations._build_active_paths(records, session_ctx, copilot_only=False)
 
     results = []
     for rec in records:

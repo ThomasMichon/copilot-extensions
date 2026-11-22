@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import cast
+from collections.abc import Callable
+
+
 import os
 import time
 import types
 from pathlib import Path
-from collections.abc import Callable
-from typing import cast
 
 import pytest
 

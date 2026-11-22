@@ -1,6 +1,12 @@
 """The first complete, conservative linked-checkout relocation flow."""
 
 from __future__ import annotations
+from collections.abc import Callable
+from typing import cast
+
+from typing import Any
+from collections.abc import Iterator
+
 
 import hashlib
 import fnmatch
@@ -12,7 +18,7 @@ import sqlite3
 import stat
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
 from . import checkout_permission_relocation as permission_paths
@@ -35,7 +41,7 @@ def _require_native_support() -> None:
         raise ValueError("relocation v1 requires native Windows; bounded POSIX copy qualification remains open")
 
 
-def capabilities() -> dict:
+def capabilities() -> dict[str, Any]:
     return {
         "schema": SCHEMA, "version": 1, "plan": _native_supported(), "apply": _native_supported(),
         "qualified_platforms": ["windows"], "platform_supported": _native_supported(),
@@ -69,7 +75,7 @@ def _digest(root: Path) -> str:
     return hashlib.sha256(json.dumps(transfer.manifest(root), sort_keys=True).encode()).hexdigest()
 
 
-def _require_retirement_copy(record, original: Path, target: Path, *, allow_partial: bool = False) -> None:
+def _require_retirement_copy(record: tracking.WorktreeRecord, original: Path, target: Path, *, allow_partial: bool = False) -> None:
     _stopped(record, original)
     _sessionless(original)
     remaining, verified = transfer.manifest(original), transfer.manifest(target)
@@ -78,7 +84,7 @@ def _require_retirement_copy(record, original: Path, target: Path, *, allow_part
         raise ValueError("original copy changed after publication; source retained")
 
 
-def _identity(record) -> dict:
+def _identity(record: tracking.WorktreeRecord) -> dict[str, Any]:
     return {
         key: getattr(record, key)
         for key in (
@@ -87,7 +93,7 @@ def _identity(record) -> dict:
     }
 
 
-def _identity_matches(record, retained: object) -> bool:
+def _identity_matches(record: tracking.WorktreeRecord, retained: object) -> bool:
     """Keep old move journals readable without treating old names as authority."""
     if not isinstance(retained, dict):
         return False
@@ -95,7 +101,7 @@ def _identity_matches(record, retained: object) -> bool:
     return {key: value for key, value in retained.items() if key not in names} == _identity(record)
 
 
-def _stopped(record, checkout: Path) -> None:
+def _stopped(record: tracking.WorktreeRecord, checkout: Path) -> None:
     if (
         not getattr(record, "receiving_allocation_present", False)
         and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
@@ -112,7 +118,7 @@ def _stopped(record, checkout: Path) -> None:
         raise ValueError(blocker)
 
 
-def _ordinary_shape(record, ledger: Path, *, allow_receiving: bool = False) -> None:
+def _ordinary_shape(record: tracking.WorktreeRecord, ledger: Path, *, allow_receiving: bool = False) -> None:
     if (
         record.kind != "session" or not record.checkout_managed
         or not isinstance(record.creation_nonce, str) or not record.creation_nonce
@@ -123,7 +129,7 @@ def _ordinary_shape(record, ledger: Path, *, allow_receiving: bool = False) -> N
         or record.session_backend is not None or record.session_backend_opaque
         or record.execution_leg is not None or record.execution_leg_opaque
         or record.profile_assignments or record.pending_seed
-        or record.follow_up or tracking.effective_open_follow_up_count(record)
+        or record.follow_up or cast(Callable[[tracking.WorktreeRecord], int], getattr(tracking, "effective_open_follow_up_count"))(record)
         or record.active_effort is not None
     ):
         raise ValueError("relocation v1 requires a completed ordinary sessionless, unpaired linked checkout")
@@ -155,7 +161,7 @@ def _launchless(ledger: Path) -> None:
             raise ValueError("relocation v1 refuses retained launch attempt history")
 
 
-def _strict_glob(root: Path, pattern: str):
+def _strict_glob(root: Path, pattern: str) -> Iterator[Path]:
     parts, pending, seen = pattern.split("/"), [(root, 0)], 0
     while pending:
         directory, depth = pending.pop()
@@ -204,7 +210,7 @@ def _strict_glob(root: Path, pattern: str):
                         pending.append((path, depth + 1))
 
 
-def _ordinary(record, ledger: Path, config) -> dict | None:
+def _ordinary(record: tracking.WorktreeRecord, ledger: Path, config: cfg.Config) -> dict[str, Any] | None:
     _ordinary_shape(record, ledger, allow_receiving=True)
     receiving_proof = None
     if record.receiving_allocation_present:
@@ -223,7 +229,7 @@ def _ordinary(record, ledger: Path, config) -> dict | None:
     return receiving_proof
 
 
-def _check_data(checkout: Path, config, branch: str) -> str:
+def _check_data(checkout: Path, config: cfg.Config, branch: str) -> str:
     from .checkout_data import preservation_reason
 
     if preservation_reason(checkout) is not None or (Path(config.default_repo.anchor) / ".agent-index" / "config.yaml").exists():
@@ -281,7 +287,7 @@ def _sessionless(checkout: Path) -> None:
             raise ValueError("relocation v1 refuses retained Copilot database references")
 
 
-def _references(path: Path, queries: list[tuple]) -> bool:
+def _references(path: Path, queries: list[tuple[Any, ...]]) -> bool:
     if path.is_symlink():
         raise ValueError("operational reference database is redirected")
     with path.open("rb") as stream:
@@ -298,7 +304,7 @@ def _references(path: Path, queries: list[tuple]) -> bool:
     references = ReferenceSnapshot(deadline)
     connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
     inspected = 0
-    def bounded_reference(value, root):
+    def bounded_reference(value: object, root: str) -> int:
         nonlocal inspected
         inspected += 1
         if inspected > transfer.MAX_ENTRIES or time.monotonic() > deadline:
@@ -320,7 +326,7 @@ def _references(path: Path, queries: list[tuple]) -> bool:
         connection.close()
 
 
-def _target(record, destination: str, config) -> Path:
+def _target(record: tracking.WorktreeRecord, destination: str, config: cfg.Config) -> Path:
     path = Path(destination).expanduser()
     source = Path(record.worktree_path)
     if (
@@ -341,14 +347,14 @@ def _target(record, destination: str, config) -> Path:
     return path
 
 
-def plan(worktree_id: str, destination: str, config) -> dict:
+def plan(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, Any]:
     """Inspect without action probes or recovery; unknown native owners refuse."""
     from .checkout_relocation_plan import inspect
 
     return inspect(worktree_id, destination, config)
 
 
-def _action_plan(worktree_id: str, destination: str, config) -> dict:
+def _action_plan(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, Any]:
     _require_native_support()
     state.require_writer_generation()
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
@@ -421,14 +427,14 @@ def _action_plan(worktree_id: str, destination: str, config) -> dict:
     return report
 
 
-def _require_receiver(record, report: dict, config) -> None:
+def _require_receiver(record: tracking.WorktreeRecord, report: dict[str, Any], config: cfg.Config) -> None:
     execution_spaces.require_current_execution_space(config)
     local = execution_spaces.require_owner_identity(record.execution_machine, config, canonical_ref=False)
     if not local and record.machine_identity is None:
         from .creation_repair_identity import _observed_original_owner
 
         local = _observed_original_owner(record, config)
-    if record.repo != config.repo_name or record.platform != cfg.detect_platform() or config.platform != cfg.detect_platform() or not local:
+    if record.repo != config.repo_name or record.platform != cast(Callable[[], str], getattr(cfg, "detect_platform"))() or config.platform != cast(Callable[[], str], getattr(cfg, "detect_platform"))() or not local:
         raise ValueError("retained move belongs to another receiving execution space")
     context = execution_spaces.current_execution_context(config)
     if record.machine_identity is not None and (
@@ -444,7 +450,7 @@ def _require_receiver(record, report: dict, config) -> None:
         raise ValueError("relocation receiving Git family changed")
 
 
-def _receiving_admission(ledger: Path, config):
+def _receiving_admission(ledger: Path, config: cfg.Config) -> tuple[tracking.WorktreeRecord, dict[str, Any] | None, AbstractContextManager[None]]:
     from .checkout_relocation_plan import read_record
 
     passive = read_record(ledger)
@@ -465,7 +471,7 @@ def _receiving_admission(ledger: Path, config):
     return passive, None, nullcontext()
 
 
-def move(worktree_id: str, destination: str, config) -> dict:
+def move(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, Any]:
     _require_native_support()
     state.require_writer_generation()
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
@@ -609,7 +615,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
         return {**report, "apply": True}
 
 
-def abort(worktree_id: str, destination: str, config) -> dict:
+def abort(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, Any]:
     _require_native_support()
     state.require_writer_generation()
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:

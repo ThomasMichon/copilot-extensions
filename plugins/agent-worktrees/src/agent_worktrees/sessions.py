@@ -11,18 +11,20 @@ The only sanctioned full walk of the state root is the explicit
 
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Callable, Iterable
 import json
 import logging
 import os
 import platform
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-from . import activity, mux_creation
-from .mux_creation import is_psmux as _is_psmux
+from . import activity, tracking
+from agent_remote_driver import mux_creation
+from agent_remote_driver.mux_creation import is_psmux as _is_psmux
 from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd, prompt_controls
 from .sessions_pane_retire import (
     _mux_bin,
@@ -33,10 +35,7 @@ from .sessions_pane_retire import (
     mux_retire_pane,  # noqa: F401 -- re-export for callers (e.g. pane_reaper, __main__)
 )
 
-try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.
-    from yaml import CSafeLoader as _YamlSafeLoader  # noqa: F401 -- backfill compatibility export
-except ImportError:  # pragma: no cover - pure-Python fallback
-    from yaml import SafeLoader as _YamlSafeLoader  # noqa: F401 -- backfill compatibility export
+_YamlSafeLoader: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
 @dataclass
@@ -359,11 +358,11 @@ def _is_process_alive(pid: int) -> bool:
         import ctypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+        handle = getattr(ctypes, "windll").kernel32.OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION, False, pid
         )
         if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+            getattr(ctypes, "windll").kernel32.CloseHandle(handle)
             return True
         return False
     else:
@@ -378,7 +377,7 @@ def _is_process_alive(pid: int) -> bool:
 _kernel32 = None
 
 
-def _get_kernel32():
+def _get_kernel32() -> Any:
     """Return a configured kernel32 WinDLL handle, cached after first call."""
     global _kernel32
     if _kernel32 is not None:
@@ -386,7 +385,7 @@ def _get_kernel32():
     import ctypes
     from ctypes import wintypes
 
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     k32.OpenProcess.restype = wintypes.HANDLE
     k32.QueryFullProcessImageNameW.argtypes = [
@@ -499,16 +498,11 @@ def _session_entry_lock_state(
     return None, stale_pids
 
 
-def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
-    """Return live-binding presence and stale lock PIDs for one worktree.
-
-    The targeted scan covers only the worktree's registered session directories
-    and their ``inuse.<pid>.lock`` files plus recorded CWD. It does not read
-    conversation bodies or enumerate the machine process table. Only a live
-    Copilot in this checkout is activity; other PIDs are stale lock residue.
-
-    Best-effort: never raises. An unindexed worktree returns ``(False, [])``;
-    explicit registry repair supplies missing session identities.
+def worktree_session_lock_state(rec: tracking.WorktreeRecord) -> tuple[bool, list[int]]:
+    """Read registered PID locks and CWDs without conversation/process sweeps.
+    Only live matching-CWD Copilots count; other PIDs are stale lock residue.
+    Best-effort: an unindexed worktree returns ``(False, [])``.
+    Explicit registry repair supplies missing session identities.
     """
     sessions_list = getattr(rec, "sessions", None)
     if not sessions_list:
@@ -528,7 +522,7 @@ def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
     return False, stale_pids
 
 
-def session_id_is_live(rec, session_id: str) -> bool:
+def session_id_is_live(rec: tracking.WorktreeRecord, session_id: str) -> bool:
     """Per-session ACTIVE check, scoped to exactly ``session_id``.
 
     Unlike :func:`worktree_has_live_session` (any session on this worktree),
@@ -550,7 +544,7 @@ def session_id_is_live(rec, session_id: str) -> bool:
     return pid is not None
 
 
-def worktree_has_live_session(rec) -> bool:
+def worktree_has_live_session(rec: tracking.WorktreeRecord) -> bool:
     """Cheap ACTIVE check for the picker's cache-only first paint."""
     return worktree_session_lock_state(rec)[0]
 
@@ -577,8 +571,7 @@ def _enrich_session_dir(
         return
     from . import reclaim
 
-    if not reclaim._cwd_under(reclaim._session_cwd(entry), worktree_path):
-        return
+    cwd_matches = reclaim._cwd_under(reclaim._session_cwd(entry), worktree_path)
 
     norm_path = _normalize_path(worktree_path)
 
@@ -631,6 +624,8 @@ def _enrich_session_dir(
     ctx.session_count[norm_path] = ctx.session_count.get(norm_path, 0) + 1
 
     # Liveness check via lock files
+    if not cwd_matches:
+        return
     for lock_file in entry.glob("inuse.*.lock"):
         parts = lock_file.stem.split(".")
         if len(parts) >= 2:
@@ -652,7 +647,7 @@ def _enrich_session_dir(
 
 
 def scan_sessions_fast(
-    records: list,
+    records: list[tracking.WorktreeRecord],
 ) -> SessionContext:
     """Targeted session scan using the per-worktree session registry.
 
@@ -729,7 +724,7 @@ def validate_session_id(session_id: str | None) -> str | None:
 
 def find_latest_session_id_fast(
     worktree_path: str,
-    sessions: list | None,
+    sessions: list[tracking.SessionEntry] | None,
 ) -> str | None:
     """Find the most recent Copilot session ID using the registry.
 
@@ -803,9 +798,9 @@ def session_has_conversation_data(session_id: str | None) -> bool:
 
 
 def resolve_resume_target(
-    record, *,
+    record: tracking.WorktreeRecord, *,
     conversation_data: Callable[[str], bool] | None = None,
-    latest_session: Callable[[str, list | None], str | None] | None = None,
+    latest_session: Callable[[str, list[tracking.WorktreeRecord] | None], str | None] | None = None,
 ) -> str | None:
     """The concrete session id a resume should reattach to -- freshest first.
 
@@ -844,7 +839,7 @@ def resolve_resume_target(
     )
 
 
-def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[str]]:
+def backfill_sessions(records: list[tracking.WorktreeRecord], *, strict: bool = False) -> dict[str, list[str]]:
     """Populate empty session registries from existing session-state data.
 
     Scans ``~/.copilot/session-state/`` once, matches sessions to
@@ -899,7 +894,7 @@ def _has_live_session(entry: Path) -> bool:
     return False
 
 
-def _session_meta(session_dir: Path, session_id: str) -> dict | None:
+def _session_meta(session_dir: Path, session_id: str) -> dict[str, Any] | None:
     """Read one session's display metadata from its session-state directory.
 
     Returns a dict with id, name (summary/title), cwd, branch, created_at,
@@ -916,7 +911,7 @@ def _session_meta(session_dir: Path, session_id: str) -> dict | None:
     if not (entry / "session.db").exists() and not events_file.exists():
         return None
 
-    ws_data: dict = {}
+    ws_data: dict[str, Any] = {}
     ws_file = entry / "workspace.yaml"
     if ws_file.exists():
         try:
@@ -970,7 +965,7 @@ def session_cwd(session_id: str) -> Path | None:
     return path if path.is_dir() else None
 
 
-def list_worktree_sessions(record) -> list[dict]:
+def list_worktree_sessions(record: tracking.WorktreeRecord) -> list[dict[str, Any]]:
     """Enumerate the Copilot sessions associated with a worktree.
 
     Uses the worktree's session registry (``record.sessions``) and
@@ -985,7 +980,7 @@ def list_worktree_sessions(record) -> list[dict]:
     if not session_dir.exists() or not record.worktree_path:
         return []
 
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     def _add(sid: str) -> None:
@@ -1042,7 +1037,7 @@ def list_worktree_sessions(record) -> list[dict]:
     return out
 
 
-def read_session_transcript(session_id: str) -> list[dict]:
+def read_session_transcript(session_id: str) -> list[dict[str, Any]]:
     """Return the renderable events for a single Copilot session.
 
     Reads ``~/.copilot/session-state/<session_id>/events.jsonl`` and
@@ -1058,7 +1053,7 @@ def read_session_transcript(session_id: str) -> list[dict]:
     if not events_file.is_file():
         return []
 
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     try:
         with open(events_file, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -1075,7 +1070,7 @@ def read_session_transcript(session_id: str) -> list[dict]:
         return []
     return events
 
-def _event_text(ev: dict) -> str:
+def _event_text(ev: dict[str, Any]) -> str:
     """Extract the displayable text from a user/assistant message event.
 
     Both carry the turn text under ``data.content``; an assistant turn that is
@@ -1089,14 +1084,14 @@ def _event_text(ev: dict) -> str:
     return content.strip() if isinstance(content, str) else ""
 
 
-def session_message_tail(session_id: str, *, limit: int = 3) -> dict:
+def session_message_tail(session_id: str, *, limit: int = 3) -> dict[str, Any]:
     """Return the last *limit* message-bearing turns for one session as JSON."""
     from . import session_tail as session_tail_mod
 
     return session_tail_mod.session_message_tail(session_id, limit=limit)
 
 
-def recent_worktree_messages(record, *, limit: int = 3) -> dict:
+def recent_worktree_messages(record: tracking.WorktreeRecord, *, limit: int = 3) -> dict[str, Any]:
     """The latest session's last *limit* message-bearing turns as JSON."""
     lim = max(1, int(limit))
     sess_list = list_worktree_sessions(record)
@@ -1191,12 +1186,10 @@ class LiveVerdict:
     Copilot forbids them even when mux absence is confirmed."""
 
 
-def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
+def verify_worktree_active(record: tracking.WorktreeRecord, *, strict: bool = False) -> LiveVerdict:
     """Verify independent mux occupancy and matching-CWD Copilot activity.
     Use this point-in-time probe for individual actions, not fleet population.
-    ``strict=True`` treats unavailable lock/process evidence as unconfirmed.
-    Returns a :class:`LiveVerdict`; probe failures retain successful signals
-    and set ``probes_ok=False`` rather than raising.
+    Probe failures retain successful signals and set ``probes_ok=False``.
     """
     from . import reclaim
 
@@ -1218,7 +1211,7 @@ def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
         worktree_path = getattr(record, "worktree_path", "")
         if not worktree_path:
             raise ValueError("Worktree working directory is unavailable")
-        binding_options = {"strict": True} if strict else {}
+        binding_options: dict[str, Any] = {"strict": True} if strict else {}
         bound = reclaim.resolve_bound_copilots(
             worktree_id=wt_id,
             worktree_path=worktree_path,
@@ -1315,10 +1308,7 @@ def worktree_id_from_mux_session(
 def has_mux_session(
     worktree_id: str, *, strict: bool = False, timeout: float = 5,
 ) -> bool:
-    """Probe mux presence; strict callers retain unavailable evidence.
-
-    Windows strict checks cap the caller's timeout at five seconds in total.
-    """
+    """Probe mux presence; Windows caps the timeout at five seconds."""
     import subprocess
     from agent_procutil import no_window_kwargs
 
@@ -1348,13 +1338,27 @@ def _list_mux_sessions(*, strict: bool = False, timeout: float = 5) -> dict[str,
     """Return client counts, or None when passive listing is unavailable."""
     import subprocess
     from agent_procutil import no_window_kwargs
-    from .mux_list_result import is_empty_tmux_listing, parse_session_counts
+    from .mux_list_result import is_empty_psmux_listing, is_empty_tmux_listing, parse_session_counts
 
-    cmd = [_mux_bin(), "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+    binary = _mux_bin()
+    if platform.system() == "Windows" and _is_psmux(binary):
+        from agent_remote_driver.windows_mux_version import require_creation_binary
+
+        try:
+            binary = require_creation_binary(binary)
+        except RuntimeError:
+            return None
+    cmd = [binary, "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **no_window_kwargs())
         if result.returncode != 0:
-            return {} if is_empty_tmux_listing(cmd[0], result) else None
+            # Only qualified Windows clients reach this call. Older clients
+            # can erase live registration files even during a listing.
+            empty = (
+                is_empty_psmux_listing(result) if _is_psmux(binary)
+                else is_empty_tmux_listing(binary, result)
+            )
+            return {} if empty else None
         if (result.stderr or "").strip():
             return None
         try:
@@ -1556,7 +1560,7 @@ def restart_worktree_copilot(
     *,
     graceful: bool = True,
     settle_timeout: float = 6.0,
-) -> dict:
+) -> dict[str, Any]:
     """Stop a worktree's interactive Copilot without removing the git worktree."""
     if not has_mux_session(worktree_id):
         _stamp_mux_live_quiet(worktree_id, False)
@@ -1875,7 +1879,7 @@ def mux_new_session(
     env: dict[str, str] | None = None,
     *,
     mux: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Create a detached ``wt-<id>`` session running ``cmd``; return its pane.
 
     Returns ``{ok, session, new_pane, error, created}``. Detached, so the caller does not
@@ -1968,7 +1972,7 @@ def headless_new_session(
     env: dict[str, str] | None = None,
     *,
     seed: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Launch ``cmd`` as a fully detached background process with **no mux at
     all** (context-handoff-overhaul Phase 3 §4.3's non-mux launch primitive).
 
@@ -2003,7 +2007,7 @@ def headless_new_session(
     argv = append_native_arguments(cmd, ["--interactive", seed]) if seed else list(cmd)
 
     full_env = {**os.environ, **(env or {})}
-    kwargs: dict[str, object] = {
+    kwargs: dict[str, Any] = {
         "cwd": work_dir,
         "env": full_env,
         "stdin": subprocess.DEVNULL,
@@ -2201,7 +2205,7 @@ def mux_binding_for_session(
     mux: str | None = None,
     expected_session_name: str | None = None,
     include_incarnation: bool = False,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Recover a session's mux/worktree identity from its live lock process.
 
     Random-access the exact session directory from the sessionStart payload,
@@ -2271,7 +2275,7 @@ def mux_binding_for_session(
     ancestry_by_pid: dict[int, set[int]] = {}
     for pid in live_pids:
         ancestry: set[int] = set()
-        seen: set[int] = set()
+        seen = set()
         cur = pid
         while cur in table and cur not in seen and len(seen) < 64:
             seen.add(cur)
@@ -2310,7 +2314,7 @@ def mux_binding_for_session(
     if result.returncode != 0:
         return None
 
-    matches: dict[tuple[str, str, int, int], dict] = {}
+    matches: dict[tuple[str, str, int, int], dict[str, Any]] = {}
     for line in result.stdout.splitlines():
         fields = line.strip().split("|")
         if len(fields) != (4 if include_incarnation else 3):
@@ -2404,7 +2408,7 @@ def mux_new_window(
     prompt_receipt_timeout: float = 8.0,
     prompt_startup_grace: float = 3.5,
     session_name: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Open + select a new window in a mux session running ``cmd``.
 
     ``new-window`` selects the new window by default (no ``-d``), so the

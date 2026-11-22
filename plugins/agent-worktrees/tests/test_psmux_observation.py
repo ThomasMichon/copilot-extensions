@@ -1,6 +1,10 @@
 """Cold-stop proof never relies on a missing registration or a failed CLI."""
 
 from __future__ import annotations
+from typing import cast
+
+from typing import Any
+
 
 import ctypes
 import builtins
@@ -15,11 +19,11 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any, NoReturn, Protocol
+from typing import NoReturn, Protocol
 
 import pytest
 
-from agent_worktrees import launch_seed_exec, psmux_observation, reclaim, resume_seed, sessions
+from agent_worktrees import tracking, launch_seed_exec, psmux_observation, reclaim, resume_seed, sessions
 from agent_remote_driver import mux_process_identity, windows_mux_processes as native
 from agent_remote_driver import mux_inventory as reader
 from agent_remote_driver.mux_observation import observe_psmux as observe_native_psmux
@@ -41,7 +45,9 @@ class ProcessPointer(Protocol):
 @pytest.fixture
 def registered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from agent_remote_driver import mux_observation
+    from agent_remote_driver import windows_mux_version
 
+    monkeypatch.setattr(windows_mux_version, "require_creation_binary", lambda binary: binary)
     monkeypatch.setattr(
         mux_observation, "_exchange",
         lambda *a, **kw: (
@@ -69,7 +75,7 @@ def test_native_absence_allows_cold_resume_but_live_mux_does_not(
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
     for worktree_id, expected_live in (("fixture", False), ("other", True)):
         record = SimpleNamespace(worktree_id=worktree_id, worktree_path=str(registered), sessions=[])
-        verdict = sessions.verify_worktree_active(record)
+        verdict = sessions.verify_worktree_active(cast(tracking.WorktreeRecord, record))
         assert verdict.probes_ok and verdict.mux_probe_ok
         assert verdict.active is False
         assert verdict.mux_live is expected_live
@@ -88,7 +94,7 @@ def test_confirmed_mux_absence_does_not_ignore_a_bound_copilot(
         {"session_id": "live-session", "homing": "bare"},
     ])
     record = SimpleNamespace(worktree_id="fixture", worktree_path=str(registered), sessions=[])
-    verdict = sessions.verify_worktree_active(record)
+    verdict = sessions.verify_worktree_active(cast(tracking.WorktreeRecord, record))
     assert verdict.probes_ok and not verdict.mux_live and verdict.bare
     assert resume_seed.cold_start_error(verdict) is not None
     error = launch_seed_exec._final_cold_error(record)
@@ -108,7 +114,7 @@ def test_live_target_does_not_require_unrelated_process_identity(
     ))
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
     verdict = sessions.verify_worktree_active(
-        SimpleNamespace(worktree_id="other", worktree_path=str(registered), sessions=[]),
+        cast(tracking.WorktreeRecord, SimpleNamespace(worktree_id="other", worktree_path=str(registered), sessions=[])),
     )
     assert not verdict.active and verdict.mux_live and verdict.mux_probe_ok and verdict.probes_ok
     assert not sessions.has_mux_session("missing", strict=True, timeout=0.05)
@@ -126,7 +132,7 @@ def test_failed_native_query_cannot_admit_a_cold_prompt(
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
     verdict = sessions.verify_worktree_active(
-        SimpleNamespace(worktree_id="fixture", worktree_path=str(registered), sessions=[]),
+        cast(tracking.WorktreeRecord, SimpleNamespace(worktree_id="fixture", worktree_path=str(registered), sessions=[])),
     )
     assert not verdict.probes_ok and not verdict.mux_probe_ok
     error = resume_seed.cold_start_error(verdict)

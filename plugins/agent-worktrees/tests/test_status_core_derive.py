@@ -7,10 +7,13 @@ without the optional TUI dep installed.
 
 from __future__ import annotations
 
+from typing import Any
+
+
 from agent_worktrees.picker_support import derive
 
 
-def _raw(**kw):
+def _raw(**kw: Any) -> dict[str, Any]:
     base = dict(id="anomalous-potato-win-20260715-0000-abcd", machine="anomalous-potato",
                 title="Feeder cam", status="finalized", state="completed")
     base.update(kw)
@@ -18,7 +21,7 @@ def _raw(**kw):
 
 
 class TestDispositionGlyph:
-    def test_flagged_gets_glyph_and_summary(self):
+    def test_flagged_gets_glyph_and_summary(self) -> None:
         n = derive.norm(_raw(follow_up=True, summary="Phases C/D left; PR open"),
                         "anomalous-potato", "win")
         assert n["title"].startswith("\u271a ")          # ✚ prefix
@@ -26,17 +29,17 @@ class TestDispositionGlyph:
         assert n["follow_up"] is True
         assert n["summary"] == "Phases C/D left; PR open"
 
-    def test_unflagged_has_no_glyph(self):
+    def test_unflagged_has_no_glyph(self) -> None:
         n = derive.norm(_raw(title="Done"), "anomalous-potato", "win")
         assert not n["title"].startswith("\u271a")
         assert n["follow_up"] is False
 
-    def test_summary_without_title_uses_summary(self):
+    def test_summary_without_title_uses_summary(self) -> None:
         n = derive.norm(_raw(title="", follow_up=True, summary="just this"),
                         "anomalous-potato", "win")
         assert n["title"] == "\u271a just this"
 
-    def test_state_stays_pure_for_bucketing(self):
+    def test_state_stays_pure_for_bucketing(self) -> None:
         # The glyph never leaks into ``state`` (bucket()/prune key off it).
         n = derive.norm(_raw(follow_up=True, summary="x"), "anomalous-potato", "win")
         assert n["state"] == derive.norm(_raw(), "anomalous-potato", "win")["state"]
@@ -46,22 +49,22 @@ class TestPausedGlyph:
     """`paused` is purely informational -- a title glyph + a field, never fed
     into bucket()/the prune verdict (unlike `follow_up`)."""
 
-    def test_paused_gets_glyph_and_field(self):
+    def test_paused_gets_glyph_and_field(self) -> None:
         n = derive.norm(_raw(paused=True, title="Nudge subsystem"),
                         "anomalous-potato", "win")
         assert n["title"].startswith("\u23f8 ")  # ⏸ prefix
         assert n["paused"] is True
 
-    def test_unpaused_has_no_glyph(self):
+    def test_unpaused_has_no_glyph(self) -> None:
         n = derive.norm(_raw(title="Done"), "anomalous-potato", "win")
         assert not n["title"].startswith("\u23f8")
         assert n["paused"] is False
 
-    def test_paused_state_stays_pure_for_bucketing(self):
+    def test_paused_state_stays_pure_for_bucketing(self) -> None:
         n = derive.norm(_raw(paused=True), "anomalous-potato", "win")
         assert n["state"] == derive.norm(_raw(), "anomalous-potato", "win")["state"]
 
-    def test_paused_and_follow_up_glyphs_compose(self):
+    def test_paused_and_follow_up_glyphs_compose(self) -> None:
         n = derive.norm(
             _raw(follow_up=True, paused=True, summary="x"), "anomalous-potato", "win",
         )
@@ -74,7 +77,7 @@ class TestPairMarker:
     """citadel #957: a paired -harness/-knowledge row is scannable + carries the
     pair linkage on the normalized record."""
 
-    def test_paired_gets_link_glyph_and_fields(self):
+    def test_paired_gets_link_glyph_and_fields(self) -> None:
         n = derive.norm(
             _raw(title="Harness work", pair_id="20260806-ab",
                  pair_role="harness", pair_kind="worktree"),
@@ -86,7 +89,7 @@ class TestPairMarker:
         assert n["pair_role"] == "harness"
         assert n["pair_kind"] == "worktree"
 
-    def test_unpaired_has_no_marker_or_fields(self):
+    def test_unpaired_has_no_marker_or_fields(self) -> None:
         n = derive.norm(_raw(title="Solo"), "anomalous-potato", "win")
         assert not n["title"].startswith("\u26ad")
         assert n["is_paired"] is False
@@ -94,7 +97,7 @@ class TestPairMarker:
         assert n["pair_role"] is None
         assert n["pair_kind"] is None
 
-    def test_pair_marker_inner_of_orphan_outer_of_follow_up(self):
+    def test_pair_marker_inner_of_orphan_outer_of_follow_up(self) -> None:
         # Marker order: ⚠ (orphan, outermost) · ⚭ (pair) · ✚ (follow-up).
         n = derive.norm(
             _raw(title="T", pair_id="p", pair_role="knowledge",
@@ -103,7 +106,7 @@ class TestPairMarker:
         )
         assert n["title"].startswith("\u26a0 \u26ad \u271a ")
 
-    def test_pair_marker_does_not_leak_into_state(self):
+    def test_pair_marker_does_not_leak_into_state(self) -> None:
         n = derive.norm(
             _raw(pair_id="p", pair_role="harness"), "anomalous-potato", "win"
         )
@@ -113,10 +116,10 @@ class TestPairMarker:
 class TestAnnotatePairs:
     """citadel #957: the aggregated dual-status data layer over the row set."""
 
-    def _row(self, **kw):
+    def _row(self, **kw: Any) -> dict[str, Any]:
         return derive.norm(_raw(**kw), "m", "e")
 
-    def test_sibling_summary_both_directions(self):
+    def test_sibling_summary_both_directions(self) -> None:
         harness = self._row(id="m-win-0000-hhhh", title="H", status="active",
                             state="active", pair_id="p1", pair_role="harness")
         knowledge = self._row(id="m-win-0000-kkkk", title="K", status="finalized",
@@ -125,18 +128,18 @@ class TestAnnotatePairs:
         assert harness["pair_sibling"]["role"] == "knowledge"
         assert knowledge["pair_sibling"]["role"] == "harness"
 
-    def test_unpaired_untouched(self):
+    def test_unpaired_untouched(self) -> None:
         solo = self._row(id="m-win-0000-ssss", title="S")
         derive.annotate_pairs([solo])
         assert "pair_sibling" not in solo
         assert "pair_attention" not in solo
 
-    def test_sibling_absent_is_none(self):
+    def test_sibling_absent_is_none(self) -> None:
         harness = self._row(id="m-win-0000-hhhh", pair_id="p1", pair_role="harness")
         derive.annotate_pairs([harness])  # sibling not in set
         assert harness["pair_sibling"] is None
 
-    def test_attention_aggregates_from_sibling(self):
+    def test_attention_aggregates_from_sibling(self) -> None:
         # A clean finalized harness whose KNOWLEDGE sibling is dirty -> the pair
         # wants attention on the harness row too.
         harness = self._row(id="m-win-0000-hhhh", status="finalized",
@@ -147,7 +150,7 @@ class TestAnnotatePairs:
         assert harness["pair_attention"] is True
         assert knowledge["pair_attention"] is True
 
-    def test_attention_from_follow_up(self):
+    def test_attention_from_follow_up(self) -> None:
         h = self._row(id="m-win-0000-hhhh", follow_up=True, summary="x",
                      pair_id="p1", pair_role="harness")
         k = self._row(id="m-win-0000-kkkk", status="finalized", state="completed",
@@ -155,7 +158,7 @@ class TestAnnotatePairs:
         derive.annotate_pairs([h, k])
         assert h["pair_attention"] is True and k["pair_attention"] is True
 
-    def test_no_attention_when_both_clean(self):
+    def test_no_attention_when_both_clean(self) -> None:
         h = self._row(id="m-win-0000-hhhh", status="finalized", state="completed",
                      pair_id="p1", pair_role="harness")
         k = self._row(id="m-win-0000-kkkk", status="finalized", state="completed",
@@ -163,7 +166,7 @@ class TestAnnotatePairs:
         derive.annotate_pairs([h, k])
         assert h["pair_attention"] is False and k["pair_attention"] is False
 
-    def test_for_machine_annotates(self):
+    def test_for_machine_annotates(self) -> None:
         h = self._row(id="m-win-0000-hhhh", state="completed", status="finalized",
                      pair_id="p1", pair_role="harness")
         k = self._row(id="m-win-0000-kkkk", state="wip",
@@ -183,42 +186,42 @@ class TestFastPassActive:
     the tracking status; the live signals are ``mux_session`` / ``mux_attached``
     (from the batched mux read) and ``session_lock_live`` (from the lock scan)."""
 
-    def _raw_active(self, **kw):
+    def _raw_active(self, **kw: Any) -> dict[str, Any]:
         base = dict(id="anomalous-potato-win-20260803-0000-abcd",
                     machine="anomalous-potato", title="Live", status="active")
         base.update(kw)
         return base
 
-    def test_mux_session_does_not_mark_active_without_copilot(self):
+    def test_mux_session_does_not_mark_active_without_copilot(self) -> None:
         n = derive.norm(self._raw_active(mux_session=True), "m", "e")
         assert n["state"] == "UNUSED"
 
-    def test_mux_attached_does_not_mark_active_without_copilot(self):
+    def test_mux_attached_does_not_mark_active_without_copilot(self) -> None:
         n = derive.norm(self._raw_active(mux_attached=True), "m", "e")
         assert n["state"] == "UNUSED"
 
-    def test_lock_live_marks_active_without_git(self):
+    def test_lock_live_marks_active_without_git(self) -> None:
         n = derive.norm(self._raw_active(session_lock_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
-    def test_bound_live_marks_active_without_git(self):
+    def test_bound_live_marks_active_without_git(self) -> None:
         # #1416 bare-resume: no mux, no lock -- only the cached bound-Copilot hint
         # (a bare-resumed session, cwd=home) marks the worktree ACTIVE.
         n = derive.norm(self._raw_active(session_bound_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
-    def test_execution_leg_live_marks_active_without_mux(self):
+    def test_execution_leg_live_marks_active_without_mux(self) -> None:
         n = derive.norm(self._raw_active(execution_leg_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
         assert n["sessionless"] is False
 
-    def test_bridge_live_marks_active_without_git(self):
+    def test_bridge_live_marks_active_without_git(self) -> None:
         # #4272 bridge-lock: no mux, no lock, no bound hint -- only a live
         # bridge.lock (a bridge-owned bare session) marks the worktree ACTIVE.
         n = derive.norm(self._raw_active(session_bridge_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
-    def test_mux_only_does_not_override_merged_pr(self):
+    def test_mux_only_does_not_override_merged_pr(self) -> None:
         # A just-merged PR with the session still running must render ACTIVE, not
         # FINAL -- the git pass returns ACTIVE (active_paths precedence), so the
         # fast pass must too, or the row flickers FINAL -> ACTIVE after ~5 s.
@@ -226,26 +229,26 @@ class TestFastPassActive:
             self._raw_active(mux_session=True, pr={"state": "merged"}), "m", "e")
         assert n["state"] != "ACTIVE"
 
-    def test_mux_only_does_not_override_finalized_status(self):
+    def test_mux_only_does_not_override_finalized_status(self) -> None:
         n = derive.norm(
             self._raw_active(status="finalized", mux_session=True), "m", "e")
         assert n["state"] != "ACTIVE"
 
-    def test_qualified_lock_absence_overrides_legacy_bound_and_active_cache(self):
+    def test_qualified_lock_absence_overrides_legacy_bound_and_active_cache(self) -> None:
         n = derive.norm(self._raw_active(
             mux_session=True, session_lock_live=False, session_bound_live=True,
             state="active",
         ), "m", "e")
         assert n["state"] != "ACTIVE"
 
-    def test_no_live_signal_falls_back_to_wip_unused(self):
+    def test_no_live_signal_falls_back_to_wip_unused(self) -> None:
         # No mux, no lock: unchanged legacy behaviour (turns -> WIP, else UNUSED).
         assert derive.norm(
             self._raw_active(turn_count=3), "m", "e")["state"] == "WIP"
         assert derive.norm(
             self._raw_active(turn_count=0), "m", "e")["state"] == "UNUSED"
 
-    def test_classified_state_still_wins_when_present(self):
+    def test_classified_state_still_wins_when_present(self) -> None:
         # When git classification IS present, its ``state`` is authoritative and
         # the fast-pass heuristic does not run (no regression to Phase 2).
         n = derive.norm(
@@ -254,22 +257,22 @@ class TestFastPassActive:
 
 
 class TestFollowUpBucket:
-    def test_bucket_dispo_review(self):
+    def test_bucket_dispo_review(self) -> None:
         assert derive.BUCKET_DISPO["follow-up"] == "REVIEW"
         assert "follow-up" in derive.BUCKET_REASON
 
-    def test_authoritative_bucket_passthrough(self):
+    def test_authoritative_bucket_passthrough(self) -> None:
         n = derive.norm(_raw(follow_up=True, cleanup_bucket="follow-up"),
                         "anomalous-potato", "win")
         assert n["cleanup_bucket"] == "follow-up"
 
-    def test_fallback_flagged_finalized_is_follow_up(self):
+    def test_fallback_flagged_finalized_is_follow_up(self) -> None:
         # No authoritative cleanup_bucket (old remote): a flagged finalized
         # worktree downgrades from clean -> follow-up.
         assert derive._bucket_from_raw(
             {"id": "x", "status": "finalized", "follow_up": True}) == "follow-up"
 
-    def test_fallback_unflagged_finalized_is_clean(self):
+    def test_fallback_unflagged_finalized_is_clean(self) -> None:
         assert derive._bucket_from_raw(
             {"id": "x", "status": "finalized"}) == "clean"
 
@@ -282,16 +285,16 @@ class TestHeldClaimsBucket:
     naming the claim's target as remote, distinct from the generic one.
     """
 
-    def test_held_claims_bucket_has_a_review_chip(self):
+    def test_held_claims_bucket_has_a_review_chip(self) -> None:
         assert derive.BUCKET_DISPO["held-claims"] == "REVIEW"
         assert "held-claims" in derive.BUCKET_REASON
 
-    def test_cross_machine_bucket_has_its_own_reason(self):
+    def test_cross_machine_bucket_has_its_own_reason(self) -> None:
         assert derive.BUCKET_DISPO["held-claims-cross-machine"] == "REVIEW"
         assert derive.BUCKET_REASON["held-claims-cross-machine"] != (
             derive.BUCKET_REASON["held-claims"])
 
-    def test_authoritative_cross_machine_bucket_passthrough(self):
+    def test_authoritative_cross_machine_bucket_passthrough(self) -> None:
         n = derive.norm(
             _raw(cleanup_bucket="held-claims-cross-machine"),
             "anomalous-potato", "win")
