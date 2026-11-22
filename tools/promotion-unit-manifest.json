@@ -20,6 +20,14 @@
       ]
     ],
     [
+      "tools/promotion_unit_tests/test_simple_shortcut_cache_owner.py",
+      [
+        "test_pre_cache_owner_commands_remain_owned[agent-vault]",
+        "test_pre_cache_owner_commands_remain_owned[agent-ssh]",
+        "test_pre_cache_owner_commands_remain_owned[agent-pull-requests]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_footprint.py",
       [
         "test_current_document_preserves_real_v2_effective_contract",
@@ -9821,10 +9829,11 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_simple_shortcut_cache_owner.py": "ec42a7fd5b7f4b3827dfd1f17b319ac3d091e182f869cf88b3356986e2c92369",
     "tools/promotion_unit_tests/test_original_command_ownership.py": "3a025dd22bd16392ebe746c655343c1e002342bca625f16528a3dd1bcf0519a9",
     "tools/test_installer_engine_commands.py": "e2dc9380ec7b58111df1efc549e7391a21a2ee2ab29db028da912db65fd50dd2",
-    "libs/installer-engine/installer-engine.sh": "2a2340788429d303e35bdb4dd219c19a0ff7e7154bdf765d2cc30ba6d5b0a780",
-    "libs/installer-engine/installer-engine.ps1": "fa11c4dfac75b7bfe616a03de91b8a5ad5be2135a23973cc9ca4974963469119",
+    "libs/installer-engine/installer-engine.sh": "5bc2aaff12c033c9036311c824dc6ab112a07bfd19fe445458944c5902dc8f0e",
+    "libs/installer-engine/installer-engine.ps1": "2897dece6e28b1878be7ae7f0dee2edc830049ad60e080e8ccb59cb41ca45285",
     "plugins/agent-bridge/plugin.json": "eb478d1a0fa60d5bb7276d333d0ae53e777a746a1ca2f88d90bf42b47493e7ab",
     "plugins/agent-bridge/scripts/install.sh": "85439d5ff1cb57ffd607dd4141d81fc4ebe0c2ce82f0942fa14a6bde9d869ef3",
     "plugins/agent-bridge/scripts/install.ps1": "88446b1317d04de659120a5c07d38259380033bfee6085ee480b08d6f440624a",
@@ -10738,7 +10747,7 @@
     "libs/installer-engine/installer_native_executable.py": "5d6346082632ea6e7a972b0416f14f23fea063d0023d722712e7e89ab0b1bb1f",
     "tools/promotion_unit_tests/test_protected_installation.py": "35b306b9c6b28dc24254004e3d5244940bf50894b9a13d5525b7b8b098717e9c",
     "libs/installer-engine/installer_driver.py": "d63882f5024114f5ab6623b95fbdb45b7322dfbffd3546ee24e1de8bd93ca98a",
-    "libs/installer-engine/installer_engine_commands.py": "5d8028b9286f61480b0d19d77b82a4a932fa7ea8193635a728170afc4f61d4ed",
+    "libs/installer-engine/installer_engine_commands.py": "06b2de98acbbe9b398c00b029faa9aed75f55e233ecc602dfdffa070c77b7d2f",
     "libs/installer-engine/installer_engine_stop.py": "5a563fe15a205d7168871a8e9470a286c1281bbeead93acb486bda259eaaee16",
     "libs/installer-engine/installer_engine_uninstall.py": "107faa897c9c76ab0b0971eabdddb8aee3ac63e6cdb967a9cc21259b2725bfa7",
     "libs/installer-engine/installer_engine_uninstall_controllers.py": "850c744f65cce2c0693692c5c27305719cfcbcc6ff31d95adc4f8b247c4244d5",
