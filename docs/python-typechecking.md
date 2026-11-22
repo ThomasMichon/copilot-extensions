@@ -166,10 +166,11 @@ Dispatch's pending project extends the service-index checker profile with the
 real MCP, HTTPX2 and Uvicorn declarations used by its routes, client and tests.
 The separate flat hash lock does not change runtime dependencies or admit the
 remaining project.
-Worktrees' pending project uses the build checker pins plus CommonMark and its
-third-party declarations in `typecheck-worktrees-requirements.txt`, so selected
-metadata/source-attribution files are checked against the real Markdown parser.
-This does not admit the unchanged Worktrees project.
+Worktrees' pending project uses the build checker pins plus Marko's annotated
+CommonMark parser in `typecheck-worktrees-requirements.txt`, so selected
+metadata/source-attribution files are checked against the real Markdown parser
+without a separate stub-package dependency. This does not admit the unchanged
+Worktrees project.
 Worktrees' selected session fixtures resolve their actual `conftest` helpers
 through that plugin's test import root, not an unrelated same-named module.
 Focused artifact-consumer tests also resolve their repository runner helpers
