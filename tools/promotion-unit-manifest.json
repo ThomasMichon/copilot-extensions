@@ -1132,7 +1132,14 @@
         "test_projection_uses_the_canonical_function_without_changing_other_configuration",
         "test_projection_refuses_incomplete_or_reordered_markers[# native-executable:end\\n# native-executable:begin\\n]",
         "test_projection_refuses_incomplete_or_reordered_markers[# native-executable:begin\\n]",
-        "test_projection_refuses_incomplete_or_reordered_markers[def select_uv_executable(path): pass\\n]"
+        "test_projection_refuses_incomplete_or_reordered_markers[def select_uv_executable(path): pass\\n]",
+        "test_named_windows_uv_uses_native_lookup_then_the_same_physical_target[uv]",
+        "test_named_windows_uv_uses_native_lookup_then_the_same_physical_target[uv.exe]",
+        "test_native_lookup_failure_is_explicit_and_never_selects_another_uv[2]",
+        "test_native_lookup_failure_is_explicit_and_never_selects_another_uv[5]",
+        "test_native_lookup_refuses_an_oversized_path",
+        "test_named_non_native_wrappers_do_not_enter_native_executable_lookup[uv.cmd]",
+        "test_named_non_native_wrappers_do_not_enter_native_executable_lookup[uv.bat]"
       ]
     ],
     [
@@ -9901,7 +9908,7 @@
     "tools/promotion_unit_tests/test_dependency_cli_refusals.py": "749eee348eef9d3048b62dc85ac39f7e8f600c233e49267af63d6d30131cca82",
     "tools/promotion_unit_tests/test_dependency_cutoff_controls.py": "60e49a49eac1db555407a1eb1fb6601f3209bdfe3a6760c4e16c3318af26bd14",
     "tools/promotion_unit_tests/test_dependency_retention_controls.py": "feebb728fd835274c4007a8984d38609e4b1b982d8f8141c422a91803e37dcfb",
-    "tools/promotion_unit_tests/test_uv_executable_fixture_units.py": "9c468cf8f61ded25396bdebd6185cb89ffef3c3ee3e9335e8a937b08c6dc10c5",
+    "tools/promotion_unit_tests/test_uv_executable_fixture_units.py": "1ee7f15517bbe8d09f2469a8251c147dd318a87da5daa687d5379d1f06ba679d",
     "tools/test_dependency_uv_executable.py": "6488e916ba2e46d43b86e9eae7dfcc618f281b4aa857e27d002013271c600c1e",
     "tools/test_installer_dependency_policy.py": "94a8069e366c93e0116af10b837f1b47dfaea154e398a49920d1ee17933eb80f",
     "tools/promotion_unit_tests/test_uv_reference_fixture_units.py": "34ff0d430c9b2d9533cef8cb76964b5d8a002f727753577fb2a7d6e2a61963b5",

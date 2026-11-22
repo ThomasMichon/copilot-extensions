@@ -1,0 +1,9 @@
+{
+  "comment": "Admit seven unchanged original UV lookup controls to the guarded unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-"""Export original UV-selection fixtures, excluding native retention and links."""
+"""Export original UV-selection fixtures, retaining native retention and links outside."""
 from __future__ import annotations
 
 import importlib.util
@@ -20,6 +20,10 @@ _SELECTED = (
     "test_sdk_projection_keeps_the_canonical_nontraversing_primitive",
     "test_projection_uses_the_canonical_function_without_changing_other_configuration",
     "test_projection_refuses_incomplete_or_reordered_markers",
+    "test_named_windows_uv_uses_native_lookup_then_the_same_physical_target",
+    "test_native_lookup_failure_is_explicit_and_never_selects_another_uv",
+    "test_native_lookup_refuses_an_oversized_path",
+    "test_named_non_native_wrappers_do_not_enter_native_executable_lookup",
 )
 for _name in _SELECTED:
     assert _name not in globals(), f"duplicate original UV-executable control: {_name}"

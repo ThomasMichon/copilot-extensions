@@ -4023,7 +4023,29 @@ dependency-age owner calls for each case. The candidate contains 8,002 nodes,
 1,165 sources and 906,889 compact-v2 bytes, retaining all preceding 8,000 nodes,
 the target branch's current source hashes, all 447 targets, 89 helper decisions,
 compact/flat-v1 identity and the 300-second deadline. Full current-head Linux
-source CI and review remain required before this finite slice can land.
+source CI and review complete for this finite slice. Ruff, whole-file strict
+typing on Python 3.10/Linux and Windows, manifest/helper closure and packaged
+`worktree-manager` changefile verification against the committed contribution
+diff pass.
+
+Copilot approval `6010545242` covers exact head
+`de81421290af0252568366087d0328ffc90aac08`, without active findings.
+CI `44989297189`, unit job `137106615776`, freshly passes all 8,002 cases
+with 39 deselections, 189.45 pytest seconds and 211.887 packet seconds.
+Evidence reports `mode=executed`, origin run `44989297189` attempt one and
+digest `2597451fbd6b115269848e44ed81322563981a270fe85a0601e4dd4c0374fa35`.
+Required aggregate `137107759676`, guards, identifier enforcement and trusted
+lockdown/attribution pass. Complete review/comment/thread pagination, seven
+fresh verifier reads and final head/hold/closing-reference checks precede the
+managed merge.
+
+Source #14040 merges at `2026-11-22T05:32:34Z` as
+`a671fd50402011f38a8db2011156bfaed3557102`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
 
 Two other development proposals remain unadmitted. The original
 project/resource-overlap cases reach Windows private-root initialization and
@@ -4035,6 +4057,51 @@ the original tests and retained lanes remain unchanged. No native loader
 preload, guard exception, clock, assertion or callback-body replacement
 converts either refusal into a passing witness. These boundaries do not
 authorize another native run.
+
+The separately proposed original editable-requirement CLI refusal also
+remains unadmitted. Its inner retained-install validation precedes the inner
+selector, but the outer configuration wrapper resolves UV first. A fresh
+guarded attempt refuses that wrapper's Windows `kernel32` load on
+`ctypes.dlopen`; the one-line adapter addition is withdrawn without changing
+the original test or manifest. This confirms the earlier November 21 refusal,
+not an additional independent boundary or passing witness. Prototype evidence
+is retained. No loader preload, selector replacement or guard exception is
+introduced.
+
+### November 22 original named-UV lookup-double qualification
+
+The existing UV-selection adapter exports four additional exact original
+functions as seven cases: named lookup preserves one physical target, errors
+2 and 5 refuse without substitution, oversized lookup refuses, and named
+`.cmd`/`.bat` wrappers never enter native lookup. The original lookup doubles,
+fixtures, callbacks, parameter identities and assertions are unchanged.
+Actual Windows lookup, private-root creation, links and installed behavior
+remain separate; no native library is loaded for these controls.
+
+The 21-case original collection matches all nineteen selected adapter cases.
+A fresh guarded process passes the complete adapter in 1.390 seconds with
+zero prohibited effects, twelve bound Python reads and positive actual
+configuration-owner call lines for each of the seven additions. The candidate
+contains 8,009 nodes, 1,165 sources and 907,461 compact-v2 bytes. It preserves
+all preceding 8,002 nodes in relative order, every unrelated source hash,
+all 447 targets, 89 helper decisions, compact/flat-v1 identity and the
+300-second bound. Ruff and whole-file strict Python 3.10/Linux and Windows
+typing pass for the changed adapter.
+
+Scoped source synchronization retains an independently advanced target's
+thirteen additional nodes, three sources and one target. The rebased
+contribution has 8,020 nodes, 1,168 sources, 448 targets and 908,907 compact
+bytes; its own delta remains seven cases and one adapter hash. All twelve
+guard-observed source inputs are byte-identical after synchronization.
+Immutable-base/head strict typing and committed changefile-presence checks
+pass; a concurrently advanced shared remote-tracking ref is not treated as
+part of this contribution.
+
+Current-head review and complete fresh Linux source CI remain required
+before this finite leaf is complete. Fresh-install/native/installed lanes
+are not exercised because no installation or runtime behavior changes.
+Full-census, every-release, comparable whole-flow, owner, native, installed
+and retained-custody gates remain open.
 
 ### November 20 path-gated audit-guard native boundary
 
