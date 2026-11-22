@@ -3,6 +3,21 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_coverage_errors.py",
+      [
+        "test_unreaped_parallel_collection_retains_automatic_sandbox",
+        "test_baseline_error_preserves_collection_output_despite_coverage_warning",
+        "TestBaselineCollectionErrorContract::test_error_preserves_both_diagnostic_streams[collection failed-]",
+        "TestBaselineCollectionErrorContract::test_error_preserves_both_diagnostic_streams[-process failed]",
+        "TestBaselineCollectionErrorContract::test_error_preserves_both_diagnostic_streams[ModuleNotFoundError: missing fixture dependency-CoverageWarning: No data was collected]",
+        "TestBaselineCollectionErrorContract::test_nonzero_exit_raises_baseline_collection_error",
+        "TestBaselineCollectionErrorContract::test_timeout_raises_baseline_collection_error",
+        "TestBaselineCollectionErrorContract::test_measured_commit_round_trips_into_the_baseline_dict",
+        "TestBaselineCollectionErrorContract::test_portfolio_tier_round_trips_per_test_into_the_baseline_dict",
+        "TestBaselineCollectionErrorContract::test_subprocess_env_scrubs_ambient_containment_variables"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_coverage_decide.py",
       [
         "TestDecide::test_no_baseline_resolved_falls_back_with_no_evidence",
@@ -10314,6 +10329,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_coverage_errors.py": "db8fea21248b5eaea0ae3253800fa57f6194c825376259f72e65759a9cbb7981",
     "tools/promotion_unit_tests/test_original_coverage_decide.py": "5a6cebf9e791e7cd06e9022ccf4476465bc8c5dda1469be51c333a42f623bb72",
     "tools/promotion_unit_tests/test_original_coverage_chunks.py": "7e7bab44ae64f309193f14239b9fa95ff0499632060cc995019a421486993930",
     "tools/promotion_unit_tests/test_original_coverage_correlation.py": "dd03755187c43035bf20211e3ea1c10bac6cdaf802a8c8ee2b0b8011eab19323",

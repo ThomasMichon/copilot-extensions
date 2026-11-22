@@ -4641,8 +4641,30 @@ The compact-v2 candidate contains 8,424 nodes, 1,207 bound sources, 453 targets
 and 948,538 bytes. All 8,413 preceding nodes retain relative order and all
 1,206 current-base source hashes remain intact. Existing targets, 89 helper
 decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
-enforced. Current-head review and complete fresh Linux CI remain required
-before normal merge.
+enforced. Fatal Ruff, strict Python 3.10/Linux and Windows typing,
+documentation consistency and diff checks pass.
+
+Copilot approval `6011594629` covers exact head
+`35df8c11418d9cac6160f39117bc44390ccd617f`, with no active findings.
+Source CI `45009822778`, unit job `137169453906`, freshly passes all 8,424
+cases with 39 deselections, 192.78 pytest seconds and 214.513 packet seconds.
+It reports `mode=executed`, origin run `45009822778` attempt one, execution
+identity `d110db32f88d81873a5a08ba5d3ddaee605ef3304b0233ceb1107e55d17ce64b`
+and packet digest
+`b09489083244a5fccca66e286045298bfcf75ee8ed976a8ed784d64161f8f2ab`.
+Required aggregate `137170754707`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14067 merges at `2026-11-22T10:01:50Z` as
+`2966cd1a1688c49756e51439f9d3dd2adc56cef2`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the eleven-case leaf.
+The merged base also includes independent #14059
+`f60677377a`: one additional launch-composition node and five refreshed
+source hashes, with unchanged source count, targets, deadline and execution
+guards. Its 8,425-node census is not the 8,424-node qualified PR head and
+does not enlarge this leaf's eleven-case result.
 
 No original test, production implementation, workflow, runtime, source/data
 policy or effect-auditor changes. This is decision-orchestration coverage, not
@@ -4650,6 +4672,37 @@ real Git debt/ancestry, asset fetching, portfolio activation or integration
 qualification. Fresh-install/native lanes are not exercised because
 installation/runtime behavior is unchanged. All retained refusals, shared-owner
 seams and broader parent gates remain open.
+
+### November 22 original synthetic collection-error qualification
+
+The adapter exports the two unchanged original synthetic sandbox/diagnostic
+functions followed by the exact `TestBaselineCollectionErrorContract` class,
+preserving original relative order, method/parameter objects, fixtures,
+helpers, existing collaborator stubs and assertions. Complete collection
+checks 157 original cases and eleven adapter cases. The manifest selects
+exactly ten: the two functions and eight synthetic class cases. The class's
+opt-in real-process error case remains unchanged outside the packet; the
+whole nine-case class is not claimed as unit-qualified.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer, selecting the ten cases explicitly at the pytest
+consumer. It passes in 2.281 seconds with zero prohibited effects, 23 bound
+Python reads and positive actual baseline-owner call-phase lines for every
+selected case. The real-process case is deselected, not executed or counted
+as a skipped unit. No mock, preload, wrapper or effect exception is added;
+the sandbox-retention witness raises the original synthetic error and
+removes only its own newly created temporary sandbox.
+
+The compact-v2 candidate contains 8,435 nodes, 1,208 bound sources and 453
+targets in 949,924 bytes. All 8,425 preceding nodes and their order, all
+1,207 current source hashes, every target, 89 helper decisions and the
+300-second bound remain intact. Only the adapter is newly hash-bound;
+both baseline owners are already targets. Normal strict typing, current-head
+review and complete fresh Linux CI remain required before closing this leaf.
+This is synthetic error-contract coverage, not native/process qualification,
+portfolio activation or resolution of retained owner/refusal boundaries.
+Fresh-install/native lanes are not exercised because no installation,
+runtime, workflow or original-test behavior changes.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 
