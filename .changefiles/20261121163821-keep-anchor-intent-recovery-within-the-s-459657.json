@@ -1,0 +1,9 @@
+{
+  "comment": "Keep anchor intent recovery within the same native session, preserve linked-worktree history, and record explicit startup links as reference-only pointers.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
