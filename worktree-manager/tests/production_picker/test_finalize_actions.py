@@ -3,10 +3,13 @@
 import asyncio
 import sys
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-from worktree_manager.production_picker.picker_tui import maintenance
+from worktree_manager import engine_client
+from worktree_manager.production_picker import context
+from worktree_manager.production_picker.picker_tui import derive, maintenance
 from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
 from worktree_manager.production_picker.picker_tui.engine_live_screens import ProgressScreen
 from test_picker_tui import _maint_source
@@ -20,29 +23,29 @@ from test_picker_tui import _maint_source
     {"cleanup_bucket": "active", "mux_live": True},
     {"cleanup_bucket": "active", "mux_observation_unknown": True},
 ])
-def test_finalize_is_discoverable_outside_the_empty_worktree_buckets(values):
+def test_finalize_is_discoverable_outside_the_empty_worktree_buckets(values: dict[str, Any]) -> None:
     row = {"sessionless": False, **values}
-    assert "Finalize" in PickerScreen._session_action_verbs(row)
+    assert "Finalize" in cast(Any, PickerScreen)._session_action_verbs(row)
     calls = []
     screen = SimpleNamespace(
         _record_supports=PickerScreen._record_supports,
         _run_op_progress=lambda *args, **kwargs: calls.append((args, kwargs)),
     )
-    PickerScreen._start_finalize(screen, row)
+    cast(Any, PickerScreen)._start_finalize(screen, row)
     assert calls == [(("Finalize", "finalize", [row]), {"armed": False})]
 
 
 @pytest.mark.parametrize("values", [
     {"managed_child": True},
-    {"mux_live": True},
+    {"session_lock_live": True},
     {"mux_observation_unknown": True},
     {"session_bound_live": True},
     {"session_ahp_live": True},
     {"execution_leg_live": True},
     {"session_lock_stale": True},
 ])
-def test_protected_finalize_never_invokes_an_engine(values, monkeypatch):
-    monkeypatch.setattr(maintenance.engine_client, "run_json", lambda *_a, **_kw: pytest.fail("engine effect"))
+def test_protected_finalize_never_invokes_an_engine(values: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine_client, "run_json", lambda *_a, **_kw: pytest.fail("engine effect"))
     row = {"raw": {"id": "fixture-wt"}, "machine": "fixture", "env": "Win", **values}
     tasks = maintenance.build_tasks("finalize", [row], None, project="fixture", local=("fixture", "Win"))
     result = tasks[0][1]()
@@ -50,8 +53,44 @@ def test_protected_finalize_never_invokes_an_engine(values, monkeypatch):
     assert result.get("reason")
 
 
+@pytest.mark.parametrize("legacy_hint", [
+    "session_bound_live", "session_bridge_live", "session_ahp_live",
+    "execution_leg_live", "session_bare_orphan",
+])
+@pytest.mark.parametrize("copilot_live", [False, True])
+def test_mux_occupancy_and_current_lock_control_distinct_picker_actions(
+    monkeypatch: pytest.MonkeyPatch, legacy_hint: str, copilot_live: bool,
+) -> None:
+    raw: dict[str, Any] = {
+        "id": "fixture-wt", "status": "active", "state": "wip",
+        "mux_session": True, "mux_attached": True, "mux_clients": 2,
+        "session_lock_live": copilot_live, legacy_hint: True,
+    }
+    row = derive.norm(raw, "fixture", "Win")
+    assert row["state"] == ("ACTIVE" if copilot_live else "WIP")
+    assert row["mux_live"] and row["sess"] == "MUX(2)"
+    active, recent, _completed = derive.bucket([row])
+    assert (active, recent) == (([row], []) if copilot_live else ([], [row]))
+    calls: list[list[str]] = []
+
+    def run_json(_project: str, argv: list[str], **_kwargs: Any) -> dict[str, Any]:
+        calls.append(argv)
+        return {"success": False, "reason": "physical checkout is occupied"}
+
+    monkeypatch.setattr(engine_client, "run_json", run_json)
+    tasks = maintenance.build_tasks("finalize", [row], None, project="fixture", local=("fixture", "Win"))
+    result = tasks[0][1]()
+    if copilot_live:
+        assert not calls and not result["success"]
+    else:
+        assert calls == [["finalize", "fixture-wt", "--json"]]
+        assert result == {"success": False, "reason": "physical checkout is occupied"}
+    raw["state"] = "active"
+    assert derive.norm(raw, "fixture", "Win")["state"] == ("ACTIVE" if copilot_live else "UNKNOWN")
+
+
 @pytest.mark.parametrize("remote", [False, True])
-def test_finalize_retains_the_real_process_refusal_output(remote, monkeypatch):
+def test_finalize_retains_the_real_process_refusal_output(remote: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager import engine_client
 
     detail = "Unmerged work remains.\nHeld claim: workdir:fixture-child\nUse claims show before cleanup."
@@ -80,7 +119,9 @@ def test_finalize_retains_the_real_process_refusal_output(remote, monkeypatch):
     (True, "remote refused before JSON", 1),
     (True, '{"unfinished":', 0),
 ])
-def test_finalize_retains_both_streams_when_json_is_unusable(remote, stdout, exit_code, monkeypatch):
+def test_finalize_retains_both_streams_when_json_is_unusable(
+    remote: bool, stdout: str, exit_code: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from worktree_manager import engine_client
 
     stderr = "original refusal context\nfinal diagnostic line"
@@ -102,7 +143,7 @@ def test_finalize_retains_both_streams_when_json_is_unusable(remote, stdout, exi
 
 
 @pytest.mark.parametrize("with_reason", [True, False])
-def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with_reason):
+def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch: pytest.MonkeyPatch, with_reason: bool) -> None:
     from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen
 
     calls = []
@@ -113,7 +154,7 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with
         + "\nClose each resource out, then retry -- or pass --abandon to re-home them."
     )
 
-    def run_json(_project, argv, **_kwargs):
+    def run_json(_project: str, argv: list[str], **_kwargs: Any) -> dict[str, Any]:
         if argv[0] != "finalize":
             return {}
         calls.append(argv)
@@ -122,11 +163,11 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with
             **({"reason": "unsettled obligations"} if with_reason else {}),
         }
 
-    monkeypatch.setattr(maintenance.engine_client, "run_json", run_json)
-    monkeypatch.setattr(maintenance.context, "project", lambda: "fixture")
+    monkeypatch.setattr(engine_client, "run_json", run_json)
+    monkeypatch.setattr(context, "project", lambda: "fixture")
 
-    async def run():
-        app = PickerApp(_maint_source(), live=False)
+    async def run() -> None:
+        app = cast(Any, PickerApp)(cast(Any, _maint_source)(), live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             screen = app.query_one(PickerScreen)
             screen.machine_idx = screen.local_index()
@@ -142,6 +183,7 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with
             screen._start_finalize(row)
             await pilot.pause()
             await pilot.press("enter")
+            assert screen.progress is not None
             for _ in range(30):
                 await pilot.pause(0.05)
                 if screen.progress["done"]:
@@ -171,9 +213,9 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with
     asyncio.run(run())
 
 
-def test_bulk_finalize_is_available_without_any_empty_worktree_bucket():
-    async def run():
-        app = PickerApp(_maint_source(), live=False)
+def test_bulk_finalize_is_available_without_any_empty_worktree_bucket() -> None:
+    async def run() -> None:
+        app = cast(Any, PickerApp)(cast(Any, _maint_source)(), live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             screen = app.query_one(PickerScreen)
             screen.machine_idx = screen.local_index()

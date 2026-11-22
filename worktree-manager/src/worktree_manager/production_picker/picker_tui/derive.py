@@ -12,6 +12,8 @@ fixture-loading half is replaced by real data sources (``data_local`` / SSH).
 from __future__ import annotations
 
 import datetime as _dt
+from collections.abc import Callable
+from typing import Any, cast
 
 from rich.cells import cell_len
 from ...worktree_reporting_contract import row_identity
@@ -38,7 +40,7 @@ NOW = _dt.datetime.now()
 _PULSE_FRESH_SECS = 90
 
 
-def _pulse_level(w):
+def _pulse_level(w: dict[str, Any]) -> str | None:
     """Classify the live agent-intent pulse: 'awaiting', 'fresh', 'stale', None.
 
     'awaiting' -- the session is parked on a human (``live_rest`` ==
@@ -90,7 +92,7 @@ def _pulse_level(w):
 
 
 
-def _parse_pulse_ts(ts):
+def _parse_pulse_ts(ts: object) -> _dt.datetime | None:
     """Parse a pulse timestamp to a *naive local* datetime, or None.
 
     The live-pulse extension stamps ``new Date().toISOString()`` -- a UTC,
@@ -123,7 +125,7 @@ _STATE_LABEL = {
 }
 
 
-def _age(ts):
+def _age(ts: object) -> str:
     if not ts:
         return "-"
     t = _parse_pulse_ts(ts)
@@ -132,7 +134,7 @@ def _age(ts):
     return _relative_age(max(0, (NOW - t).total_seconds()))
 
 
-def _relative_age(s):
+def _relative_age(s: float) -> str:
     if s < 3600:
         return f"{int(s // 60)}m"
     if s < 86400:
@@ -140,7 +142,7 @@ def _relative_age(s):
     return f"{int(s // 86400)}d"
 
 
-def _pr(w):
+def _pr(w: dict[str, Any]) -> str:
     pr = w.get("pr") or {}
     n = pr.get("number")
     if not n:
@@ -151,7 +153,7 @@ def _pr(w):
     return f"#{n}{tag}"
 
 
-def _state(w, relation_label=""):
+def _state(w: dict[str, Any], relation_label: str = "") -> str:
     """Display label aligned with the canonical git WorktreeState vocabulary.
 
     Prefers the ``state`` field from ``list --json --classify`` (computed where
@@ -169,21 +171,20 @@ def _state(w, relation_label=""):
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted.get("finalized_display") and relation_label != "HANDOFF":
         return "FINAL"
-    # Liveness wins except for the validated explicit-finalization display.
-    # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
-    # before any git status/PR consideration). A live mux, a live
-    # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
-    # bridge-lock means a live Copilot session.
-    if (w.get("mux_session") or w.get("mux_attached")
-            or w.get("session_lock_live") or w.get("session_bound_live")
+    # Mux occupancy is independent of Copilot activity. A current lock
+    # observation supersedes legacy hints that did not qualify the CWD.
+    lock_observed = "session_lock_live" in w
+    if (w.get("session_lock_live") or not lock_observed and (w.get("session_bound_live")
             or w.get("session_bridge_live") or w.get("session_ahp_live")
             or w.get("execution_leg_live")
-            or w.get("session_bare_orphan")):
+            or w.get("session_bare_orphan"))):
         return "ACTIVE"
     if relation_label == "HANDOFF":
         return "HANDOFF"
     st = (w.get("state") or "").lower()
     if st:
+        if st == "active" and lock_observed:
+            return "UNKNOWN"
         # Conversation-only refinement: an UNUSED worktree whose session held
         # turns is not idle -- it's CONVO.
         if st == "unused" and w.get("turn_count", 0) > 0:
@@ -200,7 +201,7 @@ def _state(w, relation_label=""):
             # descriptor is absent or unsupported.
             interpreted = prune.interpret_descriptor_payload(w.get("closure"))
             if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
-                return interpreted["label"]
+                return cast(str, interpreted["label"])
             return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
@@ -213,14 +214,14 @@ def _state(w, relation_label=""):
         # render FINAL through this back door.
         interpreted = prune.interpret_descriptor_payload(w.get("closure"))
         if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
-            return interpreted["label"]
+            return cast(str, interpreted["label"])
         return "MERGED"
     if status == "active":
         return "WIP" if w.get("turn_count", 0) > 0 else "UNUSED"
-    return (status or "?").upper()[:6]
+    return cast(str, (status or "?").upper()[:6])
 
 
-def _state_style(w, relation_label=""):
+def _state_style(w: dict[str, Any], relation_label: str = "") -> str | None:
     """The closure descriptor's validated ``style`` (e.g. ``merged-blocked``),
     surfaced only when ``_state()`` itself actually resolved to FINAL/MERGED
     through the descriptor. Reuses ``_state()``'s own resolution (rather than
@@ -242,11 +243,11 @@ def _state_style(w, relation_label=""):
         return None
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
-        return interpreted["style"]
+        return cast(str, interpreted["style"])
     return None
 
 
-def _status_markers(w):
+def _status_markers(w: dict[str, Any]) -> str:
     """The closure descriptor's per-fact freshness markers (worktree-finality-
     and-obligations Phase 9), e.g. ``"C1 U* OC*"`` -- held-claim/follow-up
     counts plus an unconfirmed upstream-containment/open-claims marker.
@@ -265,10 +266,10 @@ def _status_markers(w):
     label = interpreted["label"]
     if not compact or not label or not compact.startswith(label):
         return ""
-    return compact[len(label):].strip()
+    return cast(str, compact[len(label):].strip())
 
 
-def truncate_text(s, w):
+def truncate_text(s: object, w: int) -> str:
     """Truncate ``s`` to at most ``w`` display cells, ellipsizing when
     clipped -- used when concatenating several variable-length segments onto
     one detail line (the Worktree tile's status_markers/asset_hints run) so
@@ -279,27 +280,27 @@ def truncate_text(s, w):
     of just bounding this one's length. Uses Rich's ``cell_len`` throughout
     (not ``len()``) so a wide/double-width character is measured by its
     actual display width, not counted as one cell."""
-    s = str(s)
-    if cell_len(s) <= w:
-        return s
+    text = str(s)
+    if cell_len(text) <= w:
+        return text
     if w <= 0:
         return ""
     if w == 1:
         # A double-width first character still exceeds a 1-cell budget even
         # unclipped (e.g. a wide CJK glyph) -- degrade to the ellipsis
         # (itself exactly 1 cell) rather than returning 2 cells' worth.
-        return s[0] if cell_len(s[0]) <= 1 else "…"
+        return text[0] if cell_len(text[0]) <= 1 else "…"
     # Binary-search the longest prefix whose cell width leaves room for the
     # ellipsis -- cheap and exact for the short strings this renders (marker
     # phrases, asset-hint runs), unlike slicing by character count.
-    lo, hi = 0, len(s)
+    lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if cell_len(s[:mid]) <= w - 1:
+        if cell_len(text[:mid]) <= w - 1:
             lo = mid
         else:
             hi = mid - 1
-    return s[:lo] + "…"
+    return text[:lo] + "…"
 
 
 #: The raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
@@ -316,7 +317,7 @@ _STATUS_MARKER_TEXT = {
 }
 
 
-def describe_status_marker(tok):
+def describe_status_marker(tok: str) -> tuple[str, bool]:
     """Expand one ``status_markers`` token into ``(text, is_warning)``. An
     unrecognized token (a future marker this helper doesn't know about yet)
     degrades to itself verbatim, still flagged as a warning if it carries the
@@ -349,7 +350,7 @@ def describe_status_marker(tok):
     return tok, tok.endswith("*")
 
 
-def status_marker_segments(markers, width):
+def status_marker_segments(markers: str, width: int) -> list[tuple[str, bool]]:
     """Expand a raw ``status_markers`` string into ``(text, is_warning)``
     render segments (comma separators included as their own non-warning
     segments), each already truncated so the whole run never exceeds
@@ -375,7 +376,9 @@ def status_marker_segments(markers, width):
     return segments
 
 
-def status_line_segments(markers, asset_hints, overflow, width):
+def status_line_segments(
+    markers: str, asset_hints: list[str], overflow: int, width: int,
+) -> list[tuple[str, bool]]:
     """Combine the ``status_markers`` expansion with the tile's asset-hint
     text into one bounded run of ``(text, is_warning)`` segments -- the
     picker's detail-line render layer just appends these in order. Asset
@@ -396,7 +399,7 @@ def status_line_segments(markers, asset_hints, overflow, width):
     return segments
 
 
-def _mux_observation_unknown(w):
+def _mux_observation_unknown(w: dict[str, Any]) -> bool:
     evidence = (w.get("fact_provenance") or {}).get("mux") or {}
     return (
         w.get("mux_observation_unavailable") is True
@@ -405,7 +408,7 @@ def _mux_observation_unknown(w):
     )
 
 
-def _sess(w):
+def _sess(w: dict[str, Any]) -> str:
     """LIVE column value (operator feedback, 2026-09-29): ``MUX``/``ACP``/
     ``PROC``/``LOCK``/``-``, replacing the prior glyph set (``●N``/``○``).
     ``MUX(n)`` carries the connected-client count, recovering the old
@@ -444,7 +447,7 @@ def _sess(w):
     return "-"
 
 
-def _length_display(w):
+def _length_display(w: dict[str, Any]) -> str:
     """LENGTH column (renamed from SESS/T, 2026-09-29): ``"<sc>s <tc>t"``,
     e.g. ``"1s 25t"`` -- unit-suffixed so it never reads like a date (the
     prior ``"1/25"``'s complaint). ``session_count`` renders ``"-"`` when
@@ -455,20 +458,20 @@ def _length_display(w):
 
 
 
-def _age_secs(w):
+def _age_secs(w: dict[str, Any]) -> float:
     ts = (w.get("completed_at") if w.get("status") == "finalized"
           else w.get("started_at"))
     dt = _parse_pulse_ts(ts)
     return max(0, (NOW - dt).total_seconds()) if dt else 1 << 40
 
 
-def _last_active_secs(w):
+def _last_active_secs(w: dict[str, Any]) -> float:
     """Use exactly the USED instant, including the documented legacy fallback."""
     dt = _activity_instant(w.get("used_at") or _last_active_timestamp(w))
-    return max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds()) if dt else w.get("age_secs", 1 << 40)
+    return max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds()) if dt else cast(float, w.get("age_secs", 1 << 40))
 
 
-def _activity_instant(ts):
+def _activity_instant(ts: object) -> _dt.datetime | None:
     if not isinstance(ts, str) or not ts:
         return None
     try:
@@ -477,28 +480,28 @@ def _activity_instant(ts):
         return None
 
 
-def _last_active_timestamp(w):
+def _last_active_timestamp(w: dict[str, Any]) -> str | None:
     activity = w.get("message_activity")
     if isinstance(activity, dict) and type(activity.get("version")) is int and activity["version"] == 1:
         message_at = activity.get("last_message_at")
         if _activity_instant(message_at) is not None:
-            return message_at
+            return cast(str, message_at)
     for candidate in (
         w.get("last_resumed_at"),
         w.get("completed_at") if w.get("status") == "finalized" else w.get("started_at"),
     ):
         if _activity_instant(candidate) is not None:
-            return candidate
+            return cast(str, candidate)
     return None
 
 
-def _last_active_display(w):
+def _last_active_display(w: dict[str, Any]) -> str:
     """Relative USED age from the same message/legacy instant as its sort key."""
     dt = _activity_instant(_last_active_timestamp(w))
     return _relative_age(max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds())) if dt else "-"
 
 
-def time_fields(w):
+def time_fields(w: dict[str, Any]) -> dict[str, Any]:
     """Refresh relative presentation without re-deriving unchanged row facts."""
     return {
         "live_pulse": _pulse_level(w),
@@ -511,7 +514,7 @@ def time_fields(w):
     }
 
 
-def _bucket_from_raw(w):
+def _bucket_from_raw(w: dict[str, Any]) -> str:
     """Cleanup bucket for a raw worktree dict.
 
     Prefers the authoritative ``cleanup_bucket`` emitted by
@@ -526,7 +529,7 @@ def _bucket_from_raw(w):
     """
     b = w.get("cleanup_bucket")
     if b:
-        return b
+        return cast(str, b)
     # worktree-status-core: on the fallback path (old remote w/o an authoritative
     # cleanup_bucket), an agent-asserted follow-up downgrades a would-be clean
     # verdict to the REVIEW-class 'follow-up' bucket. (The authoritative path is
@@ -564,7 +567,7 @@ def _bucket_from_raw(w):
     return "unknown"
 
 
-def _ff_from_raw(w):
+def _ff_from_raw(w: dict[str, Any]) -> bool:
     """Whether a raw worktree dict is fast-forward eligible.
 
     Prefers the authoritative ``ff_eligible`` field; else mirrors
@@ -617,14 +620,14 @@ BUCKET_REASON = {
 
 
 #: Client-side ordering for every section; USED is recency, not creation age.
-WT_SORT_KEYS = [
+WT_SORT_KEYS: list[tuple[str, Callable[[dict[str, Any]], Any]]] = [
     ("used", _last_active_secs),
     ("title", lambda w: (w.get("title") or "").casefold()),
     ("state", lambda w: w.get("state") or ""),
 ]
 
 
-def wt_row_always_visible(w):
+def wt_row_always_visible(w: dict[str, Any]) -> bool:
     """True for a worktree row the "/" command-bar filter must never hide
     (#2228 Phase 4) -- the cross-effort record-shape-contract: a live or
     bare-orphan worktree, or one classified ``ACTIVE``, stays visible
@@ -645,16 +648,16 @@ def wt_row_always_visible(w):
 
 
 def norm(
-    w,
-    machine,
-    env,
+    w: dict[str, Any],
+    machine: str,
+    env: str,
     *,
-    source_kind=source_identity.MACHINE_SSH_KIND,
-    source_id=None,
-    source_label=None,
-    source_metadata=None,
-    source_capabilities=None,
-):
+    source_kind: str = source_identity.MACHINE_SSH_KIND,
+    source_id: str | None = None,
+    source_label: str | None = None,
+    source_metadata: dict[str, Any] | None = None,
+    source_capabilities: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Normalize one raw worktree dict into the engine's record shape."""
     identity = row_identity(w)
     source_id = source_identity.resolve_id(
@@ -737,7 +740,7 @@ def norm(
     # ``_state_style()`` (which must agree on whether HANDOFF actually won)
     # and reused below rather than recomputed for the ``relation`` field.
     relation_label = reciprocal.short_label(reciprocal_relation)
-    record = {
+    record: dict[str, Any] = {
         "id": w["id"],
         "id4": id4,
         "selection_id": f"{source_id}\x1f{w['id']}",
@@ -783,8 +786,8 @@ def norm(
         "session_count": w.get("session_count"),
         # #3307 Phase 6, renamed LENGTH: see ``_length_display``'s docstring.
         "sess_turns": _length_display(w),
-        "sessionless": _sessionless(w),
-        "managed_child": managed_child(w, reciprocal_relation),
+        "sessionless": cast(Callable[[dict[str, Any]], bool], _sessionless)(w),
+        "managed_child": cast(Callable[..., bool], managed_child)(w, reciprocal_relation),
         "pr": _pr(w),
         # #3307 Phase 4: the engine's already-ranked claims summary (computed
         # in ``agent_worktrees.__main__._worktree_to_dict`` via the shared
@@ -869,13 +872,17 @@ def norm(
     return record
 
 
-def for_machine(wts, machine, env):
+def for_machine(
+    wts: list[dict[str, Any]], machine: str, env: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     here = [w for w in wts if w["machine"] == machine and w["env"] == env]
     annotate_pairs(here)
     return bucket(here)
 
 
-def for_source(wts, source_id):
+def for_source(
+    wts: list[dict[str, Any]], source_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Return rows owned by one canonical source."""
     here = [w for w in wts if w.get("source_id") == source_id]
     annotate_pairs(here)
@@ -890,12 +897,12 @@ def for_source(wts, source_id):
 _PAIR_ATTENTION_STATES = frozenset({"WIP", "DIRTY", "ORPHAN"})
 
 
-def _pair_wants_attention(row) -> bool:
+def _pair_wants_attention(row: dict[str, Any]) -> bool:
     """True when a row has un-landed work (follow-up flag or a WIP/dirty state)."""
     return bool(row.get("follow_up")) or row.get("state") in _PAIR_ATTENTION_STATES
 
 
-def annotate_pairs(rows):
+def annotate_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attach each paired row's SIBLING summary + an aggregate attention flag.
 
     For every row carrying a ``pair_id`` (see :func:`norm`), match it against the
@@ -912,7 +919,7 @@ def annotate_pairs(rows):
     untouched). Idempotent. Pairs are carved on one machine, so callers annotate
     a per-machine slice (see :func:`for_machine`).
     """
-    by_pair: dict[str, list] = {}
+    by_pair: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         pid = r.get("pair_id")
         if pid:
@@ -935,7 +942,7 @@ def annotate_pairs(rows):
     return rows
 
 
-def bucket(wts):
+def bucket(wts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Split into (active, recent, completed).
 
     Sections key off the canonical *state*, not the tracking status:
