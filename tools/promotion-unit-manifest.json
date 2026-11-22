@@ -3,6 +3,20 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_dispatch_artifact_integrity_units.py",
+      [
+        "test_source_admission_integrity_cannot_be_invented_by_artifact_metadata[time]",
+        "test_source_admission_integrity_cannot_be_invented_by_artifact_metadata[workflow-sha]",
+        "test_source_admission_integrity_cannot_be_invented_by_artifact_metadata[future-attempt]",
+        "test_source_admission_integrity_cannot_be_invented_by_artifact_metadata[duplicate]",
+        "test_source_admission_integrity_cannot_be_invented_by_artifact_metadata[upload-time]",
+        "test_source_admission_integrity_cannot_be_invented_by_artifact_metadata[upload-status]",
+        "test_untrusted_or_legacy_artifact_uploads_cannot_claim_current_source_ownership[branch]",
+        "test_untrusted_or_legacy_artifact_uploads_cannot_claim_current_source_ownership[workflow]",
+        "test_untrusted_or_legacy_artifact_uploads_cannot_claim_current_source_ownership[legacy-step]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_evidence_states_units.py",
       [
         "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[queued-None-False]",
@@ -10928,6 +10942,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_dispatch_artifact_integrity_units.py": "ebd208be258f3721bd5be677e602a08b4272051134f73a91ed86a250d33a18d6",
     "tools/promotion_unit_tests/test_original_dispatch_evidence_states_units.py": "30932c3b296fc1c71f2acf6568d44b0d9314daa418f0554fdc763e7cf36c18bc",
     "tools/promotion_unit_tests/test_original_dispatch_history_units.py": "ec9cf3f6baf21d20f8d8fe6bf935534feb646d070b327cb64c77337b6198f5de",
     "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py": "59d54478c962b3e47137b2f535aaa6b39e66ff95080aae1d84e096c62c44ac90",
