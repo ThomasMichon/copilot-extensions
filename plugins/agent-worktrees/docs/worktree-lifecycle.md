@@ -149,6 +149,9 @@ resume planning, cold managed `embody`, and successful `register-session` /
 `trustedFolders`. Cold embodiment establishes trust after launch admission and
 the final live-owner checks, before starting Copilot; an unreadable or malformed
 trust configuration refuses launch rather than starting an unattended trust prompt.
+It uses the launch environment's effective `COPILOT_HOME` (including inherited
+values), not a different caller-default configuration, without mutating the parent
+environment. Relative launch homes resolve against the admitted checkout.
 An already-live embodiment does not change folder trust. Resume
 planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.

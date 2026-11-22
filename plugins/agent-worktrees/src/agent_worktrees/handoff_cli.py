@@ -571,7 +571,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
         try:
-            worktree_trust.ensure_record_trusted(admitted_record, config)
+            worktree_trust.ensure_record_trusted(admitted_record, config, environment=env)
         except (FolderTrustError, ExecutionSpaceError) as exc:
             return output._json_error(str(exc), exit_code=3)
         try:

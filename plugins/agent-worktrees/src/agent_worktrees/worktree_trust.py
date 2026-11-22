@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from . import config as cfg, config_authority, permissions, tracking
+import os
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import cast
+
+from . import config as cfg, config_authority, permissions, tracking, tracking_claims
 from .config import Config
 from .execution_spaces import ExecutionSpaceError, require_owner_identity, require_record_mutation
 
 
-def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None = None) -> bool:
+def ensure_record_trusted(
+    record: tracking.WorktreeRecord, config: Config | None = None,
+    *, environment: Mapping[str, str] | None = None,
+) -> bool:
     """Trust only an admitted native checkout, never a path being inspected."""
     if config is None:
         config = config_authority.registration_record_config(record)
@@ -19,9 +27,20 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
         raise permissions.FolderTrustError("Refusing folder trust for a terminal managed worktree")
     from . import retained_checkout
 
+    launch_environment = os.environ if environment is None else environment
+    home = launch_environment.get("COPILOT_HOME", os.environ.get("COPILOT_HOME"))
+    copilot_home = Path(home) if home else None
+    if copilot_home is not None and not copilot_home.is_absolute():
+        copilot_home = Path(record.worktree_path) / copilot_home
+
+    def trust_folder() -> bool:
+        if copilot_home is None:
+            return permissions.ensure_trusted_folder(record.worktree_path)
+        return permissions.ensure_trusted_folder(record.worktree_path, copilot_home=copilot_home)
+
     if retained_checkout.is_local(record, config):
-        return permissions.ensure_trusted_folder(record.worktree_path)
-    actual = cfg.detect_platform()
+        return trust_folder()
+    actual = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
     if record.platform != actual or config.platform != actual:
         raise ExecutionSpaceError("Folder trust requires the current native execution platform")
     try:
@@ -33,14 +52,14 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
     if not local:
         from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
-        ref = tracking.parse_claim_ref(
-            tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
-        )
+        parse_ref = cast(Callable[[str], tracking_claims.ClaimRef | None], getattr(tracking, "parse_claim_ref"))
+        format_ref = cast(Callable[[str, str, str], str], getattr(tracking, "format_claim_ref"))
+        ref = parse_ref(format_ref(record.execution_machine, record.repo, record.worktree_id))
         if ref is None:
             raise ExecutionSpaceError("Folder trust requires a valid local claim identity")
         if resolve_legacy_wsl_owner_ref(ref, config) is None:
             raise ExecutionSpaceError("Folder trust requires a local execution-space record")
-    return permissions.ensure_trusted_folder(record.worktree_path)
+    return trust_folder()
 
 
 def prepare_for_launch(

@@ -27,6 +27,7 @@ def native_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> NativeCh
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     home = tmp_path / ".copilot"
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
     monkeypatch.setattr(permissions, "_copilot_dir", lambda: home)
     return checkout, home
 
@@ -197,6 +198,50 @@ def test_embody_establishes_trust_before_spawning_copilot(
     tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str], mode: str,
 ) -> None:
+    _assert_embody_trust(
+        native_checkout, sample_record, tmp_tracking_dir, monkeypatch, capfd, mode,
+    )
+
+
+@pytest.mark.parametrize("source", ["overlay", "relative-overlay", "inherited"])
+@pytest.mark.parametrize("mode", ["cold", "invalid-config"])
+def test_embody_establishes_trust_in_effective_launch_home(
+    sample_record: tracking.WorktreeRecord, tmp_path: Path, tmp_tracking_dir: Path,
+    monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], source: str, mode: str,
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    account_home = tmp_path / "account"
+    default_home = account_home / ".copilot"
+    default_home.mkdir(parents=True)
+    default_config = default_home / "config.json"
+    default_config.write_text("malformed default", encoding="utf-8")
+    launch_home = checkout / "selected-copilot" if source == "relative-overlay" else tmp_path / "selected-copilot"
+    inherited_home = tmp_path / "inherited-copilot"
+    monkeypatch.setenv("USERPROFILE", str(account_home))
+    monkeypatch.setenv("HOME", str(account_home))
+    monkeypatch.setenv("COPILOT_HOME", str(launch_home if source == "inherited" else inherited_home))
+    home_value = "selected-copilot" if source == "relative-overlay" else str(launch_home)
+    environment = {} if source == "inherited" else {"COPILOT_HOME": home_value}
+    before = dict(os.environ)
+    _assert_embody_trust(
+        (checkout, launch_home), sample_record, tmp_tracking_dir, monkeypatch, capfd, mode,
+        launch_environment=environment,
+    )
+    assert dict(os.environ) == before
+    assert default_config.read_text(encoding="utf-8") == "malformed default"
+    assert not (default_home / "config.lock").exists()
+    assert (launch_home / "config.lock").is_file()
+    assert not inherited_home.exists()
+
+
+def _assert_embody_trust(
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_tracking_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], mode: str,
+    *, launch_environment: dict[str, str] | None = None,
+) -> None:
     import argparse
 
     from agent_worktrees import (
@@ -223,7 +268,7 @@ def test_embody_establishes_trust_before_spawning_copilot(
     monkeypatch.setattr(agent_policy, "require", lambda *args, **kwargs: None)
     monkeypatch.setattr(command, "_preflight_launch", lambda *args: LaunchPreflight())
     monkeypatch.setattr(command, "_build_launch_cmd", lambda *args, **kwargs: ["copilot"])
-    monkeypatch.setattr(command, "_build_env", lambda *args, **kwargs: {})
+    monkeypatch.setattr(command, "_build_env", lambda *args, **kwargs: dict(launch_environment or {}))
     monkeypatch.setattr(command, "_repo_session_env", lambda *args, **kwargs: {})
     monkeypatch.setattr(sessions, "has_mux_session", lambda value: mode == "live")
     monkeypatch.setattr(sessions, "resolve_resume_target", lambda value: None)
