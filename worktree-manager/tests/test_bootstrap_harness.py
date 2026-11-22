@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from worktree_manager import bootstrap_harness as boot
+from worktree_manager import registered_suite, runtime_source_repository, source_config
 
 
 def test_register_reopen_and_select_pin(tmp_path: Path) -> None:
@@ -18,7 +19,7 @@ def test_register_reopen_and_select_pin(tmp_path: Path) -> None:
     for _ in range(2):
         selected = boot.first_registration(root, source, str(harness))
         assert selected.samefile(harness)
-        assert boot.runtime_source_repository.read(selected, default_repository=boot.source_config.DEFAULT_REPO)[
+        assert runtime_source_repository.read(selected, default_repository=source_config.DEFAULT_REPO)[
             "reference"
         ] == pin
     other = tmp_path / "other" / harness.name
@@ -26,4 +27,4 @@ def test_register_reopen_and_select_pin(tmp_path: Path) -> None:
     boot._git(other, "init", "--quiet")
     with pytest.raises(ValueError, match="another checkout"):
         boot.first_registration(root, source, str(other))
-    assert boot.registered_suite.registrations(root)[1]["example"].samefile(harness)
+    assert registered_suite.registrations(root)[1]["example"].samefile(harness)

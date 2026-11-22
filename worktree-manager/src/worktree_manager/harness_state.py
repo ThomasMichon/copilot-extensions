@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from agent_procutil import no_window_kwargs
 
 SETTINGS_RELS: tuple[tuple[str, ...], ...] = (
     (".claude", "settings.json"),
@@ -609,8 +610,6 @@ def _is_real_git_checkout(path: Path) -> bool | None:
     when git itself couldn't be probed (binary missing, timeout) — an
     inconclusive probe must never be reported as proof of mis-registration.
     """
-    from agent_procutil import no_window_kwargs
-
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         bare = subprocess.run(

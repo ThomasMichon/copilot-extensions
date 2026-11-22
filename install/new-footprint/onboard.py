@@ -11,9 +11,11 @@ import sys
 import time
 
 KIT = Path(__file__).resolve().parents[2]
-sys.path[:0] = [str(KIT / "worktree-manager" / "src"), str(KIT / "tools")]
+sys.path[:0] = [str(KIT / "worktree-manager" / "src"), str(KIT / "tools"),
+                str(KIT / "libs" / "agent-procutil" / "src")]
 
 from worktree_manager import bootstrap_harness as harness
+from worktree_manager import registered_suite, runtime_source_repository, source_config
 
 
 def main() -> None:
@@ -52,9 +54,9 @@ def main() -> None:
     if args.repo:
         anchor = harness.first_registration(root, args.srcroot.absolute(), args.repo)
     elif (root / "registry").exists():
-        default, anchors = harness.registered_suite.registrations(root)
+        default, anchors = registered_suite.registrations(root)
         anchor = anchors[default]
-    selection = harness.runtime_source_repository.read(anchor, default_repository=harness.source_config.DEFAULT_REPO)
+    selection = runtime_source_repository.read(anchor, default_repository=source_config.DEFAULT_REPO)
     _, url = harness._github(selection["repository"])
     reference = selection["reference"]
     if reference.startswith("-") or ":" in reference or reference.startswith("+"):
