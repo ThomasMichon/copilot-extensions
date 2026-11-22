@@ -96,6 +96,10 @@ continue to delegate to their PowerShell entry. The application generation
 resolver, Bridge's specialized bootstrap resolver, and explicit setup-provided
 Python paths retain their existing ownership.
 
+Index uses the same selector before its configuration reader. Dispatch's
+retained admission directory includes the declaration and selector closure,
+so its copied helpers do not revert to PATH Python.
+
 Ordinary selection uses PATH uv, the declared managed interpreter and
 `--no-python-downloads`. Missing uv or an unprepared interpreter stops with a
 setup diagnostic, never PATH Python. Explicit prerequisite preparation can run

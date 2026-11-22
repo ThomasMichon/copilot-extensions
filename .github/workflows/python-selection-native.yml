@@ -39,6 +39,12 @@ on:
       - plugins/agent-worktrees/scripts/install.ps1
       - plugins/agent-worktrees/scripts/install.sh
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
+      - plugins/agent-dispatch/scripts/install.ps1
+      - plugins/agent-dispatch/scripts/install.sh
+      - plugins/agent-dispatch/tests/test_retained_bootstrap.py
+      - plugins/agent-index/scripts/runtime-gate.ps1
+      - plugins/agent-index/scripts/runtime-gate.sh
+      - plugins/agent-index/tests/test_runtime_gate.py
       - plugins/budget-guidance/payload-invocation.json
       - plugins/budget-guidance/scripts/install.ps1
       - plugins/budget-guidance/scripts/bootstrap-check.ps1
@@ -102,6 +108,27 @@ jobs:
           python tools/run-plugin-tests.py agent-codespaces
           --test-file tests/test_bootstrap_python.py --allow-explicit-tiers
           --junit-dir qualification-evidence/evaluator-bootstrap
+      - name: Qualify retained Dispatch selector publication
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_retained_bootstrap.py
+          --allow-explicit-tiers -k binstub_publication_retains_managed_bootstrap
+          --junit-dir qualification-evidence/retained-bootstrap
+      - name: Qualify Index configuration admission and missing uv
+        run: >-
+          python tools/run-plugin-tests.py agent-index
+          --test-file tests/test_runtime_gate.py
+          --allow-explicit-tiers -k adopted_configuration_reader_ignores_path_python
+          --junit-dir qualification-evidence/index-bootstrap
+      - name: Require actual retained and configuration-reader controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          groups={name:[c for p in Path('qualification-evidence',name).rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')] for name in ('retained-bootstrap','index-bootstrap')};
+          assert all(len(groups[name])==count for name,count in [('retained-bootstrap',3),('index-bootstrap',6)]);
+          assert all(sum(c.find('skipped') is None for c in groups[name])==count
+          for name,count in [('retained-bootstrap',2),('index-bootstrap',4)]);
+          assert all(c.find(t) is None for cases in groups.values() for c in cases for t in ('error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5
