@@ -27,6 +27,12 @@ _RESOURCES = (
     "libs/payload-invocation/bootstrap_python.py",
     "libs/payload-invocation/template_rendering.py",
     "libs/payload-invocation/runtime_admission.py",
+    "libs/payload-invocation/templates/bootstrap-python-powershell.tmpl",
+    "libs/payload-invocation/templates/bootstrap-python-posix.tmpl",
+    "libs/installer-engine/bootstrap-uv.ps1",
+    "libs/installer-engine/bootstrap-uv.sh",
+    "libs/installer-engine/bootstrap-capture.ps1",
+    "libs/installer-engine/bootstrap-capture.exe",
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",
@@ -41,7 +47,9 @@ _RESOURCES = (
 )
 
 
-def bootstrap_files(manifest: Path, data: dict[str, object]) -> dict[Path, str]:
+def bootstrap_files(
+    manifest: Path, data: dict[str, object], *, canonical_root: Path | None = None,
+) -> dict[Path, str | bytes]:
     previous_bytecode = sys.dont_write_bytecode
     try:
         sys.dont_write_bytecode = True
@@ -49,7 +57,7 @@ def bootstrap_files(manifest: Path, data: dict[str, object]) -> dict[Path, str]:
         assert spec and spec.loader
         bootstrap = module_from_spec(spec)
         spec.loader.exec_module(bootstrap)
-        outputs: dict[Path, str] = bootstrap.expected_files(manifest, data)
+        outputs: dict[Path, str | bytes] = bootstrap.expected_files(manifest, data, canonical_root=canonical_root)
         return outputs
     finally:
         sys.dont_write_bytecode = previous_bytecode
@@ -163,7 +171,9 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
     for relative in _RESOURCES:
         resource = repo / relative
         _ordinary(resource, repo)
-        contents[resource.relative_to(repo)] = resource.read_text(encoding="utf-8")
+        contents[resource.relative_to(repo)] = (
+            resource.read_bytes() if resource.suffix == ".exe" else resource.read_text(encoding="utf-8")
+        )
     import_roots = [
         root.relative_to(repo).as_posix()
         for root in roots if root in selected_roots

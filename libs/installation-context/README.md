@@ -77,10 +77,16 @@ its whole working set rolled back.
   through their explicit installation owner. Bootstrap selection does not
   replace SDK installation/context admission. A `bootstrap-python-version.txt`
   request alone is inert data for its own consumer, not resolver adoption.
+  Invocation's `bootstrapLauncher: "uv"` provides another adoption path:
+  its generated `bootstrap-python-launcher.txt` sidecar selects the packaged
+  `_bootstrap_python/select.ps1` adapter to the existing uv provider and native
+  capture owner. The transport applies its remaining deadline and keeps its
+  original direct worker parent. Missing generated support, uv or the declared
+  prepared interpreter fails without PATH-Python fallback or acquisition.
   Payloads without resolver adoption retain the
   compatibility requirement: Python 3.10+ as the first `python` application on
-  PATH. Bridge's Windows entry adopts owned resolution; other callers and POSIX
-  shell behavior are unchanged.
+  PATH. Bridge's Windows entry retains its specialized owned resolution;
+  POSIX installation-context shell behavior is unchanged.
   The adapter does not acquire
   an interpreter, verify its publisher or compile native types. It runs Python
   with isolated startup and no site initialization, using an encoded request

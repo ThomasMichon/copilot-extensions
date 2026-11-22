@@ -5,6 +5,8 @@
   "module": "agent_dispatch",
   "legacyRuntimeRoot": ".agent-dispatch",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
+  "bootstrapLauncher": "uv",
   "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
   "purpose": "Coordinate queued agent work and task lifecycles",

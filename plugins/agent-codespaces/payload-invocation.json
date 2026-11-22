@@ -5,6 +5,8 @@
   "module": "agent_codespaces",
   "legacyRuntimeRoot": ".agent-codespaces",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
+  "bootstrapLauncher": "uv",
   "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_CODESPACES_NO_SELFPROVISION",
   "purpose": "Manage GitHub Codespaces lifecycle transport and dispatch",

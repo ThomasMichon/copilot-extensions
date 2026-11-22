@@ -5,6 +5,8 @@
   "module": "agent_worktrees",
   "legacyRuntimeRoot": ".agent-worktrees",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
+  "bootstrapLauncher": "uv",
   "runtimeAdmissionToolkit": true,
   "catalogBinding": true,
   "catalogBindingModule": "src/agent_worktrees/_command_binding.py",

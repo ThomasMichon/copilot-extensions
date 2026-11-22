@@ -14,6 +14,15 @@ function Resolve-EvaluatorBootstrapPython {
             Status = 'selected'; Reason = 'explicit-python'; Python = $Python; Guard = $null
         }
     }
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bootstrap-python-launcher.txt')) {
+        $selector = Join-Path $PSScriptRoot '_bootstrap_python\select.ps1'
+        if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
+            throw 'Declared command bootstrap selector is unavailable; update the owning plugin.'
+        }
+        return [pscustomobject]@{
+            Status = 'selected'; Reason = 'uv-managed-python'; Python = (& $selector); Guard = $null
+        }
+    }
     try {
         $command = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0]
     } catch [System.Management.Automation.CommandNotFoundException] {

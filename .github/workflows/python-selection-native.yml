@@ -53,6 +53,47 @@ permissions:
   contents: read
 
 jobs:
+  command-bootstrap-uv:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare isolated managed interpreters, including old PATH Python
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'command-bootstrap-python'
+          uv python install --no-bin --no-registry cpython@3.11.18 cpython@3.9.25
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $oldPython = uv python find --no-project --system --managed-python --no-python-downloads cpython@3.9.25
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+          "TEST_OLD_PYTHON=$oldPython" >> $env:GITHUB_ENV
+      - name: Qualify generated ingress and acquisition-free refusals
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_uv_runtime_launch.py
+          --allow-explicit-tiers -k generated_managed_bootstrap
+          --junit-dir qualification-evidence/command-bootstrap
+      - name: Require each native control
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/command-bootstrap').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          native=[c for c in cases if c.find('skipped') is None];
+          assert len(cases)==12 and len(native)==(9 if os.name=='nt' else 3);
+          assert all(c.find(t) is None for c in native for t in ('error','failure'))"
   budget-uv-launch:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -81,7 +122,7 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_uv_runtime_launch.py
           --junit-dir qualification-evidence/budget-launch
-          --allow-explicit-tiers -k "ps1 or winps or declaration or powershell_early_exit"
+          --allow-explicit-tiers -k "(ps1 or winps or declaration or powershell_early_exit) and not generated_managed_bootstrap"
       - name: Qualify native installer failure and clean retry
         run: >-
           python tools/run-plugin-tests.py budget-guidance
