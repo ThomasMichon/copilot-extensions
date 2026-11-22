@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from agent_dispatch.ordinary_native_bindings import reservation_native_identity
+from agent_dispatch.ordinary_agent_storage import record_created_agent
+from agent_dispatch.native_attachment_custody import require_not_reassigned
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_records import TaskError
@@ -126,6 +128,61 @@ def test_published_reservation_without_attachment_still_guards_native(
     with pytest.raises(TaskError):
         second()
     assert before == (queue.get(new.id), queue.get_reservation(res.key))
+
+
+@pytest.mark.parametrize("publish_first", [False, True])
+def test_ordinary_first_delivery_excludes_competing_native_attachment(tmp_path: Path, publish_first: bool) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    original = queue.create("initial delivery", repo="example")
+    other = queue.create("other goal", repo="example")
+    assert isinstance(original, Task) and isinstance(other, Task)
+    res, _ = queue.reserve_spawn(original.id, driver="ordinary-bridge")
+    queue.claim_one("host/tree", task_id=other.id)
+
+    def publish() -> None:
+        record_created_agent(queue, res.key, task_generation=original.generation, agent_info={
+            "session_id": "bridge-body", "ready": True, "status": "awaiting_first_prompt",
+            "connection": {"native_session_id": "native", "worktree_id": "tree",
+                           "repo": "example", "target_dir": "/fixture/tree"},
+        })
+
+    def attach() -> None:
+        queue.start(other.id, "host/tree", owner_session_id="native")
+
+    first, second = (publish, attach) if publish_first else (attach, publish)
+    first()
+    before = queue.get(other.id), queue.get_reservation(res.key)
+    with pytest.raises(TaskError, match="another task|remains admitted"):
+        second()
+    assert (queue.get(other.id), queue.get_reservation(res.key)) == before
+
+
+def test_repeated_returns_do_not_rescan_attachment_suffixes(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create("original goal", repo="example")
+    other = queue.create("other goal", repo="example")
+    assert isinstance(task, Task) and isinstance(other, Task)
+    res, _ = queue.reserve_spawn(task.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    with queue._connect() as conn:
+        conn.execute("BEGIN")
+        # Alternate completed assignments; the newest return belongs to the original.
+        conn.executemany("INSERT INTO task_attachments(task_id,session_id,worktree_id,machine,attached_at,detached_at) "
+                         "VALUES (?,'native','tree','host',1,2)",
+                         ((owner,) for _ in range(500) for owner in (other.id, task.id)))
+        conn.executemany("INSERT INTO task_attachments(task_id,session_id,machine,attached_at) "
+                         "VALUES (?,'unrelated','remote',1)", ((other.id,) for _ in range(5000)))
+        row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (res.key,)).fetchone()
+        statements: list[str] = []
+        conn.set_trace_callback(statements.append)
+        try:
+            require_not_reassigned(conn, row)
+        finally:
+            conn.set_trace_callback(None)
+        assert len(statements) < 10
+        plans = [entry["detail"] for sql in statements for entry in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+        assert not any("SCAN task_attachments" in plan or "SCAN tasks" in plan for plan in plans), plans
 
 
 @pytest.mark.parametrize("adopt", [False, True])

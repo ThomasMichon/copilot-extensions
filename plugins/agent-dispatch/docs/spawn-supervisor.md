@@ -1180,6 +1180,11 @@ Cleanup retry admission and lease revalidation both reject a later attachment;
 new attachment admission checks the same outstanding effects in reverse.
 A reservation may already name a native and workspace before its task first
 starts. Missing attachment history is not proof that the native is free.
+For ordinary Bridge startup, publishing the created or resumed identity and
+admitting another task to that native exclude each other before the first
+prompt. The original task can still attach. The queue indexes outstanding
+reservation effects separately from settled history, and checks returns to
+a known native without rescanning its history for every prior attachment.
 Resuming a retained session checks outstanding effects even when no new
 attachment row is needed, and wake delivery checks again before sending.
 Reopening startup, changing an existing handle, or restarting a cold

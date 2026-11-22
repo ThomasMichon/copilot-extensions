@@ -12,6 +12,41 @@ def _host(value: str | None) -> str:
     return normalize_host(value or "")
 
 
+_OUTSTANDING = (
+    "((state IN ('reserving','spawned','cold','releasing') AND (state='releasing' "
+    "OR cooling_token IS NOT NULL OR startup_fenced OR (NOT startup_complete AND "
+    "(startup_revision>1 OR session_handle IS NOT NULL OR agent_info IS NOT NULL)))) "
+    "OR (state IN ('failed','settled') AND conclusion_state IN ('pending','held')))"
+)
+_BOUND = "status IN ('claimed','started','suspended')"
+
+
+def install_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_native_custody_session ON task_attachments(session_id,id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_native_custody_tree ON task_attachments(worktree_id,id)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_native_custody_owner ON tasks(owner_session_id) WHERE {_BOUND}")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_native_custody_effect_v1 ON spawn_reservations(task_id) "
+                 f"WHERE {_OUTSTANDING}")
+
+
+def require_available_native(conn: sqlite3.Connection, task_id: str, *natives: str | None) -> None:
+    for native in set(natives) - {None}:
+        if conn.execute(
+            f"SELECT 1 FROM tasks WHERE {_BOUND} AND owner_session_id=? AND id<>? LIMIT 1",
+            (native, task_id),
+        ).fetchone():
+            raise TaskError("native is bound to another task")
+
+
+def _last_other(conn: sqlite3.Connection, task_id: str, key: str | None, *, tree: bool = False) -> int:
+    if key is None:
+        return 0
+    column = "worktree_id" if tree else "session_id"
+    row = conn.execute(f"SELECT id FROM task_attachments WHERE {column}=? AND task_id<>? "
+                       "ORDER BY id DESC LIMIT 1", (key, task_id)).fetchone()
+    return int(row[0]) if row else 0
+
+
 def require_not_reassigned(
     conn: sqlite3.Connection, row: sqlite3.Row, target: str | None = None,
     worktree: str | None = None,
@@ -19,46 +54,53 @@ def require_not_reassigned(
     task_id = row["task_id"]
     tree = row["worktree"] or worktree
     native = reservation_native_identity(conn, row)
-    if conn.execute(
-        "SELECT 1 FROM tasks WHERE id<>? AND status IN ('claimed','started','suspended') "
-        "AND owner_session_id IN (?,?) LIMIT 1", (task_id, native, target),
-    ).fetchone():
-        raise TaskError("native is bound to another task")
+    require_available_native(conn, task_id, native, target)
     originals = conn.execute(
-        "SELECT id,session_id,machine,worktree_id FROM task_attachments WHERE task_id=? "
-        "AND (worktree_id=? OR worktree_id IS NULL OR ? IS NULL)",
+        "SELECT min(id) first_id,session_id,machine,worktree_id FROM task_attachments WHERE task_id=? "
+        "AND (worktree_id=? OR worktree_id IS NULL OR ? IS NULL) GROUP BY session_id,machine,worktree_id",
         (task_id, tree, tree),
-    )
-    has_original = False
-    for original in originals:
-        has_original = True
-        later = conn.execute(
-            "SELECT task_id,machine,worktree_id,session_id FROM task_attachments "
-            "WHERE (session_id IN (?,?,?) OR worktree_id=?) AND id>? ORDER BY id DESC",
-            (original["session_id"], native, target, original["worktree_id"] or tree, original["id"]),
-        )
-        returned: set[tuple[str, str]] = set()
-        for event in later:
-            host = _host(event["machine"])
-            if event["task_id"] == task_id:
-                if host and host == _host(original["machine"]) and (
-                    original["worktree_id"] and event["worktree_id"] == original["worktree_id"]
-                ):
-                    returned.add((host, event["session_id"]))
-                continue
-            if native == event["session_id"] and (host, native) in returned:
-                continue
-            if native is not None and event["session_id"] not in (native, target):
-                continue
-            raise TaskError("native attached to another task after leaving this assignment")
-    # A worker may publish a body and never START. Without an original
-    # attachment there is no event ordering that proves a return to this task.
-    if not has_original and conn.execute(
-        "SELECT 1 FROM task_attachments WHERE task_id<>? AND "
-        "(session_id IN (?,?) OR (? IS NULL AND worktree_id=?)) LIMIT 1",
-        (task_id, native, target, native, tree),
-    ).fetchone():
-        raise TaskError("reservation target attached to another task without original attachment history")
+    ).fetchall()
+    since = min((int(row["first_id"]) for row in originals), default=0)
+    conflict = "native attached to another task after leaving this assignment"
+    if target != native and _last_other(conn, task_id, target) > since:
+        raise TaskError(conflict)
+    if native is None:
+        session_starts: dict[str, int] = {}
+        tree_starts: dict[str, int] = {}
+        for row in originals:
+            for key, starts in ((row["session_id"], session_starts), (row["worktree_id"] or tree, tree_starts)):
+                if key:
+                    starts[key] = min(row["first_id"], starts.get(key, row["first_id"]))
+        if not originals and tree:
+            tree_starts[tree] = 0
+        if (any(_last_other(conn, task_id, k) > v for k, v in session_starts.items())
+                or any(_last_other(conn, task_id, k, tree=True) > v for k, v in tree_starts.items())):
+            raise TaskError(conflict)
+        return
+    if _last_other(conn, task_id, native) <= since:
+        return
+
+    # One indexed pass over this native, not one suffix scan per original attachment.
+    foreign: dict[str, int] = {}
+    returned: dict[tuple[str, str], int] = {}
+    for event in conn.execute(
+        "SELECT (task_id=?) is_original,machine,worktree_id,max(id) last_id FROM task_attachments "
+        "WHERE session_id=? AND id>? GROUP BY is_original,machine,worktree_id", (task_id, native, since),
+    ):
+        host, last = _host(event["machine"]), event["last_id"]
+        if not event["is_original"]:
+            foreign[host] = max(foreign.get(host, 0), last)
+        elif host and event["worktree_id"]:
+            key = (host, event["worktree_id"])
+            returned[key] = max(returned.get(key, 0), last)
+    if not originals and foreign:
+        raise TaskError(conflict)
+    newest = sorted(foreign.items(), key=lambda item: item[1], reverse=True)[:2]
+    for row in originals:
+        host, first = _host(row["machine"]), row["first_id"]
+        own = returned.get((host, row["worktree_id"]), 0)
+        if any(other != host and last > first for other, last in newest) or foreign.get(host, 0) > max(first, own):
+            raise TaskError(conflict)
 
 
 def require_no_prior_effect(
@@ -66,12 +108,8 @@ def require_no_prior_effect(
 ) -> None:
     """Serialize a new attachment against already-admitted redrive or terminal cleanup."""
     rows = conn.execute(
-        "SELECT s.*,r.native_session_id FROM spawn_reservations s "
-        "LEFT JOIN acquisition_receipts r ON r.reservation_key=s.key WHERE s.task_id<>? AND ("
-        "(s.state IN ('spawned','cold','releasing') AND (s.state='releasing' "
-        "OR s.cooling_token IS NOT NULL OR s.startup_fenced "
-        "OR (NOT s.startup_complete AND s.startup_revision>1))) "
-        "OR (s.state IN ('failed','settled') AND s.conclusion_state IN ('pending','held'))) "
+        "SELECT s.*,r.native_session_id FROM spawn_reservations s INDEXED BY idx_native_custody_effect_v1 "
+        f"LEFT JOIN acquisition_receipts r ON r.reservation_key=s.key WHERE s.task_id<>? AND {_OUTSTANDING} "
         "AND (s.worktree=? OR s.session_handle=? OR r.native_session_id=? "
         "OR CASE WHEN json_valid(s.agent_info) THEN ? IN (json_extract(s.agent_info,'$.native_session_id'),"
         "json_extract(s.agent_info,'$.acp_session_id'),json_extract(s.agent_info,'$.connection.native_session_id')) END "
