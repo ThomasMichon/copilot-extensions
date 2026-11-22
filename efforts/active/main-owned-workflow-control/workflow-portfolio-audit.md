@@ -6671,6 +6671,42 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 22 original synthetic reproducer static boundary
+
+The adapter exports all 21 original static-boundary functions, preserving the
+original loader, helpers, synthetic dictionaries, stacked parameter marks,
+loops and assertions. Complete collection compares all 170 original and
+adapter nodes, verifies original function and parameter-row object identity,
+and compares cross-module parameter values and types. No fixture, mock,
+preload, guard exception or data admission is introduced.
+
+The initial unchanged effect/source guard passes all 170 cases in 2.312
+observation seconds, with zero prohibited effects and canonical Python reads
+limited to the adapter, original test and production boundary module.
+All 510 setup/call/teardown reports pass; every case has actual production-owner
+call-phase lines. Docker, resource and native labels are synthetic inputs, not
+container execution, provisioning, egress, quota, custody or capacity proof.
+
+Only those three Python source bindings and the production coverage target
+are added. Compact-v2 stores 9,285 nodes and 1,292 bindings in 1,035,062 bytes,
+preserving all 9,115 prior nodes in order, all 1,289 prior source hashes and
+all 469 prior targets in order after the new target. The 89 helper decisions
+and 300-second bound remain unchanged. Exact-head review and complete fresh
+Linux source CI remain required; local observation is not full packet execution
+or comparable whole-flow savings proof.
+
+This below-altitude source-test selection changes no workflow, runtime,
+installation, process or service contract. Fresh-install and native lanes do
+not apply because their behavior does not change; normal fresh source CI
+supplies external Linux consumer proof. Separate retained refusals are not
+replayed, and their phase/data/effect contracts remain unchanged. Both previous
+manual metadata-refresh grants and the separate job-retry grant remain
+consumed. No rollout, cleanup, parent completion or owner-seam acceptance is
+claimed.
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
+documentation consistency pass before publication. A worktree-manager patch
+changefile retains release intent; it is not writer activation or rollout.
+
 ### November 22 original compatibility-root migration scanner
 
 The adapter exports every one of the original 22 scanner tests and the same
@@ -6697,6 +6733,31 @@ exact-head review remain required; local observation is not a full packet
 execution, whole-flow savings proof, native qualification or parent completion.
 The operator retains the separate assessment-phase refusal and selects
 continued independent census rather than changing the phase contract.
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing, documentation
+consistency, committed changefile presence and complete diff checks pass.
+Approval `6014770709` names exact head
+`9365953a19fea6659491eeda03c38a3c0951feaa`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45075425842`, attempt one, unit job `137371471481`, executes all
+9,115 selected cases with 55 deselections in 136.04 pytest / 154.522 packet
+seconds. It reports `mode=executed`, origin run `45075425842`, attempt one,
+execution identity
+`d106fdd32cacbaa63ff9cc92fd879656689de2d9f73839b1fbf8528406bda2f1`
+and packet digest
+`9d76e2482890ed5d908430ef19af410080281d4cb8dc072242d72936bd101bc0`.
+Evidence upload succeeds as artifact `14775286818`. Guard job `137371471237`,
+required aggregate `137372580554` and trusted metadata checks pass.
+Seven fresh required-check verifier reads and final head/review/thread/hold/
+parent-reference fences pass before normal managed merge. No CI retry,
+manual workflow or deadline waiver is used.
+
+Source #14131 merges at `2026-11-22T22:08:31Z` as
+`15912163e4020dd1c11b896c16e2354d882782c7`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+22-case leaf. Separate data/native-load/thread and assessment-phase refusals,
+release, owner, custody and completion gates remain open.
 
 ### November 22 original fixture-only construction inventory
 
