@@ -1486,7 +1486,7 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
     )
     for name in (
         "resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py",
-        "config_schema.py",
+        "config_schema.py", "config_yaml.py",
     ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     if os.name == "nt":
