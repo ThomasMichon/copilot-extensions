@@ -10000,7 +10000,7 @@
     "plugins/agent-containers/scripts/init.ps1": "60f1c5d480b84febb9769221beb8c0102ccc28e9a0e1060e96c377d2b61fbbd6",
     "plugins/agent-worktrees/plugin.json": "ab0bff0afa1d63c77f1429cd04a7a7c365e1f94716a4804517631a31ff265eed",
     "plugins/agent-worktrees/scripts/install.sh": "6b69736f10f67a9afbe40fb1dd4a26b9768d4920b9ac4b1ee397c336eda32a16",
-    "plugins/agent-worktrees/scripts/install.ps1": "03a3bbd2f60888a70387eaf5cf84186e8582d8943027729cee15c693435ead01",
+    "plugins/agent-worktrees/scripts/install.ps1": "a28ab5635940155aea172145a900869875e784d1ebe367e726fb7a0686a4291e",
     "plugins/agent-worktrees/bin/agent-worktrees": "bbe9cf37ae88f553df76f64e1b8c3e04969abca0ee9aa0571ce9dcf3579237e4",
     "plugins/agent-worktrees/bin/agent-worktrees.ps1": "2b130f2de3a30372d9625a2de6c6e0e493c302f9157dc13ba7b69826865ba7fd",
     "plugins/agent-worktrees/bin/agent-worktrees.cmd": "bc043eeb3330a39e0da4dd12330eb7fb33070eba29cc9ff0912d2015d6a69265",
