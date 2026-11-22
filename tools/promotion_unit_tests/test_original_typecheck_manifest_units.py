@@ -23,5 +23,13 @@ _SELECTED = (
     "test_manifest_rejects_invalid_additional_version_policy",
     "test_optional_constructor_positions_and_combined_manifest",
     "test_combined_matrix_preserves_import_custody_and_failure_collection",
+    "test_manifest_optional_import_roots_preserve_old_defaults",
+    "test_manifest_refuses_invalid_import_roots",
+    "test_import_roots_refuse_native_path_list_separators",
+    "test_import_roots_are_ordered_project_local_and_lease_cleaned",
+    "test_import_inputs_accept_owned_wip_and_namespace_members_only",
+    "test_import_inputs_follow_native_stub_extension_aliases",
+    "test_import_inputs_preserve_native_owned_source_extension_aliases",
+    "test_import_input_snapshot_refuses_member_and_root_changes",
 )
 globals().update({name: getattr(_original, name) for name in _SELECTED})
