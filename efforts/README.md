@@ -37,6 +37,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Origin-Scoped Telemetry Routing](active/origin-scoped-telemetry-routing/README.md) | Draft; configure-once sink policy, knowledge/machine usage and inherited driving-origin architecture before implementation | #14021; preserves #13545 predecessor and #7935/#5900/#10873, update and configuration owners; no activation or rollout |
 | [Unified Bridge Inventory and Lifecycle](active/unified-bridge-inventory-and-lifecycle/README.md) | Draft; reviewed vision and inception before implementation | #13811; compose #13797 registration/catalog work and existing workspace/Driver/venue owners; no live rollout |
 | [Worktree Dehydration](active/worktree-dehydration/README.md) | Draft; external agenda placement/doctor, reversible checkout storage and automatic entry proposal | #13781; #13790 -> #13783 -> #13784 -> #13785; preserves existing data, lifecycle and roster owners; no implementation or rollout |
 | [Orphan Task Adoption](active/orphan-task-adoption/README.md) | Draft; complete four-stage controller adoption for existing headless ACP and bare scripted tasks, planning only | #3443; preserves #7237's distinct relationship owner and all existing task/workspace/provider/credential custodians; no launch, takeover or rollout |
