@@ -15,6 +15,7 @@ _spec.loader.exec_module(_original)
 fixed_checker_stage = _original.fixed_checker_stage
 _isolated_scratch = _original._isolated_scratch
 _SELECTED = (
+    "test_harness_emitted_procutil_provider_is_candidate_local_and_unambiguous",
     "test_inventory_rejects_new_or_ambiguous_python",
     "test_directory_prefixes_do_not_claim_neighboring_components",
     "test_paths_cannot_inject_response_file_arguments",
