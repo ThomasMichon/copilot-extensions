@@ -8,6 +8,23 @@ from worktree_manager import registered_suite, runtime_source_repository, source
 from worktree_manager.harness_onboarding import target_machines
 
 
+def test_refresh_accepts_only_untracked_generated_overlay(tmp_path: Path) -> None:
+    boot._git(tmp_path, "init", "--quiet")
+    output = tmp_path / ".github/copilot/settings.local.json"
+    output.parent.mkdir(parents=True)
+    output.write_text("{}", encoding="utf-8")
+    assert not boot._refresh_clean(tmp_path)
+    output.write_text('{"_agentWorktreesKnowledgePluginOverlay":{"version":1,"marketplaces":{},'
+                      '"enabledPlugins":{}}}', encoding="utf-8")
+    assert boot._refresh_clean(tmp_path)
+    other = tmp_path / "operator-change"
+    other.touch()
+    assert not boot._refresh_clean(tmp_path)
+    other.unlink()
+    boot._git(tmp_path, "add", "--", ".github/copilot/settings.local.json")
+    assert not boot._refresh_clean(tmp_path)
+
+
 def test_target_gate_includes_alias_and_physical_host(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     (tmp_path / "machines.yaml").write_text(

@@ -61,6 +61,25 @@ def _anchor(path: Path) -> Path:
     return path
 
 
+def _refresh_clean(checkout: Path) -> bool:
+    status = _git(checkout, "status", "--porcelain=v1", "--untracked-files=all")
+    if not status:
+        return True
+    relative = ".github/copilot/settings.local.json"
+    if status != "?? " + relative:
+        return False
+    path = checkout / relative
+    runtime_source_repository._ordinary(path)
+    if not path.is_file():
+        return False
+    data = json.loads(path.read_bytes())
+    marker = data.get("_agentWorktreesKnowledgePluginOverlay") if isinstance(data, dict) else None
+    # Permit the untracked product of composition, never changes in the index.
+    # It remains unignored: Git will refuse a fast-forward that would overwrite it.
+    return (isinstance(marker, dict) and marker.get("version") == 1
+            and isinstance(marker.get("marketplaces"), dict) and isinstance(marker.get("enabledPlugins"), dict))
+
+
 def acquire_checkout(srcroot: Path, checkout: Path, remote: str) -> Path:
     """Clone without executing repository hooks, or fast-forward a matching clean anchor."""
     runtime_source_repository._ordinary(srcroot)
@@ -75,14 +94,14 @@ def acquire_checkout(srcroot: Path, checkout: Path, remote: str) -> Path:
         actual = _git(checkout, "remote", "get-url", "origin")
         if repository_remote(actual)[1].casefold() != remote.casefold():
             raise ValueError("Existing checkout has a different origin")
-        if _git(checkout, "status", "--porcelain"):
+        if not _refresh_clean(checkout):
             raise ValueError("Refusing to update a dirty checkout")
         branch = _git(checkout, "symbolic-ref", "--short", "HEAD")
         upstream = _git(checkout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
         if upstream != f"origin/{branch}":
             raise ValueError("Refusing to refresh from a different tracking branch")
         _git(checkout, "fetch", "--no-tags", "origin", f"refs/heads/{branch}")
-        _git(checkout, "merge", "--ff-only", "FETCH_HEAD")
+        _git(checkout, "merge", "--ff-only", "--no-overwrite-ignore", "FETCH_HEAD")
         if _git(checkout, "rev-parse", "HEAD") != _git(checkout, "rev-parse", "FETCH_HEAD"):
             raise ValueError("Local checkout has unpublished commits")
     return _anchor(checkout)
