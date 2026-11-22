@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/workspace-creations",
+    "json": {
+      "agent": "example-project@local",
+      "creation_key": "logical-work"
+    }
+  },
+  "response": {
+    "status": 409,
+    "json": {
+      "detail": {
+        "code": "transition_pending",
+        "message": "original workspace finalization is in progress",
+        "effect": null
+      }
+    }
+  },
+  "captured_from": {
+    "commit": "1c6a10da4ca84f9861e2e3ae0ba2b6155ec5a50a",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 40,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+    "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+    "source_sha256": "6d60b6aa410991b2f45baae5187d9d549b9ca896bd0954a9881c4b2ca1b9e082"
+  },
+  "capture_method": "The isolated exact-owner creation rig invokes the committed production start_request adapter at generation 40 and verifies its retryable HTTP refusal without starting a native session or delivering a prompt; immutable generation-37, generation-38 and generation-39 captures remain unchanged.",
+  "compatibility": {
+    "retry_same_creation_key": true,
+    "permanent_terminal_result": false,
+    "native_session_started": false,
+    "prompt_delivered": false
+  }
+}

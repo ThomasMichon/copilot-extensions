@@ -1,0 +1,9 @@
+{
+  "comment": "Use exact ground-owned worktree records for workspace identity preflight without roster fallback",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
