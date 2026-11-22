@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original lifecycle CLI status, idempotency and transport-failure unit decisions.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

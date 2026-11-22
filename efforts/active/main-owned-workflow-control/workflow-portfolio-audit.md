@@ -6508,6 +6508,83 @@ candidate, completes the parent nor proves comparable whole-flow savings.
 The prior one-PR metadata-refresh authorization remains consumed and is not
 reused.
 
+Fatal Ruff, whole-file strict typing, documentation consistency, committed
+changefile presence and complete diff checks pass. Approval `6013832511`
+names exact head `f1ad1d929b1f6d1ab507d9d9386866330d22cf79`, with no active
+findings, discussion comments or unresolved threads and complete pagination.
+Fresh Linux CI `45057075131`, unit job `137314557525`, executes all 9,039
+cases with 48 deselections in 159.73 pytest / 180.472 packet seconds.
+It reports `mode=executed`, origin run `45057075131` attempt one,
+execution identity
+`0bd0b95e1987992e66adf2da828701cd32dc3bddaf7bd91aa6cdf2513a1c3072`
+and packet digest
+`47bcb89ea6552a447e25d1dd749aebb359b3a2fe9abd296e246a992c607ff51f`.
+Guards and required aggregate `137315657311` pass.
+
+Direct source-attribution check `137315515923` fails as superseded despite the
+successful workflow job; the required-check verifier correctly refuses merge.
+A new explicit one-PR authorization permits only `workflow-lockdown-guard.yml`
+on Main with `pull_request_number=14117`. Run `45063270301` succeeds and
+direct result `137333815895` passes. This single dispatch is consumed, not a
+standing grant or a reuse of the prior authorization. No source, policy,
+promotion, runtime or check bypass accompanies the refresh. Seven fresh verifier
+reads and final head/review/thread/hold/parent-reference fences pass before
+normal managed Maintainer merge.
+
+Source #14117 merges at `2026-11-22T19:56:27Z` as
+`e186fb46ca4c4fe969a973041404c1da2727fe8e`. Independent readback confirms merged
+state and open parent #6237; managed source sync succeeds. The complete
+reviewed-head/merged-tree diff is not empty: independent base #14119 merged as
+`d6df55e29e28444e4ddeeb38aa534ccacd858071` during the approval pause.
+Its eleven-file Index YAML reader delta is read in full, not attributed to this
+slice or claimed as this slice's qualification. All five nonmanifest blobs of
+this slice and all 9,039 ordered nodes match the reviewed head exactly.
+Manifest composition equals the reviewed manifest plus only the peer's
+`config_yaml.py` binding and `resolve_effective_config.py` rebind; all current
+source hashes verify. Current inventory is 9,039 nodes, 1,278 sources and 467
+targets in 1,013,579 bytes, with 89 helpers and the unchanged 300-second bound.
+The prior exact-head CI is not relabeled as an execution of that composed tree.
+The next complete fresh source-CI packet must use the current source bindings.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this 32-case leaf. Separate data/native-load/thread refusals,
+release, owner, custody and completion gates remain open.
+
+### November 22 original lifecycle CLI decisions
+
+The adapter exports three complete original lifecycle CLI tests: open-promotion
+status retains ownership and prevents idle admission, exact existing candidate
+opening is idempotent without becoming idle, and transport failure is visible
+without writing success output. Every original function, callback, monkeypatch,
+fixture-local file and capture/assertion remains unchanged. The transport test
+constructs and raises its original synthetic `CalledProcessError`; it does not
+launch a process. The separate real isolated subprocess test stays outside
+the selection.
+
+Complete collection verifies all 34 original cases and exactly three adapter
+cases with original function-object identity, matching empty parameter maps
+and exact node identity. Initial unchanged source/effect auditing passes all
+three in 1.359 seconds, with zero prohibited effects, six bound canonical
+Python reads and actual lifecycle-owner call-phase lines in every case.
+All nine setup/call/teardown reports pass.
+
+Only the adapter source binding is added; no target changes. All 9,039 prior
+nodes retain relative order; all 1,278 current source hashes, including #14119's
+independent YAML-reader additions, 467 targets, 89 helper decisions and the
+300-second bound remain intact. Compact-v2 and flat-v1 logical identity agree;
+the candidate contains 9,042 nodes and 1,279 sources in 1,014,063 bytes.
+Fatal Ruff and whole-file strict Python 3.10/Linux and Windows typing pass.
+Exact-head review and complete fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes do not apply because installation and runtime
+behavior do not change; normal fresh source CI supplies external Linux
+consumer proof. This distinct selection neither replays nor settles a refused
+candidate, completes the parent nor proves comparable whole-flow savings.
+Both previous PR-specific metadata-refresh authorizations are consumed; no
+new manual workflow dispatch is authorized by this source slice.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original
