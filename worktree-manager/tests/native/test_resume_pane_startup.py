@@ -13,7 +13,7 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 from types import TracebackType
-from typing import Protocol, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 from uuid import uuid4
 
 import pytest
@@ -616,11 +616,22 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
     binary = slot / "payload" / "bin"
     shutil.copytree(WRAPPER.parent, binary)
     launch = _resume_fixture(tmp_path / "launch", env, binary, 0)
-    for key in ("PSMUX_DATA_DIR", "COPILOT_DRIVER_PSMUX_NAMESPACE"):
+    for key in ("PSMUX_DATA_DIR", "PSMUX_CONFIG_FILE", "COPILOT_DRIVER_PSMUX_NAMESPACE"):
         monkeypatch.setenv(key, env[key])
     monkeypatch.syspath_prepend(str(ROOT / "plugins/agent-worktrees/src"))
     from agent_worktrees import sessions
 
+    run = subprocess.run
+    backend = Path(psmux).resolve()
+
+    def private_mux_run(
+        argv: list[str], **kwargs: Any,
+    ) -> subprocess.CompletedProcess[Any]:
+        if argv and Path(argv[0]).resolve() == backend and argv[1:2] == ["list-sessions"]:
+            argv = [argv[0], *namespace, *argv[1:]]
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", private_mux_run)
     monkeypatch.setattr(
         mux_discovery, "run_mux_child", lambda *a, **k: pytest.fail("Passive PSMux CLI"),
     )
