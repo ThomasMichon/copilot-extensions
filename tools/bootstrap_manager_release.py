@@ -80,7 +80,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.index_host and "agent-index" not in (args.component or []):
         parser.error("--index-host requires agent-index")
-    extras = {"agent-index": ("server", "store")} if args.index_host else {}
+    extras: dict[str, tuple[str, ...]] = {"agent-index": ("server", "store")} if args.index_host else {}
     uv = shutil.which("uv")
     if not uv:
         parser.error("Manager preparation requires uv")

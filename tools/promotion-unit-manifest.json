@@ -10337,7 +10337,7 @@
     "plugins/agent-worktrees/src/agent_worktrees/knowledge_overlay.py": "428766892064ad3c784dbc2dde1b759d28614302c9ba0c28313efdc4c24c4c15",
     "plugins/agent-worktrees/src/agent_worktrees/knowledge_plugin_committed.py": "1dda8c6d9586055840bbf6584ecf2db6cef19cd1f9a6022bb5d581b6b275962d",
     "plugins/harness-knowledge/skills/binding-knowledge/scripts/binding_yaml.py": "68a48c895b0cba6cfb51eb0ab83d7e428a805498a0c387d5a3d27beb9c1d46de",
-    "tools/bootstrap_manager_release.py": "77461680371b0fa0df277cfe52520377db6d977d014bb93ce1550549bd3839c0",
+    "tools/bootstrap_manager_release.py": "f4f4afac2b442efab28809f9e38e226efd29e14b520cae24cf0bc508bd341924",
     "tools/runtime_marketplace_source.py": "cda39bab1ba40834e54baea41ef7b9a81f6d6de11b429452d2398c740ee473bb",
     "tools/runtime_source_authentication.py": "d24f6ebeffb00f4b1f5ac988d739c8abf9352eecb93e60bca6f1c891e3f10f30",
     "tools/promotion_unit_tests/test_simple_shortcut_cache_owner.py": "ec42a7fd5b7f4b3827dfd1f17b319ac3d091e182f869cf88b3356986e2c92369",
