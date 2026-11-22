@@ -18,7 +18,9 @@ from typing import Any
 
 from . import config as cfg, git_ops, installer, pr_authority, repos
 
-KEY = "_agentWorktreesToolPluginOverlay"
+from .knowledge_overlay import (KEY as KEY, preserve_guard as preserve_guard, protect_tool_receipts as protect_tool_receipts,
+                                unique_json_object as unique_json_object, validate_personal_version as validate_personal_version)
+
 REGISTRY_KEY = "copilot_plugin_profile_root"
 SETTING_KEYS = ("extraKnownMarketplaces", "enabledPlugins")
 
@@ -30,16 +32,6 @@ class _Family:
     common: str
     paths: tuple[Path, ...]
     identities: frozenset[str]
-
-
-def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """Refuse ambiguous duplicate keys at every JSON object depth."""
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON key {key!r}")
-        result[key] = value
-    return result
 
 
 def _error(detail: str):
@@ -243,77 +235,6 @@ def validate_marker(existing: dict, path: Path, *, project: str | None = None,
     return marker
 
 
-def preserve_guard(result: dict) -> None:
-    """Older personal owners must refuse mixed contributor documents."""
-    from . import knowledge_plugins as kp
-
-    if KEY in result:
-        marker = result.setdefault(kp._OVERLAY_KEY, {"marketplaces": {}, "enabledPlugins": {}})
-        marker["version"] = 2
-    elif kp.same_json_value(result.get(kp._OVERLAY_KEY), {"version": 2, "marketplaces": {}, "enabledPlugins": {}}):
-        result.pop(kp._OVERLAY_KEY)
-    elif kp._OVERLAY_KEY in result:
-        result[kp._OVERLAY_KEY]["version"] = 1
-
-
-def protect_tool_receipts(existing: dict, result: dict, personal: dict,
-                          marketplace_conflicts: list, enabled_conflicts: list) -> None:
-    """A missing live tool value does not transfer its receipt to personal input."""
-    tool = existing.get(KEY)
-    if tool is None:
-        return
-    rejected_marketplaces = set()
-    for setting, receipt, conflicts in (
-        ("extraKnownMarketplaces", "marketplaces", marketplace_conflicts),
-        ("enabledPlugins", "enabledPlugins", enabled_conflicts),
-    ):
-        authored = personal[receipt]
-        overlaps = set(authored) & set(tool[setting])
-        if setting == "extraKnownMarketplaces":
-            rejected_marketplaces.update(overlaps)
-        for name in overlaps:
-            authored.pop(name)
-            if name in existing.get(setting, {}):
-                result[setting][name] = existing[setting][name]
-            else:
-                result.get(setting, {}).pop(name, None)
-            conflicts.append(name)
-        if not result.get(setting) and setting not in existing:
-            result.pop(setting, None)
-    from . import knowledge_plugins as kp
-
-    prior_enabled = existing.get(kp._OVERLAY_KEY, {}).get("enabledPlugins", {})
-    existing_enabled = existing.get("enabledPlugins", {})
-    for source in tuple(personal["enabledPlugins"]):
-        if kp.split_source(source)[1] in rejected_marketplaces:
-            personal["enabledPlugins"].pop(source)
-            if source in existing_enabled and (
-                source not in prior_enabled
-                or not kp.same_json_value(existing_enabled[source], prior_enabled[source])
-            ):
-                result.setdefault("enabledPlugins", {})[source] = existing_enabled[source]
-            else:
-                result.get("enabledPlugins", {}).pop(source, None)
-            enabled_conflicts.append(source)
-    if not result.get("enabledPlugins") and "enabledPlugins" not in existing:
-        result.pop("enabledPlugins", None)
-
-
-def validate_personal_version(marker: dict, path: Path, existing: dict) -> None:
-    from . import knowledge_plugins as kp
-
-    if marker.get("version") not in (1, 2) or (marker.get("version") == 2 and KEY not in existing):
-        raise _error(
-            f"cannot safely manage {path}: unsupported '{kp._OVERLAY_KEY}' version {marker.get('version')!r}"
-        )
-    tool = existing.get(KEY)
-    if isinstance(tool, dict):
-        for key, personal_key in (("extraKnownMarketplaces", "marketplaces"), ("enabledPlugins", "enabledPlugins")):
-            owned = marker.get(personal_key)
-            if isinstance(owned, dict) and set(owned) & set(tool[key]):
-                raise _error(f"ambiguous tool/personal receipt ownership in {path}")
-
-
 def _verify_checkout(root: Path, checkout: Path, project: str, family: _Family) -> None:
     if project not in installer.read_projects_registry(strict=True).get("projects", {}):
         raise _error("tool profile project is not registered")
@@ -360,7 +281,8 @@ def _project(root: Path, checkout: Path, project: str, profile: str | None,
                 continue
             if name in legacy_values:
                 native = {**existing, key: current}
-                tiers = kp._read_harness_settings(
+                from .knowledge_overlay import _read_harness_settings
+                tiers = _read_harness_settings(
                     checkout, native, ignored_native_marketplaces=set(), ignored_native_enabled=set())
                 effective = tiers.marketplaces.get(name) if key == "extraKnownMarketplaces" else tiers.enabled.get(name)
                 if not kp.same_json_value(legacy_values[name], value) or not kp.same_json_value(effective, value):

@@ -19,6 +19,17 @@ from worktree_manager import bootstrap_pairing
 from worktree_manager import registered_suite, runtime_source_repository, source_config
 
 
+def require_onboarding(python: Path, env: dict[str, str]) -> None:
+    probe = subprocess.run(
+        [str(python), "-I", "-B", "-c",
+         "import importlib.util,sys; sys.exit(importlib.util.find_spec("
+         "'worktree_manager.harness_onboarding') is None)"],
+        env=env, timeout=30, check=False,
+    )
+    if probe.returncode:
+        raise RuntimeError("Selected Manager does not provide harness onboarding; no app slots staged")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)
@@ -106,13 +117,29 @@ def main() -> None:
     subprocess.run([uv, "sync", "--project", str(executor), "--locked", "--no-dev", "--no-build",
                     "--no-editable", "--python", sys.executable], env=env, check=True, timeout=180)
     python = executor / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if anchor is not None:
+        # Inspect the incoming wheel, not the bootstrap checkout. Do not start a
+        # partial installation if its Manager cannot perform the next phase.
+        require_onboarding(python, env)
     command = [str(python), "-I", "-B", "-m", "worktree_manager.application_footprints",
                str(footprint), "--apps-root", str(root / "apps"), "--apply"]
     if args.stage:
         command.append("--stage")
     subprocess.run(command, env=env, check=True, timeout=1800)
     if anchor is not None:
-        raise RuntimeError("Manager staged; installed harness onboarding still required")
+        (app,) = json.loads((footprint / "footprint.json").read_bytes())["apps"]
+        installed = root / "apps" / "worktree-manager" / "versions" / app["version"] / ".venv"
+        interpreter = installed / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        handoff = [str(interpreter), "-I", "-B", "-m", "worktree_manager.harness_onboarding",
+                   "--root", str(root), "--srcroot", str(args.srcroot), "--source-checkout",
+                   str(checkout), "--source-commit", commit]
+        if knowledge_url:
+            name, remote = harness.repository_remote(knowledge_url)
+            knowledge = harness.acquire_checkout(args.srcroot.absolute(), args.srcroot.absolute() / name, remote)
+            handoff.extend(["--knowledge-repo", remote, "--knowledge-checkout", str(knowledge)])
+        if args.stage:
+            handoff.append("--stage")
+        subprocess.run(handoff, env=env, check=True, timeout=1800)
 
 
 if __name__ == "__main__":

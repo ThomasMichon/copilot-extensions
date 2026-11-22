@@ -14,7 +14,8 @@ import local_install_profile as profiles
 import local_install_source as source
 
 
-def prepare(checkout: Path, commit: str, repository: str, output: Path, uv: Path, deadline: float) -> Path:
+def prepare_snapshot(checkout: Path, commit: str, repository: str, output: Path, uv: Path, deadline: float,
+                     *, component: str) -> Path:
     output.mkdir(parents=True, exist_ok=False)
     release = output / "release"
     release.mkdir()
@@ -24,16 +25,16 @@ def prepare(checkout: Path, commit: str, repository: str, output: Path, uv: Path
     if discovered is None:
         raise ValueError("Selected commit has no published release index")
     index, assets = discovered
-    component = "worktree-manager"
-    key = "standalone:" + component
+    entry, = (e for e in index["artifacts"] if e.get("component", e.get("plugin")) == component)
+    standalone = "component" in entry
+    key = ("standalone:" if standalone else "") + component
     inputs = output / "inputs"
     record = source.compose(checkout, commit, None, inputs, projects=(key,),
                             closed_wheel_source=True, deadline=deadline)
     inputs = Path(source.native_retained_path(inputs))
     tree = inputs / "source"
-    entry, = (e for e in index["artifacts"] if e.get("component") == component)
     binding = discovery.read_selected_source_artifact(
-        release, index=index, assets=assets, repository=repository, component="standalone-" + component,
+        release, index=index, assets=assets, repository=repository, component=("standalone-" if standalone else "") + component,
         version=entry["version"], candidate_root=tree,
     )
     if binding is None:
@@ -42,24 +43,28 @@ def prepare(checkout: Path, commit: str, repository: str, output: Path, uv: Path
     _, _, payloads, identities = source._source_projects(tree, record, (key,))
     if identities[key].package_version != manifest["version"]:
         raise ValueError("Manager version differs from its selected source")
-    row, = manifest["wheels"]
     pool = inputs / "wheels" / component
     pool.mkdir(parents=True)
     with zipfile.ZipFile(release / entry["filename"]) as archive:
-        filename = row["filename"]
-        if Path(filename).name != filename:
-            raise ValueError("Invalid wheel filename")
-        with archive.open(filename) as src, (pool / filename).open("xb") as dst:
-            shutil.copyfileobj(src, dst)
+        for row in manifest["wheels"]:
+            filename = row["filename"]
+            if Path(filename).name != filename:
+                raise ValueError("Invalid wheel filename")
+            with archive.open(filename) as src, (pool / filename).open("xb") as dst:
+                shutil.copyfileobj(src, dst)
     record["projects"][key] = {
         "payload": payloads[key].relative_to(inputs).as_posix(), "source": identities[key].document(),
         "wheels": pool.relative_to(inputs).as_posix(), "artifact": manifest,
     }
     (inputs / source.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
     result = profiles.prepare_registry_lock(inputs, output / "profile", uv=str(uv), deadline=deadline,
-                                           prepare_profile=True)
-    snapshot = Path(result["snapshot"])
-    return application_footprint.export({component: snapshot}, output / "footprint", deadline=deadline)
+                                           prepare_profile=True, component=component)
+    return Path(result["snapshot"])
+
+
+def prepare(checkout: Path, commit: str, repository: str, output: Path, uv: Path, deadline: float) -> Path:
+    snapshot = prepare_snapshot(checkout, commit, repository, output, uv, deadline, component="worktree-manager")
+    return application_footprint.export({"worktree-manager": snapshot}, output / "footprint", deadline=deadline)
 
 
 def main() -> None:

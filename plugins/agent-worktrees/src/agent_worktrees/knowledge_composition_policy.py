@@ -7,24 +7,9 @@ self-contained and have no dependency on the overlay read/write machinery.
 
 from __future__ import annotations
 
-from plugin_resolve import split_source
+from .knowledge_overlay import is_self_referential_harness_plugin as is_self_referential_harness_plugin
 
 from . import config as cfg
-
-# A knowledge repo's own `<repo>-harness` plugin is a self-referential
-# maintenance surface for *that* repo (same convention as other named-repo
-# `-harness` adapters), not a generically graftable capability -- the same
-# reasoning that keeps a `*-agent` plugin venue-scoped and never loaded
-# centrally. Composing it into a different harness's session would introduce
-# an extra sessionStart/agent surface authored for a different repository.
-SELF_HARNESS_SUFFIX = "-harness"
-
-
-def is_self_referential_harness_plugin(source: str, local_names: set[str]) -> bool:
-    """True when `source` names a knowledge-local `*-harness` plugin."""
-    plugin, marketplace = split_source(source)
-    return marketplace in local_names and plugin.endswith(SELF_HARNESS_SUFFIX)
-
 
 def repo_config_for(
     loaded_config: cfg.Config | None, repo_name: str

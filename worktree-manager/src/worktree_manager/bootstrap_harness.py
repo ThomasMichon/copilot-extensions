@@ -60,6 +60,33 @@ def _anchor(path: Path) -> Path:
     return path
 
 
+def acquire_checkout(srcroot: Path, checkout: Path, remote: str) -> Path:
+    """Clone without executing repository hooks, or fast-forward a matching clean anchor."""
+    runtime_source_repository._ordinary(srcroot)
+    runtime_source_repository._ordinary(checkout)
+    if not checkout.exists():
+        if checkout.parent != srcroot:
+            raise ValueError("New checkout must be directly under the selected source root")
+        srcroot.mkdir(parents=True, exist_ok=True)
+        _git(srcroot, "clone", "--no-recurse-submodules", "--", remote, str(checkout))
+    else:
+        _anchor(checkout)
+        actual = _git(checkout, "remote", "get-url", "origin")
+        if repository_remote(actual)[1].casefold() != remote.casefold():
+            raise ValueError("Existing checkout has a different origin")
+        if _git(checkout, "status", "--porcelain"):
+            raise ValueError("Refusing to update a dirty checkout")
+        branch = _git(checkout, "symbolic-ref", "--short", "HEAD")
+        upstream = _git(checkout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+        if upstream != f"origin/{branch}":
+            raise ValueError("Refusing to refresh from a different tracking branch")
+        _git(checkout, "fetch", "--no-tags", "origin", f"refs/heads/{branch}")
+        _git(checkout, "merge", "--ff-only", "FETCH_HEAD")
+        if _git(checkout, "rev-parse", "HEAD") != _git(checkout, "rev-parse", "FETCH_HEAD"):
+            raise ValueError("Local checkout has unpublished commits")
+    return _anchor(checkout)
+
+
 def first_registration(root: Path, srcroot: Path, repository: str) -> Path:
     """Create one complete registry or reuse an identical prior registration."""
     for path in (root, srcroot):
@@ -88,25 +115,7 @@ def first_registration(root: Path, srcroot: Path, repository: str) -> Path:
             raise ValueError("Existing harness name refers to another checkout")
         checkout = registered
     if remote:
-        runtime_source_repository._ordinary(checkout)
-        if not checkout.exists():
-            srcroot.mkdir(parents=True, exist_ok=True)
-            _git(srcroot, "clone", "--no-recurse-submodules", "--", remote, str(checkout))
-        else:
-            _anchor(checkout)
-            actual = _git(checkout, "remote", "get-url", "origin")
-            if repository_remote(actual)[1].casefold() != remote.casefold():
-                raise ValueError("Existing checkout has a different origin")
-            if _git(checkout, "status", "--porcelain"):
-                raise ValueError("Refusing to update a dirty harness checkout")
-            branch = _git(checkout, "symbolic-ref", "--short", "HEAD")
-            upstream = _git(checkout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
-            if upstream != f"origin/{branch}":
-                raise ValueError("Refusing to refresh from a different tracking branch")
-            _git(checkout, "fetch", "--no-tags", "origin", f"refs/heads/{branch}")
-            _git(checkout, "merge", "--ff-only", "FETCH_HEAD")
-            if _git(checkout, "rev-parse", "HEAD") != _git(checkout, "rev-parse", "FETCH_HEAD"):
-                raise ValueError("Local harness has unpublished commits")
+        acquire_checkout(srcroot, checkout, remote)
     if not existing:
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=root) as temporary:
