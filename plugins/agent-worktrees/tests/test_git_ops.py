@@ -76,6 +76,7 @@ class TestGitWrapper:
         assert len(calls) == 1
         assert 0 < calls[0]["timeout"] <= 2
         assert calls[0]["soft_timeout"] == 30
+        assert calls[0]["errors"] == "replace"
 
     @pytest.mark.parametrize("selection", [
         "bin", "explicit",

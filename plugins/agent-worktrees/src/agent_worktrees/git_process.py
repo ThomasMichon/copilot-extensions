@@ -59,6 +59,7 @@ def execute(
 
         return cast(ProcessResult, run_owned(
             command, cwd=cwd, env=env, timeout=timeout, soft_timeout=soft_timeout,
+            errors="replace",
         ))
     if observation_deadline is not None or (kill_tree and timeout is not None):
         bounded: _BoundedOptions = {}

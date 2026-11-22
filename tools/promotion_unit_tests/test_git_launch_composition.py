@@ -325,3 +325,44 @@ def test_candidate_stat_distinguishes_absence_from_denial(
     else:
         with pytest.raises(PermissionError):
             LOOKUP._usable("candidate")
+
+
+def test_soft_capture_uses_the_existing_owned_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def owned(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(["git"], 0, "output", "")
+
+    package = ModuleType("agent_procutil")
+    package.__path__ = []
+    provider = ModuleType("agent_procutil.owned_process")
+    setattr(provider, "run_owned", owned)
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
+
+    def unexpected(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        pytest.fail("soft capture selected a different process owner")
+
+    result = PROCESS.execute(
+        ["git", "fetch"], cwd=None, env={}, capture=True, timeout=5,
+        kill_tree=False, input_data=None, observation_deadline=None,
+        run=unexpected, bounded_run=unexpected, window_options=lambda: {},
+        soft_timeout=1,
+    )
+    assert result.stdout == "output"
+    assert calls == [{"cwd": None, "env": {}, "timeout": 5, "soft_timeout": 1, "errors": "replace"}]
+
+
+@pytest.mark.parametrize("kind", ["input", "uncaptured"])
+def test_soft_capture_refuses_incompatible_modes_before_launch(kind: str) -> None:
+    def unexpected(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        pytest.fail("invalid soft capture reached process creation")
+
+    with pytest.raises(ValueError, match="captured text output"):
+        PROCESS.execute(
+            ["git", "fetch"], cwd=None, env={}, capture=kind != "uncaptured", timeout=5,
+            kill_tree=False, input_data=b"input" if kind == "input" else None,
+            observation_deadline=None, run=unexpected, bounded_run=unexpected,
+            window_options=lambda: {}, soft_timeout=1,
+        )

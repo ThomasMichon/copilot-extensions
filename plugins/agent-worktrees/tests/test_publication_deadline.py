@@ -23,6 +23,18 @@ def test_configured_deadline(raw: dict[str, object], expected: float) -> None:
     assert cfg.PRConfig().push_timeout_seconds == push_timeout.DEFAULT_PUSH_TIMEOUT == 180.0
 
 
+def test_short_push_budget_still_covers_fork_acquisition_and_authority_contention() -> None:
+    from agent_worktrees import publication_deadline
+
+    timeout = .5
+    holder = publication_deadline.lock_wait(timeout)
+    fork_sequence = 2 * NETWORK_HARD_TIMEOUT + 4 * timeout + NETWORK_HARD_TIMEOUT
+    assert holder >= fork_sequence
+    assert publication_deadline.lifecycle_budget(
+        cfg.PRConfig(push_timeout_seconds=timeout),
+    ) >= holder + fork_sequence
+
+
 @pytest.mark.parametrize("value", [
     None, True, False, 0, -1, float("inf"), float("-inf"), float("nan"),
     "", "300", "invalid", [], {}, 10 ** 400, 1e308, 1e300,
@@ -98,9 +110,10 @@ def test_real_publication_forwards_deadline_and_lock_budgets(
     assert finalize.push_changes(wid, config)
 
     assert attempts == [timeout] * 3
-    assert waits and set(waits) == {4 * timeout + NETWORK_HARD_TIMEOUT, 1.0}
+    holder = 4 * timeout + 7 * NETWORK_HARD_TIMEOUT + 90
+    assert waits and set(waits) == {holder, 1.0}
     assert waits.count(1.0) == 3
-    budget = 8 * timeout + 3 * NETWORK_HARD_TIMEOUT + 90
+    budget = 2 * holder
     assert lifecycle == [{"timeout": budget, "stale_after": budget}]
     assert marker.read_text().splitlines() == ["1"] * 3
 
@@ -166,7 +179,9 @@ def test_maximum_deadline_is_usable_by_real_subprocess(tmp_path: Path) -> None:
 
     from agent_worktrees import publication_deadline
 
-    maximum = (publication_deadline.MAX_WAIT_SECONDS - 3 * NETWORK_HARD_TIMEOUT - 90) / 8
+    maximum = (
+        publication_deadline.MAX_WAIT_SECONDS - 2 * publication_deadline._holder_budget(0)
+    ) / 8
     assert publication_deadline.validate(maximum) == maximum
     with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*dependent wait budgets"):
         publication_deadline.validate(math.nextafter(maximum, math.inf))

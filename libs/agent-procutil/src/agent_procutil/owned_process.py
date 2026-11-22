@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import codecs
 import math
 import os
 import selectors
@@ -242,6 +243,7 @@ def _communicate_unreaped(
     on_root_exit: Callable[[], None] | None = None,
     cleanup_deadline: float | None = None,
     handoff_on_root_exit: bool = False,
+    errors: str = "strict",
 ) -> tuple[str | bytes | None, ...]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
@@ -331,7 +333,7 @@ def _communicate_unreaped(
     while _observe_unreaped(process) is None:
         time.sleep(min(.01, remaining()))
     return tuple(
-        (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
+        (bytes(data) if binary else data.decode("utf-8", errors=errors).replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
         for data, stream in zip(output, streams)
     )
@@ -343,6 +345,7 @@ def _communicate_windows_bounded(
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
     _settlement: _CleanupSettlement | None = None,
+    errors: str = "strict",
 ) -> tuple[str | bytes | None, ...]:
     if job is None:
         raise RuntimeError("native child Windows Job custody is unavailable")
@@ -580,7 +583,7 @@ def _communicate_windows_bounded(
             primary[0].stderr = bytes(output[1]) if process.stderr is not None else None
         raise primary[0]
     return tuple(
-        (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
+        (bytes(data) if binary else data.decode("utf-8", errors=errors).replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
         for data, stream in zip(output, (process.stdout, process.stderr))
     )
@@ -600,10 +603,12 @@ def _run_owned(
     borrow_parent_scope: bool = False,
     inactivity_timeout: float | None = None,
     soft_timeout: float | None = None,
+    errors: str = "strict",
     output_fds: Mapping[str, int] | None = None,
     completion_supervisor: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     windows = os.name == "nt"
+    codecs.lookup_error(errors)
     streaming = (
         inactivity_timeout is not None or output_fds is not None
         or soft_timeout is not None and not windows
@@ -681,7 +686,7 @@ def _run_owned(
             stdout=subprocess.PIPE if capture or streaming else subprocess.DEVNULL,
             stderr=subprocess.PIPE if capture or streaming else subprocess.DEVNULL,
             **cast(dict[str, Any], {"text": False, "bufsize": 0} if bounded_windows or streaming or soft_timeout is not None else {
-                "text": True, "encoding": "utf-8", "errors": "strict",
+                "text": True, "encoding": "utf-8", "errors": errors,
             }),
             **no_window_kwargs(),
             **({"start_new_session": True} if not windows and not inherit_process_group else {}),
@@ -713,7 +718,8 @@ def _run_owned(
             if deadline is not None:
                 _remaining(deadline, argv, timeout)
             stream_capture.wait(
-                inactivity_timeout, deadline=deadline, wait_for_eof=False,
+                inactivity_timeout, deadline=deadline,
+                wait_for_eof=inactivity_timeout is None and output_fds is None,
                 exit_observer=lambda: _observe_unreaped(process) is not None,
                 cleanup_deadline=budget.deadline if budget else None,
                 soft_timeout=soft_timeout,
@@ -727,6 +733,7 @@ def _run_owned(
                 argv=argv, timeout=cast(float, timeout), capture_limits=cast(tuple[int, int], capture_limits),
                 binary=binary,
                 _settlement=settlement,
+                errors=errors,
                 **({"budget": budget} if budget is not None else {}),
             )
         elif windows:
@@ -747,6 +754,7 @@ def _run_owned(
                 binary=binary,
                 on_root_exit=settle_exited_group if timeout is None and not inherit_process_group else None,
                 handoff_on_root_exit=completion_supervisor,
+                errors=errors,
                 cleanup_deadline=budget.deadline if budget is not None else None,
                 **({"capture_timeout": True} if budget is not None else {}),
             )
@@ -837,7 +845,7 @@ def _run_owned(
                     on_settled()
     if (streaming or windows and soft_timeout is not None) and capture and not binary:
         stdout, stderr = (
-            data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            data.decode("utf-8", errors=errors).replace("\r\n", "\n").replace("\r", "\n")
             if data is not None else None for data in (stdout, stderr)
         )
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
@@ -850,6 +858,7 @@ def run_owned(
     on_settled: Callable[[], None] | None = None,
     inactivity_timeout: float | None = None,
     soft_timeout: float | None = None,
+    errors: str = "strict",
     output_fds: Mapping[str, int] | None = None,
     budget: OwnedExecutionBudget | None = None,
 ) -> subprocess.CompletedProcess[Any]:
@@ -860,6 +869,7 @@ def run_owned(
     reporting whole-scope completion. Callers retain exclusive Popen custody.
     ``soft_timeout`` reports output inactivity without terminating or renewing
     ``timeout``. It requires capture and a finite hard timeout.
+    UTF-8 output decoding remains strict unless ``errors`` explicitly opts in.
     """
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
@@ -884,7 +894,7 @@ def run_owned(
         confirm_posix_group=on_settled is not None or (
             inactivity_timeout is not None or output_fds is not None or soft_timeout is not None
         ),
-        inactivity_timeout=inactivity_timeout, soft_timeout=soft_timeout,
+        inactivity_timeout=inactivity_timeout, soft_timeout=soft_timeout, errors=errors,
         output_fds=output_fds, budget=budget,
     )
 
