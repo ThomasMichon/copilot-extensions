@@ -2056,7 +2056,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   after exact-head approval and complete fresh Linux CI executes all 8,893
   selected units. Reviewed and merged trees match; only this two-case
   leaf is complete. The separate native-load refusal remains unadmitted.
-- [ ] Qualify the separate original ZIP32/ZIP64 directory-count boundary
+- [x] Qualify the separate original ZIP32/ZIP64 directory-count boundary
   function with all three original entry counts: 65,534, 65,535 and 65,536.
   Preserve actual in-memory ZIP_STORED archives, the original limits fixture,
   twenty-second preflight deadlines, stream-reset assertion and reduced-count
@@ -2076,8 +2076,34 @@ authorizes critical main-path acceptance or a bounded administrative change.
   preflight owner call-phase lines per case. Only the adapter binding is
   added; no coverage target changes. Compact-v2 contains 8,896 nodes,
   1,260 sources and 463 targets in 996,926 bytes, preserving prior node order
-  and every previous source hash. Full fresh source CI and normal
-  review/merge remain required.
+  and every previous source hash. #14097 merges at
+  `85b93019f19c090f32a3bb8e1c5d0cc008244aef` after exact-head approval and
+  complete fresh Linux CI executes all 8,896 selected units within the
+  unchanged bound. Reviewed and merged trees match; only this three-case
+  leaf is complete. All separate refusals and parent gates remain open.
+- [ ] Qualify the separate original historical-argv inspection function
+  with all six combinations of `venv`/`.venv` and the three original products.
+  Preserve the literal argument vectors, unused temporary-path fixture and
+  original positive, foreign-root and unrelated-module assertions.
+  Export only that pure `admits_argv` inspection, not stop, capture, process
+  inventory, signaling, native pidfd, unit-writer or Bash execution cases.
+  Require complete original/adapter collection identity, initial unchanged
+  source/effect auditing and actual owner calls before admission.
+  Preserve all 8,896 nodes, 1,260 source hashes, 463 targets, 89 helper
+  decisions and the 300-second bound. Normal strict checks, committed
+  changefile presence, exact-head review and complete fresh Linux CI remain
+  required. No replay of refused candidates, new mock, preload, guard
+  exception, data admission, native/runtime/routing or cleanup authority
+  is added.
+  Complete collection verifies all 110 original cases and exactly six adapter
+  cases with original function and parameter-object identity. Initial unchanged
+  auditing passes all six in 1.094 seconds with zero prohibited effects,
+  three bound canonical reads and actual `admits_argv` call-phase lines per
+  case. Two Python bindings and the already hash-bound owner as a coverage
+  target are added; no original test changes. Compact-v2 contains 8,902 nodes,
+  1,262 sources and 464 targets in 997,820 bytes, preserving prior node order
+  and every previous source hash. Exact-head review and complete fresh Linux
+  CI remain required; this leaf is not yet complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
