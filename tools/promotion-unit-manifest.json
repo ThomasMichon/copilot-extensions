@@ -9574,7 +9574,7 @@
     "tools/governed_feed_trust.py": "6fcfca959294d45d5b9b92475674fddcf81cbb22fbb0d3f6ac8b0b99b513311f",
     "tools/installer_engine_ref.py": "95b0aa21a37eb2e80c5f680518f9e6fb3193f440e7e28642d69bc58707733640",
     "tools/launch_wrapper_assets_ref.py": "881412e885a63e41680f923fb9af33e8f188994b729434009a4e1861ed0d27be",
-    "tools/materialize_installer_engine.py": "f2ee8f71e2129cd6f7644ffdfee35f8b235c90af2bce0ff9ee9849b32fe3b0fb",
+    "tools/materialize_installer_engine.py": "28aee249557d37f89947d8cb8f46ad34e01f07ac0fb60fdf4070cda5431d8ca9",
     "tools/materialize_launch_wrapper_assets.py": "e7c1dcbb9ddf7095bfba8d11dc84ecac08b3e4883c5fd7967fbdb961e83559fc",
     "tools/materialize_main.py": "182f1784457390a9ba7c8ce858e53cd4ffee06edb7ea30e8d8e560840a15140c",
     "tools/materialize_source_applications.py": "ba28bb5a3b1b017d755e729ad2c4ac083ad756f96f6b4d3c7f2170f34e578159",

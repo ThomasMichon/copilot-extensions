@@ -67,12 +67,14 @@ def _payload(root: Path) -> Path:
     try:
         materialize_installer_engine = importlib.import_module("materialize_installer_engine")
         materialize_payload_invocation = importlib.import_module("materialize_payload_invocation")
+        materialize_main = importlib.import_module("materialize_main")
     finally:
         sys.path[:] = previous
-    changes = materialize_installer_engine.materialize_derived_files(
+    changes = materialize_main.materialize_file_pointers(payload, canonical_root=PLUGIN.parents[1])
+    changes.extend(materialize_installer_engine.materialize_derived_files(
         payload, canonical_root=PLUGIN.parents[1], copied_consumer=(PLUGIN, payload),
         file_names=frozenset({"bootstrap-uv.ps1", "bootstrap-uv.sh"}),
-    )
+    ))
     shutil.copy2(PLUGIN / "payload-invocation.json", payload / "payload-invocation.json")
     changes.extend(materialize_payload_invocation.materialize(
         payload, canonical_root=PLUGIN.parents[1], source_consumer=PLUGIN,

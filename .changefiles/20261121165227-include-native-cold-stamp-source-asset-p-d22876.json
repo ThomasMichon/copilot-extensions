@@ -1,0 +1,9 @@
+{
+  "comment": "Include native cold-stamp source-asset planning updates in bundled installer tooling.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
