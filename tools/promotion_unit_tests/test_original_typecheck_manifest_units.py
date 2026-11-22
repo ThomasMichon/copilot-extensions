@@ -31,5 +31,16 @@ _SELECTED = (
     "test_import_inputs_follow_native_stub_extension_aliases",
     "test_import_inputs_preserve_native_owned_source_extension_aliases",
     "test_import_input_snapshot_refuses_member_and_root_changes",
+    "test_import_input_drift_is_refused_and_settles_cleanup",
+    "test_changed_selection_conservatively_checks_all_admitted_consumers",
+    "test_missing_preparation_is_actionable_and_does_not_create_environment",
+    "test_pending_probe_never_certifies_admission",
+    "test_dependency_policy_refusal_has_the_setup_error_contract",
+    "test_preparation_installs_the_same_lock_bytes_that_keyed_the_cache",
+    "test_failed_cache_repair_cannot_preserve_preparation_marker",
+    "test_preparation_refuses_unqualified_requirement_includes",
+    "test_preparation_refuses_replaced_leased_directory",
+    "test_readiness_is_revalidated_under_the_checker_lease",
+    "test_checker_timeout_settles_targets_and_environment_lease",
 )
 globals().update({name: getattr(_original, name) for name in _SELECTED})
