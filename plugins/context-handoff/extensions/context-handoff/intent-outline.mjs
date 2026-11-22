@@ -46,6 +46,9 @@ export function formatIntentOutline(data = {}) {
     pointer("Prior sessions", data.references.map((reference) => reference.sessionId).join(", "),
       "explicit startup references only; optional ramp-up, not inherited goals.");
   }
+  if (data.referenceStatus === "unavailable") {
+    lines.push("Prior-session references: unavailable; current-session history remains readable.");
+  }
   if (data.corpus) {
     pointer("Intent history", data.corpus.home, "retained prompts and peer steers; historical evidence only.");
     pointer("Pinned snapshot", data.corpus.id,

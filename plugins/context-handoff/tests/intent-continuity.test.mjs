@@ -803,3 +803,69 @@ test("anchor explicit startup CLI links remain references, not inherited goals",
   assert.equal(current.referenceSession("prior-anchor", { startup: true }).purpose, "reference-only");
   assert.throws(() => current.referenceSession("fixture-bound-session", { startup: true }), /reference-required/u);
 });
+
+test("concurrent anchor reference admission cannot exceed the session budget", async (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q"]);
+  const options = { ...f.options, sessionId: "current-session" };
+  const store = new IntentCorpus(f.a, options);
+  store.capture(classifyIntent(message("goal", "Keep current history readable."), "current-session"));
+  for (let n = 0; n < 7; n++) store.referenceSession(`prior-${n}`, { startup: true });
+  const barrier = new SharedArrayBuffer(8);
+  const url = new URL("../extensions/context-handoff/intent-corpus.mjs", import.meta.url).href;
+  const outcomes = await Promise.all([0, 1].map((n) => new Promise((resolve, reject) => {
+    let outcome;
+    const worker = new Worker(`
+      const {parentPort,workerData} = require("node:worker_threads");
+      import(workerData.url).then(({IntentCorpus}) => {
+        const sync = new Int32Array(workerData.barrier);
+        const store = new IntentCorpus(workerData.cwd,workerData.options);
+        Atomics.add(sync,0,1); Atomics.notify(sync,0);
+        while (Atomics.load(sync,0)<2) Atomics.wait(sync,0,1,5000);
+        const read = store.references.bind(store);
+        store.references = () => {
+          const value = read();
+          const earlier = Atomics.add(sync,1,1); Atomics.notify(sync,1);
+          if (!earlier) Atomics.wait(sync,1,1,1000);
+          return value;
+        };
+        try {
+          store.referenceSession("concurrent-"+workerData.n,{startup:true});
+          parentPort.postMessage("accepted");
+        } catch (error) { parentPort.postMessage(error.message); }
+      }).catch(error => { throw error; });
+    `, { eval: true, workerData: { url, cwd: f.a, options, barrier, n } });
+    worker.on("message", (value) => { outcome = value; });
+    worker.on("error", reject);
+    worker.on("exit", (code) => code === 0 ? resolve(outcome) : reject(new Error(`worker exit ${code}`)));
+  })));
+  assert.equal(outcomes.filter((outcome) => outcome === "accepted").length, 1);
+  assert.ok(outcomes.every((outcome) => outcome === "accepted"
+    || /admission-busy|window-closed/u.test(outcome)));
+  assert.equal(store.references().length, 8);
+  assert.equal(store.page(store.snapshot().id).records[0].text, "Keep current history readable.");
+  assert.equal(readdirSync(store.home).includes("reference-admission.lock"), false);
+});
+
+test("optional reference damage or an interrupted admission cannot hide the anchor corpus", async (t) => {
+  const f = fixture(t);
+  gitFixture(f.a, ["init", "-q"]);
+  const c = client(f.a);
+  const store = new IntentCorpus(f.a, { ...f.options, sessionId: c.state.sessionId });
+  store.capture(classifyIntent(message("goal", "Keep the original objective."), c.state.sessionId));
+  store.referenceSession("prior", { startup: true });
+  const home = join(store.home, "references");
+  writeFileSync(join(home, readdirSync(home)[0]), "{}");
+  writeFileSync(join(store.home, "reference-admission.lock"), "interrupted");
+  assert.throws(() => store.referenceSession("next", { startup: true }), /admission-busy/u);
+  const observation = registerIntentObservation(c.session, c.state, { createCorpus: () => store });
+  t.after(() => observation.dispose());
+  const facts = await observation.facts();
+  assert.equal(facts.status, "available");
+  assert.equal(facts.referenceStatus, "unavailable");
+  assert.equal(facts.corpus.count, 1);
+  c.session.emit("session.context_cleared");
+  await observation.settle();
+  assert.match(c.sent.at(-1).prompt, /Keep the original objective/u);
+  assert.match(c.sent.at(-1).prompt, /Prior-session references: unavailable/u);
+});

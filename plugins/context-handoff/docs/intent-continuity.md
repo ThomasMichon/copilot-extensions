@@ -78,6 +78,12 @@ node handoff-cli.mjs reference-session --prior-session <prior-id> --session-id <
 inferred by the tool. A new reference is accepted only before the session has
 more than one captured input. Exact retries are idempotent. At most eight
 references are retained, and linking a session to itself is refused.
+Admission and publication share an exclusive per-session lock. A concurrent
+writer receives `intent-reference-admission-busy` and can retry the same request.
+An interrupted writer's lock is not reclaimed by age or guessed liveness; it
+can block new optional links until the owner recovers it, not current-session
+capture or recovery. Unavailable optional reference metadata is reported
+separately and does not hide an intact current-session corpus.
 The record contains only the prior session ID and `purpose: reference-only`.
 It does not read or import the prior goal, corpus, effort or handoff. Recovery
 lists the pointer for optional on-demand ramp-up, never as an inherited goal.

@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { IntentCorpus, intentScope, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { IntentCorpus, intentScope, intentReferenceFacts, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 
 export function resolveIntentCwd(cwd, sessionId, execute) {
   if (!sessionId) return cwd;
@@ -120,7 +120,7 @@ export function collectLocalIntentFacts(cwd, execute, sessionId = null) {
     const store = new IntentCorpus(cwd, { sessionId });
     const corpus = store.snapshot();
     return { goal, corpus, page: corpus ? store.page(corpus.id) : null,
-      sessionId, references: store.references(),
+      sessionId, ...intentReferenceFacts(store),
       directive: INTENT_RESEARCH_DIRECTIVE };
   } catch {
     return { goal, corpus: null, status: "unavailable",

@@ -1,4 +1,4 @@
-import { IntentCorpus, classifyIntent, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { IntentCorpus, classifyIntent, intentReferenceFacts, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 import { formatIntentOutline } from "./intent-outline.mjs";
 
 export function registerIntentObservation(session, state, {
@@ -86,7 +86,7 @@ export function registerIntentObservation(session, state, {
       const page = snapshot ? corpus(cwd).page(snapshot.id) : null;
       const data = { status: pending.size ? "incomplete" : "available", goal, corpus: snapshot, page,
         sessionId: session.sessionId || state.sessionId,
-        references: corpus(cwd).references?.() ?? [],
+        ...intentReferenceFacts(corpus(cwd)),
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE };
       cached.set(scopeKey(cwd), data);
       return data;
@@ -164,6 +164,7 @@ export function registerIntentObservation(session, state, {
         corpusPath: corpora.get(key)?.home ?? null,
         sessionId: session.sessionId || state.sessionId,
         references: data?.references ?? [],
+        referenceStatus: data?.referenceStatus ?? "unqualified",
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE,
         instruction: "Emergency cached pointers only; current Goal and corpus freshness are unqualified. " +
           "Consult relevant sources on demand; cached pages may omit later inputs.",

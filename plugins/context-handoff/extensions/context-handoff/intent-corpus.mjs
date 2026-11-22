@@ -136,6 +136,20 @@ export class IntentCorpus {
     if (!this.sessionId || !startup || !validSession(sessionId) || sessionId === this.sessionId) {
       throw new Error("intent-startup-reference-required");
     }
+    directory(this.storageRoot);
+    directory(this.home);
+    const lock = join(this.home, "reference-admission.lock");
+    let fd;
+    try { fd = openSync(lock, "wx", 0o600); }
+    catch (error) {
+      if (error.code === "EEXIST") throw new Error("intent-reference-admission-busy");
+      throw error;
+    }
+    try { return this.#admitReference(sessionId); }
+    finally { closeSync(fd); unlinkSync(lock); }
+  }
+
+  #admitReference(sessionId) {
     const value = { version: 1, sessionId, purpose: "reference-only" };
     const references = this.references();
     const existing = references.find((reference) => reference.sessionId === sessionId);
@@ -143,8 +157,6 @@ export class IntentCorpus {
     if (references.length >= 8 || (this.snapshot()?.count ?? 0) > 1) {
       throw new Error("intent-startup-reference-window-closed");
     }
-    directory(this.storageRoot);
-    directory(this.home);
     const home = join(this.home, "references");
     directory(home);
     const saved = JSON.parse(commit(join(home, `${digest(sessionId)}.json`), JSON.stringify(value)));
@@ -258,6 +270,11 @@ export class IntentCorpus {
     }
     return output(fragments, record, offset);
   }
+}
+
+export function intentReferenceFacts(store) {
+  try { return { references: store.references?.() ?? [], referenceStatus: "available" }; }
+  catch { return { references: [], referenceStatus: "unavailable" }; }
 }
 
 export const INTENT_RESEARCH_DIRECTIVE =
