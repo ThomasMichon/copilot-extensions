@@ -36,6 +36,19 @@ start_native_daemon() {
     channel="$(umask 077; mktemp -d -- "$working/.native-daemon-XXXXXXXX")" || return 1
     (umask 077; mkfifo -- "$channel/ready") || { rmdir -- "$channel"; return 1; }
     exec 7<>"$channel/ready" || return 1
+    if [[ -n "$admission_deadline" ]]; then
+        read -r uptime _idle </proc/uptime || code=1
+        admission_wait="$(LC_ALL=C awk -v deadline="$admission_deadline" -v now="$uptime" \
+            'BEGIN { remaining=deadline-now; if (remaining<=0) exit 1;
+                     printf "%.3f", (remaining<15 ? remaining : 15) }')" || code=1
+        if [[ "$code" != 0 ]]; then
+            exec 7>&-
+            rm -- "$channel/ready"
+            rmdir -- "$channel"
+            printf '%s\n' 'Native daemon admission deadline expired before launch.' >&2
+            return 1
+        fi
+    fi
     if [[ "${COPILOT_EXTENSIONS_TEST_CONTAINED:-}" == 1 ]]; then
         COPILOT_EXTENSIONS_DAEMON_INSTANCE="$__daemon_instance_id" \
         COPILOT_EXTENSIONS_DAEMON_REGISTRY="$__daemon_instance_root" \

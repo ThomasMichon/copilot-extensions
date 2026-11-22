@@ -103,13 +103,15 @@ def test_native_daemon_and_bounded_control_after_caller_group_destruction(tmp_pa
             os.close(descriptor)
 
 
-@pytest.mark.parametrize("expired", [False, True])
-def test_native_admission_deadline_does_not_retire_independent_owner(tmp_path: Path, expired: bool) -> None:
+@pytest.mark.parametrize("mode", ["stalled", "expired", "delayed-reservation"])
+def test_native_admission_deadline_does_not_retire_independent_owner(tmp_path: Path, mode: str) -> None:
     source = Path(__file__).parents[1] / "src/agent_procutil/native_daemon.sh"
     helper = tmp_path / source.name
     shutil.copyfile(source, helper)
     (tmp_path / "daemon_instances.sh").write_text(
-        'new_daemon_instance_reservation() { __daemon_instance_id=fixture; '
+        'new_daemon_instance_reservation() { '
+        + ('sleep .3; ' if mode == "delayed-reservation" else '') +
+        '__daemon_instance_id=fixture; '
         '__daemon_instance_root="$2"; __daemon_instance_record="$2/fixture"; }\n'
         '_di_read() { sleep 1; return 1; }\n',
         encoding="utf-8",
@@ -124,14 +126,18 @@ def test_native_admission_deadline_does_not_retire_independent_owner(tmp_path: P
          "'BEGIN { printf \"%.3f\", now+(expired ? -1 : .2) }')\"; "
          'code=0; start_native_daemon --admission-deadline "$deadline" "$2" "$3" "$3/log" || code=$?; '
          '[[ "$code" != 0 ]] || exit 91; '
-         'if [[ "$4" == 0 ]]; then '
+         'if [[ "$5" == stalled ]]; then '
          'kill -0 "$__native_daemon_wait_pid" || exit 92; '
          'printf "owner-still-running\\n"; wait "$__native_daemon_wait_pid"; '
          'else [[ ! -v __native_daemon_wait_pid ]] || exit 93; fi',
-         "deadline-fixture", str(helper), str(worker), str(tmp_path), str(int(expired))],
+         "deadline-fixture", str(helper), str(worker), str(tmp_path), str(int(mode == "expired")), mode],
         env=environment, capture_output=True, text=True, timeout=5,
     )
-    assert result.returncode == (0 if expired else 1), result.stdout + result.stderr
-    assert ("owner-still-running" in result.stdout) != expired
+    if mode == "delayed-reservation":
+        assert result.returncode == 0 and "owner-still-running" not in result.stdout, result.stdout + result.stderr
+        assert "deadline expired before launch" in result.stderr
+    else:
+        assert result.returncode == (0 if mode == "expired" else 1), result.stdout + result.stderr
+        assert ("owner-still-running" in result.stdout) == (mode == "stalled")
     assert not list(tmp_path.glob(".native-daemon-*"))
     assert "Native daemon admission" in result.stderr

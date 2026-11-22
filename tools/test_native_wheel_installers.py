@@ -83,8 +83,6 @@ def assert_native_bootstrap(
 
     host = shell or shutil.which("powershell.exe")
     assert host
-    # A Windows venv redirector inserts a parent between capture and the caller.
-    bootstrap_python = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     payload, home = tmp_path / "payload", tmp_path / "home"
     shutil.copytree(
         ROOT / "plugins" / plugin, payload,
@@ -122,6 +120,9 @@ def assert_native_bootstrap(
     if plugin == "budget-guidance":
         monkeypatch.syspath_prepend(str(ROOT / "plugins/budget-guidance/tests"))
         importlib.import_module("cue_fixture").prepare_cue_assets(payload)
+        resolver = payload / "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1"
+        resolver.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1", resolver)
         uv = shutil.which("uv")
         assert uv, "managed readiness requires prepared uv"
         storage = subprocess.run(
@@ -159,7 +160,7 @@ def assert_native_bootstrap(
         (root / "current-version").write_text(generation)
         manifest_generation = native_version if fault == "same-version-rollback" else generation
         (root / "deploy-manifest.json").write_text(json.dumps({
-            "service": plugin, "bootstrap_python": bootstrap_python,
+            "service": plugin, "bootstrap_python": sys.executable,
             "runtime_version": "0.0.0" if fault == "different-generation" else manifest_generation,
             "source": {"version": version, "plugin": plugin, "path": str(payload), "content_hash": "b" * 64},
         }))

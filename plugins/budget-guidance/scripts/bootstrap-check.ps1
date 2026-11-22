@@ -64,6 +64,10 @@ function Test-BudgetManagedRuntimeCurrent {
         -not [IO.File]::Exists($bootstrap)) {
         return $false
     }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        . (Join-Path $PluginDir 'libs/agent-procutil/src/agent_procutil/daemon_instances.ps1')
+        $bootstrap = (Resolve-DaemonInstancePython -Selected $bootstrap).Executable
+    }
     . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
     . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     $processHelper = Join-Path $PSScriptRoot 'bootstrap_uv_capture.py'

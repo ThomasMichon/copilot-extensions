@@ -136,6 +136,10 @@ readiness reader under that managed interpreter. The query and reader share a
 six-second budget with a cleanup reserve; missing managed Python does not fall
 back to PATH Python or acquire an interpreter on the hook. The Python/uv-free
 first stamp remains separate from drift supervision.
+On Windows, the existing Procutil metadata resolver normalizes a prepared
+venv-backed bootstrap selection to its base before capture. The actual uv
+selection remains managed-only; neither PATH discovery nor a replacement
+bootstrap interpreter is introduced.
 The cue reads inert configuration with the same pure posture, never authorizes
 readers or refreshes a provider, and uses a reviewed pointer plus a separate
 static advisory boundary. It uses the prepared managed interpreter without
