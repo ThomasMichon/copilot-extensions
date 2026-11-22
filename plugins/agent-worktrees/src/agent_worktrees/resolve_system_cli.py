@@ -12,6 +12,7 @@ import argparse
 from pathlib import Path
 
 from . import git_ops, sessions, tracking
+from .checkout_hydration_catalog import is_dehydrated
 from . import config as cfg
 from .picker import ItemKind, MenuItem, pick
 
@@ -126,6 +127,8 @@ def _system_cleanup(config: cfg.Config) -> int | None:
                 active_paths=active_paths,
             )
             info = _apply_tracking_override(record, info)
+        elif is_dehydrated(record):  # held, never cleanable
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DEHYDRATED)
         elif record.status == "finalized":
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
         else:

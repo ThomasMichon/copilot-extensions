@@ -20,6 +20,7 @@ from .cleanup_blockers import (
     _closure_blockers as _closure_blockers,
     _enrich_reason_with_blockers as _enrich_reason_with_blockers,
 )
+from .checkout_hydration_catalog import is_dehydrated
 from .retirement_safety import retirement_blocker
 
 if TYPE_CHECKING:
@@ -286,6 +287,8 @@ def _revalidate_cleanup_safety(
                 latest = tracking.load_record(yaml_path)
             except (ExecutionSpaceError, ValueError, OSError, yaml.YAMLError) as exc:
                 return RevalidationResult(False, f"record/reporting context unavailable: {exc}", "execution-space")
+            if is_dehydrated(latest):  # even --force: the checkout is held, not gone
+                return RevalidationResult(False, "checkout is dehydrated; rehydrate first", "dehydrated")
             if automatic and (
                 latest.dispatch_attempt is not None or latest.dispatch_attempt_opaque
             ):
@@ -443,6 +446,9 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             )
             info = _apply_tracking_override(rec, info)
             state_str = info.state.value
+        elif is_dehydrated(rec):
+            info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DEHYDRATED)
+            state_str = "dehydrated"
         elif rec.status == "finalized":
             state_str = "completed"
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
@@ -451,7 +457,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             state_str = "gone"
 
         age = _age_str(rec.started_at)
-        path_display = rec.worktree_path if Path(rec.worktree_path).exists() else "(gone)"
+        absent = "(dehydrated)" if state_str == "dehydrated" else "(gone)"
+        path_display = rec.worktree_path if Path(rec.worktree_path).exists() else absent
 
         # Compute prune-safety verdict (combines git state, PR records, and
         # session activity) -- drives the cleanup decision and enriches display.

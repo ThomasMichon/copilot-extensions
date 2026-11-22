@@ -685,9 +685,7 @@ def _reconcile_merged_pointers(
                 "rev-parse", upstream, cwd=anchor, check=False
             ).stdout.strip()
             if up_sha:
-                git_ops.git(
-                    "branch", "-f", branch, up_sha, cwd=anchor, check=False
-                )
+                git_ops.force_branch(branch, up_sha, cwd=anchor)
     except Exception:
         pass
 
@@ -771,7 +769,7 @@ def _push_changes_pr(
 
     from .pr_publication_labels import validate_scope
     validate_scope(repo.pr, pushed_pr)
-    if not feature:
+    if not feature or pushed_pr is None:
         output.err("PR mode: no tracked PR feature branch to update.")
         return False
     from . import pr_publish
@@ -839,7 +837,10 @@ def _push_changes_pr(
             tracking_session_registry.record_repo_fetch_confirmed(record.repo)
 
         if on_wt:
-            git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
+            refused = git_ops.force_branch(feature, "HEAD", cwd=worktree_path, config=config)
+            if refused:
+                output.err(f"{refused} Nothing was pushed.")
+                return False
 
         # push-changes always updates an already-published PR head -- lease
         # the push against its LAST-OBSERVED tip, never a live re-query
@@ -1188,6 +1189,15 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+def _hydration_hold(record: tracking.WorktreeRecord | None, worktree_path: str, worktree_id: str) -> bool:
+    from .checkout_hydration_catalog import is_dehydrated, is_dehydrated_checkout
+
+    if (record is not None and is_dehydrated(record)) or is_dehydrated_checkout(worktree_path):
+        output.err(f"Worktree {worktree_id} is dehydrated; rehydrate it before finalizing.")
+        return True
+    return False
+
+
 @repository_identity_scope()
 def validate_and_finalize(
     worktree_id: str,
@@ -1256,6 +1266,10 @@ def validate_and_finalize(
         except Exception as exc:
             output.err(f"Cannot finalize {worktree_id}: {exc}")
             return False
+    # A dehydrated checkout is held, not finalizable: refuse before any
+    # abandonment publication, obligation re-homing or ledger freeze.
+    if _hydration_hold(record, worktree_path, worktree_id):
+        return False
     branch = _worktree_branch(record, worktree_id)
     checkout_managed = record is None or record.checkout_managed
 
@@ -1531,6 +1545,8 @@ def validate_and_finalize(
                         "refused until acceptance or decline/cancel resolves them."
                     )
                     return False
+                if _hydration_hold(record, worktree_path, worktree_id):
+                    return False
                 if unsettled and not abandon:
                     output.err(
                         f"Worktree {worktree_id} acquired {len(unsettled)} "
@@ -1584,6 +1600,9 @@ def validate_and_finalize(
             if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
+        if _hydration_hold(record, worktree_path, worktree_id):
+            _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+            return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = False if retain_checkout or inside_worktree else _has_live_session(record)
         from . import prune

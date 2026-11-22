@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+from typing import Any
 
 
-def classify(go, worktree_path, branch, *, fetch, remote, default_branch, active_paths):
+def classify(
+    go: Any, worktree_path: str, branch: str, *, fetch: bool, remote: str, default_branch: str,
+    active_paths: set[str] | None,
+) -> Any:
     path = Path(worktree_path)
     if not path.exists() or not (path / ".git").exists():
-        return go.WorktreeStateInfo(state=go.WorktreeState.GONE)
+        from .checkout_hydration_catalog import is_dehydrated_checkout
+        held = is_dehydrated_checkout(path)
+        return go.WorktreeStateInfo(state=go.WorktreeState.DEHYDRATED if held else go.WorktreeState.GONE)
     actual = go._get_current_branch_safe(path)
     drift = bool(actual and actual != branch)
     norm = worktree_path.rstrip("/\\")

@@ -106,6 +106,7 @@ _STATE_LABEL = {
     "orphan": "ORPHAN",
     "active": "ACTIVE",
     "gone": "GONE",
+    "dehydrated": "DEHYDRATED",
     "unknown": "?",
 }
 
@@ -260,8 +261,8 @@ def _bucket_from_raw(w: dict[str, Any]) -> str:
         return "unknown"
     if st == "active":
         return "active"
-    if st == "gone":
-        return "gone"
+    if st in ("gone", "dehydrated"):
+        return st
     if st == "dirty":
         return "dirty"
     if st == "orphan":
@@ -311,6 +312,7 @@ BUCKET_DISPO = {
     "retained-data": "REVIEW",
     "closed-unmerged": "REVIEW",
     "gone": "REVIEW",
+    "dehydrated": "UNSAFE",
     "dirty": "UNSAFE",
     "wip": "UNSAFE",
     "unmerged": "UNSAFE",
@@ -338,6 +340,7 @@ BUCKET_REASON = {
     "retained-data": "checkout-local agenda requires preservation",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
+    "dehydrated": "checkout stored; rehydrate to use",
     "dirty": "uncommitted work",
     "wip": "unmerged commits",
     "unmerged": "commits not on default branch",

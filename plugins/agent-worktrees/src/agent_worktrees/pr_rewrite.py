@@ -240,7 +240,9 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 if error:
                     raise ValueError(error)
             if repo.pr.head_scheme == "snapshot":
-                git_ops.git("branch", "-f", pr.branch, head_sha, cwd=cwd)
+                refused = git_ops.force_branch(pr.branch, head_sha, cwd=cwd, config=config)
+                if refused:
+                    raise ValueError(refused)
             # Pin the source object as well as the destination: even a concurrent
             # local checkout cannot substitute another branch during hook execution.
             with hooks.allow_pr_push():
