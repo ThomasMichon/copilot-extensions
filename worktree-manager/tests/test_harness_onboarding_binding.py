@@ -71,6 +71,29 @@ def check_registered_checkout_readback(tmp_path: Path, case: unittest.TestCase) 
 
 
 class BindingTest(unittest.TestCase):
+    def test_marketplace_opt_out_then_machine_override(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            harness = root / "harness"
+            base = harness / ".copilot-extensions/agent-worktrees"
+            market = "fixture--0123456789abcdef"
+            overlay = base / "marketplaces" / market / "config.yaml"
+            overlay.parent.mkdir(parents=True)
+            (base / "config.yaml").write_text("compose_knowledge_plugins: true\n", encoding="utf-8")
+            overlay.write_text("compose_knowledge_plugins: false\n", encoding="utf-8")
+            machine = root / "config.yaml"
+            receipt = root / "footprint/marketplaces" / market / "plugins/agent-worktrees/install.json"
+            with patch.dict(os.environ, {"COPILOT_EXTENSIONS_CONTEXT": str(receipt)}), patch(
+                "worktree_manager._installation_context.resolve_context", return_value={"marketplaceId": market},
+            ) as validate:
+                self.assertFalse(onboarding.composition_enabled(harness, machine, "example"))
+                self.assertEqual(validate.call_args.kwargs["plugin_id"], "agent-worktrees")
+                machine.write_text("repos:\n  example:\n    compose_knowledge_plugins: true\n", encoding="utf-8")
+                self.assertTrue(onboarding.composition_enabled(harness, machine, "example"))
+                validate.side_effect = ValueError("invalid receipt")
+                with self.assertRaisesRegex(ValueError, "invalid receipt"):
+                    onboarding.composition_enabled(harness, machine, "example")
+
     def test_setup_has_closed_inputs_and_no_release_credentials(self) -> None:
         keys = ("GH_TOKEN", "GITHUB_TOKEN", "ARTIFACT_VERIFY_TOKEN")
         with patch.dict(os.environ, {k: "fixture" for k in keys}, clear=True), patch.object(

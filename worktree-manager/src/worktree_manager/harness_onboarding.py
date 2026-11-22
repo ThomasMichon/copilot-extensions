@@ -94,6 +94,21 @@ def composition_enabled(harness: Path, machine_config: Path, project: str) -> bo
         if path.exists():
             setting = read(path).get("compose_knowledge_plugins", True)
             break
+    pointer = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if pointer:
+        receipt = Path(pointer)
+        if not receipt.is_absolute() or len(receipt.parents) < 5:
+            raise ValueError("Worktrees composition requires an absolute installation context receipt")
+        runtime_source_repository._ordinary(receipt)
+        validator = import_module("._installation_context", __package__)
+        context = validator.resolve_context(context=receipt, plugin_id="agent-worktrees",
+                                            payload_root=os.environ.get("AGENT_WORKTREES_PAYLOAD_ROOT"),
+                                            durable_home=receipt.parents[4])
+        marketplace = context["marketplaceId"]
+        if not isinstance(marketplace, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{16}", marketplace):
+            raise ValueError("Invalid Worktrees marketplace identity")
+        path = harness / ".copilot-extensions/agent-worktrees/marketplaces" / marketplace / "config.yaml"
+        setting = read(path).get("compose_knowledge_plugins", setting)
     repos = read(machine_config).get("repos", {})
     if not isinstance(repos, dict) or not isinstance(repos.get(project, {}), dict):
         raise ValueError("Invalid machine-local harness settings")
