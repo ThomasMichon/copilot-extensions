@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [bounded inventory, telemetry and continuity continuation](journal/2026/11.21-bounded-inventory-and-continuity-intake.md)
+records two merged source leaves, three distinct new requests and an external departure; the complete census is 902 open, 173 above the fixed target.
+
 The [POSIX cue and fixture-boundary continuation](journal/2026/11.21-posix-cue-and-fixture-boundaries.md)
 records scoped delivery, the audited offline protocol completion and retained independent owners; all campaign gates remain unchanged.
 
