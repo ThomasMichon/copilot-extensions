@@ -248,6 +248,41 @@ def test_partial_pair_publication_reuses_original_child(
     assert child.creation_nonce == original_child.creation_nonce
 
 
+def test_source_preparation_does_not_hold_either_tracking_record(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare = worktree_creation._prepare_worktree_source
+    observed: list[str] = []
+
+    def unlocked_prepare(
+        anchor: str | Path, *, remote: str, default_branch: str,
+        fast_forward_anchor: bool, label: str,
+    ) -> git_ops.WorktreeBaseResult:
+        paths = (
+            existing.record.yaml_path,
+            cfg.tracking_dir("knowledge") / f"{existing.record.worktree_id}-k.yaml",
+        )
+        for path in paths:
+            def probe() -> None:
+                try:
+                    with tracking._RecordLock(path, timeout=0.1, require_sidecar=True):
+                        observed.append("available")
+                except TimeoutError:
+                    observed.append("blocked")
+            peer = threading.Thread(target=probe)
+            peer.start()
+            peer.join(2)
+            assert not peer.is_alive()
+        return prepare(
+            anchor, remote=remote, default_branch=default_branch,
+            fast_forward_anchor=fast_forward_anchor, label=label,
+        )
+
+    monkeypatch.setattr(worktree_creation, "_prepare_worktree_source", unlocked_prepare)
+    _pair(existing)
+    assert observed == ["available", "available"]
+
+
 @pytest.mark.parametrize("kind", ["dirty", "missing-record", "live", "unknown", "lost-branch"])
 def test_retained_companion_conflicts_preserve_evidence(
     existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str,

@@ -124,27 +124,21 @@ def _carve_paired_knowledge(
     legacy_machine: str | None = None,
     revalidate_creation: Callable[[], None] | None = None,
     retained_pair_path: Path | None = None,
+    prepared_source: tuple[str, str, str, git_ops.WorktreeBaseResult] | None = None,
 ) -> dict[str, Any] | None:
-    """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
+    """Allocate and cross-stamp the stateless harness's bound companion.
 
-    When the launch repo is a **stateless harness bound to a knowledge repo**
-    (``resolve_state_root`` reports ``requires_external`` + ``bound``), the
-    knowledge repo's state is carved and tracked **together** with the harness
-    worktree so the agent never has to remember to carve it separately:
+    A worktree-capable companion receives a branch, record, codename and
+    reciprocal owner reference; other classes retain anchor-kind pairing.
+    Disabled, unbound or inapplicable pairing returns ``None``.
 
-    * **Worktree-class knowledge repo** -> carve its own worktree (shared
-      ``<ts>-<suffix>`` pair stub, parallel ``worktree/<id>`` branch), write its
-      tracking record cross-stamped back to the harness, and return the
-      ``pair_*`` stamp (``pair_kind="worktree"``) for the HARNESS record.
-    * **Non-worktree-class knowledge repo** (singleton / reference) -> no second
-      worktree; return an ``anchor`` pairing stamp so the pair is recorded and
-      ``state-root --pair`` resolves to the knowledge anchor.
+    ``prepared_source`` binds the prepared anchor/remote/default branch so
+    recovery can fetch before record locks. Otherwise preparation runs here.
+    The optional callback revalidates before effects and under the codename lock.
 
-    Returns the ``pair_*`` dict to stamp on the harness record, or ``None`` when
-    no pairing applies (a normal self-hosted repo, or an unbound harness).
-    **Fail-safe:** any error degrades to ``None`` (the harness carve is never
-    affected) with a one-line stderr note. Set ``AGENT_WORKTREES_NO_PAIR`` to
-    disable the carve-both behavior entirely.
+    Return the harness's ``pair_*`` stamp for its canonical publication and
+    composition tail. Allocation errors propagate to the caller, which retains
+    responsibility for any partial effects.
     """
     core = _core()
     if os.environ.get("AGENT_WORKTREES_NO_PAIR"):
@@ -177,13 +171,18 @@ def _carve_paired_knowledge(
         cwd=knowledge_anchor,
     )
     default_branch = (entry.default_branch or "main") if entry else "main"
-    prepared = core._prepare_worktree_source(
-        knowledge_anchor,
-        remote=remote,
-        default_branch=default_branch,
-        fast_forward_anchor=getattr(config, "auto_fast_forward", True),
-        label=f"paired knowledge repo '{knowledge_name}'",
-    )
+    if prepared_source is not None:
+        if prepared_source[:3] != (knowledge_anchor, remote, default_branch):
+            raise ValueError("prepared companion repository policy changed before allocation")
+        prepared = prepared_source[3]
+    else:
+        prepared = core._prepare_worktree_source(
+            knowledge_anchor,
+            remote=remote,
+            default_branch=default_branch,
+            fast_forward_anchor=getattr(config, "auto_fast_forward", True),
+            label=f"paired knowledge repo '{knowledge_name}'",
+        )
 
     if not is_worktree_class:
         # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).

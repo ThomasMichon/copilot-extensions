@@ -134,6 +134,19 @@ def recover(
             if (fresh[0].repo, fresh[0].path, fresh[3], fresh[4]) != (root.repo, root.path, target, action):
                 raise ValueError("pair recovery evidence changed; inspect again")
             root, allocation, child, target, action = fresh
+            prepared_source = None
+            if child is None:
+                entry = repos.find_repo(root.repo)
+                if entry is None or root.path is None:
+                    raise ValueError("companion source registration disappeared")
+                remote = git_ops.resolve_remote_name(entry.remote or "origin", cwd=root.path)
+                branch = entry.default_branch or "main"
+                base = worktree_creation._prepare_worktree_source(
+                    root.path, remote=remote, default_branch=branch,
+                    fast_forward_anchor=config.auto_fast_forward,
+                    label=f"paired knowledge repo '{root.repo}'",
+                )
+                prepared_source = (root.path, remote, branch, base)
             for member_path in sorted((path, child_path)):
                 locks.enter_context(tracking._RecordLock(member_path, require_sidecar=True))
             fresh_config = cfg.load_config()
@@ -173,6 +186,7 @@ def recover(
                     legacy_machine=record.machine if record.machine_identity is None else None,
                     retained_pair_path=target,
                     revalidate_creation=revalidate,
+                    prepared_source=prepared_source,
                 )
                 if not stamp:
                     raise ValueError("native companion allocation did not complete; inspect retained effects")
