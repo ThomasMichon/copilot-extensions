@@ -1314,12 +1314,11 @@ def has_mux_session(
 
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
-        from .mux_list_result import MuxObservationUnavailable
+        from .psmux_observation import session_status
 
-        observed = _list_mux_sessions(strict=True, timeout=min(timeout, 5))
-        if observed is None:
-            raise MuxObservationUnavailable("PSMux session listing is unavailable")
-        return sess_name in observed
+        return session_status(
+            [worktree_id], strict=strict, timeout=min(timeout, 5),
+        )[worktree_id].exists
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
@@ -1336,30 +1335,25 @@ def has_mux_session(
 
 def _list_mux_sessions(*, strict: bool = False, timeout: float = 5) -> dict[str, int] | None:
     """Return client counts, or None when passive listing is unavailable."""
+    if platform.system() == "Windows":
+        from .psmux_observation import list_session_counts
+
+        return list_session_counts()
     import subprocess
     from agent_procutil import no_window_kwargs
     from .mux_list_result import is_empty_psmux_listing, is_empty_tmux_listing, parse_session_counts
 
     binary = _mux_bin()
-    if platform.system() == "Windows" and _is_psmux(binary):
-        from agent_remote_driver.windows_mux_version import require_creation_binary
-
-        try:
-            binary = require_creation_binary(binary)
-        except RuntimeError:
-            return None
     cmd = [binary, "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **no_window_kwargs())
         if result.returncode != 0:
-            # Only qualified Windows clients reach this call. Older clients
-            # can erase live registration files even during a listing.
             empty = (
                 is_empty_psmux_listing(result) if _is_psmux(binary)
                 else is_empty_tmux_listing(binary, result)
             )
             return {} if empty else None
-        if (result.stderr or "").strip() or (platform.system() == "Windows" and not result.stdout):
+        if (result.stderr or "").strip():
             return None
         try:
             return parse_session_counts(result.stdout, strict=True)
@@ -1415,6 +1409,10 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     result: dict[str, MuxInfo] = {}
     if not worktree_ids:
         return result
+    if platform.system() == "Windows":
+        from .psmux_observation import session_status
+
+        return session_status(worktree_ids, strict=strict)
 
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
@@ -1425,11 +1423,6 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             else:
                 result[wt_id] = MuxInfo(exists=False, clients=0)
     else:
-        if platform.system() == "Windows":
-            from .mux_list_result import MuxObservationUnavailable
-            raise MuxObservationUnavailable(
-                "PSMux session listing is unavailable; mux presence is unknown",
-            )
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
             try:
@@ -1446,6 +1439,10 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
 
 def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     """Keep independent display facts usable without inventing mux negatives."""
+    if platform.system() == "Windows":
+        from .psmux_observation import display_status
+
+        return display_status(worktree_ids)
     from .mux_list_result import MuxObservationUnavailable
 
     try:

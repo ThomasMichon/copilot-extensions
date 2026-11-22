@@ -616,11 +616,14 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
     binary = slot / "payload" / "bin"
     shutil.copytree(WRAPPER.parent, binary)
     launch = _resume_fixture(tmp_path / "launch", env, binary, 0)
-    for key in ("PSMUX_DATA_DIR", "COPILOT_DRIVER_PSMUX_NAMESPACE"):
+    for key in ("PSMUX_DATA_DIR", "PSMUX_CONFIG_FILE", "COPILOT_DRIVER_PSMUX_NAMESPACE"):
         monkeypatch.setenv(key, env[key])
     monkeypatch.syspath_prepend(str(ROOT / "plugins/agent-worktrees/src"))
     from agent_worktrees import sessions
 
+    monkeypatch.setattr(
+        sessions, "_mux_bin", lambda *a, **k: pytest.fail("Passive PSMux CLI selection"),
+    )
     monkeypatch.setattr(
         mux_discovery, "run_mux_child", lambda *a, **k: pytest.fail("Passive PSMux CLI"),
     )

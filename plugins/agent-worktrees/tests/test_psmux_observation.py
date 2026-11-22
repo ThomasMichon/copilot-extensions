@@ -80,7 +80,9 @@ def test_native_absence_allows_cold_resume_but_live_mux_does_not(
         assert verdict.active is False
         assert verdict.mux_live is expected_live
         assert (resume_seed.cold_start_error(verdict) is None) is not expected_live
-        assert (launch_seed_exec._final_cold_error(record) is None) is not expected_live
+        assert (
+            launch_seed_exec._final_cold_error(cast(tracking.WorktreeRecord, record)) is None
+        ) is not expected_live
 
 
 def test_confirmed_mux_absence_does_not_ignore_a_bound_copilot(
@@ -97,27 +99,27 @@ def test_confirmed_mux_absence_does_not_ignore_a_bound_copilot(
     verdict = sessions.verify_worktree_active(cast(tracking.WorktreeRecord, record))
     assert verdict.probes_ok and not verdict.mux_live and verdict.bare
     assert resume_seed.cold_start_error(verdict) is not None
-    error = launch_seed_exec._final_cold_error(record)
+    error = launch_seed_exec._final_cold_error(cast(tracking.WorktreeRecord, record))
     assert error is not None and "seed remains staged" in error
 
 
 def test_live_target_does_not_require_unrelated_process_identity(
     registered: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agent_worktrees.mux_list_result import MuxObservationUnavailable as PresenceUnavailable
+
     def unavailable() -> dict[int, str]:
         raise MuxObservationUnavailable("Native mux process identity is unavailable")
 
     monkeypatch.setattr(native, "servers", unavailable)
     monkeypatch.setattr(platform, "system", lambda: "Windows")
-    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(
-        argv, 0, "wt-other:1\n", "",
-    ))
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
     verdict = sessions.verify_worktree_active(
         cast(tracking.WorktreeRecord, SimpleNamespace(worktree_id="other", worktree_path=str(registered), sessions=[])),
     )
     assert not verdict.active and verdict.mux_live and verdict.mux_probe_ok and verdict.probes_ok
-    assert not sessions.has_mux_session("missing", strict=True, timeout=0.05)
+    with pytest.raises(PresenceUnavailable, match="process identity is unavailable"):
+        sessions.has_mux_session("missing", strict=True, timeout=0.05)
 
 
 @pytest.mark.parametrize("failure", [TimeoutError(), ConnectionRefusedError(), OSError()])
@@ -251,18 +253,22 @@ def test_namespaced_registration_preserves_live_session_name(
     for extension in ("pid", "port", "key"):
         (registered / f"wt-other.{extension}").rename(registered / f"example__wt-fixture.{extension}")
     monkeypatch.setattr(reader, "_query", lambda *a: ("wt-fixture", 1, 101))
+    monkeypatch.setattr(reader, "_query_membership", lambda *a: ("wt-fixture", 1, 101, "$7:100"))
     monkeypatch.setattr(
         mux_observation, "_exchange",
-        lambda *a, **kw: "P\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture\nI\twt-fixture\t$7:100\t%2\n",
+        lambda *a, **kw: (
+            "P\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture\n"
+            "C\twt-fixture\nI\twt-fixture\t$7:100\t%2\n"
+        ),
     )
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     assert reader.observe_registrations() == {"example__wt-fixture": ("wt-fixture", 1)}
     assert reader.observe() == {"wt-fixture": 1}
     assert mux_observation.observe_psmux_many(["wt-fixture"])["wt-fixture"].status == "unknown"
-    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(
-        argv, 0, "wt-fixture:1\n", "",
-    ))
-    assert sessions.mux_status_many(["fixture"], strict=True)["fixture"].exists
+    assert not sessions.mux_status_many(["fixture"], strict=True)["fixture"].exists
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "example")
+    observed = sessions.mux_status_many(["fixture"], strict=True)["fixture"]
+    assert observed.exists and observed.clients == 1
 
 
 def test_same_session_name_in_multiple_namespaces_remains_unknown(
