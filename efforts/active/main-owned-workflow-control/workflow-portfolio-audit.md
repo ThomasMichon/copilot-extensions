@@ -4145,12 +4145,55 @@ identity and the 300-second bound.
 
 Ruff and whole-file strict Python 3.10/Linux and Windows typing pass for the
 corrected contribution, including the restored UV adapter.
-Current-head review and complete fresh Linux source CI remain required.
+Current-head review and complete fresh Linux source CI complete for this
+finite refusal cohort. Copilot approval `6010669746` covers exact head
+`c7df361c4960377d94a1be1b6d2589d8e82182c9`, without active findings.
+CI `44992131475`, unit job `137115288376`, freshly passes all 8,016 cases
+with 39 deselections, 145.56 pytest seconds and 165.541 packet seconds.
+Evidence reports `mode=executed`, origin run `44992131475` attempt one and
+digest `110f6b96837790ee1136740127c2411f9abc84e35890f307f449a520b5504419`.
+Required aggregate `137116588867`, guards, identifier enforcement and trusted
+lockdown/attribution pass. Complete review/comment/thread pagination, seven
+fresh verifier reads and final head/hold/closing-reference checks precede the
+managed merge.
+
+Source #14041 merges at `2026-11-22T06:13:18Z` as
+`4b7c28faa6fe4120813ff72b2b552dfba94adb41`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the three-case leaf.
+The failed lookup cohort and threaded success path remain outside; later
+green CI does not relabel either refusal or change the effect boundary.
 No live publication, artifact download, thread, native execution, runtime
 update or Main/controller mutation occurs in this qualification. Fresh-install
 and installed external lanes are not exercised because no installation or
 runtime behavior changes. Full-census, every-release, comparable whole-flow,
 owner, native, installed and retained-custody gates remain open.
+
+### November 22 original synthetic artifact-bundle qualification
+
+The adapter exports six exact unchanged original functions as 33 cases:
+bundle/transfer roundtrip, three structured wheel-read failures, missing
+output-directory creation, two invalid-directory refusals, deterministic
+bytes despite original clock/mtime/permission/order changes, and all 25
+archive-corruption mutations with a valid outer digest. The original autouse
+identity fixture, synthetic wheel builder, callbacks, parameter identities,
+clock witness and assertions are preserved. No hosted publication, native
+lookup, thread-pool substitute or alternate test body is introduced.
+
+The 200-case original collection matches all 33 selections and their exact
+objects. A fresh guarded process passes 33 cases in 3.906 seconds with zero
+prohibited effects, 38 bound Python reads and positive actual call-phase
+artifact-owner lines for every case. Only the adapter needs a new binding.
+The candidate has 8,049 nodes, 1,173 sources, 448 targets and 912,504
+compact-v2 bytes, preserving all preceding 8,016 nodes and hashes, 89 helper
+decisions, compact/flat-v1 identity and the 300-second bound. Ruff and
+whole-file strict Python 3.10/Linux and Windows typing pass.
+
+Current-head review and complete fresh Linux source CI remain required
+before this finite leaf is complete. Fresh-install/native/installed external
+lanes are not exercised because no installation or runtime behavior changes.
+Full-census, every-release, comparable whole-flow, owner, native, installed
+and retained-custody gates remain open.
 
 ### November 20 path-gated audit-guard native boundary
 

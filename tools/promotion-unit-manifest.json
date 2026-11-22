@@ -3,6 +3,44 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_artifact_bundles.py",
+      [
+        "test_bundle_and_transfer_roundtrip",
+        "test_bundle_wheel_read_failures_are_structured[missing]",
+        "test_bundle_wheel_read_failures_are_structured[unreadable]",
+        "test_bundle_wheel_read_failures_are_structured[copy]",
+        "test_build_cli_creates_missing_output_directory",
+        "test_build_cli_reports_invalid_output_directory[file]",
+        "test_build_cli_reports_invalid_output_directory[nonempty]",
+        "test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[plugin]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[version]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[artifact_id]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[schema]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[schema-version]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[list-manifest]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[wheel-digest]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[bare-digest]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[third-party]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[no-plugin]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[two-plugins]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[duplicate-record]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[list-record]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[missing-wheels]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[traversal]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[backslash]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[missing-member]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[extra-member]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[duplicate-member]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[symlink]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[directory]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[oversized-manifest]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[oversized-bundle]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[invalid-json]",
+        "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest[invalid-zip]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_artifact_readiness.py",
       [
         "test_source_mismatch_refuses_before_any_release_request",
@@ -11021,7 +11059,8 @@
     "tools/promotion_unit_tests/test_original_artifact_readiness.py": "bd28b86f1df83988e02203c7193fa203f276de6b79d590555c94832377fd29e6",
     "tools/test_promotion_artifact_readiness.py": "089d18b06d50242277e22d394630f790d4e46326d0e0a0dc8f3951c52d4f3994",
     "tools/test_promotion_python_artifacts.py": "a53c2561950b80f381b3b00d50b48c7c0ba154b1d78d70c3bf668156afa472eb",
-    "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb"
+    "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
+    "tools/promotion_unit_tests/test_original_artifact_bundles.py": "aba897aac0ace682bb4692bee9e355253785b4b6a18233f5ad30a4740855c286"
   },
   "coverage_targets": [
     "libs/installer-engine/installer_engine_commands.py",
