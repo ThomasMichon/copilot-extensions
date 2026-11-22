@@ -101,3 +101,12 @@ def test_fallback_dedented_comment_ends_block_without_becoming_content() -> None
         "description: |-\n    prose\n    # literal text\n  # policy flags follow\nstateless: false\n",
     )
     assert parsed == {"description": "prose\n# literal text", "stateless": False}
+
+
+@pytest.mark.parametrize(("body", "expected"), [
+    ("description: |-\n  first\n    \n  last\n", "first\n  \nlast"),
+    ("description: >-\n  first\n  \tcode\n  last\n", "first\n\tcode\nlast"),
+    ("description: >-\n  first\n\n  \tcode\n  last\n", "first\n\n\tcode\nlast"),
+])
+def test_fallback_preserves_whitespace_content_and_folded_boundaries(body: str, expected: str) -> None:
+    assert _module()._parse_simple_yaml(body) == {"description": expected}

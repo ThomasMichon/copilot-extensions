@@ -34,7 +34,7 @@ def tokenize(
             while line_index < len(lines):
                 following = lines[line_index]
                 following_indent = len(following) - len(following.lstrip(" "))
-                if following.strip():
+                if following.lstrip(" "):
                     if following_indent <= boundary:
                         break
                     if body_indent is None:
@@ -45,14 +45,16 @@ def tokenize(
                         raise error_type("invalid block scalar indentation")
                 body.append(following)
                 line_index += 1
-            body = [line[body_indent:] if line.strip() else "" for line in body]
+            if body_indent is None:
+                body_indent = max((len(line) for line in body), default=0)
+            body = [line[body_indent:] for line in body]
             pieces: list[str] = []
             for index, line in enumerate(body):
                 pieces.append(line)
                 if index + 1 == len(body):
                     if line_index < len(lines) or text.endswith(("\n", "\r")):
                         pieces.append("\n")
-                elif block[2] == "|" or line.startswith(" ") or body[index + 1].startswith(" "):
+                elif block[2] == "|" or line.startswith((" ", "\t")) or body[index + 1].startswith((" ", "\t")):
                     pieces.append("\n")
                 elif not line:
                     pieces.append("\n")
@@ -60,7 +62,7 @@ def tokenize(
                     pieces.append(" ")
                 else:
                     following_text = next((body[i] for i in range(index + 2, len(body)) if body[i]), "")
-                    if not following_text or following_text.startswith(" "):
+                    if not following_text or following_text.startswith((" ", "\t")):
                         pieces.append("\n")
             value = "".join(pieces)
             if "-" in block[3]:
