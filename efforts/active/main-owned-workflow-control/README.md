@@ -1895,7 +1895,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `1cd4836f9a0c18106aee8db6507df205ba72f47e` after exact-head Copilot approval
   and complete required Linux CI with all 8,878 selected units freshly
   executed. Only this provider-control leaf is complete; broader gates remain open.
-- [ ] Qualify the three original optional H1 validator malformed-shape
+- [x] Qualify the three original optional H1 validator malformed-shape
   controls from one complete original function. Preserve exact original
   function, parameter values and assertions; call only `validate_packets`
   with synthetic malformed fixture declarations and verify deferral to the
@@ -1917,8 +1917,32 @@ authorizes critical main-path acceptance or a bounded administrative change.
   source bindings and validator target are added; all 8,878 prior nodes,
   1,246 hashes, 460 targets, 89 helper decisions and the 300-second bound
   remain intact. The compact-v2 candidate contains 8,881 nodes, 1,250 sources
-  and 461 targets in 993,848 bytes. Normal review and complete fresh CI remain
-  required; malformed-shape deferral is not full H1 owner validation.
+  and 461 targets in 993,848 bytes. #14087 merges at
+  `63cd3dd4acf78d12aa5b3820b7153c355adab9fb` after exact-head approval,
+  complete fresh Linux CI and independent merged-tree verification.
+  Malformed-shape deferral is not full H1 owner validation; only this leaf
+  is complete.
+- [ ] Qualify the four original pytest temporary-link controls from both
+  complete original functions. Preserve all Windows alias and Linux/macOS
+  parameter objects, original monkeypatches, assertions and restoration.
+  Verify only the optional pytest helper is suppressed and restored, while
+  `os.symlink` remains unchanged; do not create an actual symlink.
+  Require complete original/adapter collection identity, initial unchanged
+  auditing, closed canonical Python reads, actual guard calls and zero
+  prohibited effects before admission. Add only the adapter/original source
+  bindings and existing guard target; preserve all 8,881 prior nodes,
+  1,250 source hashes, 461 targets, 89 helper decisions and the 300-second
+  bound. Require normal strict typing, committed changefile presence,
+  exact-head review and complete fresh Linux CI. No native/process effect,
+  new mock, preload, guard exception, data, workflow, runtime or cleanup change.
+  Complete collection verifies all four original and adapter cases, both
+  original functions and every selected parameter object. Initial unchanged
+  auditing passes all four in 1.032 seconds, with zero prohibited effects,
+  fourteen bound Python reads and actual guard call-phase lines per case.
+  Only the adapter/original bindings and existing guard target are added.
+  The compact-v2 candidate contains 8,885 nodes, 1,252 sources and 462 targets
+  in 994,539 bytes, preserving prior node order and all previous source hashes.
+  Normal review and complete fresh CI remain required; this leaf is not complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
