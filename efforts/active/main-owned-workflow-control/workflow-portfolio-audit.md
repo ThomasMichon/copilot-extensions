@@ -4887,12 +4887,55 @@ targets, 89 helper decisions and the 300-second bound remain intact.
 New bindings are the adapter, original test module and unchanged admission
 owner; only that owner becomes a new target.
 
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6011940251` covers exact head
+`af6bff29d7104f9262550b2087d8cc48ba75c9c6` with no active findings.
+Source CI `45016172973`, unit job `137188838839`, freshly passes all 8,560
+cases with 43 deselections, 194.65 pytest seconds and 217.492 packet seconds.
+It reports `mode=executed`, origin run `45016172973` attempt one, execution
+identity `306e03e415eaf8a1b2f56f0ee24ad9e4b5b1e3c13222e236adb97bb695094c2c`
+and packet digest
+`251a5a244a906aa144f6752844d3355b03ee544b9528f74f7f43fc4f8492e993`.
+Required aggregate `137189974539`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14073 merges at `2026-11-22T11:18:55Z` as
+`9a6a8f56bf3c972b1fb9012c60fa854a98cc47b5`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the fifty-case leaf.
 No new mock, preload, wrapper, effect exception, data allowlist or workflow/
-routing/runtime change is introduced. Complete fresh Linux CI, current-head
-review and normal required merge checks remain necessary. This finite
+routing/runtime change is introduced. This finite
 qualification does not accept a shared-owner seam or settle retained
 refusals. Fresh-install/native lanes are not applicable because installation,
 runtime, workflow and original-test behavior do not change.
+
+### November 22 original pure matrix and backend-decision qualification
+
+The adapter exports four original matrix functions and all sixteen backend
+decision functions, retaining both original backend fixtures, helper calls,
+assertions and parameter values. Complete original/adapter collection verifies
+124 original cases and exactly 109 selected cases in original order, including
+tuple-named parameters, stacked parametrization and the original overflow-clock
+ParameterSet. The fifteen actual CLI, Git, workflow/generated-checkout and
+repository-inventory cases remain unchanged outside the packet; the entire
+invalid-or-empty-partition function is excluded before qualification.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+109 cases in 3.219 seconds, with zero prohibited effects, only bound Python
+reads and actual partition-owner call-phase lines for every case. The compact-v2
+candidate contains 8,669 nodes, 1,221 sources and 458 targets in 970,483 bytes.
+All 8,560 preceding nodes/order, 1,218 current source hashes, prior targets,
+89 helper decisions and the 300-second bound remain intact. New bindings are
+the adapter, original test module and unchanged partition owner; only that
+owner becomes a new target.
+
+This is synthetic pure-decision coverage, not private-backend activation,
+runner allocation, native reserve proof, measured execution saving or owner-seam
+acceptance. No mock, preload, wrapper, effect exception, data allowlist,
+workflow, routing or runtime change is introduced. Complete fresh Linux CI,
+current-head review and normal required merge checks remain necessary.
+Fresh-install/native lanes are not applicable because installation, runtime,
+workflow and original-test behavior do not change.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 
