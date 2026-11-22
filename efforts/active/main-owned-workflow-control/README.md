@@ -2208,7 +2208,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   units in 184.659 packet seconds within the unchanged bound. Reviewed and
   merged trees match. Only this three-case leaf is complete; the parent and
   the separate invalid-deadline import refusal remain open.
-- [ ] Qualify the separate five complete original deferred-dispatch
+- [x] Qualify the separate five complete original deferred-dispatch
   admission/history controls: actual Gate attempt binding, all job-attempt
   pages, closed-history pagination and candidate binding, readback mismatch
   refusal, and the ten-page inventory ceiling. Preserve the existing
@@ -2229,9 +2229,36 @@ authorizes critical main-path acceptance or a bounded administrative change.
   six bound canonical Python reads and actual admission/dispatch owner
   call-phase coverage. Only the adapter binding is added; no target changes.
   Compact-v2 contains 8,915 nodes and 1,270 sources in 1,000,644 bytes,
-  preserving prior node order and all current source hashes. Exact-head
-  review and complete fresh Linux CI remain required; this leaf is not
-  yet complete.
+  preserving prior node order and all current source hashes. #14106 merges
+  at `f80b5c109f43c5b82e3bec919dd68a47f502e865` after exact-head approval
+  and complete fresh Linux CI executes all 8,915 selected units in 227.499
+  packet seconds within the unchanged bound. Reviewed and merged trees
+  match. Only this five-case leaf is complete; all parent acceptance and
+  separate refusal gates remain open.
+- [ ] Qualify three separate complete original admission/history parameterized
+  functions: recorded Gate status/conclusion decisions (six cases),
+  unavailable/malformed admission evidence (five cases), and incomplete or
+  malformed retirement connections (eight cases). Preserve all 19 original
+  parameters, in-memory backend/request callbacks, diagnostic assertions and
+  the entire errors/missing/truncated/state/merge/duplicate/cursor coverage.
+  Require complete original/adapter collection identity, initial unchanged
+  source/effect auditing and actual owner calls before adding only a new
+  adapter binding. Preserve all 8,915 nodes, 1,270 current source hashes,
+  467 targets, 89 helper decisions and the 300-second bound. Normal strict
+  checks, committed release intent, exact-head review and complete fresh Linux
+  CI remain required. No original assertion, fixture or OS skip is changed;
+  no new mock, preload, data/guard exception, actual Main/workflow/runtime,
+  native/routing or cleanup authority is added. Never replay a retained
+  refused candidate.
+  Complete collection verifies all 102 original cases and exactly 19 adapter
+  cases, including exact function objects and parameters from each original
+  parametrization. Initial unchanged auditing passes all 19 in 1.109 seconds
+  with zero prohibited effects, six bound canonical Python reads and actual
+  admission/dispatch owner call-phase coverage per case. Only the adapter
+  binding is added; no target changes. Compact-v2 contains 8,934 nodes and
+  1,271 sources in 1,002,798 bytes, preserving prior node order and all current
+  source hashes. Exact-head review and complete fresh Linux CI remain required
+  before resolving this finite leaf.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

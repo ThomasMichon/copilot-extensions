@@ -3,6 +3,30 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_dispatch_evidence_states_units.py",
+      [
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[queued-None-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[in_progress-None-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-skipped-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-cancelled-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-failure-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-success-True]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed0]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed1]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed2]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed3]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed4]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[errors]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[missing]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[truncated]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[wrong-state]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[merged]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[duplicate]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[invalid-cursor]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[repeated-cursor]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_history_units.py",
       [
         "test_admission_binds_the_actual_gate_attempt_and_reuses_it_for_job_only_recovery",
@@ -10904,6 +10928,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_dispatch_evidence_states_units.py": "30932c3b296fc1c71f2acf6568d44b0d9314daa418f0554fdc763e7cf36c18bc",
     "tools/promotion_unit_tests/test_original_dispatch_history_units.py": "ec9cf3f6baf21d20f8d8fe6bf935534feb646d070b327cb64c77337b6198f5de",
     "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py": "59d54478c962b3e47137b2f535aaa6b39e66ff95080aae1d84e096c62c44ac90",
     "tools/test_promotion_dispatch.py": "f75de93ee3906617471aac2e5d129ae8ada84755dd3ac954cb5a3fe20416198f",
