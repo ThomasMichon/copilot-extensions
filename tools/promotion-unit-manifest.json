@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_artifact_readiness.py",
+      [
+        "test_source_mismatch_refuses_before_any_release_request",
+        "test_cli_preparation_failure_is_nonzero_and_final_publication_never_repairs_readiness",
+        "test_publish_cli_requires_a_nonempty_premerge_identity"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_bundled_release_age.py",
       [
         "test_bundled_dbus_next_still_requires_canonical_release_age[False]",
@@ -11009,7 +11017,11 @@
     "tools/fixtures/installed-footprint-v2.json": "0f43ea6327b532bc26c7ceff6db71e6c7cd876d6168be31616005885557fc66f",
     "tools/promotion_unit_tests/test_original_validation_overrides.py": "6ea4c619368b9860baeab8cd9ce2d55a37c57c54f4238b1046b0b478bdf27d5a",
     "tools/test_validation_config_overrides.py": "e84fc742fc42edd8946988462f7847550bcb81a34dca3d710ae983b7f0bb067e",
-    "tools/promotion_unit_tests/test_original_bundled_release_age.py": "80c2f5771b46486a3fff87261729990ac1da15f94eac0b0b14ac4622a12939cc"
+    "tools/promotion_unit_tests/test_original_bundled_release_age.py": "80c2f5771b46486a3fff87261729990ac1da15f94eac0b0b14ac4622a12939cc",
+    "tools/promotion_unit_tests/test_original_artifact_readiness.py": "bd28b86f1df83988e02203c7193fa203f276de6b79d590555c94832377fd29e6",
+    "tools/test_promotion_artifact_readiness.py": "089d18b06d50242277e22d394630f790d4e46326d0e0a0dc8f3951c52d4f3994",
+    "tools/test_promotion_python_artifacts.py": "a53c2561950b80f381b3b00d50b48c7c0ba154b1d78d70c3bf668156afa472eb",
+    "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb"
   },
   "coverage_targets": [
     "libs/installer-engine/installer_engine_commands.py",

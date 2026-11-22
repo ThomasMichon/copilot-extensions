@@ -1190,7 +1190,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   first case on Windows at the original private-root `advapi32` load
   (`ctypes.dlopen`); neither case is admitted. No preload, fixture change or
   guard exception substitutes for that missing qualification.
-- [ ] Qualify and land both original bundled-wheel release-age cases using
+- [x] Qualify and land both original bundled-wheel release-age cases using
   the exact unchanged function and the already hash-bound canonical wheel.
   Preserve the aged-versus-young canonical-release checks, corrupt-wheel
   refusal and controlled metadata acquisition without installation or network
@@ -1200,6 +1200,49 @@ authorizes critical main-path acceptance or a bounded administrative change.
   bound, strict typing, current-head review and complete Linux source CI.
   Keep the separate executable-discovery and resource-retention native
   boundaries unadmitted; native, installed and parent gates remain.
+  #14040 merges at `a671fd50402011f38a8db2011156bfaed3557102` after
+  exact-head Copilot approval and complete required Linux CI with all 8,002
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify the original deployment CLI editable-requirement refusal using
+  its unchanged trusted temporary project, requirements include and forbidden
+  UV-selector witness. Extend the existing original CLI adapter without
+  another module import. Require exact original identity, closed reads,
+  positive actual policy-owner calls and zero prohibited effects before
+  admission; retain every preceding node, unrelated hash, target, helper
+  decision, compact/flat-v1 identity and the 300-second bound. Normal strict
+  typing, current-head review and complete Linux source CI remain required.
+  This early-refusal case does not qualify executable discovery, retained
+  private-root creation, native execution or installed behavior.
+  Fresh guarded qualification refuses the outer configuration wrapper's
+  Windows `kernel32` load before the inner source validation. The adapter
+  addition is withdrawn and the case remains unadmitted; this confirms the
+  previously recorded editable-requirement boundary, not new coverage.
+- [ ] Qualify the seven original named-UV lookup and non-native-wrapper
+  controls through their four unchanged functions and original lookup doubles.
+  Extend the existing UV-selection adapter without rewriting a fixture,
+  callback or assertion. Require exact original objects and parameter IDs,
+  closed reads, positive per-case actual configuration-owner calls and zero
+  prohibited effects before admission. Preserve preceding node order,
+  unrelated hashes, targets, helper decisions, compact/flat-v1 identity and
+  the 300-second bound. Normal strict typing, current-head review and complete
+  Linux source CI remain required. These source-level doubles do not qualify
+  actual Windows lookup, private-root creation, links or installed behavior.
+  Linux CI refuses the original lazy `ctypes` import at `PyDLL(None)` before
+  the lookup doubles are installed. All seven additions are withdrawn;
+  the passing Windows development run is not cross-platform admission.
+  No preload, guard exception or original-test rewrite is substituted.
+- [ ] Qualify and land three original artifact-readiness refusal controls:
+  changed source refuses before release access, failed preparation emits no
+  receipt and final publication does not repair it, and missing premerge
+  identity refuses before release access. Preserve the exact original
+  synthetic hosted and autouse identity fixtures, callbacks and assertions.
+  Require original-object/parameter identity, closed reads, positive per-case
+  actual owner calls and zero prohibited effects before admission; retain
+  preceding nodes/hashes, targets, helper decisions, compact/flat-v1 identity
+  and the 300-second bound. Normal strict typing, current-head review and
+  complete fresh Linux CI remain required. Parallel download verification,
+  actual hosted publication, native execution, installed and parent gates
+  remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
