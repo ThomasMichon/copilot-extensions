@@ -33,6 +33,12 @@ authoritative; an environment input can select the knowledge repo on an
 unbound machine without a prompt. See the [installer vision](../../../visions/installer/README.md#boot-from-zero)
 and [onboarding architecture](../../../docs/architecture.md#new-footprint-onboarding).
 
+The promoted bootstrap from #14007 selected its declared source in a Windows
+trial, but only Manager staged. Registration, a binding file and a composed
+overlay did not prove the required union was installed. Recovery requires
+a retained handoff diagnostic and installer-owned retirement of an inactive
+partial trial before another run. Neither full setup nor recovery is verified.
+
 Fleet Manager is an independently selected application, not a dependency of
 `agent-worktrees`. The bound knowledge repository opts a target machine into
 Fleet Manager by its assigned role (for example, controller). Installing
