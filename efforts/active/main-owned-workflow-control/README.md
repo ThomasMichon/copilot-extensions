@@ -1482,7 +1482,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,413
   units freshly executed. Only this finite leaf is complete; all broader
   parent gates remain open.
-- [ ] Qualify all eleven original `TestDecide` methods, retaining the exact
+- [x] Qualify all eleven original `TestDecide` methods, retaining the exact
   class/method objects, helper baselines, original collaborator stubs and
   assertions. Keep actual Git debt/ancestry, asset-fetch and integration cases
   unchanged with their existing owners. Do not add mocks, preloads, real
@@ -1501,8 +1501,35 @@ authorizes critical main-path acceptance or a bounded administrative change.
   The current base includes #14054's six independently owned bootstrap
   bindings and sixteen refreshed hashes; these are preserved, not reauthored
   or attributed to this slice. The compact-v2 candidate contains 8,424 nodes,
-  1,207 sources and 453 targets. Current-head review and complete fresh Linux
-  CI remain required.
+  1,207 sources and 453 targets. #14067 merges at
+  `2966cd1a1688c49756e51439f9d3dd2adc56cef2` after exact-head Copilot approval
+  and complete required Linux CI with all 8,424 selected units freshly
+  executed. The merged base also carries #14059's independently owned
+  additional node and five refreshed hashes, yielding 8,425 current nodes.
+  Only this eleven-case leaf is complete; broader parent gates remain open.
+- [ ] Qualify the two original synthetic sandbox/diagnostic functions and
+  eight non-integration `TestBaselineCollectionErrorContract` cases.
+  Preserve the exact function/class/method and parameter objects, fixtures,
+  helpers, existing collaborator stubs and assertions. The class's opt-in
+  `test_real_collection_error_is_not_hidden_by_coverage_warning` remains
+  unchanged and outside the exact manifest; the whole nine-case class is
+  not unit-qualified. Require complete original/adapter collection identity,
+  explicit ten-case selection, closed source reads, positive per-case actual
+  owner calls and zero prohibited effects before admission.
+  Preserve preceding nodes, current-base hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no new mocks,
+  preloads, process/thread execution, network access, workflow, runtime or
+  native contract changes.
+  Complete collection verifies all 157 original cases, eleven adapter cases
+  and the exact ten-case selection, including original parameter-object
+  identity. Initial unchanged-guard qualification passes all ten in 2.281
+  seconds, with zero prohibited effects, 23 bound Python reads and actual
+  baseline-owner call-phase lines per case. The real-process case is
+  deselected, never executed or counted as a skipped unit. Only the adapter
+  needs a new source binding; no coverage target changes. The compact-v2
+  candidate contains 8,435 nodes, 1,208 sources and 453 targets. Current-head
+  review and complete fresh Linux CI remain required before this leaf closes.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

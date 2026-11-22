@@ -1,0 +1,9 @@
+{
+  "comment": "Admit ten unchanged original synthetic baseline error contracts to the exact unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
