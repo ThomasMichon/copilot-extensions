@@ -835,8 +835,12 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         if use_json:
             output._json_output(result)
         elif result.get("pr_identity_verified") is False:
-            output.warn(f"Unverified PR receipt #{result.get('number')}: {result.get('url', '')}")
+            number = result.get("number")
+            identity = f" #{number}" if type(number) is int and number > 0 else ""
+            output.warn(f"Unverified PR receipt{identity}: {result.get('url', '')}")
             output.warn("Creation outcome is unknown. Reconcile this receipt before retrying.")
+            if detail := result.get("error") or result.get("pr_open_error"):
+                output.warn(str(detail))
             if result.get("pr_receipt_tracking_error"):
                 output.warn(str(result["pr_receipt_tracking_error"]))
         elif result.get("success"):

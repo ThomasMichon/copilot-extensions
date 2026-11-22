@@ -21,6 +21,7 @@ class NativeCommandUnavailable(ValueError):
 
 def run_command(
     argv: list[str], *, timeout: float, budget: OwnedExecutionBudget | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     input_text = None
     if os.name == "nt" and Path(argv[0]).suffix.lower() == ".ps1":
@@ -54,7 +55,7 @@ def run_command(
     return run_caller_owned(
         argv, timeout=timeout, input_text=input_text,
         max_stdout_bytes=1_048_576, max_stderr_bytes=65_536,
-        budget=budget,
+        budget=budget, env={**os.environ, **env} if env is not None else None,
     )
 
 

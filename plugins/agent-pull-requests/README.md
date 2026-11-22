@@ -242,7 +242,18 @@ PR, posting a comment or releasing source/claim custody.
 
 Each native snapshot read has a 60-second deadline; capability probes retain
 their 20-second deadline and mutations retain a 90-second deadline and bounded
-output. The polling timeout does not cancel an in-flight snapshot: that read
+output. Automatic fork discovery first requires the selected Worktrees runtime's
+`foreign-create-deadline-v1` author capability. The local child receives one
+absolute monotonic deadline, 75 seconds from dispatch, through
+`AGENT_WORKTREES_FOREIGN_CREATE_DEADLINE_V1`; startup, lookup and creation share
+it, with 15 seconds reserved for durable receipt settlement. This leaves response
+and caller cleanup margin inside the unchanged 90-second outer limit. A missing
+capability refuses discovery before effects and directs the caller to explicit
+`--source-repo` with a runtime supporting that existing form. Plain-head and
+explicit-source legacy paths are not removed; capable existing author probes
+also select the shared deadline without adding CLI syntax. Older frontends can
+still invoke the bounded default of a newer Worktrees runtime.
+The polling timeout does not cancel an in-flight snapshot: that read
 finishes or reaches its own deadline before wait reports its latest result.
 A lost mutation response is uncertain: reconcile with native
 status before retrying, never retry through the GitHub path. On Windows,

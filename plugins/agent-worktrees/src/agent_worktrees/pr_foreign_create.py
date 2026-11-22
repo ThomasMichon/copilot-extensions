@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import claim_history, config as cfg, obligations, pr_config, pr_ops, tracking
+from . import claim_history, config as cfg, obligations, pr_config, pr_creation_budget, pr_ops, tracking
 from .codename import is_valid_handle
 from .providers import attribution as attr
 from .providers import base as providers
@@ -41,6 +41,7 @@ from .pr_ops import _ensure_pr_claim
 _OPEN_STATE_ALIASES = {"active": "open"}
 
 
+@pr_creation_budget.bounded
 def create_foreign_pr_from_branch(
     worktree_id: str,
     config: cfg.Config,
@@ -215,6 +216,10 @@ def create_foreign_pr_from_branch(
             scope.head_identity = pr_publish._identity(
                 "https://" + provider.authority_endpoint(scope.api_base) + "/" + source_repo, "",
             )
+        elif source_repository:
+            return {"error": "--source-repo is only supported for GitHub foreign creation.",
+                    "repo": target_repo}
+        if prcfg.provider in ("github", "gitea", "azure-devops"):
             attempt = pr_foreign_receipts.Attempt(
                 config, rec_path, pre_record, provider=prcfg.provider,
                 endpoint=provider.authority_endpoint(scope.api_base),
@@ -223,9 +228,6 @@ def create_foreign_pr_from_branch(
             pending = attempt.pending()
             if pending is not None:
                 return {**pending, "repo": target_repo, "head": from_branch, "base": base_branch}
-        elif source_repository:
-            return {"error": "--source-repo is only supported for GitHub foreign creation.",
-                    "repo": target_repo}
         if source_workspace:
             from . import pr_foreign_checks
             assert expected_head is not None
@@ -291,6 +293,8 @@ def create_foreign_pr_from_branch(
                     ),
                     "repo": target_repo,
                 }
+            if pr_creation_budget.remaining(120, provider=True) <= 0:
+                raise providers.CreationRefused("Foreign creation observation budget expired before transport.")
             if attempt is not None:
                 blocked = attempt.reserve(base_branch, expected_head)
                 if blocked is not None:

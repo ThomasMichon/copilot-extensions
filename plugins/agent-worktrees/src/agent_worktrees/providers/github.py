@@ -91,8 +91,10 @@ class GitHubProvider:
 
     def _env(self, token: str | None, *, host: str = "") -> dict[str, str]:
         env: dict[str, str] = {}
-        if token:
-            env["GH_TOKEN"] = token
+        if token is not None:
+            env.update({key: token for key in (
+                "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            )})
         if host:
             # `gh pr merge`/`gh pr merge --auto` have no `--hostname` flag (unlike
             # `gh api`) -- GH_HOST is the only way to pin them to a non-default
@@ -127,8 +129,6 @@ class GitHubProvider:
         for label in scope.labels:
             args += ["--label", label]
         env = self._env(token, host=self.authority_endpoint(scope.api_base))
-        if token is not None:
-            env.update({key: token for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")})
         proc = run_cli(args, env=env)
         if proc.returncode != 0:
             raise ProviderError(

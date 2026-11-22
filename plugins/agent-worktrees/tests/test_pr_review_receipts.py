@@ -375,3 +375,305 @@ def test_foreign_pending_receipt_is_not_advertised_as_cleanable(
         disposition = prune.cleanup_disposition(record, info)
         assert not disposition.cleanable and disposition.bucket == "unknown-publication"
     assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("outcome", ["valid", "mismatched-url", "timeout", "malformed-id"])
+def test_foreign_gitea_reserves_before_transport_and_preserves_uncertainty(
+    _tracking_setup: Any, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    from agent_worktrees import pr_config, pr_foreign_create, pr_foreign_receipts, prune
+    from agent_worktrees.providers import base as providers
+    from agent_worktrees.providers.gitea import GiteaProvider
+    from test_pr_foreign_create import _config, _foreign_resolution
+
+    ledger, wid = _tracking_setup
+    config = cast(Callable[..., cfg.Config], _config)()
+    resolution = cast(Callable[..., Any], _foreign_resolution)()
+    resolution = replace(resolution, repo_config=replace(
+        resolution.repo_config, pr=replace(
+            resolution.repo_config.pr, api_base="https://forge.example.test/gitea",
+        ),
+    ))
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    provider = GiteaProvider()
+    calls: list[str] = []
+    reserved: list[dict[str, Any]] = []
+    url = "https://forge.example.test/gitea/owner/other-repo/pulls/7"
+    if outcome == "mismatched-url":
+        url = url.replace("/gitea/", "/GITEA/")
+
+    def curl(method: str, *_args: Any, **_kwargs: Any) -> tuple[int, str]:
+        calls.append(method)
+        paths = list(ledger.glob("*.foreign-pr-receipts/*.json"))
+        reserved.extend(json.loads(path.read_text(encoding="utf-8")) for path in paths)
+        if outcome == "timeout":
+            raise providers.ProviderError("Fixture transport timeout")
+        return 201, json.dumps({
+            "number": "7" if outcome == "malformed-id" else 7,
+            "html_url": url, "state": "open",
+        })
+
+    monkeypatch.setattr(provider, "_curl", curl)
+    monkeypatch.setattr(providers, "get_provider", lambda *_: provider)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: "fixture-token")
+
+    def create() -> dict[str, Any]:
+        return pr_foreign_create.create_foreign_pr_from_branch(
+            wid, config, target_repo="owner/other-repo", from_branch="topic", title="Fix", new=True,
+        )
+
+    result = create()
+    assert calls == ["POST"]
+    assert len(reserved) == 1 and reserved[0]["phase"] == "publishing"
+    assert reserved[0]["binding"]["endpoint"] == "https://forge.example.test/gitea"
+    record = tracking.load_record(ledger / f"{wid}.yaml")
+    receipt = json.loads(next(ledger.glob("*.foreign-pr-receipts/*.json")).read_text(encoding="utf-8"))
+    assert receipt["owner"]["nonce"] == record.creation_nonce
+    if outcome == "valid":
+        assert result["claimed"] and receipt["phase"] == "verified"
+        assert any(claim.ref == url and claim.state == "active" for claim in record.resources)
+        assert not pr_foreign_receipts.owner_receipts(record)[1]
+    else:
+        assert result["publication_state"] == "unknown" and not result["claimed"]
+        assert receipt["phase"] == "unknown" and not record.live_resources
+        if outcome == "mismatched-url":
+            assert receipt["provider_number"] == result["number"] == 7
+            assert receipt["provider_url"] == result["url"] == url
+        assert not prune.assess(
+            record, git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+        ).safe
+        before = json.dumps(receipt, sort_keys=True)
+        retry = create()
+        assert retry["publication_state"] == "unknown" and calls == ["POST"]
+        assert json.dumps(json.loads(next(ledger.glob(
+            "*.foreign-pr-receipts/*.json",
+        )).read_text(encoding="utf-8")), sort_keys=True) == before
+
+
+@pytest.mark.parametrize("consumer", ["provider", "settlement"])
+def test_gitea_mount_prefix_is_case_sensitive_at_creation_consumers(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch, consumer: str,
+) -> None:
+    from agent_worktrees import pr_publication_state
+    from agent_worktrees.providers import base as providers
+    from agent_worktrees.providers.gitea import GiteaProvider
+
+    config, caller, _owner, _workspace = native_source_owners
+    endpoint = "https://forge.example.test/gitea"
+    pull = PullResult(number=7, url="https://forge.example.test/GITEA/owner/repo/pulls/7")
+    if consumer == "provider":
+        provider = GiteaProvider()
+        monkeypatch.setattr(provider, "_curl", lambda *_args, **_kwargs: (
+            201, json.dumps({"number": pull.number, "html_url": pull.url}),
+        ))
+        monkeypatch.setattr(provider, "_apply_labels", lambda *_: pytest.fail("Wrong mount received labels"))
+        with pytest.raises(providers.ProviderError):
+            provider.create_pull(PRScope(
+                repo="owner/repo", head="topic", base="main", title="Fix",
+                api_base=endpoint, labels=("review-needed",),
+            ), token="fixture-token")
+    else:
+        config = replace(config, repos={
+            name: replace(repo, pr=replace(repo.pr, provider="gitea", api_base=endpoint))
+            for name, repo in config.repos.items()
+        })
+        target = tracking.PRRecord(
+            pr_id="pending", branch="topic", repo="owner/repo", provider="gitea", state="creating",
+            creation={"provider_outcome": "publishing"},
+        )
+        caller.prs = [target]
+        tracking.save_record(caller)
+        before = caller.yaml_path.read_bytes()
+        with pytest.raises(ValueError, match="identity|URL"):
+            pr_publication_state.persist_pull(
+                config, caller, target, pull, head_sha="a" * 40, marker_published=False, session="",
+            )
+        assert caller.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("number", [None, 7])
+@pytest.mark.parametrize("field", ["error", "pr_open_error"])
+def test_human_create_reports_the_unverified_cause_without_inventing_a_number(
+    native_source_owners: NativeOwners, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], number: int | None, field: str,
+) -> None:
+    from agent_worktrees import __main__ as cli
+    from agent_worktrees import finalize_cli, pr_ops
+
+    config, caller, _owner, _workspace = native_source_owners
+    monkeypatch.setattr(cfg, "load_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(pr_ops, "create_pr", lambda *_args, **_kwargs: {
+        "success": False, "pr_identity_verified": False, "publication_state": "unknown",
+        "number": number, "url": "https://forge.example.test/owner/repo/pulls/7" if number else "",
+        field: "Fixture provider response was malformed",
+    })
+    args = cli.build_parser().parse_args(["create-pr", caller.worktree_id, "--title", "Fix"])
+    assert finalize_cli.cmd_create_pr(args) == 1
+    captured = capfd.readouterr()
+    text = captured.out + captured.err
+    assert "Fixture provider response was malformed" in text
+    assert "#None" not in text and "Reconcile" in text
+    assert ("#7" in text) == (number == 7)
+
+
+def test_github_creation_verification_uses_the_selected_enterprise_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    from agent_worktrees.providers import github
+
+    keys = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+    for key in keys:
+        monkeypatch.setenv(key, "unrelated-ambient-credential")
+    calls: list[list[str]] = []
+    url = "https://forge.example.test/owner/repo/pull/7"
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        effective = {**os.environ, **kwargs.get("env", {})}
+        assert all(effective[key] == "selected-fixture-credential" for key in keys)
+        if argv[1:3] == ["pr", "create"]:
+            return subprocess.CompletedProcess(argv, 0, url + "\n", "")
+        assert argv[1:3] == ["pr", "view"]
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "number": 7, "url": url, "state": "OPEN", "headRefName": "topic",
+            "baseRefName": "main", "headRepository": {
+                "nameWithOwner": "owner/repo", "url": "https://forge.example.test/owner/repo",
+            },
+        }), "")
+
+    monkeypatch.setattr(github, "run_cli", run)
+    result = github.GitHubProvider().create_pull(PRScope(
+        repo="owner/repo", head="topic", base="main", title="Fix", api_base="https://forge.example.test",
+    ), token="selected-fixture-credential")
+    assert result.number == 7 and len(calls) == 2
+
+
+@pytest.mark.parametrize("outcome", ["valid", "post-timeout", "startup-delay"])
+def test_foreign_creation_shares_the_frontend_deadline_through_provider_and_receipt_settlement(
+    _tracking_setup: Any, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    import time
+    from agent_worktrees import pr_config, pr_foreign_create, pr_foreign_receipts
+    from agent_worktrees.providers import base as providers, bounded_read_cli, github
+    from test_pr_foreign_create import _config, _foreign_resolution
+    from test_pr_fork_source import _pull
+
+    ledger, wid = _tracking_setup
+    config = cast(Callable[..., cfg.Config], _config)()
+    repo = cast(Callable[..., Any], _foreign_resolution)(provider="github").repo_config
+    repo = replace(repo, pr=replace(repo.pr, api_base="https://forge.example.test"))
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: (
+        pr_config.ForeignRepoResolution(repo, "upstream/target")
+    ))
+    monkeypatch.setattr(providers, "get_provider", lambda *_: github.GitHubProvider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    started = time.monotonic()
+    elapsed = 40.0 if outcome == "startup-delay" else 0.0
+    monkeypatch.setenv("AGENT_WORKTREES_FOREIGN_CREATE_DEADLINE_V1", str(started + 75))
+    monkeypatch.setattr(time, "monotonic", lambda: started + elapsed)
+    calls: list[tuple[str, float]] = []
+    original = subprocess.run
+
+    def run(argv: list[str], *_args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal elapsed
+        if Path(argv[0]).stem.casefold() != "gh":
+            return original(argv, **kwargs)
+        path = next(value for value in argv if value.startswith("https://"))
+        method = argv[argv.index("--method") + 1]
+        if "/forks?" in path:
+            data: object = [[{
+                "full_name": "contributor/renamed-source", "fork": True,
+                "owner": {"login": "contributor"},
+            }]]
+            duration = 20.0
+        elif path.endswith("/pulls"):
+            data = _pull() if method == "POST" else [[]]
+            duration = 11.0 if method == "POST" and outcome == "post-timeout" else (
+                5.0 if method == "POST" else 10.0
+            )
+        else:
+            data = {"full_name": "upstream/target", "fork": False}
+            duration = 20.0
+        timeout = float(kwargs["timeout"])
+        calls.append((method, timeout))
+        elapsed += min(duration, timeout)
+        if duration > timeout:
+            return subprocess.CompletedProcess(argv, 124, "", "Fixture provider timed out")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(bounded_read_cli, "run_bounded", run)
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, config, target_repo="upstream/target", from_branch="contributor:topic", title="Fix",
+    )
+    record = tracking.load_record(ledger / f"{wid}.yaml")
+    if outcome == "valid":
+        assert result["claimed"] and result["number"] == 7, result
+        assert not pr_foreign_receipts.owner_receipts(record)[1]
+        assert elapsed == 55
+    elif outcome == "post-timeout":
+        assert result["publication_state"] == "unknown" and not result["claimed"], result
+        assert pr_foreign_receipts.owner_receipts(record)[1]
+        assert elapsed <= 60
+    else:
+        assert result.get("error") and not any(method == "POST" for method, _ in calls), result
+        assert not pr_foreign_receipts.owner_receipts(record)[0]
+        assert elapsed <= 60
+    assert all(timeout <= 60 for _method, timeout in calls)
+    assert elapsed < 75
+
+
+@pytest.mark.parametrize("outcome", ["valid", "timeout", "malformed-id"])
+def test_foreign_azure_creation_uses_the_same_durable_attempt_owner(
+    _tracking_setup: Any, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    from agent_worktrees import pr_config, pr_foreign_create, pr_foreign_receipts
+    from agent_worktrees.providers import azure_devops
+    from agent_worktrees.providers import base as providers
+    from test_pr_foreign_create import _config, _foreign_resolution
+
+    ledger, wid = _tracking_setup
+    config = cast(Callable[..., cfg.Config], _config)()
+    repo = cast(Callable[..., Any], _foreign_resolution)(provider="azure-devops").repo_config
+    repo = replace(repo, pr=replace(repo.pr, api_base="https://forge.example.test/organization"))
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: (
+        pr_config.ForeignRepoResolution(repo, "project/repo")
+    ))
+    provider = azure_devops.AzureDevOpsProvider()
+    monkeypatch.setattr(provider, "update_pull_metadata", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(providers, "get_provider", lambda *_: provider)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    reservations: list[dict[str, Any]] = []
+    calls = 0
+
+    def run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        reservations.extend(json.loads(path.read_text(encoding="utf-8")) for path in (
+            ledger.glob("*.foreign-pr-receipts/*.json")
+        ))
+        if outcome == "timeout":
+            return subprocess.CompletedProcess(argv, 124, "", "Fixture transport timeout")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "pullRequestId": "7" if outcome == "malformed-id" else 7, "status": "active",
+        }), "")
+
+    monkeypatch.setattr(azure_devops, "run_cli", run)
+
+    def create() -> dict[str, Any]:
+        return pr_foreign_create.create_foreign_pr_from_branch(
+            wid, config, target_repo="project/repo", from_branch="topic", title="Fix", new=True,
+        )
+
+    result = create()
+    assert calls == 1 and len(reservations) == 1
+    assert reservations[0]["phase"] == "publishing"
+    record = tracking.load_record(ledger / f"{wid}.yaml")
+    if outcome == "valid":
+        assert result["claimed"] and result["number"] == 7, result
+        assert not pr_foreign_receipts.owner_receipts(record)[1]
+    else:
+        assert result["publication_state"] == "unknown" and not result["claimed"]
+        assert pr_foreign_receipts.owner_receipts(record)[1]
+        assert create()["publication_state"] == "unknown" and calls == 1

@@ -13357,7 +13357,18 @@ manually dispatched `PR rebase full` workflow on Linux and Windows:
 ```powershell
 $env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
 python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source or pr_review_reconciliation or pr_creation_review or pr_review_destination or pr_review_receipts or pr_creation_reconcile or pr_legacy_admission or github_head_reconciliation" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-pull-requests --test-file tests/test_native_cli.py --test-file tests/test_native_foreign_source.py --allow-explicit-tiers --timeout 300 --plugin-timeout 900 --max-files-per-sub-suite 1
 ```
+
+The same manual lane checks the native creation caller on both OSes, including
+current/prior capability selection, the real child-environment handoff and
+truthful unknown responses. Provider parsing uses synthetic transport responses;
+it does not install or contact Gitea or Azure services. Worktrees receipt,
+claim and lock persistence remain real. The foreign creation deadline controls
+share a synthetic clock across real adapter/request construction and durable
+receipt settlement, proving startup consumption and a retained unknown POST
+without a long-running backend. Existing item, sub-suite and job limits remain
+unchanged; no exhaustive lane is added to required unit-only CI.
 
 Use the exhaustive mode when changing replay authorization or its publication
 adapters; unrelated PRs and ordinary promotion runs do not pay the matrix cost.

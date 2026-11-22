@@ -95,6 +95,7 @@ def capabilities(config: cfg.Config, repository: str) -> dict[str, Any]:
         "operations": {
             "qualified-create": qualified_create,
             "foreign-source-repo": pr.enabled and pr.provider == "github",
+            "foreign-create-deadline-v1": pr.enabled and pr.provider in ("github", "gitea", "azure-devops"),
             "metadata-update": pr.enabled and pr.provider in ("azure-devops", "github", "gitea"),
             "source-push": supported, "remote-evidence": False,
             "worker-policy-config": pr.enabled and pr.provider in ("azure-devops", "github"),

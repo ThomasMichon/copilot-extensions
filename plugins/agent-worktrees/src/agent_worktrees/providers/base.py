@@ -22,6 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
+from .. import pr_creation_budget
+
 if TYPE_CHECKING:
     from ..pr_bar import Snapshot
     from ..pr_contract import PRDiff, PRSnapshot, RepoPolicy, ReviewNudgeResult, ThreadsResult
@@ -791,6 +793,9 @@ def run_cli(
     exe = shutil.which(args[0], path=full_env.get("PATH")) or args[0]
     resolved = [exe, *args[1:]]
     sanitized = _sanitize_cli_args(resolved)
+    timeout = pr_creation_budget.remaining(timeout, provider=True)
+    if timeout <= 0:
+        return subprocess.CompletedProcess(sanitized, 124, "", "Foreign creation provider budget expired.")
     if max_stdout_bytes is not None:
         from .bounded_read_cli import run_bounded
         return cast(_RunBounded, run_bounded)(

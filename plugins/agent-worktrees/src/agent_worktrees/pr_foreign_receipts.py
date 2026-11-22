@@ -9,9 +9,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from . import config as cfg, pr_authority, pr_publish, record_machine_identity, tracking
+from . import config as cfg, pr_authority, pr_creation_budget, pr_publish, record_machine_identity, tracking
 from .providers.base import ProviderError, PullResult
-from .providers.github_pull_source import endpoint_identity
+from .providers import creation_receipt
 from .receiving_allocation import serialized_receipt
 
 
@@ -109,7 +109,7 @@ class Attempt:
     ) -> None:
         self.config, self.owner_path, self.record = config, path, record
         self.binding = {
-            "provider": provider, "endpoint": endpoint_identity(endpoint),
+            "provider": provider, "endpoint": creation_receipt.endpoint_identity(provider, endpoint),
             "target": target.casefold(), "source": source.casefold(), "branch": branch,
         }
         key = hashlib.sha256(json.dumps(self.binding, sort_keys=True).encode()).hexdigest()
@@ -123,7 +123,7 @@ class Attempt:
         if not self.path.exists():
             return None
         value = _read_receipt(self.path)
-        if {**value["binding"], "endpoint": endpoint_identity(value["binding"]["endpoint"])} != self.binding:
+        if self._binding(value["binding"]) != self.binding:
             raise ProviderError("Foreign creation receipt binding changed; reconcile before publication.")
         return value
 
@@ -133,10 +133,14 @@ class Attempt:
         for ledger in sorted(ledgers):
             for path in _receipts(ledger):
                 value = _read_receipt(path)
-                binding = {**value["binding"], "endpoint": endpoint_identity(value["binding"]["endpoint"])}
+                binding = self._binding(value["binding"])
                 if binding == self.binding:
                     entries.append((path, value))
         return entries
+
+    @staticmethod
+    def _binding(value: dict[str, str]) -> dict[str, str]:
+        return {**value, "endpoint": creation_receipt.endpoint_identity(value["provider"], value["endpoint"])}
 
     @staticmethod
     def _snapshot(entries: list[tuple[Path, dict[str, Any]]]) -> tuple[tuple[str, str], ...]:
@@ -171,8 +175,11 @@ class Attempt:
             raise ProviderError("Foreign creation owner changed; requalify the retained attempt.")
 
     def _write(self, value: dict[str, Any]) -> None:
-        with pr_publish.metadata_lock(self.owner_path.stem, project=self.config.repo_name), tracking._RecordLock(
-            self.owner_path, require_sidecar=True,
+        with pr_publish.metadata_lock(
+            self.owner_path.stem, project=self.config.repo_name,
+            timeout=pr_creation_budget.remaining(pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S),
+        ), tracking._RecordLock(
+            self.owner_path, require_sidecar=True, timeout=pr_creation_budget.remaining(2),
         ):
             if not self.owner_path.is_file():
                 raise ProviderError("Foreign creation needs an existing managed owner.")
@@ -193,7 +200,7 @@ class Attempt:
     def reserve(self, base: str, expected_head: str | None) -> dict[str, Any] | None:
         if self.record is None:
             raise ProviderError("Foreign creation needs an existing managed owner.")
-        with pr_authority.guard():
+        with pr_authority.guard(timeout=pr_creation_budget.remaining(pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S)):
             pending = self.pending()
             if pending is not None:
                 return pending
@@ -217,10 +224,11 @@ class Attempt:
         if self.expected is None or self.expected["phase"] != "publishing":
             raise ProviderError("Foreign creation has no current reserved receipt.")
         if verified:
-            from .providers.github_pull_source import validate_url
             if pull is None:
                 raise ProviderError("Foreign creation did not return a pull-request identity.")
-            validate_url(pull.url, pull.number, self.binding["target"], self.binding["endpoint"])
+            creation_receipt.validate(
+                pull, self.binding["provider"], self.binding["target"], self.binding["endpoint"],
+            )
         self._write({
             **self.expected, "revision": self.expected["revision"] + 1,
             "phase": "verified" if verified else "unknown",
@@ -242,8 +250,13 @@ def claim_owner(
         with tracking._RecordLock(path, require_sidecar=True):
             yield tracking.load_record(path)
         return
-    with pr_authority.guard(), pr_publish.metadata_lock(path.stem, project=attempt.config.repo_name), tracking._RecordLock(
-        path, require_sidecar=True,
+    with pr_authority.guard(
+        timeout=pr_creation_budget.remaining(pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S),
+    ), pr_publish.metadata_lock(
+        path.stem, project=attempt.config.repo_name,
+        timeout=pr_creation_budget.remaining(pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S),
+    ), tracking._RecordLock(
+        path, require_sidecar=True, timeout=pr_creation_budget.remaining(2),
     ):
         record = tracking.load_record(path)
         attempt.require_owner(record)
@@ -255,8 +268,9 @@ def claim_owner(
                 raise ProviderError("Foreign creation has no retained provider receipt to claim.")
             if attempt._read() != attempt.expected:
                 raise ProviderError("Foreign creation receipt changed before claiming.")
-            from .providers.github_pull_source import validate_url
-            validate_url(pull.url, pull.number, attempt.binding["target"], attempt.binding["endpoint"])
+            creation_receipt.validate(
+                pull, attempt.binding["provider"], attempt.binding["target"], attempt.binding["endpoint"],
+            )
         yield record
         if not reused:
             from . import obligations

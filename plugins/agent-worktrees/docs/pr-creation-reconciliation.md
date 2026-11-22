@@ -192,14 +192,38 @@ owner lock. Ordinary unverified provider receipts also block finalization and
 forced managed removal before owner transition or physical teardown; terminal
 PR labels do not erase those receipts.
 Checkout-free GitHub fork discovery requires a complete network observation
-within a shared 120-second and 1-MiB capture budget; an unavailable or oversized
-observation requires explicit `--source-repo`, never a partial-network guess.
+within a 1-MiB capture budget; an unavailable or oversized observation requires
+explicit `--source-repo`, never a partial-network guess. Foreign creation shares
+one 75-second budget across discovery, lookup, provider creation and receipt
+settlement. Provider calls stop with 15 seconds reserved for settlement; their
+individual timeouts and admission/receipt lock waits cannot renew that budget.
+The standalone fork reader retains its independent 120-second upper bound.
+
+The existing target-qualified author capability advertises
+`foreign-create-deadline-v1`. A capable local frontend may pass
+`AGENT_WORKTREES_FOREIGN_CREATE_DEADLINE_V1`, an absolute local monotonic deadline
+at most 75 seconds ahead. Startup consumes that same budget; the child never
+restarts it. An expired, nonfinite or excessive deadline refuses before effects.
+Older callers need no new syntax and receive the bounded default. The native
+frontend negotiates support before automatic fork discovery; an older runtime
+without it requires explicit source selection rather than risking a 120-second
+lookup inside its 90-second command lifetime. Existing explicit-source and
+plain-head legacy forms retain their prior compatibility behavior.
+
+GitHub, Gitea and Azure DevOps foreign creates reserve an owner-bound pending receipt before
+transport. Missing managed ownership refuses before POST. Failed validation or
+transport retains unknown evidence, including a returned number and URL when
+known, and blocks even `--new` until reconciled. Gitea endpoint identity includes
+its case-sensitive server mount; only repository URL suffixes are normalized.
 Ordinary creation likewise requires an active claim before settling a
 nonterminal provider result. Malformed provider responses after a create
 retain an unknown attempt with reconciliation instructions, not a retryable
 absence. Raw provider IDs must be positive JSON integers, and returned URLs
 must match the selected endpoint, target repository and PR number before
-follow-up mutations or receipt verification.
+follow-up mutations or receipt verification. Selected GitHub credentials also
+override enterprise token aliases during mandatory creation readback, not just
+POST. Human-readable unknown-creation output retains the underlying provider
+error and prints a receipt number only when one is known.
 Prune and cleanup reporting expose pending publication holds even when no PR
 association or checkout directory remains. Advisory displays reuse a bounded,
 invalidated receipt summary; mutation-time checks still read receipts freshly

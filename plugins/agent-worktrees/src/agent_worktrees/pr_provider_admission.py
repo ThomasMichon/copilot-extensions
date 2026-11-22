@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 
-from . import pr_publish, tracking
+from . import pr_creation_budget, pr_publish, tracking
 from .pr_transport_fence import Head
 from .providers.base import PRProvider, PRScope, ProviderError
 
@@ -35,7 +35,9 @@ def creation_guard(provider: PRProvider, scope: PRScope, *, token: str | None) -
         raise ProviderError("Provider creation needs the exact published head object.")
     heads = sorted({target, Head(identity, branch)}, key=lambda head: head.directory)
     with ExitStack() as lifetime:
-        deadline = time.monotonic() + pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S
+        deadline = time.monotonic() + pr_creation_budget.remaining(
+            pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S, provider=True,
+        )
         try:
             for head in heads:
                 lifetime.enter_context(head.guard(timeout=max(0, deadline - time.monotonic())))

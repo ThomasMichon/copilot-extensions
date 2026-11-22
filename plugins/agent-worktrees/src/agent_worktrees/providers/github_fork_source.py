@@ -10,6 +10,7 @@ from subprocess import CompletedProcess
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .. import pr_creation_budget
 from .base import ProviderError
 from .observation_credentials import github_endpoint
 
@@ -46,7 +47,7 @@ def resolve(
                 endpoint + path + ("/forks?per_page=100" if forks else "")]
         if forks:
             args += ["--paginate", "--slurp"]
-        remaining = deadline - time.monotonic()
+        remaining = pr_creation_budget.remaining(deadline - time.monotonic(), provider=True)
         if remaining <= 0:
             raise ProviderError("GitHub fork resolution exceeded its observation budget; pass --source-repo.")
         result = run(args, env=env, timeout=remaining, max_stdout_bytes=1024 * 1024)

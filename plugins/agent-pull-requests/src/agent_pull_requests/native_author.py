@@ -103,22 +103,31 @@ def capability(args: Any, prefix: list[str], operation: str | None = None) -> di
     return body
 
 
-def create_options(args: Any, prefix: list[str]) -> list[str]:
+def create_options(args: Any, prefix: list[str]) -> tuple[list[str], bool]:
     workspace = getattr(args, "source_workspace", None)
     expected = getattr(args, "expected_head", None)
     source_repo = getattr(args, "source_repo", None)
     source_options = [f"--source-repo={source_repo}"] if source_repo else []
+    discovery = ":" in args.head and not source_repo and not workspace
     if bool(workspace) != bool(expected):
         raise ValueError("--source-workspace and --expected-head must be supplied together")
     if not workspace:
-        if source_repo or getattr(args, "body_file", None) or config_options(args):
-            capability(args, prefix, "foreign-source-repo" if source_repo else "qualified-create")
-        return [*source_options, *config_options(args)]
+        declared = capability(
+            args, prefix, "foreign-source-repo" if source_repo else None if discovery else "qualified-create",
+        ) if source_repo or discovery or getattr(args, "body_file", None) or config_options(args) else None
+        bounded = declared is not None and declared["operations"].get("foreign-create-deadline-v1") is True
+        if discovery and not bounded:
+            raise ValueError(
+                "Selected Worktrees runtime cannot bound automatic fork discovery and creation together; "
+                "pass --source-repo owner/repository with a runtime that supports explicit source selection"
+            )
+        return [*source_options, *config_options(args)], bounded
     declared = capability(args, prefix, "qualified-create")
     if source_repo and declared["operations"].get("foreign-source-repo") is not True:
         raise ValueError("Selected Worktrees runtime does not advertise foreign-source-repo; no creation attempted")
-    return [f"--source-workspace={workspace}", f"--expected-head={expected}",
-            *source_options, *config_options(args)]
+    return ([f"--source-workspace={workspace}", f"--expected-head={expected}",
+             *source_options, *config_options(args)],
+            declared["operations"].get("foreign-create-deadline-v1") is True)
 
 
 def readiness_failure(repo: str, number: int, error: str, *,

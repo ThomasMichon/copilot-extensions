@@ -10043,7 +10043,8 @@
     "plugins/agent-worktrees/src/agent_worktrees/pr_unverified_creation.py": "176b4053c3a8cdad3be1ec2235cfe6d45f9c40d20e2e8421b78fea59644d87db",
     "plugins/agent-worktrees/src/agent_worktrees/git_push_tracking.py": "23079c32445b2db02251356f9bbb3e109149053a9cda12382c005d4b620c2c41",
     "plugins/agent-worktrees/src/agent_worktrees/foreign_receipt_summary.py": "f87a2e7d4aadf14c7a3d5b46a3b219a04c022d5ded45439c584de05075dd1cc0",
-    "plugins/agent-worktrees/src/agent_worktrees/providers/creation_receipt.py": "2f8e93bead9d602f2bf931dd5ed453e45045a77156c188b940064d9314545a69"
+    "plugins/agent-worktrees/src/agent_worktrees/providers/creation_receipt.py": "588a03462b177d733c111713ffda761b95ac2187e589fb83dcc57cfffdab9603",
+    "plugins/agent-worktrees/src/agent_worktrees/pr_creation_budget.py": "d4a9a6985ea59bc59954e88ba2bc0fb916c676f0dde456227e3b21b64979cb44"
   },
   "coverage_targets": [
     "worktree-manager/scripts/installer_dependency_policy.py",
