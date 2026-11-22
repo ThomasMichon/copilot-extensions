@@ -6445,6 +6445,69 @@ any refused candidate, complete the parent or demonstrate comparable
 whole-flow savings. The prior one-PR metadata-refresh authorization remains
 consumed and is not reused.
 
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013764948` names exact head
+`acca7aef67cdfb1dce798165dd5e0ef47fc09c5b`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45055496659`, unit job `137309691334`, executes all 9,007
+cases with 48 deselections in 117.23 pytest / 134.840 packet seconds.
+It reports `mode=executed`, origin run `45055496659` attempt one,
+execution identity
+`c9ad83cca66eb7d8bd225c0f80ef9547aeb2f4ad85337b38d5a52d7312d1b4c2`
+and packet digest
+`8ec5ec111bcb396ed67bd3ad6a2548b58fdc18d986fd0a37a6fc771d43b05c46`.
+Guards, required aggregate `137311003154` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge. No manual workflow is dispatched.
+
+Source #14116 merges at `2026-11-22T18:37:39Z` as
+`ffe137243bf345c9cf1ee57d20a4aed6b10e977b`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+45-case leaf. Separate data/native-load/thread refusals, release, owner,
+custody and completion gates remain open.
+
+### November 22 original dispatch CLI and lifecycle admission remainder
+
+Two adapters export the two complete remaining original dispatch CLI functions
+and eleven complete original lifecycle inventory/admission functions (30 cases).
+The CLI cases retain their original in-memory backend, API monkeypatch,
+fixture-local output files and capture assertions. The inventory cases retain
+complete/empty inventory, producing-run independence, exact candidate reuse,
+foreign/nonpromotion/publisher rules, invalid rows/pages/repositories,
+complete bounded pagination and moving-history refusal. Lifecycle CLI and
+real isolated subprocess cases remain outside this selection.
+
+Complete collection verifies all 102 original dispatch and 34 original
+lifecycle cases against exactly two and 30 adapter cases. Every selected
+function is the original object; every original parameter decorator retains
+row-object identity, cross-module value/type identity and exact node identity.
+The unchanged multi-track qualification helper runs the existing `UnitRun`
+source/effect auditor without alteration. Initial auditing passes all 32
+in 1.234 seconds, with zero prohibited effects, eight bound canonical Python
+reads and actual lifecycle-owner call-phase lines in every case. All 96
+setup/call/teardown reports pass.
+
+Only the two adapter bindings and original lifecycle-test source binding are
+added; both production owners were already admitted sources and targets.
+All 9,007 prior nodes retain relative order; all 1,274 current source hashes,
+467 targets, 89 helper decisions and the 300-second bound remain intact.
+Compact-v2 and flat-v1 logical identity agree; the candidate contains 9,039
+nodes and 1,277 sources in 1,013,461 bytes. Fatal Ruff and whole-file strict
+Python 3.10/Linux and Windows typing pass. Exact-head review and complete
+fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes are not applicable because installation and
+runtime behavior do not change; normal fresh source CI supplies the external
+Linux consumer proof. This selection neither replays nor settles any refused
+candidate, completes the parent nor proves comparable whole-flow savings.
+The prior one-PR metadata-refresh authorization remains consumed and is not
+reused.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original

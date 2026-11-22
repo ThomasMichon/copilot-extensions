@@ -3,6 +3,48 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_dispatch_cli_units.py",
+      [
+        "test_cli_exposes_only_a_validated_source_and_active_pr_still_prevents_recovery_dispatch",
+        "test_cli_rechecks_queued_automatic_source_without_writing_success_on_retirement"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_original_lifecycle_admission_units.py",
+      [
+        "test_complete_empty_inventory_is_the_only_new_generation_admission",
+        "test_producing_run_terminal_state_cannot_release_an_open_pr[failure]",
+        "test_producing_run_terminal_state_cannot_release_an_open_pr[cancelled]",
+        "test_producing_run_terminal_state_cannot_release_an_open_pr[timed_out]",
+        "test_producing_run_terminal_state_cannot_release_an_open_pr[completed]",
+        "test_producing_run_terminal_state_cannot_release_an_open_pr[None]",
+        "test_only_exact_existing_candidate_can_be_reused_after_qualification",
+        "test_nonpromotion_and_foreign_prs_cannot_claim_the_release_namespace",
+        "test_unknown_same_repository_publisher_cannot_be_silently_ignored",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[not-row]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[number]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[duplicate]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[state]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[base]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[head]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[user]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[source]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[branch]",
+        "test_invalid_or_incomplete_inventory_never_defaults_to_idle[sha]",
+        "test_invalid_page_shape_is_not_empty_inventory[None]",
+        "test_invalid_page_shape_is_not_empty_inventory[rows1]",
+        "test_invalid_page_shape_is_not_empty_inventory[]",
+        "test_invalid_page_shape_is_not_empty_inventory[rows3]",
+        "test_all_pages_are_read_before_admission",
+        "test_bounded_pagination_refuses_instead_of_silently_truncating",
+        "test_invalid_repository_refuses_before_any_api_call[]",
+        "test_invalid_repository_refuses_before_any_api_call[../project]",
+        "test_invalid_repository_refuses_before_any_api_call[example/..]",
+        "test_invalid_repository_refuses_before_any_api_call[example/project/extra]",
+        "test_closing_an_earlier_pr_between_cursor_pages_cannot_hide_a_surviving_promotion"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_noncli_decision_units.py",
       [
         "test_current_source_ci_uses_direct_run_evidence_without_index_lag",
@@ -11016,6 +11058,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_dispatch_cli_units.py": "459322b4c8fa0a36713a54b69465ea58ddc321c8eeafe067c961a076c949d867",
+    "tools/promotion_unit_tests/test_original_lifecycle_admission_units.py": "8d8de6b7067d0d0fd8afab0998e05c9ed9df9296c6b8618f151015b5241257d5",
+    "tools/test_promotion_lifecycle.py": "73227135f3fde8133cabe1c643835e84e2f601b54f8a281e3805f8afb83dd3cc",
     "tools/promotion_unit_tests/test_original_dispatch_noncli_decision_units.py": "2dda9ad138bb3f9a3f31b0c8ab9cb0f1b2925fefd1d80deeb141ae4d04fd2955",
     "tools/promotion_unit_tests/test_original_dispatch_source_event_refusal_units.py": "d2d1f16b1c160a49007bb66223805aefa0893a7089d4222f4c4bdccee8695758",
     "tools/promotion_unit_tests/test_original_dispatch_artifact_integrity_units.py": "ebd208be258f3721bd5be677e602a08b4272051134f73a91ed86a250d33a18d6",
