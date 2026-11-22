@@ -1408,6 +1408,19 @@ canonical read-only installation helper in-process, with explicit named source,
 root and project arguments. This avoids redundant interpreter startups while
 preserving both publication and provenance checks within the hook deadline.
 
+The `budget-install-v1` capability adds Budget's existing **V1** single-command
+declaration without changing its command ABI or pretending it has a V2 runtime
+gate. Its fixed `stamp`, `provision` and `install` actions require the canonical
+installed payload, default legacy root, UV launcher, complete self-contained
+inputs and the same publication/provenance checks. Mixed V2 declarations,
+custom roots and compound stamp/provision requests refuse before foundation
+acquisition. Accepted work retains the request's credential-free UV storage
+and offline/cache selection rather than inheriting another worker starter's
+settings. The existing queue, full-input copier and native installer own
+execution; no Budget-specific daemon or arbitrary installer command is added.
+This is provider support for consumer migration, not a claim that Budget's
+session bootstrap already uses it.
+
 After `enqueue` commits, the existing queue's ID/state JSON is the **durable
 ordinary-request receipt**. It appears in the supervisor log even if worker
 launch subsequently fails. The finite worker and waiter are the existing

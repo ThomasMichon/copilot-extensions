@@ -831,6 +831,7 @@ function _Resolve-Py([string]`$TraceMode = 'ready') {
     if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver -TraceMode `$TraceMode }
     return `$AgentRtPy
 }
+if ('$commandLiteral' -ceq 'agent-vault') { `$env:AGENT_VAULT_HOME = `$_root }
 `$_py = _Resolve-Py
 if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
 $earlyDispatcher

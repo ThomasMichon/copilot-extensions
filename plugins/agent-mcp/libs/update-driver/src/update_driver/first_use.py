@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,7 @@ RECIPES = {
     "agent-logger": "AGENT_LOGGER",
     "agent-bridge": "AGENT_BRIDGE",
     "agent-mcp": "AGENT_MCP",
+    "budget-guidance": "BUDGET_GUIDANCE",
 }
 LOGGER_COMMANDS = (
     ("agent-logger", "agent_logger"),
@@ -79,6 +81,13 @@ MCP_CONTEXT_KEYS = (
     "AGENT_MCP_NO_SELFPROVISION", "AGENT_MCP_PINNED_CONTEXT",
     "AGENT_MCP_NO_CUTOVER", "AGENT_MCP_CUTOVER_DRAIN_TIMEOUT",
     "AGENT_MCP_CUTOVER_HEALTH_TIMEOUT", "AGENT_MCP_NO_VERSION_REAP",
+)
+BUDGET_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME", "XDG_CACHE_HOME", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "BUDGET_GUIDANCE_NO_SELFPROVISION", "BUDGET_GUIDANCE_PINNED_CONTEXT",
+    "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_CACHE_DIR",
+    "UV_OFFLINE", "UV_NO_CACHE",
 )
 BRIDGE_HELPERS = (
     "installer-engine.ps1", "installer-engine.sh",
@@ -153,6 +162,7 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
         "AGENT_MCP_VALIDATED_CONTEXT", "AGENT_MCP_PAYLOAD_ROOT", "AGENT_MCP_ACTION",
         "AGENT_MCP_MARKETPLACE_ROOT",
+        "BUDGET_GUIDANCE_ACTION", "BUDGET_GUIDANCE_FORCE", "BUDGET_GUIDANCE_INSTALL_DIR",
     ):
         result.pop(key, None)
     return result
@@ -193,8 +203,8 @@ def _inspect_payload(
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
         raise ProvisionError("stamp-to-selected-snapshot provisioning requires SSH")
-    if installer_action == "install" and plugin not in ("agent-logger", "agent-bridge"):
-        raise ProvisionError("fixed install action requires Logger or Bridge")
+    if installer_action == "install" and plugin not in ("agent-logger", "agent-bridge", "budget-guidance"):
+        raise ProvisionError("fixed install action requires Logger, Bridge or Budget")
     prefix = RECIPES[plugin]
     if plugin == "agent-bridge" and any(not (scripts / name).is_file() for name in BRIDGE_HELPERS):
         raise ProvisionError("Bridge first use requires its complete materialized installation helpers")
@@ -211,7 +221,30 @@ def _inspect_payload(
             if shutil.which(tool) is None:
                 raise ProvisionError(f"Bridge first use requires native tool: {tool}")
     no_self = prefix + "_NO_SELFPROVISION"
-    if (
+    if plugin == "budget-guidance":
+        if (
+            manifest.get("schema") != "copilot-extensions.payload-invocation"
+            or type(manifest.get("version")) is not int or manifest["version"] != 1
+            or manifest.get("command") != plugin or manifest.get("module") != "budget_guidance"
+            or manifest.get("runtimeRoot") != ".budget-guidance"
+            or manifest.get("pythonLauncher") != "uv"
+            or not isinstance(manifest.get("bootstrapPython"), str)
+            or re.fullmatch(r"3\.\d+\.\d+", manifest["bootstrapPython"], flags=re.ASCII) is None
+            or manifest.get("installer") != "install"
+            or manifest.get("installerLifecycle") is not True
+            or manifest.get("noSelfProvisionEnv") != no_self
+            or any(key in manifest for key in (
+                "installationContext", "provisionMode", "payloadDispatcher", "commands",
+            ))
+        ):
+            raise ProvisionError("Budget first use requires its fixed V1 installation declaration")
+        if (
+            runtime_root != Path.home() / ".budget-guidance"
+            or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
+            or payload.name != plugin
+        ):
+            raise ProvisionError("Budget first use requires its canonical installed payload and default legacy root")
+    elif (
         manifest.get("schema") != "copilot-extensions.payload-invocation"
         or type(manifest.get("version")) is not int or manifest["version"] != 2
         or (plugin != "agent-logger" and manifest.get("command") != plugin)
@@ -415,6 +448,7 @@ def enqueue(
         "agent-logger": LOGGER_CONTEXT_KEYS,
         "agent-bridge": BRIDGE_CONTEXT_KEYS,
         "agent-mcp": MCP_CONTEXT_KEYS,
+        "budget-guidance": BUDGET_CONTEXT_KEYS,
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
@@ -466,6 +500,7 @@ def _execute(admission: dict[str, Any], *, root: Path, client_only: bool = False
                 "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
                 "agent-bridge",
                 "agent-mcp",
+                "budget-guidance",
             }
             inputs = _path(
                 runtime_root / ".install-stage" if legacy_stage

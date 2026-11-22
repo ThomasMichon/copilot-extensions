@@ -1,6 +1,9 @@
 * text=auto
 *.sh text eol=lf
 *.ps1 text eol=crlf
+# Promotion footprint witnesses hash these exact data bytes on every platform.
+plugins/agent-mcp/scripts/uninstall-profile.json text eol=lf
+tools/fixtures/installed-footprint-v2.json text eol=lf
 # Promotion inputs and their composed library copies must retain identical bytes.
 **/libs/agent-procutil/src/agent_procutil/daemon_instances.ps1 text eol=lf
 **/libs/agent-procutil/src/agent_procutil/native_daemon.ps1 text eol=lf

@@ -115,7 +115,7 @@ def _function(source: str, name: str, ps: bool = False) -> str:
     if len(starts) != 1:
         raise RuntimeError(f"Expected one native writer {name}; found {len(starts)}")
     lines = source[starts[0].end():].splitlines(keepends=True)
-    body = []
+    body: list[str] = []
     delimiter = None
     for line in lines:
         if delimiter is not None:
@@ -423,6 +423,13 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
         product + ".ps1": (_render_ps(ps, "ps1Content", values),),
         product + ".cmd": (_render_ps(ps, "cmdContent", values),),
     }
+    # Exact predecessor before ready-runtime Vault home propagation.
+    for name, line in (
+        (product, 'if [ "$_name" = agent-vault ]; then export AGENT_VAULT_HOME="$_root"; fi\n'),
+        (product + ".ps1",
+         f"if ('{product}' -ceq 'agent-vault') {{ $env:AGENT_VAULT_HOME = $_root }}\n"),
+    ):
+        result[name] += tuple(body.replace(line, "", 1) for body in result[name] if body.count(line) == 1)
     if product == "agent-ssh":
         writer = _function(ps_install, "Write-Binstubs", True)
         result[product] += tuple(_ps_array(writer, {
@@ -439,14 +446,14 @@ def _templates(payload: Path, root: Path, product: str, *,
         return _simple(payload, root, product, module)
     if product == "agent-worktrees":
         # Both native installers copy these exact payload-owned files.
-        return {name: (_read(payload / "bin" / name),) for name in (
+        commands: dict[str, tuple[str, ...]] = {name: (_read(payload / "bin" / name),) for name in (
             product, product + ".ps1", product + ".cmd",
             "agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1",
-        )} | {
-            "agent-worktrees-update-json.awk": (
-                _read(payload / "scripts" / "installation-context" / "json-query.awk"),
-            ),
-        }
+        )}
+        commands["agent-worktrees-update-json.awk"] = (
+            _read(payload / "scripts" / "installation-context" / "json-query.awk"),
+        )
+        return commands
     sh = _native(payload, product, "sh")
     ps = _native(payload, product, "ps1")
     sh_name = "deploy_binstub"

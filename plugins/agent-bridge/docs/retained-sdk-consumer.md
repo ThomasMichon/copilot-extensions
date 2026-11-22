@@ -44,9 +44,9 @@ The extension registers the public SDK's `onPostToolUse` and
 `onPostToolUseFailure` callbacks. Its existing off-loop inbox and original
 receipt reads populate a bounded in-memory set of pending message IDs before
 an SDK send can block. Root callbacks for the registered native session report
-the pending input without instructing the agent to end its turn: an idle
-transition alone cannot guarantee submission through an unavailable SDK or
-an outstanding native effect. The callback performs
+the pending input, states that it is submitted when the session next goes
+idle, and tells the agent not to end its turn solely for the notice or to
+send an acknowledgement or replay input. The callback performs
 no network, subprocess, file or history work and never awaits the drain.
 Nested/foreign callbacks, intentional `/peer` mute and unavailable current
 registration produce no notice. A repeated notice is coalesced for 30 seconds.
@@ -61,7 +61,7 @@ notice never marks a receipt consumed or answered; those still require their
 original independent evidence. A session-binding change invalidates the old set.
 The most recent 1,000 confirmations suppress stale offers within that binding.
 A late successful SDK reply clears attention even after its reporting deadline;
-the original uncertain receipt and no-resend fence remain independent.
+the original uncertain receipt and its idle re-attempt rules remain independent.
 At the 1,000-ID bound, observation becomes explicitly incomplete rather than
 evicting known IDs or claiming the inbox is empty. Unknown overflow is not a
 reason to replay input; it does not itself demand an end-turn after all known
@@ -87,7 +87,8 @@ No hook return, prompt-submitted callback or send reply is treated as model
 consumption. Timed content fallback remains unsupported until the native
 provider supplies enforceable pre-input duplicate suppression and evidence
 that the exact post-tool content reached model-facing input. Existing retained
-uncertainty, pending-native fences, original IDs and no-resend rules are unchanged.
+uncertainty, pending-native fences, original IDs and the idle re-attempt rules
+below are unchanged.
 
 The legacy represented-event flusher separately preserves actual attributed
 root-input events across failed or unconfirmed event POSTs. It retries only
@@ -224,8 +225,10 @@ Both retain a root envelope carrying the exact
 native session, consumer incarnation, original handoff and message ID.
 SDK admission records `sdk_accepted`, not consumption or semantic completion.
 An ambiguous exception, missing SDK message ID or timeout records/retains
-`unknown`; the original is not resent. A timed-out native promise stays fenced
-until it settles rather than accumulating another native call every tick.
+`unknown`. It is not resent immediately; the idle re-attempt rules below decide
+whether it is later consumed, submitted again or failed. A timed-out native
+promise stays fenced until it settles rather than accumulating another native
+call every tick.
 
 The consumer reads pending original receipts even while muted, deregistered or
 after closure. Only an actual root `user.message` from that same SDK/native
@@ -263,13 +266,103 @@ recovery, another inbox or a new consumption authority.
 An unbegun original offer can survive a receiver reload and be delivered using
 its original receipt identifier and envelope. Versioned final admission must
 name the currently enrolled receiver even when that envelope retains the original
-receipt consumer. A stale receiver cannot start an effect. A sending, unknown or accepted
-handoff is observation-only across that reload: no new receiver obtains a
-second SDK invocation.
+receipt consumer. A stale receiver cannot start an effect. An accepted handoff
+is observation-only across that reload. A `sending` or `unknown` handoff is
+re-attempted while idle, as described next.
+
+## Idle submission and bounded re-attempts
+
+No ordinary record is left ambiguous. When the provider health capabilities
+include `retained_delivery_reattempt: 1`, the receiver negotiated
+`message_base: 1` and the extension tracks the main turn, the receiver
+manages every ordinary record that is not `sdk_accepted`, `consumed`,
+rejected or failed. That includes `sending`/`unknown` records whose handoff
+started under an earlier consumer incarnation of the same native session.
+While the session is idle, each drain tick:
+
+1. Settles records already present in the session's root user-message input.
+   Live observations are checked first. Durable history is read only for
+   started records not yet verified in the current idle episode, in one
+   batch per tick, at most once per 30 seconds. A match carrying the
+   retained header and message ID reports `consumed`, and nothing is sent.
+2. Requests a new attempt for each remaining started record through
+   `poll(reattempt=[...])` and `begin(attempt=N)`. The bounded re-attempt
+   list holds only unsubmitted originals; accepted receipts that are still
+   seeking consumption never occupy it. The backend re-grants the
+   same original (ID, body, order, handoff and receipt history) to the
+   current enrolled receiver and records the attempt in
+   `live_message_attempts`, indexed by session so `pending-queue` failure
+   reads never scan other sessions' attempts. The grant is compare-and-set on the attempt
+   number, is one-shot, and keeps authentication, binding, current-session,
+   worktree and mute checks. The original start counts as attempt one. When a
+   fourth attempt is requested, the backend records the terminal
+   `failed`/`delivery_attempts_exhausted` disposition instead of granting it.
+   The record then leaves recovery and the pending notice and appears in the
+   `pending-queue` `failed` list. Late `sdk_accepted`/`consumed` evidence for
+   an exhausted original is still accepted: it is kept on the final attempt
+   row, the `/outcome` reply returns the observed stage so the receiver's
+   report settles, the terminal disposition is unchanged, and the record
+   leaves the `failed` list.
+3. Submits granted and offered records through the ordinary `session.send`
+   path with the original `<agent-message ... msg-id=...>` header and reports
+   `sdk_accepted`.
+
+If history cannot be read, the started record is not resent on that tick, and
+the check is retried on the next idle tick. It never becomes a permanent
+"no resend". An offered record that never began cannot be in native input, so
+it needs no history read.
+
+When a running-to-idle transition finds queued records and every one of them
+proves already delivered, so nothing is submitted, the receiver sends one short
+resume prompt for that idle episode. It sends nothing for an empty queue,
+for an episode that submitted anything, for later ticks of the same episode,
+or for the startup idle. The resume prompt also requires the
+`retained_delivery_reattempt` capability and a `message_base` 1 enrollment.
+Without the capability, the legacy behavior is unchanged: started records are
+observation-only, the notice clears for them, and no unsolicited turn is
+started.
+
+History is bounded because a session's durable event log can be very large.
+The SDK's `getEvents()` takes no options and returns the whole log. When the
+runtime exposes the `session.rpc.eventLog.read` RPC, the receiver reads root
+`user.message` events backward, in pages of 100. It reads at most eight pages
+per read and stops at the oldest candidate's start time. It caches a
+per-session high-water mark, so later reads only examine newer events. A deep
+backward scan toward an older handoff keeps its cursor across reads; only the
+newest page's event IDs are kept to detect overlap, so progress never resets
+however many user messages precede the handoff. The cached evidence is
+bounded too: at most 1,000 compact retained headers are kept. Headers for
+settled (consumed or rejected) originals are dropped and never cached again,
+and the originals being checked are pinned. If the cap evicts another
+original's header, that original loses its history coverage until a fresh
+scan re-reads it while it is pinned, so an evicted match can never authorize
+a duplicate submission. Without
+that RPC, each started record's handoff is checked with at most one full
+`getEvents()` read for the life of the extension. Its re-attempts then rely on
+live observation; if that observation overflows its bound, the memo is cleared
+so the next re-attempt reads history again first. After a submission is
+accepted, the original still seeks consumption evidence through the same
+bounded read; without the RPC, that is one full read per handoff.
+
+The receiver checks live input again immediately before requesting a
+re-attempt grant and immediately before the SDK send; a matching input settles
+the record as consumed instead. A re-attempt whose session leaves idle before
+the send is deferred, or reported `unknown` once granted, and retried on a
+later idle. The resume prompt waits until every recovery page of the idle
+episode has been reconciled, so records beyond the first page are never missed.
+A fresh offer delivered during an idle episode that began with queued records
+joins that episode, so a failed or uncertain send also withholds the prompt.
+
+With re-attempt support, a history check deferred by the cooldown or a failed
+read never holds a recovery page. The checks are kept in a bounded set and
+folded into the next read, and later pages keep being discovered. Any
+unsubmitted original left unverified withholds the resume prompt for that
+sweep.
 
 Durable SDK history is read lazily, at most once per 30 seconds, and shared
 across the bounded receipt page. It is not an event-handler operation or a
-per-message RPC. A page awaiting the history-read cooldown keeps its cursor;
+per-message RPC. Without re-attempt support, a page awaiting the history-read
+cooldown keeps its cursor;
 older unknown receipts cannot phase-lock all reads to the first page and starve
 later consumption evidence. One outstanding history observation has its own
 bounded slot; a rejected or timed-out read does not block compatible ordinary
@@ -356,7 +449,8 @@ or permission to replay. Ordinary non-replay responses retain their prior shape.
 A missing result remains `unknown`/`control_started`.
 Any prior claim, send start, delivery or consumption refuses a new rejection or
 control start; migration cannot certify earlier effects absent or canceled.
-Enrollment and reloading do not replay uncertain work.
+Enrollment and reloading do not replay uncertain control work. Ordinary records
+follow the idle re-attempt rules above.
 
 Retiring or changing a retained message type requires a documented, tested
 migration or explicit terminal-rejection strategy for every supported stored

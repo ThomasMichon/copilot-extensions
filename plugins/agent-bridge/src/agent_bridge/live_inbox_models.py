@@ -91,11 +91,16 @@ class InboxEnrollRequest(InboxCurrentRequest):
 
 class InboxPollRequest(InboxCurrentRequest):
     limit: int | None = Field(default=None, ge=1, le=100)
+    # Idle receivers only: also return these started originals that were never
+    # marked submitted and that the receiver verified absent from its history.
+    reattempt: list[int] = Field(default_factory=list, max_length=100)
 
 
 class InboxHandoffRequest(InboxCurrentRequest):
     message_id: int = Field(gt=0)
     handoff_id: str = Field(min_length=1)
+    # The polled attempt count; required to re-grant a started original.
+    attempt: int | None = Field(default=None, ge=0)
 
 
 class InboxOutcomeRequest(InboxNegotiateRequest):
@@ -112,12 +117,15 @@ class RetainedInboxMessage(LiveMessage):
     message_contract: dict[str, object] | None = None
     control: bool = False
     consumer: InboxConsumerInfo | None = None
+    attempt: int | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         value: dict[str, Any] = handler(self)
         if self.consumer is None:
             value.pop("consumer", None)
+        if self.attempt is None:
+            value.pop("attempt", None)
         if self.message_contract is None:
             value.pop("message_contract", None)
         if not self.control:

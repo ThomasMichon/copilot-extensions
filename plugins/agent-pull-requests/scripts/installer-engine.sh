@@ -675,6 +675,7 @@ _resolve() {
         . "\$_resolver"
     fi
 }
+if [ "\$_name" = agent-vault ]; then export AGENT_VAULT_HOME="\$_root"; fi
 _resolve
 [ -n "\$AGENT_RT_PY" ] && exec "\$AGENT_RT_PY" -m "$module_name" "\$@"
 $early_dispatch

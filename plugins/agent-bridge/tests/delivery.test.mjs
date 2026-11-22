@@ -30,7 +30,8 @@ test("pending-input notice coalesces, preserves mute and ignores foreign root in
   notice.offered("root", [{ id: 1 }]);
   assert.equal(notice.postTool(input, invocation, "root", false), undefined);
   const hint = notice.postTool(input, invocation, "root", true).additionalContext;
-  assert.match(hint, /idle submission is not guaranteed/i);
+  assert.match(hint, /submitted when this session next goes idle/i);
+  assert.match(hint, /do not end your turn solely for this notice/i);
   assert.doesNotMatch(hint, /END YOUR TURN/);
   notice.offered("root", [{ id: 2 }]);
   assert.equal(notice.postTool(input, invocation, "root", true), undefined);

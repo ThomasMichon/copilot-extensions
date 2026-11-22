@@ -3294,6 +3294,11 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Qualify Budget V1 fixed installation recipe
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_budget.py
+          --test-timeout 60 --timeout 180 --plugin-timeout 240
       - name: Prepare the real disposable user service manager
         run: |
           unit="user@$(id -u).service"
@@ -3455,6 +3460,11 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Qualify Budget V1 fixed installation recipe
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_budget.py
+          --test-timeout 60 --timeout 180 --plugin-timeout 240
       - name: Select runner-owned native scratch
         run: '"AGENT_SCRATCH_ROOT=$env:RUNNER_TEMP" >> $env:GITHUB_ENV'
       - name: Qualify same-boot queue settlement and legacy compatibility

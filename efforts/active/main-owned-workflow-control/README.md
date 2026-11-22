@@ -1132,7 +1132,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13984 merges at `27daa8b46dc852b202703af59e78761c1f49ba76` after
   exact-head Copilot approval and complete required Linux CI with all 7,226
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land 704 original source-derived command ownership cases
+- [x] Qualify and land 704 original source-derived command ownership cases
   through 31 exact unchanged functions, plus three focused hash-bound-data
   controls and four candidate-data origin/refusal controls. Preserve
   writer-body, newline/BOM, peer, root/module/publisher,
@@ -1148,6 +1148,101 @@ authorizes critical main-path acceptance or a bounded administrative change.
   The bounded source-only candidate-reader correction follows the existing
   declared canonical-to-local routes for six native data copies. It changes no
   materializer writer, workflow, activation, native-run authority or custody.
+  #13986 merges at `2db9de42d9d2464e7a08554c9b3c17d9ff387097` after
+  exact-head Copilot approval and complete required Linux CI with all 7,937
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify and land 56 original footprint-history and recognition cases
+  through 19 exact unchanged functions, with the original profile/history data
+  hash-bound and never executable. Preserve semantic-transition, retirement,
+  read-boundary, corrupt/foreign/stale-input and fresh-construction witnesses.
+  Keep the other 33 original cases outside this bounded slice without removing
+  their retained lanes or replacing their assertions. Require closed reads,
+  positive per-case actual footprint-owner calls, zero prohibited effects,
+  unchanged preceding nodes and unrelated hashes, 89 helper decisions,
+  compact/flat-v1 identity, the 300-second bound, strict typing, current-head
+  review and complete Linux source CI. Native, installed and parent gates remain.
+  #14019 merges at `82860fb482d13b402050f1d572a3c56bad1aafef` after
+  exact-head Copilot approval and complete required Linux CI with all 7,995
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify and land all five original validation-override cases through
+  three exact unchanged functions. Preserve list-clearing versus omission,
+  empty-map inheritance, empty-path replacement and machine-precedence
+  witnesses using the original source-level merge/parser helper, without
+  importing or starting the managed runtime. Require closed reads, positive
+  per-case actual configuration-owner calls, zero prohibited effects,
+  unchanged preceding nodes and hashes, 89 helper decisions, compact/flat-v1
+  identity, the 300-second bound, strict typing, current-head review and
+  complete Linux source CI. The withdrawn Darwin candidate is not admitted
+  or counted as completed coverage; native, installed and parent gates remain.
+  #14026 merges at `a0601af38db4fb964ec5781cbe3228d91a75014c` after
+  exact-head Copilot approval and complete required Linux CI with all 8,000
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify both original project/resource-overlap cases for normal and
+  editable installs, retaining the complete admitted parent project when a
+  package resource names its descendant. Preserve the original synthetic
+  resolver projection and real fixture copies/hashes without running UV or
+  touching operational resources. Require exact original objects and parameter
+  identities, closed reads, positive per-case actual policy-owner calls, zero
+  prohibited effects, unchanged preceding nodes and target-branch hashes,
+  targets/helper decisions, compact/flat-v1 identity, the 300-second bound,
+  strict typing, current-head review and complete Linux source CI. Native,
+  installed and parent gates remain. Fresh guarded qualification refuses the
+  first case on Windows at the original private-root `advapi32` load
+  (`ctypes.dlopen`); neither case is admitted. No preload, fixture change or
+  guard exception substitutes for that missing qualification.
+- [x] Qualify and land both original bundled-wheel release-age cases using
+  the exact unchanged function and the already hash-bound canonical wheel.
+  Preserve the aged-versus-young canonical-release checks, corrupt-wheel
+  refusal and controlled metadata acquisition without installation or network
+  access. Require closed reads, positive per-case actual dependency-age owner
+  calls, zero prohibited effects, unchanged preceding nodes and target-branch
+  hashes, targets/helper decisions, compact/flat-v1 identity, the 300-second
+  bound, strict typing, current-head review and complete Linux source CI.
+  Keep the separate executable-discovery and resource-retention native
+  boundaries unadmitted; native, installed and parent gates remain.
+  #14040 merges at `a671fd50402011f38a8db2011156bfaed3557102` after
+  exact-head Copilot approval and complete required Linux CI with all 8,002
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify the original deployment CLI editable-requirement refusal using
+  its unchanged trusted temporary project, requirements include and forbidden
+  UV-selector witness. Extend the existing original CLI adapter without
+  another module import. Require exact original identity, closed reads,
+  positive actual policy-owner calls and zero prohibited effects before
+  admission; retain every preceding node, unrelated hash, target, helper
+  decision, compact/flat-v1 identity and the 300-second bound. Normal strict
+  typing, current-head review and complete Linux source CI remain required.
+  This early-refusal case does not qualify executable discovery, retained
+  private-root creation, native execution or installed behavior.
+  Fresh guarded qualification refuses the outer configuration wrapper's
+  Windows `kernel32` load before the inner source validation. The adapter
+  addition is withdrawn and the case remains unadmitted; this confirms the
+  previously recorded editable-requirement boundary, not new coverage.
+- [ ] Qualify the seven original named-UV lookup and non-native-wrapper
+  controls through their four unchanged functions and original lookup doubles.
+  Extend the existing UV-selection adapter without rewriting a fixture,
+  callback or assertion. Require exact original objects and parameter IDs,
+  closed reads, positive per-case actual configuration-owner calls and zero
+  prohibited effects before admission. Preserve preceding node order,
+  unrelated hashes, targets, helper decisions, compact/flat-v1 identity and
+  the 300-second bound. Normal strict typing, current-head review and complete
+  Linux source CI remain required. These source-level doubles do not qualify
+  actual Windows lookup, private-root creation, links or installed behavior.
+  Linux CI refuses the original lazy `ctypes` import at `PyDLL(None)` before
+  the lookup doubles are installed. All seven additions are withdrawn;
+  the passing Windows development run is not cross-platform admission.
+  No preload, guard exception or original-test rewrite is substituted.
+- [ ] Qualify and land three original artifact-readiness refusal controls:
+  changed source refuses before release access, failed preparation emits no
+  receipt and final publication does not repair it, and missing premerge
+  identity refuses before release access. Preserve the exact original
+  synthetic hosted and autouse identity fixtures, callbacks and assertions.
+  Require original-object/parameter identity, closed reads, positive per-case
+  actual owner calls and zero prohibited effects before admission; retain
+  preceding nodes/hashes, targets, helper decisions, compact/flat-v1 identity
+  and the 300-second bound. Normal strict typing, current-head review and
+  complete fresh Linux CI remain required. Parallel download verification,
+  actual hosted publication, native execution, installed and parent gates
+  remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

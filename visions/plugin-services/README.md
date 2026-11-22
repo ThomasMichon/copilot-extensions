@@ -252,12 +252,20 @@ the separation does not make an unavailable service appear ready.
 
 ### compiler-free-first-party-execution
 
-The suite's own implementation is interpreted code, not custom native source
-or suite-owned compiled binaries. Development, release construction,
-installation, repair and ordinary execution do not require native compilation,
-an end-user compiler or on-demand compilation of embedded helper code. Moving
-that compilation to a release worker or shipping a prebuilt custom helper is
-not an alternative to this boundary.
+The suite's application implementation is interpreted code. Installation,
+repair and ordinary execution do not require an end-user compiler or on-demand
+compilation of embedded helper code. Moving application implementation into
+release-built custom helpers is not an alternative to this boundary.
+
+A narrowly scoped pre-interpreter containment adapter may be built ahead of
+time when operating-system lifetime custody must exist before an interpreter
+can be selected. Its reviewed source and qualified artifact travel together;
+deployed callers never compile it. It establishes only the original caller's
+finite process custody, not interpreter selection, application admission,
+installation authority, a service or a new state store. Existing platform
+runtime prerequisites remain explicit, and missing capability refuses rather
+than weakening containment. This exception does not migrate application or
+service implementation into compiled helpers.
 
 Thin shell entrypoints and shared Python implementations use existing operating
 system interfaces while preserving process identity, lifetime, containment,

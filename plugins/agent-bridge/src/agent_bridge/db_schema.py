@@ -61,6 +61,7 @@ class _SchemaMixin:
         from .creation_writer_schema import ensure_schema as ensure_creation_writer_schema
         from .creation_writer_schema import validate_schema as validate_creation_writer_schema
         from .live_message_schema import ensure_schema as ensure_pending_queue_schema
+        from .retained_attempts import ensure_schema as ensure_retained_attempts_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -147,6 +148,7 @@ class _SchemaMixin:
             self._ensure_current_columns(conn)
             prepare_message_contracts(conn)
             ensure_pending_queue_schema(conn)
+            ensure_retained_attempts_schema(conn)
             validate_schema(conn)
             validate_inbox_schema(conn)
             validate_consumer_schema(conn)

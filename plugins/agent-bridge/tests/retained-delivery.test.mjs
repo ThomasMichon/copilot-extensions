@@ -2,10 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  createRetainedInbox, retainedDeliverySelected, retainedConsumption, retainedConsumptionReason,
+  createRetainedInbox, retainedDeliverySelected, retainedConsumption, retainedConsumptionReason, RESUME_NUDGE,
 } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
 import { isRemoteDriverSource } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
-import { PendingInputNotice } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
+import { MainTurn, PendingInputNotice } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
 
 const contract = "retained-inbox-v1";
 const sid = "native-a";
@@ -91,8 +91,12 @@ function fixture() {
       assert.equal(body.limit, 1);
       assert.deepEqual(body.consumer, f.current);
       assert.deepEqual(body.binding, binding);
+      const reattempt = (r) => (body.reattempt ?? []).includes(r.id)
+        && ["sending", "unknown"].includes(r.handoff_stage);
       const row = f.rows.find((r) => !r.disposition && (body.receiving_api === "native-sdk-v1"
-        ? !r.handoff_stage || r.handoff_stage === "offered" : r.handoff_stage !== "consumed"));
+        ? !r.handoff_stage || r.handoff_stage === "offered" || reattempt(r)
+        : r.handoff_stage !== "consumed"));
+      if (row && reattempt(row)) row.attempt ??= 1;
       if (row && !row.handoff_id && !row.control) {
         row.handoff_id = `handoff-${row.id}`;
         row.consumer = clone(body.consumer);
@@ -111,11 +115,25 @@ function fixture() {
     } else if (path === `${prefix}/begin`) {
       if (f.closed) throw new Error("epoch closed");
       const row = f.rows.find((r) => r.id === body.message_id);
-      assert.deepEqual(body.consumer, row.consumer);
       assert.equal(body.handoff_id, row.handoff_id);
-      const begin = row.handoff_stage === "offered";
-      if (begin) row.handoff_stage = "sending";
-      result = { begin };
+      if (body.attempt !== undefined) {
+        // Re-grant for the current consumer; bounded by the attempt ledger.
+        assert.deepEqual(body.consumer, f.current);
+        const count = row.attempt ?? 1;
+        let begin = false;
+        if (body.attempt === count && ["sending", "unknown"].includes(row.handoff_stage)) {
+          if (count >= 3) row.disposition = { state: "failed", code: "delivery_attempts_exhausted" };
+          else Object.assign(row, { attempt: count + 1, handoff_stage: "sending" });
+          begin = !row.disposition;
+        }
+        f.regrants = (f.regrants ?? 0) + 1;
+        result = { begin };
+      } else {
+        assert.deepEqual(body.consumer, row.consumer);
+        const begin = row.handoff_stage === "offered";
+        if (begin) row.handoff_stage = "sending";
+        result = { begin };
+      }
     } else if (path === `${prefix}/disposition`) {
       const row = f.rows.find((r) => r.id === body.message_id);
       assert.deepEqual(body.consumer, f.current);
@@ -1246,4 +1264,452 @@ test("frontend recovery refuses a changed binding or another current consumer", 
     assert.equal(f.calls.filter((call) => call.path.endsWith("/enroll")).length, 1);
     assert.match(f.logs.join("\n"), /original binding or consumer/);
   }
+});
+
+// Managed (idle-aware) receiving: nothing queued and unsubmitted stays ambiguous.
+function managedFixture() {
+  const f = fixture();
+  f.messageBase = true;
+  f.capabilities = { compatible_native_inbox: 1, retained_delivery_reattempt: 1 };
+  f.turn = new MainTurn();
+  f.notice = new PendingInputNotice({ now: () => f.clock });
+  f.managed = (incarnation = "consumer-new", options = {}) => f.consumer(incarnation, {
+    receivingApi: "native-sdk-v1", mainTurn: f.turn,
+    onPending: (target, messages) => f.notice.offered(target, messages),
+    onSubmitted: (target, id) => f.notice.confirmed(target, id),
+    onConsumed: (target, id) => f.notice.confirmed(target, id),
+    ...options,
+  });
+  // A begun original from an earlier consumer incarnation of this session.
+  f.started = (stage = "unknown") => {
+    const row = f.add();
+    return Object.assign(row, {
+      handoff_id: `handoff-${row.id}`, handoff_stage: stage,
+      consumer: { session_id: sid, incarnation: "consumer-old" },
+    });
+  };
+  f.history = (row) => ({
+    id: `history-${row.id}`, type: "user.message", timestamp: new Date(3_000).toISOString(),
+    data: { source: "agent-bridge", turnId: `turn-${row.id}`,
+      content: `<agent-message retained-session="${sid}" retained-consumer="consumer-old" `
+        + `retained-handoff="${row.handoff_id}" msg-id="${row.id}" from="peer">body-${row.id}</agent-message>` },
+  });
+  f.run = () => f.turn.observe({ type: "assistant.turn_start" });
+  f.idle = () => { f.run(); f.turn.observe({ type: "session.idle" }); };
+  f.nudges = () => f.sends.filter((send) => send.prompt === RESUME_NUDGE).length;
+  return f;
+}
+
+test("an unsubmitted original from a prior incarnation is submitted once the session goes idle", async () => {
+  const f = managedFixture();
+  const first = f.started("unknown");
+  const second = f.started("sending");
+  const inbox = f.managed();
+  f.run();
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.historyReads, 0);
+  assert.deepEqual([...f.notice.pending], [1, 2]);
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.historyReads, 1, "one bounded history check per idle episode");
+  assert.equal(f.sends.length, 2);
+  assert.match(f.sends[0].prompt, /^<agent-message retained-session="native-a" retained-consumer="consumer-old" retained-handoff="handoff-1" /);
+  assert.match(f.sends[0].prompt, /msg-id="1"/);
+  assert.match(f.sends[1].prompt, /msg-id="2"/);
+  assert.equal(f.sends[0].mode, "enqueue");
+  assert.equal(first.handoff_stage, "sdk_accepted");
+  assert.equal(second.handoff_stage, "sdk_accepted");
+  assert.equal(first.attempt, 2);
+  const begin = f.calls.find((call) => call.path.endsWith("/begin")).body;
+  assert.equal(begin.attempt, 1);
+  assert.deepEqual(begin.consumer, f.current);
+  assert.equal(f.notice.pending.size, 0);
+  assert.equal(f.nudges(), 0);
+});
+
+test("an original already in session history is marked consumed and never resent", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  f.events = [f.history(row)];
+  const inbox = f.managed();
+  f.run();
+  await inbox.tick(sid);
+  f.idle();
+  await inbox.tick(sid);
+  assert.equal(row.handoff_stage, "consumed");
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+  assert.deepEqual(f.sends.map((send) => send.prompt), [RESUME_NUDGE]);
+  assert.equal(f.sends[0].mode, "enqueue");
+  assert.equal(f.notice.pending.size, 0);
+  await inbox.tick(sid);
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(f.nudges(), 1, "one nudge per idle episode");
+  f.idle();
+  await inbox.tick(sid);
+  assert.equal(f.nudges(), 1, "a later idle with an empty queue is never nudged");
+});
+
+test("an idle session with an empty queue gets no prompt and no history read", async () => {
+  const f = managedFixture();
+  const inbox = f.managed();
+  f.run();
+  await inbox.tick(sid);
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.historyReads, 0);
+});
+
+test("mixed redundant and new originals submit only the new one and never nudge", async () => {
+  const f = managedFixture();
+  const redundant = f.started("unknown");
+  f.events = [f.history(redundant)];
+  const inbox = f.managed();
+  f.run();
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  f.add();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(redundant.handoff_stage, "consumed");
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /msg-id="2"/);
+  assert.equal(f.nudges(), 0);
+});
+
+test("unavailable history defers submission to a later idle check, then submits", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  let fail = true;
+  const getEvents = f.session.getEvents;
+  f.session.getEvents = async () => {
+    if (fail) { f.historyReads++; throw new Error("history unavailable"); }
+    return getEvents();
+  };
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(row.handoff_stage, "unknown");
+  assert.equal(f.historyReads, 1, "cooldown bounds history retries");
+  assert.equal(f.nudges(), 0);
+  fail = false;
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.equal(f.notice.pending.size, 0);
+});
+
+test("bounded attempts end in an explicit terminal failure, not a lingering record", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  let attempts = 0;
+  f.session.send = async () => { attempts++; throw new Error("SDK reply lost"); };
+  const inbox = f.managed();
+  f.idle();
+  for (let i = 0; i < 6; i++) {
+    await inbox.tick(sid);
+    f.clock += 30_001;
+  }
+  assert.equal(attempts, 2);
+  assert.deepEqual(row.disposition, { state: "failed", code: "delivery_attempts_exhausted" });
+  assert.equal(f.historyReads, 1, "a full history read happens at most once per original");
+  assert.equal(f.notice.pending.size, 0);
+  const regrants = f.regrants;
+  await inbox.tick(sid);
+  assert.equal(f.regrants, regrants);
+});
+
+test("live-observed and offered originals settle without any history read", async () => {
+  const f = managedFixture();
+  const observed = f.started("unknown");
+  const inbox = f.managed();
+  inbox.observe(sid, f.history(observed));
+  f.add();
+  f.idle();
+  await inbox.tick(sid);
+  // Both pre-submit decisions were made without reading history.
+  assert.equal(f.historyReads, 0);
+  await inbox.tick(sid);
+  assert.equal(observed.handoff_stage, "consumed");
+  assert.equal(f.rows[1].handoff_stage, "sdk_accepted");
+  // Only the submitted original then seeks consumption, once, as before.
+  assert.equal(f.historyReads, 1);
+  await inbox.tick(sid);
+  assert.equal(f.historyReads, 1);
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /msg-id="2"/);
+});
+
+test("a bridge without re-attempt support never resends and clears the pending notice", async () => {
+  const f = managedFixture();
+  f.capabilities = { compatible_native_inbox: 1 };
+  const row = f.started("unknown");
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(row.handoff_stage, "unknown");
+  assert.equal(f.notice.pending.size, 0);
+  assert.equal(f.calls.some((call) => call.body?.reattempt), false);
+});
+
+test("submitted receipts never crowd an unsubmitted original out of the re-attempt list", async () => {
+  const f = managedFixture();
+  const accepted = Array.from({ length: 100 }, () => f.started("sdk_accepted"));
+  const row = f.started("unknown");
+  const inbox = f.managed();
+  f.idle();
+  for (let i = 0; i < 4; i++) {
+    await inbox.tick(sid);
+    f.clock += 30_001;
+  }
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.deepEqual(f.sends.map((send) => send.prompt.match(/msg-id="(\d+)"/)?.[1]), ["101"]);
+  assert.ok(accepted.every((receipt) => receipt.handoff_stage === "sdk_accepted"));
+});
+
+test("a redundant queue never prompts a session without re-attempt support or message base", async () => {
+  for (const legacy of [
+    (f) => { f.capabilities = { compatible_native_inbox: 1 }; },
+    (f) => { f.messageBase = false; },
+  ]) {
+    const f = managedFixture();
+    legacy(f);
+    const row = f.started("unknown");
+    f.events = [f.history(row)];
+    const inbox = f.managed();
+    f.run();
+    await inbox.tick(sid);
+    f.idle();
+    await inbox.tick(sid);
+    await inbox.tick(sid);
+    assert.equal(row.handoff_stage, "consumed");
+    assert.equal(f.sends.length, 0);
+  }
+});
+
+test("a queued backlog beyond the first recovery page is fully reconciled before any nudge", async () => {
+  const f = managedFixture();
+  const rows = Array.from({ length: 101 }, () => f.started("unknown"));
+  f.events = rows.slice(0, 100).map((row) => f.history(row));
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.nudges(), 0, "the second page is still unreconciled");
+  f.clock += 30_001;
+  for (let i = 0; i < 3; i++) await inbox.tick(sid);
+  assert.ok(rows.slice(0, 100).every((row) => row.handoff_stage === "consumed"));
+  assert.equal(rows[100].handoff_stage, "sdk_accepted");
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /msg-id="101"/);
+  assert.equal(f.nudges(), 0);
+});
+
+test("matching input observed while a re-attempt is granted is never sent again", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  let inbox;
+  f.after = async (_method, path, body) => {
+    if (path.endsWith("/begin") && body.attempt !== undefined) inbox.observe(sid, f.history(row));
+  };
+  inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.filter((send) => send.prompt !== RESUME_NUDGE).length, 0);
+  assert.equal(row.handoff_stage, "consumed");
+});
+
+test("a turn starting during a re-attempt grant defers the send to the next idle", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  let started = false;
+  f.after = async (_method, path, body) => {
+    if (!started && path.endsWith("/begin") && body.attempt !== undefined) {
+      started = true;
+      f.run();
+    }
+  };
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(row.handoff_stage, "unknown");
+  f.turn.observe({ type: "session.idle" });
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.equal(row.attempt, 3);
+});
+
+test("bounded recent-first history is preferred over a full event read", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  const reads = [];
+  f.session.rpc.eventLog = { read: async (options) => {
+    reads.push(options);
+    return { events: [f.history(row)], cursor: null, hasMore: false, cursorStatus: "ok" };
+  } };
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  assert.equal(f.historyReads, 0);
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].direction, "backward");
+  assert.deepEqual(reads[0].types, ["user.message"]);
+  assert.equal(row.handoff_stage, "consumed");
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+});
+
+test("a deep backward history scan keeps its progress past any number of user messages", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  // Far more user messages than any overlap cache; all arrived after the handoff.
+  const total = 60_000;
+  let pages = 0;
+  let maxPerTick = 0;
+  let perTick = 0;
+  f.session.rpc.eventLog = { read: async ({ cursor, max }) => {
+    pages++;
+    perTick++;
+    const start = cursor ? Number(cursor) : 0;
+    const end = Math.min(total, start + max);
+    const events = [];
+    for (let i = start; i < end; i++) {
+      events.push({ id: `user-${i}`, type: "user.message", timestamp: new Date(3_000).toISOString(),
+        data: { content: `ordinary ${i}` } });
+    }
+    return { events, cursor: end < total ? String(end) : null, hasMore: end < total, cursorStatus: "ok" };
+  } };
+  const inbox = f.managed();
+  f.idle();
+  for (let i = 0; i < 120 && f.sends.length === 0; i++) {
+    perTick = 0;
+    await inbox.tick(sid);
+    maxPerTick = Math.max(maxPerTick, perTick);
+    f.clock += 30_001;
+  }
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.equal(f.sends.length, 1);
+  assert.ok(maxPerTick <= 8, "each check reads a bounded number of pages");
+  assert.ok(pages < total / 100 + 200, "the deep scan never restarts from the newest event");
+});
+
+test("deferred history checks never hold a recovery page from later unsubmitted originals", async () => {
+  const f = managedFixture();
+  Array.from({ length: 100 }, () => f.started("sdk_accepted"));
+  const row = f.started("unknown");
+  let reads = 0;
+  f.session.rpc.eventLog = { read: async () => {
+    if (reads++ === 0) throw new Error("history briefly unavailable");
+    return { events: [], cursor: null, hasMore: false, cursorStatus: "ok" };
+  } };
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0, "the cooldown still bounds history reads");
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(reads, 2, "one history read covers both pages' deferred checks");
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.deepEqual(f.sends.map((send) => send.prompt.match(/msg-id="(\d+)"/)?.[1]), ["101"]);
+  assert.equal(f.nudges(), 0);
+});
+
+test("a fresh offer whose send fails blocks the resume prompt after a redundant original", async () => {
+  const f = managedFixture();
+  const redundant = f.started("unknown");
+  f.events = [f.history(redundant)];
+  const send = f.session.send;
+  f.session.send = async (options) => {
+    if (options.prompt !== RESUME_NUDGE) throw new Error("SDK reply lost");
+    return send(options);
+  };
+  const inbox = f.managed();
+  f.run();
+  await inbox.tick(sid);
+  const offer = f.add();
+  f.idle();
+  for (let i = 0; i < 8; i++) {
+    await inbox.tick(sid);
+    f.clock += 30_001;
+  }
+  assert.equal(redundant.handoff_stage, "consumed");
+  assert.notEqual(offer.handoff_stage, "offered");
+  assert.equal(f.nudges(), 0);
+});
+// Serve a fixed user.message log newest-first in bounded pages.
+function pagedLog(events) {
+  const ordered = [...events].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  return { read: async ({ cursor, max }) => {
+    const start = cursor ? Number(cursor) : 0;
+    const end = Math.min(ordered.length, start + max);
+    return { events: ordered.slice(start, end), cursor: end < ordered.length ? String(end) : null,
+      hasMore: end < ordered.length, cursorStatus: "ok" };
+  } };
+}
+
+const unrelatedInputs = (count) => Array.from({ length: count }, (_, i) => ({
+  id: `other-${i}`, type: "user.message", timestamp: new Date(4_000 + i).toISOString(),
+  data: { source: "agent-bridge", turnId: `other-turn-${i}`,
+    content: `<agent-message retained-session="${sid}" retained-consumer="consumer-old" `
+      + `retained-handoff="other-${i}" msg-id="${9_000 + i}" from="peer">x</agent-message>` },
+}));
+
+test("cached history evidence stays bounded and settled originals are pruned", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  f.session.rpc.eventLog = pagedLog([f.history(row), ...unrelatedInputs(1_500)]);
+  const inbox = f.managed();
+  f.idle();
+  let peak = 0;
+  for (let i = 0; i < 8 && row.handoff_stage !== "consumed"; i++) {
+    await inbox.tick(sid);
+    peak = Math.max(peak, inbox.historyEvidenceSize());
+    f.clock += 30_001;
+  }
+  assert.equal(row.handoff_stage, "consumed", "the pinned original's match survives the cap");
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+  assert.ok(peak <= 1_000, `cached evidence is capped (peak ${peak})`);
+  assert.ok(inbox.historyEvidenceSize() < 1_000);
+});
+
+test("evicted history evidence never authorizes a duplicate submission", async () => {
+  const f = managedFixture();
+  const original = f.started("unknown");
+  f.started("sdk_accepted");
+  f.session.rpc.eventLog = pagedLog([f.history(original), ...unrelatedInputs(1_500)]);
+  const inbox = f.managed();
+  // While running only the submitted original is checked, so the unsubmitted
+  // one's match is unpinned and the cap evicts it.
+  f.run();
+  for (let i = 0; i < 4; i++) {
+    await inbox.tick(sid);
+    assert.ok(inbox.historyEvidenceSize() <= 1_000);
+    f.clock += 30_001;
+  }
+  f.idle();
+  for (let i = 0; i < 8 && original.handoff_stage !== "consumed"; i++) {
+    await inbox.tick(sid);
+    assert.ok(inbox.historyEvidenceSize() <= 1_000);
+    f.clock += 30_001;
+  }
+  assert.equal(original.handoff_stage, "consumed");
+  assert.equal(f.sends.filter((send) => /msg-id="1"/.test(send.prompt)).length, 0);
 });

@@ -76,10 +76,17 @@ STANDALONE_NATIVE_EXTRA_FILES = {
 NATIVE_SOURCE_ALIASES = {
     "plugins/budget-guidance": {"pip-index-config": "installer_pip_index.py"},
 }
+NATIVE_SUPPORT_FILES = {
+    "plugins/agent-bridge": (
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
+}
 
 
 def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
     relative = consumer.relative_to(repo).as_posix()
+    if relative in NATIVE_SUPPORT_FILES:
+        return NATIVE_SUPPORT_FILES[relative]
     return (*STANDALONE_NATIVE_FILES, *STANDALONE_NATIVE_EXTRA_FILES.get(relative, ()))
 
 
@@ -95,7 +102,10 @@ def python_adopter_dirs(repo: Path, *, plugins: tuple[str, ...] | None = None) -
 
 
 def native_adopter_dirs(repo: Path) -> tuple[Path, ...]:
-    return tuple(repo / name for name in STANDALONE_NATIVE_ADOPTERS if os.path.lexists(repo / name))
+    return tuple(
+        repo / name for name in (*STANDALONE_NATIVE_ADOPTERS, *NATIVE_SUPPORT_FILES)
+        if os.path.lexists(repo / name)
+    )
 
 
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")

@@ -960,9 +960,12 @@ function Invoke-Stamp {
     $section = '(?ms)(^\[tool\.uv\.sources\]\s*\r?\n)(.*?)(?=^\[|\z)'
     $project = [regex]::Replace($project, $section, {
         param($match)
-        $match.Groups[1].Value + [regex]::Replace(
+        $sources = [regex]::Replace(
             $match.Groups[2].Value, '(?m)^agent-procutil\s*=.*$',
             'agent-procutil = { path = "libs/agent-procutil" }')
+        $match.Groups[1].Value + [regex]::Replace(
+            $sources, '(?m)^agent-update-driver\s*=.*$',
+            'agent-update-driver = { path = "libs/update-driver" }')
     })
     [IO.File]::WriteAllText($projectPath, $project, $utf8NoBom)
     } elseif ((Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion) -ne $SourceRuntimeIdentity) {

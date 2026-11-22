@@ -296,6 +296,7 @@ function Write-Fail {{ param([string]$Msg) Write-Host "  [FAIL] $Msg" }}
 function Write-Step {{ param([string]$Msg) }}
 function Write-Warn {{ param([string]$Msg) Write-Host "  [WARN] $Msg" }}
 function Ensure-Uv {{ return $true }}
+function Initialize-BridgeBootstrapPython {{ }}
 function Ensure-ScheduledTask {{ }}
 function Invoke-MigrationCheck {{ }}
 function Enter-InstallLock {{ return $true }}

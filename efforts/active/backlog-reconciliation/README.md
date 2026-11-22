@@ -410,8 +410,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [optional Budget foundation-closure follow-through](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md#optional-installation-inputs-are-not-worker-adoption)
+records the newly merged self-contained bootstrap inputs and attributed focused qualification, while retaining actual executor/readiness adoption and the failing broader portfolio.
+
+The [naming-source and Git-read deadline continuation](journal/2026/11.21-naming-source-and-git-read-deadlines.md)
+retains the unresolved ID-first naming default after a loader move and the expanded remote-read/retry/publication contract, without repeating unchanged originals or changing issue state.
+
+The [Budget prerequisite and telemetry-planning continuation](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md)
+credits three scoped source deliveries without claiming consumer adoption or a passing full native portfolio, retains the distinct suite-wide telemetry planning request and records a complete 905-open census.
+
+The [protected-capacity and activity intake](journal/2026/11.21-protected-capacity-and-activity-intake.md)
+retains two distinct requests, scoped #14008 delivery and a complete 903-open census; it also restores the recorded later 60-second owner amendment rather than reviving a historical latency gate.
+
 The [native operability and original-acceptance continuation](journal/2026/11.21-native-operability-and-original-acceptance.md)
-distinguishes the reviewed 60-second read correction from the original 20-second request, and retains installed/older-mux qualification separately from source completion.
+distinguishes operability from latency improvement, accepts the later 60-second owner amendment and retains installed/older-mux qualification separately from source completion.
 
 The [bounded inventory, telemetry and continuity continuation](journal/2026/11.21-bounded-inventory-and-continuity-intake.md)
 records two merged source leaves, three distinct new requests and an external departure; the complete census is 902 open, 173 above the fixed target.
@@ -4061,6 +4073,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [monitor/roster receiving proposal](monitor-roster-receiving.md) maps
+  #13789's complete reader contract into the existing OPEN #2619 event-driven,
+  incremental publication parent. Reviewed intent precedes actual append-only
+  receiving acceptance and a separate tracking judgment; neither issue is
+  completed or any implementation/resource owner reassigned by the proposal.
   The [finite lifecycle receiving and corrective closeout](journal/2026/11.18-lifecycle-receiving-and-corrective-closeout.md)
   records #13197's actual reviewed merge, all three unsupported retirements
   withdrawn with zero credit, preserved source conditions and 24 open parent
@@ -6373,6 +6390,10 @@ incumbent parent check state remains unchanged.
   disposition, without resetting body/source allowances or other owners' holds.
 - [ ] Every consolidation explicitly preserves all unique unresolved
   requirements, acceptance conditions and owner responsibilities in its successor.
+  The [monitor/roster gates](monitor-roster-receiving.md#validation-plan)
+  require the whole actual parent/discussion readback, all incumbent event and
+  native/performance clauses, every source reader/compatibility condition and
+  current keeper qualification before a separately audited tracking retirement.
 - [ ] _(Agent-recommended)_ Every eligible open issue appears in the graph
   coverage roster with a primary research owner and a reviewed or explicitly
   pending outcome; excluded issues remain metadata-only and counted.

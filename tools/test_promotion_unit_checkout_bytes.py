@@ -57,18 +57,28 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
                 for name in files if name in names
             )
     payloads = sorted(set(payloads))
+    data_payloads = (
+        "plugins/agent-mcp/scripts/uninstall-profile.json",
+        "tools/fixtures/installed-footprint-v2.json",
+    )
+    assert all(name in manifest["sources"] for name in data_payloads)
+    payloads.extend(data_payloads)
     content = b"Write-Output 'literal promotion fixture'\n"
     lf_names = {
         "daemon_instances.ps1", "native_daemon.ps1", "native_owned.ps1",
         "windows_broker_task.ps1", "versioned_runtime_native.ps1",
     }
     expected = {
-        name: content if Path(name).name in lf_names else content.replace(b"\n", b"\r\n")
+        name: content if Path(name).name in lf_names or name in data_payloads
+        else content.replace(b"\n", b"\r\n")
         for name in payloads
     }
     assert any(expected[name] == content for name in admitted_payloads)
     assert any(expected[name] != content for name in admitted_payloads)
-    sources = {name: hashlib.sha256(expected[name]).hexdigest() for name in admitted_payloads}
+    sources = {
+        name: hashlib.sha256(expected[name]).hexdigest()
+        for name in (*admitted_payloads, *data_payloads)
+    }
     attributes = root / ".gitattributes"
     attributes.write_bytes(b"*.ps1 text eol=crlf\n")
     for name in payloads:

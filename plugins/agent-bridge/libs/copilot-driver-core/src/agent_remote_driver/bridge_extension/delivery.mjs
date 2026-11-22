@@ -245,7 +245,7 @@ export class PendingInputNotice {
           (this.pending.size ? "Known messages remain pending; idle submission is not guaranteed. " : "") +
           "Original inbox receipts remain authoritative; do not acknowledge or replay uncertain input."
         : `Agent-bridge has ${this.pending.size} pending message(s) awaiting SDK submission. ` +
-          "Idle submission is not guaranteed; do not end your turn solely for this notice. " +
+          "They are submitted when this session next goes idle; do not end your turn solely for this notice. " +
           "Do not send an acknowledgement or replay input.",
     };
   }
@@ -264,6 +264,8 @@ const MAIN_TURN_END = new Set(["assistant.idle", "session.idle"]);
 export class MainTurn {
   constructor() {
     this.running = false;
+    // Counts idle episodes: each running -> idle transition starts a new one.
+    this.episode = 0;
   }
 
   observe(event) {
@@ -271,6 +273,7 @@ export class MainTurn {
     const type = event?.type;
     if (MAIN_TURN_START.has(type)) this.running = true;
     else if (MAIN_TURN_END.has(type)) {
+      if (this.running) this.episode += 1;
       this.running = false;
       return true;
     }

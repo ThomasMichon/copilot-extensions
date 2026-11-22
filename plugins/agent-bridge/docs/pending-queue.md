@@ -27,8 +27,15 @@ message IDs, admission/handoff/SDK stages, registration freshness, turn state,
 current consumer incarnation and an independently fresh delivery-attention
 observation when available. It excludes message bodies and controls. Accepted
 but unconsumed records remain visible; absence of legacy consumption tracking
-does not prove they are still queued. `sending` and `unknown` preserve uncertain
-native effects. The existing hook's last emitted count can appear separately
+does not prove they are still queued. `sending` and `unknown` mark started
+native effects that have not been confirmed submitted; an idle current receiver
+re-attempts them (see below), so they are not a permanent state.
+A started original whose bounded re-attempts were exhausted leaves
+`messages` and is listed under `failed` with stage `failed`, code
+`delivery_attempts_exhausted`, the attempt count and its failure time. Late
+acceptance or consumption evidence for such an original removes it from that
+list while its terminal disposition stays recorded.
+That list is bounded (newest 20) and body-free. The existing hook's last emitted count can appear separately
 when this serving process observed its diagnostic event in the last 60 seconds.
 It is not a current set or a queue census; an observed consumer incarnation
 must still match, and legacy notices without one say their binding is unverified.
@@ -55,10 +62,39 @@ same handoff and the receiver's one-shot begin grant.
 It does not submit or resend native input, wake/replace a session, reset a
 cursor, unmute delivery, clear a hook's pending notice or mark input consumed.
 Already started, uncertain, SDK-accepted, runtime-custodied, startup and
-interrupt records are left unchanged. The ordinary receiver still owns all
-delivery and final admission. A new/current incompatible receiver, changed
-worktree, stale registration or non-serving owner refuses before preparation.
-A muted receiver stays muted.
+interrupt records are left unchanged by reconciliation. The ordinary receiver
+still owns all delivery, idle re-attempts and final admission. A new/current
+incompatible receiver, changed worktree, stale registration or non-serving
+owner refuses before preparation. A muted receiver stays muted.
+
+## Idle submission of started records
+
+A record is not left in an ambiguous started state. When the session is idle,
+a current receiver whose provider advertises `retained_delivery_reattempt: 1`
+submits every ordinary queued record that is not yet `sdk_accepted`,
+`consumed`, rejected or failed, including `sending`/`unknown` records started by
+an earlier consumer incarnation of the same native session:
+
+1. It first checks the session's own root user-message input for the record's
+   retained `<agent-message ... msg-id=...>` header. A match reports
+   `consumed` and nothing is sent.
+2. Otherwise the backend grants a new attempt of the same original (same ID,
+   body, order, handoff and receipt history) to the current enrolled receiver,
+   records it in `live_message_attempts`, and the receiver submits it and
+   reports `sdk_accepted`. Each attempt grant is one-shot, compare-and-set on
+   the attempt number, and keeps the usual authentication, binding, current
+   session, worktree and mute checks.
+3. The original start counts as attempt one. A request beyond three attempts
+   instead records the terminal `failed` disposition shown above.
+
+If history cannot be read, nothing is resent and the check is retried on a
+later idle tick; it is never a permanent "no resend". If the receiver goes
+idle with queued records and every one of them proves already delivered, it
+sends one short resume prompt for that idle episode only. An empty queue, a
+real submission or a later tick of the same episode sends nothing, and a
+receiver without re-attempt support never sends the resume prompt. A new
+message offered during that episode whose send fails or stays uncertain also
+withholds the prompt.
 
 The command first reads the selected executing provider's
 `GET /api/v1/live-sessions/pending-queue-contract` declaration, then pins its

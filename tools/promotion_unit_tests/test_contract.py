@@ -171,9 +171,12 @@ def test_noncanonical_or_git_source_is_refused(path: str) -> None:
     "plugins/agent-worktrees/bin/agent-worktrees",
     "libs/installer-engine/installer-engine.ps1",
     "plugins/agent-bridge/plugin.json",
+    "plugins/agent-mcp/scripts/uninstall-profile.json",
+    "tools/fixtures/installed-footprint-v2.json",
 ], ids=[
     "catalog", "gateway-recipe", "gateway-ignore", "bundled-wheel",
     "native-command-text", "native-writer-text", "command-metadata",
+    "footprint-profile", "footprint-history",
 ])
 def test_build_data_is_hash_bound_but_never_executable_unit_source(tmp_path: Path, name: str) -> None:
     data = manifest()

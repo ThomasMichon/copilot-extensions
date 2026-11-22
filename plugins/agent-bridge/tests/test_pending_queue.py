@@ -218,6 +218,35 @@ def test_unknown_started_and_accepted_handoffs_are_never_replayed(queue_api: Que
     assert [dict(row) for row in db.execute_read("SELECT * FROM live_messages")] == before
 
 
+def test_exhausted_reattempts_leave_pending_and_report_explicit_failure(queue_api: QueueAPI) -> None:
+    _, api, db = queue_api
+    message_id = db.enqueue_live_message("native", "sender", "PRIVATE BODY", time.time())
+    first = InboxConsumer("native", "receiver", message_base=1)
+    compatible_inbox.enroll(db, first, expected_incarnation=None, now=time.time())
+    offered, = compatible_inbox.poll(db, first, now=time.time(), limit=10)
+    handoff = offered["handoff"]["id"]
+    assert compatible_inbox.begin(db, first, message_id, handoff, now=time.time())
+    successor = InboxConsumer("native", "successor", message_base=1)
+    compatible_inbox.enroll(db, successor, expected_incarnation="receiver", now=time.time())
+    for expected in (1, 2):
+        assert compatible_inbox.begin(
+            db, successor, message_id, handoff, now=time.time(), attempt=expected,
+        )
+    pending = api.get(PATH, params=PARAMS).json()
+    assert [(m["message_id"], m["stage"]) for m in pending["messages"]] == [(message_id, "sending")]
+    assert pending["failed"] == []
+    assert not compatible_inbox.begin(
+        db, successor, message_id, handoff, now=time.time(), attempt=3,
+    )
+    result = api.get(PATH, params=PARAMS).json()
+    assert result["messages"] == []
+    failure, = result["failed"]
+    assert (failure["message_id"], failure["stage"], failure["code"], failure["attempts"]) == (
+        message_id, "failed", "delivery_attempts_exhausted", 3,
+    )
+    assert "PRIVATE BODY" not in json.dumps(result)
+
+
 def test_exact_binding_current_receiver_and_serving_refusals(queue_api: QueueAPI) -> None:
     app, api, db = queue_api
     db.enqueue_live_message("native", "sender", "original", time.time())

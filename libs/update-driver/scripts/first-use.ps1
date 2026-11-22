@@ -5,6 +5,7 @@
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
 # Installation driver lifecycle contract: mcp-recipes-v1
+# Installation driver lifecycle contract: budget-install-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -55,14 +56,21 @@ switch -CaseSensitive ($plugin) {
     'agent-logger' { $prefix = 'AGENT_LOGGER' }
     'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
     'agent-mcp' { $prefix = 'AGENT_MCP' }
+    'budget-guidance' { $prefix = 'BUDGET_GUIDANCE' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
     throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
 }
-if ($InstallerAction -ceq 'install' -and $plugin -cnotin @('agent-logger', 'agent-bridge')) {
-    throw 'Fixed install action requires Logger or Bridge.'
+if ($InstallerAction -ceq 'install' -and $plugin -cnotin @('agent-logger', 'agent-bridge', 'budget-guidance')) {
+    throw 'Fixed install action requires Logger, Bridge or Budget.'
 }
+if ($plugin -ceq 'budget-guidance' -and (
+    $RuntimeRoot -ine (Join-Path $env:USERPROFILE '.budget-guidance') -or
+    [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
+    [IO.Path]::GetFileName($Payload) -cne 'budget-guidance'
+)) { throw 'Budget first use requires its canonical installed payload and default legacy root.' }
 if ($plugin -ceq 'agent-logger') {
     foreach ($helper in @(
         'command_binding.py', 'command_lifecycle.py', 'installer_engine.py',
@@ -197,6 +205,23 @@ $recipe = @{
     noSelfProvisionEnv = $noSelf
     installationContext = 'required'
 }
+if ($plugin -ceq 'budget-guidance') {
+    $recipe.Remove('installationContext')
+    $recipe.module = 'budget_guidance'
+    $recipe.runtimeRoot = '.budget-guidance'
+    $recipe.pythonLauncher = 'uv'
+    $recipe.installer = 'install'
+    if ($invocation.bootstrapPython -isnot [string] -or
+        $invocation.bootstrapPython -cnotmatch '\A3\.[0-9]+\.[0-9]+\z' -or
+        $invocation.installerLifecycle -isnot [bool] -or -not $invocation.installerLifecycle) {
+        throw 'Budget first use requires its fixed V1 installation declaration.'
+    }
+    foreach ($field in @('installationContext', 'provisionMode', 'payloadDispatcher', 'commands')) {
+        if ($null -ne $invocation.PSObject.Properties[$field]) {
+            throw 'Budget first use requires its fixed V1 installation declaration.'
+        }
+    }
+}
 if ($plugin -ceq 'agent-logger') {
     $loggerCommands = @(
         @('agent-logger', 'agent_logger'),
@@ -229,7 +254,7 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
         ($provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'snapshot')) {
         throw 'Owning payload does not declare the fixed first-use provision recipe.'
     }
-} elseif ($plugin -cne 'agent-logger' -and ($null -eq $provisionMode -or
+} elseif ($plugin -cnotin @('agent-logger', 'budget-guidance') -and ($null -eq $provisionMode -or
     $provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'direct')) {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
@@ -240,9 +265,10 @@ foreach ($field in $recipe.GetEnumerator()) {
     }
 }
 $expectedInstaller = if ($plugin -ceq 'agent-mcp') { 'init' } else { 'install' }
+$expectedVersion = if ($plugin -ceq 'budget-guidance') { 1 } else { 2 }
 if ($identity.name -isnot [string] -or
     ($invocation.version -isnot [int] -and $invocation.version -isnot [long]) -or
-    $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne $expectedInstaller) {
+    $invocation.version -ne $expectedVersion -or $installer -isnot [string] -or $installer -cne $expectedInstaller) {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
 # MCP batches read-only SDK queries, retaining the canonical caller-owned adapter.
