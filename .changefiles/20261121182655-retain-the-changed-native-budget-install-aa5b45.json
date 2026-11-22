@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the changed native Budget installer inputs in the existing sealed-unit admission used by bundled tooling.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
