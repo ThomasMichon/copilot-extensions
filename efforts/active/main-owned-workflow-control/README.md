@@ -2405,7 +2405,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   seconds within the unchanged bound. Reviewed and merged trees match.
   Only this three-case leaf is complete; the parent, separate refusals and
   native qualifications remain open.
-- [ ] Qualify the two complete original control-manifest refusal functions:
+- [x] Qualify the two complete original control-manifest refusal functions:
   fourteen nonportable/noncontrol path cases and nine malformed/ambiguous
   schema cases. Preserve original functions, parameter objects, literal
   malformed bytes, helper calls and assertions; compare complete 46-case
@@ -2427,7 +2427,36 @@ authorizes critical main-path acceptance or a bounded administrative change.
   control-owner call-phase coverage per case; all 69 phase reports pass.
   Only the adapter and original-test source bindings are added. Compact-v2
   contains 9,065 nodes and 1,281 sources in 1,016,683 bytes, preserving prior
-  node order, source hashes and all targets. Exact-head review, strict checks
+  node order, source hashes and all targets. Fatal Ruff, whole-file strict
+  Linux/Win32 typing and documentation checks pass. #14123 merges at
+  `b315b0441dc0feb091cb908bd226af196f33e2f2` after exact-head approval and
+  complete fresh Linux CI executes all 9,065 selected units in 235.563 packet
+  seconds within the unchanged bound. Reviewed and merged trees match.
+  Only this 23-case leaf is complete; the parent, separate refusals and
+  native qualifications remain open.
+- [ ] Qualify the four complete original source-owned artifact-index tests:
+  equivalent composition across Git containers, changed source/composition
+  refusal, legacy parent binding and rejection of a second container identity.
+  Preserve original functions, parameter objects, temporary wheel/bundle/index
+  helpers and assertions; compare complete 16-case original collection with
+  exactly five adapter nodes. Keep all real-Git, Windows-native and publisher
+  calls outside this selection. Require initial unchanged source/effect
+  auditing and actual artifact-owner call-phase coverage before adding only
+  a new adapter and original-test source binding. Preserve all 9,065 nodes,
+  1,281 current source hashes, 467 targets, 89 helper decisions and the
+  300-second bound. Normal strict checks, committed release intent, exact-head
+  review and complete fresh Linux CI remain required. No original assertion,
+  fixture, OS skip, new mock, preload, data/guard exception, workflow,
+  runtime/native/routing or cleanup change is authorized. Do not replay a
+  retained refusal or reuse either consumed metadata-refresh grant.
+  Complete collection verifies all 16 original cases and exactly five adapter
+  cases with original function, parameter-row object, type and node identity.
+  Initial unchanged auditing passes all five in 2.656 seconds, with zero
+  prohibited effects, forty bound canonical Python reads and actual
+  artifact-owner call-phase coverage per case; all fifteen phase reports pass.
+  Only the adapter and original-test source bindings are added. Compact-v2
+  contains 9,070 nodes and 1,283 sources in 1,017,444 bytes, preserving prior
+  node order, source hashes and all targets. Strict checks, exact-head review
   and complete fresh Linux CI remain required; this local qualification does
   not complete the parent or any separate refusal or native qualification.
 - [x] Land and observe necessary parsed-root admission for the sibling

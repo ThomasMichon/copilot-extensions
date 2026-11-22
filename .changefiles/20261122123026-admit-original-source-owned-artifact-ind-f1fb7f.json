@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original source-owned artifact-index unit decisions without Git or publisher calls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
