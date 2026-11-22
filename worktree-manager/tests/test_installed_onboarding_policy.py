@@ -14,7 +14,7 @@ class InstalledPolicyTest(unittest.TestCase):
             anchor.mkdir()
             companion.mkdir()
 
-            def observe(app: str, expected: str | None) -> None:
+            def observe(app: str, expected: str | None, *, bound: bool = True) -> None:
                 probe = (
                     "import sys,runpy\n"
                     "def guard(event,args):\n"
@@ -25,7 +25,7 @@ class InstalledPolicyTest(unittest.TestCase):
                 )
                 result = subprocess.run(
                     [sys.executable, "-I", "-B", "-c", probe, app, temp, "control",
-                     str(anchor), str(companion), "fixture"], capture_output=True, text=True, timeout=30,
+                     str(anchor), str(companion) if bound else "", "fixture"], capture_output=True, text=True, timeout=30,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 self.assertNotIn("unexpected service effect", result.stderr)
@@ -56,7 +56,10 @@ class InstalledPolicyTest(unittest.TestCase):
             base_index.parent.mkdir()
             base_index.write_text("indexers: not-a-list", encoding="utf-8")
             observe("agent-index", None)
+            base_index.write_text("indexer:\n  machine: fixture\n", encoding="utf-8")
+            observe("agent-index", "host", bound=False)
             base_index.unlink()
+            observe("agent-index", None, bound=False)
             vault.write_text('{"enabled":"false"}', encoding="utf-8")
             index.write_text("indexers: not-a-list", encoding="utf-8")
             observe("agent-vault", None)

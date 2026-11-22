@@ -29,12 +29,13 @@ def observe(app: str, root: Path, project: str, anchor: Path, companion: Path | 
     config = root / "apps" / app / "config"
     if app == "agent-index":
         native = owner("resolve_effective_config")
-        state, external = native._requires_external(anchor)
-        if state != "ready" or (external and not companion):
-            raise ValueError("Index configuration root unresolved")
         status, _, _ = native._load_repo_candidate(anchor, compose_preferences=False)
-        if status == "absent" and external:
-            status, _, _ = native._load_repo_candidate(companion, compose_preferences=False)
+        if status == "absent":
+            state, external = native._requires_external(anchor)
+            if state != "ready" or (external and not companion):
+                raise ValueError("Index configuration root unresolved")
+            if external:
+                status, _, _ = native._load_repo_candidate(companion, compose_preferences=False)
         if status == "absent":
             return "unconfigured"
         if status != "ready":
