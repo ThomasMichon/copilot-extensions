@@ -1509,7 +1509,7 @@ handoffConfigPromise.then((resolved) => {
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
 intentObservation = registerIntentObservation(session, state, {
-  readGoal: (cwd) => readCanonicalGoal(cwd, runCli),
+  readGoal: (cwd, sid) => readCanonicalGoal(cwd, runCli, sid),
   resolveCwd: (cwd, sid) => resolveIntentCwd(cwd, sid, runCli),
   allowAutomaticReplay: async () => (await refreshHandoffConfig()).mode !== "off",
 });

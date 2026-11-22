@@ -825,6 +825,105 @@ def test_posix_explicit_uv_config_preserves_physical_parent(
     assert output.out == output.err == ""
 
 
+def _raw_budget_checkout(tmp_path: Path) -> tuple[Path, Path]:
+    checkout = tmp_path / "checkout with spaces"
+    files = subprocess.check_output(
+        ["git", "-C", str(PLUGIN.parents[1]), "ls-files", "-z", "--",
+         "plugins/budget-guidance", "libs", "tools", ".github/plugin/marketplace.json"],
+        timeout=30, creationflags=NO_WINDOW,
+    )
+    for raw in files.split(b"\0"):
+        if not raw:
+            continue
+        relative = Path(os.fsdecode(raw))
+        target = checkout / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PLUGIN.parents[1] / relative, target)
+    roster = checkout / ".github/plugin/marketplace.json"
+    catalog = json.loads(roster.read_bytes())
+    catalog["plugins"] = [entry for entry in catalog["plugins"] if entry["name"] == "budget-guidance"]
+    roster.write_text(json.dumps(catalog), encoding="utf-8")
+    return checkout, checkout / "plugins/budget-guidance"
+
+
+@pytest.mark.parametrize("engine", ["pwsh", "powershell"])
+@pytest.mark.parametrize("operation", ["stamp", "missing-source", "linked-parent", "invalid-plan"])
+def test_powershell_raw_checkout_stamped_closure(
+    tmp_path: Path, engine: str, operation: str,
+) -> None:
+    executable = shutil.which(engine)
+    if executable is None:
+        pytest.skip(f"{engine} unavailable")
+    _, env = _fake_uv_environment(tmp_path)
+    checkout, payload = _raw_budget_checkout(tmp_path)
+    root = Path(env["HOME"]) / ".budget-guidance"
+    env.update(PATH="", COPILOT_EXTENSIONS_TEST_CONTAINED="1")
+    for name in ("COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN", "COPILOT_PLUGIN_STAGED_FROM",
+                 "COPILOT_PLUGIN_INSTALL_STAGED"):
+        env.pop(name, None)
+    assert not (payload / "scripts/bootstrap-python-version.txt").exists()
+    assert not (payload / "scripts/bootstrap-uv.ps1").exists()
+    original = checkout / "libs/agent-procutil/src/agent_procutil/__init__.py"
+    if operation == "missing-source":
+        original.unlink()
+    elif operation == "linked-parent":
+        linked_source = original.parent
+        linked_target = checkout / "linked-package"
+        linked_source.rename(linked_target)
+        if os.name == "nt":
+            linked = subprocess.run(
+                [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(linked_source), str(linked_target)],
+                capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+            )
+            assert linked.returncode == 0, linked.stdout + linked.stderr
+        else:
+            linked_source.symlink_to(linked_target, target_is_directory=True)
+    elif operation == "invalid-plan":
+        with (payload / "scripts/installer-source-assets.tsv").open("a", encoding="utf-8") as stream:
+            stream.write("copy\tlibs/agent-procutil/pyproject.toml\tscripts/../../escaped\n")
+    command = [
+        executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        str(payload / "scripts/install.ps1"), "stamp",
+    ]
+    result = subprocess.run(
+        command, cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=45, creationflags=NO_WINDOW,
+    )
+    if operation != "stamp":
+        assert result.returncode != 0, result.stdout + result.stderr
+        if operation == "linked-parent":
+            assert "Linked source snapshot asset refused" in result.stdout + result.stderr
+        assert not (root / "payload-dir").exists()
+        assert not (root / "stamped-version").exists()
+        assert not (checkout / "escaped").exists()
+        assert not list((root / "snapshots").glob("*.tmp-*"))
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    snapshot = Path((root / "payload-dir").read_text(encoding="utf-8").strip())
+    assert not (root / "current-version").exists()
+    stub = "budget-guidance.ps1" if os.name == "nt" else "budget-guidance"
+    assert (Path(env["HOME"]) / ".local/bin" / stub).is_file()
+    rows = (payload / "scripts/installer-source-assets.tsv").read_text().splitlines()
+    for row in rows:
+        action, source, target = row.split("\t")
+        if action == "copy":
+            assert (snapshot / target).read_bytes() == (checkout / source).read_bytes(), target
+        else:
+            assert (snapshot / target).read_text() == source + "\n"
+    assert (snapshot / "scripts/bootstrap-uv.ps1").is_file()
+    assert (snapshot / "scripts/pip-index-config").read_bytes() == (
+        checkout / "libs/installer-engine/installer_pip_index.py"
+    ).read_bytes()
+    shutil.rmtree(checkout)
+    repeated = subprocess.run(
+        [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         str(snapshot / "scripts/install.ps1"), "stamp"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=45,
+        creationflags=NO_WINDOW,
+    )
+    assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+
+
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX checkout reference coverage")
 @pytest.mark.parametrize("operation", [
     "install", "stamp", "stamp-artifacts", "stamp-linked-file", "stamp-linked-parent",
@@ -841,24 +940,7 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
     uv_config = tmp_path / "uv.toml"
     uv_config.write_text("", encoding="utf-8")
     env.update(UV_CONFIG_FILE=str(uv_config), PIP_CONFIG_FILE=os.devnull)
-    checkout = tmp_path / "checkout"
-    files = subprocess.check_output(
-        ["git", "-C", str(PLUGIN.parents[1]), "ls-files", "-z", "--",
-         "plugins/budget-guidance", "libs", "tools", ".github/plugin/marketplace.json"],
-        timeout=30,
-    )
-    for raw in files.split(b"\0"):
-        if not raw:
-            continue
-        relative = Path(os.fsdecode(raw))
-        target = checkout / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(PLUGIN.parents[1] / relative, target)
-    roster = checkout / ".github/plugin/marketplace.json"
-    catalog = json.loads(roster.read_bytes())
-    catalog["plugins"] = [entry for entry in catalog["plugins"] if entry["name"] == "budget-guidance"]
-    roster.write_text(json.dumps(catalog), encoding="utf-8")
-    payload = checkout / "plugins/budget-guidance"
+    checkout, payload = _raw_budget_checkout(tmp_path)
     if not is_stamp:
         staged = tmp_path / "bootstrap-ready"
         shutil.copytree(payload, staged)

@@ -40,6 +40,11 @@ uv may refuse a malformed empty setting rather than mutate the caller.
 Missing uv or an unprepared runtime reports setup instructions. `stamp` still
 creates a source snapshot and command, but first command use no longer performs
 installation: invoke the snapshot's `scripts/install.* provision` explicitly.
+Cold checkout stamping uses the same generated source-asset plan on POSIX and
+PowerShell, including the managed-Python request and native bootstrap provider.
+It needs neither Python nor uv and refuses missing, linked or escaping plan
+inputs before publishing snapshot redirects. Provision remains a separate,
+explicit operation.
 Retained completed environments are not relabeled or deleted by this launch
 change. Startup/publication and posture-guidance helper migration remain
 separate from these command/setup and removal boundaries.

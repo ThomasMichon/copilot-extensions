@@ -191,9 +191,15 @@ def observe(
         argv = command(executable, route, known_hosts)
         if time.monotonic() >= budget.execution_deadline:
             return _result("unknown", "timeout")
+        # Windows OpenSSH cannot reuse another process's POSIX descriptor table.
         result = run_caller_owned(
             argv, timeout=None, budget=budget,
             max_stdout_bytes=MAX_OUTPUT_BYTES, max_stderr_bytes=MAX_OUTPUT_BYTES,
+            env={
+                name: value for name, value in os.environ.items()
+                if os.name != "nt" or name.casefold()
+                != "c28fc6f98a2c44abbbd89d6a3037d0d9_posix_fd_state"
+            },
         )
     except OwnedCleanupError:
         raise

@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { IntentCorpus, intentScope } from "../../extensions/context-handoff/intent-corpus.mjs";
 
+const legacy = new IntentCorpus(process.cwd(), { scope: intentScope(process.cwd()).identity });
+legacy.capture({ sessionId: "old-anchor", eventId: "old-anchor-event", source: "user",
+  origin: "operator", text: "UNRELATED OLD ANCHOR GOAL" });
+const other = new IntentCorpus(process.cwd(), { sessionId: "other-anchor" });
+other.capture({ sessionId: "other-anchor", eventId: "other-event", source: "user",
+  origin: "operator", text: "UNRELATED OTHER SESSION GOAL" });
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
 const tools = session.config.tools.definitions ?? session.config.tools;
@@ -30,6 +37,7 @@ assert.equal(replay.source, "system");
 assert.ok(Buffer.byteLength(replay.prompt, "utf8") < 4200);
 assert.ok(!replay.prompt.includes(text));
 assert.match(replay.prompt, /Read only the sources/u);
+assert.doesNotMatch(replay.prompt, /UNRELATED/u);
 const snapshot = /- Pinned snapshot: ([a-f0-9]{64}) -- 2 records/u.exec(replay.prompt)?.[1];
 assert.ok(snapshot);
 const reader = tools.find((tool) => tool.name === "read_intent_corpus");
@@ -49,6 +57,7 @@ const generate = tools.find((tool) => tool.name === "generate_handoff_prompt");
 const generated = await generate.handler({}, {});
 assert.ok(generated.textResultForLlm.includes(snapshot));
 assert.match(generated.textResultForLlm, /Canonical Goal and Intent Corpus/u);
+assert.doesNotMatch(generated.textResultForLlm, /UNRELATED/u);
 const before = session.sends.length;
 await emit("session.compaction_complete", { success: false });
 await new Promise((resolve) => setImmediate(resolve));

@@ -123,7 +123,7 @@ def test_source_and_source_free_writers_contend_before_snapshot_publication(
     text = _setup(tmp_path, holder_payload, shell)
     if shell == "bash":
         names = ("_install_lock_timeout", "_enter_install_lock", "_exit_install_lock")
-        text += '\n__install_lock_link=""\n__install_lock_fd=""\n'
+        text += '\n__install_lock_link=""\n__install_lock_fd=""\n__owned_snapshot_tmp=""\n'
         text += "\n".join(_function(name, shell) for name in names)
         text += """
 _initialize_source_runtime

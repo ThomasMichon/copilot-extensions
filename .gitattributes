@@ -34,6 +34,7 @@ plugins/agent-vault/scripts/daemon_instances.ps1 text eol=lf
 plugins/agent-vault/scripts/versioned_runtime_native.ps1 text eol=lf
 plugins/agent-worktrees/scripts/daemon_instances.ps1 text eol=lf
 plugins/agent-worktrees/scripts/versioned_runtime_native.ps1 text eol=lf
+plugins/agent-worktrees/scripts/installation-context/json-query.awk text eol=lf
 plugins/budget-guidance/scripts/daemon_instances.ps1 text eol=lf
 plugins/budget-guidance/scripts/versioned_runtime_native.ps1 text eol=lf
 plugins/wsl-setup/skills/setting-up-wsl/references/daemon_instances.ps1 text eol=lf

@@ -145,3 +145,42 @@ inventory. These later domain outcomes and carrier qualification stay open.
    separately. Obtain independent activation authority before any real route,
    existing schedule, cohort or carrier is changed. No live production probe
    or deployment is part of this plan-only PR.
+
+### Positive-authentication qualification packet
+
+The existing native login helper uses `ssh -N`: it deliberately opens no
+command channel, so its successful login cannot qualify `observe`'s fixed
+`exit 0` action. Extend the opt-in health-provider fixture instead of changing
+that helper or substituting a mocked successful client exit.
+
+- Use only an already-installed native OpenSSH client, key generator and
+  server. Create disposable host, accepted-client and denied-client keys in
+  one private fixture directory, with no imported or production credentials.
+  Bind an ephemeral high port on IPv4 loopback only, as the current
+  non-elevated user; no system listener, account, service or firewall changes.
+- Keep server configuration, authorization, profile and known-host files
+  fixture-local. Disable password/interactive authentication, forwarding,
+  user startup files and helper commands. Allow only the harmless command
+  channel needed for the provider's unchanged action. Do not select Gateway,
+  Vault, a managed route or an existing authorized-keys file.
+- Exercise the real CLI/parser and native client without replacing process
+  execution: authenticated action completion, an empty known-host file and a
+  client key absent from fixture authorization. Require a current outbound
+  proof only for success, and no proof for either refusal. Compare profile,
+  keys, authorization and known-host bytes before and after each observation.
+- Keep every observation's five-second shared execution/settlement budget.
+  Bound the server and its descendants through the existing caller-owned
+  process primitive, inside the normal contained test runner; assert exact
+  settlement and listener closure even after a failed assertion. Unconfirmed
+  cleanup is a failed qualification, not permission to start another server.
+- Select the fixture explicitly on each approved native platform. A missing
+  server, denied native execution or ordinary opt-out is an explicit skip,
+  never authentication or platform acceptance. Record native source proof
+  separately from a later private installed-provider metadata/entrypoint
+  check; neither permits collection-policy adoption or rollout.
+
+Source preparation is inert. Executing this packet requires separate bounded
+approval for the temporary SSH server, disposable test credentials and
+current-user command execution on each selected venue. Earlier finite
+scheduler-fixture approval does not cover those effects. If native prerequisites
+are absent, report the gap rather than install tools or change the host.

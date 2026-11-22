@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [native operability and original-acceptance continuation](journal/2026/11.21-native-operability-and-original-acceptance.md)
+distinguishes the reviewed 60-second read correction from the original 20-second request, and retains installed/older-mux qualification separately from source completion.
+
 The [bounded inventory, telemetry and continuity continuation](journal/2026/11.21-bounded-inventory-and-continuity-intake.md)
 records two merged source leaves, three distinct new requests and an external departure; the complete census is 902 open, 173 above the fixed target.
 

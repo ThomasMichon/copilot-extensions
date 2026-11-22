@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -66,6 +67,27 @@ def test_observation_keeps_direction_time_and_configuration_private(
     assert captured["max_stdout_bytes"] == captured["max_stderr_bytes"] == 16 * 1024
     budget = captured["budget"]
     assert budget.execution_deadline < budget.deadline
+
+
+def test_native_child_does_not_inherit_foreign_descriptor_state(
+    route_files: RouteFiles, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile, _, known_hosts = route_files
+    descriptor = "C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE"
+    monkeypatch.setenv(descriptor, "synthetic-ancestor-state")
+    monkeypatch.setenv("SSH_FIXTURE_SENTINEL", "preserved")
+    monkeypatch.setattr(shutil, "which", lambda _name: "fixture-ssh")
+    captured: dict[str, Any] = {}
+
+    def run(*args: object, **kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(health, "run_caller_owned", run)
+    assert health.observe(profile, "target-a", known_hosts)["state"] == "ok"
+    assert (descriptor in captured["env"]) == (os.name != "nt")
+    assert captured["env"]["SSH_FIXTURE_SENTINEL"] == "preserved"
+    assert os.environ[descriptor] == "synthetic-ancestor-state"
 
 
 @pytest.mark.parametrize("line", [

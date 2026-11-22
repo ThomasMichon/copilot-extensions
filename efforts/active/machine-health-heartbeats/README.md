@@ -79,8 +79,17 @@ original owner settles a faulted native-client acknowledgement. Actual
 native-client death remains unqualified; acknowledgement injection is not
 process-death evidence. No provisioning or production enrollment is included.
 The [owner-bounded probe amendment](domain-probes.md) defines one outbound
-SSH owner -> local slot -> age-qualified report flow. Qualify the SSH provider first,
-then explicit collection-policy adoption and the age-qualified report flow.
+SSH owner -> local slot -> age-qualified report flow. Agent SSH provides the
+explicit direct-key-file operation and selected-runtime declaration. The bounded
+Windows unresponsive-peer control is qualified. The opt-in positive-authentication
+packet now passes on Windows and Linux: actual fixed-action completion,
+strict-host-key and denied-key refusals, input preservation, copied-wheel
+execution and exact process/listener settlement. Native qualification exposed
+inherited Windows POSIX descriptor state; the provider now removes only that
+foreign table from its child environment, preserving unrelated values.
+The copied package is not proof of a live selected installation or rollout.
+Complete selected-runtime qualification before collection-policy adoption and
+the complete age-qualified report flow.
 The remaining native-death, installed-provider and adoption gates stay explicit.
 Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
@@ -244,6 +253,16 @@ and the canonical fixture. Global installs, shell/profile changes, `sudo`,
 host provisioning and existing-service changes remain excluded. This preparation
 authority does not broaden the already-approved finite fixture-unit scope.
 
+A later explicit answer approves the authenticated-command SSH fixture on the
+selected Windows and Linux test venues, including bounded fixture revisions
+and retries. Only disposable test keys in private temporary folders, an
+already-installed native SSH server on loopback for at most 60 seconds per
+test, the provider's fixed `exit 0`, and exact process/listener cleanup are
+covered. Production credentials, existing SSH configuration/services, installs,
+elevation, rollout, carrier and receiving changes remain excluded; missing
+native prerequisites are reported rather than installed. Exact private venue
+selectors and the original approval remain with the adopter.
+
 ## Plan
 
 ### Phase 1 - Reviewed architecture and design
@@ -373,6 +392,51 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-21 - Native SSH authentication and copied-provider qualification
+- The source packet passes 29 focused Windows controls in 47.63 seconds and
+  29 Linux controls in 42.23 seconds. Extending it to a copied wheel passes
+  the two native Windows cases in 53.96 seconds and all 29 Linux controls in
+  42.77 seconds. Preparation and exact cleanup are additional runner costs.
+- The explicitly approved fixture uses disposable test keys, an existing
+  native server on a finite loopback port and the provider's unchanged fixed
+  action. No existing SSH profiles, authorization, services or production
+  credentials are changed. Every observation preserves its inputs; native
+  settlement and listener closure are asserted even after assertion failure.
+- A sanitized native-client control distinguished prompt strict-host-key
+  refusal from the provider's timeout with inherited Windows descriptor
+  state. The provider now applies the existing SSH owner's child-only
+  descriptor exclusion; a focused regression preserves unrelated environment
+  values and the original parent environment.
+- Earlier fixture failures exposed an overly broad temporary-directory ACL
+  and synthetic environment username, both corrected through existing native
+  owners. A fresh-process assertion also rejected the runner's editable
+  package as installed proof. The final package check builds a copied wheel,
+  verifies its import origin and capability resource, and completes the real
+  action from that isolated package.
+- These are native-source and copied-package results, not release, live
+  selected-runtime adoption, collection-policy migration or rollout.
+  The parent domain, platform, carrier and preference gates remain open.
+
+### 2026-11-21 - Bounded SSH observation provider source
+- Merged #13830 as `43bcb8131b59cbeeca03911241ee3f2f5179c77d` after
+  exact-head Copilot approval with no active findings, resolved threads and
+  all required/provider checks green. A concurrent base-branch change refused
+  the first merge attempt; refreshed live gates permitted the managed retry.
+- The provider observes one explicit literal direct key-file route with
+  strict existing-host-key verification, no ambient config/helper evaluation,
+  bounded owned execution and content-minimized outbound proof. Malformed
+  identity, profile and known-hosts paths refuse before filesystem access.
+- Sixty-two focused cases pass in 13.45 seconds, or 118.97 seconds including
+  preparation and exact cleanup. The actual Windows SSH client reaches a
+  private live SSH-banner fixture and times out without inventing authenticated
+  proof or changing its files. Strict Python 3.10 checking passes for both
+  platform targets; lint, install-contract and documentation checks pass.
+- Successful native authentication, Linux native and installed-runtime support
+  remain unqualified. No collection-policy migration, existing route/job,
+  credential, carrier, receiving or rollout change is included. Re-read the
+  parent Goal and Plan/Validation items; qualify the provider before adopting
+  the v3 collector. The umbrella issue remains open.
 
 ### 2026-11-21 - Owner-bounded domain-probe plan reviewed
 - Merged #13823 as `d2996337f8c4ea8cef97dec026196e1fcbccaa4a` after
