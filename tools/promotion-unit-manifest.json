@@ -3,6 +3,18 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_windows_rotation.py",
+      [
+        "test_picks_the_expected_count",
+        "test_picks_are_known_and_tier_a_has_no_duplicates",
+        "test_deterministic_for_the_same_date",
+        "test_every_tier_a_plugin_is_reachable_across_the_rotation_cycle",
+        "test_every_tier_b_plugin_is_reachable_across_the_rotation_cycle",
+        "test_cli_json_format",
+        "test_cli_github_output_format"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_parallel_hash_refusals.py",
       [
         "test_payload_hash_rejects_unbounded_worker_counts_before_read[0]",
@@ -10099,6 +10111,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_windows_rotation.py": "0a233bf4497a1cd76c77464e196e69bbf7f85c827fc96c704b39c84b6f094d52",
+    "tools/test_select_windows_rotation.py": "519b88f96f1213a20813934619f0e5184d362459f55f10ee34af454ac75679fc",
+    "tools/select_windows_rotation.py": "b1fac66f390c4135378cac2c570eb98b25766d37b19c17acf76acd0d2bda8a28",
     "tools/promotion_unit_tests/test_original_parallel_hash_refusals.py": "3be56bcd93cbe59c43ff3f1a5e3cf97d5e8f6c5891db96addd07ca211dca8d0a",
     "tools/test_parallel_artifact_hash.py": "8f0112f07ba75823d050d964b104e1185e48970061790169aa70dc7b92451440",
     "tools/promotion_unit_tests/test_original_core_python_artifacts.py": "759bd97930589a41905b59d7acae729650cdf677da285c2db2e9f0a031e17d5a",
@@ -11284,6 +11299,7 @@
     "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31"
   },
   "coverage_targets": [
+    "tools/select_windows_rotation.py",
     "libs/installer-engine/installer_engine_commands.py",
     "worktree-manager/scripts/installer_dependency_policy.py",
     "tools/sync-versioned-runtime.py",
