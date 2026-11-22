@@ -4270,11 +4270,56 @@ without duplicating it. Every unrelated source hash and coverage target,
 89 helper decisions, compact/flat-v1 identity and the 300-second bound remain
 enforced.
 
-Current-head review and complete fresh Linux source CI remain required before
-this finite leaf can close. Fresh-install/native/installed external lanes are
-not exercised because no installation or runtime behavior changes. This is
-development qualification, not a full-packet result, reuse hit, controlled
+Current-head review and complete fresh Linux source CI complete for this
+finite cohort. Copilot approval `6010946130` covers exact head
+`d0d32b0277d8c4df8529911e1b67be8493b2a763`, without active findings.
+CI `44996014016`, unit job `137127093280`, freshly passes all 8,121 cases
+with 39 deselections, 142.63 pytest seconds and 161.578 packet seconds.
+Evidence reports `mode=executed`, origin run `44996014016` attempt one and
+digest `389758f785eb2f94a0570bdae013255eded57eb14c1ebb01eea1ef055ebe2cef`.
+Required aggregate `137128223962`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+
+Source #14050 merges at `2026-11-22T07:04:52Z` as
+`fbe2276af774d799e5eddf9cd282f09c7736d6fe`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the 33-case leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
 whole-flow saving or acceptance of any broader owner or parent gate.
+
+### November 22 original serial publication qualification
+
+The initial 54-case development prototype retains all original objects,
+parameters and the autouse identity fixture. Its guarded execution passes
+the preceding 105 adapter cases, then refuses
+`test_attestation_checks_exact_workflow_ref_and_digests` when the production
+attestation verifier submits a thread. That successful bundle-verification
+case is withdrawn from the adapter and remains unadmitted. Neither the
+original function nor its pool, mocks or effect guard changes; its existing
+integration owner retains the threaded witness.
+
+A distinct remainder contains all 53 cases from the other fourteen complete
+functions: attestation failure and invalid-subject refusal, synthetic
+verification-token isolation, immutable publication, explicit HTTP-404
+classification, bounded tag resolution and payload binding, tag-creation
+races, actual merge/source/bundle mismatch refusal and trusted builder
+namespace preservation. The original 200-case collection matches all 158
+adapter selections with exact function and autouse fixture objects and
+parameter identities. A fresh guarded process passes all 158 in 7.875
+seconds, with zero prohibited effects, 40 bound Python reads and positive
+actual call-phase artifact-owner lines for every case.
+
+The candidate has 8,174 nodes, 1,173 bound sources, 448 targets and 923,376
+compact-v2 bytes. Only the existing adapter hash changes. The 53 new nodes
+append to its existing 105-case group without duplicating that group;
+all preceding 8,121 nodes retain relative order. Every unrelated source
+hash and target, 89 helper decisions, compact/flat-v1 identity and the
+300-second bound remain enforced. Current-head review and complete fresh
+Linux CI remain pending. This is development qualification, not a reuse
+hit, controlled whole-flow saving, real publication, installed/native
+validation or acceptance of any broader owner or parent gate.
 
 ### November 20 path-gated audit-guard native boundary
 

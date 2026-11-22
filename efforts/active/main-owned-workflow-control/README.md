@@ -1276,7 +1276,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #14046 merges at `65421209a6a23b5a3ca79d5c7632f7d94744c302` after
   exact-head Copilot approval and complete required Linux CI with all 8,088
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify all 33 cases from eight adjacent original digest, transfer,
+- [x] Qualify all 33 cases from eight adjacent original digest, transfer,
   unsafe-wheel, declared-source-path and signer-policy functions. Preserve
   exact original functions, parameters, callbacks, assertions and the autouse
   identity fixture in the existing adapter. Guard every adapter case with
@@ -1286,6 +1286,26 @@ authorizes critical main-path acceptance or a bounded administrative change.
   300-second bound. Require normal strict typing, current-head review and
   complete fresh Linux CI; native, installed, real publication and broader
   parent gates remain separate.
+  #14050 merges at `fbe2276af774d799e5eddf9cd282f09c7736d6fe` after
+  exact-head Copilot approval and complete required Linux CI with all 8,121
+  units freshly executed. Broader parent gates stay open.
+- [ ] Resolve the original successful bundle-attestation control's thread-start
+  refusal through its existing integration owner. The 54-case development
+  prototype passes the preceding 105 adapter cases but refuses
+  `test_attestation_checks_exact_workflow_ref_and_digests` at the production
+  verifier's thread-pool submission. It is withdrawn from the adapter and is
+  not admitted; the original function, guard and threading boundary remain
+  unchanged. Do not substitute a serial pool or weaker witness.
+- [ ] Qualify the other 53 cases from fourteen original attestation-failure,
+  publication, explicit-404, tag-resolution and candidate-source controls. Preserve exact
+  original functions, callbacks, parameters, assertions and autouse fixture,
+  including synthetic command and token-isolation witnesses. Require closed
+  reads, positive per-case actual owner calls and zero prohibited effects
+  before admission. Preserve preceding node order and unrelated source hashes,
+  coverage targets, helper decisions, compact/flat-v1 identity and the
+  300-second bound. Normal strict typing, current-head review and complete
+  fresh Linux CI remain required; real publication, credentials, native,
+  installed and broader parent gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
