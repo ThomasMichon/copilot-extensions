@@ -73,12 +73,39 @@ def main() -> None:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--marketplace", action="store_true")
+    parser.add_argument("--component", action="append")
+    parser.add_argument("--frozen-seeds", nargs=2, metavar=("MAIN", "DEV"))
     args = parser.parse_args()
     uv = shutil.which("uv")
     if not uv:
         parser.error("Manager preparation requires uv")
-    print(prepare(args.checkout.resolve(strict=True), args.commit, args.repository,
-                  args.output.absolute(), Path(uv), time.monotonic() + 600))
+    checkout, output = args.checkout.resolve(strict=True), args.output.absolute()
+    deadline = time.monotonic() + 1500
+    if args.marketplace:
+        if args.component or args.frozen_seeds:
+            parser.error("marketplace export takes no component selection")
+        archive = output.with_suffix(".tar")
+        source.preparation._archive(checkout, args.commit, archive, deadline=deadline)
+        output.mkdir()
+        source.preparation._extract_archive(archive, output, deadline=deadline)
+    elif args.component:
+        components = tuple(args.component)
+        if args.frozen_seeds:
+            snapshots = application_footprint.prepare_frozen(
+                checkout, args.commit, *args.frozen_seeds, output,
+                components=components, uv=uv, deadline=deadline,
+            )
+        else:
+            output.mkdir()
+            snapshots = {name: str(prepare_snapshot(checkout, args.commit, args.repository,
+                             output / name, Path(uv), deadline, component=name)) for name in components}
+        print(application_footprint.export({k: Path(v) for k, v in snapshots.items()},
+                                          output / "footprint", deadline=deadline))
+    elif args.frozen_seeds:
+        parser.error("frozen preparation requires an explicit component roster")
+    else:
+        print(prepare(checkout, args.commit, args.repository, output, Path(uv), deadline))
 
 
 if __name__ == "__main__":

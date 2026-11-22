@@ -123,7 +123,7 @@ def main() -> None:
         require_onboarding(python, env)
     command = [str(python), "-I", "-B", "-m", "worktree_manager.application_footprints",
                str(footprint), "--apps-root", str(root / "apps"), "--apply"]
-    if args.stage:
+    if args.stage or anchor is not None:
         command.append("--stage")
     subprocess.run(command, env=env, check=True, timeout=1800)
     if anchor is not None:

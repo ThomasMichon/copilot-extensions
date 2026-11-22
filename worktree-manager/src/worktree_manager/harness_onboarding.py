@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import platform
 import re
-import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -98,7 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--knowledge-repo")
     parser.add_argument("--knowledge-checkout", type=Path)
     parser.add_argument("--stage", action="store_true")
+    parser.add_argument("--frozen-seeds", nargs=2, metavar=("MAIN", "DEV"))
     args = parser.parse_args(argv)
+    if args.frozen_seeds and not args.stage:
+        parser.error("explicit frozen preparation requires --stage")
     root, commit = args.root, args.source_commit
     slot = runtime_identity.running_application_slot()
     if (slot is None or not root.is_absolute() or not re.fullmatch(r"[a-f0-9]{40}", commit)
@@ -112,24 +115,23 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("Incoming source commit unavailable")
     default, anchors = registered_suite.registrations(root)
     kit = Path(__file__).resolve().parent / "_runtime_assets/scripts/runtime-source-tools"
-    producer = _asset(kit / "tools", "bootstrap_manager_release")
     writer = _asset(kit / "plugins/harness-knowledge/skills/binding-knowledge/scripts", "binding_yaml")
-    uv = shutil.which("uv")
-    if not uv:
-        raise ValueError("uv required")
     deadline = time.monotonic() + 1500
+    def produce(output: Path, *options: str) -> None:
+        script = (kit / "tools/bootstrap_manager_release.py").resolve(strict=True)
+        if not script.is_relative_to(Path(__file__).resolve().parent / "_runtime_assets"):
+            raise ValueError("Producer must belong to this Manager")
+        subprocess.run(
+            [sys.executable, "-I", "-B", "-c",
+             "import runpy,sys;from pathlib import Path;p=Path(sys.argv.pop(1));"
+             "sys.path.insert(0,str(p.parent));runpy.run_path(str(p),run_name='__main__')",
+             str(script), "--checkout", str(checkout), "--commit", commit, "--repository",
+             origin.removeprefix("https://github.com/"), "--output", str(output), *options],
+            check=True, timeout=max(0.0, deadline - time.monotonic()),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
     with tempfile.TemporaryDirectory(prefix="ce-suite-") as work:
         workspace = Path(work)
-        snapshots: dict[str, Path] = {}
-
-        def snapshot(component: str) -> Path:
-            if component not in snapshots:
-                snapshots[component] = producer.prepare_snapshot(
-                    checkout, commit, origin.removeprefix("https://github.com/"), workspace / component,
-                    Path(uv), deadline, component=component,
-                )
-            return snapshots[component]
-
         companions: dict[str, Path] = {}
         for project, anchor in anchors.items():
             config = root / "repos" / project / "config.yaml"
@@ -170,16 +172,13 @@ def main(argv: list[str] | None = None) -> int:
                                                   fleet_target=target if fleet and fleet.exists() else None)
 
         market = workspace / "marketplace"
-        source = producer.source.preparation
-        archive = workspace / "marketplace.tar"
-        source._archive(checkout, commit, archive, deadline=deadline)
-        market.mkdir()
-        source._extract_archive(archive, market, deadline=deadline)
+        produce(market, "--marketplace")
         required = registered_suite.required_applications(anchors, market, commit, observe)
-        for component in required:
-            snapshot(component)
-        footprint = producer.application_footprint.export(
-            {name: snapshots[name] for name in required}, workspace / "footprint", deadline=deadline)
+        options = [arg for component in sorted(required) for arg in ("--component", component)]
+        if args.frozen_seeds:
+            options.extend(["--frozen-seeds", *args.frozen_seeds])
+        produce(workspace / "suite", *options)
+        footprint = workspace / "suite/footprint"
         plan = registered_suite.registered_plan(
             root, resolve=lambda *_: registered_suite.PreparedSuite(commit, market, footprint), observe=observe)
         command = [str(footprint), "--apps-root", str(root / "apps"), "--apply"]
