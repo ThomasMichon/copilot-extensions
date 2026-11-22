@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-11-04
+- **Last revised:** 2026-11-21
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -183,6 +183,24 @@ retry identity and handoff; SSH is an invocation boundary, not a second seed
 mechanism. Confirmed text reaches that authority intact, without shell
 interpretation. An unavailable or incompatible target reports the limitation
 without losing intent or repeating an admitted creation or handoff.
+
+### ssh-first-terminal-handoff
+Confirming a remote launch hands the complete selected intent to the terminal,
+not to a preliminary remote creation transaction. For an in-place handoff, the Picker exits before the terminal
+connects with an interactive TTY and invokes the target's ordinary launch flow.
+A supported detached launch leaves the Picker running and performs that same
+SSH-first flow in the new terminal window. Project, execution destination,
+New or anchor selection, resume options, multiplexer choice and prompt arrive
+intact at that flow.
+
+The target owns preparation, policy enforcement, durable prompt handling and
+Copilot startup using its own tools and services. The originating Picker does
+not pre-create the remote worktree or wait for remote admission, policy or
+allocation receipts before yielding the terminal. Connection establishment may
+be bounded; accepted foreground creation waits for completion rather than
+expiring because an arbitrary elapsed-time budget ran out. Real errors,
+explicit cancellation and transport loss remain visible; an unknown outcome
+never authorizes replaying a creation.
 
 ### durable-launch-attempts
 Each confirmed New, Resume or Open action leaves a durable machine-local

@@ -433,6 +433,27 @@ resident write transport. It is not a real Copilot acceptance test.
 
 ## SSH launch-prompt admission
 
+### Architecture transition: SSH-first terminal launch
+
+The [SSH-first terminal launch effort](../../../efforts/active/ssh-first-terminal-launch/README.md)
+replaces the interactive preliminary-admission mechanism described below.
+The intended in-place path is confirmation, complete argument packaging,
+Manager exit, TTY-enabled SSH, then the ordinary target-local worktree launch
+command. Supported detached launches run the same SSH-first sequence in the
+new terminal without closing the originating Picker.
+Creation, policy enforcement, prompt staging, mux and Copilot startup belong
+to that target command, with no admission/policy/creation receipt round-trip
+to the originating Manager. Initial connection establishment may be bounded;
+accepted foreground creation must not expire on elapsed completion timers.
+
+This is the reviewed replacement direction, not a claim that the current
+implementation already follows it. The existing protocol below remains the
+current behavior until the implementation lands and remains a compatibility
+and retained-request recovery surface afterward. Unknown prior outcomes must
+not be replayed as fresh New requests.
+
+### Existing structured admission protocol
+
 The Worktrees composer is host-rendered for local and machine-SSH sources.
 Prompted remote `resolve --json --machine <target>` invokes the target's own
 `resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
