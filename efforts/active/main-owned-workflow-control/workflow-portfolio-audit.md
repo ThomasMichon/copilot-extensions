@@ -5239,12 +5239,65 @@ targets, 89 helper decisions and 300-second bound remain intact. Compact-v2
 and flat-v1 logical identity agree; the candidate contains 8,878 nodes and
 1,246 sources in 992,935 bytes.
 
-Normal review and complete fresh Linux CI remain pending. No new mock,
-preload, wrapper, effect exception, data, production, workflow, runtime or cleanup
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, committed changefile,
+documentation and diff checks pass. Copilot approval `6012425318` names exact
+head `013e484d8736173d8d248862aa4a88784126a137`, with no findings, comments
+or unresolved threads. An initial watcher sees only completed trusted metadata,
+not full source CI; the late-starting natural source run is identified and
+awaited separately. An attempted early log read is refused while the workflow
+is in progress; logs are read only after it completes.
+
+Source CI `45026007377`, unit job `137219068944`, freshly passes all 8,878
+cases with 43 deselections in 107.89 pytest / 122.643 packet seconds. It reports
+`mode=executed`, origin run `45026007377` attempt one, execution identity
+`582e63b0ff1119b69482a00c99f029b6ad65c53ffadac48cb24b4ad3fba7325e`
+and packet digest
+`f5bc12958b6cda6245b9614de082f9882798be842761b345ea4b40f051bfcfb0`.
+Required aggregate `137220465811`, guards and trusted metadata pass.
+Complete review/comment/thread pagination, seven fresh verifier reads and final
+head/hold/parent-reference checks precede the managed merge.
+Source #14085 merges at `2026-11-22T13:16:59Z` as
+`1cd4836f9a0c18106aee8db6507df205ba72f47e`; independent readback confirms merged
+state and open parent #6237. The managed source sync succeeds, and the complete
+reviewed-head/merged-tree comparison is empty. The actual parent Goal, own Plan
+leaf and Validation Plan are reread before resolving only the provider leaf.
+No new mock, preload, wrapper, effect exception, data, production, workflow, runtime or cleanup
 change is introduced. Neither this admission nor the preceding source-view
 merge settles the separate seven-case thread or two-case native-load refusal.
 Fresh-install/native lanes are not applicable because installation, runtime,
 workflow and original-test behavior do not change.
+
+### November 22 original optional H1 validator malformed-shape controls
+
+The new adapter exports only the complete original
+`test_h1_optional_validator_defers_malformed_shape_to_registry_owner`
+function, preserving its three parameter objects and assertions. Complete
+collection verifies all 14 original cases and the three selected adapter
+cases with exact function and parameter identity. Every vector-read,
+asynchronous observation, host/client, packet-capture and historical-record
+case remains outside this selection.
+
+Initial unchanged auditing passes all three in 1.032 seconds, with zero
+prohibited effects, seven bound Python reads and actual validator call-phase
+lines per case. The call checks only malformed optional-shape deferral to the
+existing registry owner, not full H1 owner validation. Only four canonical
+Python source bindings (adapter, original, validator and imported-publication)
+and the validator coverage target are added. All 8,878 prior nodes retain
+relative order and all 1,246 previous source hashes, 460 previous targets,
+89 helper decisions and the 300-second bound remain intact. Compact-v2 and
+flat-v1 logical identity agree; the candidate contains 8,881 nodes, 1,250
+sources and 461 targets in 993,848 bytes.
+
+The first local admission invocation uses a Python environment without
+coverage and stops during helper import, before manifest mutation. The
+existing qualification environment supplies that dependency; admission then
+passes without changing the observation or guard. Fatal Ruff passes.
+Strict typing, committed changefile presence, current-head review and complete
+fresh source CI remain required. Fresh-install/native lanes are not applicable:
+installation, runtime, workflow and original-test behavior do not change.
+No capture, listener, process, publication, cleanup, new mock, preload, guard
+exception, data, production or routing change is introduced. This selection
+does not settle either separate thread/native-load refusal or parent completion.
 
 ### November 22 original machine-gate mutation-source failure
 
