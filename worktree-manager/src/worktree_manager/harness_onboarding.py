@@ -203,8 +203,18 @@ def main(argv: list[str] | None = None) -> int:
             gate = tuple(d / filename for d in dirs if d for filename in ("services.yaml", "external-repos.yaml"))
             target = platform.node().lower()
             fleet = companion / ".copilot-extensions/fleet-manager/config.json" if companion else None
+            def activation(app: str) -> str:
+                result = subprocess.run(
+                    [sys.executable, "-I", "-B", "-m", "worktree_manager.onboarding_policy", app,
+                     str(root), project, str(anchor), str(companion or ""), target],
+                    executable=sys.executable, check=False, capture_output=True, text=True, timeout=30,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if result.returncode:
+                    raise ValueError(f"{app} activation policy could not be resolved")
+                return result.stdout.strip()
             return registered_suite.HarnessPolicy(gate, (target,), fleet_config=fleet if fleet and fleet.exists() else None,
-                                                  fleet_target=target if fleet and fleet.exists() else None)
+                                                  fleet_target=target if fleet and fleet.exists() else None, activation=activation)
 
         market = workspace / "marketplace"
         produce(market, "--marketplace")

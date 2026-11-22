@@ -3,6 +3,27 @@
   "version": 2,
   "groups": [
     {
+      "canonicalDir": "libs/configuration-layers/src",
+      "payloadDir": "scripts/runtime-source-tools/policy",
+      "files": ["configuration_layers/__init__.py", "configuration_context/__init__.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-index/scripts",
+      "payloadDir": "scripts/runtime-source-tools/policy",
+      "files": ["resolve_effective_config.py", "config_schema.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-index/src/agent_index",
+      "payloadDir": "scripts/runtime-source-tools/policy/agent_index",
+      "files": ["__init__.py", "config.py", "configuration_layers.py", "_knowledge_overlay.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-vault/src/agent_vault",
+      "payloadDir": "scripts/runtime-source-tools/policy/agent_vault",
+      "files": ["__init__.py", "configuration.py", "config.py", "invocation.py", "configuration_scope.py",
+                "_peer_launch.py", "cache_limits.py", "cache_manifests.py", "cache_targets.py", "credential_fields.py"]
+    },
+    {
       "canonicalDir": "plugins/agent-worktrees/src/agent_worktrees",
       "payloadDir": "scripts/runtime-source-tools/knowledge_composition",
       "files": ["knowledge_overlay.py", "knowledge_plugin_committed.py"]

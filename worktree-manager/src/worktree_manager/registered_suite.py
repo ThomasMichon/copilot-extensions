@@ -31,6 +31,7 @@ class HarnessPolicy:
     vault_state: Literal["configured", "configuration-empty"] | None = None
     fleet_config: Path | None = None
     fleet_target: str | None = None
+    activation: Callable[[str], str] | None = None
 
 
 def fleet_service_roles(path: Path, target: str) -> tuple[str, ...]:
@@ -128,6 +129,22 @@ def required_applications(
                 anchor, marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
                 index_role=policy.index_role, vault_state=policy.vault_state,
             )
+            if policy.activation and (missing := result["unresolved"]):
+                index_role, vault_state = policy.index_role, policy.vault_state
+                if isinstance(missing, list) and "agent-index" in missing:
+                    role = policy.activation("agent-index")
+                    if role not in ("host", "client", "unconfigured"):
+                        raise ValueError("Invalid Index role")
+                    index_role = role
+                if isinstance(missing, list) and "agent-vault" in missing:
+                    state = policy.activation("agent-vault")
+                    if state not in ("configured", "configuration-empty"):
+                        raise ValueError("Invalid Vault activation")
+                    vault_state = state
+                result = repository_suite_roster.plan(
+                    anchor, marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
+                    index_role=index_role, vault_state=vault_state,
+                )
             fleet = _requires_fleet(policy)
         except (ValueError, OSError) as exc:
             raise ValueError(f"Harness {name}, selected commit {commit}: {exc}") from exc
