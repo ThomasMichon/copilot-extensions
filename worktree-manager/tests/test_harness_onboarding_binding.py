@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from worktree_manager import harness_onboarding as onboarding
-from worktree_manager import bootstrap_harness
+from worktree_manager import bootstrap_harness, harness_state
 
 
 class NonpersistingWriter(ModuleType):
@@ -59,7 +59,7 @@ def check_registered_checkout_readback(tmp_path: Path, case: unittest.TestCase) 
     overlay.write_text(json.dumps(current), encoding="utf-8")
     onboarding.compose_checkout(harness, companion, enabled=enabled)
     assert json.loads(overlay.read_bytes())["enabledPlugins"] == {"operator@example": False}
-    assert onboarding.harness_state._read_yaml(config, strict=True)["knowledge_repo"] == companion.name
+    assert harness_state._read_yaml(config, strict=True)["knowledge_repo"] == companion.name
     onboarding.compose_checkout(harness, companion)
     mixed = json.loads(overlay.read_bytes())
     mixed["_agentWorktreesToolPluginOverlay"] = {"project": "foreign"}

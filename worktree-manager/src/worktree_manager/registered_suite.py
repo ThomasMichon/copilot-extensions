@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from . import harness_state, runtime_source_repository, source_config
 
@@ -135,12 +135,12 @@ def required_applications(
                     role = policy.activation("agent-index")
                     if role not in ("host", "client", "unconfigured"):
                         raise ValueError("Invalid Index role")
-                    index_role = role
+                    index_role = cast(Literal["host", "client", "unconfigured"], role)
                 if isinstance(missing, list) and "agent-vault" in missing:
                     state = policy.activation("agent-vault")
                     if state not in ("configured", "configuration-empty"):
                         raise ValueError("Invalid Vault activation")
-                    vault_state = state
+                    vault_state = cast(Literal["configured", "configuration-empty"], state)
                 result = repository_suite_roster.plan(
                     anchor, marketplace, gate_paths=policy.gate_paths, machines=policy.machines,
                     index_role=index_role, vault_state=vault_state,

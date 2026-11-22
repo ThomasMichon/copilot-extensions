@@ -10328,7 +10328,7 @@
     "plugins/agent-index/src/agent_index/configuration_layers.py": "ed159b53148fa5dece0b0b450792026b87d1229b778794d751ced1eb7be1a4ca",
     "plugins/agent-vault/src/agent_vault/__init__.py": "e165035d693ecc5e1e5e07ea097976376660829109d8e7e02d06524078029a2e",
     "plugins/agent-vault/src/agent_vault/_peer_launch.py": "ba33ddd1b3f5028349d39ae8702131f662cefbc8f6efed5b73e08e64fcdf9221",
-    "plugins/agent-vault/src/agent_vault/configuration.py": "63ad7f2b0e68da05c95742e84b79e9b4e362e0dc532ec646d5a2b7e4c46c3245",
+    "plugins/agent-vault/src/agent_vault/configuration.py": "fbae0f30b34ebc02659b52243d5b96f7584f06850df1f4077a5993aa3b36acf0",
     "plugins/agent-vault/src/agent_vault/configuration_scope.py": "77680d55ed7bcbb698637c84603eaeefd231b5ff4c5096482ec7c7c9736823eb",
     "tools/promotion_unit_tests/test_original_attestation_verifier_retry.py": "d25d45bf5fd30272c74f7a921577d3bc11f51bfabf52ae6a18315edd9b6a1a3d",
     "tools/test_attestation_verifier_retry.py": "6470fed334e64d92d876510d36ff08bd6582726f54ee933b7d4556de90adb65d",

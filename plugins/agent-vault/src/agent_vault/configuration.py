@@ -211,7 +211,7 @@ def explicit_preferences(
     for root, tier, origin in sources:
         if not Path(root).exists():
             continue
-        document = read_source(root, ".agent-vault.json")
+        document = read_source(str(root), ".agent-vault.json")
         if document is None:
             continue
         raw = document["values"]
