@@ -14,12 +14,15 @@ standalone.
 
 from __future__ import annotations
 
-import math
-from collections.abc import Callable
-from dataclasses import replace
-
 import json
+import math
 import sqlite3
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 from .queue_common import (
     PROGRESS_SUMMARY_MAX,
@@ -31,29 +34,56 @@ from .queue_common import (
     _clip,
     _task_transition_spec,
 )
-from .queue_progress import QueueProgressMixin
 from .queue_execution_handoff import require_execution_admission
+from .queue_operator_hold import OperatorHoldMixin
+from .queue_progress import QueueProgressMixin
 from .queue_records import SpawnState, Status, TaskError
 from .queue_task_recovery import RESET_FIELDS, require_task_recovery_safe
 
 # marketplace-isolation: allow release-verb (a business verb, "release from
 # suspension" -- coincidentally matches the guard's lease/mutex keyword scan
 # via "release" containing "lease", not a lifecycle identity)
-_RELEASED_FROM_SUSPENSION = (
-    "task released from suspension"  # marketplace-isolation: allow release-verb
-)
 _RESET_TO_PROPOSED = "task reset to proposed"  # marketplace-isolation: allow release-verb
 
 
-class QueueLifecycleMixin(QueueProgressMixin):
+def _task_result(value: Task | tuple[Task, bool]) -> Task:
+    if not isinstance(value, Task):
+        raise TypeError("unexpected replay result for an ordinary task transition")
+    return value
+
+
+class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
     """Lifecycle, ownership, and progress methods for :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        lease_seconds: int
+        def _connect(self) -> sqlite3.Connection: ...
+        def get(self, task_id: str) -> Task | None: ...
+        def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
+        def _now(self, now: float | None) -> float: ...
+        def _encode_result(self, result: object | None) -> str | None: ...
+        def _notify_verification(self) -> None: ...
+        def _notify_wake(self) -> None: ...
+        def _has_headless_reservation(self, conn: sqlite3.Connection, task_id: str) -> bool: ...
+        def _audit(self, conn: sqlite3.Connection, task_id: str, *, ts: float,
+                   from_status: str, to_status: str, worker: str | None, note: str | None,
+                   unassigned_worker: str | None = None) -> None: ...
+        def _insert_verification_request(
+            self, conn: sqlite3.Connection, task_id: str, generation: int, trigger: str, ts: float,
+        ) -> sqlite3.Row: ...
+        def _enqueue_wake(self, conn: sqlite3.Connection, task: Task, *,
+                          message: str | None, ts: float) -> object: ...
+        def _record_attachment(self, conn: sqlite3.Connection, task_id: str, *, ts: float,
+                               old_session_id: str | None, new_session_id: str | None,
+                               worktree_id: str | None, machine: str | None,
+                               detach_reason: str) -> None: ...
 
     def approve(self, task_id: str, *, now: float | None = None) -> Task:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
         allowed, to = _task_transition_spec("approve")
-        return self._transition(
+        return _task_result(self._transition(
             task_id, allowed=allowed, to=to, now=now, note="approve", idempotent_replay=True
-        )
+        ))
 
     def start(
         self,
@@ -78,12 +108,12 @@ class QueueLifecycleMixin(QueueProgressMixin):
             extra["owner_session_id"] = owner_session_id
         allowed, to = _task_transition_spec("start")
         if pool_recovery_revision is not None:
-            allowed = {*allowed, Status.SUSPENDED}
+            allowed = allowed | {Status.SUSPENDED}
             extra.update(
                 lease_expires_at=ts + self.lease_seconds, resume_requested=0,
                 monitor_kind=None, monitor_not_before=None,
             )
-        return self._transition(
+        return _task_result(self._transition(
             task_id,
             allowed=allowed,
             to=to,
@@ -99,7 +129,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             expected_generation=expected_generation,
             require_pool_assignment=require_pool_assignment,
             pool_recovery_revision=pool_recovery_revision,
-        )
+        ))
 
     def complete(
         self,
@@ -139,8 +169,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
     ) -> CompletionOutcome:
         """Complete active or suspended work (owner must match)."""
         encoded_result = self._encode_result(result)
-        allowed, _to = _task_transition_spec("complete")
-        allowed = set(allowed)
+        states, _to = _task_transition_spec("complete")
+        allowed = set(states)
         if expected_status is not None:
             if expected_status not in allowed:
                 raise TaskError(f"cannot expect {expected_status!r} when completing a task")
@@ -174,7 +204,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
                     raise TaskError(f"task {task_id!r} ownership incarnation changed")
                 conn.execute("COMMIT")
                 return complete(
-                    self, task_id, worker_id, request,
+                    cast("TaskQueue", self), task_id, worker_id, request,
                     result=result, result_ref=result_ref, now=ts,
                 )
             from .queue_submission_preparation import require_unprepared_submission
@@ -345,7 +375,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         """Release a suspended task to ``queued`` for a replacement worker."""
         note = _clip(reason, PROGRESS_SUMMARY_MAX) or "release suspended task"
         allowed, to = _task_transition_spec("release_suspended")
-        return self._transition(
+        return _task_result(self._transition(
             task_id,
             allowed=allowed,
             to=to,
@@ -360,95 +390,10 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 "last_liveness": None,
                 "resume_requested": 0,
             },
-            release_spawn=True,
-            release_spawn_detail=_RELEASED_FROM_SUSPENSION,
+            voluntary_requeue=True,
             reject_if_held=True,
             idempotent_replay=True,
-        )
-
-    def set_hold(
-        self,
-        task_id: str,
-        *,
-        reason: str,
-        actor: str,
-        expected_status: str | None = None,
-        now: float | None = None,
-    ) -> Task:
-        """Set a durable, operator-owned hold on ``task_id``."""
-        meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
-        if meaningful is None:
-            raise TaskError("set_hold requires a non-empty reason")
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
-            if task is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such task {task_id!r}")
-            _check_expected_status(task, expected_status)
-            if task.status in Status.CONCLUDED:
-                conn.execute("COMMIT")
-                raise TaskError(f"cannot hold a {task.status!r} task {task_id!r}")
-            from .queue_pool_recovery import hold_recovery
-            hold_recovery(conn, task_id, held=True, ts=ts)
-            conn.execute(
-                "UPDATE tasks SET hold_reason = ?, hold_actor = ?, hold_at = ?,"
-                " updated_at = ? WHERE id = ?",
-                (meaningful, actor, ts, ts, task_id),
-            )
-            self._audit(
-                conn,
-                task_id,
-                ts=ts,
-                from_status=task.status,
-                to_status=task.status,
-                worker=actor,
-                note=f"hold: {meaningful}",
-            )
-            result = self._fetch(conn, task_id)
-            conn.execute("COMMIT")
-        return result  # type: ignore[return-value]
-
-    def clear_hold(
-        self,
-        task_id: str,
-        *,
-        actor: str | None = None,
-        expected_status: str | None = None,
-        now: float | None = None,
-    ) -> Task:
-        """Clear a hold set by :meth:`set_hold`."""
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
-            if task is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such task {task_id!r}")
-            if task.hold_reason is None:
-                conn.execute("COMMIT")
-                return task
-            _check_expected_status(task, expected_status)
-            from .queue_pool_recovery import hold_recovery
-            hold_recovery(conn, task_id, held=False, ts=ts)
-            conn.execute(
-                "UPDATE tasks SET hold_reason = NULL, hold_actor = NULL,"
-                " hold_at = NULL, updated_at = ? WHERE id = ?",
-                (ts, task_id),
-            )
-            self._audit(
-                conn,
-                task_id,
-                ts=ts,
-                from_status=task.status,
-                to_status=task.status,
-                worker=actor,
-                note=f"unhold (was: {task.hold_reason})",
-            )
-            result = self._fetch(conn, task_id)
-            conn.execute("COMMIT")
-        return result  # type: ignore[return-value]
+        ))
 
     def yield_task(
         self,
@@ -460,7 +405,11 @@ class QueueLifecycleMixin(QueueProgressMixin):
         release_spawn: bool = True,
         now: float | None = None,
     ) -> Task:
-        """Return an owned task to ``queued`` with updates."""
+        """Return the task, not the worker's process or workspace.
+
+        ``release_spawn`` is accepted for wire compatibility; it cannot grant
+        teardown authority for an independent worker or bypass pool custody.
+        """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             current = self._fetch(conn, task_id)
@@ -497,7 +446,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 existing.append(exclude)
             extra["excludes"] = json.dumps(existing)
         allowed, to = _task_transition_spec("yield_task")
-        return self._transition(
+        return _task_result(self._transition(
             task_id,
             allowed=allowed,
             to=to,
@@ -505,10 +454,9 @@ class QueueLifecycleMixin(QueueProgressMixin):
             now=now,
             note=note or "yield",
             extra=extra,
-            release_spawn=release_spawn,
-            release_spawn_detail="task yielded",  # marketplace-isolation: allow release-verb
+            voluntary_requeue=True,
             idempotent_replay=True,
-        )
+        ))
 
     def abandon(
         self,
@@ -582,7 +530,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
     ) -> Task:
         """Reset a task back to ``proposed`` for a fresh attempt."""
         allowed, to = _task_transition_spec("reset")
-        return self._transition(
+        return _task_result(self._transition(
             task_id,
             allowed=allowed,
             to=to,
@@ -597,7 +545,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             idempotent_replay=True,
             release_spawn=True,
             release_spawn_detail=_RESET_TO_PROPOSED,
-        )
+        ))
 
     def bind_owner_session(
         self,
@@ -665,7 +613,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         *,
         reservation_key: str,
         observed_at: float | None = None,
-        admission_fence: dict | None = None,
+        admission_fence: dict[str, Any] | None = None,
         now: float | None = None,
     ) -> Task:
         """Publish activity fenced to this task's active spawn reservation."""
@@ -729,8 +677,9 @@ class QueueLifecycleMixin(QueueProgressMixin):
         now: float | None = None,
         note: str | None = None,
         stamp: str | None = None,
-        extra: dict[str, object] | None = None,
+        extra: Mapping[str, object] | None = None,
         release_spawn: bool = False,
+        voluntary_requeue: bool = False,
         release_spawn_detail: str = "task released from suspension",
         wake_requested: bool = False,
         wake_message: str | None = None,
@@ -744,7 +693,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         reject_if_held: bool = False,
         idempotent_replay: bool = False,
         report_replay: bool = False,
-        start_acquisition_authority: dict | None = None,
+        start_acquisition_authority: dict[str, Any] | None = None,
         require_pool_assignment: bool = False,
         pool_recovery_revision: int | None = None,
         transaction_guard: Callable[[sqlite3.Connection], None] | None = None,
@@ -781,8 +730,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
             ):
                 raise TaskError("allocator claim has no accepted worker to perform this transition")
             if note == "start":
-                from .queue_pool_recovery import require_recovery_start
                 from .queue_pool_placement import require_pool_start
+                from .queue_pool_recovery import require_recovery_start
                 from .queue_pool_startup import require_pool_decision
                 ts = self._now(now)
                 require_recovery_start(
@@ -844,6 +793,9 @@ class QueueLifecycleMixin(QueueProgressMixin):
                     f"cannot {note or to} a {task.status!r} task (allowed: {sorted(allowed_set)})"
                 )
             if to == Status.STARTED:
+                if (extra or {}).get("owner_session_id", task.owner_session_id) == task.owner_session_id:
+                    from .native_attachment_custody import require_retained_resume
+                    require_retained_resume(conn, task)
                 require_execution_admission(conn, task_id)
                 from .queue_task_relationships import require_relationship
                 require_relationship(conn, task_id)
@@ -877,6 +829,12 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 raise TaskError(f"task {task_id!r} changed while the transition was in flight")
             if release_spawn_detail == _RESET_TO_PROPOSED:
                 require_task_recovery_safe(self, conn, task_id)
+            if (
+                to in (Status.QUEUED, Status.PROPOSED, Status.ABANDONED)
+                and "owner" in (extra or {}) and transaction_guard is None
+            ):
+                from .reservation_assignment import require_disposition
+                require_disposition(conn, task, worker_id, to, voluntary=voluntary_requeue)
             if (release_spawn or to == Status.STARTED) and conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
                 (task_id,),
@@ -930,14 +888,17 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if note == "start" and to == Status.STARTED:
                 from .queue_pool_startup import reset_pool_startup
                 reset_pool_startup(conn, task_id)
-            if "owner_session_id" in (extra or {}):
+            if extra is not None and "owner_session_id" in extra:
+                session = extra["owner_session_id"]
+                if session is not None and not isinstance(session, str):
+                    raise TaskError("owner session identity must be a string")
                 attach_machine, attach_worktree = _claimant_worktree_machine(task)
                 self._record_attachment(
                     conn,
                     task_id,
                     ts=ts,
                     old_session_id=task.owner_session_id,
-                    new_session_id=extra["owner_session_id"],  # type: ignore[index]
+                    new_session_id=session,
                     worktree_id=attach_worktree,
                     machine=attach_machine,
                     detach_reason=note or to,

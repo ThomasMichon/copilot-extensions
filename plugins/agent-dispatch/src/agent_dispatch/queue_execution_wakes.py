@@ -143,6 +143,11 @@ def require_no_wake_for_cooling(queue: TaskQueue, conn: sqlite3.Connection, task
 
 
 def require_no_wake_for_release(queue: TaskQueue, conn: sqlite3.Connection, reservation: sqlite3.Row) -> None:
+    from .queue_relevance import closeout_request
+
+    closeout = closeout_request(conn, reservation["task_id"])
+    if closeout is not None and closeout["acknowledgement"] is None:
+        raise TaskError("pending source closeout requires the original reservation")
     task = queue._fetch(conn, reservation["task_id"])
     if task is not None:
         _require_no_owner_wake(queue, conn, task, operation="release", protect_pending=False)
@@ -344,6 +349,12 @@ class QueueExecutionWakesMixin:
             )
             if not current or task is None:
                 raise TaskError("wake send task fence advanced")
+            if wake.owner_session_id:
+                from .native_attachment_custody import require_no_prior_effect
+                from .queue_common import _claimant_worktree_machine
+                tree = (wake.resume_worktree if isinstance(wake, RunWaiterWakeOperation)
+                        else _claimant_worktree_machine(task)[1])
+                require_no_prior_effect(conn, task.id, wake.owner_session_id, tree)
             if conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id = ?"
                 " AND cooling_token IS NOT NULL LIMIT 1", (task.id,),

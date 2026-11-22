@@ -7,16 +7,26 @@ import subprocess
 import time
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Protocol, TypedDict
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from agent_dispatch.assignment_workspace import AssignmentWorkspace, RelationshipWriter
 from agent_dispatch.coordinator import create_app
-from agent_dispatch.queue import Status
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import Status, TaskError
+from agent_dispatch.queue_relevance import RelevanceScope
 from agent_dispatch.task_scope import TASK_SCOPE_HEADER, mint_task_scope_token
 from tests import test_task_relevance_closeout_ack as acknowledgements
 from tests import test_task_relevance_closeout_readiness as readiness
+from tests._helpers import required
+from tests.test_assignment_relationships import GroundOwner, start_managed
 from tests.test_assignment_relationships import independent_readiness as independent_readiness
+from tests.test_task_relevance import report
+from tests.test_task_relevance_binding import Assignment, _scope
 
 managed_assignment = readiness.managed_assignment
 assignment = readiness.assignment
@@ -24,14 +34,28 @@ ready = readiness.ready
 finalized = acknowledgements.finalized
 
 
+Json = dict[str, object]
+
+
+class ReportClosure(Protocol):
+    def __call__(self, queue: TaskQueue, task_id: str, /, *, scope: RelevanceScope) -> object: ...
+
+
+start_worker: Callable[[TaskQueue, AssignmentWorkspace, Task], Task] = start_managed
+report_closure: ReportClosure = report
+
+
 class BoundGroundOwner:
-    def __init__(self, owner: readiness.GroundOwner) -> None:
+    def __init__(self, owner: GroundOwner) -> None:
         self.owner = owner
 
+    def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: Json) -> Json:
+        raise AssertionError("closeout writer invoked without binding the request")
+
     def bind_request(
-        self, _: dict, *, authority_guard: Callable[[], None] | None = None,
-    ) -> Callable:
-        def write(workspace: object, operation: str, payload: dict) -> dict:
+        self, _: Json, *, authority_guard: Callable[[], None] | None = None,
+    ) -> RelationshipWriter:
+        def write(workspace: AssignmentWorkspace, operation: str, payload: Json) -> Json:
             if authority_guard is not None:
                 authority_guard()
             return self.owner(workspace, operation, payload)
@@ -39,8 +63,8 @@ class BoundGroundOwner:
         return write
 
 
-def api(value: readiness.Ready, **options: object) -> TestClient:
-    if isinstance(value[0]._relationship_writer, readiness.GroundOwner):
+def api(value: readiness.Ready, *, wake_is_active: Callable[[], bool] | None = None) -> TestClient:
+    if isinstance(value[0]._relationship_writer, GroundOwner):
         value[0]._relationship_writer = BoundGroundOwner(value[1])
     return TestClient(
         create_app(
@@ -49,7 +73,7 @@ def api(value: readiness.Ready, **options: object) -> TestClient:
             control_token="control",
             enable_mcp=False,
             verification_interval=0,
-            **options,
+            wake_is_active=wake_is_active,
         )
     )
 
@@ -58,26 +82,39 @@ def path(value: readiness.Ready, suffix: str = "") -> str:
     return f"/tasks/{value[3].id}/relevance-closeout{suffix}"
 
 
-def body(value: readiness.Ready) -> dict:
+def body(value: readiness.Ready) -> Json:
     return {
         "version": 1,
         "request_id": "closed-source",
         "worker_id": value[2].worker_id,
         "native_id": "native",
-        "expected_generation": value[0].get(value[3].id).generation,
+        "expected_generation": required(value[0].get(value[3].id)).generation,
     }
 
 
-def headers(value: readiness.Ready, **overrides: object) -> dict[str, str]:
-    arguments = {
-        "task_id": value[3].id,
-        "worker_id": value[2].worker_id,
-        "owner_session_id": "native",
-        "generation": value[0].get(value[3].id).generation,
-        "epoch": 0,
-        **overrides,
-    }
-    return {TASK_SCOPE_HEADER: mint_task_scope_token("control", **arguments)}
+class ScopeOverrides(TypedDict, total=False):
+    task_id: str
+    worker_id: str
+    owner_session_id: str
+    generation: int
+    now: float
+
+
+def headers(
+    value: readiness.Ready, *, task_id: str | None = None, worker_id: str | None = None,
+    owner_session_id: str = "native", generation: int | None = None, now: float | None = None,
+) -> dict[str, str]:
+    current = required(value[0].get(value[3].id))
+    token = mint_task_scope_token(
+        "control",
+        task_id=current.id if task_id is None else task_id,
+        worker_id=value[2].worker_id if worker_id is None else worker_id,
+        owner_session_id=owner_session_id,
+        generation=current.generation if generation is None else generation,
+        epoch=0,
+        now=now,
+    )
+    return {TASK_SCOPE_HEADER: token}
 
 
 def test_original_owner_prepares_without_abandoning_or_releasing_native(
@@ -85,14 +122,14 @@ def test_original_owner_prepares_without_abandoning_or_releasing_native(
 ) -> None:
     client = api(ready)
     auth = headers(ready)
-    before = ready[0].get(ready[3].id)
+    before = required(ready[0].get(ready[3].id))
     response = client.post(path(ready, "/prepare"), json=body(ready), headers=auth)
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["protocol"] == "task_relevance_closeout/v1"
     assert result["result"]["relationship"]["state"] == "closed"
-    assert ready[0].get(ready[3].id) == before
-    assert not ready[0].latest_reservation(before.id).release_requested
+    assert required(ready[0].get(ready[3].id)) == before
+    assert not required(ready[0].latest_reservation(before.id)).release_requested
     assert client.get(path(ready), headers=auth).json()["result"]["readiness"]
     assert client.get("/health", headers=auth).status_code == 403
 
@@ -105,20 +142,21 @@ def test_finish_and_lost_reply_replay_emit_terminal_hooks_once(
 
     client = api(finalized)
     auth, arguments = headers(finalized), body(finalized)
-    calls: list[tuple[dict, bool]] = []
-    events: list[dict] = []
+    calls: list[tuple[Json, bool]] = []
+    events: list[Json] = []
     monkeypatch.setattr(
         handoff_claim_release,
         "release_if_handoff",
-        lambda task, *, cancel_pending: calls.append((task, cancel_pending)),
+        lambda task, *, cancel_pending, queue: calls.append((task, cancel_pending)),
     )
+    assert isinstance(client.app, FastAPI)
     monkeypatch.setattr(client.app.state.bus, "publish", events.append)
     first = client.post(path(finalized, "/finish"), json=arguments, headers=auth)
     assert first.status_code == 200, first.text
     assert first.json()["result"]["status"] == Status.ABANDONED
     assert set(first.json()["result"]) == {"id", "status", "generation"}
 
-    def unexpected(*_: object) -> dict:
+    def unexpected(*_: object) -> Json:
         raise AssertionError("terminal retries must not reobserve the workspace")
 
     monkeypatch.setattr(pool_decline_observation, "observe", unexpected)
@@ -128,7 +166,7 @@ def test_finish_and_lost_reply_replay_emit_terminal_hooks_once(
     assert restarted.get(path(finalized), headers=auth).json()["result"]["acknowledgement"]
     assert len(calls) == 1 and calls[0][1] is True
     assert [event["type"] for event in events] == ["task.abandoned"]
-    assert not finalized[0].latest_reservation(finalized[3].id).release_requested
+    assert not required(finalized[0].latest_reservation(finalized[3].id)).release_requested
     for suffix in ("", "/payload"):
         assert restarted.get(f"/tasks/{finalized[3].id}{suffix}", headers=auth).status_code == 403
     assert (
@@ -143,7 +181,7 @@ def test_finish_and_lost_reply_replay_emit_terminal_hooks_once(
 
 @pytest.mark.parametrize("submitted", [False, True])
 def test_captured_owner_can_close_out_unassigned_or_submitted_work(
-    assignment: readiness.bindings.Assignment,
+    assignment: Assignment,
     independent_readiness: None,
     monkeypatch: pytest.MonkeyPatch,
     submitted: bool,
@@ -151,22 +189,28 @@ def test_captured_owner_can_close_out_unassigned_or_submitted_work(
     from agent_dispatch import pool_decline_observation, submission_readiness_observation
 
     queue, owner, workspace, task = assignment
-    readiness.start_managed(queue, workspace, task)
+    start_worker(queue, workspace, task)
     if submitted:
         queue.complete(task.id, workspace.worker_id, result={"done": True})
-        assert queue.get(task.id).status == Status.SUBMITTED
-    readiness.report(queue, task.id, scope=readiness.bindings._scope(queue, task.id))
+        assert required(queue.get(task.id)).status == Status.SUBMITTED
+    report_closure(queue, task.id, scope=_scope(queue, task.id))
     monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
     monkeypatch.setattr(
         pool_decline_observation,
         "observe",
         lambda *_: {"status": "finalized", "creation_nonce": workspace.creation_nonce},
     )
-    value = queue, owner, workspace, task, []
+    value: readiness.Ready = queue, owner, workspace, task, []
     auth, client = headers(value), api(value)
     readiness.prepare(queue, workspace, task)
     if not submitted:
-        queue.yield_task(task.id, workspace.worker_id, release_spawn=False)
+        with pytest.raises(TaskError, match="retains assignment"):
+            queue.yield_task(task.id, workspace.worker_id, release_spawn=False)
+        # Older writers could yield here. Keep covering the historical
+        # unassigned case without allowing a new writer to produce it.
+        with queue._connect() as conn:
+            conn.execute("UPDATE tasks SET status='queued', owner=NULL, owner_session_id=NULL "
+                         "WHERE id=?", (task.id,))
     assert client.get(path(value), headers=auth).status_code == 200
     assert client.get(f"/tasks/{task.id}", headers=auth).status_code == 403
     response = client.post(path(value, "/finish"), json=body(value), headers=auth)
@@ -183,7 +227,9 @@ def test_authority_is_rechecked_after_independent_owner_io(
     invalidation: str,
 ) -> None:
     from agent_dispatch import (
-        pool_decline_observation, submission_readiness_observation, task_closeout_authority,
+        pool_decline_observation,
+        submission_readiness_observation,
+        task_closeout_authority,
     )
 
     class Guard:
@@ -195,9 +241,12 @@ def test_authority_is_rechecked_after_independent_owner_io(
     guard = Guard()
     queue, owner, workspace, task, _ = ready
     client, auth, arguments = api(ready), headers(ready), body(ready)
+    assert isinstance(client.app, FastAPI)
     client.app.state.task_fencing_guard = guard
     if boundary == "finalization":
-        assert client.post(path(ready, "/prepare"), json=arguments, headers=auth).status_code == 200
+        assert (
+            client.post(path(ready, "/prepare"), json=arguments, headers=auth).status_code == 200
+        )
     before_closes = sum(operation == "close" for operation, _ in owner.calls)
 
     def invalidate() -> None:
@@ -212,14 +261,14 @@ def test_authority_is_rechecked_after_independent_owner_io(
     if boundary == "readiness":
         observe = submission_readiness_observation.observe
 
-        def observe_readiness(*args: object) -> dict:
-            result = observe(*args)
+        def observe_readiness(request: Json, allocation: Json, claim_ref: str) -> Json:
+            result = observe(request, allocation, claim_ref)
             invalidate()
             return result
 
         monkeypatch.setattr(submission_readiness_observation, "observe", observe_readiness)
     elif boundary == "claim":
-        def before_reply(operation: str, _: dict) -> None:
+        def before_reply(operation: str, _: Json) -> None:
             if operation == "inspect":
                 invalidate()
 
@@ -230,7 +279,7 @@ def test_authority_is_rechecked_after_independent_owner_io(
 
         records: list[list[str]] = []
 
-        def capture(argv: list[str], **options: object) -> subprocess.CompletedProcess:
+        def capture(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
             if "capabilities" in argv:
                 result = support()
             elif "record" in argv:
@@ -243,19 +292,22 @@ def test_authority_is_rechecked_after_independent_owner_io(
                 }}
             else:
                 operation = argv[argv.index("resource-relationship") + 1]
-                result = owner(workspace, operation, json.loads(options["input_text"]))
+                input_text = options["input_text"]
+                assert isinstance(input_text, str)
+                result = owner(workspace, operation, json.loads(input_text))
                 result["writer_identity"] = dict(WRITER_IDENTITY)
             return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
 
         monkeypatch.setattr(assignment_relationship_owner, "run_background_capture", capture)
+        def admit(_workspace: AssignmentWorkspace, _identity: Json, original: Json) -> None:
+            queue._admit_original_relationship_request(original)
+
         queue._relationship_writer = assignment_relationship_owner.WorktreeRelationshipWriter(
             ["selected"], admit_workspace=lambda *_: None,
-            admit_request=lambda _workspace, _identity, original: (
-                queue._admit_original_relationship_request(original)
-            ),
+            admit_request=admit,
         )
     else:
-        def observe_finalized(*_: object) -> dict:
+        def observe_finalized(*_: object) -> Json:
             invalidate()
             return {"status": "finalized", "creation_nonce": workspace.creation_nonce}
 
@@ -267,8 +319,8 @@ def test_authority_is_rechecked_after_independent_owner_io(
         headers=auth,
     )
     assert response.status_code == (403 if invalidation == "epoch" else 401), response.text
-    assert queue.get(task.id).status == Status.STARTED
-    assert not queue.latest_reservation(task.id).release_requested
+    assert required(queue.get(task.id)).status == Status.STARTED
+    assert not required(queue.latest_reservation(task.id)).release_requested
     assert sum(operation == "close" for operation, _ in owner.calls) == before_closes
     closeout = queue.relevance_snapshot(task.id)["closeout"]
     assert closeout.get("acknowledgement") is None
@@ -293,7 +345,9 @@ def test_scoped_finish_and_replay_never_return_generic_task_content(
         headers={"Authorization": scheme + " data"},
     )
     assert trusted.status_code == 200, trusted.text
-    assert all(key in trusted.json()["result"] for key in ("payload_inline", "result", "card_draft"))
+    assert all(
+        key in trusted.json()["result"] for key in ("payload_inline", "result", "card_draft")
+    )
     scoped = client.post(path(finalized, "/finish"), json=arguments, headers=headers(finalized))
     assert scoped.status_code == 200, scoped.text
     assert scoped.json()["result"] == {
@@ -312,7 +366,7 @@ def test_opaque_writer_cannot_silently_drop_closeout_authority(
     result = response.json()["result"]["relationship"]
     assert result["state"] == "retained" and "request-bound closeout authority" in result["error"]
     assert sum(operation == "close" for operation, _ in ready[1].calls) == closes
-    assert ready[0].task_relationship(ready[3].id)["state"] == "bound"
+    assert required(ready[0].task_relationship(ready[3].id))["state"] == "bound"
 
 
 @pytest.mark.parametrize(
@@ -327,14 +381,14 @@ def test_opaque_writer_cannot_silently_drop_closeout_authority(
 )
 def test_scoped_closeout_refuses_foreign_stale_or_expired_authority(
     ready: readiness.Ready,
-    change: dict,
+    change: ScopeOverrides,
 ) -> None:
     response = api(ready).post(
         path(ready, "/prepare"), json=body(ready), headers=headers(ready, **change)
     )
     assert response.status_code in {401, 403}
     assert not ready[4]
-    assert ready[0].task_relationship(ready[3].id)["state"] == "bound"
+    assert required(ready[0].task_relationship(ready[3].id))["state"] == "bound"
 
 
 @pytest.mark.parametrize(
@@ -407,7 +461,7 @@ def test_existing_trusted_bearers_can_use_the_conditional_provider(
 )
 def test_strict_wire_cannot_supply_proof_or_guess_a_version(
     ready: readiness.Ready,
-    change: dict,
+    change: Json,
 ) -> None:
     response = api(ready).post(
         path(ready, "/prepare"),
@@ -424,6 +478,7 @@ def test_drain_and_superseded_epoch_preserve_custody(ready: readiness.Ready) -> 
             return epoch >= 1
 
     client = api(ready)
+    assert isinstance(client.app, FastAPI)
     client.app.state.task_fencing_guard = Guard()
     assert client.get(path(ready), headers=headers(ready)).status_code == 403
     client.app.state.task_fencing_guard = None
@@ -447,9 +502,7 @@ def test_finish_does_not_treat_preparation_as_finalization(
 ) -> None:
     from agent_dispatch import pool_decline_observation
 
-    def blocked(*_: object) -> dict:
-        from agent_dispatch.queue import TaskError
-
+    def blocked(*_: object) -> Json:
         raise TaskError("workspace is not finalized")
 
     client, auth = api(ready), headers(ready)
@@ -457,7 +510,7 @@ def test_finish_does_not_treat_preparation_as_finalization(
     assert client.post(path(ready, "/prepare"), json=body(ready), headers=auth).status_code == 200
     response = client.post(path(ready, "/finish"), json=body(ready), headers=auth)
     assert response.status_code == 409 and "not finalized" in response.text
-    assert ready[0].get(ready[3].id).status == Status.STARTED
+    assert required(ready[0].get(ready[3].id)).status == Status.STARTED
 
 
 def test_passive_coordinator_refuses_closeout_before_observation(ready: readiness.Ready) -> None:

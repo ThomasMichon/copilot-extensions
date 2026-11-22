@@ -8,7 +8,10 @@ emitters are unchanged without that configuration. Registered evaluators can opt
 into [periodic reconsideration](periodic-relevance.md). Domain source adapters
 and actual session/workspace closeout remain tracked by
 the [active effort](../../../efforts/active/task-relevance-reconciliation/README.md).
-There is no default automatic task scrubber.
+There is no default automatic task scrubber. Once a source closeout is accepted,
+automatic GC, orphan sweeping and supersession cannot discard its original
+recipient or assign a replacement. A pending notification is not evidence that
+the original resources have been released.
 
 ## Existing owners and integration seams
 

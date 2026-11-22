@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from .current_driver_lookup import install_indexes, install_pin_indexes
+from .native_attachment_custody import install_indexes as install_attachment_indexes
 from .pending_workspace_conclusion import install_index as install_conclusion_index
 
 _TABLE = "current_driver_pool_v1"
@@ -20,6 +21,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             _install(conn)
         install_pin_indexes(conn)
         install_conclusion_index(conn)
+        install_attachment_indexes(conn)
         conn.commit()
     except BaseException:
         conn.rollback()

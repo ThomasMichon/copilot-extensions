@@ -14,18 +14,22 @@ import pytest
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.pool_instances import PoolInstanceDefinition
 from agent_dispatch.pool_publication_custody import PoolCatalogRead
-from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_pool_catalog import PoolPublicationScope
-from agent_dispatch.queue_records import SpawnReservation
+from agent_dispatch.queue_records import SpawnReservation, Status, TaskError
 from agent_dispatch.registrar import Filters
 from agent_dispatch.registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
+from tests._legacy_pool_history import seed_pre_retention_yield
+from tests.test_pool_placement import assignment_for, current_task, reservation_for, task
 
 
 def _project(q: TaskQueue, *members: tuple[str, str]) -> int:
     current = q.pool_configured_cohort()
     previous = current.observation
-    assert previous is None or previous.revision is not None
-    revision = 0 if previous is None else previous.revision + 1
+    revision = 0
+    if previous is not None:
+        assert previous.revision is not None
+        revision = previous.revision + 1
     cohort = ConfiguredSupervisorCohort(
         "complete", hashlib.sha256(json.dumps([revision, members]).encode()).hexdigest(),
         revision, tuple(SupervisorScopeIntent(machine, machine, env) for machine, env in members),
@@ -100,9 +104,9 @@ def test_removed_scope_is_retained_but_not_required_or_eligible(
     assert snapshot.ready and snapshot.configured_ready and snapshot.blockers == ()
     assert snapshot.scopes == (retained, current)
     assert snapshot.definitions == current.definitions
-    fresh = q.create("work", repo="example")
+    fresh = task(q, "work")
     _place(q, fresh.id)
-    assert q.task_pool_assignment(fresh.id).machine == "host-b"
+    assert assignment_for(q, fresh.id).machine == "host-b"
     restored = TaskQueue(q.db_path).pool_catalog_snapshot(now=100.0)
     assert restored == snapshot
 
@@ -111,7 +115,7 @@ def test_remaining_missing_or_unavailable_scope_still_blocks_every_new_claim(q: 
     _project(q, ("host-b", "linux"), ("host-c", "linux"))
     b = _publish(q, "host-b")
     assert q.pool_catalog_snapshot().blockers == ("host-c/linux: configured scope has not enrolled",)
-    fresh = q.create("work", repo="example")
+    fresh = task(q, "work")
     with pytest.raises(TaskError, match="complete configured"):
         _place(q, fresh.id)
     c = _publish(q, "host-c")
@@ -124,12 +128,12 @@ def test_remaining_missing_or_unavailable_scope_still_blocks_every_new_claim(q: 
     assert c.definitions[0] in q.pool_catalog_snapshot().definitions
     with pytest.raises(TaskError, match="complete configured"):
         _place(q, fresh.id)
-    assert q.get(fresh.id).status == Status.QUEUED
+    assert current_task(q, fresh.id).status == Status.QUEUED
     assert q.task_pool_assignment(fresh.id) is None and not q.list_reservations(task_id=fresh.id)
 
 
 def test_confirmed_empty_excludes_every_scope_without_erasing_original_tables(q: TaskQueue) -> None:
-    def retained_rows() -> dict[str, list[tuple]]:
+    def retained_rows() -> dict[str, list[tuple[object, ...]]]:
         with q._connect() as conn:
             return {
                 name: [tuple(row) for row in conn.execute(f"SELECT * FROM {name}")]
@@ -147,12 +151,12 @@ def test_confirmed_empty_excludes_every_scope_without_erasing_original_tables(q:
     assert empty.configured_ready and not empty.ready and empty.blockers == ()
     assert empty.definitions == () and empty.scopes == before.scopes
     assert retained_rows() == original
-    fresh = q.create("work", repo="example")
+    fresh = task(q, "work")
     with pytest.raises(TaskError, match="capacity"):
         _place(q, fresh.id)
     with pytest.raises(TaskError, match="pool placement operation"):
         q.reserve_spawn(fresh.id)
-    assert q.get(fresh.id).status == Status.QUEUED
+    assert current_task(q, fresh.id).status == Status.QUEUED
 
 
 def test_withdrawal_is_exact_to_execution_machine_and_environment(q: TaskQueue) -> None:
@@ -168,9 +172,9 @@ def test_withdrawal_is_exact_to_execution_machine_and_environment(q: TaskQueue) 
     assert {definition.identity for definition in snapshot.definitions} == {
         definition.identity for definition in (*windows.definitions, *other.definitions)
     }
-    assigned = q.create("work", repo="example", target_machine="host-a")
+    assigned = task(q, "work", target_machine="host-a")
     _place(q, assigned.id)
-    assert q.task_pool_assignment(assigned.id).env == "windows"
+    assert assignment_for(q, assigned.id).env == "windows"
     assert all(scope.generation == 1 for scope in snapshot.scopes)
 
 
@@ -195,6 +199,7 @@ def test_remove_readd_requires_current_publication_without_generation_reset(
             old.machine, old.env, "premature-successor", expected_generation=old.generation,
             expected_cohort_revision=2,
         )
+    assert initial.observation is not None
     assert q.observe_pool_configured_cohort(
         initial.observation, expected_revision=0,
     ) == initial
@@ -242,42 +247,42 @@ def test_original_accepted_response_replay_never_reactivates_removed_scope(q: Ta
 
 
 def test_removed_claim_keeps_native_start_capacity_and_exclusive_custody(q: TaskQueue) -> None:
-    assigned = q.create("assigned", repo="example", target_machine="host-a", exclusive_key="shared")
+    assigned = task(q, "assigned", target_machine="host-a", exclusive_key="shared")
     reservation = _place(q, assigned.id)
     q.record_spawn_worktree(
         reservation.key, "worktree", ownership="created", creating_host="host-a",
         execution_machine="host-a", driver="cli",
     )
     q.record_spawn(reservation.key, session_handle="native", worktree="worktree")
-    assignment = q.task_pool_assignment(assigned.id)
-    before = q.get_reservation(reservation.key)
+    assignment = assignment_for(q, assigned.id)
+    before = reservation_for(q, reservation.key)
     _project(q, ("host-b", "linux"))
     _publish(q, "host-b")
-    assert q.get_reservation(reservation.key) == before
-    assert q.task_pool_assignment(assigned.id) == assignment
+    assert reservation_for(q, reservation.key) == before
+    assert assignment_for(q, assigned.id) == assignment
     assert _place(q, assigned.id) == before
     started = q.start(
         assigned.id, "host-a/worktree", owner_session_id="native",
-        expected_generation=q.get(assigned.id).generation,
+        expected_generation=current_task(q, assigned.id).generation,
     )
     assert started.status == Status.STARTED
-    contender = q.create("contender", repo="example", exclusive_key="shared")
+    contender = task(q, "contender", exclusive_key="shared")
     with pytest.raises(TaskError, match="exclusive key"):
         _place(q, contender.id)
     _project(q, ("host-a", "linux"), ("host-b", "linux"))
     _publish(q, "host-a")
     _publish(q, "host-b")
-    same_pool = q.create("same pool", repo="example", target_machine="host-a")
+    same_pool = task(q, "same pool", target_machine="host-a")
     with pytest.raises(TaskError, match="capacity"):
         _place(q, same_pool.id)
-    independent = q.create("independent", repo="example", target_machine="host-b")
+    independent = task(q, "independent", target_machine="host-b")
     assert _place(q, independent.id).key != reservation.key
-    assert q.get_reservation(reservation.key).session_handle == "native"
-    assert q.task_pool_assignment(assigned.id) == assignment
+    assert reservation_for(q, reservation.key).session_handle == "native"
+    assert assignment_for(q, assigned.id) == assignment
 
 
 def test_failed_retained_assignment_cannot_move_to_remaining_scope(q: TaskQueue) -> None:
-    assigned = q.create("assigned", repo="example", target_machine="host-a")
+    assigned = task(q, "assigned", target_machine="host-a")
     reservation = _place(q, assigned.id)
     q.record_spawn_worktree(
         reservation.key, "worktree", ownership="created", creating_host="host-a",
@@ -285,12 +290,12 @@ def test_failed_retained_assignment_cannot_move_to_remaining_scope(q: TaskQueue)
     )
     q.record_spawn(reservation.key, session_handle="native", worktree="worktree")
     q.start(assigned.id, "host-a/worktree", owner_session_id="native",
-            expected_generation=q.get(assigned.id).generation)
+            expected_generation=current_task(q, assigned.id).generation)
     q.fail_spawn(reservation.key)
-    q.yield_task(assigned.id, "host-a/worktree")
+    seed_pre_retention_yield(q, reservation)
     _project(q, ("host-b", "linux"))
     _publish(q, "host-b")
-    assignment = q.task_pool_assignment(assigned.id)
+    assignment = assignment_for(q, assigned.id)
     with pytest.raises(TaskError, match="retained pool assignment is unavailable"):
         _place(q, assigned.id)
     _project(q, ("host-a", "linux"), ("host-b", "linux"))
@@ -298,8 +303,8 @@ def test_failed_retained_assignment_cannot_move_to_remaining_scope(q: TaskQueue)
     _publish(q, "host-b")
     with pytest.raises(TaskError, match="capacity"):
         _place(q, assigned.id)
-    assert q.task_pool_assignment(assigned.id) == assignment
-    assert q.get_reservation(reservation.key).session_handle == "native"
+    assert assignment_for(q, assigned.id) == assignment
+    assert reservation_for(q, reservation.key).session_handle == "native"
 
 
 def test_http_catalog_preserves_all_original_positions_but_only_current_definitions(q: TaskQueue) -> None:
@@ -330,7 +335,7 @@ def test_http_catalog_preserves_all_original_positions_but_only_current_definiti
 
 
 def test_withdrawal_and_new_placement_serialize_without_lost_custody(q: TaskQueue) -> None:
-    fresh = q.create("work", repo="example", target_machine="host-a")
+    fresh = task(q, "work", target_machine="host-a")
     revision = q.pool_catalog_snapshot().revision
     barrier = Barrier(2)
 
@@ -355,6 +360,6 @@ def test_withdrawal_and_new_placement_serialize_without_lost_custody(q: TaskQueu
         admitted = placement.result(timeout=5)
     snapshot = q.pool_catalog_snapshot()
     assert snapshot.configured_ready and not snapshot.definitions and len(snapshot.scopes) == 2
-    assert q.get(fresh.id).status == (Status.CLAIMED if admitted else Status.QUEUED)
+    assert current_task(q, fresh.id).status == (Status.CLAIMED if admitted else Status.QUEUED)
     assert len(q.list_reservations(task_id=fresh.id)) == int(admitted)
     assert (q.task_pool_assignment(fresh.id) is not None) == admitted

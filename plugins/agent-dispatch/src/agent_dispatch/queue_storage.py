@@ -24,22 +24,22 @@ else:
 from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import is_blob_ref
 from .queue_common import (
+    _TASK_SELECT,
     AttachmentRecord,
     CreationOutcome,
     StructuredResult,
     Task,
     TaskAttachmentEntry,
     WakeOperation,
-    _TASK_SELECT,
     encode_result,
 )
+from .queue_dedup import find_live_dedup_task
+from .queue_execution_handoff import require_execution_admission
 from .queue_producer_fences import (
     ProducerFenceError,
     ProducerScopeValidationError,
 )
-from .queue_execution_handoff import require_execution_admission
 from .queue_records import Status, TaskError
-from .queue_dedup import find_live_dedup_task
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -124,6 +124,8 @@ class QueueStorageMixin(StorageOwner):
                 (ts, detach_reason, task_id, old_session_id),
             )
         if new_session_id is not None:
+            from .native_attachment_custody import require_no_prior_effect
+            require_no_prior_effect(conn, task_id, new_session_id, worktree_id)
             conn.execute(
                 "INSERT INTO task_attachments "
                 "(task_id, session_id, worktree_id, machine, attached_at, detached_at) "
@@ -813,18 +815,9 @@ class QueueStorageMixin(StorageOwner):
                             conn, standing_parent_id, canonical_repo,
                         )
                     if supersede_exclusive_key:
-                        superseded = conn.execute(
-                            "SELECT id, status FROM tasks "
-                            "WHERE repo = ? AND exclusive_key = ? "
-                            "AND status IN (?, ?)",
-                            (
-                                canonical_repo,
-                                exclusive_key,
-                                Status.PROPOSED,
-                                Status.QUEUED,
-                            ),
-                        ).fetchall()
-                        for prior in superseded:
+                        from .reservation_assignment import supersedable
+
+                        for prior in supersedable(conn, canonical_repo, exclusive_key):
                             conn.execute(
                                 "UPDATE tasks SET status = ?, owner = NULL, "
                                 "lease_expires_at = NULL, activity = NULL, "

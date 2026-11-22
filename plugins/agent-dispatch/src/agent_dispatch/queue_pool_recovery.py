@@ -247,6 +247,8 @@ def request_recovery(
     continuing = task.resume_requested and assignment["recovery_requested_at"] is not None
     if continuing and (not wake_requested or assignment["recovery_wake_id"] is not None):
         return task
+    from .native_attachment_custody import require_retained_resume
+    require_retained_resume(conn, task)
     from .queue_execution_custody import require_execution_send_reconciliation
     require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
     if conn.execute(

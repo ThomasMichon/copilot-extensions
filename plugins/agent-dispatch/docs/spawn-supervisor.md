@@ -519,8 +519,10 @@ double-spawned. Each cycle:
    reservation-created worktree enters `releasing`; targeted/reused legacy
    rows may fail directly. Unknown liveness remains reserved. An unbound
    reservation is never guessed away.
-3. **fulfill yield/release requests** — yielding marks the active reservation
-   for release but does not settle it transactionally. The supervisor ends a
+3. **fulfill reservation release requests** — an independent worker can yield
+   or release its task without authorizing any cleanup of its native or workspace.
+   An active pool placement retains the assignment until its owner completes
+   the return. For an explicit reservation release, the supervisor ends a
    confirmed-live headless body (or observes it gone), concludes only a
    provenance-verified reservation-created worktree, and persists pending or
    held cleanup across restarts. Targeted, reused, foreign-host, origin-unknown,
@@ -1138,7 +1140,10 @@ An ordinary started owner whose current same-native wake is still pending or
 delivering stays started instead: that wake is how the Bridge resumes the
 stopped native, and suspending would fence it stale. A `gone` verdict is also
 ignored when the task's current wake changed while the probe ran, because the
-verdict predates that delivery; the next pass probes again.
+verdict predates that delivery; the next pass probes again. The same rule
+applies when its active reservation or allocator placement changed during the
+probe. Pending source-closeout requests remain held for their original owner,
+not auto-suspended by the generic liveness pass.
 Restricted owners retain
 their existing immutable binding. Stranded-cold cleanup likewise does not release
 either driver's conversation to make a replacement. `live` bodies
@@ -1163,6 +1168,40 @@ cooling, conflicting reservation, active waiter or unresolved owner/waiter wake
 prevents the send; failed or superseded attempted wakes are not absence proof.
 Qualified execution scopes remain held until supervisor send enrollment is
 implemented, even if the owner-wake list is empty.
+
+If that native leaves the original assignment and attaches to another task,
+the later attachment fences both the old prompt and terminal cleanup of the
+old reservation. Conversely, a new task cannot attach that native while a
+previously admitted redrive or terminal cleanup still owns it. This comparison
+uses the recorded assignments, not the yield message or transport name.
+Completion counts even when it leaves the original attachment undetached.
+A release-in-progress or pending/held retired cleanup also retains custody.
+Cleanup retry admission and lease revalidation both reject a later attachment;
+new attachment admission checks the same outstanding effects in reverse.
+A retired cleanup lease also checks the checkout independently of the native.
+While workspace cleanup is pending or held, a different native cannot take the
+same checkout; an intervening attachment prevents lease issue and revalidation.
+A completed workspace component with its recorded outcome leaves only native
+custody to check. A legacy or ambiguous cleanup detail is not such evidence.
+A reservation may already name a native and workspace before its task first
+starts. Missing attachment history is not proof that the native is free.
+For ordinary Bridge startup, publishing the created or resumed identity and
+admitting another task to that native exclude each other before the first
+prompt. The original task can still attach. The queue indexes outstanding
+reservation effects separately from settled history, and checks returns to
+a known native without rescanning its history for every prior attachment.
+Resuming a retained session checks outstanding effects even when no new
+attachment row is needed, and wake delivery checks again before sending.
+Reopening startup, changing an existing handle, or restarting a cold
+reservation checks the recorded native even if the caller omits the startup
+flag or reports the restart already complete. Claiming a cooling stop checks
+the same attachment history before
+issuing the stop token. Until the stop is settled, another task cannot
+attach that native.
+Case and surrounding whitespace do not distinguish host identities. When a
+prior assignment and a later task share a native or checkout, an unfamiliar
+host alias or unmapped process handle cannot establish that they are disjoint.
+An unrelated native in a different checkout is not held by that comparison.
 
 Before transport, the existing `record_spawn` operation atomically rechecks the
 snapshot and records a pending startup revision together with the frozen

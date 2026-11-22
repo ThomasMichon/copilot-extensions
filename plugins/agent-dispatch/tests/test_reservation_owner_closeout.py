@@ -80,8 +80,9 @@ def test_original_reservation_caller(
         "creator_machine": machine,
         "ownership": "created",
     }
-    if scenario.startswith("withdrawn-"):
-        q.record_spawn_allocation(r.key, "example", cohort_transport="cohort-v1")
+    transport = "cohort-v1" if scenario.startswith("withdrawn-") else None
+    q.record_spawn_allocation(r.key, "example", cohort_transport=transport)
+    if transport is not None:
         assert r.allocation_cohort and r.allocation_cohort["pool"]
         stamp["cohort"] = r.allocation_cohort
     q.record_spawn_worktree(

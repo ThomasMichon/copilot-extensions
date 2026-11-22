@@ -155,6 +155,9 @@ def _record_agent(
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None or task.generation != task_generation:
             raise TaskError("ordinary agent reservation admission fence changed")
+        from .native_attachment_custody import require_available_native, require_no_prior_effect
+        require_available_native(conn, task.id, actual.native)
+        require_no_prior_effect(conn, task.id, actual.native, actual.worktree)
         from .queue_spawn_cooling import require_no_cooling
         require_no_cooling(row)
         if error := _admission_error(conn, row, task, now=queue._now(None)):

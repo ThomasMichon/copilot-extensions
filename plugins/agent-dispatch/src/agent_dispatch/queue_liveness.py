@@ -16,8 +16,10 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
 from .queue_records import SpawnState, Status
+from .reservation_assignment import liveness_custody, pending_source_closeout, protects_disposition
 
 #: Upper bound on concurrent per-task liveness probes across ALL
 #: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
@@ -58,6 +60,14 @@ def _get_probe_executor() -> ThreadPoolExecutor:
 class LivenessMixin:
     """Liveness, orphan-reaping, and backlog-health methods for
     :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _now(self, now: float | None) -> float: ...
+        def _canonical_repo(self, repo: str | None) -> str | None: ...
+        def _audit(self, conn: sqlite3.Connection, task_id: str, *, ts: float,
+                   from_status: str, to_status: str, worker: str | None = None,
+                   note: str | None = None) -> None: ...
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.
@@ -175,6 +185,7 @@ class LivenessMixin:
         on ``(id, status, owner_session_id, generation)`` -- so if the owner
         registered, resumed, completed, or the task was re-claimed between probe
         and write, the update **no-ops** (no double-execution, no clobber).
+        Pool placement and active reservation must also match the probe snapshot.
 
         Returns counts: ``checked``/``live``/``gone``/``unknown``/``requeued``/
         ``dead_lettered``/``suspended``.
@@ -208,6 +219,7 @@ class LivenessMixin:
             "suspended": 0,
         }
         with self._connect() as conn:
+            conn.execute("BEGIN")
             # The wake snapshot is taken before probing: a wake delivered while
             # a probe runs resumes the native, so its stale verdict is unusable.
             # Standing charters retain their attached owner until its native
@@ -223,6 +235,7 @@ class LivenessMixin:
             # applies, using the shared connection -- read-only, no write lock,
             # so this snapshot stays consistent with the held-task read above.
             specs = []
+            custody_snapshots = {}
             for row in held:
                 from .queue_pool_placement import pool_assignment
                 if row["owner"] is None and pool_assignment(conn, row["id"]) is not None:
@@ -232,6 +245,7 @@ class LivenessMixin:
                 local_sid = _parse_local_body_handle(handle)
                 fleet = _parse_fleet_body_handle(handle)
                 specs.append((row, local_sid, fleet, worktree, machine))
+                custody_snapshots[row["id"]] = liveness_custody(conn, row["id"])
 
         def _probe(
             spec: tuple[sqlite3.Row, str | None, tuple[str, str] | None, str, str],
@@ -283,6 +297,9 @@ class LivenessMixin:
                 task_id, verdict, owner_session_id, generation, attempts, status, cli_embodied,
                 wake_snapshot,
             ) in probed:
+                # A gone observation cannot suspend a replacement allocation.
+                if liveness_custody(conn, task_id) != custody_snapshots[task_id]:
+                    continue
                 # Persist the last verdict for the buildup metric (fenced on the
                 # generation so a re-claim mid-pass isn't tagged with a stale beat).
                 conn.execute(
@@ -291,6 +308,8 @@ class LivenessMixin:
                     (verdict, task_id, generation, Status.CLAIMED, Status.STARTED),
                 )
                 if verdict != self.LIVENESS_GONE:
+                    continue
+                if pending_source_closeout(conn, task_id):
                     continue
                 restricted = conn.execute(
                     "SELECT 1 FROM spawn_reservations s JOIN tasks t ON t.id=s.task_id "
@@ -335,6 +354,8 @@ class LivenessMixin:
                 ).fetchone():
                     continue
                 suspend = (cli_embodied or ordinary_native) and status == Status.STARTED
+                if not suspend and protects_disposition(conn, task_id):
+                    continue  # Suspension retains the owner; abandonment/requeue would not.
                 if suspend:
                     to_status = Status.SUSPENDED
                 else:
@@ -474,6 +495,8 @@ class LivenessMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             for task_id, generation, status in victims:
+                if protects_disposition(conn, task_id):
+                    continue
                 cur = conn.execute(
                     "UPDATE tasks SET status = ?, updated_at = ?, completed_at = ?,"
                     " owner = NULL, lease_expires_at = NULL"
@@ -524,10 +547,10 @@ class LivenessMixin:
         with self._connect() as conn:
 
             def _count(status: str) -> int:
-                return conn.execute(
+                return int(conn.execute(
                     f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
                     (status, *args),
-                ).fetchone()[0]
+                ).fetchone()[0])
 
             queued = _count(Status.QUEUED)
             proposed = _count(Status.PROPOSED)

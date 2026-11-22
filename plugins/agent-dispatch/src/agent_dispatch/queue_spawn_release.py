@@ -19,8 +19,10 @@ class SpawnReleaseMixin:
         now: float | None = None,
     ) -> SpawnReservation:
         """Retire a release on exact absence without reviving historical ownership."""
+        from .queue import TaskQueue
         from .queue_spawn_reservations import _newer_worktree_reservation, _validate_conclusion_claim
 
+        assert isinstance(self, TaskQueue)
         if not exact_absence:
             raise TaskError("spawn retirement requires exact absence proof")
         ts = self._now(now)
@@ -102,6 +104,9 @@ class SpawnReleaseMixin:
         now: float | None = None,
     ) -> SpawnReservation:
         """Fence an attempt and atomically retain any failed body identity."""
+        from .queue import TaskQueue
+
+        assert isinstance(self, TaskQueue)
         if disposition not in {"failed", "settled"}:
             raise TaskError(f"invalid spawn release disposition: {disposition!r}")
         if finished_startup_revision is not None and (
@@ -135,10 +140,14 @@ class SpawnReleaseMixin:
                     f"reservation {key} worktree is {row['worktree']!r}, "
                     f"not {worktree!r}"
                 )
+            from .native_attachment_custody import require_not_reassigned
+            require_not_reassigned(conn, row, session_handle, worktree)
             clear_retirement = False
             if session_handle is not None:
                 from .queue_pool_placement import pool_native_publication
                 task = self._fetch(conn, row["task_id"])
+                if task is None:
+                    raise TaskError("spawn release has no owning task")
                 clear_retirement = pool_native_publication(
                     conn, task, row, session_handle, releasing=True,
                 )

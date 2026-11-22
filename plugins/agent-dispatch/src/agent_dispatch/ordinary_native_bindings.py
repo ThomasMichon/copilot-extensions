@@ -51,6 +51,8 @@ def reservation_native_identity(conn: Any, history: Any) -> str | None:
         if native and native != handle:
             raise TaskError("retained CLI native identity evidence conflicts")
         native = handle
+    if native is not None and not isinstance(native, str):
+        raise TaskError("invalid reservation native identity")
     return native
 
 
@@ -198,7 +200,7 @@ def inherited_retirement(conn: Any, row: Any, task: Any) -> bool:
     return bool(evidence.retired) or evidence.qualified_empty
 
 
-def retained_start_generation(conn: Any, task: Any, info: dict) -> bool:
+def retained_start_generation(conn: Any, task: Any, info: dict[str, Any]) -> bool:
     """Later normal claims require the original native's real attachment history."""
     generation = info.get("task_generation")
     if type(generation) is not int or task.generation < generation:
@@ -219,7 +221,7 @@ def retained_start_generation(conn: Any, task: Any, info: dict) -> bool:
     )
 
 
-def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
+def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict[str, Any]:
     """Describe a same-native queued continuation; never authorize replacement."""
     from .bridge_remote import normalize_host
     from .ordinary_agent_facts import native_conflict
@@ -275,6 +277,8 @@ def retained_redrive_facts(conn: Any, row: Any, task: Any) -> dict:
         ):
             raise TaskError("retained native redrive has unresolved wake custody")
     actual = identity(json.loads(row["agent_info"]))
+    from .native_attachment_custody import require_not_reassigned
+    require_not_reassigned(conn, row, actual.native)
     previous = conn.execute(
         "SELECT session_id,worktree_id,machine FROM task_attachments "
         "WHERE task_id=? ORDER BY id DESC LIMIT 1", (task.id,),

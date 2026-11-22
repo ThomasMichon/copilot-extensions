@@ -68,6 +68,49 @@ def test_original_pool_allocation_reaches_both_storage_transactions(
         "host-a/worktree-a",
         "native-a",
     )
+    counts = reopened.reconcile_liveness(resolver=lambda *_owner: "gone")
+    suspended = reopened.get(before.id)
+    assert counts["suspended"] == 1 and counts["requeued"] == 0
+    assert (suspended.status, suspended.owner, suspended.owner_session_id) == (
+        "suspended", started.owner, started.owner_session_id,
+    )
+    assert reopened.get_reservation(row.key) == row
+
+
+@pytest.mark.parametrize("changed", ["reservation", "placement"])
+def test_gone_pool_probe_cannot_suspend_changed_custody(
+    ordinary: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
+) -> None:
+    o = ordinary
+    original_owner_nonce(o, monkeypatch)
+    launch(o)
+    o.client.start_pool_task(
+        o.task["id"], "host-a/worktree-a", owner_session_id="native-a",
+        expected_generation=o.placed["assignment"]["task_generation"],
+    )
+    before = o.q.get(o.task["id"])
+
+    def replace_during_probe(*_owner: str | None) -> str:
+        with o.q._connect() as conn:
+            if changed == "reservation":
+                conn.execute(
+                    "UPDATE spawn_reservations SET session_handle=? WHERE key=?",
+                    ("local-body:replacement", o.placed["reservation"]["key"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE task_pool_assignments SET catalog_revision=catalog_revision+1 "
+                    "WHERE task_id=?",
+                    (before.id,),
+                )
+        return "gone"
+
+    counts = o.q.reconcile_liveness(resolver=replace_during_probe)
+
+    assert counts["gone"] == 1 and counts["suspended"] == counts["requeued"] == 0
+    assert o.q.get(before.id) == before
 
 
 def test_keyed_owner_return_and_agent_publish_or_roll_back_together(

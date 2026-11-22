@@ -38,6 +38,9 @@ class SpawnCoolingMixin:
         Legacy callers without a guard cannot supersede a guarded stop.
         ``release_exclusive`` frees the resource while cold; resume reacquires it.
         """
+        from .queue import TaskQueue
+
+        assert isinstance(self, TaskQueue)
         if startup_revision is not None and (
             type(startup_revision) is not int or startup_revision < 1
         ):
@@ -58,6 +61,9 @@ class SpawnCoolingMixin:
         There is deliberately no lease: a timed-out stop can still take effect.
         A lost response or ambiguous stop retains the blocker for reconciliation.
         """
+        from .queue import TaskQueue
+
+        assert isinstance(self, TaskQueue)
         if type(startup_revision) is not int or startup_revision < 1:
             raise TaskError("cooling requires the current startup revision")
         if state not in {SpawnState.SPAWNED, SpawnState.COLD} or not session_handle:
@@ -82,6 +88,8 @@ class SpawnCoolingMixin:
             ):
                 raise TaskError("dormant startup changed or remains incomplete")
             require_no_cooling(row)
+            from .native_attachment_custody import require_not_reassigned
+            require_not_reassigned(conn, row)
             from .queue_execution_wakes import require_no_wake_for_cooling
             require_no_wake_for_cooling(self, conn, task)
             conn.execute(

@@ -7,20 +7,51 @@ import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol, TypedDict
 
 import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
-from agent_dispatch.queue import Task, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import TaskError
 from agent_dispatch.queue_relevance import RelevanceScope
 from tests import test_assignment_relationships as relationships
-from tests.test_assignment_relationships import claim, start_managed
-from tests.test_task_relevance import report, request
+from tests import test_task_relevance as relevance
+from tests._helpers import required
+from tests._legacy_pool_history import seed_pre_retention_yield
 
 managed_assignment = relationships.assignment
 Assignment = tuple[TaskQueue, relationships.GroundOwner, AssignmentWorkspace, Task]
+claim: Callable[[TaskQueue, AssignmentWorkspace, Task], Task | None] = relationships.claim
+start_managed: Callable[[TaskQueue, AssignmentWorkspace, Task], Task] = relationships.start_managed
+
+
+class SourceRequest(TypedDict):
+    request_id: str
+    scope: RelevanceScope
+    expected_generation: int
+    expected_revision: int
+    verdict: str
+    reason: str
+    observation_ref: str
+    reporter: str
+
+
+class Request(Protocol):
+    def __call__(self, q: TaskQueue, task_id: str, *, scope: RelevanceScope) -> SourceRequest: ...
+
+
+class Report(Protocol):
+    def __call__(self, q: TaskQueue, task_id: str, *, scope: RelevanceScope,
+                 request_id: str = ...) -> dict[str, object]: ...
+
+
+request: Request = relevance.request
+report: Report = relevance.report
 
 
 @pytest.fixture
@@ -30,30 +61,34 @@ def assignment(managed_assignment: Assignment) -> Assignment:
         conn.execute(
             "UPDATE tasks SET source='emitter', origin_ref='review-source' WHERE id=?", (task.id,),
         )
-    return queue, owner, workspace, queue.get(task.id)
+    return queue, owner, workspace, required(queue.get(task.id))
 
 
 def _scope(queue: TaskQueue, task_id: str) -> RelevanceScope:
-    task = queue.get(task_id)
+    task = required(queue.get(task_id))
+    assert task.repo and task.source and task.origin_ref
     return RelevanceScope(task.repo, task.source, task.origin_ref)
 
 
-def _binding(queue: TaskQueue, task_id: str) -> dict | None:
-    return queue.relevance_snapshot(task_id)["closeout"]["resource_binding"]
+def _binding(queue: TaskQueue, task_id: str) -> dict[str, object]:
+    value = queue.relevance_snapshot(task_id)["closeout"]["resource_binding"]
+    assert isinstance(value, dict)
+    return value
 
 
 @pytest.mark.parametrize("pooled", [False, True])
 def test_acceptance_captures_exact_relationship_and_native_reservation(
     assignment: Assignment, pooled: bool,
 ) -> None:
-    queue, _, workspace, task = assignment
+    queue, owner, workspace, task = assignment
     if pooled:
         start_managed(queue, workspace, task)
     else:
         claim(queue, workspace, task)
         queue.start(task.id, workspace.worker_id, owner_session_id="native")
-    relationship = queue.task_relationship(task.id)["request"]
-    before_calls = list(queue._relationship_writer.calls)
+    relationship = required(queue.task_relationship(task.id))["request"]
+    assert queue._relationship_writer is owner
+    before_calls = list(owner.calls)
     report(queue, task.id, scope=_scope(queue, task.id))
     binding = _binding(queue, task.id)
     reservation = queue.get_reservation(relationship["reservation_key"]) if pooled else None
@@ -66,11 +101,11 @@ def test_acceptance_captures_exact_relationship_and_native_reservation(
         "reservation_key": relationship["reservation_key"],
         "startup_revision": reservation.startup_revision if reservation else None,
     }
-    assert queue._relationship_writer.calls == before_calls
-    closeout = queue.relevance_receipt(task.id, "closed-source")["closeout"]
+    assert owner.calls == before_calls
+    closeout = required(queue.relevance_receipt(task.id, "closed-source"))["closeout"]
     assert closeout["resource_binding"] == binding
     assert (closeout["owner"], closeout["owner_session_id"], closeout["generation"]) == (
-        workspace.worker_id, "native", queue.get(task.id).generation,
+        workspace.worker_id, "native", required(queue.get(task.id)).generation,
     )
 
 
@@ -80,7 +115,9 @@ def test_binding_survives_unassignment_restart_and_duplicate_reports(assignment:
     original_request = request(queue, task.id, scope=_scope(queue, task.id))
     accepted = queue.reconcile_task_relevance(task.id, **original_request)
     original = _binding(queue, task.id)
-    queue.yield_task(task.id, workspace.worker_id)
+    with pytest.raises(TaskError, match="retains assignment"):
+        queue.yield_task(task.id, workspace.worker_id)
+    seed_pre_retention_yield(queue, required(queue.latest_reservation(task.id)), expected_state="spawned")
     with queue._connect() as conn:
         conn.execute(
             "UPDATE task_pool_assignments SET assignment_released=1 WHERE task_id=?", (task.id,),
@@ -91,7 +128,7 @@ def test_binding_survives_unassignment_restart_and_duplicate_reports(assignment:
     assert restarted.reconcile_task_relevance(task.id, **original_request) == accepted
     report(restarted, task.id, scope=_scope(restarted, task.id), request_id="later-source-report")
     assert _binding(restarted, task.id) == original
-    assert restarted.get(task.id).owner is None
+    assert required(restarted.get(task.id)).owner is None
 
 
 def test_resumed_owner_keeps_original_relationship_and_current_generation(
@@ -100,7 +137,7 @@ def test_resumed_owner_keeps_original_relationship_and_current_generation(
     queue, _, workspace, task = assignment
     claim(queue, workspace, task)
     queue.start(task.id, workspace.worker_id, owner_session_id="first-native")
-    original = queue.task_relationship(task.id)["request"]
+    original = required(queue.task_relationship(task.id))["request"]
     queue.suspend(task.id, workspace.worker_id, reason="awaiting source")
     resumed = queue.resume(task.id, workspace.worker_id, adopt_owner_session_id="resumed-native")
     assert resumed.generation > original["generation"]
@@ -108,7 +145,7 @@ def test_resumed_owner_keeps_original_relationship_and_current_generation(
     binding = _binding(queue, task.id)
     assert binding["state"] == "captured"
     assert binding["assignment_event_id"] == original["event_id"]
-    closeout = queue.relevance_receipt(task.id, "closed-source")["closeout"]
+    closeout = required(queue.relevance_receipt(task.id, "closed-source"))["closeout"]
     assert closeout["generation"] == resumed.generation
     assert closeout["owner_session_id"] == "resumed-native"
 
@@ -119,7 +156,7 @@ def test_inconsistent_binding_stays_visible_without_blocking_closeout_delivery(
 ) -> None:
     queue, _, workspace, task = assignment
     start_managed(queue, workspace, task)
-    relationship = queue.task_relationship(task.id)["request"]
+    relationship = required(queue.task_relationship(task.id))["request"]
     with queue._connect() as conn:
         if change == "native":
             conn.execute(
@@ -156,6 +193,7 @@ def test_inconsistent_binding_stays_visible_without_blocking_closeout_delivery(
 def test_legacy_or_preacceptance_unassigned_owner_is_not_guessed(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example", source="emitter", origin_ref="review-source")
+    assert isinstance(task, Task)
     queue.claim_one("host/worker", task_id=task.id)
     queue.start(task.id, "host/worker", owner_session_id="native")
     queue.yield_task(task.id, "host/worker")
