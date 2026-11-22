@@ -19,6 +19,7 @@ from machine_transport import (local_execution_platform, machine_name, merge_mac
 from . import bootstrap_harness as boot
 from . import bootstrap_pairing, harness_state, registered_suite, runtime_identity, runtime_source_repository
 from .config_write_lock import config_write_lock, retained_sidecar_lock
+from .onboarding_failure import phase
 
 
 def _asset(directory: Path, name: str) -> ModuleType:
@@ -224,18 +225,21 @@ def main(argv: list[str] | None = None) -> int:
             name, remote = boot.repository_remote(remote)
             if local and name != local:
                 raise ValueError("Local binding conflicts with repository identity")
-            companions[project] = bind_companion(root, project, remote, knowledge, writer)
+            with phase(root, "binding"):
+                companions[project] = bind_companion(root, project, remote, knowledge, writer)
         if companions:
             for project, companion in companions.items():
-                compose_checkout(anchors[project], companion, enabled=composition_enabled(
-                    anchors[project], root / "repos" / project / "config.yaml", project))
+                with phase(root, "composition"):
+                    compose_checkout(anchors[project], companion, enabled=composition_enabled(
+                        anchors[project], root / "repos" / project / "config.yaml", project))
                 if os.environ.get("OneDrive"):
-                    bootstrap_pairing.remember_bound(
-                        root / "repos" / project / "config.yaml",
-                        boot._git(anchors[project], "remote", "get-url", "origin"),
-                        boot._git(companion, "remote", "get-url", "origin"), Path(os.environ["OneDrive"]),
-                        registered_knowledge=companion,
-                    )
+                    with phase(root, "preference"):
+                        bootstrap_pairing.remember_bound(
+                            root / "repos" / project / "config.yaml",
+                            boot._git(anchors[project], "remote", "get-url", "origin"),
+                            boot._git(companion, "remote", "get-url", "origin"), Path(os.environ["OneDrive"]),
+                            registered_knowledge=companion,
+                        )
 
         roles: dict[tuple[str, str], str] = {}
 
@@ -263,23 +267,34 @@ def main(argv: list[str] | None = None) -> int:
                                                   fleet_target=target if fleet and fleet.exists() else None, activation=activation)
 
         market = workspace / "marketplace"
-        produce(market, "--marketplace")
-        required = registered_suite.required_applications(anchors, market, commit, observe)
+        with phase(root, "marketplace"):
+            produce(market, "--marketplace")
+        with phase(root, "roster"):
+            required = registered_suite.required_applications(anchors, market, commit, observe)
         options = [arg for component in sorted(required) for arg in ("--component", component)]
         if any(roles.get((project, "agent-index")) == "host" for project in required.get("agent-index", [])):
             options.append("--index-host")
         if args.frozen_seeds:
             options.extend(["--frozen-seeds", *args.frozen_seeds])
-        produce(workspace / "suite", *options)
+        with phase(root, "preparation"):
+            produce(workspace / "suite", *options)
         footprint = workspace / "suite/footprint"
-        plan = registered_suite.registered_plan(
-            root, resolve=lambda *_: registered_suite.PreparedSuite(commit, market, footprint), observe=observe)
+        with phase(root, "planning"):
+            plan = registered_suite.registered_plan(
+                root, resolve=lambda *_: registered_suite.PreparedSuite(commit, market, footprint), observe=observe)
         command = [str(footprint), "--apps-root", str(root / "apps"), "--apply"]
         for app in plan:
             command.extend(["--app", app.name])
         if args.stage:
             command.append("--stage")
-        return install_prepared(command)
+        try:
+            with phase(root, "installation"):
+                code = install_prepared(command)
+                if code:
+                    raise subprocess.CalledProcessError(code, "application installation")
+        except subprocess.CalledProcessError as error:
+            return error.returncode
+        return 0
 
 
 if __name__ == "__main__":
