@@ -1151,7 +1151,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #13986 merges at `2db9de42d9d2464e7a08554c9b3c17d9ff387097` after
   exact-head Copilot approval and complete required Linux CI with all 7,937
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land 56 original footprint-history and recognition cases
+- [x] Qualify and land 56 original footprint-history and recognition cases
   through 19 exact unchanged functions, with the original profile/history data
   hash-bound and never executable. Preserve semantic-transition, retirement,
   read-boundary, corrupt/foreign/stale-input and fresh-construction witnesses.
@@ -1161,6 +1161,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
   unchanged preceding nodes and unrelated hashes, 89 helper decisions,
   compact/flat-v1 identity, the 300-second bound, strict typing, current-head
   review and complete Linux source CI. Native, installed and parent gates remain.
+  #14019 merges at `82860fb482d13b402050f1d572a3c56bad1aafef` after
+  exact-head Copilot approval and complete required Linux CI with all 7,995
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify and land all five original validation-override cases through
+  three exact unchanged functions. Preserve list-clearing versus omission,
+  empty-map inheritance, empty-path replacement and machine-precedence
+  witnesses using the original source-level merge/parser helper, without
+  importing or starting the managed runtime. Require closed reads, positive
+  per-case actual configuration-owner calls, zero prohibited effects,
+  unchanged preceding nodes and hashes, 89 helper decisions, compact/flat-v1
+  identity, the 300-second bound, strict typing, current-head review and
+  complete Linux source CI. The withdrawn Darwin candidate is not admitted
+  or counted as completed coverage; native, installed and parent gates remain.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
