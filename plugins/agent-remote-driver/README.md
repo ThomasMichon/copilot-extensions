@@ -15,6 +15,87 @@ agent-remote-driver --support-json
 agent-remote-driver --cwd <execution-workspace> --state-file <private-state-file> -- copilot --acp --stdio
 ```
 
+The built application's ordinary installer also installs and globally enables
+the small connector, preserving an explicit existing opt-out. The native CLI
+loads local marketplace plugins by reference, so the installer retains immutable
+connector generations outside retireable application slots. A foreign
+marketplace binding refuses rather than being redirected.
+
+The selected application starts one user-mode Driver service. It inventories
+and relays independently owned Session Hosts; it does not own their conversations.
+No Worktrees, Manager, Dispatch or Bridge runtime is required on that target.
+Its explicit commands are:
+
+```powershell
+agent-remote-driver service --support-json
+agent-remote-driver service status
+agent-remote-driver service ensure
+agent-remote-driver service stop --instance-id <instance-id-from-status>
+```
+
+`status` is read-only. `ensure` reuses a healthy selected owner and can recover
+after confirmed process exit. Partial startup or unknown process identity holds
+the original attempt instead of launching a replacement. Output omits private
+endpoint capabilities. The executing numbered runtime supplies the installation
+root; a conflicting explicit root is refused.
+
+`stop` requires the original instance ID returned by `status` and uses its
+canonical native process registration, not a PID-only signal. A replacement,
+duplicate or unresolved owner is not stopped. Stopping this front door disconnects
+its relays but does not stop independently owned Session Hosts or their Copilot
+children. It does not disable the connector: a later explicit `ensure` or new
+connector startup can start the service again. Native pinned retirement currently
+requires Windows or Linux; other platforms refuse without signaling. Stopped
+instance records remain available to their canonical artifact-cleanup owner.
+Each Host launched through the installed application holds its own canonical
+runtime retention lease until it exits, independently of this service. Stopping
+the service therefore cannot make a live Host's code eligible for reclamation.
+Explicit staging remains usable without claiming completed installation.
+The installed launcher's explicit uninstall route runs under isolated managed
+base Python, before target-venv launch or runtime retention:
+
+```powershell
+agent-remote-driver uninstall --workspace <new-external-workspace> --instance-id <instance-id-from-status>
+```
+
+The workspace must be an absolute ordinary path outside the installation, with
+an existing parent. It retains original controls, profile wheels and transaction
+evidence; do not overwrite or discard it after a partial or uncertain outcome.
+After slot removal, a settled retry uses that same workspace and external Python:
+`<base-python> -I -B <workspace>/packet/install.py uninstall --workspace <workspace> --instance-id <original-instance-id>`.
+Legacy runtime removal is not a substitute for this numbered application's
+ownership contract. Service-removal custody keeps the existing
+start lock through exact native retirement, canonical original-instance artifact
+settlement and its caller's withdrawal. Unknown or nonsettled cleanup blocks that
+caller without a retry or a sweep of other services. New service endpoint files
+live directly in the already constructed bootstrap directory; original-layout
+observations remain readable without inventing directory-cleanup receipts.
+Connector withdrawal disables native live discovery, unregisters only its owned
+marketplace and retains connector files for already-running clients. The external
+removal coordinator composes these owners with the installer's retained packet
+and original publication/cleanup receipts. Its journal records original native
+identity and intent before effects. Service or connector intent without a settled
+record holds as uncertain and is never replayed. Known settled phases use their
+original evidence, while service-start and connector-activation custody span
+filesystem withdrawal and reclamation. Independent Host references still refuse
+reclamation, including finished registrations whose artifact owner has not yet
+settled. That owner uses its original canonical receipt; removal does not sweep
+or take over another Host. The reference check repeats inside exclusive runtime
+custody before deletion. Uninstall retains connector generations and user state;
+it does not terminate independent Hosts to force reclamation. Missing original
+service evidence, changed selection or malformed saved snapshots refuse before
+new effects. It cannot retrofit removal receipts onto older completed slots.
+
+For this installed connector, extension startup performs one bounded ensure
+through its installer-published binding and canonical retained-runtime launcher.
+It does not search PATH, download packages, reinstall the plugin or retry an
+uncertain launch. A connector installed by itself, without that application
+binding, keeps its existing SDK behavior and does not provision a service.
+Application installation and plugin activation therefore remain distinct.
+The source packet and its production caller-Job qualification are described in
+[the test guide](../../TESTING.md); contained functional checks do not prove
+survival after all caller Jobs close.
+
 The executing entrypoint advertises its support; package versions are not
 capability evidence. This headless entrypoint supports TCP frames and optional
 [`acp.v1`](docs/session-host-websocket.md) WebSocket access to that same broker
@@ -77,8 +158,8 @@ are unchanged, and reading readiness cannot thaw a frozen controller.
 Local launches export the core into their retained runtime directory
 and execute it with a physical base interpreter, independently of the caller's
 venv. The same core can export a compact receiving zipapp without Bridge,
-Worktrees or Manager. The application uses the existing wheel/application-project
-build owner; it does not introduce a global service or start on plugin enablement.
+Worktrees or Manager. The application uses the existing wheel/application-project build owner.
+Plugin enablement alone does not install its application runtime.
 
 Original keyed Bridge launches use a private, launch-scoped live admission
 channel. The retained Host asks its original caller to recheck the same operation

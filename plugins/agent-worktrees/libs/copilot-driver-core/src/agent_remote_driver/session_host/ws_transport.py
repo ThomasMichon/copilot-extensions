@@ -8,8 +8,10 @@ from http import HTTPStatus
 import hmac
 import json
 
-from websockets.asyncio.server import ServerConnection, serve
+from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Request, Response
+from websockets.typing import Subprotocol
 
 from .client import SessionHostClient
 from .protocol import MAX_MESSAGE_BYTES, ProtocolError
@@ -25,20 +27,20 @@ class WebSocketTransport:
         self.port = 0
         self._tcp_port = tcp_port
         self._tcp_nonce = tcp_nonce
-        self._server = None
-        self._handlers: set[asyncio.Task] = set()
+        self._server: Server | None = None
+        self._handlers: set[asyncio.Task[None]] = set()
 
     async def serve(self, port: int = 0) -> int:
         self._server = await serve(
             self._handle, "127.0.0.1", port,
-            subprotocols=["acp.v1"], process_request=self._authorize,
+            subprotocols=[Subprotocol("acp.v1")], process_request=self._authorize,
             compression=None, max_size=MAX_MESSAGE_BYTES - 2,
             max_queue=4, write_limit=64 * 1024, close_timeout=2,
         )
-        self.port = self._server.sockets[0].getsockname()[1]
+        self.port = next(iter(self._server.sockets)).getsockname()[1]
         return self.port
 
-    def _authorize(self, connection, request):
+    def _authorize(self, connection: ServerConnection, request: Request) -> Response | None:
         headers = request.headers
         offered = [
             item.strip() for value in headers.get_all("Sec-WebSocket-Protocol")
@@ -69,7 +71,12 @@ class WebSocketTransport:
                 await asyncio.wait_for(waiter, 3)
 
     async def _handle(self, websocket: ServerConnection) -> None:
+        await self.relay(websocket)
+
+    async def relay(self, websocket: ServerConnection) -> None:
+        """Attach this authenticated frontend to the original Host only."""
         handler = asyncio.current_task()
+        assert handler is not None
         self._handlers.add(handler)
         client = None
         tasks = []
@@ -83,7 +90,7 @@ class WebSocketTransport:
                 await websocket.close(1013, "Host controller unavailable")
                 return
 
-            async def incoming():
+            async def incoming() -> None:
                 async for text in websocket:
                     if not isinstance(text, str):
                         await websocket.close(1003, "ACP requires JSON-RPC text messages")
@@ -104,7 +111,7 @@ class WebSocketTransport:
                         return
                     await client.write(payload + b"\n")
 
-            async def outgoing():
+            async def outgoing() -> None:
                 async for sequence, frame in client.frames():
                     await websocket.send(frame.decode("utf-8").rstrip("\n"))
                     # Plain ACP WS has no application receipt or resumable

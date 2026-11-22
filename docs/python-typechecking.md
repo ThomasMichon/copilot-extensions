@@ -57,9 +57,16 @@ controls live in `tools/test_typecheck_programs.py`.
 
 Bridge remains pending as a project. Its whole-file changed-code checks use
 a hash-locked extension of the service-index checker environment, adding
-Cryptography for its HTTPS certificate fixtures alongside Pydantic's typed
-models. This supplies validation dependencies without claiming
-that the complete Bridge source or test tree is strict.
+Cryptography for its HTTPS certificate fixtures and the declared ACP client
+for native consumer fixtures alongside Pydantic's typed models. This supplies
+validation dependencies without claiming that the complete Bridge source or
+test tree is strict.
+
+Core and Driver also remain pending. Their changed-file checks use the
+hash-locked Driver profile for the declared WebSocket and asynchronous fixture
+dependencies. Driver's native application fixtures additionally resolve the
+repository's actual `tools` imports through their declared import root. These
+checker inputs do not add runtime dependencies or qualify project admission.
 
 Materialized library copies under the strict services' `libs/` directories are
 inventoried separately as pending consumers. They do not inherit service

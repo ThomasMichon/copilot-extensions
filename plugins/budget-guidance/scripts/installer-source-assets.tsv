@@ -246,7 +246,9 @@ copy	libs/installer-engine/installer_source_wheel_cache.py	scripts/installer_sou
 copy	libs/installer-engine/installer_wheel_acquisition.py	scripts/installer_wheel_acquisition.py
 copy	libs/installer-engine/installer_wheel_inputs.py	scripts/installer_wheel_inputs.py
 copy	libs/installer-engine/installer_wheel_snapshot.py	scripts/installer_wheel_snapshot.py
+copy	libs/installer-engine/runtime_application_artifacts.py	scripts/runtime_application_artifacts.py
 copy	libs/installer-engine/runtime_application_install.py	scripts/runtime_application_install.py
+copy	libs/installer-engine/runtime_application_qualification.py	scripts/runtime_application_qualification.py
 copy	libs/installer-engine/runtime_launcher.py	scripts/runtime_launcher.py
 copy	libs/single-instance-lease/LICENSE	libs/single-instance-lease/LICENSE
 copy	libs/single-instance-lease/README.md	libs/single-instance-lease/README.md

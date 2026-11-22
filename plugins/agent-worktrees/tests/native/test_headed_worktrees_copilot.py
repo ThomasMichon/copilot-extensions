@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 import http.server
 import json
@@ -96,6 +96,61 @@ def _backend_execution(attempt: Path) -> tuple[Path, dict[str, Any]] | None:
             matches.append((path, receipt))
     assert len(matches) <= 1, "The caller published more than one native backend execution"
     return matches[0] if matches else None
+
+
+def _bridge_prompt(
+    state: dict[str, Any], *, native: str, prompt: str, refused: bool,
+    environment: dict[str, str], cwd: Path,
+) -> None:
+    python = environment.get("COPILOT_DRIVER_BRIDGE_PYTHON")
+    assert python and Path(python).is_absolute() and Path(python).is_file(), (
+        "Native qualification requires the selected Bridge consumer environment"
+    )
+    root = Path(__file__).resolve().parents[4]
+    result = run_caller_owned(
+        [
+            python, "-I", "-B", "-X", "utf8", "-c",
+            "import asyncio,json,sys;sys.path.insert(0,sys.argv[1]);"
+            "from test_copied_core_pickup import _bridge_existing_host;"
+            "print(json.dumps(asyncio.run(_bridge_existing_host(**json.load(sys.stdin)))))",
+            str(root / "plugins" / "agent-bridge" / "tests" / "native"),
+        ],
+        input_text=json.dumps({
+            "state": state, "native": native, "prompt": prompt, "refused": refused,
+        }),
+        env=environment, cwd=cwd, timeout=25,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observation = json.loads(result.stdout)
+    assert observation["session_id"] == native and observation["child_pid"] == state["child_pid"]
+    if refused:
+        assert observation["result"] == {"refused": True, "code": -32001}
+    else:
+        assert observation["result"]["stop_reason"] == "end_turn"
+        assert any(event["type"] == "agent_message" for event in observation["events"]), (
+            "Bridge did not observe the native response"
+        )
+
+
+async def _control_native(
+    state: dict[str, Any], *, native: str, environment: dict[str, str], cwd: Path,
+    prompt: str | None = None, stop: bool = False, refused: bool = False,
+) -> None:
+    if not stop:
+        assert prompt is not None
+        await asyncio.to_thread(
+            _bridge_prompt, state, native=native, prompt=prompt, refused=refused,
+            environment=environment, cwd=cwd,
+        )
+        return
+    client = await SessionHostClient.connect(port=state["port"])
+    try:
+        hello = await client.attach(nonce=state["nonce"].encode())
+        assert hello.child_pid == state["child_pid"]
+        await client.terminate()
+    finally:
+        await client.close()
 
 
 def _initialize_fixture_repository(checkout: Path, environment: dict[str, str]) -> None:
@@ -421,7 +476,10 @@ def _qualify_native_worktrees(
         key: value for key, value in (
             cast(dict[str, str], worktrees_environment) if installed else os.environ
         ).items()
-        if (key.startswith("COPILOT_EXTENSIONS_") or not key.startswith(("COPILOT_", "OTEL_")))
+        if (
+            key == "COPILOT_DRIVER_BRIDGE_PYTHON" or key.startswith("COPILOT_EXTENSIONS_")
+            or not key.startswith(("COPILOT_", "OTEL_"))
+        )
         and key not in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE",
             "PSMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION", "PSMUX_SESSION_NAME",
@@ -542,36 +600,10 @@ def _qualify_native_worktrees(
     async def broker(
         state: dict[str, Any], *, prompt: str | None = None, stop: bool = False, refused: bool = False,
     ) -> None:
-        client = await SessionHostClient.connect(port=state["port"])
-        try:
-            hello = await client.attach(nonce=state["nonce"].encode())
-            assert hello.child_pid == state["child_pid"]
-            if stop:
-                await client.terminate()
-                return
-            for request_id, method, params in (
-                (1, "initialize", {"protocolVersion": 1}),
-                (2, "session/prompt", {
-                    "sessionId": native, "prompt": [{"type": "text", "text": prompt}],
-                }),
-            ):
-                await client.write((json.dumps({
-                    "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
-                }) + "\n").encode())
-                while True:
-                    frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
-                    cursor, frame = await asyncio.wait_for(anext(frames()), 30)
-                    reply = json.loads(frame)
-                    await client.ack(cursor)
-                    if reply.get("id") == request_id:
-                        if request_id == 2 and refused:
-                            assert reply.get("error", {}).get("code") == -32001, reply
-                        else:
-                            assert "result" in reply, reply
-                        break
-            await client.detach(reapable=True)
-        finally:
-            await client.close()
+        await _control_native(
+            state, native=native, environment=environment, cwd=checkout,
+            prompt=prompt, stop=stop, refused=refused,
+        )
 
     identities: dict[str, str] = {}
     state: dict[str, Any] | None = None

@@ -23,6 +23,7 @@
         "agent-remote-driver/extensions/agent-remote-driver/extension.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/lifecycle.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/registry.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/service-startup.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/session-driver.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs"
       ]

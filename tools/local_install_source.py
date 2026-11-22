@@ -328,10 +328,9 @@ def _build_input_roots(source: Path, selected: tuple[str, ...], builder: _Builde
             roots.add(project)
             roots.update(path for _name, path in builder.resolve_vendored_libs(project))
             if (project / "setup.py").is_file():
-                from plugin_runtime_resources import build_inputs
+                from plugin_runtime_resources import build_resource_roots
 
-                _data, injected = build_inputs(project, root=source)
-                roots.update(path.parent for path in injected.values())
+                roots.update(build_resource_roots(project, root=source))
     result: list[Path] = []
     for path in sorted(roots, key=lambda value: (len(value.parts), str(value))):
         if not path.is_relative_to(source) or builder.uer._find_symlinked_ancestor(path, source):

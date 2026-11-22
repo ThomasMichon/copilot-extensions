@@ -440,7 +440,7 @@ def _input_origins(inputs: FrozenInputs, slot: Path | None = None) -> dict[str, 
         if slot is None or inputs.wheel_inputs is None:
             raise ValueError("Application origins require the retained slot and complete wheels")
         return {
-            name: (slot / "wheels" / filename).as_uri()
+            name: _file_uri(slot / "wheels" / filename)
             for name, _version, filename, _digest in inputs.wheel_inputs.distributions
         }
     if inputs.source_wheels is not None:
@@ -457,7 +457,7 @@ def _input_origins(inputs: FrozenInputs, slot: Path | None = None) -> dict[str, 
         }
     return {
         tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]:
-        root.as_uri() for root in _installed_packages(inputs)
+        _file_uri(root) for root in _installed_packages(inputs)
     }
 
 

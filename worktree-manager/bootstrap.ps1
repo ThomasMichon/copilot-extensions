@@ -697,6 +697,11 @@ if ((Test-Path -LiteralPath $Config) -and -not $explicitSource) {
 
 $installerArgs = @()
 $commandArgs = @($args)
+$DescribeInstall = $commandArgs -ccontains '--describe-install'
+if ($DescribeInstall) {
+    if ($commandArgs.Count -ne 1) { throw '--describe-install accepts no application or installation arguments.' }
+    $commandArgs = @()
+}
 $InstallSource = $null
 if ($commandArgs.Count -and $commandArgs[0] -ceq '--install-source') {
     if ($commandArgs.Count -lt 2 -or -not [IO.Path]::IsPathRooted($commandArgs[1])) {
@@ -894,7 +899,9 @@ try {
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $Python
     $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))
-    if ($commandArgs.Count) {
+    if ($DescribeInstall) {
+        & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --describe-install
+    } elseif ($commandArgs.Count) {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
     } else {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs

@@ -1631,6 +1631,11 @@ paths, protected work and unknown launch outcomes hold. A guard may declare
 individual already-created lifecycle files using `add_artifact`; cleanup does
 not recursively delete runtime roots, source, installed code, undeclared logs,
 or retained evidence. Canonical lock files remain to prevent split custody.
+An optional absolute monotonic `deadline` bounds exact cleanup without a new
+timeout, and `runtime_root` limits it to the original registered runtime.
+Neither option adds termination authority. An application that has separately
+retired its original service can use `terminate=False` to settle only its
+registered lifecycle files; nonsettled results must remain explicit.
 For read-only discovery, `daemon_observation.publish_file_observation(receipt,
 name, path)` records an existing file's canonical locator only when the running
 record belongs to the current process. The bounded observation namespace neither

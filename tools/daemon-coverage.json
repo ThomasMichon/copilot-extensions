@@ -25,6 +25,7 @@
     "r": "."
   },
   "entrypoints": {
+    "r:plugins/agent-remote-driver/src/agent_remote_driver_app/service_lifecycle.py::serve": "$SERVICE",
     "b:service_start_cli.py::_cmd_start": "agent-bridge",
     "b:app_lifecycle.py::lifespan": "agent-bridge",
     "cd:session_host/launcher.py::run_host": "agent-bridge-session-host",
@@ -79,12 +80,14 @@
     "t:clean-room/scenarios/leased-daemon-instances/fixtures/worker.py::main": "$args.service"
   },
   "context_required": [
+    "r:plugins/agent-remote-driver/src/agent_remote_driver_app/service_lifecycle.py::serve",
     "r:plugins/agent-bridge/spikes/session-host/session_host.py::SessionHost.run",
     "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::run_daemon",
     "t:clean-room/gateway-role-tunnels/fixture_service.py::serve",
     "t:clean-room/scenarios/leased-daemon-instances/fixtures/worker.py::main"
   ],
   "admission_owners": {
+    "r:plugins/agent-remote-driver/src/agent_remote_driver_app/service_lifecycle.py": ["r:plugins/agent-remote-driver/src/agent_remote_driver_app/service_lifecycle.py::serve"],
     "t:clean-room/gateway-role-tunnels/fixture_service.py": ["t:clean-room/gateway-role-tunnels/fixture_service.py::serve"],
     "b:service_process_cli.py": ["b:service_start_cli.py::_cmd_start"],
     "cd:session_host/launcher.py": ["cd:session_host/launcher.py::run_host"],
@@ -195,6 +198,7 @@
   },
   "sites": {
     "resident": {
+      "r:plugins/agent-remote-driver/src/agent_remote_driver_app/service_lifecycle.py::start::spawn_daemon": 1,
       "fm:gateway_host_start.py::ensure::spawn_daemon": 1,
       "ss:local_service.py::start::spawn_daemon": 1,
       "r:services/ssh/container/Dockerfile::<script>::ENTRYPOINT": 1,

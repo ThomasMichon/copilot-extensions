@@ -92,6 +92,91 @@ fixtures permit durable children to leave their caller Jobs; each packet also
 runs the queued-installer restrictive-Job negative and bounded-child cleanup.
 Ordinary runner containment remains unchanged. Contained hook fixtures retain
 their caller Job until owned work settles and do not claim Job-loss survival.
+The protected Windows qualification packet `native-driver-service-caller-jobs`
+selects the installed standalone Driver service and the restrictive-Job negative
+control. It prepares only the Driver environment and uses the same hosted native
+owner, source-bound cache lease and exact daemon cleanup. Preparation and execution
+share a 420-second aggregate deadline. Both exact JUnit cases must pass; a missing
+or skipped prerequisite cannot qualify. This packet requires a governed feed,
+but does not extend the workflow's existing feed-secret allowlist. Until the
+deployment owner admits that prerequisite and the protected controller publishes
+support, this remains a source-only packet, not native lifetime evidence.
+The contained installed-application removal-preflight case uses an external
+base interpreter and copied installer after deleting construction sources.
+It stops only the fixture's original central service, requires a live Host's
+runtime lease to refuse exclusive removal custody, verifies further TCP/WS
+delivery from the same Host and child, then requires custody after their exit.
+This proves reference retention and quiescent admission, not uninstall or
+survival after all caller Jobs close.
+The ordinary-application artifact consumer installs a real locked Source/profile
+fixture, copies its removal owner outside the target and removes construction
+sources. It now prepares and reloads the canonical external packet, retaining
+the original Source/profile wheels, helper resources and physical/publication
+receipts. Canonical cleanup must refuse while the candidate is selected, then
+reclaim only the original sealed objects after fixture-owned withdrawal. A durable
+external receipt supports settled retry; focused controls preserve changed,
+replaced, missing and unlisted objects before receipt preparation and reject new
+objects during partial cleanup. The connector packet separately exercises native
+live-plugin disable followed by marketplace unregistration, preserves unrelated
+settings and retained payloads, and proves repeated absence. These layers do not
+constitute an integrated Driver uninstall.
+The service-artifact packet adds contained real-service controls for ordinary
+and extended-length runtime registrations. Exact original cleanup must retain
+the registered scope spelling after physical slot validation. The installed
+consumer retires the original service and its canonical lifecycle artifact while
+holding service-start custody, retains the independently installed Host's runtime
+reference and verifies further TCP/WS delivery before quiescent admission.
+Held, live or missing cleanup outcomes block withdrawal without a cleanup retry.
+This proves the service-removal seam, not a complete uninstall, native Copilot
+conversation or survival after all caller Jobs close.
+A separate no-install profile probe copies the real locked wheel set outside
+the target, deletes construction/profile inputs and imports both Driver control
+helpers under isolated physical base Python. Native birth observation and an
+actual operation lock work from that copied set, with native extension modules
+restricted to the base interpreter. This qualifies the external dependency
+closure, not transaction preparation, withdrawal or deletion.
+The canonical packet controls reject changed Source/wheels/resources, unsafe or
+partial destinations, incomplete or changed retained packets and fresh-preflight
+recovery. Retained evidence survives publication and slot loss. Preparation admits
+a live runtime's shared lease; explicitly named service transients are recorded
+but excluded from the original cleanup receipt, which still refuses while they
+remain. The installed service-artifact consumer now prepares that packet before
+retirement with both the original service and independent Host live, and imports
+its controls from the retained wheels under base Python. An extended-path endpoint
+regression is covered by a cheap Windows alias case. These checks do not qualify
+the durable withdrawal/unknown-effect transaction by themselves.
+The ordinary installed-application consumer also uses canonical receipted
+publication withdrawal and reclamation rather than manual fixture unlinking.
+Focused controls prove durable intent before partial publication loss,
+same-byte replacement and unreceipted absence refusal, live-runtime exclusion,
+and settled retry after the original slot is gone. These filesystem phases do
+not settle an unknown native connector call.
+The Driver coordinator controls separately require durable service/connector
+intent before effects, original identity revalidation before retirement, and no
+native replay after an interrupted outcome. Settled retries retain service-start
+and connector-activation custody through canonical filesystem phases, refuse
+reactivation or changed service owners, and permit only original receipted
+partial recovery. Windows alias cases require physical path identity while
+preserving exact generation, startup arguments and original file identity.
+The installed service-artifact consumer composes these phases from retained
+wheels under physical base Python after construction/profile removal: a live
+independent Host must first refuse reclamation and continue TCP/WS delivery.
+Its finished registration must still refuse reclamation until its original
+artifact owner settles the exact receipt; only then may the transaction finish
+and retry after slot loss. A separate control verifies reference validation
+inside exclusive canonical runtime custody, closing the admission-to-delete
+race. These internal lanes do not qualify native Copilot conversations,
+cross-host behavior or production caller-Job survival.
+The public-removal packet adds native CMD/PowerShell route controls before
+target-venv preflight, opt-in callback declaration validation, sealed external
+helper retention, changed-selection refusal before service intent and strict
+saved-native-snapshot rejection. The service-free real public consumer removes
+an installed application after source loss, then retries its retained entry
+after slot loss. The separately selected `public_uninstall_preserves` installed
+Driver case enters the actual public launcher with no manually prepared packet,
+retains live and finished independent Host references, and completes only after
+that Host's original artifact owner settles its exact registration. It uses
+the same post-slot retained-entry retry, not a second installer or deleter.
 Ordinary contained Windows runs and the explicit native Windows owner sample
 only their own instance registry in the existing resource-poll loop and retain
 birth-matched process handles through strict daemon cleanup, within the original

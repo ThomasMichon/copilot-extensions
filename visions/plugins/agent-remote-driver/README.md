@@ -1,11 +1,11 @@
 # Copilot Driver - Vision
 
-- **Subject:** The minimal, independently distributed Copilot execution app in
-  the `agent-remote-driver` namespace: Session Host, mux wrapping and a common
-  ACP-compatible broker for headless and headed sessions.
+- **Subject:** The minimal, independently distributed Copilot plugin and service
+  in the `agent-remote-driver` namespace: Session Host, mux wrapping, discovery
+  and a common ACP-compatible broker for headless and headed sessions.
 - **Scope:** leaf (a concrete provider within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-21
 - **Reality docs:** [Remote Driver](../../../plugins/agent-remote-driver/README.md) ·
   [Bridge hosting](../../../plugins/agent-bridge/docs/architecture.md) ·
   [Worktrees mux support](../../../plugins/agent-worktrees/docs/mux.md)
@@ -22,7 +22,16 @@ The app supports ordinary host installation, but its primary distribution
 objective is a compact, quickly installable redistributable. Bridge, Worktrees
 or another authorized caller can carry that same selected package to a machine,
 container or CodeSpace and obtain a usable session endpoint. Existing guest
-coordination plugins and mutable global plugin settings are not prerequisites.
+coordination plugins and mutable global plugin settings are not prerequisites
+for launch-scoped execution.
+
+An ordinary machine installation enables the thin plugin globally and keeps
+the independently installed Driver service running. Every subsequent native
+Copilot session, including mux-wrapped interactive and hosted ACP execution,
+is discoverable and controllable through Bridge from another authorized host.
+The target needs neither Bridge, Worktrees nor Manager. The Driver supplies
+the small receiving, discovery and control substrate; Bridge remains the
+coordination client.
 
 Headless and headed launches share one Session Host broker. Callers receive
 the same ACP-compatible control boundary and attributable endpoint, process
@@ -36,6 +45,20 @@ The core app is independently installable and usable without loading a Copilot
 plugin. The plugin is its connection and guidance surface, not its installer
 or lifetime prerequisite. Its selected redistributable supplies the receiving
 support needed for the chosen mode without importing a caller's whole runtime.
+
+### Machine service and globally enabled connector
+
+The ordinary installer owns the persistent service and its stable invocation,
+health-gated replacement and reversible startup registration. It also enables
+the selected thin plugin in the user's global Copilot configuration, preserving
+unrelated settings. Neither session startup nor plugin activation is an
+installer or the service's lifetime owner.
+
+The service discovers native sessions and retained Hosts through their existing
+execution identities and exposes them to authorized Bridge clients. An
+unreachable target or incomplete inventory remains explicit, not an empty
+fleet. Discovery, observation and mutation use the same selected Driver
+generation and native session; transport access does not create control custody.
 
 ### Session Host broker
 
@@ -102,6 +125,17 @@ A headed launch carries its selected extension from session creation without
 rewriting guest-global registrations. Trust is scoped to that supplied
 extension; it is not blanket native tool permission or repository exposure
 approval.
+
+### machine-wide-session-visibility
+
+An ordinary installation makes newly launched sessions visible without
+per-repository enablement, a worktree registry or a full coordination daemon
+on the target. Global enablement and launch-scoped receiving are complementary
+installation modes of the same connector, not duplicate session drivers.
+Mux presentation and hosted ACP execution both appear under their exact native
+identities and support authorized remote enumeration, input and output reads.
+Native consumption is distinct from transport or SDK acceptance; an uncertain
+handoff is retained and never automatically resent.
 
 ### attributable-launch-result
 
@@ -220,6 +254,9 @@ the authority required for consequential actions.
 
 ## Provenance
 
+- **2026-11-21** - Clarified ordinary machine installation as a globally
+  enabled thin connector plus independently supervised service, with both
+  presentations reachable through Bridge without a target coordination suite.
 - **2026-11-05** - Factored the shared Copilot execution substrate into an
   independently distributed app, with Session Host brokering both direct
   headless children and extension-connected interactive mux sessions.
