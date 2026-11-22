@@ -1258,7 +1258,14 @@ unrelated inherited descriptors and acknowledges the admitted application's
 actual process identity before executing the selected script. With
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, it preserves the caller's group instead.
 `__native_daemon_pid` is only a live launch observation, never persisted
-application custody or a completion receipt. Neither helper supplies cgroup
+application custody or a completion receipt. The optional leading
+`--admission-deadline <seconds>` accepts an absolute Linux `/proc/uptime`
+deadline. It bounds the readiness handshake by the remaining caller budget,
+never more than the existing fifteen-second default. An expired deadline
+refuses before launch; expiry after launch closes only the admission channel,
+not the independently owned supervisor. Callers reserve their own response and
+channel-cleanup time and reconcile any unacknowledged launch through its owner.
+Neither helper supplies cgroup
 escape, an installation queue or macOS admission.
 `__native_daemon_wait_pid` separately identifies the launcher's direct,
 waitable child. A synchronous observer waits that child for the native exit

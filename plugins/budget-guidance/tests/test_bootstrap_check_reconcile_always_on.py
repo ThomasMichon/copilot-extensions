@@ -121,6 +121,7 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     (driver / "first-use.sh").write_text(
         "#!/usr/bin/env bash\n"
         "# Installation driver lifecycle contract: budget-install-v1\n"
+        "# Installation driver lifecycle contract: budget-admission-deadline-v1\n"
         'printf "%s\\n" "$@" >"$HOME/driver-args"\n'
         '[[ "${BOOTSTRAP_DRIVER_STATUS:-0}" == 0 ]] || exit "$BOOTSTRAP_DRIVER_STATUS"\n'
         'printf "%s\\n" "${BOOTSTRAP_DRIVER_ACK:-launched:42 log:'
@@ -184,10 +185,12 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path: Path) -> None:
     assert "SKIPPED" not in result.stderr, result.stderr
     assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
     assert "bootstrap install supervision launched" in result.stderr, result.stderr
-    assert (home / "driver-args").read_text().splitlines() == [
+    arguments = (home / "driver-args").read_text().splitlines()
+    assert arguments[:6] == [
         str(home / ".copilot-extensions/update-driver"), str(plugin_dir),
         str(home / ".budget-guidance"), str(project), "--installer-action", "install",
     ]
+    assert arguments[6] == "--admission-deadline" and float(arguments[7]) > 0
     assert not (home / ".budget-guidance/reconcile.lock").exists()
 
 
@@ -255,10 +258,15 @@ def test_driver_submission_retains_fixed_install_action_and_project(tmp_path: Pa
     assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
     assert "bootstrap install supervision launched" in result.stderr
     assert "Launch is not durable request acceptance" in result.stderr
-    assert (home / "driver-args").read_text(encoding="utf-8-sig").splitlines() == [
+    arguments = (home / "driver-args").read_text(encoding="utf-8-sig").splitlines()
+    assert arguments[:6] == [
         str(home / ".copilot-extensions/update-driver"), str(payload),
         str(installation), str(tmp_path / "project with spaces"), "--installer-action", "install",
     ]
+    if host == "bash":
+        assert arguments[6] == "--admission-deadline" and float(arguments[7]) > 0
+    else:
+        assert len(arguments) == 6
     assert not (installation / "reconcile.lock").exists()
 
 

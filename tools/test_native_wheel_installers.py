@@ -83,6 +83,8 @@ def assert_native_bootstrap(
 
     host = shell or shutil.which("powershell.exe")
     assert host
+    # A Windows venv redirector inserts a parent between capture and the caller.
+    bootstrap_python = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     payload, home = tmp_path / "payload", tmp_path / "home"
     shutil.copytree(
         ROOT / "plugins" / plugin, payload,
@@ -157,7 +159,7 @@ def assert_native_bootstrap(
         (root / "current-version").write_text(generation)
         manifest_generation = native_version if fault == "same-version-rollback" else generation
         (root / "deploy-manifest.json").write_text(json.dumps({
-            "service": plugin, "bootstrap_python": sys.executable,
+            "service": plugin, "bootstrap_python": bootstrap_python,
             "runtime_version": "0.0.0" if fault == "different-generation" else manifest_generation,
             "source": {"version": version, "plugin": plugin, "path": str(payload), "content_hash": "b" * 64},
         }))

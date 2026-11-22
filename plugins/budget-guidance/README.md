@@ -124,6 +124,10 @@ acknowledgement identifies the driver's own diagnostic log, not durable request
 acceptance or installation success. Installation retains source admission,
 publication policy and existing state-preservation rules. Context-selected,
 no-self-provision and pinned invocations do not submit automatic work.
+Linux forwards the remaining hook deadline through the client's advertised
+`budget-admission-deadline-v1` capability, reserving two seconds for channel
+cleanup and the hook response. Admission expiry never kills the independent
+supervisor or authorizes another launch.
 macOS retains its existing automatic installer path pending native-owner
 qualification; this migration does not claim that platform's worker adoption.
 Closed-wheel readiness uses the prepared bootstrap selection to contain a

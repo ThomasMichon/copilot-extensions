@@ -43,6 +43,11 @@ fi
 # defers automatic work; it cannot prove process ownership or authorize retirement.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+hook_deadline=""
+if [[ "$(uname -s)" == Linux ]]; then
+  read -r hook_uptime _idle </proc/uptime || exit 3
+  hook_deadline="$(LC_ALL=C awk -v now="$hook_uptime" 'BEGIN { printf "%.3f", now+13 }')" || exit 3
+fi
 session_start_json_emitted=0
 emit_session_start_json() {
   if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
@@ -192,14 +197,15 @@ if [[ "$(uname -s)" == Linux ]]; then
   fi
   first_use="$PluginDir/libs/update-driver/scripts/first-use.sh"
   if [[ ! -f "$first_use" ]] ||
-      ! grep -Fq '# Installation driver lifecycle contract: budget-install-v1' "$first_use"; then
+      ! grep -Fq '# Installation driver lifecycle contract: budget-install-v1' "$first_use" ||
+      ! grep -Fq '# Installation driver lifecycle contract: budget-admission-deadline-v1' "$first_use"; then
     printf '[%s] The packaged installation driver lacks the Budget install lifecycle contract.\n' "$name" >&2
     exit 3
   fi
   execution_root="$HOME/.copilot-extensions/update-driver"
   project="$(pwd -P)" || exit 3
   if ! acknowledgement="$(bash "$first_use" "$execution_root" "$PluginDir" "$InstallDir" "$project" \
-      --installer-action install </dev/null)"; then
+      --installer-action install --admission-deadline "$hook_deadline" </dev/null)"; then
     printf '[%s] Installation driver admission failed.\n' "$name" >&2
     exit 3
   fi
