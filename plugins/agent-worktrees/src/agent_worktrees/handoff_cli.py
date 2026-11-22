@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
-from pathlib import Path
+from functools import wraps
 from types import ModuleType
 from typing import ParamSpec, TypeVar, cast
 
@@ -19,6 +18,7 @@ from . import (
     embody_completion,
     embody_receipt,
     embody_resume,
+    handoff_cutover,
     launch_admission,
     launch_seed_state,
     native_restart_launch,
@@ -38,7 +38,6 @@ from .bridge_acquisition_launch import apply_bridge_scope as _apply_bridge_scope
 from .execution_spaces import ExecutionSpaceError
 from .launch_passthrough import add_launch_passthrough_args
 from .launch_passthrough import passthrough_error as _passthrough_error
-from .launch_preflight import LaunchPreflight
 from .permissions import FolderTrustError
 from .worktree_creation import LaunchSeedStagingFailure
 
@@ -58,109 +57,39 @@ def _core_helper(name: str, local: Callable[P, R]) -> Callable[P, R]:
     return local
 
 
-def _apply_assignment_env(
-    env: dict[str, str], selection: profile_assignment.LaunchProfileSelection,
-) -> dict[str, str]:
-    return _core_helper("_apply_assignment_env", resolve_launch_cli._apply_assignment_env)(env, selection)
+def _core_forward(name: str, signature: Callable[P, R], *, fallback: bool = False) -> Callable[P, R]:
+    # Resolve at call time so entry-point overrides remain effective.
+    @wraps(signature)
+    def forward(*args: P.args, **kwargs: P.kwargs) -> R:
+        target = (
+            _core_helper(name, signature) if fallback
+            else cast(Callable[P, R], getattr(_core(), name))
+        )
+        return target(*args, **kwargs)
+    return forward
 
 
-def _build_env(
-    profile: cfg.CopilotProfile | None, session_env: dict[str, str] | None = None,
-    work_dir: str | None = None, *, config: cfg.Config | None = None,
-) -> dict[str, str]:
-    build = cast(Callable[..., dict[str, str]], _core()._build_env)
-    if config is not None:
-        return build(profile, session_env, work_dir=work_dir, config=config)
-    return build(profile, session_env, work_dir=work_dir)
-
-
-def _build_launch_cmd(
-    config: cfg.Config, args: argparse.Namespace, work_dir: str,
-    profile: cfg.CopilotProfile | None = None, *, preflight: LaunchPreflight | None = None,
-    fallback_copilot_path: str | None = None,
-) -> list[str]:
-    build = cast(Callable[..., list[str]], _core()._build_launch_cmd)
-    if fallback_copilot_path is not None:
-        return build(config, args, work_dir, profile=profile, preflight=preflight,
-                     fallback_copilot_path=fallback_copilot_path)
-    return build(config, args, work_dir, profile=profile, preflight=preflight)
-
-
-def _create_worktree_core(
-    config: cfg.Config, **kwargs: object,
-) -> dict[str, object]:
-    create = cast(Callable[..., dict[str, object]], _core()._create_worktree_core)
-    return create(config, **kwargs)
-
-
-def _handoff_cutover_retire_result(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
-    retire = cast(Callable[[argparse.Namespace], tuple[int, dict[str, object]]],
-                  _core()._handoff_cutover_retire_result)
-    return retire(args)
-
-
-def _handoff_cutover_retry_result(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
-    retry = cast(Callable[[argparse.Namespace], tuple[int, dict[str, object]]],
-                 _core()._handoff_cutover_retry_result)
-    return retry(args)
-
-
-def _handoff_cutover_spawn_result(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
-    spawn = cast(Callable[[argparse.Namespace], tuple[int, dict[str, object]]],
-                 _core()._handoff_cutover_spawn_result)
-    return spawn(args)
-
-
-def _launch_profile_selection(
-    config: cfg.Config, args: argparse.Namespace, record: tracking.WorktreeRecord | None,
-    *, lane: str, generation_key: str, ordinary_profile: cfg.CopilotProfile | None = None,
-    explicit_profile: cfg.CopilotProfile | None = None, resume_session: str | None = None,
-    predecessor_session: str | None = None, allocate_new: bool = True,
-) -> profile_assignment.LaunchProfileSelection:
-    select = _core_helper("_launch_profile_selection", resolve_launch_cli._launch_profile_selection)
-    return select(
-        config, args, record, lane=lane, generation_key=generation_key,
-        ordinary_profile=ordinary_profile, explicit_profile=explicit_profile,
-        resume_session=resume_session, predecessor_session=predecessor_session,
-        allocate_new=allocate_new,
-    )
-
-
-def _perform_remux(
-    *, worktree_id: str | None, session_id: str | None, worktree_path: str | None,
-    force_sudo: bool | None, apply_windows: bool, session_ids: list[str] | None = None,
-) -> dict[str, object]:
-    remux = cast(Callable[..., dict[str, object]],
-                 _core_helper("_perform_remux", reclaim_cli._perform_remux))
-    return remux(worktree_id=worktree_id, session_id=session_id, worktree_path=worktree_path,
-                 force_sudo=force_sudo, apply_windows=apply_windows, session_ids=session_ids)
-
-
-def _preflight_launch(
-    config: cfg.Config, args: argparse.Namespace, work_dir: str,
-    *, allocation_source: str | None = None,
-) -> LaunchPreflight:
-    preflight = cast(Callable[..., LaunchPreflight], _core()._preflight_launch)
-    if allocation_source is not None:
-        return preflight(config, args, work_dir, allocation_source=allocation_source)
-    return preflight(config, args, work_dir)
-
-
-def _reflect_assignment(
-    record: tracking.WorktreeRecord, selection: profile_assignment.LaunchProfileSelection,
-) -> None:
-    _core_helper("_reflect_assignment", resolve_launch_cli._reflect_assignment)(record, selection)
+_apply_assignment_env = _core_forward("_apply_assignment_env", resolve_launch_cli._apply_assignment_env, fallback=True)
+_build_env = _core_forward("_build_env", resolve_launch_cli._build_env)
+_build_launch_cmd = _core_forward("_build_launch_cmd", resolve_launch_cli._build_launch_cmd)
+_create_worktree_core = _core_forward("_create_worktree_core", resolve_launch_cli._create_worktree_core)
+_handoff_cutover_retire_result = _core_forward("_handoff_cutover_retire_result", handoff_cutover._handoff_cutover_retire_result)
+_handoff_cutover_retry_result = _core_forward("_handoff_cutover_retry_result", handoff_cutover._handoff_cutover_retry_result)
+_handoff_cutover_spawn_result = _core_forward("_handoff_cutover_spawn_result", handoff_cutover._handoff_cutover_spawn_result)
+_launch_profile_selection = _core_forward("_launch_profile_selection", resolve_launch_cli._launch_profile_selection, fallback=True)
+_perform_remux = _core_forward("_perform_remux", reclaim_cli._perform_remux, fallback=True)
+_preflight_launch = _core_forward("_preflight_launch", resolve_launch_cli._preflight_launch)
+_reflect_assignment = _core_forward("_reflect_assignment", resolve_launch_cli._reflect_assignment, fallback=True)
+_repo_session_env = _core_forward("_repo_session_env", resolve_launch_cli._repo_session_env)
+_monitor_session_state_handoff_path = _core_forward("_monitor_session_state_handoff_path", status_monitor_runtime._monitor_session_state_handoff_path, fallback=True)
+_monitor_read_session_state_handoff = _core_forward("_monitor_read_session_state_handoff", status_monitor_runtime._monitor_read_session_state_handoff, fallback=True)
+resolve_worktree_id_by_codename = _core_forward("resolve_worktree_id_by_codename", worktree_identity.resolve_worktree_id_by_codename)
 
 
 def _repo_for_record(config: cfg.Config, record: tracking.WorktreeRecord) -> cfg.RepoConfig | None:
     lookup = cast(Callable[[cfg.Config, tracking.WorktreeRecord], cfg.RepoConfig | None],
                   _core_helper("_repo_for_record", tracking._repo_for_record))
     return lookup(config, record)
-
-
-def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
-    build = cast(Callable[[cfg.Config, str], dict[str, str]], _core()._repo_session_env)
-    return build(config, work_dir)
 
 
 def _unsupported_hosted_launch(record: tracking.WorktreeRecord | None, operation: str) -> str:
@@ -184,21 +113,6 @@ def _monitor_retire_handoff_predecessor(request: dict[str, object]) -> tuple[int
 def _monitor_maybe_process_handoff_record(record: tracking.WorktreeRecord) -> None:
     process = cast(Callable[[tracking.WorktreeRecord], None], _core()._monitor_maybe_process_handoff_record)
     process(record)
-
-
-def _monitor_session_state_handoff_path(session_id: str | None) -> Path | None:
-    return _core_helper("_monitor_session_state_handoff_path",
-                        status_monitor_runtime._monitor_session_state_handoff_path)(session_id)
-
-
-def _monitor_read_session_state_handoff(path: str | os.PathLike[str] | None) -> dict[str, object] | None:
-    return _core_helper("_monitor_read_session_state_handoff",
-                        status_monitor_runtime._monitor_read_session_state_handoff)(path)
-
-
-def resolve_worktree_id_by_codename(codename: str) -> str | None:
-    resolve = cast(Callable[[str], str | None], _core().resolve_worktree_id_by_codename)
-    return resolve(codename)
 
 
 def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -269,34 +183,10 @@ def cmd_bridge_seed_settle(args: argparse.Namespace) -> int:
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     """Live-cutover handoff: spawn/refocus a successor Copilot or retire a pane.
 
-    Two modes (JSON out on stdout either way):
-
-    * **spawn** (default; needs ``--seed``): reconstruct this worktree's launch
-      command (the same ``_build_launch_cmd`` the picker uses) for a **plain
-      interactive** Copilot, open + select a NEW window in the worktree's
-      ``wt-<id>`` mux session (cutting the operator over). The seed is encoded as
-      a space-free pane-wrapper control argument; the wrapper decodes it after
-      psmux's lossy argv reconstruction, appends native
-      ``-i <seed>``, and writes a receipt before the parent reports
-      success. Deliberately omits ``--resume``: a handoff wants a FRESH context
-      window seeded by the prompt, not the old transcript replayed. Returns the
-      OLD (pre-cutover) pane id so the successor-side handoff consumer can retire
-      it after pickup.
-    * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
-      (Copilot's native clean quit), hard-killing it only if it will not exit.
-      Then, when the predecessor ``--session-id`` is known, **verify its Copilot
-      process is gone** -- reaping an orphan by its ``inuse.<pid>.lock`` pid (the
-      successor is a different pid, untouched) -- so a hard-killed pane never
-      leaves a lingering parallel session that the mux later restores as a
-      reappearing pane. Success requires **both** the pane retired and the old
-      Copilot process gone.
-    * **retry** (``--retry``): inspect the most recent handoff on this worktree
-      and positively confirm whether its recorded successor session already has
-      a live pane in this mux. If so, do **not** spawn again -- just refocus
-      that existing window. If not, fall back to the ordinary spawn path.
-
-    The mux choreography lives here (agent-worktrees owns launch + mux); the
-    context-handoff extension is a thin trigger that shells out to this command.
+    Dispatch to the cutover owner's spawn, retire or retry operation and emit
+    its JSON result. Spawn starts a fresh seeded conversation and returns the
+    predecessor pane; retirement verifies both pane and process exit; retry
+    refocuses a confirmed live successor rather than duplicating it.
     """
     # ── Retire mode ──────────────────────────────────────────────────────
     retire_pane = getattr(args, "retire_pane", None)
@@ -354,31 +244,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
 
 def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
-    """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
+    """Create or resume one detached mux+Copilot session in a worktree.
 
-    The agent-facing "embodiment" verb: spawn a durable, mux-wrapped interactive
-    Copilot in a target worktree so it registers with the local bridge (Phase 1)
-    and becomes viewable/messageable -- the CLI-first embodiment of
-    ``visions/agent-fabric`` §lifetime-decides-embodiment, driven by an agent
-    rather than a human at the picker. JSON out on stdout.
-
-    Target selection:
-      * ``--worktree-id <id>`` embodies in an existing worktree;
-      * ``--new`` creates a fresh worktree first (the outlives-its-caller case).
-
-    Resume semantics: **one live session per worktree**. If a ``wt-<id>`` mux
-    session already exists, this does NOT spawn a duplicate -- it reports the
-    existing session (``created=false``), honoring "to act in an occupied space,
-    interrogate the occupant or embody a fresh space." Otherwise it creates the
-    session detached (never attaching -- the operator or Neuron Forge attaches
-    later). Embodying an existing worktree without a seed resumes its head
-    conversation (``resume_session`` in the output; ``--fresh`` opts out,
-    including with a seed). Cold startup prompts use native interactive
-    arguments when qualified, otherwise the established terminal fallback.
-    Ordinary live embodiment never injects text; only the explicit
-    ``--deliver-pending-seed`` startup callback settles staged New text.
-
-    Verification: mux-only via ``--verify-timeout``; native state via the receipt.
+    An existing live mux is reported without duplication or text injection.
+    Cold launches resume the recorded head unless ``--fresh`` opts out, and
+    prepare startup text through native arguments or the terminal fallback.
+    Only ``--deliver-pending-seed`` settles staged text in an existing mux.
+    ``--verify-timeout`` observes the mux; the receipt observes native state.
     """
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
@@ -631,19 +503,8 @@ def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
                 args, wt_id=wt_id, work_dir=work_dir, deferred=deferred,
                 cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
             )
-        # A freshly-provisioned remote venue (CodeSpace/container) virtually
-        # never has tmux preinstalled (confirmed against a real CodeSpace
-        # devcontainer, agent-bridge-cli-mode-sessions Phase 4 prep) --
-        # self-heal it here, once, right before the one call that actually
-        # needs it, rather than failing with a raw "not found" or silently
-        # downgrading to a non-reattachable headless launch. Explicit opt-in
-        # only (--ensure-mux): an operator who deliberately runs a BYO
-        # terminal/session manager (e.g. Herdr) instead of tmux on their OWN
-        # machine must never have tmux silently installed underneath them by
-        # an ordinary `embody` call -- opt-in-not-ambient-default applies
-        # here just as it does to CLI mode itself. Only a caller that KNOWS
-        # it is preparing a venue with nothing else already managing
-        # sessions (agent-bridge's `cli-mode launch`) sets this.
+        # Fresh venues may lack a mux. Installation is explicit opt-in so an
+        # ordinary embodiment never changes a caller's chosen session manager.
         if getattr(args, "ensure_mux", False):
             sessions.ensure_mux_available()
         # Resolved here, from the record re-read under the lifecycle fence, so
@@ -745,31 +606,12 @@ def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
 
 
 def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dict[str, object] | None = None) -> int:
-    """The ``--anchor`` half of :func:`cmd_embody`: create-or-resume a
-    detached mux+Copilot session directly in the active project's anchor
-    checkout, with no worktree involved at all.
+    """Create or resume a detached session in the active project's anchor.
 
-    Deliberately parallels headless dispatch's own existing behavior: a
-    CodeSpace/container ACP session already runs `copilot --acp --stdio`
-    straight in the venue's anchor checkout (its ``workspace_folder``),
-    never in a worktree -- CLI mode had no equivalent, forcing every
-    interactive venue session through worktree creation/tracking it didn't
-    actually need. This reuses the exact same launch-building primitives
-    (:func:`_build_launch_cmd`, :func:`_build_env`, :func:`_repo_session_env`,
-    :func:`_preflight_launch`) the worktree path uses -- none of them
-    require a worktree tracking record; they only need a ``work_dir`` string,
-    confirmed by ``_build_env``'s own docstring ("A non-worktree work_dir (the
-    anchor) ... simply omits the var"). Skips entirely the worktree-specific
-    machinery that genuinely doesn't apply here: tracking-record
-    load/re-verify, launch-profile fleet assignment (`_launch_profile_selection`,
-    meant for routing across many parallel worktrees), and the managed-kind/
-    terminal-status guard.
-
-    One live anchor session per repo (mirrors "one live session per
-    worktree"): the synthesized id ``anchor-<repo_name>`` is what
-    ``sessions.has_mux_session``/``mux_new_session`` key off, so a second
-    ``--anchor`` call resumes the same session rather than duplicating it,
-    identically to the worktree case.
+    Anchor launches reuse normal launch/environment preflight but have no
+    worktree ledger, lifecycle lock or fleet profile assignment. The synthesized
+    ``anchor-<repo_name>`` mux identity enforces one live session per anchor.
+    This does not grant permission to edit an otherwise read-only anchor.
     """
     repo_name = config.repo_name
     if not repo_name:
