@@ -3,6 +3,24 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_candidate_retry.py",
+      [
+        "test_immutable_clock_refuses_invalid_or_noncanonical_inputs[]",
+        "test_immutable_clock_refuses_invalid_or_noncanonical_inputs[not-a-time]",
+        "test_immutable_clock_refuses_invalid_or_noncanonical_inputs[2026-01-01T00:00:00+00:00]",
+        "test_immutable_clock_refuses_invalid_or_noncanonical_inputs[2026-99-99T00:00:00Z]",
+        "test_fixed_clock_and_git_identity_do_not_mutate_parent_environment",
+        "test_retry_compares_the_full_commit_identity_without_fetching_or_normalizing[same]",
+        "test_retry_compares_the_full_commit_identity_without_fetching_or_normalizing[wrong-sha]",
+        "test_retry_compares_the_full_commit_identity_without_fetching_or_normalizing[wrong-ref]",
+        "test_retry_compares_the_full_commit_identity_without_fetching_or_normalizing[multiple]",
+        "test_retry_compares_the_full_commit_identity_without_fetching_or_normalizing[absent]",
+        "test_cli_emits_the_trusted_commit_directly_not_via_human_log_parsing",
+        "test_cli_noop_never_emits_a_candidate_identity[False]",
+        "test_cli_noop_never_emits_a_candidate_identity[True]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_artifact_bundles.py",
       [
         "test_bundle_and_transfer_roundtrip",
@@ -10013,6 +10031,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_candidate_retry.py": "1e91d9bbdc9ce4602eb4c79630dbdb047180c07422d98992377122acae3649c0",
+    "tools/test_promotion_candidate_retry.py": "066ce0676dfd074bcd0c74f037ab1ebe46b7e7dd64ddc8aba5c2b7c1b5b3639c",
     "tools/promotion_unit_tests/test_simple_shortcut_cache_owner.py": "ec42a7fd5b7f4b3827dfd1f17b319ac3d091e182f869cf88b3356986e2c92369",
     "tools/promotion_unit_tests/test_original_command_ownership.py": "3a025dd22bd16392ebe746c655343c1e002342bca625f16528a3dd1bcf0519a9",
     "tools/test_installer_engine_commands.py": "e2dc9380ec7b58111df1efc549e7391a21a2ee2ab29db028da912db65fd50dd2",
