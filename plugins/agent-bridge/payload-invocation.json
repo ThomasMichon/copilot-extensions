@@ -5,6 +5,7 @@
   "module": "agent_bridge",
   "legacyRuntimeRoot": ".agent-bridge",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
   "installerLifecycle": true,
   "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",

@@ -102,6 +102,7 @@ if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
     }
 }
 $NativeWheelSelection = $null
+$driverPython = $null
 
 
 if ($RequireGracefulCutover -and $Action -ne 'update') {
@@ -150,9 +151,15 @@ if ($env:OS -eq 'Windows_NT' -and
             $driverOptions += $name
         }
     }
+    $bootstrapOptions = @{}
+    if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'resolve-bootstrap-python.ps1')
+        $bootstrapOptions.BootstrapPython = Resolve-PayloadBootstrapPython -AllowUnprepared
+    }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
         -Plugin 'agent-bridge' -Action $Action -Options $driverOptions `
-        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv `
+        @bootstrapOptions
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -584,6 +591,9 @@ function Ensure-RuntimeSlotRetention {
 
 function Get-BootstrapPython {
     if ($WheelProfile) { return $WheelPython }
+    if ($env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON) {
+        return $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
+    }
     <# A python to run the stdlib-only versioned_runtime.py helper BEFORE the
        slot venv exists (e.g. the pre-build toss). Prefers a signed base python,
        then python3/python on PATH. Returns $null if none found. #>
@@ -624,6 +634,10 @@ function Initialize-SourceRuntime {
         if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     } catch [System.IO.DirectoryNotFoundException] {
         if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
+    if (-not $WheelProfile -and -not $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON) {
+        $seedPython = Resolve-NativeBootstrapPython -Action $Action -Root $InstallDir
+        if ($seedPython) { $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $seedPython }
     }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
@@ -682,6 +696,12 @@ function Invoke-UvVenvResilient {
     )
 
     return (Invoke-UvVenvResilientShared -VenvDir $VenvDir -Arguments $Arguments -UvCommand $UvCommand)
+}
+
+function Initialize-BridgeBootstrapPython {
+    if ($WheelProfile) { return }
+    . (Join-Path $PSScriptRoot 'resolve-bootstrap-python.ps1')
+    [void](Resolve-PayloadBootstrapPython -Operation Prepare -TimeoutMilliseconds 600000)
 }
 
 function Ensure-Uv {
@@ -1783,6 +1803,10 @@ function Write-DeployManifest {
     # $PayloadHash: the transaction's once-computed Get-PayloadHash value, so
     # the manifest records the same content the slot was admitted/built for.
     param([string]$PayloadHash = '')
+    if ($WheelProfile) {
+        . (Join-Path $PSScriptRoot 'resolve-bootstrap-python.ps1')
+        [void](Resolve-PayloadBootstrapPython -RuntimeRoot $InstallDir -PreparedRuntimeOnly)
+    }
     $fields = @{}
     if ($NativeWheelSelection) { $fields['runtime_version'] = $SrcVersion }
     $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
@@ -2785,6 +2809,7 @@ function Invoke-Install {
     Write-Step 'agent-bridge install'
 
     if (-not (Ensure-Uv)) { exit 1 }
+    Initialize-BridgeBootstrapPython
 
     # Check for migration from old installer
     if (-not $NoService) { Invoke-MigrationCheck }
@@ -3706,6 +3731,7 @@ function Invoke-Update {
     Write-Step 'agent-bridge update'
 
     if (-not (Ensure-Uv)) { exit 1 }
+    Initialize-BridgeBootstrapPython
 
     # Serialize concurrent installers (see Invoke-Install): don't let an
     # overlapping install/update race serving convergence or rebuild the venv.
@@ -4036,7 +4062,13 @@ $script:InstallerLifecycleAction = if ($ForceTaskRepair) { '' }
     elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
+$previousBootstrapPython = $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
 try {
+    if ($WheelProfile) {
+        $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $WheelPython
+    } elseif ($driverPython) {
+        $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $driverPython
+    }
     if ($Action -ne 'schedule' -and -not $ForceTaskRepair) { Initialize-SourceRuntime }
     if ($WheelProfile) {
         Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
@@ -4087,8 +4119,12 @@ try {
         $script:InstallerLifecycleOutcome = 'fail'
         throw
     } finally {
-        if ($script:InstallerLifecycleAction) {
-            Write-InstallerLifecycle $script:InstallerLifecycleOutcome
+        try {
+            if ($script:InstallerLifecycleAction) {
+                Write-InstallerLifecycle $script:InstallerLifecycleOutcome
+            }
+        } finally {
+            $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $previousBootstrapPython
         }
     }
 }

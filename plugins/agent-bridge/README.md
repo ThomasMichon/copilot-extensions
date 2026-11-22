@@ -142,6 +142,41 @@ first accepted candidate and reuses it only within that installer process,
 checking its existence and Authenticode signature on each use. An unsuccessful
 lookup is not cached, and required native-operation failures remain visible.
 
+On Windows, the installation-context helper and session writer first use the
+installer-selected, completed Bridge environment as an offline bootstrap
+handoff. A namespaced receipt pointer locates its canonical Bridge installation
+without using receipt contents as admission or falling back to the legacy root.
+Explicit SDK context/root arguments take precedence over ambient hints.
+Context-free SDK actions ignore unrelated ambient context hints.
+Without a context or prepared legacy helper, a bounded lookup of existing
+installation receipts can locate the owning payload's cell; ambiguous matches
+are never guessed. The declared uv fallback remains available. This locator
+does not replace SDK admission.
+Helpers run only isolated stdlib; the SDK still validates installation
+and context ownership before application dispatch. Cold helpers use the exact
+uv-managed CPython declared in `payload-invocation.json`. Neither path selects
+the first Python on PATH, downloads Python or synchronizes dependencies.
+Missing both prepared inputs is an actionable prerequisite failure.
+Session-guidance rendering explicitly uses context-free bootstrap selection, so
+stale or foreign inherited context cannot block its payload-local catalog.
+Context-addressed SDK calls retain their strict installation checks.
+Raw receipt inputs receive the SDK's single environment-token expansion;
+already-normalized status and probe paths are not expanded again.
+
+Windows selector subprocesses use the packaged, ahead-of-time bootstrap capture
+host before the Python worker exists. Its strict Job remains owned by the
+original PowerShell caller; caller death or bounded cleanup retires selectors
+and their descendants. No compiler runs during installation or invocation.
+The selector host does not replace SDK admission or the worker's own lifetime.
+
+Explicit install/update/provision prepares the cold declaration after native
+admission and the initialized uv prerequisite owner. Closed-wheel installation
+instead carries its supplied Python only within the transaction, restores the
+caller's selection and validates the completed runtime handoff before publishing
+success. It performs no additional interpreter download. An initially cold
+source driver retains its documented Python 3.11+ seed requirement. POSIX,
+remote-carrier launchers and installed hosts are not migrated by this source fix.
+
 Both installers identify install/update with one ordinary progress line instead
 of a blank/banner/blank block. Standalone output retains the action name; an
 existing timed parent renders that line as running progress, not completion.

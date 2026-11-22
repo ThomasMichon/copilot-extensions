@@ -84,6 +84,8 @@ The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
 isolation. Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
+Bridge also adopts the Windows provider for its declared bootstrap helpers;
+Worktrees' future pre-lifecycle adoption remains separate.
 
 The required `InvokeCaptured` callback accepts `FilePath` and `ArgList` and
 returns exactly one object with integer `ExitCode` and string `Stdout` and
@@ -186,6 +188,59 @@ The native installation-context transport controls exercise the actual
 uv-selection-to-direct-worker handoff, including a large literal request,
 nonzero exit, poisoned selection hints and an unavailable managed interpreter.
 They do not enable any production command or catalog.
+
+## Windows pre-interpreter capture
+
+`bootstrap-capture.ps1` and its ahead-of-time `bootstrap-capture.exe` are the
+finite Windows selector boundary. The canonical C# source is
+`bootstrap-capture.cs`; Bridge declares both runtime assets in its existing
+native support inventory. The normal materializer carries them together.
+This is not part of the pure-Python process-owner wheel or a new service.
+
+The host verifies the kernel's private-input-pipe server PID and the original
+caller's retained process birth. It transfers a non-inheritable strict
+kill-on-close Job handle into that same caller, joins the Job itself, and
+closes its local Job handle before publishing the offer. Only the original
+PowerShell process retains continuing ownership. No selector runs before the
+correlated adoption acknowledgement; an explicit unadopted abort is the only
+remote-handle reclamation authority. Unknown adoption never reclaims a numeric
+handle that the caller might have disposed or reused.
+
+Both uv lookup and prepared-interpreter probes execute within this custody.
+Capture drains both output pipes concurrently, retains literal argument and
+child-environment semantics, and reserves cleanup inside the caller's monotonic
+deadline. The original caller uses the same prebuilt assembly's finite
+retirement entrypoint to terminate the exact retained Job and confirm zero
+active processes before releasing its handle. It loads the assembly from bytes
+and caches the method by content, avoiding a file lock or repeated assembly
+loads while allowing payload replacement in a continuing caller.
+Unconfirmed retirement retains
+the exact objects and fences further capture in that caller; it is not replayed.
+The application SDK's original worker, private request pipe and admission
+remain separate and unchanged.
+
+Deployed callers never compile C# or require an SDK. Windows uses its existing
+.NET Framework runtime for this small host; the facade works on Windows
+PowerShell 5.1 and PowerShell 7. A missing artifact or unsupported execution
+policy refuses rather than compiling, weakening custody or selecting another
+interpreter.
+
+Source builds use an already installed .NET 8+ SDK and existing Windows
+framework references, without package restore or toolchain installation:
+
+```powershell
+python .\tools\build-bootstrap-capture.py
+python .\tools\build-bootstrap-capture.py --check
+```
+
+The build is deterministic, path-mapped and warning-free. The actual native
+Bridge controls exercise unhinted runtime/uv selection, original-caller death
+and timeout descendant retirement on both PowerShell engines. Repeated capture
+also verifies payload replacement and removal while the caller remains alive.
+A bare-capture
+negative control keeps the enclosing fixture Job open and confirms descendants
+would otherwise remain alive. These controls do not claim a deployment or
+desktop-observation result.
 
 The retained-source constructor checks build-tool containment using resolved
 physical paths and the shared Windows extended-path normalization. Equivalent

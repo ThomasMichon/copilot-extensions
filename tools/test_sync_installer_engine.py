@@ -108,6 +108,16 @@ def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str])
     return candidate
 
 
+def test_bridge_materializes_complete_bootstrap_capture_boundary(tmp_path: Path) -> None:
+    consumer = REPO / "plugins" / "agent-bridge"
+    names = ("bootstrap-capture.ps1", "bootstrap-capture.exe")
+    candidate = _materialized_consumer(consumer, tmp_path, names)
+    for name in names:
+        assert (candidate / "scripts" / name).read_bytes() == (
+            REPO / "libs" / "installer-engine" / name
+        ).read_bytes()
+
+
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
 def test_native_deploy_manifest_can_build_without_publishing(tmp_path: Path, shell: str) -> None:
     executable = shutil.which(shell)
@@ -441,7 +451,12 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
     extras = {
-        name for files in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for name in files
+        name
+        for files in (
+            *contract.STANDALONE_NATIVE_EXTRA_FILES.values(),
+            *contract.NATIVE_SUPPORT_FILES.values(),
+        )
+        for name in files
     }
     for asset in (*contract.FILES, *contract.support_files(origin), *sorted(extras)):
         (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
@@ -454,7 +469,10 @@ def test_real_engine_fixture_retains_nested_support_assets(
     contract = sync_installer_engine.ier
     origin = tmp_path / "input"
     canonical = origin / "libs" / "installer-engine"
-    assets = (*contract.FILES, "nested/support.py")
+    native_support = (
+        asset for files in contract.NATIVE_SUPPORT_FILES.values() for asset in files
+    )
+    assets = (*contract.FILES, "nested/support.py", *native_support)
     for asset in assets:
         path = canonical / asset
         path.parent.mkdir(parents=True, exist_ok=True)
