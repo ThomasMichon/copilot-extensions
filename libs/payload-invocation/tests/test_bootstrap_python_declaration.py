@@ -49,6 +49,38 @@ def test_static_bootstrap_declaration_does_not_change_launchers(tmp_path: Path) 
     assert generator.expected_files(manifest) == outputs
 
 
+@pytest.mark.parametrize("launcher", [None, True, "unknown", "uv"])
+def test_incomplete_managed_bootstrap_refuses_before_writes(tmp_path: Path, launcher: object) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data.pop("bootstrapPython")
+    data["bootstrapLauncher"] = launcher
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="bootstrapLauncher|bootstrap declaration"):
+        generator.process_manifest(manifest, check=False)
+    assert not (manifest.parent / "bin").exists()
+
+
+@pytest.mark.parametrize("keep_declaration", [False, True])
+def test_withdrawn_managed_launcher_refuses_before_writes(
+    tmp_path: Path, keep_declaration: bool,
+) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data["bootstrapLauncher"] = "uv"
+    manifest.write_text(json.dumps(data))
+    assert generator.process_manifest(manifest, check=False) == []
+    del data["bootstrapLauncher"]
+    if not keep_declaration:
+        del data["bootstrapPython"]
+        (manifest.parent / "scripts/bootstrap-python-version.txt").unlink()
+    manifest.write_text(json.dumps(data))
+    before = {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="obsolete bootstrap launcher"):
+        generator.process_manifest(manifest, check=False)
+    assert before == {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+
+
 @pytest.mark.parametrize("check", [False, True])
 def test_withdrawn_request_is_rejected_by_generation_and_check(tmp_path: Path, check: bool) -> None:
     manifest = _declare(tmp_path, "3.11.11")

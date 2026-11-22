@@ -46,6 +46,12 @@ _bootstrap_python_candidates() {
             /*) printf '%s\n' "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" ;;
             *) printf '%s\n' "ERROR: Bootstrap Python must be an absolute executable." >&2; return 1 ;;
         esac
+    elif [[ -f "$SCRIPT_DIR/bootstrap-python-launcher.txt" ]]; then
+        [[ -f "$SCRIPT_DIR/_bootstrap_python/select.sh" ]] || {
+            printf '%s\n' "ERROR: Declared command bootstrap selector is unavailable; update the owning payload." >&2
+            return 1
+        }
+        "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh"
     else
         type -ap python3 python
     fi
