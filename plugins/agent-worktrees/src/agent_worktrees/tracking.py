@@ -3085,7 +3085,7 @@ def find_worktree_id_by_cwd(cwd: str, *, project: str | None = None) -> str | No
     return best_id
 
 
-def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
+def retire_record(record: WorktreeRecord, tracking_path: Path, *, retain_pair_history: bool = False) -> bool:
     """Retire a reaped worktree's tracking record: tombstone it as
     ``archived`` (unpaired) or ``finalized`` when paired (BOTH-gate
     follow-up, #957/#220). An unpaired record becomes a minimal
@@ -3174,10 +3174,9 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     checkout is already gone. Re-read responsibility under the record lock;
     stale caller snapshots cannot erase a newly acquired obligation.
 
-    Returns ``True`` once the record is durably retired (tombstoned or
-    deleted, or found already retired by a concurrent call); ``False`` if
-    deferred by a contended lock or changed pair -- callers retry on a later
-    reap pass. Raises ``ValueError`` for unsettled responsibility.
+    Returns ``True`` when retired, ``False`` on contention or changed pairing;
+    retry a later reap pass. Unsettled responsibility raises ``ValueError``.
+    ``retain_pair_history`` keeps both joint-cleanup terminal records.
     """
     from . import paired_claims, receiving_allocation
     from .retirement_safety import delete_retired_pair, require_retirable, retains_artifact_metadata, retirement_blocker, same_pair
@@ -3230,7 +3229,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                 ):
                     hard_delete_sibling = True
 
-            if hard_delete_sibling:
+            if hard_delete_sibling and not retain_pair_history:
                 return delete_retired_pair(record, sibling, path, sibling_path)
 
             def _write_tombstone(status: WorktreeStatus) -> bool:

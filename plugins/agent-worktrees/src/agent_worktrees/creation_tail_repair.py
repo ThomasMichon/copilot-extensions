@@ -163,7 +163,7 @@ def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: st
 
 def _retained_sibling(
     config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot,
-    timestamp: str, suffix: str, platform: str,
+    timestamp: str, suffix: str, platform: str, *, require_checkout: bool = True,
 ):
     knowledge_id = f"{record.worktree_id}-k"
     harness_ref = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
@@ -215,11 +215,12 @@ def _retained_sibling(
         receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
         if (
             not creation_repair_identity._repair_namespace_matches(child, receiving)
-            or not expected_path.is_dir() or expected_path.is_symlink()
+            or require_checkout and not expected_path.is_dir() or expected_path.is_symlink()
             or child.status != "active"
         ):
             raise ValueError("retained paired checkout is missing, moved, or no longer active")
-        _same_repository(root.path, child.worktree_path, branch=child.branch)
+        if require_checkout:
+            _same_repository(root.path, child.worktree_path, branch=child.branch)
         found = child
     return found
 

@@ -45,6 +45,12 @@ def _reap_locked(
     warnings: list[str] = []
     failures = 0
     from . import session_lease
+    from . import paired_cleanup
+
+    try:
+        paired_cleanup.require_joint(rec)
+    except ValueError as exc:
+        return 1, [str(exc)]
 
     if session_lease.release_expired_finalized(rec):
         tracking.save_record(rec, tracking_path / f"{rec.worktree_id}.yaml")
@@ -99,7 +105,7 @@ def _reap_locked(
                 warnings.append(f"Directory still present: {wt_dir}")
                 failures += 1
 
-    if rec.branch and rec.branch != repo.default_branch:
+    if rec.branch and rec.branch != repo.default_branch and git_ops.local_branch_exists(rec.branch, cwd=repo.anchor):
         if not git_ops.delete_branch(rec.branch, cwd=repo.anchor, force=True):
             warnings.append(f"Could not delete branch {rec.branch}")
             failures += 1
@@ -107,6 +113,9 @@ def _reap_locked(
     if rec.worktree_path and not Path(rec.worktree_path).exists():
         permissions.merge_permissions(repo.anchor, rec.worktree_path)
         permissions.remove_trusted_folder(rec.worktree_path)
+
+    if failures or paired_cleanup.admitted(rec):
+        return failures, warnings
 
     # Preserve the record on deferral or a newly observed responsibility hold.
     try:

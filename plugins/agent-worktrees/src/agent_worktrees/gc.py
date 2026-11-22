@@ -132,6 +132,8 @@ class OrphanVerdict:
 
 def classify_orphan(d: Path, *, min_settle_secs: float = _MIN_SETTLE_SECS) -> OrphanVerdict:
     """Decide what to do with one orphan directory, without touching it."""
+    if d.name.endswith("-k"):
+        return OrphanVerdict(str(d), "skip", "possible retained knowledge companion; joint cleanup required")
     if reason := preservation_reason(d):
         return OrphanVerdict(str(d), "skip", reason)
     if _age_secs(d) < min_settle_secs:
@@ -249,6 +251,8 @@ def _on_rm_error(func: Callable[[str], object], path: str, _exc: object) -> None
 
 def remove_tree(d: Path) -> tuple[bool, str]:
     """Remove *d*, retrying once on a lock (the Windows transient-handle case)."""
+    if d.name.endswith("-k"):
+        return False, "possible retained knowledge companion; joint cleanup required"
     for attempt in range(2):
         if reason := preservation_reason(d):
             return False, reason

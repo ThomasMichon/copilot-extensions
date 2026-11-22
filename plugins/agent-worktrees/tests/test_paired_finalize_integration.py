@@ -197,6 +197,8 @@ def test_harness_finalizes_after_verified_knowledge_conclusion(environment, monk
     _concluded_knowledge(harness, knowledge)
     assert _finalize(harness, configurations, monkeypatch)
     assert tracking.load_record(harness.yaml_path).status == "finalized"
+    assert Path(harness.worktree_path).is_dir()
+    assert Path(knowledge.worktree_path).is_dir()
 
 
 @pytest.mark.parametrize("creator_link", [False, True])
@@ -295,13 +297,13 @@ def test_unfinished_paired_sibling_cannot_finalize_and_clear_parent(
     assert tracking.load_record(harness.yaml_path).resources[0].is_unsettled
 
 
-def test_finalize_fences_sibling_reopen_through_removal_and_terminal_save(
+def test_finalize_fences_sibling_reopen_through_terminal_save_and_defers_removal(
     environment, monkeypatch,
 ):
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
     _concluded_knowledge(harness, knowledge)
-    from agent_worktrees import git_ops, prune
+    from agent_worktrees import git_ops
 
     observed = []
 
@@ -321,32 +323,21 @@ def test_finalize_fences_sibling_reopen_through_removal_and_terminal_save(
         worker.join(2)
         assert not worker.is_alive()
 
-    probe, remove, update = (
-        prune.default_paired_sibling_final, git_ops.remove_worktree, tracking.update_status,
-    )
-
-    def probe_then_reopen(record):
-        result = probe(record)
-        attempt_reopen("after-probe")
-        return result
+    update = tracking.update_status
 
     def remove_under_fence(*args, **kwargs):
-        attempt_reopen("before-removal")
-        return remove(*args, **kwargs)
+        pytest.fail("finalize must retain paired checkouts for joint cleanup")
 
     def terminal_under_fence(record, status, *args, **kwargs):
         if record.worktree_id == harness.worktree_id and status == "finalized":
             attempt_reopen("terminal-save")
         return update(record, status, *args, **kwargs)
 
-    monkeypatch.setattr(prune, "default_paired_sibling_final", probe_then_reopen)
     monkeypatch.setattr(git_ops, "remove_worktree", remove_under_fence)
     monkeypatch.setattr(tracking, "update_status", terminal_under_fence)
     assert _finalize(harness, configurations, monkeypatch)
-    assert observed == [
-        ("after-probe", "fenced"), ("before-removal", "fenced"),
-        ("terminal-save", "fenced"),
-    ]
+    assert observed == [("terminal-save", "fenced")]
+    assert Path(harness.worktree_path).is_dir() and Path(knowledge.worktree_path).is_dir()
     assert tracking.load_record(knowledge.yaml_path).status == "finalized"
     with tracking._RecordLock(knowledge.yaml_path, timeout=0.1, require_sidecar=True):
         pass

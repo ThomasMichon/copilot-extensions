@@ -859,10 +859,10 @@ def cmd_config_root_dispatch(argv: list[str]) -> int:
 
 def cmd_knowledge_dispatch(argv: list[str]) -> int:
     """Manage the launch-time harness/knowledge composition boundary."""
-    if argv and argv[0] == "control-plane":
-        from .control_plane_cli import main
+    if argv and argv[0] in ("control-plane", "repair-pair"):
+        from . import control_plane_cli, knowledge_pair_recovery
 
-        return main(argv[1:])
+        return (control_plane_cli.main if argv[0] == "control-plane" else knowledge_pair_recovery.main)(argv[1:])
     p = argparse.ArgumentParser(
         prog="agent-worktrees knowledge",
         description=(
@@ -871,6 +871,7 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
         ),
     )
     sub = p.add_subparsers(dest="command")
+    sub.add_parser("repair-pair", help="Inspect or restore an existing harness's knowledge companion")
     sub.add_parser(
         "control-plane",
         help="Read the declared harness/knowledge roles from an explicit topology",
