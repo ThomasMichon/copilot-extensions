@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import runpy
 from typing import Callable, ContextManager, Iterator
 
 import importlib.machinery
@@ -42,6 +43,61 @@ STATIC_BUILD = (
     '[build-system]\nrequires = ["setuptools>=68"]\n'
     'build-backend = "setuptools.build_meta"\n'
 )
+
+
+def test_driver_connector_build_and_static_admission_share_complete_resources() -> None:
+    source = ROOT / "plugins/agent-remote-driver"
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    selected = helper["application_resources"](source, "agent_remote_driver_app")
+    metadata, admitted = resources.build_inputs(source, root=ROOT)
+    project = metadata["project"]
+    assert isinstance(project, dict) and project["name"] == "agent-remote-driver"
+    assert {
+        "agent_remote_driver_app/" + name: path for name, path in selected.items()
+    } == admitted
+    expected = {
+        "plugin.json",
+        *(
+            path.relative_to(source).as_posix()
+            for path in (source / "extensions").rglob("*.mjs")
+        ),
+        "extensions/agent-remote-driver/sdk-compat.mjs",
+    }
+    assert set(selected) == {"_runtime_assets/" + name for name in expected}
+    compatibility = selected["_runtime_assets/extensions/agent-remote-driver/sdk-compat.mjs"]
+    assert compatibility.read_bytes() == (
+        ROOT / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs"
+    ).read_bytes()
+
+
+def test_driver_connector_acquisition_retains_its_nonpackaged_build_owner() -> None:
+    import build_python_artifacts as builder
+    import local_install_source as local
+
+    roots = local._build_input_roots(ROOT, ("agent-remote-driver",), builder)
+    helper = ROOT / "libs/versioned-runtime/standalone_build.py"
+    assert any(helper.is_relative_to(path) for path in roots)
+    _metadata, packaged = resources.build_inputs(ROOT / "plugins/agent-remote-driver", root=ROOT)
+    assert helper not in packaged.values()
+
+
+def test_driver_connector_sdist_reuses_its_packaged_bytes(tmp_path: Path) -> None:
+    import shutil
+
+    source = ROOT / "plugins/agent-remote-driver"
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    selected = helper["application_resources"](source, "agent_remote_driver_app")
+    for relative, original in selected.items():
+        target = tmp_path / "src/agent_remote_driver_app" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(original, target)
+    recovered = helper["application_resources"](tmp_path, "agent_remote_driver_app")
+    assert set(recovered) == set(selected)
+    assert all(value is None for value in recovered.values())
+    assert all(
+        (tmp_path / "src/agent_remote_driver_app" / name).read_bytes() == original.read_bytes()
+        for name, original in selected.items()
+    )
 
 
 def test_gateway_build_context_contains_the_canonical_runtime_and_cache_closure() -> None:

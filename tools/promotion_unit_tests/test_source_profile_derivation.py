@@ -8,7 +8,7 @@ import json
 from pathlib import Path, PureWindowsPath
 import subprocess
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, cast
 from ssl import SSLContext
 
@@ -26,6 +26,62 @@ from promotion_unit_tests.test_runtime_profile_wheels import _ENVIRONMENT
 @pytest.fixture(autouse=True)
 def _synthetic_host_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("packaging.markers.default_environment", lambda: dict(_ENVIRONMENT))
+
+
+@pytest.mark.parametrize(("ordinary", "alias"), [
+    (r"C:\fixture\versions\1.0", r"\\?\C:\fixture\versions\1.0"),
+    (r"\\fixture\share\versions\1.0", r"\\?\UNC\fixture\share\versions\1.0"),
+])
+def test_installed_application_source_accepts_the_same_physical_wheel_uri(
+    monkeypatch: pytest.MonkeyPatch, ordinary: str, alias: str,
+) -> None:
+    from dataclasses import dataclass
+    import installer_engine as engine
+    import runtime_application_install as application
+
+    @dataclass(frozen=True)
+    class Wheels:
+        generation: str = "1.0"
+        distributions: tuple[tuple[str, str, str, str], ...] = (
+            ("fixture", "1.0", "fixture-1.0-py3-none-any.whl", "a" * 64),
+        )
+
+    wheels = Wheels()
+    inputs = {"runtime_version": "1.0", "local_packages": ["fixture"], "extras": []}
+    source_record = {"plugin": "fixture"}
+    record = {"construction": "fixture"}
+    receipt = {"binding": "fixture"}
+    monkeypatch.setattr(application, "_construction_metadata", lambda *_args: SimpleNamespace(
+        inputs=inputs, source=source_record, wheels=wheels, receipt=receipt, identity="fixture",
+    ))
+    frozen = cast(engine.FrozenInputs, SimpleNamespace(application=record, wheel_inputs=wheels))
+    slot = cast(Path, PureWindowsPath(alias))
+    written = engine._input_origins(frozen, cast(Path, PureWindowsPath(ordinary)))
+    assert engine._input_origins(frozen, slot) == written
+    expected = {
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "packages": written, "wheel_inputs": receipt, "local_packages": ["fixture"],
+    }
+    documents = {
+        "runtime-source.json": source_record, "application.json": record,
+        ".runtime-input-origins.json": expected,
+    }
+    monkeypatch.setattr(application, "_read", lambda path, **_kwargs: json.dumps(
+        documents[path.name],
+    ).encode())
+    association = application._construction_inputs(
+        slot, record, ModuleType("fixture_runtime"), engine, time.monotonic() + 5,
+    )
+    verifier = cast(ModuleType, SimpleNamespace(verify_application_wheels=lambda *_args: None))
+    application._unchanged_application(
+        slot, association, verifier,
+    )
+    assert association.proof == expected
+    expected["packages"] = {"fixture": "file:///different/fixture-1.0-py3-none-any.whl"}
+    with pytest.raises(RuntimeError, match="construction inputs changed"):
+        application._unchanged_application(
+            slot, association, verifier,
+        )
 
 
 def _native_file_lock(files: list[tuple[str, dict[str, str]]]) -> bytes:
@@ -274,6 +330,7 @@ def test_native_compile_generated_exclusions_use_supported_constraint_spelling(
         yield object()
 
     monkeypatch.setattr(configuration, "temporary_inputs", temporary)
+    monkeypatch.setattr(configuration, "select_uv_executable", lambda uv, **_options: uv)
     with configuration.retain_local_exclusions(
         retain, "uv", [], excluded_local_packages=("App",), error_type=ValueError,
         _operation=operation,

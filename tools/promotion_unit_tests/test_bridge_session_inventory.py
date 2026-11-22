@@ -112,6 +112,10 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     monkeypatch.setitem(sys.modules, "agent_remote_driver.session_host.osutil", SimpleNamespace(
         process_start_time=lambda pid: "native-birth",
     ))
+    load(
+        monkeypatch, "agent_remote_driver.session_host.registered_inventory",
+        "libs/copilot-driver-core/src/agent_remote_driver/session_host/registered_inventory.py",
+    )
     hosts = load(
         monkeypatch, "_inventory_host.registered_inventory",
         BRIDGE + "session_host/registered_inventory.py",

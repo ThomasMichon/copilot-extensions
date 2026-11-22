@@ -3,20 +3,26 @@
 import importlib.util
 import ast
 import asyncio
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 SPEC = importlib.util.spec_from_file_location(
     "daemon_coverage", Path(__file__).with_name("check-daemon-coverage.py"),
 )
+assert SPEC is not None and SPEC.loader is not None
 GUARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GUARD)
 
 
-def fixture(root, text, sites=None, entries=None):
+def fixture(
+    root: Path, text: str, sites: dict[str, dict[str, int]] | None = None,
+    entries: dict[str, str] | None = None,
+) -> Path:
     source = root / "services" / "example" / "src" / "service.py"
     source.parent.mkdir(parents=True)
     source.write_text(text, encoding="utf-8")
@@ -38,7 +44,9 @@ def fixture(root, text, sites=None, entries=None):
     "Popen(argv)",
     "launch(argv)",
 ])
-def test_unknown_dynamic_launch_fails_even_with_containment_comment(tmp_path, expression):
+def test_unknown_dynamic_launch_fails_even_with_containment_comment(
+    tmp_path: Path, expression: str,
+) -> None:
     fixture(
         tmp_path,
         "from subprocess import Popen as launch\n"
@@ -48,7 +56,7 @@ def test_unknown_dynamic_launch_fails_even_with_containment_comment(tmp_path, ex
     assert any("unclassified" in problem for problem in GUARD.verify(tmp_path))
 
 
-def test_assigned_launch_alias_is_checked():
+def test_assigned_launch_alias_is_checked() -> None:
     sites, _ = GUARD.python_sites(
         "import subprocess\nlaunch = subprocess.Popen\n"
         "def go(argv):\n    return launch(argv)\n", "fixture.py",
@@ -56,7 +64,7 @@ def test_assigned_launch_alias_is_checked():
     assert sites == {("go", "Popen"): 1}
 
 
-def test_getattr_alias_and_direct_native_spawn_are_checked():
+def test_getattr_alias_and_direct_native_spawn_are_checked() -> None:
     sites, _ = GUARD.python_sites(
         "launch = getattr(subprocess, 'Popen')\n"
         "def go(argv):\n"
@@ -67,7 +75,7 @@ def test_getattr_alias_and_direct_native_spawn_are_checked():
     assert sites == {("go", "Popen"): 2, ("go", "posix_spawn"): 1}
 
 
-def test_checked_in_bin_launchers_are_not_skipped(tmp_path):
+def test_checked_in_bin_launchers_are_not_skipped(tmp_path: Path) -> None:
     fixture(tmp_path, "pass\n")
     directory = tmp_path / "worktree-manager" / "bin"
     directory.mkdir(parents=True)
@@ -75,7 +83,7 @@ def test_checked_in_bin_launchers_are_not_skipped(tmp_path):
     assert any("bin/unclassified.py" in problem for problem in GUARD.verify(tmp_path))
 
 
-def test_rebased_elevation_and_guidance_helpers_keep_their_finite_custody_classes():
+def test_rebased_elevation_and_guidance_helpers_keep_their_finite_custody_classes() -> None:
     census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
     assert census["sites"]["finite-worker"][
         "r:plugins/agent-conduct-guidance/skills/requesting-windows-elevation/scripts/"
@@ -86,7 +94,7 @@ def test_rebased_elevation_and_guidance_helpers_keep_their_finite_custody_classe
     ] == 1
 
 
-def test_rebased_profile_parser_and_removed_logger_bootstraps_are_classified():
+def test_rebased_profile_parser_and_removed_logger_bootstraps_are_classified() -> None:
     census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
     assert census["sites"]["caller-contained"][
         "r:fleet-manager/src/fleet_manager/host_profile.py::_parser::Popen"
@@ -97,14 +105,14 @@ def test_rebased_profile_parser_and_removed_logger_bootstraps_are_classified():
     )
 
 
-def test_session_host_direct_serve_is_the_admitted_startup_owner():
+def test_session_host_direct_serve_is_the_admitted_startup_owner() -> None:
     census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
     key = "cd:session_host/host.py::SessionHost.serve"
     assert census["entrypoints"][key] == "agent-bridge-session-host"
     assert census["admission_owners"]["cd:session_host/host.py"] == [key]
 
 
-def test_independent_driver_library_listener_cannot_escape_the_census(tmp_path):
+def test_independent_driver_library_listener_cannot_escape_the_census(tmp_path: Path) -> None:
     fixture(tmp_path, "pass\n")
     source = tmp_path / "libs/copilot-driver-core/src/agent_remote_driver/host.py"
     source.parent.mkdir(parents=True)
@@ -112,7 +120,7 @@ def test_independent_driver_library_listener_cannot_escape_the_census(tmp_path):
     assert any("host.py::serve::create_server" in problem for problem in GUARD.verify(tmp_path))
 
 
-def test_ssh_source_start_is_resident_with_its_real_admitted_foreground(tmp_path):
+def test_ssh_source_start_is_resident_with_its_real_admitted_foreground(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     census = json.loads((root / "tools/daemon-coverage.json").read_text())
     caller = "ss:local_service.py"
@@ -147,12 +155,40 @@ def test_ssh_source_start_is_resident_with_its_real_admitted_foreground(tmp_path
     assert ast.literal_eval(instance.args[0]) == census["entrypoints"][entry]
 
 
-def test_posix_exec_intermediary_and_observer_keep_caller_containment():
+def test_driver_resident_launch_requires_its_original_reserved_entry(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    census = json.loads((root / "tools/daemon-coverage.json").read_text())
+    relative = "plugins/agent-remote-driver/src/agent_remote_driver_app/service_lifecycle.py"
+    caller = "r:" + relative
+    entry, site = caller + "::serve", caller + "::start::spawn_daemon"
+    source = tmp_path / relative
+    source.parent.mkdir(parents=True)
+    original = (root / relative).read_text()
+    source.write_text(original)
+    selected = {
+        "schema": census["schema"], "prefixes": {"r": "."},
+        "sites": {"resident": {site: census["sites"]["resident"][site]}},
+        "entrypoints": {entry: census["entrypoints"][entry]},
+        "context_required": [key for key in census["context_required"] if key == entry],
+        "admission_owners": {caller: census["admission_owners"][caller]},
+    }
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "daemon-coverage.json").write_text(json.dumps(selected))
+    assert GUARD.verify(tmp_path) == []
+    assert selected["context_required"] == [entry]
+    source.write_text(original.replace(
+        "guard = admit_daemon_instance(", "guard = unadmitted_instance(",
+    ))
+    assert any("lacks shared startup admission" in issue for issue in GUARD.verify(tmp_path))
+
+
+def test_posix_exec_intermediary_and_observer_keep_caller_containment() -> None:
     census = json.loads(Path(__file__).with_name("daemon-coverage.json").read_text(encoding="utf-8"))
     assert census["sites"]["caller-contained"]["w:launch_seed_posix.py::execute::fork"] == 2
 
 
-def test_all_sdk_adapters_are_counted_as_caller_contained_not_resident():
+def test_all_sdk_adapters_are_counted_as_caller_contained_not_resident() -> None:
     root = Path(__file__).resolve().parents[1]
     census = json.loads((root / "tools/daemon-coverage.json").read_text(encoding="utf-8"))
     adapters = sorted((root / "plugins").glob(
@@ -174,14 +210,14 @@ def test_all_sdk_adapters_are_counted_as_caller_contained_not_resident():
         )
 
 
-def test_counted_classification_cannot_cover_second_launch(tmp_path):
+def test_counted_classification_cannot_cover_second_launch(tmp_path: Path) -> None:
     fixture(tmp_path, "def serve(argv):\n    Popen(argv)\n    Popen(argv)\n", {
         "caller-contained": {"s:service.py::serve::Popen": 1},
     })
     assert any("count 1 != actual 2" in problem for problem in GUARD.verify(tmp_path))
 
 
-def test_powershell_instance_helpers_keep_caller_containment_and_canonical_source():
+def test_powershell_instance_helpers_keep_caller_containment_and_canonical_source() -> None:
     root = Path(__file__).resolve().parents[1]
     census = json.loads((root / "tools/daemon-coverage.json").read_text())
     canonical = root / "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1"
@@ -214,7 +250,7 @@ def test_powershell_instance_helpers_keep_caller_containment_and_canonical_sourc
     )
 
 
-def test_stale_classification_fails(tmp_path):
+def test_stale_classification_fails(tmp_path: Path) -> None:
     fixture(tmp_path, "def serve():\n    return 0\n", {
         "finite-worker": {"s:service.py::serve::Popen": 1},
     })
@@ -228,12 +264,14 @@ def test_stale_classification_fails(tmp_path):
     "from other_owner import daemon_entrypoint\n"
     "@daemon_entrypoint('service', source=__file__)\ndef serve():\n    pass\n",
 ])
-def test_no_comment_flags_dead_branch_or_foreign_decorator_admits(tmp_path, body):
+def test_no_comment_flags_dead_branch_or_foreign_decorator_admits(
+    tmp_path: Path, body: str,
+) -> None:
     fixture(tmp_path, body, entries={"s:service.py::serve": "service"})
     assert any("lacks shared startup admission" in p for p in GUARD.verify(tmp_path))
 
 
-def test_exact_shared_decorator_admits_async_entry(tmp_path):
+def test_exact_shared_decorator_admits_async_entry(tmp_path: Path) -> None:
     fixture(
         tmp_path,
         "from agent_procutil.daemon_instances import daemon_entrypoint as entry\n"
@@ -243,7 +281,7 @@ def test_exact_shared_decorator_admits_async_entry(tmp_path):
     assert GUARD.verify(tmp_path) == []
 
 
-def test_fail_closed_optional_import_preserves_direct_admission(tmp_path):
+def test_fail_closed_optional_import_preserves_direct_admission(tmp_path: Path) -> None:
     fixture(
         tmp_path,
         "def serve():\n"
@@ -266,7 +304,9 @@ def test_fail_closed_optional_import_preserves_direct_admission(tmp_path):
     "raise RuntimeError(reason=application_work())",
     "raise RuntimeError('missing') from application_work()",
 ])
-def test_optional_import_cannot_admit_a_non_refusing_failure_branch(tmp_path, handler):
+def test_optional_import_cannot_admit_a_non_refusing_failure_branch(
+    tmp_path: Path, handler: str,
+) -> None:
     fixture(
         tmp_path,
         "def serve():\n"
@@ -281,7 +321,7 @@ def test_optional_import_cannot_admit_a_non_refusing_failure_branch(tmp_path, ha
     assert any("lacks shared startup admission" in problem for problem in GUARD.verify(tmp_path))
 
 
-def test_service_identity_must_match(tmp_path):
+def test_service_identity_must_match(tmp_path: Path) -> None:
     fixture(
         tmp_path,
         "from agent_procutil.daemon_instances import daemon_entrypoint\n"
@@ -291,7 +331,7 @@ def test_service_identity_must_match(tmp_path):
     assert GUARD.verify(tmp_path)
 
 
-def test_native_launches_are_counted_without_comment_allowance():
+def test_native_launches_are_counted_without_comment_allowance() -> None:
     assert GUARD.native_sites(
         "# Start-Process ignored\n"
         "Start-Process $program # daemon-spawn: allow contained\n"
@@ -299,7 +339,7 @@ def test_native_launches_are_counted_without_comment_allowance():
     ) == {("<script>", "Start-Process"): 1, ("<script>", "ExecStart"): 1}
 
 
-def test_container_service_command_is_not_its_finite_health_probe():
+def test_container_service_command_is_not_its_finite_health_probe() -> None:
     sites = GUARD.native_sites(
         'HEALTHCHECK --interval=5s \\\n'
         '    CMD ["python", "-m", "service", "ready"]\n'
@@ -313,7 +353,7 @@ def test_container_service_command_is_not_its_finite_health_probe():
     }
 
 
-def test_javascript_spawn_aliases_are_not_timer_unref():
+def test_javascript_spawn_aliases_are_not_timer_unref() -> None:
     assert GUARD.javascript_sites(
         "import {spawn as launch} from 'node:child_process';\n"
         "launch(argv, {detached:true}).unref();\n"
@@ -321,7 +361,7 @@ def test_javascript_spawn_aliases_are_not_timer_unref():
     ) == {("<script>", "spawn"): 1}
 
 
-def test_native_documentation_and_templates_are_not_admission_proof():
+def test_native_documentation_and_templates_are_not_admission_proof() -> None:
     text = (
         "<#\n$x = Enter-DaemonInstance -Service 'fake'\n#>\n"
         "$template = @'\n"
@@ -334,7 +374,7 @@ def test_native_documentation_and_templates_are_not_admission_proof():
     assert "'real'" in code
 
 
-def test_supported_roots_include_managers_standalone_and_tools(tmp_path):
+def test_supported_roots_include_managers_standalone_and_tools(tmp_path: Path) -> None:
     for root in ("plugins", "worktree-manager", "fleet-manager", "services", "tools"):
         directory = tmp_path / root
         directory.mkdir()
@@ -345,14 +385,14 @@ def test_supported_roots_include_managers_standalone_and_tools(tmp_path):
     assert len(GUARD.verify(tmp_path)) == 5
 
 
-def test_resident_classification_requires_a_real_startup_owner(tmp_path):
+def test_resident_classification_requires_a_real_startup_owner(tmp_path: Path) -> None:
     fixture(tmp_path, "def launch(argv):\n    return Popen(argv)\n", {
         "resident": {"s:service.py::launch::Popen": 1},
     })
     assert any("needs an admitted startup owner" in p for p in GUARD.verify(tmp_path))
 
 
-def test_first_statement_owned_admission_is_not_a_late_body_hint(tmp_path):
+def test_first_statement_owned_admission_is_not_a_late_body_hint(tmp_path: Path) -> None:
     text = (
         "from agent_procutil.daemon_instances import admit_daemon_instance\n"
         "def serve():\n"
@@ -368,7 +408,7 @@ def test_first_statement_owned_admission_is_not_a_late_body_hint(tmp_path):
     assert GUARD.verify(tmp_path)
 
 
-def test_native_kernel_commands_are_counted_not_python_decorated(tmp_path):
+def test_native_kernel_commands_are_counted_not_python_decorated(tmp_path: Path) -> None:
     fixture(tmp_path, "def unrelated():\n    pass\n")
     native = tmp_path / "services" / "kernel.c"
     native.write_text(
@@ -393,7 +433,9 @@ def test_native_kernel_commands_are_counted_not_python_decorated(tmp_path):
 
 
 @pytest.mark.parametrize("fault", ["none", "extra", "dynamic", "missing-entry", "syntax"])
-def test_shared_python_helper_has_an_exact_entrypoint_and_command_census(tmp_path, fault):
+def test_shared_python_helper_has_an_exact_entrypoint_and_command_census(
+    tmp_path: Path, fault: str,
+) -> None:
     source = fixture(tmp_path, "pass\n")
     code = (
         "def main():\n"
@@ -420,7 +462,7 @@ def test_shared_python_helper_has_an_exact_entrypoint_and_command_census(tmp_pat
     assert bool(GUARD.verify(tmp_path)) == (fault != "none")
 
 
-def test_finite_artifact_helper_cannot_acquire_an_unclassified_spawn(tmp_path):
+def test_finite_artifact_helper_cannot_acquire_an_unclassified_spawn(tmp_path: Path) -> None:
     fixture(tmp_path, "pass\n")
     helper = tmp_path / "tools" / "test_artifact_helper.py"
     helper.write_text(
@@ -441,7 +483,7 @@ def test_finite_artifact_helper_cannot_acquire_an_unclassified_spawn(tmp_path):
     assert any("finite helper command census differs" in p for p in GUARD.verify(tmp_path))
 
 
-def test_known_production_role_requires_an_explicit_declaration(tmp_path):
+def test_known_production_role_requires_an_explicit_declaration(tmp_path: Path) -> None:
     source = fixture(
         tmp_path,
         "from agent_procutil.daemon_instances import daemon_entrypoint\n"
@@ -466,7 +508,9 @@ def test_known_production_role_requires_an_explicit_declaration(tmp_path):
     "plugins/agent-index/src/agent_index/engine/shim.py",
 ])
 @pytest.mark.parametrize("failed", [False, True])
-def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, monkeypatch):
+def test_actual_asgi_entry_retains_admission_until_cleanup(
+    relative: str, failed: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import sys
     from types import ModuleType, SimpleNamespace
 
@@ -481,7 +525,7 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
     events = []
 
     @contextmanager
-    def admission(service, **kwargs):
+    def admission(service: str, **kwargs: object) -> Iterator[None]:
         assert kwargs["purpose"] == "production"
         assert kwargs["source"] == str(source)
         events.append("admit")
@@ -491,7 +535,7 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
             events.append("closed")
 
     @asynccontextmanager
-    async def body(app):
+    async def body(app: object) -> AsyncIterator[None]:
         events.append("body")
         try:
             yield
@@ -502,29 +546,51 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
     package = ModuleType("caller_lifecycle_fixture")
     package.__path__ = []
     application = ModuleType("caller_lifecycle_fixture.app")
-    application._lifespan = body
+    setattr(application, "_lifespan", body)
     roster = ModuleType("caller_lifecycle_fixture.app_agent_roster")
+    telemetry = ModuleType("caller_lifecycle_fixture.consumer_telemetry")
+    manager, database = object(), object()
 
-    async def stop_roster(app):
+    async def stop_roster(app: object) -> None:
         assert events[-1] == "cleanup"
         assert "closed" not in events
         events.append("roster_cleanup")
 
-    roster.stop_agent_roster_cache = stop_roster
+    setattr(roster, "stop_agent_roster_cache", stop_roster)
+
+    def close_telemetry(value: object) -> None:
+        assert value is manager
+        assert events[-1] == "roster_cleanup"
+        assert "closed" not in events
+        events.append("telemetry_cleanup")
+
+    async def settled_thread_call(function: Callable[[object], None], value: object) -> None:
+        function(value)
+
+    async def close_database(value: object) -> None:
+        assert value is database
+        assert events[-1] == "telemetry_cleanup"
+        assert "closed" not in events
+        events.append("database_cleanup")
+
+    setattr(telemetry, "close", close_telemetry)
     monkeypatch.setitem(sys.modules, package.__name__, package)
     monkeypatch.setitem(sys.modules, application.__name__, application)
     monkeypatch.setitem(sys.modules, roster.__name__, roster)
-    namespace = {
+    monkeypatch.setitem(sys.modules, telemetry.__name__, telemetry)
+    namespace: dict[str, Any] = {
         "asynccontextmanager": asynccontextmanager, "__file__": str(source),
         "_lifespan": body, "__package__": package.__name__,
         "admit_daemon_instance": admission,
+        "settled_thread_call": settled_thread_call, "close_database": close_database,
     }
     wrapper = ast.parse("from __future__ import annotations\n")
     wrapper.body.append(entry)
     exec(compile(wrapper, str(source), "exec"), namespace)
 
-    async def run():
-        async with namespace["lifespan"](SimpleNamespace(state=SimpleNamespace())):
+    async def run() -> None:
+        state = SimpleNamespace(session_manager=manager, db=database)
+        async with namespace["lifespan"](SimpleNamespace(state=state)):
             assert events == ["admit", "body"]
             if failed:
                 raise RuntimeError("synthetic application failure")
@@ -536,5 +602,5 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
         asyncio.run(run())
     expected = ["admit", "body", "cleanup"]
     if relative == "plugins/agent-bridge/src/agent_bridge/app_lifecycle.py":
-        expected.append("roster_cleanup")
+        expected.extend(("roster_cleanup", "telemetry_cleanup", "database_cleanup"))
     assert events == [*expected, "closed"]

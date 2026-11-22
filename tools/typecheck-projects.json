@@ -399,6 +399,7 @@
     },
     {
       "name": "lib-copilot-driver-core",
+      "requirements": "tools/typecheck-driver-requirements.txt",
       "include": [
         "libs/copilot-driver-core"
       ],
@@ -503,6 +504,8 @@
     },
     {
       "name": "agent-remote-driver",
+      "requirements": "tools/typecheck-driver-requirements.txt",
+      "import_roots": ["tools"],
       "include": [
         "plugins/agent-remote-driver"
       ],

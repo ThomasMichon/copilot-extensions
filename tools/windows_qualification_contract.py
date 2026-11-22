@@ -36,7 +36,22 @@ WORKFLOW = "windows-qualification.yml"
 TRANSPORT_REF = "refs/qualification/windows-inputs"
 TRANSPORT_MARKER = "windows-qualification-transport-v1"
 SUPPORT_PATH = "tools/windows-qualification-support.json"
+DRIVER_SERVICE_PACKET = "native-driver-service-caller-jobs"
+DRIVER_SERVICE_CASES = (
+    ("test_session_host_application", "test_installed_service_survives_all_installer_caller_jobs"),
+    ("test_durable_wmi_job_survival",
+     "test_tracked_cleanup_scope_refuses_a_child_outside_the_immediate_caller_job"),
+)
+DRIVER_SERVICE_FILES = (
+    "tools/qualify_driver_service.py",
+    "plugins/agent-remote-driver/tests/native/test_session_host_application.py",
+    "plugins/agent-worktrees/tests/native/public_caller_jobs_fixture.py",
+    "libs/agent-procutil/tests/test_durable_wmi_job_survival.py",
+)
 NATIVE_PACKETS = {
+    DRIVER_SERVICE_PACKET: (
+        "agent-remote-driver", *DRIVER_SERVICE_CASES[0], DRIVER_SERVICE_PACKET,
+    ),
     "native-worktrees-embody": (
         "agent-worktrees", "test_native_seed_application", "test_public_embody",
         "native-worktrees-public-caller",
@@ -266,12 +281,17 @@ def validate_result(
     ):
         if not cases or any(case.get("outcome") != "passed" for case in cases):
             raise ValueError("empty, failed or skipped selection cannot qualify")
-        if native and (
-            len(cases) != 1 or cases[0].get("name") != native[2]
-            or cases[0].get("class", "").split(".")[-1] != native[1]
-            or value.get("native_prerequisites") != NATIVE_VERSIONS
-        ):
-            raise ValueError("native caller or prerequisite identity mismatch")
+        if native:
+            identities = sorted(
+                (case.get("class", "").split(".")[-1], case.get("name"))
+                for case in cases
+            )
+            required_cases = (
+                DRIVER_SERVICE_CASES if expected["selection"]["name"] == DRIVER_SERVICE_PACKET
+                else ((native[1], native[2]),)
+            )
+            if identities != sorted(required_cases) or value.get("native_prerequisites") != NATIVE_VERSIONS:
+                raise ValueError("native caller or prerequisite identity mismatch")
         if lifetime and (
             len(cases) != 1 or cases[0].get("name") != MCP_LIFETIME_CASE
             or cases[0].get("class", "").split(".")[-1] != "test_custody_native_lifetime"

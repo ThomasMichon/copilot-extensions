@@ -134,6 +134,7 @@ async def set_live_mode(
         kind=control_kind,
         delivery="queue",
         expected_session_id=expected_mode_session,
+        enrolled_inbox=True,
     )
     if reason == "not_found":
         raise HTTPException(status_code=404, detail="live session not found")
@@ -150,6 +151,11 @@ async def set_live_mode(
         target_session_id = db.resolve_live_session_id(target_session_id)
         if outcome == "applied":
             return SetModeResult(session_id=target_session_id, mode=body.mode, applied=True, state="applied")
+        if outcome == "unknown":
+            return SetModeResult(
+                session_id=target_session_id, mode=body.mode, applied=None, state="in_flight",
+                detail="the session reported an unknown outcome; the original change may already have applied",
+            )
         if outcome is not None:
             return SetModeResult(
                 session_id=target_session_id, mode=body.mode, applied=False, state="rejected",

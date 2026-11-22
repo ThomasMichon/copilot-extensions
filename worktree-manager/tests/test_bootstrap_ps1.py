@@ -336,6 +336,7 @@ def _run(
     handoff: bool = False,
     shadow_uv: str | None = None,
     uv_contract: str | None = "1",
+    bootstrap_args: tuple[str, ...] = ("--version",),
 ) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path, long_path=long_path, uv_contract=uv_contract)
     root = tmp_path / "manager-root"
@@ -443,7 +444,7 @@ def _run(
         text = installer_mock + (
             "[Threading.Thread]::CurrentThread.CurrentCulture = "
             "[Globalization.CultureInfo]::GetCultureInfo('de-DE'); "
-            f"& '{script}' --version; $code = $LASTEXITCODE; "
+            f"& '{script}' {' '.join(_quote(arg) for arg in bootstrap_args)}; $code = $LASTEXITCODE; "
             + (
                 f"[IO.File]::WriteAllText({_quote(tmp_path / 'restored-python')}, "
                 "$env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON); "
@@ -453,7 +454,7 @@ def _run(
         )
         command += ["-EncodedCommand", base64.b64encode(text.encode("utf-16le")).decode("ascii")]
     else:
-        command += ["-File", str(BOOTSTRAP), "--version"]
+        command += ["-File", str(BOOTSTRAP), *bootstrap_args]
     return subprocess.run(
         command,
         capture_output=True, text=True, env=env, timeout=120, check=False,
@@ -465,6 +466,31 @@ def test_failed_uv_fails_the_bootstrap(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=3)
     assert result.returncode != 0
     assert "Python acquisition failed" in result.stdout + result.stderr
+
+
+def test_bootstrap_inspects_acquired_installer_without_application_dispatch(tmp_path: Path) -> None:
+    result = _run(tmp_path, uv_exit=0, handoff=True, bootstrap_args=("--describe-install",))
+    assert result.returncode == 0, result.stdout + result.stderr
+    arguments = (tmp_path / "argument-handoff").read_text(encoding="utf-8").strip()
+    assert arguments.endswith("runtime_install.py --describe-install")
+    assert " --root " not in arguments and " --payload " not in arguments
+    assert " -- " not in arguments
+    root = tmp_path / "manager-root"
+    assert (root / "staging" / "worktree-manager" / "scripts" / "runtime_install.py").is_file()
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    ("--describe-install", "--version"), ("--version", "--describe-install"),
+])
+def test_bootstrap_installer_inspection_rejects_mixed_arguments(
+    tmp_path: Path, arguments: tuple[str, ...],
+) -> None:
+    result = _run(tmp_path, uv_exit=0, handoff=True, bootstrap_args=arguments)
+    assert result.returncode != 0
+    assert "--describe-install accepts no application or installation arguments" in result.stderr
+    assert not (tmp_path / "argument-handoff").exists()
+    assert not (tmp_path / "manager-root" / "staging").exists()
 
 
 def test_failed_runtime_command_fails_the_bootstrap(tmp_path: Path) -> None:

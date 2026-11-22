@@ -352,6 +352,18 @@ if [ -f "$CONFIG" ] && [ "$explicit_source" -eq 0 ]; then
 fi
 
 installer_args=()
+describe_install=0
+if [ "${1-}" = --describe-install ]; then
+    [ "$#" -eq 1 ] || { _bootstrap_progress '--describe-install accepts no application or installation arguments.' failed; exit 2; }
+    describe_install=1
+    shift
+fi
+for argument in "$@"; do
+    if [ "$argument" = --describe-install ]; then
+        _bootstrap_progress '--describe-install accepts no application or installation arguments.' failed
+        exit 2
+    fi
+done
 recovery_only=0
 install_source=""
 if [ "${1-}" = --install-source ]; then
@@ -551,6 +563,9 @@ case ":$PATH:" in
 esac
 
 # Then run whatever the caller asked for through the freshly-installed app.
+if [ "$describe_install" -eq 1 ]; then
+    exec "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --describe-install
+fi
 if [ "$recovery_only" -eq 1 ]; then
     "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}"
     exit "$?"

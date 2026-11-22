@@ -198,6 +198,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
     ("native-driver-observation-loss", True),
     ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
     ("native-driver-startup-cold-resume", True),
+    (contract.DRIVER_SERVICE_PACKET, True),
     ("native-unrecognized", None),
 ])
 def test_admission_reports_native_preparation_only_for_known_packets(
@@ -446,7 +447,13 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(
     _, module, case, phase = contract.NATIVE_PACKETS[packet]
     value.update(
         request=expected, native_prerequisites=contract.NATIVE_VERSIONS,
-        tests=[{"class": "native." + module, "name": case, "outcome": "passed"}],
+        tests=[
+            {"class": "native." + case_module, "name": case_name, "outcome": "passed"}
+            for case_module, case_name in (
+                contract.DRIVER_SERVICE_CASES if packet == contract.DRIVER_SERVICE_PACKET
+                else ((module, case),)
+            )
+        ],
         phases=[{"name": name, "status": "passed"} for name in (
             "source-and-selection", "native-prerequisites",
             phase, "test-runtime",
@@ -708,7 +715,9 @@ def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(
 
 @pytest.mark.parametrize("prerequisites", [True, False])
 @pytest.mark.parametrize("preparation", ["success", "failure", "cancelled", "skipped", "unrecognized"])
-@pytest.mark.parametrize("packet", list(contract.NATIVE_PACKETS))
+@pytest.mark.parametrize("packet", [
+    packet for packet in contract.NATIVE_PACKETS if packet != contract.DRIVER_SERVICE_PACKET
+])
 def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prerequisites: bool,
     preparation: str, packet: str,
@@ -745,6 +754,13 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
 
     monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
     monkeypatch.setattr(worker, "native_prerequisites", prepare)
+    if plugin == "agent-worktrees" and packet not in contract.NATIVE_LIFETIME_PACKETS:
+        import windows_qualification_lifetime
+
+        monkeypatch.setattr(
+            windows_qualification_lifetime, "bridge_consumer",
+            lambda *_args, **_kwargs: nullcontext(tmp_path / "bridge-python.exe"),
+        )
     if packet in contract.NATIVE_LIFETIME_PACKETS:
         import windows_qualification_lifetime
 
@@ -777,6 +793,75 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         if path.is_file():
             assert "feed.example.invalid" not in path.read_text("utf-8")
             assert "download.example.invalid" not in path.read_text("utf-8")
+
+
+@pytest.mark.parametrize("evidence", ["passed", "missing", "duplicate", "foreign", "skipped", "no-feed"])
+def test_driver_service_execution_requires_both_lifetime_controls_and_governed_feed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence: str,
+) -> None:
+    import windows_qualification_lifetime as lifetime
+
+    root, output = tmp_path / "candidate", tmp_path / "evidence"
+    root.mkdir()
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(worker, "Transport", lambda *_args: SimpleNamespace(
+        git=lambda *_args: SimpleNamespace(stdout="b" * 40),
+    ))
+    calls: list[list[str]] = []
+
+    def prerequisites(_owned: Any, *, require_feed: bool) -> dict[str, str]:
+        assert require_feed is True
+        if evidence == "no-feed":
+            raise ValueError("governed feed unavailable")
+        return dict(contract.NATIVE_VERSIONS)
+
+    def owned(command: list[str], **_options: Any) -> SimpleNamespace:
+        calls.append(command)
+        assert "-c" in command
+        return SimpleNamespace(
+            returncode=0, stdout='{"python":"3.12","system":"Windows"}', stderr="",
+        )
+
+    def native(candidate: Path, destination: Path, *, prepare: Any) -> int:
+        assert candidate == root and destination == output
+        cases = list(contract.DRIVER_SERVICE_CASES)
+        if evidence == "missing":
+            cases.pop()
+        elif evidence == "duplicate":
+            cases.append(cases[0])
+        elif evidence == "foreign":
+            cases[-1] = ("foreign_module", cases[-1][1])
+        (output / "junit").mkdir()
+        (output / "junit/driver.xml").write_text(
+            "<testsuite>" + "".join(
+                f'<testcase classname="native.{module}" name="{name}">'
+                + ('<skipped message="unavailable"/>' if evidence == "skipped" else "")
+                + "</testcase>" for module, name in cases
+            ) + "</testsuite>", encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr(worker, "native_prerequisites", prerequisites)
+    monkeypatch.setattr(worker, "native_command", lambda *_args: pytest.fail("contained substitute"))
+    monkeypatch.setattr(lifetime, "driver_service_lifetime", native)
+    monkeypatch.setattr(lifetime, "bridge_consumer", lambda *_args, **_kwargs: pytest.fail("suite dependency"))
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=owned))
+    expected = request()
+    expected["selection"] = {"kind": "packet", "name": contract.DRIVER_SERVICE_PACKET}
+    actual = worker.execute(root, expected, output)
+    assert actual["outcome"] == (
+        "qualified" if evidence == "passed" else "incomplete" if evidence == "skipped" else "failed"
+    )
+    if evidence == "no-feed":
+        assert not calls and not (output / "junit").exists()
+    else:
+        assert len(calls) == 1
+        assert contract.DRIVER_SERVICE_PACKET in {phase["name"] for phase in actual["phases"]}
+
+
+def test_driver_service_cannot_use_an_ordinary_contained_native_command(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="native lifetime owner"):
+        worker.native_command(tmp_path, tmp_path / "output", contract.DRIVER_SERVICE_PACKET)
 
 
 def test_native_sanitization_handles_interrupted_workers_and_oversized_evidence(
@@ -856,6 +941,7 @@ def test_status_correlates_request_not_latest_success(
     "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "caller-jobs",
     "copilot-caller-jobs",
     "manager-no-mux", "manager-mux",
+    "driver-service",
     "workflow", "unprotected", "desktop",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
@@ -875,11 +961,13 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "manager-no-mux": "native-worktrees-manager-no-mux",
         "manager-mux": "native-worktrees-manager-mux",
         "desktop": contract.DESKTOP_PACKET,
+        "driver-service": contract.DRIVER_SERVICE_PACKET,
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
     )
-    files = list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
+    files = list(contract.DRIVER_SERVICE_FILES) if packet == contract.DRIVER_SERVICE_PACKET else (
+        list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
         "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
         "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
         "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
@@ -890,7 +978,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     } else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-    ] if packet else ["plugins/sample/tests/test_sample.py"]
+    ] if packet else ["plugins/sample/tests/test_sample.py"])
     client.transport = SimpleNamespace(
         git=lambda *args: SimpleNamespace(
             stdout=(
@@ -936,6 +1024,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
 @pytest.mark.parametrize("packet", [
     "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss",
     "native-driver-startup-seed", "native-driver-startup-no-seed", "native-driver-startup-cold-resume",
+    contract.DRIVER_SERVICE_PACKET,
     contract.DESKTOP_PACKET,
 ])
 @pytest.mark.parametrize("missing", [True, False])
@@ -944,10 +1033,11 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
 ) -> None:
     client = object.__new__(client_module.Client)
     client.root = tmp_path
-    files = list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
+    files = list(contract.DRIVER_SERVICE_FILES) if packet == contract.DRIVER_SERVICE_PACKET else (
+        list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-    ]
+    ])
 
     def git(*args: str) -> SimpleNamespace:
         if args[0] == "rev-parse":
