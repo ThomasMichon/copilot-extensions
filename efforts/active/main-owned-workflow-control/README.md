@@ -2434,7 +2434,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   seconds within the unchanged bound. Reviewed and merged trees match.
   Only this 23-case leaf is complete; the parent, separate refusals and
   native qualifications remain open.
-- [ ] Qualify the four complete original source-owned artifact-index tests:
+- [x] Qualify the four complete original source-owned artifact-index tests:
   equivalent composition across Git containers, changed source/composition
   refusal, legacy parent binding and rejection of a second container identity.
   Preserve original functions, parameter objects, temporary wheel/bundle/index
@@ -2456,9 +2456,64 @@ authorizes critical main-path acceptance or a bounded administrative change.
   artifact-owner call-phase coverage per case; all fifteen phase reports pass.
   Only the adapter and original-test source bindings are added. Compact-v2
   contains 9,070 nodes and 1,283 sources in 1,017,444 bytes, preserving prior
-  node order, source hashes and all targets. Strict checks, exact-head review
-  and complete fresh Linux CI remain required; this local qualification does
-  not complete the parent or any separate refusal or native qualification.
+  node order, source hashes and all targets. Fatal Ruff, whole-file strict
+  Linux/Win32 typing and documentation checks pass. Initial CI executes all
+  9,070 cases within the packet limit but exceeds the separate five-minute
+  job limit before evidence upload; that cancellation remains recorded.
+  One explicitly authorized job-scoped retry at unchanged head executes all
+  9,070 cases afresh in 145.023 packet seconds and passes complete required CI,
+  without changing either limit. #14125 merges at
+  `165e6e206994266da8bb842fefcf5e07244d8933` after exact-head approval;
+  reviewed and merged trees match. Only this five-case leaf is complete;
+  the parent, separate refusals and native qualifications remain open.
+- [ ] Qualify the complete original thirteen-method construction-assessment
+  class, preserving its original class, methods, setup, synthetic in-memory
+  helpers, loops, subtests and assertions. Compare complete 22-case original
+  collection with exactly thirteen adapter nodes. Keep the nine-method
+  canonical-policy-reading native-matrix sibling outside this selection.
+  Require initial unchanged source/effect auditing and actual assessment-owner
+  call-phase coverage before adding only adapter, original-test and production
+  source bindings plus the production coverage target. Preserve all 9,070
+  nodes, 1,283 current source hashes, 467 targets, 89 helper decisions and the
+  300-second bound. Normal strict checks, committed release intent, exact-head
+  review and complete fresh Linux CI remain required. Synthetic native labels
+  do not execute or qualify native behavior. No original assertion, fixture,
+  OS skip, new mock, preload, data/guard exception, workflow, runtime/native/
+  routing or cleanup change is authorized. All prior retry and metadata-refresh
+  grants are consumed; a retained refusal is not replayed.
+  Complete collection verifies all 22 original cases and exactly thirteen
+  adapter cases with original class, method and setup identity. Initial
+  unchanged execution reports thirteen passing tests and 121 passing subtests,
+  then the existing evidence verifier refuses the phase stream as
+  `duplicate or unexpected unit phase`. Test success is not packet admission:
+  no completed observation or per-node owner-coverage proof is produced.
+  All thirteen remain unqualified; the manifest and guard remain unchanged.
+  The exact adapter is retained outside source discovery with its candidate,
+  helper and refusal evidence. No subtest filtering, assertion change,
+  phase-contract waiver or replay is authorized.
+- [ ] Qualify the 23 original fixture-only construction-inventory methods,
+  exporting the complete original thirty-method class without subclassing or
+  method substitution. Use exact positive node selectors; leave the five
+  subtest-emitting methods and the real symlink and real Git/CLI methods
+  outside the initial selection. Preserve original setup, cleanup, fixture
+  writes, patches and assertions. Compare all thirty original and adapter
+  collection identities before the initial unchanged source/effect audit.
+  Require actual inventory-owner call-phase coverage for all 23 nodes before
+  adding only adapter, original-test and production source bindings plus the
+  production target. Preserve all 9,070 prior nodes, 1,283 source hashes,
+  467 targets, 89 helper decisions and the 300-second bound. Normal strict
+  checks, committed release intent, exact-head review and complete fresh Linux
+  CI remain required. This is not a replay or repair of the separately
+  refused assessment class, native qualification or a phase-contract change.
+  Complete collection verifies all thirty original and adapter nodes with
+  original class, method, setup and fixture-helper identity; exactly 23 are
+  selected. Initial unchanged auditing passes all 23 in 4.454 seconds, with
+  zero prohibited effects, only three bound canonical Python reads and actual
+  inventory-owner call-phase coverage per case. All 69 phase reports pass.
+  Compact-v2 contains 9,093 nodes and 1,286 sources in 1,020,285 bytes,
+  retaining all prior node order and source hashes and adding only the
+  production target ahead of the prior 467. Source review and complete fresh
+  Linux CI remain pending; this leaf and the parent are not complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

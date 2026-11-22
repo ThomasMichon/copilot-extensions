@@ -3,6 +3,34 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_construction_inventory_units.py",
+      [
+        "ConstructionInventoryTests::test_cli_errors_are_visible_and_not_success_shaped",
+        "ConstructionInventoryTests::test_cli_reports_unknown_owners_with_nonzero_status",
+        "ConstructionInventoryTests::test_duplicate_or_missing_tracked_project_is_refused",
+        "ConstructionInventoryTests::test_explicit_additional_project_is_owned_without_inferring_its_environment",
+        "ConstructionInventoryTests::test_git_inventory_is_finite_read_only_and_ignores_inherited_git_redirection",
+        "ConstructionInventoryTests::test_library_identity_uses_python_distribution_name_normalization",
+        "ConstructionInventoryTests::test_malformed_library_input_is_not_silently_classified",
+        "ConstructionInventoryTests::test_malformed_project_cannot_produce_a_complete_inventory",
+        "ConstructionInventoryTests::test_manifest_identity_mismatch_refuses_inventory",
+        "ConstructionInventoryTests::test_missing_declared_runtime_cannot_be_omitted_as_payload_only",
+        "ConstructionInventoryTests::test_mutable_roster_cannot_hide_later_standalone_consumers",
+        "ConstructionInventoryTests::test_nested_engine_and_unclassified_fixture_remain_visible_and_incomplete",
+        "ConstructionInventoryTests::test_new_marketplace_runtime_is_discovered_without_an_allowlist_update",
+        "ConstructionInventoryTests::test_payload_only_runtime_contradiction_refuses_inventory",
+        "ConstructionInventoryTests::test_plugin_and_standalone_cannot_own_the_same_project",
+        "ConstructionInventoryTests::test_requested_root_roster_is_authoritative_and_is_never_executed",
+        "ConstructionInventoryTests::test_resolved_additional_project_cannot_escape_its_plugin",
+        "ConstructionInventoryTests::test_resolved_project_alias_cannot_acquire_a_second_owner",
+        "ConstructionInventoryTests::test_standalone_roster_growth_requires_its_actual_project",
+        "ConstructionInventoryTests::test_undeclared_or_differently_named_nested_libraries_cannot_disappear",
+        "ConstructionInventoryTests::test_untracked_runtime_declaration_is_not_silently_used",
+        "ConstructionInventoryTests::test_uses_both_canonical_rosters_without_counting_extras_or_libraries_as_venvs",
+        "ConstructionInventoryTests::test_vendored_library_inputs_are_not_counted_as_environments"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_source_index_units.py",
       [
         "test_source_owned_index_accepts_an_equivalent_composition_in_another_container",
@@ -11104,6 +11132,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_construction_inventory_units.py": "19b191e6719a8285bd5bd89c85ef3258589e5984324f10253ddf70c279eb4a17",
+    "tools/test_construction_inventory.py": "d3e2d392f519a8dbfb2a0c769060968cec4cb0653cf90cddc51841b80866202a",
+    "tools/construction_inventory.py": "73074755b99c587950c9438c7b7fa70213baa640b82917ad88f72b909c4d96eb",
     "tools/promotion_unit_tests/test_original_source_index_units.py": "6eebf6b2ca82066adace0e6372d6e2aab32efd37103056292494ca7ea9a119e7",
     "tools/test_promotion_source_identity.py": "320111aa725b431330dea1a6f99fdc730923bb919af7c9cd4b2d6207600f8aad",
     "tools/promotion_unit_tests/test_original_control_manifest_units.py": "56fc3a56edbdf11678ac4c21f6090074b288d7a27d38289fd3d0fe2fd2d25c87",
@@ -12389,6 +12420,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/construction_inventory.py",
     "libs/installer-engine/installer_instance_reconcile.py",
     "libs/installer-engine/installer_engine_stop.py",
     "libs/installer-engine/installer_source_build.py",
