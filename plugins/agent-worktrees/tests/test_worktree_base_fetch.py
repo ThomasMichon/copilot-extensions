@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 from collections.abc import Iterator
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -83,6 +84,53 @@ def test_foreground_creation_fetch_waits_without_an_aggregate_source_deadline(
     assert prepared.fetched and prepared.fetch_error is None
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == expected
     assert observed and all(item == (None, None) for item in observed)
+
+
+@pytest.mark.parametrize("outer_seconds", [None, 350.0, 10.0])
+def test_slow_policy_fetch_gets_a_fresh_observation_budget_without_renewing_outer_limit(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+    outer_seconds: float | None,
+) -> None:
+    from agent_worktrees import git_acquisition_budget, tracking_write, worktree_base_preparation
+
+    seed, anchor = local_repositories
+    _commit(seed, ".agent-worktrees/config.yaml", "default_branch: stable\n")
+    _git("branch", "dev", cwd=seed)
+    _git("branch", "stable", cwd=seed)
+    _git("push", "origin", "trunk", "dev", "stable", cwd=seed)
+    clock = [100.0]
+    time_source = SimpleNamespace(monotonic=lambda: clock[0])
+    for module in (git_acquisition_budget, worktree_base_preparation, inrepo_config_source):
+        monkeypatch.setattr(module, "time", time_source)
+    fetch = git_ops._fetch_refspecs
+    fetched: list[str] = []
+
+    def observe(*args: Any, **kwargs: Any) -> None:
+        refspec = str(kwargs["refspec"][0])
+        fetch(*args, **kwargs)
+        fetched.append(refspec)
+        if refspec.startswith("+refs/heads/trunk:"):
+            clock[0] += 301
+
+    monkeypatch.setattr(git_ops, "_fetch_refspecs", observe)
+    prepared: git_ops.WorktreeBaseResult | None = None
+    with (
+        tracking_write.foreground_completion(),
+        git_acquisition_budget.acquisition_budget(clock[0] + outer_seconds)
+        if outer_seconds is not None else nullcontext(),
+        pytest.raises(TimeoutError, match="fetch deadline")
+        if outer_seconds == 10 else nullcontext(),
+    ):
+        prepared = git_ops.prepare_worktree_base(
+            anchor, remote="origin", default_branch="dev", fast_forward_anchor=False,
+        )
+    assert any(value.startswith("+refs/heads/trunk:") for value in fetched)
+    if outer_seconds == 10:
+        assert prepared is None
+        assert not any(value.startswith("+refs/heads/stable:") for value in fetched)
+    else:
+        assert prepared is not None and prepared.fetched and prepared.fetch_error is None
+        assert any(value.startswith("+refs/heads/stable:") for value in fetched)
 
 
 @pytest.mark.parametrize(

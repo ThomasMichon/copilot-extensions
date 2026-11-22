@@ -197,6 +197,11 @@ Do not globally unbound passive reads or unrelated background operations.
 - Completed the mandatory whole-file strict typing of touched source and
   tests; the strict ratchet passes for both Linux and Windows targets.
 - Required PR checks, current-head review and installed acceptance remain open.
+- A follow-up review found that a separate slow policy fetch could consume the
+  next observation's budget. Each foreground post-fetch observation now starts
+  a fresh bounded read budget, clamped to any enclosing acquisition limit.
+  Real-Git controls with simulated 301-second policy fetches cover unlimited
+  completion, a still-valid outer bound and an exhausted outer bound.
 
 ### 2026-11-21 - Kickoff
 
