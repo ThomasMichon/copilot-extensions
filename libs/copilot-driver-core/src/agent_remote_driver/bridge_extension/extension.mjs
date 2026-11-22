@@ -216,17 +216,18 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     }
   }
 
-  async function selectInbox() {
+  async function selectInbox(fromInbox = false) {
     if (RETAINED_INBOX || Date.now() < inboxHealthUntil) return true;
+    if (state.delivering && !fromInbox) return true;
     if (inboxSelection) return inboxSelection;
     inboxSelection = (async () => {
       const health = await bridgeGetJson("/health");
       if (!Number.isSafeInteger(health?.protocol_version)) return false;
       if (health.protocol_version >= 50 && health.capabilities?.compatible_native_inbox === 1
           && health.capabilities?.native_consumption_inbox === 1) {
-        // A legacy submission may still be in the native queue. Switching its
-        // owner before consumption could grant a second send of the same input.
-        if (state.inFlight.pending.size) return false;
+        // Keep legacy settlement running until the provider confirms its ACKs.
+        // Local consumption alone does not release the original server input.
+        if (state.inFlight.pending.size || state.inFlight.unacknowledgedConsumed.size) return true;
         RETAINED_INBOX = true;
         extLog("provider selected retained native inbox; legacy ACKs and control effects disabled");
       }
@@ -413,7 +414,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     state.inboxAgain = false;
     const sid = state.sessionId;
     try {
-      if (!await selectInbox()) return;
+      if (!await selectInbox(true)) return;
       if (RETAINED_INBOX) {
         await retainedInbox.tick(sid, { allowSend: state.deliveryEnabled && state.registered });
         return;

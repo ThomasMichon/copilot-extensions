@@ -38,11 +38,20 @@ await drainInbox(config.sid, dependencies);
 await request("GET", "/health");
 await drainInbox(config.sid, dependencies);
 if (sends.length !== 1) throw new Error("Unconsumed input was sent more than once");
-inFlight.observe({
+const consumed = {
+  id: "original-native-input",
   type: "user.message", data: { source: sends[0].source, content: sends[0].prompt },
-});
+};
+inFlight.observe(consumed);
+if (config.flushConsumption) {
+  await request("POST", `/api/v1/live-sessions/${encodeURIComponent(config.sid)}/events`, {
+    events: [consumed],
+  });
+}
 await drainInbox(config.sid, dependencies);
-emit({ log: { sends: sends.length, nativeConsumed: true } });
+emit({ log: {
+  sends: sends.length, nativeConsumed: true, unacknowledged: inFlight.unacknowledgedConsumed.size,
+} });
 emit({ done: true });
 lines.close();
 process.stdin.pause();

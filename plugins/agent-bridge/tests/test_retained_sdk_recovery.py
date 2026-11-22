@@ -105,8 +105,10 @@ def run_consumer(
                 stream.close()
 
 
+@pytest.mark.parametrize("flush_consumption", [False, True])
 def test_legacy_sdk_acceptance_does_not_ack_before_actual_native_consumption(
     serving: tuple[Any, TestClient, Database, Any], monkeypatch: pytest.MonkeyPatch,
+    flush_consumption: bool,
 ) -> None:
     _, client, db, consumer = serving
     message_id = db.enqueue_live_message(consumer.session_id, "peer", "one input", time.time())
@@ -114,18 +116,27 @@ def test_legacy_sdk_acceptance_does_not_ack_before_actual_native_consumption(
         sys.modules[__name__], "CHILD", Path(__file__).parent / "fixtures/legacy-sdk-consumer.mjs",
     )
     checkpoints: list[str] = []
+    empty_pending: list[bool] = []
 
     def before_request(request: dict[str, Any]) -> None:
         if request["path"] == "/health":
             checkpoints.append(request["path"])
             row = db.execute_read("SELECT * FROM live_messages WHERE id=?", (message_id,))[0]
             assert row["delivered_at"] is None, "ACK preceded native consumption"
+        elif flush_consumption and "/messages?" in request["path"]:
+            receipt = db.live_message_receipt(consumer.session_id, message_id)
+            assert receipt is not None
+            if receipt["consumed_at"] is not None:
+                assert db.list_pending_live_messages(consumer.session_id) == []
+                empty_pending.append(True)
 
     code, calls, logs = run_consumer(client, {
         "sid": consumer.session_id, "module": DELIVERY_MODULE.as_uri(),
+        "flushConsumption": flush_consumption,
     }, before_request=before_request)
     assert code == 0 and checkpoints == ["/health"]
-    assert logs == [{"sends": 1, "nativeConsumed": True}]
+    assert logs == [{"sends": 1, "nativeConsumed": True, "unacknowledged": 0}]
+    assert empty_pending == ([True] if flush_consumption else [])
     acknowledgements = [call for call in calls if call["path"].endswith("/messages/ack")]
     assert len(acknowledgements) == 1
     assert acknowledgements[0]["body"]["ids"] == [message_id]

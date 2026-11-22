@@ -106,6 +106,7 @@ export class InFlightMessages {
     this.pending = new Map();
     this.consumed = new Set();
     this.unacknowledgedConsumed = new Set();
+    this.unacknowledgedMessages = new Map();
     this.uncertain = new Set();
     this.consumptionObservers = new Set();
     this.limit = limit;
@@ -129,7 +130,10 @@ export class InFlightMessages {
   }
 
   _rememberConsumed(id) {
-    if (this.pending.has(id)) this.unacknowledgedConsumed.add(id);
+    if (this.pending.has(id)) {
+      this.unacknowledgedConsumed.add(id);
+      this.unacknowledgedMessages.set(id, this.pending.get(id));
+    }
     this.pending.delete(id);
     this.uncertain.delete(id);
     this.consumed.delete(id);
@@ -140,7 +144,10 @@ export class InFlightMessages {
   }
 
   acknowledged(ids) {
-    for (const id of ids) this.unacknowledgedConsumed.delete(id);
+    for (const id of ids) {
+      this.unacknowledgedConsumed.delete(id);
+      this.unacknowledgedMessages.delete(id);
+    }
   }
 
   watchConsumption() {
@@ -508,8 +515,7 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
-  const messages = data?.messages;
-  if (!Array.isArray(messages) || messages.length === 0) return [];
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
   consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
   onPending(sid, messages.filter((msg) => msg && !consumption.has(msg.id)
     && !inFlight.pending.has(msg.id)));
@@ -608,7 +614,23 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
       break;
     }
   }
-  const consumed = delivered.filter((id) => consumption.has(id));
+  const observed = delivered.filter((id) => consumption.has(id));
+  const candidates = [...inFlight.unacknowledgedConsumed].filter((id) => !observed.includes(id))
+    .map((id) => ({
+      id, message: inFlight.unacknowledgedMessages.get(id),
+    }));
+  const exact = candidates.find(({ message }) => message?.exact_session);
+  let exactCurrent = false;
+  if (exact) {
+    try {
+      exactCurrent = await currentNative(exact.message);
+    } catch (error) {
+      log(`consumed exact input held: ${error.message}`);
+    }
+  }
+  const consumed = [...candidates.filter(({ message }) => !message?.exact_session
+    || exactCurrent && stillCurrent(message) && message.original_session_id === sid)
+    .map(({ id }) => id), ...observed];
   if (consumed.length > 0 && await post("POST", `${base}/messages/ack`, { ids: consumed })) {
     inFlight.acknowledged(consumed);
   }

@@ -136,6 +136,35 @@ for (const failure of [false, true]) {
   });
 }
 
+for (const response of [{ messages: [] }, null]) {
+  test(`consumed legacy IDs settle after ${response ? "empty" : "failed"} pending polls`, async () => {
+    const message = { id: 1, body: "original" };
+    const inFlight = new InFlightMessages(1);
+    const sends = [], acknowledgements = [];
+    let acknowledge = false;
+    const deps = {
+      inFlight, getJson: async () => ({ messages: [message] }),
+      session: { send: async (options) => { sends.push(options); return "accepted"; } },
+      post: async (_method, _path, body) => {
+        acknowledgements.push(body.ids);
+        return acknowledge;
+      },
+    };
+    await drainInbox("root", deps);
+    inFlight.observe(recorded(message));
+    deps.getJson = async () => response;
+    await drainInbox("root", deps);
+    assert.deepEqual(acknowledgements, [[1]]);
+    assert.deepEqual([...inFlight.unacknowledgedConsumed], [1]);
+    acknowledge = true;
+    await drainInbox("root", deps);
+    assert.deepEqual(acknowledgements, [[1], [1]]);
+    assert.equal(inFlight.unacknowledgedConsumed.size, 0);
+    assert.doesNotThrow(() => inFlight.sent({ id: 2 }));
+    assert.equal(sends.length, 1);
+  });
+}
+
 test("legacy pending capacity retains original fences instead of evicting and resending", async () => {
   const { deps, calls } = interruptHarness([{ id: 1 }, { id: 2 }], { consume: false });
   deps.inFlight = new InFlightMessages(1);
@@ -672,8 +701,9 @@ for (const failure of ["metadata", "send"]) {
       assert.deepEqual(await drainInbox("s", deps), []);
       assert.deepEqual([...deps.inFlight.pending.keys()].sort(),
         [...earlier.slice(failedId - 1).map((m) => m.id), 5]);
-      assert.equal(calls.filter(([type]) => type === "ack").length, 0);
-      assert.match(calls.at(-1)[1], /deliver failed/);
+      assert.deepEqual(calls.filter(([type]) => type === "ack"),
+        failedId === 2 ? [["ack", [1]]] : []);
+      assert.ok(calls.some(([type, message]) => type === "held" && /deliver failed/.test(message)));
 
       const before = [...sent];
       deps.session.rpc.metadata.snapshot = async () => ({ sessionId: "s" });
@@ -797,22 +827,24 @@ for (const boundary of ["poll", "first-metadata", "final-metadata", "abort", "re
   });
 }
 
-test("ACK failure redelivery keeps consumed exact input held after rollover", async () => {
-  const message = exactMessage(5);
-  const { calls, deps, rollover } = exactHarness([message]);
-  deps.post = async () => { throw new Error("inbox ACK did not commit"); };
-  await assert.rejects(drainInbox("s", deps), /ACK did not commit/);
-  calls.length = 0;
-  deps.getJson = async () => {
-    deps.inFlight.observe(recorded(message));
-    rollover();
-    return { messages: [message] };
-  };
-  deps.post = async () => { throw new Error("changed native cannot ACK"); };
-  assert.deepEqual(await drainInbox("s", deps), []);
-  assert.equal(calls.filter(([type]) => type === "send").length, 0);
-  assert.equal(deps.inFlight.consumptionObservers.size, 0);
-});
+for (const listed of [true, false]) {
+  test(`ACK failure keeps consumed exact input held after rollover (${listed ? "listed" : "absent"})`, async () => {
+    const message = exactMessage(5);
+    const { calls, deps, rollover } = exactHarness([message]);
+    deps.post = async () => { throw new Error("inbox ACK did not commit"); };
+    await assert.rejects(drainInbox("s", deps), /ACK did not commit/);
+    calls.length = 0;
+    deps.getJson = async () => {
+      deps.inFlight.observe(recorded(message));
+      rollover();
+      return { messages: listed ? [message] : [] };
+    };
+    deps.post = async () => { throw new Error("changed native cannot ACK"); };
+    assert.deepEqual(await drainInbox("s", deps), []);
+    assert.equal(calls.filter(([type]) => type === "send").length, 0);
+    assert.equal(deps.inFlight.consumptionObservers.size, 0);
+  });
+}
 
 test("active consumption observation ignores nested input and closes after a poll failure", async () => {
   const { deps } = exactHarness([exactMessage(5)]);
@@ -852,7 +884,7 @@ test("an interrupt aborts a running main turn, then re-sends confirmed queued me
   const mainTurn = new MainTurn();
   mainTurn.observe({ type: "assistant.turn_start", data: { turnId: "1" } });
   assert.deepEqual(await drainInbox("s", { ...deps, mainTurn }), [5]);
-  assert.deepEqual(calls, [["abort"], ["send", "immediate"], ["send", "immediate"], ["ack", [5]]]);
+  assert.deepEqual(calls, [["abort"], ["send", "immediate"], ["send", "immediate"], ["ack", [4, 5]]]);
 });
 
 test("a second interrupt in a batch never aborts the turn the first one started", async () => {

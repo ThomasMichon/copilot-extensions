@@ -29,7 +29,7 @@ async function load(selected, version = 50, {
   historyResponse = { replay_accepted: true, ingested: 1 },
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
   tokenInitiallyMissing = false,
-  retainedReceipts,
+  retainedReceipts, legacyAck, legacyPoll,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const deferred = [];
@@ -42,6 +42,8 @@ async function load(selected, version = 50, {
   let joined;
   let eventPosts = 0;
   let bridgeReady = !tokenInitiallyMissing;
+  let compatibleReady = compatible;
+  let now = Date.now();
   const endpointState = {
     base: "http://127.0.0.1:9280", token: bridgeReady ? "synthetic-secret" : null,
   };
@@ -68,7 +70,7 @@ async function load(selected, version = 50, {
     }
     let result = {};
     if (route === "/health") result = {
-      protocol_version: version, capabilities: compatible
+      protocol_version: version, capabilities: compatibleReady
         ? { compatible_native_inbox: 1, native_consumption_inbox: 1 } : {},
     };
     else if (route.endsWith("/events?replay=true")) result = { session_id: nativeId, ...historyResponse };
@@ -99,7 +101,7 @@ async function load(selected, version = 50, {
             message_id: 1, session_id: nativeId, receiver_incarnation: consumer.incarnation, sender: "peer",
           },
         } : {}),
-      }],
+      }].filter((message) => !legacyAcked.has(message.id)),
     };
     else if (route.endsWith("/begin")) result = { begin: true };
     else if (route.endsWith("/outcome")) {
@@ -117,6 +119,7 @@ async function load(selected, version = 50, {
       }]).filter((message) => !legacyAcked.has(message.id)),
     };
     else if (route.endsWith("/messages/ack")) {
+      if (legacyAck && !legacyAck(body)) return { ok: false, status: 503 };
       for (const id of body.ids) legacyAcked.add(id);
       if (inboxMessages) {
         for (let index = inboxMessages.length - 1; index >= 0; index--) {
@@ -125,9 +128,11 @@ async function load(selected, version = 50, {
       }
     }
     else if (route.endsWith("/controls")) result = { messages: [] };
+    if (route.includes("/messages?") && legacyPoll) result = await legacyPoll(result);
     return { ok: true, status: 200, json: async () => result };
   };
   const context = vm.createContext({
+    Date: class extends Date { static now() { return now; } },
     process: {
       env: { SESSION_ID: initialSessionId, AGENT_BRIDGE_RETAINED_INBOX: selected,
         ...(muted ? { AGENT_BRIDGE_DELIVERY: "0" } : {}),
@@ -258,6 +263,7 @@ async function load(selected, version = 50, {
     nativeSession: session,
     closed: () => closed, runDeferred, registeredSessions,
     publishBridge: () => { bridgeReady = true; },
+    publishRetained: () => { compatibleReady = true; now += 60_000; },
     rename: (sid) => { session.sessionId = sid; nativeId = sid; },
   };
 }
@@ -481,6 +487,64 @@ test("a capable provider selects durable handoff by default without a legacy ACK
   assert.equal(f.calls.some((call) => call.route.includes("/messages?")), false);
   assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
   assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+});
+
+test("retained cutover settles legacy ACKs before delayed event flushing", async () => {
+  let acknowledge = false;
+  const messages = [{ id: 1, body: "legacy body", kind: "prompt", delivery: "steer" }];
+  const f = await load(undefined, 52, {
+    compatible: false, inboxMessages: messages, legacyAck: () => acknowledge,
+  });
+  assert.equal(f.sends.length, 1);
+  f.publishRetained();
+  const before = f.calls.filter((call) => call.route.includes("/messages?")).length;
+  f.poll.fn();
+  await settle();
+  assert.ok(f.calls.filter((call) => call.route.includes("/messages?")).length > before);
+  f.handlers[0]({
+    id: "native-input", type: "user.message", sessionId: "native-a",
+    data: { source: "agent-bridge", content: f.sends[0].prompt },
+  });
+  f.poll.fn();
+  await settle();
+  assert.ok(f.calls.some((call) => call.route.endsWith("/messages/ack")));
+  assert.equal(f.calls.some((call) => call.route.includes("/retained-inbox")), false);
+  assert.equal(f.calls.some((call) => call.route.endsWith("/events")), false);
+  acknowledge = true;
+  f.poll.fn();
+  await settle();
+  assert.equal(messages.length, 0);
+  f.poll.fn();
+  await settle();
+  assert.ok(f.calls.some((call) => call.route.endsWith("/negotiate")));
+  f.timers.find((timer) => timer.ms === 1_000).fn();
+  await settle();
+  f.poll.fn();
+  await settle();
+  assert.equal(f.sends.length, 1);
+});
+
+test("retained selection cannot overtake an awaited legacy inbox read", async () => {
+  const messages = [];
+  let hold = false, release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const f = await load(undefined, 52, {
+    compatible: false, inboxMessages: messages,
+    legacyPoll: (result) => hold ? waiting.then(() => result) : result,
+  });
+  messages.push({ id: 1, body: "legacy body", kind: "prompt", delivery: "steer" });
+  hold = true;
+  f.poll.fn();
+  await settle();
+  f.publishRetained();
+  f.poll.fn();
+  await settle();
+  assert.equal(f.calls.some((call) => call.route.includes("/retained-inbox")), false);
+  release();
+  await settle();
+  await f.runDeferred();
+  assert.equal(f.sends.length, 1);
+  assert.doesNotMatch(f.sends[0].prompt, /retained-handoff=/);
 });
 
 test("capable default selection retains an ambiguous SDK effect instead of legacy redelivery", async () => {
