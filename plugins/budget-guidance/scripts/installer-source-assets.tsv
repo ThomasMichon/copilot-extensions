@@ -38,6 +38,7 @@ copy	libs/agent-procutil/src/agent_procutil/_suspended_handoff.py	libs/agent-pro
 copy	libs/agent-procutil/src/agent_procutil/_terminal_offer.py	libs/agent-procutil/src/agent_procutil/_terminal_offer.py
 copy	libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py	libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py
 copy	libs/agent-procutil/src/agent_procutil/_windows_job_types.py	libs/agent-procutil/src/agent_procutil/_windows_job_types.py
+copy	libs/agent-procutil/src/agent_procutil/_windows_owned_output.py	libs/agent-procutil/src/agent_procutil/_windows_owned_output.py
 copy	libs/agent-procutil/src/agent_procutil/_windows_parent_job.py	libs/agent-procutil/src/agent_procutil/_windows_parent_job.py
 copy	libs/agent-procutil/src/agent_procutil/async_foreground.py	libs/agent-procutil/src/agent_procutil/async_foreground.py
 copy	libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py	libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py
@@ -168,6 +169,7 @@ copy	libs/agent-procutil/tests/test_owned_budget.py	libs/agent-procutil/tests/te
 copy	libs/agent-procutil/tests/test_owned_budget_native.py	libs/agent-procutil/tests/test_owned_budget_native.py
 copy	libs/agent-procutil/tests/test_owned_capture_boundaries.py	libs/agent-procutil/tests/test_owned_capture_boundaries.py
 copy	libs/agent-procutil/tests/test_owned_no_deadline.py	libs/agent-procutil/tests/test_owned_no_deadline.py
+copy	libs/agent-procutil/tests/test_owned_soft_timeout.py	libs/agent-procutil/tests/test_owned_soft_timeout.py
 copy	libs/agent-procutil/tests/test_owned_streaming.py	libs/agent-procutil/tests/test_owned_streaming.py
 copy	libs/agent-procutil/tests/test_process_retirement.py	libs/agent-procutil/tests/test_process_retirement.py
 copy	libs/agent-procutil/tests/test_python_cache_collect.py	libs/agent-procutil/tests/test_python_cache_collect.py
