@@ -2265,7 +2265,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   required-check verifier and normal merge. Intervening independently merged
   source/hash changes are retained; the reviewed adapter and node additions
   match. Only this 19-case leaf is complete; all parent gates remain open.
-- [ ] Qualify two separate complete original artifact-admission integrity
+- [x] Qualify two separate complete original artifact-admission integrity
   functions: six timestamp/workflow/attempt/duplicate/upload-evidence mutations
   and three foreign-branch/workflow/legacy-step decisions. Preserve all nine
   original parameters, in-memory backend/request callbacks and assertions.
@@ -2284,8 +2284,33 @@ authorizes critical main-path acceptance or a bounded administrative change.
   six bound canonical Python reads and actual admission-owner call-phase
   coverage per case. Only the adapter binding is added; no target changes.
   Compact-v2 contains 8,943 nodes and 1,272 sources in 1,003,943 bytes,
+  preserving prior node order and all current source hashes. #14112 merges at
+  `fc2f362081ce09a58e7d84429c70970c33a08c8b` after exact-head approval and
+  complete fresh Linux CI executes all 8,943 selected units in 164.193 packet
+  seconds within the unchanged bound. Reviewed and merged trees match.
+  Only this nine-case leaf is complete; all parent gates remain open.
+- [ ] Qualify five separate complete original source-event refusal functions:
+  pending/failed current CI (four cases), untrusted or unrelated CI (three),
+  noncanonical promoter completion (four), drifting or incomplete closed-PR
+  evidence (five), and malformed pipeline state (three). Preserve all 19
+  original parameters, in-memory backend/request callbacks and assertions.
+  Require complete original/adapter collection identity, initial unchanged
+  source/effect auditing and actual owner calls before adding only a new
+  adapter binding. Preserve all 8,943 nodes, 1,272 current source hashes,
+  467 targets, 89 helper decisions and the 300-second bound. Normal strict
+  checks, committed release intent, exact-head review and complete fresh Linux
+  CI remain required. No original assertion, fixture or OS skip is changed;
+  no new mock, preload, data/guard exception, actual Main/workflow/runtime,
+  native/routing or cleanup authority is added. Never replay a retained
+  refused candidate or reuse the consumed metadata-refresh authorization.
+  Complete collection verifies all 102 original cases and exactly 19 adapter
+  cases with original function-object and parameter identity. Initial unchanged
+  auditing passes all 19 in 1.093 seconds with zero prohibited effects,
+  six bound canonical Python reads and actual dispatch-owner call-phase
+  coverage per case. Only the adapter binding is added; no target changes.
+  Compact-v2 contains 8,962 nodes and 1,273 sources in 1,005,736 bytes,
   preserving prior node order and all current source hashes. Exact-head review
-  and complete fresh Linux CI remain required before resolving this finite leaf.
+  and complete fresh Linux CI remain required; this leaf is not yet complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
