@@ -5114,11 +5114,137 @@ order; only the existing adapter's binding changes, preserving the other
 bound. The compact-v2 candidate contains 8,831 nodes and 1,245 sources in
 988,509 bytes.
 
-Current-head review and complete fresh Linux CI remain pending. No new mock,
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, committed changefile,
+documentation and diff checks pass. Source CI `45023142734`, unit job
+`137210234327`, freshly passes all 8,831 cases with 43 deselections in
+153.59 pytest / 173.444 packet seconds. It reports `mode=executed`, origin
+run `45023142734` attempt one, execution identity
+`2f7915e8fdc7fd8aed9e07520a5805ec0ce744c585eece59d4656a50c3f8fc87`
+and packet digest
+`afcc17b543a0421232d7facf3e304092b7d12431820e3f48c1c56d07a6de95ea`.
+Required aggregate `137211426837`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/parent-reference checks precede the managed merge.
+Source #14081 merges at `2026-11-22T12:42:27Z` as
+`cb2cfa00afdec9e52c3a69437a59918e8a747de3`; independent readback confirms merged
+state and open parent #6237. The managed source sync succeeds, and the complete
+reviewed-head/merged-tree comparison is empty. The actual parent Goal, own Plan
+leaf and Validation Plan are reread before resolving only the fourteen-case
+leaf. No new mock, preload, wrapper, effect exception, data allowlist, workflow,
+runtime or cleanup change is introduced. This qualification does not settle
+retained failures or owner seams. Fresh-install/native lanes are not applicable
+because installation, runtime, workflow and original-test behavior do not change.
+
+### November 22 original strict-checker source-view controls
+
+The existing adapter additionally exports eleven unchanged original functions
+covering guard-alias scope/mapping/drift, physical line mapping, native-loader
+source preservation, copied input custody, loader-mutation and directive
+refusals, declared fragment order, stale composition, code/suppression
+preservation and imported-view drift cleanup. Complete collection verifies
+236 original cases and 110 adapter cases with exact function, fixture and
+parameter-value identities. All collaborator stubs belong to the originals;
+actual MyPy, native/process, symlink, repository-catalog, platform-specific
+guard-shadow and other excluded cases remain unchanged outside the selection.
+
+Initial unchanged effect auditing passes all 110 cases in 9.000 seconds with
+zero prohibited effects, 27 bound Python reads and positive actual
+checker-owner call-phase lines per case. Only 46 new nodes are appended after
+the current 64 within the first group. All 8,831 prior nodes retain relative
+order. Only the existing adapter hash changes and the original helper's
+canonical `copilot-mention-guard.py` read binding is added; all other 1,244
+current-base hashes remain intact. Coverage targets remain 460, helper
+decisions 89 and the bound 300 seconds. Compact-v2 and flat-v1 logical
+identity agree; the candidate has 8,877 nodes and 1,246 sources in 992,850 bytes.
+
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, committed changefile,
+documentation and diff checks pass. Copilot approval `6012373316` names exact
+head `a8ba667cf6fdd0ee9929a5982b68ebbcd006c653`, with no findings, comments
+or unresolved threads. Source CI `45024571900`, unit job `137214664003`,
+freshly passes all 8,877 cases with 43 deselections in 157.45 pytest /
+176.967 packet seconds. It reports `mode=executed`, origin run `45024571900`
+attempt one, execution identity
+`9c93d392a0a32297d0f9db5fd43013ee054d1a11659a4bb82980aebb3114621a`
+and packet digest
+`ae924bff311873eba733d9c5b096d18aa1db97f601efda24ca00f19df42600ed`.
+Required aggregate `137216013351`, guards and trusted metadata pass.
+Complete review/comment/thread pagination and seven fresh verifier reads pass.
+A local final fence initially refuses before merge because it incorrectly
+requires overall `reviewDecision=APPROVED`; the configured Maintainer CODEOWNER
+exception permits `REVIEW_REQUIRED`. Direct exact-head approval, absent
+change requests, final head/hold/parent-reference checks and the managed
+provider-authorized role remain required; no review or CI requirement changes.
+Source #14083 merges at `2026-11-22T13:00:39Z` as
+`630385013436e640dd72fa3940cbc67ece00571a`; independent readback confirms merged
+state and open parent #6237. The managed source sync succeeds, and the complete
+reviewed-head/merged-tree comparison is empty. The actual parent Goal, own Plan
+leaf and Validation Plan are reread before resolving only the 46-case leaf.
+No new mock,
 preload, wrapper, effect exception, data allowlist, workflow, runtime or cleanup
 change is introduced. This qualification does not settle retained failures or
 owner seams. Fresh-install/native lanes are not applicable because installation,
 runtime, workflow and original-test behavior do not change.
+
+### November 22 original source-identity thread refusal
+
+The new adapter preserves six original functions and all parameter values:
+seven cases from sixteen originals, with the native repository fixture and
+all nine Git/history/native cases excluded. Complete collection verifies exact
+original function and parameter identities. Initial unchanged auditing passes
+five index-only cases, then stops at
+`test_source_release_reuses_the_same_immutable_set_across_git_containers`.
+Its existing `HostedRelease` collaborator remains unchanged, but production
+`verify_asset_downloads` reaches a `ThreadPoolExecutor`; the existing guard
+refuses `thread start` before launch.
+
+No complete observation report or admission follows. All seven remain
+unadmitted, not just the failing case; the adapter, exact candidate, collection
+and helper are retained outside the source tree without replay, subset
+admission, new stubs, assertion changes or guard exceptions. The seventh case
+has not executed. This is an eligibility boundary, not a native execution,
+thread-policy waiver, source regression fix or parent completion.
+
+### November 22 original dependency-resource overlap native-load refusal
+
+The adapter preserves the original resource-overlap function, its editable
+and noneditable parameters, synthetic UV projection probe and actual source
+copy/metadata assertions. Complete collection verifies both original and
+adapter cases with exact function/parameter identities. Initial unchanged
+auditing stops at the first noneditable case when `private_retained_root`
+attempts to load `advapi32`; the existing guard refuses `ctypes.dlopen` before
+loading. The editable case has not executed.
+
+No complete observation report or admission follows. Both remain unadmitted,
+with exact adapter, candidate, collection and helper retained outside the source
+tree without replay, subset admission, preloading, new stubs, assertion changes
+or guard exceptions. This eligibility boundary does not authorize a native
+loader, platform substitution, policy change or parent completion.
+
+### November 22 original checker candidate-local provider control
+
+The existing checker adapter additionally exports the complete original
+`test_harness_emitted_procutil_provider_is_candidate_local_and_unambiguous`
+function. It preserves candidate-local provider precedence, foreign winning
+provider refusal and package/module/distribution-stub refusals without invoking
+native procutil or changing any collaborator. Complete collection verifies
+236 original cases and 111 adapter cases, exact original function/fixture
+identities and all selected parameter values.
+
+Initial unchanged auditing passes all 111 in 8.844 seconds with zero prohibited
+effects, 27 bound Python reads and actual checker-owner call-phase lines per
+case. Only the provider node is inserted at the front of the same checker
+group, preserving original source order and all 8,877 prior nodes' relative
+order. Only the existing adapter hash changes; the other 1,245 hashes, 460
+targets, 89 helper decisions and 300-second bound remain intact. Compact-v2
+and flat-v1 logical identity agree; the candidate contains 8,878 nodes and
+1,246 sources in 992,935 bytes.
+
+Normal review and complete fresh Linux CI remain pending. No new mock,
+preload, wrapper, effect exception, data, production, workflow, runtime or cleanup
+change is introduced. Neither this admission nor the preceding source-view
+merge settles the separate seven-case thread or two-case native-load refusal.
+Fresh-install/native lanes are not applicable because installation, runtime,
+workflow and original-test behavior do not change.
 
 ### November 22 original machine-gate mutation-source failure
 
