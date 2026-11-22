@@ -1296,7 +1296,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   verifier's thread-pool submission. It is withdrawn from the adapter and is
   not admitted; the original function, guard and threading boundary remain
   unchanged. Do not substitute a serial pool or weaker witness.
-- [ ] Qualify the other 53 cases from fourteen original attestation-failure,
+- [x] Qualify the other 53 cases from fourteen original attestation-failure,
   publication, explicit-404, tag-resolution and candidate-source controls. Preserve exact
   original functions, callbacks, parameters, assertions and autouse fixture,
   including synthetic command and token-isolation witnesses. Require closed
@@ -1306,6 +1306,20 @@ authorizes critical main-path acceptance or a bounded administrative change.
   300-second bound. Normal strict typing, current-head review and complete
   fresh Linux CI remain required; real publication, credentials, native,
   installed and broader parent gates remain separate.
+  #14055 merges at `d7e8fe3c9d7ef7582aada56b3537a0b3571450fc` after
+  exact-head Copilot approval and complete required Linux CI with all 8,174
+  units freshly executed. The distinct successful-attestation thread refusal
+  and broader parent gates stay open.
+- [ ] Qualify all thirteen cases from five original candidate-retry clock,
+  environment, exact remote identity and CLI output functions. Export exact
+  original functions and the identity fixture, preserving every parameter,
+  callback, clock witness and assertion. Keep the three native Git cases with
+  their existing owner, unchanged. Require closed reads, positive per-case
+  actual owner calls and zero prohibited effects before admission. Preserve
+  all preceding nodes and hashes, targets, helper decisions, compact/flat-v1
+  identity and the 300-second bound. Require normal strict typing, current-head
+  review and complete fresh Linux CI; native, installed, publication and
+  broader parent gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

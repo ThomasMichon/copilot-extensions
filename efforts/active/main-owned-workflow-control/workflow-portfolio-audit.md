@@ -4316,10 +4316,45 @@ compact-v2 bytes. Only the existing adapter hash changes. The 53 new nodes
 append to its existing 105-case group without duplicating that group;
 all preceding 8,121 nodes retain relative order. Every unrelated source
 hash and target, 89 helper decisions, compact/flat-v1 identity and the
-300-second bound remain enforced. Current-head review and complete fresh
-Linux CI remain pending. This is development qualification, not a reuse
-hit, controlled whole-flow saving, real publication, installed/native
-validation or acceptance of any broader owner or parent gate.
+300-second bound remain enforced.
+
+Copilot approval `6011027058` covers exact head
+`3fd591c9f14431a2e06c563cbc655c0a11271625` without active findings.
+CI `44997595782`, unit job `137131887865`, freshly passes all 8,174 cases
+with 39 deselections, 127.40 pytest seconds and 146.443 packet seconds.
+The evidence reports `mode=executed`, origin run `44997595782` attempt one
+and digest `8bafbc22e609ade3a5102ab615db5dccbc2da078c18363aaaefb2afff4e726c4`.
+Required aggregate `137132657712`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+Source #14055 merges at `2026-11-22T07:23:46Z` as
+`d7e8fe3c9d7ef7582aada56b3537a0b3571450fc`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the 53-case leaf. The
+successful-attestation thread refusal remains open. Fresh-install/native/
+installed lanes are not exercised because no installation or runtime
+behavior changes. This is not a reuse hit, controlled whole-flow saving,
+real publication or acceptance of any broader owner or parent gate.
+
+### November 22 original candidate-retry qualification
+
+A new adapter exports five exact original candidate-retry functions as
+thirteen cases: four invalid/noncanonical clocks, immutable parent
+environment and Git identity, five exact remote commit/ref responses,
+trusted candidate CLI output despite injected human-log text, and two
+no-op/paused output controls. The original autouse identity fixture,
+parameters, callbacks, fixed clock and assertions remain unchanged. The
+three real Git sibling cases remain unadmitted with their existing owner.
+
+The original sixteen-case collection matches all thirteen adapter selections
+and exact original objects and parameter identities. A fresh guarded process
+passes all thirteen in 1.218 seconds with zero prohibited effects, seven
+bound Python reads and positive actual call-phase candidate/promoter-owner
+lines per case. Only the new adapter and original test file require new
+source bindings; both production targets are already admitted. Current-head
+review and complete fresh Linux CI remain required. This is development
+qualification, not a full-packet result, reuse hit, native/installed proof,
+release operation or acceptance of any broader parent or owner gate.
 
 ### November 20 path-gated audit-guard native boundary
 
