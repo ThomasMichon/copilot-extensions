@@ -2187,7 +2187,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   No manifest or guard is changed. The refused adapter, helper, candidate,
   node list and refusal evidence are retained without replay; this leaf
   remains blocked under the existing data-admission owner.
-- [ ] Qualify the separate three complete original deferred-dispatch recovery
+- [x] Qualify the separate three complete original deferred-dispatch recovery
   controls: verified merge completion recovers a suppressed advance, a resume
   merge drains paused source without another push, and retirement never
   automatically retries unchanged source. Preserve the original in-memory
@@ -2203,6 +2203,35 @@ authorizes critical main-path acceptance or a bounded administrative change.
   intent, exact-head review and complete fresh Linux CI remain required.
   This source-only leaf makes no dispatch, Main, workflow, runtime, native,
   guard or cleanup change and does not settle retained refusals.
+  #14105 merges at `870876e40c683d6fef438d8c2b747786aeebfb41` after
+  exact-head approval and complete fresh Linux CI executes all 8,910 selected
+  units in 184.659 packet seconds within the unchanged bound. Reviewed and
+  merged trees match. Only this three-case leaf is complete; the parent and
+  the separate invalid-deadline import refusal remain open.
+- [ ] Qualify the separate five complete original deferred-dispatch
+  admission/history controls: actual Gate attempt binding, all job-attempt
+  pages, closed-history pagination and candidate binding, readback mismatch
+  refusal, and the ten-page inventory ceiling. Preserve the existing
+  in-memory backend/request callbacks, literal 101-row inventories,
+  both attempt assertions, exact page/cursor sequences, mismatch diagnostic
+  and ten-call bound. Require complete original/adapter collection identity,
+  initial unchanged source/effect auditing and actual owner calls before
+  adding only a new adapter binding. Preserve all 8,910 nodes, 1,269 current
+  source hashes, 467 targets, 89 helper decisions and the 300-second bound.
+  Normal strict checks, committed release intent, exact-head review and
+  complete fresh Linux CI remain required. This is source-only qualification,
+  not actual workflow dispatch, Main writes or artifact admission; it adds
+  no new mock, preload, data/guard exception, native/runtime/routing or
+  cleanup authority and never replays retained refused candidates.
+  Complete collection verifies all 102 original cases and exactly five
+  adapter cases with original function-object identity. Initial unchanged
+  auditing passes all five in 1.015 seconds with zero prohibited effects,
+  six bound canonical Python reads and actual admission/dispatch owner
+  call-phase coverage. Only the adapter binding is added; no target changes.
+  Compact-v2 contains 8,915 nodes and 1,270 sources in 1,000,644 bytes,
+  preserving prior node order and all current source hashes. Exact-head
+  review and complete fresh Linux CI remain required; this leaf is not
+  yet complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

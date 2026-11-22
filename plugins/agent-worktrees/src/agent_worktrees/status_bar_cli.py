@@ -128,6 +128,7 @@ _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
     git_ops.WorktreeState.ORPHAN: ("colour129", "ORPHAN"),  # magenta
     git_ops.WorktreeState.ACTIVE: ("colour039", "ACTIVE"),  # blue
     git_ops.WorktreeState.GONE: ("colour238", "GONE"),  # dark grey
+    git_ops.WorktreeState.DEHYDRATED: ("colour244", "DEHYDRATED"),  # grey
     git_ops.WorktreeState.UNKNOWN: ("colour238", "?"),  # dark grey
 }
 
@@ -152,6 +153,7 @@ _DESCRIPTOR_STYLE_BG: dict[str, str] = {
     "convo": "colour037",
     "orphan": "colour129",
     "gone": "colour238",
+    "dehydrated": "colour244",
     "unknown": "colour238",
 }
 

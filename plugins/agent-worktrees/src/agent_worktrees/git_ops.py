@@ -352,12 +352,11 @@ def classify_worktree(
             default_branch=default_branch, active_paths=active_paths,
         )
     path = Path(worktree_path)
-    if not path.exists():
-        return WorktreeStateInfo(state=WorktreeState.GONE)
-
-    # A directory without .git is an incomplete/removed checkout.
-    if not (path / ".git").exists():
-        return WorktreeStateInfo(state=WorktreeState.GONE)
+    if not path.exists() or not (path / ".git").exists():
+        # A missing checkout (or one without .git) is GONE unless dehydrated.
+        from .checkout_hydration_catalog import is_dehydrated_checkout
+        held = is_dehydrated_checkout(path)
+        return WorktreeStateInfo(state=WorktreeState.DEHYDRATED if held else WorktreeState.GONE)
 
     deadline = _observation_deadline(observation_deadline)
     norm = worktree_path.rstrip("/\\")
@@ -1468,10 +1467,47 @@ def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:
 
 
 def delete_branch(name: str, *, cwd: str | Path, force: bool = False) -> bool:
-    """Delete a local branch. Returns True on success."""
-    flag = "-D" if force else "-d"
-    result = git("branch", flag, name, cwd=cwd, check=False)
+    """Delete a local branch. Returns True on success.
+
+    Refuses a branch retained by a dehydrated checkout: it is the only durable
+    copy of that checkout's HEAD until rehydration.
+    """
+    from . import checkout_hydration_catalog
+
+    try:
+        with checkout_hydration_catalog.reservation_lock(cwd):
+            holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name)
+            if holder:
+                log.warning("Refusing to delete branch %s: retained by dehydrated worktree %s", name, holder)
+                return False
+            flag = "-D" if force else "-d"
+            result = git("branch", flag, name, cwd=cwd, check=False)
+    except checkout_hydration_catalog.CatalogError as exc:
+        log.warning("Refusing to delete branch %s: %s", name, exc)
+        return False
     return result.returncode == 0
+
+
+def force_branch(name: str, target: str, *, cwd: str | Path, config: object = None) -> str | None:
+    """``git branch -f name target`` unless a dehydrated checkout retains ``name``.
+
+    The reservation check and the ref write run under the repository's
+    reservation lock, so a concurrent dehydration cannot interleave. Returns
+    ``None`` on success or a refusal/failure message.
+    """
+    from . import checkout_hydration_catalog
+
+    try:
+        with checkout_hydration_catalog.reservation_lock(cwd):
+            holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name, config)
+            if holder:
+                return f"{name} is retained by dehydrated worktree {holder}; rehydrate it first."
+            result = git("branch", "-f", name, target, cwd=cwd, check=False)
+    except checkout_hydration_catalog.CatalogError as exc:
+        return f"cannot verify branch reservation for {name}: {exc}"
+    if result.returncode != 0:
+        return f"Failed to set {name} to {target}: {result.stderr.strip()}"
+    return None
 
 
 def get_dirty_files(cwd: str | Path) -> list[str]:

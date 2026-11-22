@@ -132,6 +132,11 @@ def assess(
         return PruneVerdict(False, "active", "live Copilot session in use",
                             turn_count)
 
+    # A dehydrated checkout is held (branch + agency preserved), never garbage.
+    from .checkout_hydration_catalog import is_dehydrated
+    if state == S.DEHYDRATED or is_dehydrated(rec):
+        return PruneVerdict(False, "dehydrated", "checkout is dehydrated; rehydrate first", turn_count)
+
     # Directory missing -- the caller must verify the branch is merged before
     # deleting; surface it distinctly rather than guessing.
     if state == S.GONE:
@@ -337,6 +342,8 @@ def cleanup_disposition(
 
     if info.state == S.ACTIVE:
         return CleanupDisposition(False, "active", v.reason)
+    if v.category == "dehydrated":
+        return CleanupDisposition(False, "dehydrated", v.reason)
 
     if v.category == "open-pr":
         return CleanupDisposition(False, v.category, v.reason)
