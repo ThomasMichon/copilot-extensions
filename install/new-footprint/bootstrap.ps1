@@ -22,13 +22,13 @@ try {
             $env:COPILOT_AGENT_SESSION_ID -or [Console]::IsInputRedirected -or
             [Console]::IsOutputRedirected -or -not [Environment]::UserInteractive
         $provided = $env:GH_TOKEN -or $env:GITHUB_TOKEN
-        if ($headless -and -not $provided) {
-            throw 'Unattended repository onboarding requires a caller-supplied GitHub credential before bootstrap.'
+        $settings = @{}
+        if ($headless) {
+            $settings['GIT_TERMINAL_PROMPT'] = '0'
+            $settings['GCM_INTERACTIVE'] = 'never'
         }
-        # Scope the helper to GitHub HTTPS for this invocation; never write a global helper.
-        $settings = @{
-            GIT_CONFIG_PARAMETERS = ($env:GIT_CONFIG_PARAMETERS + " 'credential.https://github.com.helper=' 'credential.https://github.com.helper=!gh auth git-credential'").Trim()
-            GIT_TERMINAL_PROMPT = '0'
+        if ($headless -and $provided) {
+            $settings['GIT_CONFIG_PARAMETERS'] = ($env:GIT_CONFIG_PARAMETERS + " 'credential.https://github.com.helper=' 'credential.https://github.com.helper=!gh auth git-credential'").Trim()
         }
         foreach ($key in $settings.Keys) {
             $savedAuthEnvironment[$key] = [Environment]::GetEnvironmentVariable($key)
@@ -38,25 +38,20 @@ try {
             $ErrorActionPreference = 'Continue'
             foreach ($value in @($Repo, $KnowledgeRepo)) {
                 if (-not $value -or (Test-Path -LiteralPath $value -PathType Container)) { continue }
-                $slug = ($value -creplace '^https://github\.com/', '') -creplace '\.git$', ''
-                if ($slug -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$') {
-                    throw 'Invalid GitHub repository locator.'
+                if ($value -match '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$') {
+                    $url = "https://github.com/$value.git"
+                } elseif ($value -match '^https://(github\.com/[^/?#]+/[^/?#]+|dev\.azure\.com/[^/?#]+/[^/?#]+/_git/[^/?#]+|[a-z0-9-]+\.visualstudio\.com/[^/?#]+/_git/[^/?#]+)$') {
+                    $url = $value
+                } else {
+                    throw 'Use a GitHub or Azure Repos HTTPS clone URL, or a separately configured local checkout.'
                 }
-                & gh api --hostname github.com "repos/$slug" --silent 2>$null
-                if ($LASTEXITCODE) { return $false }
-                & git -c credential.interactive=never ls-remote --exit-code "https://github.com/$slug.git" HEAD 2>$null | Out-Null
+                & git ls-remote --exit-code $url HEAD 2>$null | Out-Null
                 if ($LASTEXITCODE) { return $false }
             }
             return $true
         }
         if (-not (Test-SelectedRepositoryAccess)) {
-            if ($headless -or $provided) {
-                throw 'Supplied GitHub identity could not verify API and Git read access to the selected repositories.'
-            }
-            & gh auth login --hostname github.com --web --git-protocol https
-            if ($LASTEXITCODE -or -not (Test-SelectedRepositoryAccess)) {
-                throw 'GitHub authorization incomplete: verify access and organization SSO for the selected repositories.'
-            }
+            throw 'Git could not read a selected repository. Verify Git Credential Manager and repository access; unattended callers must preauthorize each provider.'
         }
     }
     if ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'driver.py'))) {

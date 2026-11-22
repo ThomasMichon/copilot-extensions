@@ -12,11 +12,12 @@
 
 ## Goal
 
-Local terminal onboarding should guide the user through GitHub authorization
-when the selected repositories are not accessible. An SSH agent instead
-obtains a repository-scoped credential locally and supplies it to the remote
-bootstrap before setup. Both paths must verify GitHub API and Git read access;
-the SSH path must not depend on interactive sign-in on the target.
+Local terminal onboarding uses Git and Git Credential Manager for GitHub
+and Azure DevOps, independently for each harness and knowledge remote.
+An SSH agent instead preauthorizes each provider before setup. Verify Git
+read access, not just tool presence or account login. Gitea authentication
+is advanced, operator-configured setup, not a default bootstrap dependency.
+Repository access and private knowledge visibility are separate checks.
 
 Provide a separate terminal bootstrap for the new footprint without changing
 the current Manager installer. Discover the source root, registered harnesses

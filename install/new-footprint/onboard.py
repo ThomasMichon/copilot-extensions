@@ -29,7 +29,10 @@ def main() -> None:
     args = parser.parse_args()
     root = args.root.absolute()
     if args.knowledge_repo and not (root / "registry").exists():
-        _, knowledge_url = harness._github(args.knowledge_repo)
+        _, knowledge_url = harness.repository_remote(args.knowledge_repo)
+        if not knowledge_url.startswith("https://github.com/"):
+            raise ValueError("Azure Repos Git access is separate from knowledge privacy; "
+                             "verify private project visibility before binding")
         locator = knowledge_url.removeprefix("https://github.com/")
         probe = subprocess.run(
             ["gh", "repo", "view", locator, "--json", "nameWithOwner,isPrivate"],

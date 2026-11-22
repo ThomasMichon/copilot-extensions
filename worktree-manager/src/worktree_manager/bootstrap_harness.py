@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import unquote, urlsplit
 
 from . import harness_state, registered_suite, runtime_source_repository, source_config
 
@@ -32,6 +33,26 @@ def _github(value: str) -> tuple[str, str]:
     return parts[1], "https://github.com/" + "/".join(parts)
 
 
+def repository_remote(value: str) -> tuple[str, str]:
+    """GitHub shorthand or a provider-qualified Azure Repos HTTPS clone URL."""
+    if "://" not in value or value.startswith("https://github.com/"):
+        return _github(value)
+    parsed = urlsplit(value)
+    host = parsed.hostname or ""
+    parts = parsed.path.lstrip("/").split("/")
+    azure = ((host == "dev.azure.com" and len(parts) == 4) or
+             (re.fullmatch(r"[a-z0-9-]+\.visualstudio\.com", host) and len(parts) == 3))
+    if (parsed.scheme != "https" or parsed.netloc != host or parsed.query or parsed.fragment
+            or not azure or parts[-2] != "_git"):
+        raise ValueError("Expected a GitHub or Azure Repos HTTPS clone URL; use a local checkout for other hosts")
+    if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ -]*", unquote(p)) for p in (*parts[:-2], parts[-1])):
+        raise ValueError("Invalid Azure Repos path")
+    name = unquote(parts[-1]).removesuffix(".git")
+    if not _NAME.fullmatch(name):
+        raise ValueError("Repository name is not a supported registration label")
+    return name, value
+
+
 def _anchor(path: Path) -> Path:
     runtime_source_repository._ordinary(path)
     if not path.is_dir() or not Path(_git(path, "rev-parse", "--show-toplevel")).samefile(path):
@@ -54,7 +75,7 @@ def first_registration(root: Path, srcroot: Path, repository: str) -> Path:
         if not _NAME.fullmatch(name):
             raise ValueError("Invalid harness name")
     else:
-        name, remote = _github(repository)
+        name, remote = repository_remote(repository)
         checkout = srcroot / name
 
     existing = registry.exists() or registry.is_symlink()
@@ -74,7 +95,7 @@ def first_registration(root: Path, srcroot: Path, repository: str) -> Path:
         else:
             _anchor(checkout)
             actual = _git(checkout, "remote", "get-url", "origin")
-            if _github(actual)[1].casefold() != remote.casefold():
+            if repository_remote(actual)[1].casefold() != remote.casefold():
                 raise ValueError("Existing checkout has a different origin")
             if _git(checkout, "status", "--porcelain"):
                 raise ValueError("Refusing to update a dirty harness checkout")

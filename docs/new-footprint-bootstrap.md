@@ -24,21 +24,30 @@ registrations and pairings. It reuses matching checkouts or clones under the
 selected source root (default `~/src`); an existing local checkout is also
 a valid input. It must not replace a checkout with a different origin.
 
-**Authentication:** In a local interactive terminal, the PowerShell entry checks
-both GitHub API access and HTTPS Git access to the selected remote repositories.
-If needed, it opens GitHub CLI's browser sign-in and checks again. An
-organization can still require the user to approve SSO or obtain repository
-access; successful sign-in alone is not sufficient.
+**Repository authentication:** Supply either `owner/repo` (GitHub) or the
+HTTPS clone URL for each repository independently. For example, a GitHub
+harness can pair with a knowledge repository at
+`https://dev.azure.com/example/project/_git/knowledge`. Use Git with Git
+Credential Manager configured. In a local terminal Git can prompt via GCM;
+the bootstrap checks read access to each remote with `git ls-remote`. Installing
+GCM does not itself grant repository access. A readable repository is not
+necessarily private: binding must independently establish knowledge-repository
+privacy. The draft does not yet verify Azure DevOps project visibility.
+Gitea authentication is not configured by default; advanced users can
+provide an independently configured checkout. Downloading and verifying
+the suite's GitHub release artifacts is separate from repository authentication.
 
-For SSH automation, obtain a short-lived, read-only credential locally for
-the selected repositories. Supply it to the remote bootstrap process as
+For SSH automation, preauthorize each provider for the target process; Git
+must not prompt. For GitHub a caller can supply a short-lived credential as
 `GH_TOKEN` through the authenticated transport before invocation. Setting
 `GH_TOKEN` in the local shell does not by itself forward it over SSH. Do not
 put it in the SSH command line, repository URL, logs or a remote login store.
 The bootstrap uses `gh auth git-credential` for GitHub HTTPS operations for
 that invocation; it does not switch accounts or change global Git settings.
 An unattended invocation with no usable supplied credential fails before
-registration. Cleanup does not require repository sign-in.
+registration if Git cannot read a requested remote. GitHub credentials do not
+authorize Azure Repos; use a separately authorized provider credential there.
+Cleanup does not require repository sign-in.
 
 The Windows SSH caller `install/new-footprint/invoke-ssh.ps1` accepts
 `-Target`, an exact `-BootstrapRevision`, the bootstrap repository and path
