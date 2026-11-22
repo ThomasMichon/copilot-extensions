@@ -6,12 +6,16 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import platform
+from typing import NoReturn, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import sessions, status_monitor_runtime
 from agent_remote_driver import mux_observation
+from agent_remote_driver.mux_observation_types import Observation, Pane
+from agent_worktrees.tracking import WorktreeRecord
 from agent_worktrees.mux_list_result import (
     MuxObservationUnavailable,
     confirmed_has_session,
@@ -63,7 +67,7 @@ def test_monitor_and_liveness_agree_on_healthy_absence(
     message: str,
 ) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -77,7 +81,7 @@ def test_monitor_and_liveness_agree_on_healthy_absence(
 def test_strict_presence_recognizes_absence_at_subprocess_boundary(
     monkeypatch: pytest.MonkeyPatch, message: str,
 ) -> None:
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     calls = []
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -102,7 +106,7 @@ def test_strict_presence_recognizes_absence_at_subprocess_boundary(
 def test_strict_presence_keeps_unavailable_probes_unknown(
     monkeypatch: pytest.MonkeyPatch, message: str,
 ) -> None:
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         subprocess, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, b"", message.encode()),
@@ -139,7 +143,7 @@ def test_probe_failures_remain_unconfirmed(
     failure: Exception,
 ) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
 
     def fail(*args: object, **kwargs: object) -> None:
         raise failure
@@ -151,7 +155,7 @@ def test_probe_failures_remain_unconfirmed(
 
 def test_unknown_server_error_remains_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -168,7 +172,7 @@ def test_unknown_server_error_remains_unconfirmed(monkeypatch: pytest.MonkeyPatc
 
 def test_successful_session_data_is_still_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         text = "wt-example:1:$1:123\n" if "session_created" in command[-1] else "wt-example:1\n"
@@ -183,7 +187,7 @@ def test_successful_session_data_is_still_parsed(monkeypatch: pytest.MonkeyPatch
 def test_partial_session_listing_does_not_confirm_absence(
     monkeypatch: pytest.MonkeyPatch, suffix: str,
 ) -> None:
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         subprocess, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
@@ -215,7 +219,7 @@ def test_partial_monitor_listing_does_not_confirm_absence(
 
 def test_success_with_diagnostics_is_not_a_complete_listing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         subprocess, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
@@ -229,9 +233,11 @@ def test_success_with_diagnostics_is_not_a_complete_listing(monkeypatch: pytest.
 def test_partial_batch_and_failed_presence_cannot_become_false(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
 
-    def run(command, **kwargs):
+    def run(
+        command: list[str], **kwargs: object,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         if command[1] == "list-sessions":
             return subprocess.CompletedProcess(command, 0, "wt-other:1\nbad line\n", "")
         return subprocess.CompletedProcess(command, 1, b"", b"Permission denied")
@@ -246,11 +252,13 @@ def test_partial_batch_and_failed_presence_cannot_become_false(
     subprocess.TimeoutExpired(["tmux"], 5),
     RuntimeError("synthetic unconfirmed presence"),
 ])
-def test_passive_posix_fallback_normalizes_unavailable_evidence(monkeypatch, error):
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+def test_passive_posix_fallback_normalizes_unavailable_evidence(
+    monkeypatch: pytest.MonkeyPatch, error: Exception,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(sessions, "_list_mux_sessions", lambda **kw: None)
 
-    def unavailable(*args, **kwargs):
+    def unavailable(*args: object, **kwargs: object) -> NoReturn:
         raise error
 
     monkeypatch.setattr(sessions, "has_mux_session", unavailable)
@@ -264,19 +272,19 @@ def test_passive_posix_fallback_normalizes_unavailable_evidence(monkeypatch, err
 def test_passive_psmux_observation_never_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import psmux_observation
 
-    def unknown(**kwargs):
+    def unknown(**kwargs: object) -> NoReturn:
         raise MuxObservationUnavailable("PSMux presence is unknown")
 
     monkeypatch.setattr(psmux_observation, "observe", unknown)
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux CLI execution"),
     )
     monkeypatch.setattr(mux_observation, "list_psmux", lambda: None)
     monkeypatch.setattr(
         mux_observation, "observe_psmux",
-        lambda *a, **kw: mux_observation.Observation("unknown", "native-query-unavailable"),
+        lambda *a, **kw: Observation("unknown", "native-query-unavailable"),
     )
     assert status_monitor_runtime._monitor_list_sessions(r"C:\Tools\PSMux.exe") is None
     assert sessions._list_mux_sessions() is None
@@ -292,25 +300,29 @@ def test_unconfirmed_psmux_cannot_admit_a_cold_seed(monkeypatch: pytest.MonkeyPa
     from types import SimpleNamespace
     from agent_worktrees import launch_seed_exec, psmux_observation, reclaim
 
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(
         mux_observation, "observe_psmux",
-        lambda *a, **kw: mux_observation.Observation("unknown", "native-query-unavailable"),
+        lambda *a, **kw: Observation("unknown", "native-query-unavailable"),
     )
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
 
-    def unavailable(**kwargs):
+    def unavailable(**kwargs: object) -> NoReturn:
         raise MuxObservationUnavailable("native server coverage unavailable")
 
     monkeypatch.setattr(psmux_observation, "observe", unavailable)
-    error = launch_seed_exec._final_cold_error(SimpleNamespace(worktree_id="fixture", sessions=[]))
+    error = launch_seed_exec._final_cold_error(
+        cast(WorktreeRecord, SimpleNamespace(worktree_id="fixture", sessions=[])),
+    )
     assert error is not None and "seed remains staged" in error
 
 
-def test_explicit_strict_presence_uses_native_psmux_evidence(monkeypatch) -> None:
+def test_explicit_strict_presence_uses_native_psmux_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import psmux_observation
 
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: pytest.fail("strict PSMux CLI execution"),
     )
@@ -339,11 +351,11 @@ def test_strict_windows_fallback_uses_qualified_membership(
 ) -> None:
     from agent_remote_driver import mux_inventory
 
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", namespace)
     monkeypatch.setattr(
         mux_observation, "observe_psmux",
-        lambda *a, **kw: mux_observation.Observation("unknown", "timeout"),
+        lambda *a, **kw: Observation("unknown", "timeout"),
     )
     monkeypatch.setattr(
         mux_inventory, "observe", lambda **kw: pytest.fail("unqualified legacy inventory"),
@@ -361,17 +373,19 @@ def test_strict_windows_fallback_uses_qualified_membership(
     assert 0 < timeouts[-1] <= .25
 
 
-def test_explicit_and_display_presence_use_driver_counts_without_cli(monkeypatch) -> None:
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+def test_explicit_and_display_presence_use_driver_counts_without_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(
         subprocess, "run",
         lambda *a, **kw: pytest.fail("passive PSMux CLI"),
     )
     monkeypatch.setattr(
         mux_observation, "observe_psmux",
-        lambda *a, **kw: mux_observation.Observation(
+        lambda *a, **kw: Observation(
             "present", clients=3, incarnation="$1:100",
-            panes=(mux_observation.Pane("%2", False, True, "fixture"),),
+            panes=(Pane("%2", False, True, "fixture"),),
         ),
     )
     info = sessions.mux_status_many(["fixture"])["fixture"]
@@ -382,14 +396,16 @@ def test_explicit_and_display_presence_use_driver_counts_without_cli(monkeypatch
     assert sessions.mux_active_pane_named("wt-fixture", mux="psmux") == "%2"
 
 
-def test_unknown_native_results_are_display_only_and_never_admit_reclaim(monkeypatch):
+def test_unknown_native_results_are_display_only_and_never_admit_reclaim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import reclaim
 
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(
         mux_observation, "observe_psmux",
-        lambda name, **kw: mux_observation.Observation("unknown", "timeout")
-        if name == "wt-fixture" else mux_observation.Observation("present", clients=2),
+        lambda name, **kw: Observation("unknown", "timeout")
+        if name == "wt-fixture" else Observation("present", clients=2),
     )
     with pytest.raises(MuxObservationUnavailable):
         sessions.mux_status_many(["fixture", "other"])
@@ -406,17 +422,19 @@ def test_unknown_native_results_are_display_only_and_never_admit_reclaim(monkeyp
     assert reclaim.teardown_detached_mux([target], table={}) == []
 
 
-def test_monitor_uses_driver_identity_and_preserves_partial_unknown(monkeypatch) -> None:
+def test_monitor_uses_driver_identity_and_preserves_partial_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux CLI"),
     )
-    observations = {"wt-fixture": mux_observation.Observation(
+    observations = {"wt-fixture": Observation(
         "present", clients=3, incarnation="$1:100",
     )}
     monkeypatch.setattr(mux_observation, "list_psmux", lambda: observations)
     assert status_monitor_runtime._monitor_list_sessions("psmux") == {"wt-fixture": (3, "$1:100")}
-    observations["wt-other"] = mux_observation.Observation("unknown", "timeout")
+    observations["wt-other"] = Observation("unknown", "timeout")
     assert status_monitor_runtime._monitor_list_sessions("psmux") is None
 
 def test_real_missing_socket_probe_does_not_start_a_server(tmp_path: Path) -> None:
@@ -456,7 +474,7 @@ def test_parsers_preserve_names_incarnations_and_legacy_bad_count_behavior() -> 
 
 def test_both_probes_preserve_captured_headless_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     calls: list[dict[str, object]] = []
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:

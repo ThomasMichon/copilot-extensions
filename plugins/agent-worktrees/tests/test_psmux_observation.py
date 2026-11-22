@@ -80,7 +80,9 @@ def test_native_absence_allows_cold_resume_but_live_mux_does_not(
         assert verdict.active is False
         assert verdict.mux_live is expected_live
         assert (resume_seed.cold_start_error(verdict) is None) is not expected_live
-        assert (launch_seed_exec._final_cold_error(record) is None) is not expected_live
+        assert (
+            launch_seed_exec._final_cold_error(cast(tracking.WorktreeRecord, record)) is None
+        ) is not expected_live
 
 
 def test_confirmed_mux_absence_does_not_ignore_a_bound_copilot(
@@ -97,7 +99,7 @@ def test_confirmed_mux_absence_does_not_ignore_a_bound_copilot(
     verdict = sessions.verify_worktree_active(cast(tracking.WorktreeRecord, record))
     assert verdict.probes_ok and not verdict.mux_live and verdict.bare
     assert resume_seed.cold_start_error(verdict) is not None
-    error = launch_seed_exec._final_cold_error(record)
+    error = launch_seed_exec._final_cold_error(cast(tracking.WorktreeRecord, record))
     assert error is not None and "seed remains staged" in error
 
 
