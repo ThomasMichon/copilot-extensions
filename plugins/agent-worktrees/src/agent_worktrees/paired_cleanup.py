@@ -77,8 +77,9 @@ def _inactive(record: tracking.WorktreeRecord) -> None:
     live = sessions.verify_worktree_active(record, strict=True)
     if live.active or not live.probes_ok or not live.mux_probe_ok:
         raise ValueError(f"{record.worktree_id}: execution is live or unknown")
-    if reason := procs.checkout_retirement_blocker(record.worktree_path):
-        raise ValueError(f"{record.worktree_id}: {reason}")
+    if Path(record.worktree_path).exists():
+        if reason := procs.checkout_retirement_blocker(record.worktree_path):
+            raise ValueError(f"{record.worktree_id}: {reason}")
 
 
 @repository_identity_scope()

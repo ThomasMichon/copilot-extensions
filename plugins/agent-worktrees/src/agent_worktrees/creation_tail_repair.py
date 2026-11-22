@@ -213,8 +213,12 @@ def _retained_sibling(
             raise ValueError("retained paired allocation has a different parent owner")
         expected_path = Path(child.worktree_path)
         receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
+        namespace_matches = creation_repair_identity._repair_namespace_matches(child, receiving)
+        if not namespace_matches and not require_checkout and not expected_path.exists():
+            original = paired_allocation_location.original(record, root, legacy=False)
+            namespace_matches = original is not None and original == expected_path
         if (
-            not creation_repair_identity._repair_namespace_matches(child, receiving)
+            not namespace_matches
             or require_checkout and not expected_path.is_dir() or expected_path.is_symlink()
             or child.status != "active"
         ):

@@ -39,7 +39,7 @@ def existing(
     monkeypatch.setattr(sessions, "verify_worktree_active", lambda record, **kw: sessions.LiveVerdict())
     monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: set())
     monkeypatch.setattr(sessions, "scan_sessions_fast", lambda records: sessions.SessionContext())
-    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(procs, "processes_with_cwd_under", lambda *args, **kwargs: [])
     return fixture
 
 
@@ -96,6 +96,24 @@ def _joint_cli(
     return code, json.loads(stream.getvalue())
 
 
+@pytest.mark.parametrize("option", ["--reconcile-prs", "--force", "--automatic"])
+def test_joint_cleanup_rejects_unsupported_effect_options_before_admission(
+    monkeypatch: pytest.MonkeyPatch, option: str,
+) -> None:
+    from agent_worktrees import output
+
+    parser = argparse.ArgumentParser()
+    cleanup_gc_cli.add_parsers(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["cleanup", "--worktree-id", "fixture", "--paired", "--json", option])
+    monkeypatch.setattr(
+        paired_cleanup, "reap_pair",
+        lambda *args, **kwargs: pytest.fail("unsupported option reached joint effect admission"),
+    )
+    with output.capture_json_output() as stream:
+        code = cleanup_gc_cli.cmd_cleanup(args)
+    assert code == 2 and option in json.loads(stream.getvalue())["error"]
+
+
 @pytest.mark.parametrize("seed_state", ["consumed", "absent"])
 def test_live_existing_harness_recovers_without_new_and_replays(
     existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, seed_state: str,
@@ -141,6 +159,29 @@ def test_lost_checkout_restores_original_retained_branch(existing: SimpleNamespa
     assert tracking.load_record(child.yaml_path).creation_nonce == child.creation_nonce
     sibling = tracking.find_paired_record(parent)
     assert sibling is not None and sibling.worktree_path == str(target)
+
+
+@pytest.mark.parametrize("retain_receipt", [True, False])
+def test_missing_companion_uses_original_allocation_after_receiver_root_changes(
+    existing: SimpleNamespace, retain_receipt: bool,
+) -> None:
+    _, child = _pair(existing)
+    original = git_ops.git("rev-parse", "HEAD", cwd=child.worktree_path).stdout.strip()
+    shutil.rmtree(child.worktree_path)
+    receiving = existing.configs["knowledge"]
+    future = existing.anchors["knowledge"].parent / "future-knowledge-root"
+    existing.configs["knowledge"] = replace(receiving, repos={
+        "knowledge": replace(receiving.default_repo, worktree_root=str(future)),
+    })
+    if not retain_receipt:
+        existing.record.yaml_path.with_suffix(".paired-allocation.json").unlink()
+    code, report = _recover(existing)
+    assert (code == 0) == retain_receipt, json.dumps(report)
+    if retain_receipt:
+        assert git_ops.git("rev-parse", "HEAD", cwd=child.worktree_path).stdout.strip() == original
+    else:
+        assert not Path(child.worktree_path).exists()
+    assert not (future / child.worktree_id).exists()
 
 
 @pytest.mark.parametrize("operation", ["recover", "cleanup"])

@@ -82,8 +82,9 @@ def _plan(
     live = sessions.verify_worktree_active(child, strict=True)
     if live.active or not live.probes_ok or not live.mux_probe_ok:
         raise ValueError("retained companion execution is live or unknown")
-    if reason := procs.checkout_retirement_blocker(child.worktree_path):
-        raise ValueError(f"retained companion is in use or unknown: {reason}")
+    if target.exists():
+        if reason := procs.checkout_retirement_blocker(child.worktree_path):
+            raise ValueError(f"retained companion is in use or unknown: {reason}")
     if target.exists():
         creation._same_repository(root.path, str(target), branch=child.branch)
         if not git_ops.is_clean(cwd=target):

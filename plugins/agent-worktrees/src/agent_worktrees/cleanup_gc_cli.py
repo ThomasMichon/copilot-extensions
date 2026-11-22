@@ -107,8 +107,11 @@ def _cleanup_one(args: argparse.Namespace) -> int:
         from .paired_cleanup import reap_pair
 
         if getattr(args, "force", False):
-            output.err("joint cleanup does not accept --force")
-            return 1
+            return output._json_error("joint cleanup does not accept --force", 2)
+        if getattr(args, "reconcile_prs", False):
+            return output._json_error(
+                "joint cleanup does not accept --reconcile-prs; refresh both members' PR state before retrying", 2,
+            )
         payload = reap_pair(
             args.worktree_id,
             include_unused=getattr(args, "include_unused", False),
