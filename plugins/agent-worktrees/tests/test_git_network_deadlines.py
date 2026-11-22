@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import git_acquisition_budget, git_ops, git_push_transport, pr_publish
+from agent_worktrees import git_acquisition_budget, git_fetch, git_ops, git_push_transport, pr_publish
 from agent_worktrees.config import RepoConfig
 from agent_worktrees.tracking import PRRecord
 
@@ -148,4 +148,62 @@ def test_legacy_fork_discovery_shares_one_budget_across_all_candidates(
         assert pr_publish._select_push_target(RepoConfig(".", "."), PRRecord(branch="topic"), ".") is None
     assert observed == ([300, 1] if outer is None else [20])
     assert clock.now - 100 == (300 if outer is None else outer)
+    assert git_acquisition_budget.remaining_timeout(None) is None
+
+
+@pytest.mark.parametrize("requested,outer,expected", [(None, None, 297), (5, None, 2), (300, 20, 17)])
+def test_fetch_credential_preparation_shares_caller_and_enclosing_deadlines(
+    monkeypatch: pytest.MonkeyPatch, requested: float | None, outer: float | None, expected: float,
+) -> None:
+    clock = SimpleNamespace(now=100.0)
+    time_source = SimpleNamespace(monotonic=lambda: clock.now)
+    monkeypatch.setattr(git_acquisition_budget, "time", time_source)
+    monkeypatch.setattr(git_fetch, "time", time_source)
+    observed: list[float | None] = []
+
+    def prepare_auth(*args: object, **kwargs: object) -> list[str]:
+        assert git_acquisition_budget.remaining_timeout(None) is not None
+        clock.now += 3
+        return []
+
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed.append(git_acquisition_budget.remaining_timeout(300))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(git_ops, "_auth_config_args", prepare_auth)
+    monkeypatch.setattr(git_ops, "git", run)
+    with (
+        git_acquisition_budget.acquisition_budget(clock.now + outer)
+        if outer is not None else nullcontext()
+    ):
+        git_ops.fetch("origin", cwd=".", timeout=requested)
+    assert observed == [expected]
+    assert git_acquisition_budget.remaining_timeout(None) is None
+
+
+@pytest.mark.parametrize("requested,outer", [(None, None), (5, None), (300, 20)])
+def test_fetch_preparation_expiry_uses_the_execution_timeout_error_contract(
+    monkeypatch: pytest.MonkeyPatch, requested: float | None, outer: float | None,
+) -> None:
+    clock = SimpleNamespace(now=100.0)
+    time_source = SimpleNamespace(monotonic=lambda: clock.now)
+    monkeypatch.setattr(git_acquisition_budget, "time", time_source)
+    monkeypatch.setattr(git_fetch, "time", time_source)
+
+    def prepare_auth(*args: object, **kwargs: object) -> list[str]:
+        remaining = git_acquisition_budget.remaining_timeout(None)
+        assert remaining is not None
+        clock.now += remaining + 1
+        git_acquisition_budget.remaining_timeout(None)
+        pytest.fail("expired credential preparation returned")
+
+    monkeypatch.setattr(git_ops, "_auth_config_args", prepare_auth)
+    monkeypatch.setattr(git_ops, "git", lambda *args, **kwargs: pytest.fail("remote launched after expiry"))
+    with (
+        git_acquisition_budget.acquisition_budget(clock.now + outer)
+        if outer is not None else nullcontext()
+    ), pytest.raises(git_ops.GitError, match="hard timeout") as failure:
+        git_ops.fetch("origin", cwd=".", timeout=requested)
+    assert failure.value.returncode == 124
+    assert isinstance(failure.value.__cause__, TimeoutError)
     assert git_acquisition_budget.remaining_timeout(None) is None

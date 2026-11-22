@@ -10635,7 +10635,7 @@
     "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py": "c416911e75043fdf58e5d6a5644ed451e23aa4f15b97da52c4c0d1098485fa4b",
     "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": "eca703bbd9341db7c95885cddd63b0280c2d97da261ae510cb676e94a692fc89",
     "plugins/agent-worktrees/src/agent_worktrees/git_acquisition_budget.py": "4e59076ec2623c0b32fe3ef3b3b176c1b52585d8f1dc08fae8c0608dc6a6113b",
-    "plugins/agent-worktrees/src/agent_worktrees/git_fetch.py": "94d074184861abac42c6fb19d246b0436854dd0291afb7fdba8175a8c661b62f",
+    "plugins/agent-worktrees/src/agent_worktrees/git_fetch.py": "e96a406f1d41742ea11eaa69d3425d064dfe0782ceb77bd5da3e3a3ff290770d",
     "plugins/agent-worktrees/src/agent_worktrees/git_state_types.py": "174ae381e2ef20f18814335a03f67ae260c0a12ff924cb70e77d4f6bf81e5373",
     "plugins/agent-worktrees/src/agent_worktrees/git_tree_diff.py": "e853a447a1daebe7ea5dd1ca43946269774b8866444145501f78ce01552a6020",
     "plugins/agent-worktrees/src/agent_worktrees/machine_instructions.py": "a0953814f08b643afba94887d527720421a7674e4522acab0916174af63e10ff",
