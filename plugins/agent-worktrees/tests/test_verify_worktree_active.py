@@ -134,6 +134,27 @@ def test_verification_passes_only_the_authoritative_session_registry() -> None:
     assert verdict.probes_ok
 
 
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("unknown_first", [False, True])
+def test_unavailable_session_preserves_other_verified_live_bindings(strict: bool, unknown_first: bool) -> None:
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    record = _rec()
+    ids = ["unknown", "live"] if unknown_first else ["live", "unknown"]
+    record.sessions = [tracking.SessionEntry(session_id=sid, started_at="") for sid in ids]
+
+    def resolve(**kwargs: Any) -> list[dict[str, Any]]:
+        if kwargs["session_ids"] == ["unknown"]:
+            raise ObservationUnavailable("Registered session working directory is unavailable")
+        return [_bound("live", "bare")]
+
+    with patch("agent_worktrees.sessions.mux_status_many", return_value={}), \
+         patch("agent_worktrees.reclaim.resolve_bound_copilots", side_effect=resolve):
+        verdict = sessions.verify_worktree_active(record, strict=strict)
+    assert verdict.active and verdict.bare and verdict.live_session_ids == ["live"]
+    assert verdict.source == "lock" and not verdict.probes_ok and verdict.mux_probe_ok
+
+
 def test_live_registered_lock_requires_matching_session_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 

@@ -92,8 +92,9 @@ def seed_for_attempt(
 def plain_live_open(args: argparse.Namespace, verdict: LiveVerdict | None) -> bool:
     return bool(
         not getattr(args, "seed", None) and not getattr(args, "seed_id", None)
+        and not getattr(args, "stage_launch_seed", False)
         and getattr(args, "preserve_seed_id", None) is None
-        and verdict is not None and verdict.active
+        and verdict is not None and (verdict.active or verdict.mux_live)
     )
 
 

@@ -48,6 +48,7 @@ def test_windows_mux_listing_does_not_require_global_server_coverage(monkeypatch
 @pytest.mark.parametrize("reply", [
     subprocess.CompletedProcess(["psmux"], 1, "", "provider unavailable"),
     subprocess.CompletedProcess(["psmux"], 0, "not-a-session-count\n", ""),
+    subprocess.CompletedProcess(["psmux"], 0, "", ""),
     subprocess.CompletedProcess(["psmux"], 0, "\n", ""),
     subprocess.CompletedProcess(["psmux"], 0, "wt-other:0\n\n", ""),
 ])

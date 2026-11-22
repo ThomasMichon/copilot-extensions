@@ -453,17 +453,9 @@ def _count_user_turns(entry: Path) -> int:
 
 
 def _session_entry_lock_state(
-    state_dir: Path, session_id: str, worktree_path: str | None = None,
+    state_dir: Path, session_id: str, worktree_path: str | None = None, *, strict_cwd: bool = False,
 ) -> tuple[int | None, list[int]]:
-    """Return ``(live_pid_or_None, stale_pids)`` for one session's lock dir.
-
-    Shared read of the ``inuse.<pid>.lock`` contract, factored out of
-    :func:`worktree_session_lock_state` (which aggregates it over every
-    session on a record) so :func:`session_id_is_live` (Phase 8,
-    worktree-finality-and-obligations) can answer the SAME question scoped to
-    exactly one session id, without re-deriving the lock-file/PID-liveness
-    logic.
-    """
+    """Return matching-CWD live and stale lock PIDs; strict CWD failures raise."""
     sdir = state_dir / session_id
     if not sdir.is_dir():
         return None, []
@@ -471,11 +463,6 @@ def _session_entry_lock_state(
     # signal for THIS worktree (mirrors _enrich_session_dir).
     if _is_detached_session(sdir):
         return None, []
-    if worktree_path is not None:
-        from . import reclaim
-
-        if not reclaim._cwd_under(reclaim._session_cwd(sdir), worktree_path):
-            return None, []
     try:
         lock_files = list(sdir.glob("inuse.*.lock"))
     except OSError:
@@ -493,6 +480,15 @@ def _session_entry_lock_state(
         # fails for a dead pid), so a stale lock from a crashed session does
         # not count.
         if _is_copilot_process(pid):
+            if worktree_path is not None:
+                from . import reclaim
+                from .push_timeout import ObservationUnavailable
+
+                cwd = reclaim._session_cwd(sdir)
+                if strict_cwd and (not cwd or not worktree_path):
+                    raise ObservationUnavailable("Registered session working directory is unavailable")
+                if not reclaim._cwd_under(cwd, worktree_path):
+                    return None, stale_pids
             return pid, stale_pids
         stale_pids.append(pid)
     return None, stale_pids
@@ -523,15 +519,7 @@ def worktree_session_lock_state(rec: tracking.WorktreeRecord) -> tuple[bool, lis
 
 
 def session_id_is_live(rec: tracking.WorktreeRecord, session_id: str) -> bool:
-    """Per-session ACTIVE check, scoped to exactly ``session_id``.
-
-    Unlike :func:`worktree_has_live_session` (any session on this worktree),
-    this answers "is THIS specific session's Copilot process alive" -- the
-    probe the Phase 8 (worktree-finality-and-obligations) sweep session-claim
-    branch needs to corroborate a ``kind="session"`` claim's liveness before
-    treating it as gone. A session id not present on ``rec`` at all is
-    conservatively not-live (``False``).
-    """
+    """Check one registered session; unavailable live-session CWD raises."""
     sessions_list = getattr(rec, "sessions", None)
     if not sessions_list or not any(
         getattr(entry, "session_id", None) == session_id for entry in sessions_list
@@ -540,7 +528,9 @@ def session_id_is_live(rec: tracking.WorktreeRecord, session_id: str) -> bool:
     state_dir = _session_state_dir()
     if not state_dir.exists():
         return False
-    pid, _stale = _session_entry_lock_state(state_dir, session_id, getattr(rec, "worktree_path", "") or "")
+    pid, _stale = _session_entry_lock_state(
+        state_dir, session_id, getattr(rec, "worktree_path", "") or "", strict_cwd=True,
+    )
     return pid is not None
 
 
@@ -1205,26 +1195,23 @@ def verify_worktree_active(record: tracking.WorktreeRecord, *, strict: bool = Fa
         mux_probe_ok = False
     mux_live = bool(info.exists)
 
-    live_ids: list[str] = []
-    bare = False
-    try:
-        worktree_path = getattr(record, "worktree_path", "")
-        if not worktree_path:
-            raise ValueError("Worktree working directory is unavailable")
-        binding_options: dict[str, Any] = {"strict": True} if strict else {}
-        bound = reclaim.resolve_bound_copilots(
-            worktree_id=wt_id,
-            worktree_path=worktree_path,
-            session_ids=[
-                entry.session_id for entry in (getattr(record, "sessions", None) or ())
-            ],
-            **binding_options,
-        )
-        live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
-        bare = any(b.get("homing") == "bare" for b in bound)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Could not verify registered Copilot bindings: %s", exc)
-        probes_ok = False
+    bound: list[dict[str, Any]] = []
+    groups = [[entry.session_id] for entry in (getattr(record, "sessions", None) or ())] or [[]]
+    for session_ids in groups:
+        try:
+            worktree_path = getattr(record, "worktree_path", "")
+            if not worktree_path:
+                raise ValueError("Worktree working directory is unavailable")
+            binding_options: dict[str, Any] = {"strict": True} if strict else {}
+            bound.extend(reclaim.resolve_bound_copilots(
+                worktree_id=wt_id, worktree_path=worktree_path,
+                session_ids=session_ids, **binding_options,
+            ))
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Could not verify registered Copilot bindings: %s", exc)
+            probes_ok = False
+    live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
+    bare = any(b.get("homing") == "bare" for b in bound)
     lock_live = bool(live_ids)
 
     if mux_live and lock_live:
@@ -1359,7 +1346,7 @@ def _list_mux_sessions(*, strict: bool = False, timeout: float = 5) -> dict[str,
                 else is_empty_tmux_listing(binary, result)
             )
             return {} if empty else None
-        if (result.stderr or "").strip():
+        if (result.stderr or "").strip() or (platform.system() == "Windows" and not result.stdout):
             return None
         try:
             return parse_session_counts(result.stdout, strict=True)

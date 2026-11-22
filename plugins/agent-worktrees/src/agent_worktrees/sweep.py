@@ -442,8 +442,13 @@ def session_claim_gone(claim: tracking_claims.ResourceClaim, config: cfg.Config)
     if record is None:
         return True
     from . import session_lease, sessions
-    if not sessions.session_id_is_live(record, parsed.session):
-        return True
+    from .push_timeout import ObservationUnavailable
+
+    try:
+        if not sessions.session_id_is_live(record, parsed.session):
+            return True
+    except ObservationUnavailable:
+        return None
     # A live but idle session holds only a lease; expiry releases it without
     # sessionEnd. Missing activity evidence stays live (False), never gone.
     return session_lease.lease_expired(record, claim) is True

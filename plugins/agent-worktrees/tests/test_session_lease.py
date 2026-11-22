@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import cast
+import builtins
+from typing import Any, cast
 from collections.abc import Callable
 
 
@@ -173,6 +174,43 @@ def test_session_claim_live_process_with_fresh_or_missing_lease_is_not_gone(
     for stamp in (time.time(), None):
         monkeypatch.setattr(session_lease, "last_activity", lambda sid, stamp=stamp: stamp)
         assert sweep.session_claim_gone(claim, config) is False
+
+
+@pytest.mark.parametrize("workspace", ["missing", "malformed", "unreadable", "foreign", "matching"])
+@pytest.mark.parametrize("live", [False, True])
+def test_session_claim_preserves_unknown_live_cwd(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace: str, live: bool,
+) -> None:
+    rec = types.SimpleNamespace(
+        sessions=[tracking.SessionEntry(session_id="sess-1", started_at="")],
+        worktree_path=str(tmp_path / "worktree"), status="active",
+    )
+    entry = state_dir / "sess-1"
+    entry.mkdir()
+    (entry / "inuse.123.lock").touch()
+    path = entry / "workspace.yaml"
+    if workspace != "missing":
+        path.write_text(
+            "cwd: [" if workspace == "malformed" else
+            f"cwd: {tmp_path.as_posix()}/{'other' if workspace == 'foreign' else 'worktree'}\n",
+            encoding="utf-8",
+        )
+    if workspace == "unreadable":
+        original = builtins.open
+
+        def open_file(file: Any, *args: Any, **kwargs: Any) -> Any:
+            if file == path:
+                raise PermissionError("fixture")
+            return original(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", open_file)
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda *_a: (rec, True))
+    monkeypatch.setattr(sessions, "_is_copilot_process", lambda _pid: live)
+    monkeypatch.setattr(session_lease, "lease_expired", lambda *_a: False)
+    config = cast(cfg.Config, types.SimpleNamespace())
+    expected = True if not live or workspace == "foreign" else False if workspace == "matching" else None
+    assert sweep.session_claim_gone(_claim(), config) is expected
+    assert sweep.claim_safe(_claim(), config) is expected
 
 
 def _scan(

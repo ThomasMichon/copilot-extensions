@@ -26,7 +26,7 @@ def resolve_bound_copilots(
 
     ``session_ids`` selects exact registered session directories without a
     session-state sweep. An empty registry returns immediately. A registered
-    binding remains authoritative when a bare resume starts from another cwd.
+    binding requires the native session CWD to match the selected worktree.
     Without that selector this retains explicit fleet discovery, filtered by
     the session ID/prefix, resolved worktree ID or cwd under ``worktree_path``.
     Detached parent-continuations and dead/non-Copilot lock owners are excluded.
