@@ -4398,11 +4398,55 @@ Positive admission contains 8,214 nodes, 1,177 bound sources, 448 targets and
 928,919 compact-v2 bytes. All preceding 8,187 nodes retain relative order and
 all 1,175 existing source hashes remain unchanged. Coverage targets, 89 helper
 decisions, compact/flat-v1 identity and the 300-second bound remain enforced.
-Normal strict typing, current-head review and complete fresh Linux CI remain
-required. Fresh-install/native/installed lanes are not exercised because no
+The adapter passes fatal Ruff and whole-file strict typing on Python
+3.10/Linux and Windows; documentation consistency and diff checks pass.
+Copilot approval `6011102958` covers exact head
+`c3ffd6f5bafbb900113e130166c199d2bc88206f` without active findings.
+CI `44999573197`, unit job `137137917716`, freshly passes all 8,214 cases
+with 39 deselections, 106.02 pytest seconds and 120.798 packet seconds.
+The evidence reports `mode=executed`, origin run `44999573197` attempt one
+and digest `e580ccf1eccb79a2439d897bfc678a96cd0ce70c96cab6f278142cda8955d37f`.
+Required aggregate `137138770956`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+Source #14057 merges at `2026-11-22T07:50:28Z` as
+`eddb35122c52195acbd12bba835d8d53d090854c`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the 27-case leaf.
+Fresh-install/native/installed lanes are not exercised because no
 installation or runtime behavior changes. This is not a reuse hit, controlled
 whole-flow saving, real publication, resolution of the threaded witness or
 acceptance of any broader owner or parent gate.
+
+### November 22 original synthetic core-artifact qualification
+
+A new adapter exports thirteen exact original core-artifact test functions as
+29 cases. They retain the existing manager-wheel exception, canonical project
+composition, conditional dependencies and extras, shared toolchain, malformed
+selection/manifest refusals, CLI argument forwarding and complete release
+profile binding. Original synthetic build callbacks, fixture helpers,
+parameters and assertions remain unchanged. The original isolated
+builder-help subprocess smoke stays outside this unit packet.
+
+The complete original collection has thirty cases; all 29 selected adapter
+identities and function objects match. A fresh process passes all 29 through
+the unchanged effect auditor in 7.875 seconds, with zero prohibited effects,
+49 bound Python reads and positive actual call-phase owner lines per case.
+Only the adapter, original core test module, original standalone fixture
+module and runtime-profile fixture module add bindings. The production
+coverage targets and copied canonical fixture inputs are already bound.
+No actual build toolchain, subprocess, thread pool or external publication
+is substituted for a required witness.
+
+The packet contains 8,243 nodes, 1,181 bound sources, 448 targets and 931,892
+compact-v2 bytes. All preceding 8,214 nodes retain relative order and all
+1,177 existing hashes remain unchanged. Coverage targets, 89 helper decisions,
+compact/flat-v1 identity, byte cap and 300-second bound remain enforced.
+Normal strict typing, current-head review and complete fresh Linux CI remain
+required. Fresh-install/native/installed lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
+whole-flow saving, real build/publication, resolution of the threaded witness
+or acceptance of any broader owner or parent gate.
 
 ### November 20 path-gated audit-guard native boundary
 

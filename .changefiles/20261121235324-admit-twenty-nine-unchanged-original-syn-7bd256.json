@@ -1,0 +1,9 @@
+{
+  "comment": "Admit twenty-nine unchanged original synthetic core-artifact controls to the guarded unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
