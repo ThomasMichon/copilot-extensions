@@ -1922,7 +1922,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   complete fresh Linux CI and independent merged-tree verification.
   Malformed-shape deferral is not full H1 owner validation; only this leaf
   is complete.
-- [ ] Qualify the four original pytest temporary-link controls from both
+- [x] Qualify the four original pytest temporary-link controls from both
   complete original functions. Preserve all Windows alias and Linux/macOS
   parameter objects, original monkeypatches, assertions and restoration.
   Verify only the optional pytest helper is suppressed and restored, while
@@ -1942,7 +1942,32 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Only the adapter/original bindings and existing guard target are added.
   The compact-v2 candidate contains 8,885 nodes, 1,252 sources and 462 targets
   in 994,539 bytes, preserving prior node order and all previous source hashes.
-  Normal review and complete fresh CI remain required; this leaf is not complete.
+  #14089 merges at `bd213fdfe08692746c8665361c972b193e2b696a` after
+  exact-head approval and complete fresh Linux CI with all 8,885 selected
+  units executed. Only this four-case leaf is complete.
+- [ ] Qualify the three original noncontained private build-tools-root
+  refusals from one complete original function: sibling, outside and relative
+  paths. Preserve exact original function, parameter objects and assertions.
+  Leave the separate native path-equivalence function and its Windows-only
+  case outside this selection; no native equivalence qualification is claimed.
+  Require complete original/adapter collection identity, initial unchanged
+  auditing, closed canonical Python reads, actual owner calls and zero
+  prohibited effects before admission. Add only the adapter/original Python
+  bindings and existing source-build owner target; preserve all 8,885 prior
+  nodes, 1,252 source hashes, 462 targets, 89 helper decisions and the
+  300-second bound. Require normal strict typing, committed changefile
+  presence, exact-head review and complete fresh Linux CI. No native loader,
+  thread, new mock, preload, guard exception, data, production, workflow,
+  runtime, routing or cleanup change.
+  Complete collection verifies all five original cases and the three selected
+  adapter cases, with exact original function and parameter-object identity.
+  Initial unchanged auditing passes all three in 1.671 seconds, with zero
+  prohibited effects, twelve bound Python reads and actual source-build
+  call-phase lines per case. Only the two Python bindings and existing
+  source-build owner target are added. The compact-v2 candidate contains
+  8,888 nodes, 1,254 sources and 463 targets in 995,204 bytes, preserving prior
+  node order and all previous source hashes. Full fresh Linux CI and normal
+  review/merge remain required before this finite leaf is complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
