@@ -59,3 +59,30 @@ def test_fallback_rejects_partially_dedented_block_content() -> None:
     module = _module()
     with pytest.raises(module.ConfigError, match="invalid block scalar indentation"):
         module._parse_simple_yaml("description: |\n    first\n  invalid\n")
+
+
+def test_fallback_ends_sequence_mapping_block_before_sibling() -> None:
+    parsed = _module()._parse_simple_yaml(
+        "items:\n  - description: |-\n      prose\n    enabled: true\n",
+    )
+    assert parsed == {"items": [{"description": "prose", "enabled": True}]}
+
+
+def test_fallback_preserves_colons_in_sequence_block_text() -> None:
+    parsed = _module()._parse_simple_yaml("items:\n  - |-\n    label: content\n")
+    assert parsed == {"items": ["label: content"]}
+
+
+@pytest.mark.parametrize(("body", "expected"), [
+    ("description: >+\n  prose\n\n", "prose\n\n"),
+    ("description: >-\n  intro\n\n    code\n  end\n", "intro\n\n  code\nend"),
+])
+def test_fallback_preserves_folded_blank_line_boundaries(body: str, expected: str) -> None:
+    assert _module()._parse_simple_yaml(body) == {"description": expected}
+
+
+@pytest.mark.parametrize("style", ["|", ">"])
+def test_fallback_clip_does_not_add_a_break_at_eof(style: str) -> None:
+    assert _module()._parse_simple_yaml(f"description: {style}\n  prose") == {
+        "description": "prose",
+    }

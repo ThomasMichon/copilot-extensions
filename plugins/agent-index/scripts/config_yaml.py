@@ -26,13 +26,15 @@ def tokenize(
         indent = len(content) - len(stripped)
         block = re.fullmatch(r"(.*:\s+|-\s+)([|>])([-+]?)", stripped)
         if block:
+            prefix = re.match(r"- +", stripped)
+            boundary = indent + (prefix.end() if prefix and block[1].strip() != "-" else 0)
             body: list[str] = []
             body_indent: int | None = None
             while line_index < len(lines):
                 following = lines[line_index]
                 following_indent = len(following) - len(following.lstrip(" "))
                 if following.strip():
-                    if following_indent <= indent:
+                    if following_indent <= boundary:
                         break
                     if body_indent is None:
                         body_indent = following_indent
@@ -53,12 +55,17 @@ def tokenize(
                     pieces.append("\n")
                 elif body[index + 1]:
                     pieces.append(" ")
+                else:
+                    following_text = next((body[i] for i in range(index + 2, len(body)) if body[i]), "")
+                    if not following_text or following_text.startswith(" "):
+                        pieces.append("\n")
             value = "".join(pieces)
             if block[3] == "-":
                 value = value.rstrip("\n")
             elif block[3] != "+":
+                ended = value.endswith("\n")
                 value = value.rstrip("\n")
-                if value:
+                if value and ended:
                     value += "\n"
             stripped = block[1] + json.dumps(value)
         tokens.append((indent, stripped))

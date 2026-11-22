@@ -309,7 +309,7 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
                 nested_item, index = parse_block(index, tokens[index][0])
                 result.append(nested_item)
                 continue
-            if ":" not in remainder:
+            if remainder.startswith(("'", '"')) or ":" not in remainder:
                 result.append(_parse_scalar(remainder))
                 if index < len(tokens) and tokens[index][0] > indent:
                     raise ConfigError("scalar list item has nested content")

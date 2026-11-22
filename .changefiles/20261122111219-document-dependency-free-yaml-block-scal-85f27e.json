@@ -1,0 +1,9 @@
+{
+  "comment": "Document dependency-free YAML block scalars in the shared invocation bootstrap contract.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
