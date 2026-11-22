@@ -110,6 +110,8 @@ interactive profile language.
 The client bypasses ambient SSH configuration, agents, hardware-key providers,
 password prompts, persistent control connections and forwarding. It uses
 strict existing-host-key verification and the fixed remote action `exit 0`.
+On Windows, its child environment excludes OpenSSH's inherited POSIX descriptor
+table; it preserves unrelated variables and does not change the caller's environment.
 One shared monotonic budget, between 100 and 5,000 milliseconds, includes selection,
 execution and native settlement; stdout and stderr are each limited to 16 KiB
 and never exported. Filesystem stalls remain a qualification failure, not a
@@ -123,6 +125,11 @@ native cleanup is unconfirmed. The Python API preserves the original
 `OwnedCleanupError` and its cleanup owner. An enclosing collector must retain
 its own containment/custody fence on exit 3, not retry or continue launching
 children. Native custody support is required before execution.
+
+The [opt-in native health fixture](../../TESTING.md#select-the-evidence-first)
+uses disposable keys and a caller-contained loopback listener. It covers the
+real action, strict-host-key and denied-key refusals, copied-wheel execution,
+input preservation and exact settlement without selecting production routes.
 
 `health-observation-v1.json` is package data in the selected runtime, not a
 package-version or current-payload inference. Consumers must discover support

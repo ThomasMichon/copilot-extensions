@@ -125,6 +125,22 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Select the evidence first
 
+Agent SSH's `tests/test_health_observation_native.py` has an explicitly selected
+positive-authentication packet. Set `AGENT_SSH_HEALTH_NATIVE=1`, then use
+`tools/run-plugin-tests.py agent-ssh --test-file tests/test_health_observation.py
+--test-file tests/test_health_observation_native.py --allow-explicit-tiers
+--test-timeout 110`. On an approved non-root POSIX account, also set
+`AGENT_SSH_NATIVE_DISPOSABLE=1` and add `--allow-host-state`. The existing native
+client, server and key generator are prerequisites, not installed by the test.
+The fixture creates only disposable keys/configuration and a finite loopback
+listener. It proves authenticated `exit 0`, missing-host-key and denied-key
+refusals, unchanged inputs, and exact caller-owned descendant/listener cleanup.
+A fresh isolated Python process executes a copied provider wheel and reads its
+packaged capability declaration; the editable test environment alone is not
+counted as installed-package proof. Windows also supplies synthetic inherited
+POSIX descriptor state. The packet does not qualify a live installation
+selection, retained scheduled action, production route, carrier or rollout.
+
 The native Windows tool-hook packet is Worktrees'
 `tests/test_native_tool_hook_transport.py`, selected through the canonical runner
 with `--allow-explicit-tiers`. Both PowerShell engines enter the actual registered
