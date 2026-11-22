@@ -1231,7 +1231,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   the lookup doubles are installed. All seven additions are withdrawn;
   the passing Windows development run is not cross-platform admission.
   No preload, guard exception or original-test rewrite is substituted.
-- [ ] Qualify and land three original artifact-readiness refusal controls:
+- [x] Qualify and land three original artifact-readiness refusal controls:
   changed source refuses before release access, failed preparation emits no
   receipt and final publication does not repair it, and missing premerge
   identity refuses before release access. Preserve the exact original
@@ -1242,6 +1242,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and the 300-second bound. Normal strict typing, current-head review and
   complete fresh Linux CI remain required. Parallel download verification,
   actual hosted publication, native execution, installed and parent gates
+  remain separate.
+  #14041 merges at `4b7c28faa6fe4120813ff72b2b552dfba94adb41` after
+  exact-head Copilot approval and complete required Linux CI with all 8,016
+  units freshly executed. The withdrawn lookup cohort and threaded readiness
+  proposal remain unadmitted; broader parent gates stay open.
+- [ ] Qualify and land all 33 cases from six original synthetic bundle
+  functions: transfer roundtrip, structured wheel-read failures, output
+  directory handling, deterministic bytes and archive-corruption refusal.
+  Preserve every original parameter, fixture, callback, clock witness and
+  assertion, including the autouse identity fixture. Require closed reads,
+  positive per-case actual artifact-owner calls and zero prohibited effects
+  before admission; retain preceding nodes/hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Normal strict typing,
+  current-head review and complete fresh Linux CI remain required. Actual
+  hosted publication, threaded readback, native/installed and parent gates
   remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
