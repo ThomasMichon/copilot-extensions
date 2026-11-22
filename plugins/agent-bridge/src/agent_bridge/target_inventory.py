@@ -44,7 +44,9 @@ def same_host_observation(first: object, second: object) -> bool:
     )
 
 
-async def inventory(request: Any, *, refresh: bool = False) -> dict[str, Any]:
+async def inventory(
+    request: Any, *, refresh: bool = False, local_only: bool = False,
+) -> dict[str, Any]:
     """Return addressable targets and honest, independent source observations."""
     from .routes import worktrees
     from .routes.live_sessions import _to_info
@@ -58,6 +60,10 @@ async def inventory(request: Any, *, refresh: bool = False) -> dict[str, Any]:
         info = _session_info(session, manager).model_dump(mode="json")
         if info["status"] in {"stopped", "ended", "failed"}:
             continue
+        presence = getattr(manager, "is_session_live", None)
+        if callable(presence):
+            observed = presence(session.session_id)
+            info["session_live"] = observed if type(observed) is bool else None
         item = {
             "kind": "managed", "handle": info["session_id"],
             "sources": ["managed"], "session": info,
@@ -145,7 +151,11 @@ async def inventory(request: Any, *, refresh: bool = False) -> dict[str, Any]:
 
     # This is the ordinary app-owned discovery cache, with its existing freshness
     # and incomplete-source evidence; listing never hydrates or launches targets.
-    workspaces = await worktrees.list_worktrees(request, render=False, refresh=refresh)
+    if local_only:
+        from .bridge_observations import cached_local_worktrees
+        workspaces = cached_local_worktrees(request)
+    else:
+        workspaces = await worktrees.list_worktrees(request, render=False, refresh=refresh)
     sources["worktrees"] = workspaces["discovery"]
     resolver = request.app.state.resolver
     from .routes.worktree_refresh import worktree_sources
@@ -158,5 +168,6 @@ async def inventory(request: Any, *, refresh: bool = False) -> dict[str, Any]:
                 "owner": owner if owner in resolver.agents else None,
                 "project": config.project if config is not None else None,
                 "worktree": entry,
+                "observation": sources["worktrees"].get("sources", {}).get(owner, sources["worktrees"]),
             })
     return {"version": 1, "targets": targets, "sources": sources}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -151,6 +151,39 @@ async def test_equal_handles_in_different_paths_do_not_merge_across_daemons() ->
 
 
 @pytest.mark.asyncio
+async def test_live_duplicate_reconciliation_is_independent_of_host_order() -> None:
+    async def remote(host: str) -> dict[str, Any]:
+        value = report("execution-host", "managed" if host == "old-controller" else "live")
+        row = value["bridges"][0]
+        if host == "old-controller":
+            row.update(
+                status="dormant", live=False, control="unavailable", control_reason="not_running"
+            )
+        return value
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                resolver=SimpleNamespace(_local_machine=None),
+                remote_operations=SimpleNamespace(bridge_inventory=remote),
+            )
+        )
+    )
+    for hosts in (
+        ["old-controller", "current-controller"],
+        ["current-controller", "old-controller"],
+    ):
+        result = await fleet_inventory(request, hosts, live=True)
+        (row,) = result["bridges"]
+        assert row["live"] is True
+        assert row["status"] == "running"
+        assert row["control"] == "registered"
+        assert row["route"]["host"] == "current-controller"
+        assert set(row["sources"]) == {"managed", "live"}
+        assert result["complete"] is True
+
+
+@pytest.mark.asyncio
 async def test_carrier_inventory_reads_only_local_sources_without_recursive_fanout() -> None:
     calls = []
 
@@ -158,7 +191,8 @@ async def test_carrier_inventory_reads_only_local_sources_without_recursive_fano
         calls.append(kwargs)
         return report("host-b", "managed")
 
-    router = CarrierRequestRouter(lambda: SimpleNamespace(list_bridges=listing))
+    client = cast(Any, SimpleNamespace(list_bridges=listing))
+    router = CarrierRequestRouter(lambda: client)
     response = await router(
         Envelope(
             EnvelopeType.REQUEST,
@@ -166,6 +200,7 @@ async def test_carrier_inventory_reads_only_local_sources_without_recursive_fano
         )
     )
     assert calls == [{"all_projects": True, "local_only": True}]
+    assert isinstance(response, Envelope)
     assert response.payload["result"]["bridges"][0]["session_id"] == "native-host-b"
 
 

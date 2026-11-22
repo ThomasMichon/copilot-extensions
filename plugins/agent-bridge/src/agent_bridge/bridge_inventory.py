@@ -32,8 +32,6 @@ def _identity(target: dict[str, Any]) -> tuple[str | None, str | None, str | Non
     row = row if isinstance(row, dict) else {}
     project = _text(target.get("project")) or _text(row.get("project"))
     machine = _text(row.get("machine"))
-    if kind == "managed" and row.get("target_type") not in {None, "local"}:
-        machine = _text(row.get("target_host")) or machine
     workspace = _text(row.get("id" if kind == "worktree" else "worktree_id"))
     directory = _text(
         row.get("path" if kind == "worktree" else ("target_dir" if kind == "managed" else "cwd"))
@@ -43,6 +41,10 @@ def _identity(target: dict[str, Any]) -> tuple[str | None, str | None, str | Non
 
 def _native(item: dict[str, Any]) -> str | None:
     row = item.get("session") or item.get("registration") or item.get("worktree") or {}
+    if item.get("kind") == "managed":
+        native = _text(row.get("acp_session_id"))
+        durable = _text(row.get("durable_session_id"))
+        return native or (durable if durable != row.get("session_id") else None)
     return (
         _text(row.get("durable_session_id"))
         or _text(
@@ -72,11 +74,11 @@ def _source_complete(value: object) -> bool:
     if not isinstance(value, dict):
         return False
     if "availability" in value:
-        return value["availability"] == "available"
-    return value.get("completeness") == "complete" and value.get("freshness") == "fresh"
+        return bool(value["availability"] == "available")
+    return bool(value.get("completeness") == "complete" and value.get("freshness") == "fresh")
 
 
-def _project(group: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, Any] | None:
     workspace = next((item for item in group if item.get("kind") == "worktree"), None)
     metadata = workspace["worktree"] if workspace else {}
     candidates = [item for item in group if item.get("kind") != "worktree"]
@@ -85,7 +87,8 @@ def _project(group: list[dict[str, Any]]) -> dict[str, Any] | None:
         for item in candidates
         if (item.get("session", item.get("registration", {})).get("status") not in _TERMINAL)
     ]
-    managed = [item["session"] for item in candidates if item.get("kind") == "managed"]
+    managed_items = [item for item in candidates if item.get("kind") == "managed"]
+    managed = [item["session"] for item in managed_items]
     registrations = [
         item["registration"]
         for item in live
@@ -94,24 +97,51 @@ def _project(group: list[dict[str, Any]]) -> dict[str, Any] | None:
     hosts = [
         item["registration"]
         for item in live
-        if item.get("kind") == "session_host" and isinstance(item.get("registration"), dict)
+        if (
+            item.get("kind") == "session_host"
+            or (item.get("kind") == "managed" and "session_host" in item.get("sources", []))
+        )
+        and isinstance(item.get("registration"), dict)
     ]
-    managed.sort(key=lambda row: row.get("status") not in _TERMINAL, reverse=True)
-    session = managed[0] if managed else {}
-    registration = registrations[0] if registrations else {}
+    active_managed = [
+        item
+        for item in managed_items
+        if item["session"].get("status") not in _TERMINAL
+        and not item["session"].get("read_only", False)
+    ]
+    identities = {
+        value
+        for value in [
+            *[_text(row.get("session_id")) for row in registrations],
+            *[_native(item) for item in active_managed],
+        ]
+        if value
+    }
+    ambiguous = len(identities) > 1
+    owner_head = _text(metadata.get("last_session_id"))
+    historical = {value for item in managed_items if (value := _native(item))}
+    native = (
+        next(iter(identities))
+        if len(identities) == 1
+        else (owner_head or (next(iter(historical)) if len(historical) == 1 else None))
+    )
+    matching = [item for item in managed_items if _native(item) == native] if native else []
+    current: dict[str, Any] = next(
+        (item["session"] for item in matching if item in active_managed), {}
+    )
+    if not current and not native and len(active_managed) == 1:
+        current = active_managed[0]["session"]
+    session = current or (matching[0]["session"] if matching else {})
+    registration: dict[str, Any] = next(
+        (row for row in registrations if row.get("session_id") == native), {}
+    )
     host = hosts[0] if hosts else {}
     progress = registration.get("latest_progress") or session.get("latest_progress") or {}
     progress = progress if isinstance(progress, dict) else {}
     count = metadata.get("session_count")
     count = count if type(count) is int and count >= 0 else 0
-    process_live = any(metadata.get(key) is True for key in ("bound_live", "session_live"))
-    if (
-        workspace
-        and not count
-        and not process_live
-        and not any(_native(item) for item in candidates)
-    ):
-        return None
+    bound_live = metadata.get("session_bound_live") if owner_current else None
+    process_live = bound_live is True or metadata.get("session_live") is True
     if not workspace and not live:
         return None
     project, machine, worktree_id, directory = _identity(workspace or group[0])
@@ -120,59 +150,51 @@ def _project(group: list[dict[str, Any]]) -> dict[str, Any] | None:
         project, machine = project or p, machine or m
         worktree_id, directory = worktree_id or w, directory or d
     project = project or _text(registration.get("repo"))
-    native = (
-        _text(registration.get("session_id"))
-        or _text(session.get("durable_session_id"))
-        or _text(session.get("acp_session_id"))
-        or _text(host.get("session_id"))
-        or _text(metadata.get("durable_session_id"))
+    standalone_native = next(
+        (_native(item) for item in candidates if item.get("kind") == "session_host"), None
     )
+    native = native or standalone_native or _text(metadata.get("acp_session_id"))
     positive = (
         bool(registrations)
         or any(row.get("liveness") in {"observed", "active", "stalled"} for row in hosts)
         or any(
-            row.get("status") not in _TERMINAL and row.get("liveness") in {"active", "stalled"}
+            row.get("status") not in _TERMINAL
+            and (row.get("session_live") is True or row.get("liveness") in {"active", "stalled"})
             for row in managed
         )
         or process_live
     )
-    negative = metadata.get("bound_live") is False or (
-        bool(session) and session.get("status") in _TERMINAL
-    )
+    if (
+        workspace
+        and not count
+        and not positive
+        and not owner_head
+        and not any(_native(item) for item in candidates)
+    ):
+        return None
+    negative = bound_live is False or (bool(session) and session.get("status") in _TERMINAL)
     is_live = True if positive else False if negative else None
     anchor = not worktree_id or metadata.get("kind") in {"anchor", "bare"}
     if anchor and is_live is not True:
         return None
     status = "running" if is_live else "dormant" if is_live is False else "retained"
+    mode_session = current or (session if not registration else {})
     transport = (
-        _text(session.get("target_type"))
+        _text(mode_session.get("target_type"))
         or _text(host.get("boundary"))
         or _text(metadata.get("transport"))
         or "unknown"
     )
-    name = _text(session.get("agent_name")) or _text(metadata.get("agent_name")) or ""
+    name = _text(mode_session.get("agent_name")) or _text(metadata.get("agent_name")) or ""
     namespace = name.split(":", 1)[0] if ":" in name else "local"
     handle = worktree_id or _text(group[0].get("handle"))
-    identities = {
-        value
-        for value in [
-            *[_text(row.get("session_id")) for row in registrations],
-            *[
-                _text(row.get("durable_session_id")) or _text(row.get("acp_session_id"))
-                for row in managed
-                if not live or row.get("status") not in _TERMINAL
-            ],
-        ]
-        if value
-    }
-    ambiguous = len(identities) > 1
-    controlled = not ambiguous and (
-        bool(registration) or any(row.get("status") not in _TERMINAL for row in managed)
-    )
+    controlled = not ambiguous and bool(registration or current)
     return {
         "handle": handle,
         "session_id": None if ambiguous else native,
-        "managed_session_id": None if ambiguous else _text(session.get("session_id")),
+        "managed_session_id": None if ambiguous else _text(current.get("session_id")),
+        "registered_session_id": None if ambiguous else _text(registration.get("session_id")),
+        "retained_managed_session_id": (_text(session.get("session_id")) if not current else None),
         "observed_session_ids": sorted(identities),
         "worktree_id": worktree_id,
         "project": project,
@@ -180,10 +202,10 @@ def _project(group: list[dict[str, Any]]) -> dict[str, Any] | None:
         "namespace": namespace,
         "directory": directory,
         "location_kind": "worktree" if not anchor else "anchor" if directory else "unknown",
-        "session_count": max(count, 1 if candidates or process_live else 0),
+        "session_count": max(count, 1 if candidates or process_live or owner_head else 0),
         "status": status,
         "live": is_live,
-        "hosting": _text(session.get("mode"))
+        "hosting": _text(mode_session.get("mode"))
         or (
             "session_host"
             if host
@@ -194,6 +216,7 @@ def _project(group: list[dict[str, Any]]) -> dict[str, Any] | None:
             else "unknown"
         ),
         "transport": transport,
+        "transport_host": _text(mode_session.get("target_host")),
         "control": "registered" if controlled else "unavailable",
         "control_reason": None
         if controlled
@@ -296,7 +319,12 @@ def project_bridges(
         index(item, group)
     bridges = []
     for group in groups:
-        row = _project(group)
+        workspace = next((item for item in group if item.get("kind") == "worktree"), {})
+        evidence = workspace.get("observation") or sources.get("worktrees") or {}
+        owner_current = evidence.get("observation_valid") is True or (
+            evidence.get("freshness") == "fresh" and evidence.get("completeness") == "complete"
+        )
+        row = _project(group, owner_current=owner_current)
         if row is None:
             continue
         if any(
@@ -325,9 +353,14 @@ def project_bridges(
 async def inventory(request: Any, *, local_only: bool = False, **scope: Any) -> dict[str, Any]:
     """Reuse cached discovery and retained managed metadata, never native history."""
     from . import target_inventory
+    from .bridge_observations import local_machine, normalize_targets
     from .routes.sessions import _session_info
 
-    catalog = await target_inventory.inventory(request, refresh=False)
+    catalog = await target_inventory.inventory(
+        request,
+        refresh=False,
+        **({"local_only": True} if local_only else {}),
+    )
     targets = list(catalog["targets"])
     known = {item["handle"] for item in targets if item.get("kind") == "managed"}
     manager = request.app.state.session_manager
@@ -342,21 +375,8 @@ async def inventory(request: Any, *, local_only: bool = False, **scope: Any) -> 
                 }
             )
     resolver = getattr(request.app.state, "resolver", None)
-    host = getattr(getattr(resolver, "_local_machine", None), "key", None)
-    if host is not None:
-        located = []
-        for item in targets:
-            field = "session" if item.get("kind") == "managed" else "registration"
-            row = item.get(field) or {}
-            local = (item.get("kind") == "managed" and row.get("target_type") == "local") or (
-                item.get("kind") == "session_host" and row.get("boundary") == "local"
-            )
-            located.append(
-                {**item, field: {**row, "machine": host}}
-                if local and not row.get("machine")
-                else item
-            )
-        targets = located
+    host = local_machine(resolver)
+    targets = normalize_targets(targets, resolver)
     if local_only:
         targets = [
             item
@@ -371,9 +391,9 @@ async def inventory(request: Any, *, local_only: bool = False, **scope: Any) -> 
     for row in report["bridges"]:
         row["route"] = {
             "host": host,
-            "handle": row["managed_session_id"] or row["session_id"] or row["handle"],
-            "kind": "managed"
-            if row["managed_session_id"]
-            else ("live" if row["control"] == "registered" else row["location_kind"]),
+            "handle": row["registered_session_id"] or row["managed_session_id"] or row["handle"],
+            "kind": "live"
+            if row["registered_session_id"]
+            else ("managed" if row["managed_session_id"] else row["location_kind"]),
         }
     return report

@@ -11,6 +11,14 @@ import pytest
 from agent_bridge import __main__ as cli
 
 
+def recording_client(calls: list[dict[str, Any]], result: dict[str, Any]) -> SimpleNamespace:
+    def listing(**scope: Any) -> dict[str, Any]:
+        calls.append(scope)
+        return result
+
+    return SimpleNamespace(list_bridges=listing)
+
+
 @pytest.mark.parametrize(
     "argv",
     [
@@ -28,7 +36,7 @@ def test_list_json_keeps_explicit_project_and_does_not_ensure(
 
     def get_client(**kwargs: Any) -> Any:
         assert kwargs == {"ensure": False}
-        return SimpleNamespace(list_bridges=lambda **scope: calls.append(scope) or result)
+        return recording_client(calls, result)
 
     monkeypatch.setattr(cli, "_get_client", get_client)
     cli.main(argv)
@@ -49,21 +57,14 @@ def test_json_list_infers_cwd_project_instead_of_defaulting_fleet_wide(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    calls = []
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr(cli, "_sender_repo", lambda: "cwd-project")
     monkeypatch.setattr(
         cli,
         "_get_client",
-        lambda **_kwargs: SimpleNamespace(
-            list_bridges=lambda **scope: (
-                calls.append(scope)
-                or {
-                    "version": 1,
-                    "bridges": [],
-                    "sources": {},
-                    "complete": True,
-                }
-            ),
+        lambda **_kwargs: recording_client(
+            calls,
+            {"version": 1, "bridges": [], "sources": {}, "complete": True},
         ),
     )
     cli.main(["--json", "list", "--machine", "host-a", "--namespace", "container", "--live"])
@@ -87,21 +88,14 @@ def test_explicit_all_projects_is_not_an_implicit_cwd_filter(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    calls = []
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr(cli, "_sender_repo", lambda: "cwd-project")
     monkeypatch.setattr(
         cli,
         "_get_client",
-        lambda **_kwargs: SimpleNamespace(
-            list_bridges=lambda **scope: (
-                calls.append(scope)
-                or {
-                    "version": 1,
-                    "bridges": [],
-                    "sources": {},
-                    "complete": True,
-                }
-            ),
+        lambda **_kwargs: recording_client(
+            calls,
+            {"version": 1, "bridges": [], "sources": {}, "complete": True},
         ),
     )
     cli.main(["--json", "list", "--all-projects", "--status", "dormant"])
@@ -162,20 +156,18 @@ def test_live_sessions_fleet_selection_retains_the_original_host_routes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls = []
+
+    def get_client(**kwargs: Any) -> SimpleNamespace:
+        def listing(**scope: Any) -> dict[str, Any]:
+            calls.append((kwargs, scope))
+            return {"version": 1, "bridges": [], "sources": {}, "complete": False}
+
+        return SimpleNamespace(list_bridges=listing)
+
     monkeypatch.setattr(
         cli,
         "_get_client",
-        lambda **kwargs: SimpleNamespace(
-            list_bridges=lambda **scope: (
-                calls.append((kwargs, scope))
-                or {
-                    "version": 1,
-                    "bridges": [],
-                    "sources": {},
-                    "complete": False,
-                }
-            )
-        ),
+        get_client,
     )
     cli.main(["live-sessions", "list", "--host", "host-a", "--host", "host-b", "--json"])
     assert calls[0][0] == {"ensure": False}

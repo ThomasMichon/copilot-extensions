@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from .bridge_inventory import _scope_path, inventory
+from .bridge_merge import merge_rows
 from .remote_errors import RemoteBridgeError
 
 MAX_HOSTS = 16
@@ -88,13 +89,12 @@ async def fleet_inventory(
                 }
 
     observations = dict(await asyncio.gather(*(read(host) for host in selected)))
-    seen: dict[tuple[Any, ...], dict[str, Any]] = {}
-    conflicting = False
+    seen: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for host, result in observations.items():
         for original in result.get("bridges", []):
             row = {**original, "route": {**(original.get("route") or {}), "host": host}}
             row["route"].setdefault("handle", row["handle"])
-            key = (
+            key: tuple[Any, ...] = (
                 row.get("machine"),
                 row.get("project"),
                 row.get("namespace"),
@@ -104,30 +104,11 @@ async def fleet_inventory(
             # Missing execution identity cannot establish equivalence across hosts.
             if not key[0]:
                 key = (host, *key)
-            if key in seen:
-                previous = seen[key]
-                previous.setdefault("routes", [previous["route"]]).append(row["route"])
-                observed = {
-                    *previous.get("observed_session_ids", []),
-                    *[
-                        value
-                        for value in (previous.get("session_id"), row.get("session_id"))
-                        if value
-                    ],
-                }
-                if len(observed) > 1:
-                    previous["observed_session_ids"] = sorted(observed)
-                    previous.update(
-                        session_id=None,
-                        control="unavailable",
-                        control_reason="identity_ambiguous",
-                    )
-                    conflicting = True
-                continue
-            seen[key] = row
+            seen.setdefault(key, []).append(row)
+    reconciled = [merge_rows(rows) for rows in seen.values()]
     bridges = [
         row
-        for row in seen.values()
+        for row, _conflict in reconciled
         if not any(
             value is not None and row.get(name) != value
             for name, value in (
@@ -142,7 +123,7 @@ async def fleet_inventory(
     return {
         "version": 1,
         "bridges": bridges,
-        "complete": not conflicting
+        "complete": not any(conflict for _row, conflict in reconciled)
         and all(result["complete"] is True for result in observations.values()),
         "sources": {
             "hosts": {
