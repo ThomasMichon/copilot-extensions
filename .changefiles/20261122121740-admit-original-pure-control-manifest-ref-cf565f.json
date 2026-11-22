@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original pure control-manifest refusal tests to the bounded promotion unit portfolio",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
