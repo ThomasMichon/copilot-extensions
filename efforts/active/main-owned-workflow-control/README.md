@@ -2545,7 +2545,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   154.522 packet seconds within the unchanged bound. Reviewed and merged
   trees match. Only this 22-case leaf is complete; the parent, separate
   refusals and native qualifications remain open.
-- [ ] Qualify the complete original static reproducer-boundary test file:
+- [x] Qualify the complete original static reproducer-boundary test file:
   all 21 original functions, parameter-mark rows, synthetic dictionaries,
   helpers, loops and assertions remain unchanged. Compare complete original
   and adapter collection and exact function/parameter identity. Static
@@ -2569,8 +2569,37 @@ authorizes critical main-path acceptance or a bounded administrative change.
   1,292 sources in 1,035,062 bytes. All prior nodes retain order, all current
   source hashes remain intact and one production target precedes the 469
   unchanged targets. Fatal Ruff, whole-file strict Linux/Win32 typing and
-  documentation consistency pass. Exact-head review and complete fresh Linux
-  CI remain pending; this leaf and the parent remain open.
+  documentation consistency pass. #14132 merges at
+  `8adad1841eab283bc4b6411c3118ece658313044` after exact-head approval and
+  complete fresh Linux CI executes all 9,285 selected units in 199.759 packet
+  seconds within the unchanged bound. Reviewed and merged trees match.
+  Only this 170-case leaf is complete; the parent, separate refusals and
+  native qualifications remain open.
+- [ ] Qualify seven complete original synthetic network-inventory functions:
+  exact physical inventory, single subject, unsafe network, missing fields,
+  peer attachments, bounded distinct selections and malformed inventory.
+  Compare all 47 original cases with the expected 43 selected cases, retaining
+  original functions, parameter rows, helpers and assertions. Exclude the four
+  reader cases before execution: their POSIX-shaped selected executable paths
+  do not satisfy Windows absolute-path validation. Do not patch those paths
+  or execute an observer. Require initial unchanged effect/source auditing and
+  actual network-owner call-phase coverage per selected case before adding
+  only the adapter, original test and its canonical import-source closure.
+  Preserve all 9,285 nodes, 1,292 source hashes, 470 prior targets, 89 helper
+  decisions and the 300-second bound. Require strict checks, committed release
+  intent, exact-head review and complete fresh Linux CI. Synthetic attachment
+  dictionaries are not Docker, network, egress, custody or capacity proof;
+  no retained refusal, guard exception, native lane or consumed retry is replayed.
+  Complete collection confirms all 47 original cases, exactly 43 adapter
+  cases, original function/parameter-row identity and equal cross-module
+  parameter values/types. Initial unchanged auditing passes all 43 in 1.562
+  seconds with zero prohibited effects, thirteen bound canonical Python reads
+  and actual network-owner call-phase coverage per case; all 129 reports pass.
+  Eleven source bindings and one production target are added; Compact-v2
+  contains 9,328 nodes and 1,303 sources in 1,039,347 bytes, preserving prior
+  node/target order and every current hash. Fatal Ruff, whole-file strict
+  Linux/Win32 typing and documentation consistency pass. Exact-head review and
+  complete fresh Linux CI remain pending; this leaf and the parent remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
