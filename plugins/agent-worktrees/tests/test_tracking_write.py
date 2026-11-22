@@ -104,6 +104,7 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
             "tracking_write_token",
             "tracking_write_generation",
             "tracking_write_verbs",
+            "tracking_write_completion_wait_version",
             "tracking_write_verb_versions",
             "tracking_write_record_contract",
             "tracking_write_recovery_intent_contract",
@@ -367,6 +368,61 @@ class TestRunDirectFallback:
 
 
 class TestDispatch:
+    def test_foreground_completion_outlives_the_old_socket_and_server_deadlines(self):
+        calls = []
+
+        def slow(args):
+            calls.append(args)
+            time.sleep(1.1)
+            return {"created": True}
+
+        tracking_write.register_verb("test-foreground", slow)
+        server = tracking_write.start_server(tracking_write.compute)
+        server.start()
+        try:
+            with tracking_write.foreground_completion():
+                result = tracking_write.dispatch(
+                    "test-foreground", {}, read_lock_data=lambda: _endpoint_dict(server),
+                    ensure_monitor=None, request_deadline_s=0.01,
+                )
+            assert result == {"created": True}
+            assert calls == [{}]
+        finally:
+            server.close()
+
+    def test_completion_wait_never_dials_a_deadline_only_receiver(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking_write, "_send_tracking_write_request",
+            lambda *a, **k: pytest.fail("incompatible receiver was dialed"),
+        )
+        calls = []
+        tracking_write.register_verb("test-old", lambda args: calls.append(args) or {"created": True})
+        old = {
+            "tracking_write_endpoint": "127.0.0.1:49152", "tracking_write_token": "fixture",
+            "tracking_write_verbs": ["test-old"],
+        }
+        with tracking_write.foreground_completion():
+            result = tracking_write.dispatch(
+                "test-old", {}, read_lock_data=lambda: old,
+                ensure_monitor=lambda: pytest.fail("compatible local fallback needs no daemon restart"),
+            )
+        assert result == {"created": True} and calls == [{}]
+
+    def test_foreground_wait_restores_background_budget_after_failure(self, monkeypatch):
+        deadlines = []
+
+        def send(**kwargs):
+            deadlines.append(kwargs["request_deadline_s"])
+            raise tracking_write.AmbiguousWriteOutcome("connection lost")
+
+        monkeypatch.setattr(tracking_write, "write_with_boot", send)
+        options = {"read_lock_data": lambda: None, "ensure_monitor": None, "request_deadline_s": 0.1}
+        with pytest.raises(tracking_write.AmbiguousWriteOutcome), tracking_write.foreground_completion():
+            tracking_write.dispatch("test", {}, **options)
+        with pytest.raises(tracking_write.AmbiguousWriteOutcome):
+            tracking_write.dispatch("test", {}, **options)
+        assert deadlines == [None, 0.1]
+
     def test_dispatch_uses_live_daemon_when_reachable(self):
         tracking_write.register_verb("test-dispatch", lambda args: {"via": "verb", **args})
         server = tracking_write.start_server(tracking_write.compute)

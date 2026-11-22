@@ -1120,7 +1120,7 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
 
 @pytest.mark.parametrize("new", [False, True])
 @pytest.mark.parametrize("target,seed,timeout,expected", [
-    ("target", "task", 30, 300),
+    ("target", "task", 30, 30),
     ("target", "task", 500, 500),
     ("target", "task", None, None),
     (None, "task", None, None),
@@ -1130,7 +1130,7 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
     ("target", "", 30, 30),
     (None, None, 500, 500),
 ])
-def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expected, monkeypatch):
+def test_remote_packaging_preserves_only_the_callers_explicit_budget(new, target, seed, timeout, expected, monkeypatch):
     seen = []
 
     def run_json(project, args, *, timeout=None, stream_progress=False, **kwargs):
@@ -1139,13 +1139,11 @@ def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expecte
             return _hosting_policy()
         assert stream_progress is True
         seen.append(timeout)
-        if target and seed:
+        if target:
             return {
                 "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
-                "launch_request_version": 2, "native_seed_required": True,
-                "launch_attempt_id": None, "launch_request_id": "a" * 32,
-                "seed_id": "a" * 32, "seed_pending": True,
-                "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+                "remote_terminal_handoff_version": 1,
+                "worktree_id": None if new else "wt-a",
             }
         return {
             **_RESUME_PLAN, "seed_pending": bool(seed),
@@ -1163,10 +1161,10 @@ def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expecte
 
 @pytest.mark.parametrize("new", [False, True])
 @pytest.mark.parametrize("damage", [
-    None, "action", "launch_request_version", "native_seed_required", "launch_attempt_id",
-    "launch_request_id", "seed_id", "seed_kind", "worktree_id", "missing",
+    None, "action", "remote_terminal_handoff_version", "launch_attempt_id",
+    "launch_request_id", "seed_id", "worktree_id", "missing",
 ])
-def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
+def test_remote_prompt_requires_terminal_handoff_without_target_allocation(monkeypatch, new, damage):
     calls = []
     def run_json(project, args, **kwargs):
         if args[:2] == ["agent-policy", "check"]:
@@ -1174,31 +1172,31 @@ def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
         calls.append(args)
         assert args[args.index("--launch-attempt-id") + 1] == "b" * 32
         assert "--require-native-seed" in args
+        assert "--require-terminal-handoff" in args
+        wid = None if new else "wt-a"
         result = {
             "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
-            "launch_request_version": 2, "native_seed_required": True,
-            "launch_attempt_id": "b" * 32, "launch_request_id": "a" * 32,
-            "seed_id": "a" * 32, "seed_pending": True,
-            "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+            "remote_terminal_handoff_version": 1, "launch_attempt_id": "b" * 32,
+            "worktree_id": wid,
             "launch_attempt_receipt": {
-                "version": 1, "operation_id": "d" * 32, "phase": "remote-admission-returned",
-                "worktree_id": "wt-a", "seed_id": "a" * 32, "request_id": "a" * 32,
+                "version": 1, "operation_id": "d" * 32, "phase": "forwarded",
+                **({"worktree_id": wid} if wid else {}),
             },
         }
         if damage == "missing":
             del result["launch_attempt_id"]
         elif damage:
             result[damage] = {
-                "action": "exec", "launch_request_version": 1, "native_seed_required": False,
+                "action": "exec", "remote_terminal_handoff_version": 0,
                 "launch_attempt_id": "c" * 32, "launch_request_id": "invalid",
-                "seed_id": "c" * 32, "seed_kind": "wrong", "worktree_id": "",
+                "seed_id": "c" * 32, "worktree_id": "unexpected",
             }[damage]
         return result
     monkeypatch.setattr(ec, "run_json", run_json)
     options = dict(new=new, worktree_id=None if new else "wt-a", target_machine="target",
                    seed="fixture", launch_attempt_id="b" * 32)
     if damage:
-        with pytest.raises(ec.EngineFeatureUnavailable, match="inspect"):
+        with pytest.raises(ec.EngineFeatureUnavailable):
             ec.resolve_launch_plan("example", **options)
     else:
         assert ec.resolve_launch_plan("example", **options).action == "remote"
@@ -1260,15 +1258,18 @@ def test_resolve_remote_sends_environment_and_action(monkeypatch):
         "remote_command": "dotfiles --worktree-id wt-1 --bare-resume --no-mux",
         "machine": "example",
         "display_name": "Example WSL",
+        "remote_terminal_handoff_version": 1,
+        "worktree_id": "wt-1",
     }
 
     def handler(cmd, kw):
-        assert cmd[-8:] == [
+        assert cmd[-9:] == [
             "--worktree-id",
             "wt-1",
             "--bare-resume",
             "--machine",
             "Example",
+            "--require-terminal-handoff",
             "--environment",
             "WSL",
             "--target-no-mux",
@@ -1304,6 +1305,41 @@ def test_resolve_remote_skew_reports_feature_unavailable(monkeypatch):
             target_machine="Example",
             target_environment="WSL",
         )
+
+
+@pytest.mark.parametrize("machine,environment", [
+    ("Example", "WSL"), ("Example-wsl", None), ("Example-wsl", "WSL"),
+])
+def test_remote_destination_uses_physical_machine_and_one_environment(monkeypatch, machine, environment):
+    calls = []
+
+    def request(project, args, **kwargs):
+        calls.append(args)
+        assert args[args.index("--machine") + 1] == "Example"
+        assert args[args.index("--environment") + 1].casefold() == "wsl"
+        return {
+            "action": "remote", "ssh_alias": "example-wsl", "remote_command": "example --new",
+            "remote_terminal_handoff_version": 1,
+        }
+
+    monkeypatch.setattr(ec, "run_json", request)
+    assert ec.resolve_launch_plan(
+        "example", new=True, target_machine=machine, target_environment=environment,
+    ).action == "remote"
+    assert len(calls) == 1
+
+
+def test_remote_handoff_requires_new_local_engine_without_weaker_retry(monkeypatch):
+    calls = []
+
+    def request(project, args, **kwargs):
+        calls.append(args)
+        raise ec.EngineError("unrecognized arguments: --require-terminal-handoff")
+
+    monkeypatch.setattr(ec, "run_json", request)
+    with pytest.raises(ec.EngineFeatureUnavailable, match="SSH-first"):
+        ec.resolve_launch_plan("example", new=True, target_machine="target")
+    assert len(calls) == 1
 
 
 def test_resolve_remote_real_error_is_not_misclassified(monkeypatch):

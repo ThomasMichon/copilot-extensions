@@ -104,11 +104,56 @@ def test_remote_action_composes_to_ssh_handoff():
     assert le.argv == [
         "ssh",
         "-t",
+        "-o",
+        "ConnectTimeout=10",
         "example-wsl",
         "dotfiles --worktree-id wt-1",
     ]
     assert le.muxed is False
     assert le.session is None
+
+
+def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch):
+    from types import SimpleNamespace
+    from worktree_manager import __main__ as entrypoint, process_priority
+    from worktree_manager.production_picker import runner
+
+    events = []
+    requests = []
+
+    def picker(project, **kwargs):
+        events.append("picker-exited")
+        return {
+            "action": "new", "project": "example", "is_local": False,
+            "machine": "target-wsl", "env": "WSL",
+            "options": {"seed_prompt": "literal prompt", "no_mux": True},
+        }
+
+    def resolve(req, **kwargs):
+        assert events == ["picker-exited"]
+        requests.append(req)
+        events.append("packaged")
+        return _exec_plan(action="remote", raw={
+            "ssh_alias": "target-wsl", "remote_command": "example --new",
+        }), 0
+
+    def execute(argv, **kwargs):
+        assert events == ["picker-exited", "packaged"]
+        assert argv[:2] == ["ssh", "-t"]
+        assert "timeout" not in kwargs and "capture_output" not in kwargs
+        events.append("ssh")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(runner, "run", picker)
+    monkeypatch.setattr(process_priority, "raise_current_process_priority", lambda: None)
+    monkeypatch.setattr(process_priority, "restore_normal_process_priority", lambda: None)
+    monkeypatch.setattr(entrypoint._terminal_launch, "validate", lambda: None)
+    monkeypatch.setattr(entrypoint, "_resolve_for", resolve)
+    monkeypatch.setattr(launcher.subprocess, "run", execute)
+    assert entrypoint._run_production_picker("example") == 0
+    assert events == ["picker-exited", "packaged", "ssh"]
+    assert requests[0].mode == "new" and requests[0].no_mux
+    assert requests[0].seed_prompt == "literal prompt"
 
 
 def test_remote_action_without_target_is_invalid():

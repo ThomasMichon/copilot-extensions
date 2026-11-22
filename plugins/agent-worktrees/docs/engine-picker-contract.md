@@ -433,29 +433,44 @@ resident write transport. It is not a real Copilot acceptance test.
 
 ## SSH launch-prompt admission
 
-### Architecture transition: SSH-first terminal launch
+### SSH-first terminal launch
+
+Manager requests `resolve --json --machine ... --require-terminal-handoff`.
+The selected local engine resolves configuration and returns
+`remote_terminal_handoff_version: 1`, the SSH alias and a shell-safe ordinary
+target command. It does not contact the target, run remote policy checks,
+allocate a remote worktree or stage a prompt. Unsupported local engines reject
+the required flag before effects; Manager never retries the old admission path.
+The packaged target command carries `--require-foreground-completion`.
+An older target rejects that syntax in the SSH terminal before creation,
+without an originating preflight, admission exchange or weaker retry.
+
+The in-place Picker has exited before `ssh -t -o ConnectTimeout=10` takes its
+terminal. The target's project command owns creation, current policy checks,
+instruction projection, durable prompt handling, mux and Copilot startup.
+The complete selected options travel to that command; POSIX arguments are
+quoted and PowerShell commands encoded. A physical machine plus environment
+and an execution alias normalize through the existing machine-transport owner.
+Supported detached presentation retains its separate terminal lifetime.
+
+Foreground creation and native launch boundaries opt into completion waiting.
+Tracking-write receivers advertise `tracking_write_completion_wait_version: 1`;
+those requests carry JSON `deadline: null` and have no socket completion
+timeout. A deadline-only receiver is never sent that request: the existing
+locked same-code pre-send fallback executes instead. Background writer budgets
+remain unchanged. Default foreground source fetches also wait to finish;
+explicit caller resource bounds and independent bounded policy observations
+remain effective. Real disconnects retain unknown-outcome protections.
 
 The [SSH-first terminal launch effort](../../../efforts/active/ssh-first-terminal-launch/README.md)
-replaces the interactive preliminary-admission mechanism described below.
-The intended in-place path is confirmation, complete argument packaging,
-Manager exit, TTY-enabled SSH, then the ordinary target-local worktree launch
-command. Supported detached launches run the same SSH-first sequence in the
-new terminal without closing the originating Picker.
-Creation, policy enforcement, prompt staging, mux and Copilot startup belong
-to that target command, with no admission/policy/creation receipt round-trip
-to the originating Manager. Initial connection establishment may be bounded;
-accepted foreground creation must not expire on elapsed completion timers.
-
-This is the reviewed replacement direction, not a claim that the current
-implementation already follows it. The existing protocol below remains the
-current behavior until the implementation lands and remains a compatibility
-and retained-request recovery surface afterward. Unknown prior outcomes must
-not be replayed as fresh New requests.
+tracks delivery and installed qualification. The existing protocol below remains
+available for compatible programmatic callers and retained-request recovery.
+Unknown prior outcomes must not be replayed as fresh New requests.
 
 ### Existing structured admission protocol
 
-The Worktrees composer is host-rendered for local and machine-SSH sources.
-Prompted remote `resolve --json --machine <target>` invokes the target's own
+Without `--require-terminal-handoff`, the legacy prompted remote
+`resolve --json --machine <target>` invokes the target's own
 `resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
 is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries a version, a 32-character hexadecimal
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`

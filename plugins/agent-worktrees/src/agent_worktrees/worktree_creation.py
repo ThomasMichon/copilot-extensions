@@ -12,13 +12,8 @@ re-exports every name defined here (several sibling modules --
 ``resolve_launch_cli.py``, ``worktree_ops_cli.py`` -- already call
 ``_create_worktree_core`` via their own ``_core()`` proxy) so every existing
 caller and every test's ``monkeypatch.setattr(m, "<name>", ...)`` keep working
-unchanged. Every cross-call between the functions below -- and every call out
-to a helper that still lives in ``__main__.py`` proper (launch-plan building,
-launch preflight, worktree-record serialization) -- goes through ``_core()``
-(the live ``__main__`` module object) rather than a bare local name, so a
-test's monkeypatch on ``m.<name>`` is observed no matter which function in
-this band makes the call, exactly as the handoff-cutover slice's own
-``_core()`` idiom already established for this same file.
+unchanged. Cross-calls use ``_core()`` (the live ``__main__`` module), preserving
+the existing monkeypatch seams for launch planning, preflight and serialization.
 """
 
 from __future__ import annotations
@@ -48,6 +43,7 @@ from . import (
     profile_assignment,
     state_root as state_root_mod,
     tracking,
+    tracking_write,
 )
 from . import config as cfg
 from .launch_progress import step
@@ -467,6 +463,7 @@ def _complete_created_pair(
     )
 
 
+@tracking_write.foreground_completion()
 def _create_worktree_core(
     config: cfg.Config,
     *,

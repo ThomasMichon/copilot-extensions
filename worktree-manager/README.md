@@ -1657,12 +1657,11 @@ New waits for initial source and plugin preparation; Resume retains existing
 source and plugin setup while resolving trust, session and prompt handoff.
 Neither imposes a fixed aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
 to the launch terminal; the final plan remains JSON on stdout. Individual
-engine operations keep their own failure bounds, and automation can explicitly
-request a bounded plan call.
-An explicitly bounded SSH prompt plan allows at least 300 seconds for the
-target's 60-second read-only owner-policy check, 180-second admission call and
-host overhead; an unbounded preparation
-call remains unbounded.
+background operations keep their own failure bounds, and automation can
+explicitly request a bounded local plan call. Remote confirmation only packages
+the normal target command: after the Picker exits, TTY-enabled SSH takes the
+terminal and that command performs preparation. SSH connection establishment
+is bounded; accepted foreground creation has no aggregate completion deadline.
 Captured preparation owns a kill-on-close Job on Windows and a dedicated
 process group on POSIX. A POSIX group owner stays unreaped until the engine's
 completion receipt has been read and the entire group has been cleaned up,
@@ -2089,21 +2088,26 @@ A later explicitly supplied prompt replaces the pending intent; a stale
 handoff acknowledgement cannot discard that replacement.
 
 Local and remote New/cold Resume use the same host-rendered prompt composer.
-For SSH targets the Manager requires the engine's negotiated native-seed
-launch-request boundary. A caller sends a bounded structured
-request to the target engine before opening its interactive SSH launch.
-The target daemon admits the request, allocates at most one New
-worktree, and stages the prompt in that target's worktree state. The launch then
-carries only the target worktree and seed identity plus the native capability
-fence. Version-2 admission binds the saved Manager attempt ID to the target's
-durable receipt; the host verifies that echo before launching. Missing capability
-or mismatched identity fails visibly, never by retrying a weaker request.
-The attempt ID is audit correlation, not authority to replay an uncertain New.
+For SSH targets Manager requires the selected local engine's
+`--require-terminal-handoff` contract. Resolution packages the complete project,
+destination and options without contacting the target. The Picker exits before
+the terminal runs `ssh -t`; the ordinary target-side command then owns policy,
+creation, seed staging and native backend handoff. Arbitrary prompt text remains
+literal through POSIX quoting or PowerShell encoding. There is no preliminary
+remote admission, allocation or receipt round-trip. An older local engine fails
+on the required flag without a fallback to remote precreation; normal target
+syntax and its native-seed fence remain strict.
+
+Foreground writer completion waits are capability-qualified against the running
+target service. A deadline-only resident uses the existing locked pre-send
+same-code fallback, never an ambiguous post-send retry. Real transport loss
+still preserves unknown outcomes. Legacy launch requests remain inspectable;
+neither this change nor an attempt ID authorizes replaying an uncertain New.
 Journaled local and seedless actions also require durable engine resolution
 receipts through `--require-launch-attempt`. The confirmed ID survives the
 relocated local launcher and the SSH target hop. Each resolution has its own
 operation receipt; a returned plan is not evidence that Copilot started.
-Seedless remote planning records forwarding only, while target resolution
+Remote planning records forwarding only, while target resolution
 records its own machine-local preparation. Missing or mismatched receipts stop
 execution without automatically repeating allocation. Full prompts remain in
 the protected Manager journal, not in these engine metadata receipts.

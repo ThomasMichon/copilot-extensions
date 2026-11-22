@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import shlex
+import shutil
+import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -14,6 +17,66 @@ import pytest
 from agent_worktrees import config as cfg, remote_seed_launch, resolve_cli, resolve_machine_cli
 
 pytestmark = pytest.mark.guard
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell unavailable")
+def test_terminal_powershell_seed_reaches_the_normal_target_parser_literally():
+    from agent_worktrees import remote_terminal_launch
+
+    seed = "--literal 'quotes' \"double\"\nUnicode \u03bb; $(not-a-command) `newline"
+    plan = remote_terminal_launch.plan(
+        "example", "target", "pwsh", ["--new", "--no-mux"], seed=seed,
+    )
+    command = base64.b64decode(plan["remote_command"].rsplit(" ", 1)[1]).decode("utf-16le")
+    driver = (
+        "function example { ConvertTo-Json -Compress -EscapeHandling EscapeNonAscii -InputObject @($args); "
+        "$global:LASTEXITCODE=0 }\n" + command
+    )
+    completed = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-Command", driver],
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0, completed.stderr
+    target = _parse(json.loads(completed.stdout))
+    assert target.new_worktree and target.no_mux and target.seed == seed
+    assert target.require_foreground_completion
+
+
+@pytest.mark.parametrize("selector,seed", [
+    (["--new"], "quotes ' \"\nUnicode \u03bb; $(not-a-command)"),
+    (["--worktree-id", "worktree id"], "--literal-prompt"),
+    (["--base"], None),
+])
+def test_terminal_handoff_packages_normal_target_command_without_contact(
+    remote, monkeypatch, selector, seed,
+):
+    _, _, plans = remote
+    monkeypatch.setattr(
+        remote_seed_launch.subprocess, "run",
+        lambda *a, **k: pytest.fail("remote work ran before terminal handoff"),
+    )
+    args = _parse([
+        "--json", "--machine", "remote-host", "--environment", "WSL",
+        "--require-terminal-handoff", "--target-no-mux", *selector,
+        "--profile", "named profile", "--recovery",
+        *(["--seed=" + seed, "--require-native-seed"] if seed else []),
+    ])
+    assert resolve_cli.cmd_resolve(args) == 0
+    plan, = plans
+    assert plan["remote_terminal_handoff_version"] == 1
+    assert "launch_request_id" not in plan and "seed_id" not in plan
+    shell, login, command = shlex.split(plan["remote_command"])
+    assert (shell, login) == ("bash", "-lc")
+    target = shlex.split(command)
+    assert target.pop(0) == "example"
+    forwarded = _parse(target)
+    assert forwarded.seed == seed
+    assert forwarded.no_mux and forwarded.recovery and forwarded.profile == "named profile"
+    assert forwarded.new_worktree == args.new_worktree
+    assert forwarded.base == args.base and forwarded.worktree_id == args.worktree_id
+    assert forwarded.machine is None and not forwarded.require_terminal_handoff
+    assert forwarded.require_foreground_completion
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -228,7 +291,8 @@ def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> Non
         "no_mux", "no_fast_forward", "json", "worktree_id", "codename", "base", "auto",
         "new_worktree", "bridge", "profile", "defer_new_seed", "stage_launch_seed",
         "require_native_seed", "native_resume_session", "launch_attempt_id",
-        "require_launch_attempt",
+        "require_launch_attempt", "require_terminal_handoff", "require_foreground_completion",
+        "first_launch", "preserve_seed_id",
         "seed_id", "launch_request_b64", "launch_request_status", "machine", "environment",
         "target_no_mux", "parent_session", "caller_worktree", "owner_ref", "seed", "copilot_args",
     }

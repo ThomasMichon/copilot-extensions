@@ -270,12 +270,24 @@ def test_capability_dispatch_preserves_exact_prompt_and_attempt(receipts, monkey
 def test_real_creation_then_resume_keeps_one_attempt_and_allocation(
     receipts, monkeypatch, seed,
 ):
-    from agent_worktrees import launch_seed_state, tracking
+    from agent_worktrees import git_ops, launch_seed_state, tracking
     from test_resolve_seed_delivery import _args, _stub_launch_plumbing
     from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
     config = _create_config(receipts)
+    create_worktree = git_ops.create_worktree
     _stub_create_worktree_core_internals(monkeypatch, receipts, config)
+    monkeypatch.setattr(git_ops, "create_worktree", create_worktree)
+    anchor = config.default_repo.anchor
+    for command in (
+        ("init",), ("config", "user.name", "Test"),
+        ("config", "user.email", "test@example.com"),
+        ("-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Fixture"),
+    ):
+        git_ops.git(*command, cwd=anchor, isolated_repository=True, no_hooks=True)
+    receipts = cfg.project_dir(config.repo_name) / "worktrees"
+    receipts.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: receipts)
     _stub_launch_plumbing(monkeypatch, config)
     attempt_id = uuid4().hex
     with output.capture_json_output() as captured:

@@ -328,6 +328,12 @@ def add_parsers(sub) -> None:
     parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
     parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
+    parser.add_argument("--require-foreground-completion", action="store_true",
+                        help="Require foreground completion waiting; excludes older launch commands")
+    parser.add_argument(
+        "--require-terminal-handoff", action="store_true",
+        help="With --json --machine: package target-local execution without remote precreation",
+    )
     parser.add_argument(
         "--environment",
         default=None,
@@ -390,7 +396,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     from configuration_layers import ConfigurationError
 
     try:
-        with preview_mode(getattr(args, "dry_run", False)):
+        with tracking_write.foreground_completion(), preview_mode(getattr(args, "dry_run", False)):
             if getattr(args, "require_launch_attempt", False):
                 from . import launch_attempt
 
@@ -404,6 +410,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    if getattr(args, "require_terminal_handoff", False) and (
+        not getattr(args, "json", False) or not getattr(args, "machine", None)
+        or getattr(args, "dry_run", False)
+    ):
+        return output._json_error("Terminal handoff requires non-preview --json --machine", exit_code=2)
     if getattr(args, "first_launch", False) and (
         not getattr(args, "worktree_id", None)
         or any(getattr(args, name, None) for name in (
@@ -672,6 +683,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                       getattr(state.args, "environment", None) or "", remote_args)
         seed = getattr(state.args, "seed", None)
         rc = (
+            _emit_remote_plan_for_env(
+                *route_args, seed=seed, terminal_handoff=True,
+            ) if getattr(state.args, "require_terminal_handoff", False) else
             _emit_remote_plan_for_env(*route_args, seed=seed)
             if seed else _emit_remote_plan_for_env(*route_args)
         )
@@ -683,6 +697,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             f"{getattr(state.args, 'environment', None) or ''}".strip()
         )
 
+    if getattr(state.args, "require_terminal_handoff", False):
+        return output._json_error("Terminal handoff requires a remote execution target", exit_code=2)
     if (
         getattr(state.args, "launch_attempt_id", None) is not None
         and not getattr(state.args, "require_launch_attempt", False)

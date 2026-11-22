@@ -217,8 +217,11 @@ def _fetch_rules(anchor: Path, remote: str) -> _FetchRules:
 
 
 def _fetch_worktree_base(anchor: Path, remote: str, default_branch: str) -> _FetchPreparation:
+    from contextlib import nullcontext
+    from . import tracking_write
+
     deadline = time.monotonic() + git_ops.DEFAULT_FETCH_TIMEOUT
-    with acquisition_budget(deadline):
+    with nullcontext() if tracking_write.foreground_completion_active() else acquisition_budget(deadline):
         remotes = git_ops.git("remote", cwd=anchor, isolated_repository=True).stdout.splitlines()
         if remote not in remotes:
             return _FetchPreparation(False)
@@ -229,6 +232,8 @@ def _fetch_worktree_base(anchor: Path, remote: str, default_branch: str) -> _Fet
 def _refresh_sources(
     anchor: Path, remote: str, default_branch: str, deadline: float, policy_remote: str,
 ) -> _FetchPreparation:
+    from . import tracking_write
+
     attempted: dict[tuple[str, str, str], bool] = {}
     errors: list[Exception] = []
     base_source = f"refs/heads/{default_branch}"
@@ -241,7 +246,8 @@ def _refresh_sources(
             try:
                 git_ops._fetch_refspecs(
                     fetch_remote, cwd=anchor, refspec=(f"+{fetch_source}:{target}",),
-                    timeout=git_ops.DEFAULT_FETCH_TIMEOUT, ignore_refmaps=True,
+                    timeout=None if tracking_write.foreground_completion_active()
+                    else git_ops.DEFAULT_FETCH_TIMEOUT, ignore_refmaps=True,
                 )
                 attempted[key] = True
             except Exception as exc:
@@ -290,6 +296,8 @@ def _refresh_sources(
                     errors.append(exc)
 
             try:
+                if tracking_write.foreground_completion_active():
+                    deadline = time.monotonic() + git_ops.DEFAULT_FETCH_TIMEOUT
                 policy_branch = source._offline_remote_head_branch(anchor, "origin", deadline)
                 if policy_branch:
                     _refresh_policy(policy_branch)

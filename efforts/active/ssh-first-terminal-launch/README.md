@@ -13,7 +13,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed PRs targeting `dev`
 - **Created:** 2026-11-21
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Picker: SSH-first terminal handoff](../../../visions/picker/README.md#ssh-first-terminal-handoff)
 - **Umbrella issue:** #14047
 - **Sub-issues:** #14049 (terminal delegation and selectors), #14048 (completion)
@@ -97,22 +97,22 @@ Existing rollout gates and any operational holds remain independent.
 
 ### Phase 1 - Reviewed intent and architecture
 
-- [ ] Land this mini-effort, vision amendment and explicit architecture
+- [x] Land this mini-effort, vision amendment and explicit architecture
   transition through normal review before implementation.
-- [ ] Retain #6057/#8375 ownership and supersede only the interactive
+- [x] Retain #6057/#8375 ownership and supersede only the interactive
   preliminary-handshake mechanism.
 
 ### Phase 2 - Terminal-owned execution
 
-- [ ] Implement #14049: package the complete remote selection, exit the UI and
+- [x] Implement #14049: package the complete remote selection, exit the UI and
   execute TTY-enabled SSH before target creation or policy work.
-- [ ] Preserve New, anchor, cold Resume/Open, mux/no-mux and arbitrary prompt
+- [x] Preserve New, anchor, cold Resume/Open, mux/no-mux and arbitrary prompt
   text through normal target-side parsing; use canonical machine selection.
-- [ ] Implement #14048: accepted foreground creation has no elapsed completion
+- [x] Implement #14048: accepted foreground creation has no elapsed completion
   deadline, including nested writer waits; retain connection bounds, explicit
   cancellation, real errors and locks without changing passive/background
   deadlines.
-- [ ] Update authoritative architecture, legacy-interface boundaries and
+- [x] Update authoritative architecture, legacy-interface boundaries and
   changefiles for the actual changed components.
 
 ### Phase 3 - Delivery and completion
@@ -129,15 +129,15 @@ Existing rollout gates and any operational holds remain independent.
 The following focused checks are agent-recommended ways to prove the requested
 contract; they add no new product scope.
 
-- [ ] Prove no remote creation, policy or admission subprocess runs before
+- [x] Prove no remote creation, policy or admission subprocess runs before
   Manager exit; the final terminal command starts SSH with a TTY.
-- [ ] Exercise target parsing with New, anchor, cold Resume/Open, mux/no-mux,
+- [x] Exercise target parsing with New, anchor, cold Resume/Open, mux/no-mux,
   project selection and canonical physical/environment or alias selection.
-- [ ] Preserve Unicode, multiline text, quotes and shell metacharacters as
+- [x] Preserve Unicode, multiline text, quotes and shell metacharacters as
   literal prompt data across supported POSIX and PowerShell adapters.
-- [ ] Prove accepted creation can finish after the old completion budgets;
+- [x] Prove accepted creation can finish after the old completion budgets;
   genuine target failures and connection loss remain failures without replay.
-- [ ] Cover new/old caller and supported target forms at the real parser or
+- [x] Cover new/old caller and supported target forms at the real parser or
   process seam; retain legacy request inspection without mutating old intent.
 - [ ] Run affected unit/contract tests, Python lint and required repository
   guards serially. Do not equate mocked plan JSON with an interactive launch.
@@ -160,6 +160,29 @@ elapsed work. Preserve unknown-outcome recovery for genuine interrupted writes.
 Do not globally unbound passive reads or unrelated background operations.
 
 ## Journal
+
+### 2026-11-21 - Reviewed intent and implementation
+
+- #14052 merged after current-head approval and required checks. Scoped the
+  exit requirement to in-place handoffs without adding detached capability.
+- Started #14049/#14048 through a pure terminal-plan contract and negotiated
+  foreground writer completion; existing programmatic admission stays available.
+- The creation trace also contained a default source-fetch wall clock. Remove
+  that foreground default while preserving explicit resource bounds and
+  independent bounded policy observations.
+- Validation remains in progress; no source completion or installed acceptance
+  is claimed by this journal entry.
+- Focused validation passed: 232 Manager cases (two optional skips), 259 target
+  handoff/writer/native cases, 35 real-allocation audit cases, 17 Git deadline
+  controls, 11 selected actual-Git source controls and 51 shared protocol cases.
+  Additional terminal/foreground witnesses passed, including actual PowerShell
+  literal transport, actual Git completion custody and Picker-exit ordering.
+- The full actual-Git file exceeded the existing 300-second group budget;
+  selected relevant cases passed without raising that limit. A synthetic
+  allocation fixture was strengthened to use real Git and its canonical
+  receiving ledger. Native process tests use a concrete PowerShell executable,
+  not an activation alias. These are isolated validation changes, not host
+  configuration changes.
 
 ### 2026-11-21 - Kickoff
 

@@ -14,6 +14,26 @@ from agent_worktrees.config import RepoConfig
 from agent_worktrees.tracking import PRRecord
 
 
+@pytest.mark.parametrize("requested,expected", [(None, None), (300, 300), (5, 5)])
+def test_foreground_creation_fetch_has_no_default_completion_deadline(
+    monkeypatch, requested, expected,
+):
+    from agent_worktrees import tracking_write
+
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((kwargs["timeout"], git_acquisition_budget.remaining_timeout(None)))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(git_ops, "_auth_config_args", lambda *a, **k: [])
+    monkeypatch.setattr(git_ops, "git", run)
+    with tracking_write.foreground_completion():
+        git_ops.fetch("origin", cwd=".", timeout=requested)
+    assert calls[0][0] == expected
+    assert (calls[0][1] is None) is (expected is None)
+
+
 def test_unpinned_head_probe_uses_soft_and_hard_deadlines(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
     ref = "refs/heads/topic"

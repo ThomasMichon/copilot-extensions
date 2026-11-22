@@ -222,6 +222,7 @@ def _emit_remote_plan_for_env(
     remote_args: list[str] | None = None,
     *,
     seed: str | None = None,
+    terminal_handoff: bool = False,
 ) -> int | None:
     """Emit a remote SSH handoff plan for a specific machine and env."""
     repo = config.default_repo
@@ -258,6 +259,16 @@ def _emit_remote_plan_for_env(
         ssh_alias, shell = _resolve_ssh_target(entry)
 
     project = cfg.project_name()
+    if terminal_handoff:
+        from .remote_terminal_launch import plan as terminal_plan
+
+        try:
+            plan = terminal_plan(project, ssh_alias, shell, remote_args or [], seed=seed)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=2)
+        plan.update(machine=entry.key, display_name=f"{entry.display_name} {env_label}".strip())
+        _emit_plan(plan)
+        return 0
     if seed:
         from .remote_seed_launch import prepare
 

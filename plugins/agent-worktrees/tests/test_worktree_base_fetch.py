@@ -62,6 +62,29 @@ def local_repositories(
     yield seed, anchor
 
 
+def test_foreground_creation_fetch_waits_without_an_aggregate_source_deadline(
+    local_repositories, monkeypatch,
+):
+    from agent_worktrees import git_acquisition_budget, tracking_write
+
+    seed, anchor = local_repositories
+    expected = _commit(seed, "foreground.txt")
+    _git("push", "origin", "trunk", cwd=seed)
+    fetch = git_ops._fetch_refspecs
+    observed = []
+
+    def observe(*args, **kwargs):
+        observed.append((kwargs["timeout"], git_acquisition_budget.remaining_timeout(None)))
+        return fetch(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "_fetch_refspecs", observe)
+    with tracking_write.foreground_completion():
+        prepared = git_ops.prepare_worktree_base(anchor, remote="origin", default_branch="trunk")
+    assert prepared.fetched and prepared.fetch_error is None
+    assert _git("rev-parse", prepared.start_point, cwd=anchor) == expected
+    assert observed and all(item == (None, None) for item in observed)
+
+
 @pytest.mark.parametrize(
     ("fetch_refspec", "missing_tracking_base", "anchor_branch"),
     [

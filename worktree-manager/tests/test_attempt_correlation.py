@@ -25,13 +25,18 @@ def admitted_engine(monkeypatch, tmp_path):
     return install
 
 
-def _plan(action="exec"):
+def _plan(action="exec", worktree_id="wt-a"):
     return {
-        "action": action, "worktree_id": "wt-a",
+        "action": action, "worktree_id": worktree_id,
+        **({
+            "remote_terminal_handoff_version": 1,
+            "ssh_alias": "target", "remote_command": "example --new",
+        } if action == "remote" else {}),
         "launch_attempt_id": ID,
         "launch_attempt_receipt": {
             "version": 1, "operation_id": "b" * 32,
-            "phase": "forwarded" if action == "remote" else "plan-ready", "worktree_id": "wt-a",
+            "phase": "forwarded" if action == "remote" else "plan-ready",
+            **({"worktree_id": worktree_id} if worktree_id else {}),
         },
     }
 
@@ -44,7 +49,10 @@ def test_all_attempts_send_the_capability_and_require_a_bound_reply(admitted_eng
         calls.append(args)
         assert "--require-launch-attempt" in args
         assert args[args.index("--launch-attempt-id") + 1] == ID
-        return _plan("remote" if remote else "exec")
+        return _plan(
+            "remote" if remote else "exec",
+            None if remote and mode in {"new", "base"} else "wt-a",
+        )
     admitted_engine(run)
     result = engine.resolve_launch_plan(
         "example", new=mode == "new", base=mode == "base",

@@ -787,6 +787,7 @@ def _launch(
             continue
 
 
+@tracking_write.foreground_completion()
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record", type=Path, required=True)

@@ -147,7 +147,7 @@ def compose_launch(
                 muxed=False, exit_code=1, session=None)
         return LaunchExec(
             kind="exec",
-            argv=["ssh", "-t", ssh_alias, remote_command],
+            argv=["ssh", "-t", "-o", "ConnectTimeout=10", ssh_alias, remote_command],
             cwd=None,
             env=dict(os.environ),
             muxed=False,

@@ -341,6 +341,7 @@ def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
         ensure_monitor=status_monitor_runtime._ensure_status_monitor if enabled else None,
         boot_wait_s=tracking_write.BOOT_WAIT_S if enabled else 0.0,
         min_version=min_version,
+        request_deadline_s=None,
     )
     if result.get("error") in {
         "execution_space", "launch_admission",

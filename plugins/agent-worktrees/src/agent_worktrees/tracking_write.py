@@ -77,13 +77,15 @@ depth -- it is a correctness step, not the final performance shape.
 from __future__ import annotations
 
 import importlib
+import contextlib
+from contextvars import ContextVar
 import json
 import logging
 import socket
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
@@ -127,11 +129,25 @@ KIND = "tracking_write"
 
 #: A migrated verb is a real lock/load/mutate/save transaction -- comparable
 #: cost to one of `worktree_status_compute`'s own facts, not a bare read.
-#: Kept modest since a write's own caller (a CLI command) has no render/click
-#: deadline to protect the way a status-bar consumer does, but should still
-#: not hang indefinitely on a wedged daemon.
+#: Background writers retain a finite budget. Foreground lifecycle operations
+#: negotiate completion waiting instead of expiring an accepted mutation.
 BOOT_WAIT_S = 4.0
 REQUEST_DEADLINE_S = 8.0
+_foreground_completion: ContextVar[bool] = ContextVar("tracking_foreground_completion", default=False)
+
+
+@contextlib.contextmanager
+def foreground_completion() -> Iterator[None]:
+    """Wait for accepted foreground work without changing background budgets."""
+    token = _foreground_completion.set(True)
+    try:
+        yield
+    finally:
+        _foreground_completion.reset(token)
+
+
+def foreground_completion_active() -> bool:
+    return _foreground_completion.get()
 
 #: Shorter linger than classify/worktree_status: a write is typically a
 #: single CLI invocation's one-shot call, not a render loop with repeat
@@ -409,6 +425,8 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
         "tracking_write_token": rv["token"],
         "tracking_write_generation": rv["generation"],
         "tracking_write_verbs": sorted(_VERBS),
+        **({"tracking_write_completion_wait_version": 1}
+           if getattr(server, "completion_wait_version", None) == 1 else {}),
         "tracking_write_record_contract": resource_relationship.writer_contract(),
         "tracking_write_recovery_intent_contract": launch_permit_recovery_intent.writer_contract(),
         # Only published when at least one verb actually needs it -- keeps
@@ -532,7 +550,7 @@ def _send_tracking_write_request(
     *,
     key: str,
     payload: dict,
-    request_deadline_s: float,
+    request_deadline_s: float | None,
     client_id: str,
 ) -> dict:
     """Send one ``tracking_write`` request, distinguishing a **pre-send**
@@ -548,8 +566,8 @@ def _send_tracking_write_request(
     protocol (``work_coalescing_singleton``'s versioned JSON-over-socket
     envelope) by construction, not by importing private helpers from it.
     """
-    timeout = request_deadline_s + 1.0
-    deadline = time.time() + request_deadline_s
+    timeout = request_deadline_s + 1.0 if request_deadline_s is not None else None
+    deadline = time.time() + request_deadline_s if request_deadline_s is not None else None
     message: dict = {
         "action": "request",
         "kind": KIND,
@@ -562,7 +580,9 @@ def _send_tracking_write_request(
     body = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
 
     try:
-        sock = socket.create_connection((host, port), timeout=timeout)
+        sock = socket.create_connection(
+            (host, port), timeout=timeout if timeout is not None else REQUEST_DEADLINE_S + 1.0,
+        )
     except OSError as exc:
         raise _PreSendFailure(str(exc)) from exc
 
@@ -615,7 +635,7 @@ def write_with_boot(
     ensure_monitor: Callable[[], bool] | None,
     payload: dict,
     fallback: Callable[[], dict],
-    request_deadline_s: float = REQUEST_DEADLINE_S,
+    request_deadline_s: float | None = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
     poll_interval_s: float = 0.1,
     min_version: int = 1,
@@ -666,13 +686,25 @@ def write_with_boot(
     started = time.time()
     verb = payload.get("verb") if isinstance(payload, dict) else None
     lock_data: dict | None = None
+    unsupported_completion = False
 
     def _dial() -> tuple[str, int, str] | None:
-        nonlocal lock_data
+        nonlocal lock_data, unsupported_completion
         lock_data = read_lock_data()
-        return endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version)
+        endpoint = endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version)
+        completion_version = (
+            lock_data.get("tracking_write_completion_wait_version")
+            if isinstance(lock_data, dict) else None
+        )
+        unsupported_completion = bool(
+            endpoint is not None and request_deadline_s is None
+            and (type(completion_version) is not int or completion_version != 1)
+        )
+        return None if unsupported_completion else endpoint
 
     def incompatible_live_owner() -> bool:
+        if unsupported_completion:
+            return True  # Never send an unbounded request to a deadline-only receiver.
         if endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version) is not None:
             return False
         if endpoint_from_rendezvous(lock_data) is None:
@@ -755,10 +787,12 @@ def write_with_boot(
                 except _PreSendFailure:
                     pass
                 finally:
-                    wcs_client.release(*replacement, client_id, timeout=request_deadline_s)
+                    wcs_client.release(
+                        *replacement, client_id, timeout=request_deadline_s or REQUEST_DEADLINE_S,
+                    )
         return fallback()
     finally:
-        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
+        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s or REQUEST_DEADLINE_S)
 
 
 def dispatch(
@@ -767,7 +801,7 @@ def dispatch(
     *,
     read_lock_data: Callable[[], dict | None],
     ensure_monitor: Callable[[], bool] | None,
-    request_deadline_s: float = REQUEST_DEADLINE_S,
+    request_deadline_s: float | None = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
     min_version: int = 1,
 ) -> dict:
@@ -793,6 +827,8 @@ def dispatch(
     """
     from . import retained_record_writer
 
+    if _foreground_completion.get():
+        request_deadline_s = None
     if retained_record_writer.active():
         if verb not in retained_record_writer.VERBS:
             raise ValueError("retained record writer cannot delegate another tracking verb")
