@@ -163,7 +163,7 @@ def test_cleanup_claim_revalidation_refuses_legacy_later_attachment(tmp_path: Pa
 
 
 @pytest.mark.parametrize("effect_first", [False, True])
-@pytest.mark.parametrize("effect", ["cooling", "reopen-without-handle"])
+@pytest.mark.parametrize("effect", ["cooling", "reopen-without-handle", "implicit-cold-restart"])
 def test_dormant_cooling_or_startup_reopen_cannot_overtake_native_transfer(
     tmp_path: Path, effect_first: bool, effect: str,
 ) -> None:
@@ -186,6 +186,8 @@ def test_dormant_cooling_or_startup_reopen_cannot_overtake_native_transfer(
                 res.key, startup_revision=res.startup_revision, session_handle="native",
                 state="cold",
             )
+        elif effect == "implicit-cold-restart":
+            queue.record_spawn(res.key)
         else:
             queue.record_spawn(
                 res.key, startup_complete=False, startup_revision=res.startup_revision,
@@ -200,6 +202,30 @@ def test_dormant_cooling_or_startup_reopen_cannot_overtake_native_transfer(
     with pytest.raises(TaskError, match="another task|remains admitted"):
         second()
     assert before == (queue.get(new.id), queue.get_reservation(res.key))
+
+
+@pytest.mark.parametrize("cold", [True, False], ids=["completed-cold-restart", "replace-handle"])
+def test_spawn_publication_preserves_a_native_now_owned_by_another_task(tmp_path: Path, cold: bool) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    old = queue.create("previous task", repo="example")
+    new = queue.create("new task", repo="example")
+    assert isinstance(old, Task) and isinstance(new, Task)
+    res, _ = queue.reserve_spawn(old.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    queue.claim_one("host/tree", task_id=old.id)
+    queue.start(old.id, "host/tree", owner_session_id="native")
+    queue.yield_task(old.id, "host/tree")
+    if cold:
+        queue.record_cold(res.key)
+    queue.claim_one("host/tree", task_id=new.id)
+    queue.start(new.id, "host/tree", owner_session_id="native")
+
+    before = queue.get_reservation(res.key)
+    with pytest.raises(TaskError, match="another task"):
+        queue.record_spawn(res.key, session_handle="native" if cold else "replacement", startup_complete=True,
+                           startup_revision=res.startup_revision)
+    assert queue.get_reservation(res.key) == before
 
 
 def test_return_to_original_native_uses_normalized_host(tmp_path: Path) -> None:

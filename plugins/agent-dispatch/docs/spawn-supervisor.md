@@ -1178,8 +1178,10 @@ Completion counts even when it leaves the original attachment undetached.
 A release-in-progress or pending/held retired cleanup also retains custody.
 Cleanup retry admission and lease revalidation both reject a later attachment;
 new attachment admission checks the same outstanding effects in reverse.
-Reopening startup checks the recorded native even if the caller omits its
-handle. Claiming a cooling stop checks the same attachment history before
+Reopening startup, changing an existing handle, or restarting a cold
+reservation checks the recorded native even if the caller omits the startup
+flag or reports the restart already complete. Claiming a cooling stop checks
+the same attachment history before
 issuing the stop token. Until the stop is settled, another task cannot
 attach that native.
 Case and surrounding whitespace do not distinguish host identities. When a

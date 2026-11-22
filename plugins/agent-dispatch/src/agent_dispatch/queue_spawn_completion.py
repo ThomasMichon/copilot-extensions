@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from .ci_repair_spawn import Snapshot
-
+from .ci_repair_spawn import Snapshot
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_cooling import SpawnCoolingMixin, require_no_cooling
 
@@ -144,7 +142,10 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                 admit_cold_lane(self, row)
 
         def verify_transfer(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
-            if startup_complete is False:
+            if (
+                startup_complete is False or row["state"] == SpawnState.COLD
+                or session_handle is not None and row["session_handle"] not in (None, session_handle)
+            ):
                 from .native_attachment_custody import require_not_reassigned
                 require_not_reassigned(conn, row, session_handle)
             if row["state"] == SpawnState.COLD and cold_restarted is not None:
