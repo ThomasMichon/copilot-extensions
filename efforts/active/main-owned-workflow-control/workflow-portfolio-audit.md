@@ -5353,8 +5353,29 @@ the 300-second bound remain intact. Compact-v2 and flat-v1 logical identity
 agree; the candidate contains 8,885 nodes, 1,252 sources and 462 targets in
 994,539 bytes.
 
-Fatal Ruff passes. Strict typing, committed changefile presence, exact-head
-review and complete fresh source CI remain required. Fresh-install/native
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, committed changefile
+presence, documentation and diff checks pass. Approval `6012563501` names
+exact head `cfa155dc63e16f566f60e76b19ba993f2390315c`, with no findings,
+comments or unresolved threads and complete review pagination.
+Source CI `45029218062`, unit job `137228850332`, freshly passes all 8,885
+cases with 43 deselections in 195.98 pytest / 217.936 packet seconds.
+It reports `mode=executed`, origin run `45029218062` attempt one,
+execution identity
+`71c5425fac822107c28fece3432a3ba0512f84b4e711d7c0525c5e7e39685dd6`
+and packet digest
+`1c6e5eaf2ece934a83fe46ca8aeb19f6e020c9e2cce729236bc34b21829e5d80`.
+Required aggregate `137230066244`, guards and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the managed merge.
+
+Source #14089 merges at `2026-11-22T13:52:40Z` as
+`bd213fdfe08692746c8665361c972b193e2b696a`. Independent readback confirms
+merged state and open parent #6237; the managed source sync succeeds and the
+complete reviewed-head/merged-tree comparison is empty. The actual parent
+Goal, own Plan leaf and Validation Plan are reread before resolving only
+this four-case leaf.
+
+Fresh-install/native
 lanes are not applicable: installation, runtime, workflow and original-test
 behavior do not change. No native/process effect, new mock, preload, guard
 exception, data, production, workflow, routing or cleanup change is introduced.
@@ -5956,6 +5977,36 @@ and one-time qualification costs are separated, not hidden in a savings claim.
 Any missing coverage/context, unauthorized runner exposure, dual writer or
 broken recovery aborts the slice; restore the affected old path before disabling
 the replacement. Parent completion remains open until its whole gate resolves.
+
+### November 22 original noncontained private build-tool roots
+
+The adapter exports the complete original
+`test_private_build_tools_still_refuse_noncontained_roots` function from
+`tools/test_installer_build_tools_root.py`. It preserves all three sibling,
+outside and relative-path cases, original parameter objects and assertions.
+The separate two-case native path-equivalence function remains outside this
+selection, including its Windows-only extended-path case; no native equivalence
+qualification is claimed.
+
+Complete collection verifies five original cases and exactly three adapter
+cases, with original function and parameter-object identity. Initial unchanged
+auditing passes all three in 1.671 seconds, with zero prohibited effects,
+twelve bound canonical Python reads and actual
+`installer_source_build._build_tools_root` call-phase lines per case.
+Only the adapter/original Python bindings and existing source-build owner
+coverage target are added. All 8,885 prior nodes retain relative order, and all
+1,252 previous source hashes, 462 targets, 89 helper decisions and the
+300-second bound remain intact. Compact-v2 and flat-v1 logical identity agree;
+the candidate contains 8,888 nodes, 1,254 sources and 463 targets in 995,204 bytes.
+
+This is development-only qualification, not complete packet or live Actions
+proof. Normal fatal Ruff, strict typing, committed changefile presence,
+exact-head review and complete fresh Linux CI remain required. Fresh-install
+and native lanes are not applicable to this selection: installation, runtime,
+workflow and original-test behavior do not change. No native loader, thread,
+new mock, preload, guard exception, data, production, routing or cleanup change
+is introduced. This selection does not settle any separate native-load/thread
+refusal or parent completion and makes no whole-flow savings claim.
 
 ## Source-attribution server failure - #7906
 
