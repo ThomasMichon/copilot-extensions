@@ -28,6 +28,8 @@ on:
       - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
+      - libs/installer-engine/bootstrap-python.ps1
+      - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - libs/installation-context/tests/test_managed_python_transport.py
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
@@ -91,6 +93,11 @@ jobs:
           native=[c for c in cases if c.find('skipped') is None];
           assert len(cases)==15 and len(native)==9;
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
+      - name: Preserve evaluator discovery and adopted selection
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces
+          --test-file tests/test_bootstrap_python.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/evaluator-bootstrap
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5
