@@ -455,10 +455,12 @@ def rehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
         if checkout.exists() and (not checkout.is_dir() or any(checkout.iterdir())):
             raise HydrationRefused("destination-occupied", f"checkout path is not empty: {checkout}")
         entry["stage"] = catalog.STAGE_REHYDRATING
+        entry.pop("config_restored", None)  # a replacement checkout always needs the snapshot config
         catalog.write_entry(entry_path, entry)
         added = _git(anchor, "worktree", "add", "--no-checkout", str(checkout), branch, check=False)
         if added.returncode != 0:
             entry["stage"] = catalog.STAGE_DEHYDRATED
+            entry.pop("config_restored", None)
             catalog.write_entry(entry_path, entry)
             raise HydrationRefused("add-failed", f"git worktree add failed: {added.stderr.strip()}")
         return _complete_rehydrate(worktree_id, anchor, entry_path, entry)
@@ -574,7 +576,9 @@ def _reconcile_locked(
         return _hold(worktree_id, entry, "checkout path holds a partial or foreign checkout")
     if _is_registered(anchor, checkout):
         return _hold(worktree_id, entry, "git still registers the absent checkout")
-    if stage != catalog.STAGE_DEHYDRATED:
+    if stage != catalog.STAGE_DEHYDRATED or "config_restored" in entry:
+        # The checkout is gone, so its restoration marker no longer applies.
+        entry.pop("config_restored", None)
         entry["stage"] = catalog.STAGE_DEHYDRATED
         entry.setdefault("dehydrated_at", _now())
         catalog.write_entry(entry_path, entry)

@@ -1158,3 +1158,43 @@ def test_create_pr_reservation_refusal_stays_retryable(pr_repo: Any, monkeypatch
     result = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
     assert result["success"], result
     assert result["head_sha"] == git_ops.git("rev-parse", "HEAD", cwd=wt).stdout.strip()
+
+
+def test_reverted_rehydrate_clears_the_config_marker(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_worktree_config(env)
+    hydration.dehydrate(WT_ID, env.config)
+
+    def boom(*_a: object) -> None:
+        raise RuntimeError("crash before catalog retirement")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog, "delete_entry", boom)
+        with pytest.raises(RuntimeError):
+            hydration.rehydrate(WT_ID, env.config)
+    assert (catalog.read_entry(env.entry) or {})["config_restored"] is True
+    _git(env.anchor, "worktree", "remove", str(env.checkout))
+    assert hydration.reconcile(WT_ID, env.config)["state"] == "dehydrated"
+    assert "config_restored" not in (catalog.read_entry(env.entry) or {})
+    assert hydration.rehydrate(WT_ID, env.config)["state"] == "hydrated"
+    _assert_worktree_config(env)
+
+
+def test_guarded_branch_writes_ignore_an_inherited_git_dir(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    _git(other, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "o")
+    for repo in (env.anchor, other):
+        _git(repo, "branch", "doomed", "HEAD")
+        _git(repo, "branch", "moved", "HEAD")
+    other_tip = _git(other, "rev-parse", "HEAD")
+    with monkeypatch.context() as patch:
+        patch.setenv("GIT_DIR", str(other / ".git"))
+        assert git_ops.delete_branch("doomed", cwd=env.anchor, force=True) is True
+        assert git_ops.force_branch("moved", env.head, cwd=env.anchor, config=env.config) is None
+    assert "doomed" not in _git(env.anchor, "branch", "--list", "doomed")
+    assert _git(env.anchor, "rev-parse", "moved") == env.head
+    assert _git(other, "rev-parse", "doomed") == other_tip == _git(other, "rev-parse", "moved")

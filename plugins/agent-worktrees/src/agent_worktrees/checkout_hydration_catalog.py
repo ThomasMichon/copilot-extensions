@@ -264,8 +264,13 @@ def reservation_lock(cwd: str | os.PathLike[str]) -> Iterator[None]:
         lock.__enter__()
     except TimeoutError as exc:
         raise CatalogError(f"branch reservation lock is busy: {exc}") from exc
+    from .git_repository_environment import repository_identity_scope
+
     try:
-        yield
+        # The guarded Git work must target the same repository the lock and the
+        # reservation check resolved, never an inherited GIT_DIR-style selector.
+        with repository_identity_scope():
+            yield
     finally:
         lock.__exit__(None, None, None)
 

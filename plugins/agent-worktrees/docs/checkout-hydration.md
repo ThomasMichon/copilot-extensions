@@ -124,7 +124,9 @@ the recorded per-worktree config file atomically and verifies its entries, and
 only then populates the files with `git reset --hard HEAD` inside the new
 checkout. The entry records `config_restored: true` before the files are
 populated; a retry after that marker never rewrites the per-worktree config,
-so newer settings survive an interrupted catalog retirement. That reset is safe only because the checkout was just created and
+so newer settings survive an interrupted catalog retirement. The marker is
+cleared whenever the entry returns to `dehydrated` and before any replacement
+checkout is added, so a new checkout always gets the snapshot config. That reset is safe only because the checkout was just created and
 holds nothing but its `.git` file and no index. Overrides such as
 `core.symlinks` or `core.autocrlf` therefore apply to the files. It then
 requires a clean status, verifies branch and HEAD, and deletes the catalog
@@ -181,7 +183,8 @@ reference are reserved too. When a readable entry names a different branch
 than its tracking record, both branches are held. When an entry's
 recorded anchor names another repository, the reservation also stays with the
 repository whose catalog placement holds it. The Git common-directory probe
-ignores inherited `GIT_DIR`-style selectors. Reservation discovery reads fresh entries from today's configured
+ignores inherited `GIT_DIR`-style selectors, and the guarded branch write runs
+in the same isolated scope, so the check and the write target one repository. Reservation discovery reads fresh entries from today's configured
 roots and from the catalog beside every recorded checkout, so it survives a
 worktree-root change. It fails closed: when configuration cannot be loaded the mutation refuses; for an unreadable or corrupt entry the
 branch comes from its tracking record; when that is unknown, or the catalog
