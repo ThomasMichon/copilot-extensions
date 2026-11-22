@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 
-from .providers.observation_inventory import inventory
+from .providers.observation_inventory import PAGE_SIZE, inventory
 
 
 def dispatch(argv: list[str]) -> int:
@@ -20,6 +20,7 @@ def dispatch(argv: list[str]) -> int:
     parser.add_argument("--expected-account")
     parser.add_argument("--max-pages", type=int, default=4)
     parser.add_argument("--max-pulls", type=int, default=200)
+    parser.add_argument("--page-size", type=int, choices=range(1, PAGE_SIZE + 1))
     parser.add_argument("--seconds", type=int, default=60)
     parser.add_argument("--json", action="store_true")
     from .providers.observation_credentials import HTTP_PROFILES
@@ -30,7 +31,10 @@ def dispatch(argv: list[str]) -> int:
         return int(error.code or 0)
     try:
         if args.contract:
-            if args.repo or args.config or args.credential_command or args.expected_account is not None:
+            if (
+                args.repo or args.config or args.credential_command
+                or args.expected_account is not None or args.page_size is not None
+            ):
                 raise ValueError("contract discovery cannot select repository or credentials")
             from .providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
             from .providers.observation_http import contract
@@ -38,6 +42,10 @@ def dispatch(argv: list[str]) -> int:
                 "protocol": "agent-worktrees.pr-inventory/v1",
                 "providers": ["github", "gitea"], "credential": "observe/per-request",
                 "effects": "none", "max_pages": 20, "max_pulls": 1000,
+                "inventory_page_size": {
+                    "version": 1, "option": "--page-size", "minimum": 1,
+                    "maximum": PAGE_SIZE, "default": PAGE_SIZE,
+                },
                 "snapshot_request_budget": MAX_SNAPSHOT_REQUESTS,
                 "snapshot_capture_bytes": 1_048_584,
                 "snapshot_credential_budget": {
@@ -70,10 +78,13 @@ def dispatch(argv: list[str]) -> int:
             expected_account=args.expected_account,
         )
         selected = load_binding(Path(args.config), args.repo)
+        page_options: dict[str, int] = (
+            {} if args.page_size is None else {"page_size": args.page_size}
+        )
         result = inventory(
             get_provider(selected.provider), args.repo, api_base=selected.api_base,
             credential_source=source, max_pages=args.max_pages, max_pulls=args.max_pulls,
-            deadline=deadline,
+            deadline=deadline, **page_options,
         )
         print(json.dumps(result, allow_nan=False))
         return 0
