@@ -101,7 +101,7 @@ def plain_live_open(args: argparse.Namespace, verdict: LiveVerdict | None) -> bo
 def cold_start_error(
     verdict: LiveVerdict | None, kind: str = "resume", *, preserving: bool = False,
 ) -> str | None:
-    if preserving and verdict is not None and verdict.active:
+    if preserving and verdict is not None and (verdict.active or verdict.mux_live):
         return None
     if verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok:
         return (

@@ -230,3 +230,66 @@ def test_fleet_discovery_ignores_unrelated_missing_cwd_but_scoped_binding_is_unk
         reclaim.resolve_bound_copilots(
             worktree_id="aaaa", worktree_path="/tmp/wt", session_ids=["a-unrelated"], table={},
         )
+
+
+@pytest.mark.parametrize(("case", "expected"), [
+    pytest.param("native", True, id="native_cli"), ("script", True), ("foreign", False),
+    ("denied", None), ("malformed", None), ("oversized", None), ("truncated", None),
+])
+def test_darwin_registered_activity_uses_bounded_native_process_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str, expected: bool | None,
+) -> None:
+    import ctypes
+    import json
+    import os
+    import sys
+    from agent_worktrees import process_table_cache, reclaim, session_liveness
+
+    argv = (
+        ["/usr/local/bin/node", "/usr/local/lib/node_modules/@github/copilot/index.js"] if case == "script"
+        else ["/usr/bin/python", "worker.py"] if case == "foreign"
+        else ["/usr/local/bin/copilot", "--resume=example"]
+    )
+    argc = 0 if case == "malformed" else len(argv)
+    payload = argc.to_bytes(4, sys.byteorder, signed=True) + argv[0].encode() + b"\0\0"
+    payload += b"\0".join(arg.encode() for arg in argv) + b"\0"
+    payload = payload[:-1] if case == "truncated" else payload + b"DISPLAY_NOTE=copilot\0"
+
+    def sysctl(mib: Any, count: int, output: Any, size_pointer: Any, _new: Any, _new_size: int) -> int:
+        assert list(mib) == [1, 49, 123] and count == 3
+        if case == "denied":
+            return -1
+        size = ctypes.cast(size_pointer, ctypes.POINTER(ctypes.c_size_t))
+        if output is None:
+            size.contents.value = (1 << 20) + 1 if case == "oversized" else len(payload)
+        else:
+            assert case != "oversized", "oversized process data must not be allocated or read"
+            ctypes.memmove(output, payload, len(payload))
+            size.contents.value = len(payload)
+        return 0
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(ctypes, "CDLL", lambda *_a, **_kw: types.SimpleNamespace(sysctl=sysctl))
+    monkeypatch.setattr(os, "kill", lambda *_a: None)
+    assert session_liveness.copilot_pid_state(123) is expected
+    assert sessions._is_copilot_process(123) is (expected is True)
+    record = _rec()
+    record.worktree_path = str(tmp_path / "worktree")
+    record.sessions = [tracking.SessionEntry(session_id="registered", started_at="")]
+    entry = tmp_path / "registered"
+    entry.mkdir()
+    (entry / "inuse.123.lock").touch()
+    (entry / "workspace.yaml").write_text(json.dumps({"cwd": record.worktree_path}), encoding="utf-8")
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(sessions, "_is_process_alive", lambda _pid: True)
+    monkeypatch.setattr(sessions, "mux_status_many", lambda *_a, **_kw: {})
+    monkeypatch.setattr(process_table_cache, "cached", lambda *_a: {})
+    monkeypatch.setattr(reclaim, "homing_of", lambda *_a: "unknown")
+    monkeypatch.setattr(locks, "process_start_time", lambda _pid: "123")
+    ctx = sessions.scan_sessions_fast([record])
+    norm = sessions._normalize_path(record.worktree_path)
+    assert bool(ctx.active_sessions.get(norm)) is (expected is True)
+    assert (norm in ctx.unavailable_paths) is (expected is None)
+    verdict = sessions.verify_worktree_active(record)
+    assert verdict.active is (expected is True)
+    assert verdict.probes_ok is (expected is not None)

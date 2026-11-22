@@ -404,6 +404,10 @@ def _get_kernel32() -> Any:
 
 def _is_copilot_process(pid: int) -> bool:
     """Check if a PID belongs to a Copilot CLI process."""
+    if platform.system() == "Darwin":
+        from . import session_liveness
+
+        return session_liveness.copilot_pid_state(pid) is True
     if platform.system() == "Windows":
         import ctypes
         from ctypes import wintypes
@@ -501,9 +505,6 @@ def _session_entry_lock_state(
             continue
         if strict_cwd and pid <= 0:
             raise ObservationUnavailable("Registered session has an unrecognized lock")
-        # _is_copilot_process is alive-AND-copilot in one call (OpenProcess
-        # fails for a dead pid), so a stale lock from a crashed session does
-        # not count.
         live = _is_copilot_process(pid)
         if strict_cwd and not live:
             from . import session_liveness

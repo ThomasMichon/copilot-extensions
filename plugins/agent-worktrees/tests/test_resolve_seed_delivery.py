@@ -1243,6 +1243,8 @@ def test_preservation_selector_rejects_restore_before_process_recovery(
 @pytest.mark.parametrize("verdict", [
     LiveVerdict(active=True, mux_live=True),
     LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
+    pytest.param(LiveVerdict(active=False, mux_live=True), id="mux_only"),
+    pytest.param(LiveVerdict(active=False, mux_live=True, probes_ok=False), id="mux_only_partial"),
 ])
 def test_preserved_open_reattaches_when_target_becomes_live_between_resolves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, verdict: LiveVerdict,

@@ -42,7 +42,9 @@ responses without this metadata must still require explicit fact confirmation.
 Forced and ordinary work are separated by the resident's coalescing boundary,
 including callers that use the legacy shared request key. Worktree ACTIVE means
 a live Copilot PID lock whose recorded session CWD is the checkout or a
-descendant, with platform-appropriate path normalization. Mux occupancy is a
+descendant, with platform-appropriate path normalization. macOS identifies
+the locked process through a bounded native per-PID argument query, not Linux
+`/proc` or a child process. Unavailable identity remains unknown. Mux occupancy is a
 separate fact: the selected `psmux` or `tmux` session listing is matched by exact
 session name. An unrelated mux server process does not invalidate that listing.
 Failed or malformed listing evidence remains unknown, not confirmed absence.

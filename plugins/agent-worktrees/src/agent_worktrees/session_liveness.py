@@ -26,6 +26,44 @@ _MAX_BINDING_DESCRIPTORS = 1024
 _ERROR_INVALID_PARAMETER = 87  # OpenProcess on a PID that doesn't exist
 
 
+def _darwin_copilot_pid_state(pid: int) -> bool | None:
+    """Read one PID's bounded KERN_PROCARGS2 payload, excluding environment data."""
+    import ctypes
+    import sys
+
+    try:
+        query = ctypes.CDLL(None, use_errno=True).sysctl
+        query.argtypes = [
+            ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t,
+        ]
+        query.restype = ctypes.c_int
+        mib = (ctypes.c_int * 3)(1, 49, pid)  # CTL_KERN, KERN_PROCARGS2, exact PID
+        size = ctypes.c_size_t()
+        if query(mib, 3, None, ctypes.byref(size), None, 0) != 0 or not 4 < size.value <= 1 << 20:
+            return None
+        buffer = ctypes.create_string_buffer(size.value)
+        if query(mib, 3, buffer, ctypes.byref(size), None, 0) != 0 or not 4 < size.value <= len(buffer):
+            return None
+        payload = buffer.raw[:size.value]
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    argc = int.from_bytes(payload[:4], sys.byteorder, signed=True)
+    if not 0 < argc <= 4096:
+        return None
+    executable, separator, remaining = payload[4:].partition(b"\0")
+    if not executable or not separator:
+        return None
+    remaining = remaining.lstrip(b"\0")
+    copilot = b"copilot" in executable.lower()
+    for _ in range(argc):
+        argument, separator, remaining = remaining.partition(b"\0")
+        if not separator:
+            return None
+        copilot = copilot or b"copilot" in argument.lower()
+    return copilot
+
+
 def copilot_pid_state(pid: int) -> bool | None:
     """True: a Copilot process holds ``pid``; False: provably not (no such
     process, or another program reused the PID); None: can't tell here."""
@@ -36,7 +74,7 @@ def copilot_pid_state(pid: int) -> bool | None:
         kernel32 = sessions._get_kernel32()
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
-            return False if ctypes.get_last_error() == _ERROR_INVALID_PARAMETER else None
+            return False if getattr(ctypes, "get_last_error")() == _ERROR_INVALID_PARAMETER else None
         try:
             query_exit = kernel32.GetExitCodeProcess
             query_exit.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
@@ -53,14 +91,18 @@ def copilot_pid_state(pid: int) -> bool | None:
             return "copilot" in Path(buf.value).name.lower()
         finally:
             kernel32.CloseHandle(handle)
-    if Path("/proc/self/cmdline").exists():
+    if platform.system() == "Darwin":
+        observed = _darwin_copilot_pid_state(pid)
+        if observed is not None:
+            return observed
+    elif Path("/proc/self/cmdline").exists():
         try:
             return b"copilot" in Path(f"/proc/{pid}/cmdline").read_bytes()
         except FileNotFoundError:
             return False
         except OSError:
             return None
-    # No process-identity probe (e.g. macOS): only "no such process" is proof.
+    # Unavailable process identity: only "no such process" is proof.
     try:
         os.kill(pid, 0)
     except OSError as exc:

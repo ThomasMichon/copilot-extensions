@@ -89,6 +89,12 @@ def resolve_bound_copilots(
                 if sessions._is_process_alive(pid)
                 and sessions._is_copilot_process(pid)
             ]
+            if session_ids is not None and not live_pids:
+                observed_pid, _stale = sessions._session_entry_lock_state(
+                    state_dir, sid, worktree_path, strict_cwd=True,
+                )
+                if observed_pid is not None:
+                    live_pids.append(observed_pid)
         if not live_pids or sessions._is_detached_session(entry):
             continue
         cwd = reclaim._session_cwd(entry)
