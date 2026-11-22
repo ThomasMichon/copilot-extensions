@@ -3,6 +3,16 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_dispatch_history_units.py",
+      [
+        "test_admission_binds_the_actual_gate_attempt_and_reuses_it_for_job_only_recovery",
+        "test_admission_reads_all_job_attempt_pages_before_deciding",
+        "test_retirement_paginates_closed_history_and_binds_candidate_bytes",
+        "test_retirement_record_readback_mismatch_is_an_error_not_permission_to_dispatch",
+        "test_retirement_inventory_is_bounded_and_never_accepts_a_truncated_prefix"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py",
       [
         "test_actual_merge_completion_recovers_a_ci_advance_suppressed_while_pr_was_open",
@@ -10894,6 +10904,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_dispatch_history_units.py": "ec9cf3f6baf21d20f8d8fe6bf935534feb646d070b327cb64c77337b6198f5de",
     "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py": "59d54478c962b3e47137b2f535aaa6b39e66ff95080aae1d84e096c62c44ac90",
     "tools/test_promotion_dispatch.py": "f75de93ee3906617471aac2e5d129ae8ada84755dd3ac954cb5a3fe20416198f",
     "tools/promotion_unit_tests/test_original_reconcile_early_return_units.py": "7edb279ce83e42867c286f495cb00cfb6b0dcd2abc1887099996163c27e81583",
