@@ -3880,6 +3880,44 @@ Fresh-install/native/installed external lanes are not exercised because no
 installation or runtime behavior changes. Full-census, every-release,
 comparable whole-flow, native, installed and retained-custody gates remain open.
 
+### November 22 original command-ownership qualification
+
+The adapter retains 704 cases from 31 exact original functions; the one
+process-global import assertion stays outside the mixed packet. Three data
+controls retain changed-byte, executable-source and coverage-target refusals.
+Four candidate-reader controls bind all six declared native engine copies,
+exercise the actual command reader, and refuse changed, missing, retargeted
+and later-drift inputs. No native program is launched.
+
+The 46 command/writer/manifest inputs remain data only. Real Git checkout
+controls preserve both the five existing LF payload guarantees and declared
+CRLF inputs, including composed copies. The bounded reader correction changes
+no materializer writer, workflow, activation, native-run authority or custody.
+Whole-file strict Linux/Windows typing and all 102 reader/data/checkout controls
+pass. The final affected guard passes 711 cases in 19.797 seconds with zero
+prohibited effects, nine bound Python reads and actual owner calls per case.
+All preceding 7,226 nodes and unrelated hashes, 89 helper decisions,
+compact/flat-v1 identity and the 300-second bound remain.
+
+Actual CI merge `73d066256a` includes head
+`3d299b6fd2418a26b9190b64aade7cf23d1277b3` and Dev `70973edc0c`.
+CI `44971343114`, unit job `137051590218`, freshly passes all 7,937 cases
+with 39 deselections, 100.92 pytest seconds and 116.101 packet seconds.
+Evidence reports `mode=executed`, origin run `44971343114` attempt one and
+digest `2589502730abdd8451d3379bf1bc10b77b64170e8099ec57339980297865c604`.
+Current-head approval `6009414715`, both resolved review threads, complete
+review/comment/thread pagination, required aggregate `137053341671`, guards,
+trusted lockdown/attribution, seven fresh verifier reads and final
+head/hold/closing-reference checks precede the managed merge.
+
+Source #13986 merges at `2026-11-22T01:38:34Z` as
+`2db9de42d9d2464e7a08554c9b3c17d9ff387097`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a
