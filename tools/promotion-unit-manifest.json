@@ -11033,7 +11033,7 @@
     "tools/test_check_no_internal_identifiers.py": "3ae7cddea5248d019a43fe014d85fff60258ede94e2668ca8d15f7d495a08fde",
     "tools/check-no-internal-identifiers.py": "6ef31ed80a855736b307e75bee986b57bf9401bcd7d9f5fa7b35dc7ff016c5e4",
     "tools/promotion_unit_tests/test_typecheck_program_control_units.py": "764de8ae05a9bd98ff547411db70995de5546603e823eecc492c981746ef9a8c",
-    "tools/test_typecheck_programs.py": "7180baea02a4dffac14b03200415860f53686eab24a208e803c93269ccc2709b",
+    "tools/test_typecheck_programs.py": "7180baea02a4df4ac14b03200415860f53686eab24a208e803c93269ccc2709b",
     "tools/test_typecheck.py": "9b94eb3673a9c1b79823e0418b594e7482d741209daa6cd7b2156f72a0e04531",
     "tools/promotion_unit_tests/test_manager_release_inputs.py": "11e1afa43e8563f96df6bf8e533345c7cf2282fd436723e24bb31d82d701201e",
     "tools/promotion_unit_tests/test_local_git_evidence_control_units.py": "6ee46fea96cdc29f818b755e830c87783c9cb1e2b5d26cf9be06c6a82db1be4c",
