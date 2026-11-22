@@ -56,7 +56,7 @@ def test_binstub_publication_retains_managed_bootstrap(tmp_path: Path, shell: st
         for name in ("python", "python3"):
             (tools / name).write_text("#!/bin/sh\nexit 98\n", encoding="utf-8")
             (tools / name).chmod(0o755)
-        for name in ("bash", "dirname", "wc", "cat", "mkdir", "cp", "mv"):
+        for name in ("bash", "dirname", "wc", "cat", "mkdir", "cp", "mv", "tr"):
             executable = shutil.which(name)
             assert executable
             shutil.copy2(executable, tools / name)
