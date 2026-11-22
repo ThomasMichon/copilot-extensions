@@ -1261,7 +1261,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #14043 merges at `a73ea800609c804721d48f48a015405983d24dce` after
   exact-head Copilot approval and complete required Linux CI with all 8,049
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify all 39 cases from five adjacent original artifact-schema and
+- [x] Qualify all 39 cases from five adjacent original artifact-schema and
   wheel-validation functions: declared vendored-library acceptance, complete
   provenance and computed identity, forged content-address refusal, real
   wheel metadata/member validation, and structured encoded-metadata refusal.
@@ -1273,6 +1273,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
   compact/flat-v1 identity and the 300-second bound. Normal strict typing,
   current-head review and complete fresh Linux CI remain required; native,
   installed, hosted publication and parent gates stay separate.
+  #14046 merges at `65421209a6a23b5a3ca79d5c7632f7d94744c302` after
+  exact-head Copilot approval and complete required Linux CI with all 8,088
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify all 33 cases from eight adjacent original digest, transfer,
+  unsafe-wheel, declared-source-path and signer-policy functions. Preserve
+  exact original functions, parameters, callbacks, assertions and the autouse
+  identity fixture in the existing adapter. Guard every adapter case with
+  closed reads, positive per-case actual owner calls and zero prohibited
+  effects before admission. Preserve preceding node order and unrelated
+  source hashes, targets, helper decisions, compact/flat-v1 identity and the
+  300-second bound. Require normal strict typing, current-head review and
+  complete fresh Linux CI; native, installed, real publication and broader
+  parent gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

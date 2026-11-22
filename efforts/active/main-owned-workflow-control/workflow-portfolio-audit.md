@@ -4231,6 +4231,45 @@ preceding 8,049 nodes retain relative order, every unrelated source hash and
 coverage target is preserved, and all 89 helper decisions, compact/flat-v1
 identity and the 300-second bound remain enforced.
 
+Current-head review and complete fresh Linux source CI complete for this
+finite cohort. Copilot approval `6010846752` covers exact head
+`cda62819fd785c445d5785dda2e0ec8833fb8ed0`, without active findings.
+CI `44995153755`, unit job `137124480732`, freshly passes all 8,088 cases
+with 39 deselections, 145.21 pytest seconds and 163.752 packet seconds.
+Evidence reports `mode=executed`, origin run `44995153755` attempt one and
+digest `9a52b40673a9bd15b06ed2f94f60f34cb0c90288002c8073aba90cd0ccd1ee6f`.
+Required aggregate `137125462688`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+
+Source #14046 merges at `2026-11-22T06:51:52Z` as
+`65421209a6a23b5a3ca79d5c7632f7d94744c302`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the 39-case leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
+whole-flow saving or acceptance of any broader owner or parent gate.
+
+### November 22 original digest, transfer and signer qualification
+
+The existing adapter additionally exports eight exact original functions as
+33 cases: empty/multichunk SHA-256, three composition mismatches, twelve
+transfer-corruption mutations, five unsafe-wheel refusals, declared primary
+source preservation, unsafe or mismatching source paths, and configured
+signer policy/shared-lock controls. Every original parameter, callback,
+assertion and the autouse identity fixture remains unchanged.
+
+The 200-case original collection matches all 105 adapter selections and their
+exact objects and parameter identities. A fresh guarded process passes all 105
+in 6.203 seconds with zero prohibited effects, 38 bound Python reads and
+positive actual call-phase artifact-owner lines for every case. Only the
+existing adapter's source binding changes. The candidate has 8,121 nodes,
+1,173 sources, 448 targets and 918,154 compact-v2 bytes. All preceding 8,088
+nodes retain relative order; the 33 new cases append to the existing group
+without duplicating it. Every unrelated source hash and coverage target,
+89 helper decisions, compact/flat-v1 identity and the 300-second bound remain
+enforced.
+
 Current-head review and complete fresh Linux source CI remain required before
 this finite leaf can close. Fresh-install/native/installed external lanes are
 not exercised because no installation or runtime behavior changes. This is
