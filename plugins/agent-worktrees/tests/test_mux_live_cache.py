@@ -231,13 +231,14 @@ def _empty_ctx():
     return types.SimpleNamespace(active_sessions={})
 
 
-def test_fresh_true_hint_marks_active_without_probe():
+def test_fresh_true_hint_protects_checkout_without_marking_activity():
     """Batch unavailable + a FRESH mux_live=True stamp -> active with NO
     per-worktree has_mux_session probe."""
     rec = _rec("aaaa", path="/tmp/a", mux_live=True, mux_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session") as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
     m_has.assert_not_called()
 
@@ -247,7 +248,7 @@ def test_fresh_false_hint_falls_back_to_probe():
     with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False) as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == set()
     m_has.assert_called_once()
 
@@ -257,7 +258,7 @@ def test_stale_hint_falls_back_to_probe():
     with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=True) as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
     m_has.assert_called_once()
 
@@ -267,7 +268,7 @@ def test_no_hint_falls_back_to_probe():
     with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False) as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == set()
     m_has.assert_called_once()
 
@@ -279,7 +280,8 @@ def test_batch_available_ignores_hint():
     with patch("agent_worktrees.sessions._list_mux_sessions",
                return_value={"wt-aaaa": 1}), \
          patch("agent_worktrees.sessions.has_mux_session") as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}  # live batch wins over the false hint
     m_has.assert_not_called()
 

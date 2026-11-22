@@ -86,7 +86,8 @@ def test_explicit_retention_finalizes_idle_checkout_without_removal(
 ) -> None:
     config, wid, checkout = local_repo
     before = _git("show-ref", cwd=checkout)
-    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(finalize, "_has_live_session",
+                        lambda record: pytest.fail("explicit retention does not require mux absence"))
     monkeypatch.setattr(git_ops, "is_cwd_inside", lambda path: False)
     monkeypatch.setattr(git_ops, "remove_worktree",
                         lambda *a, **k: pytest.fail("explicit retention cannot remove checkout"))
@@ -100,6 +101,27 @@ def test_explicit_retention_finalizes_idle_checkout_without_removal(
     assert record.status == "finalized"
     assert record.finalized_checkout is not None
     assert "separate cleanup operation" in capsys.readouterr().out
+
+
+def test_mux_only_worktree_is_inactive_and_can_finalize_without_removal(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, checkout = local_repo
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    from agent_worktrees import reclaim
+
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **_kwargs: [])
+    monkeypatch.setattr(sessions, "mux_status_many",
+                        lambda *_a, **_k: {wid: sessions.MuxInfo(exists=True, clients=0)})
+    verdict = sessions.verify_worktree_active(record)
+    assert verdict.active is False
+    assert verdict.mux_live is True
+    monkeypatch.setattr(finalize, "_has_live_session", lambda _record: verdict.mux_live)
+    monkeypatch.setattr(git_ops, "remove_worktree",
+                        lambda *_a, **_k: pytest.fail("the mux checkout must remain"))
+    assert finalize.validate_and_finalize(wid, config)
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
+    assert checkout.is_dir()
 
 
 def test_explicit_retention_does_not_allow_unlanded_work(local_repo: LocalRepo) -> None:

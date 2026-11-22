@@ -1,0 +1,9 @@
+{
+  "comment": "Separate matching-CWD Copilot activity from exact mux-list occupancy, and allow retained logical finalization without requiring mux absence.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

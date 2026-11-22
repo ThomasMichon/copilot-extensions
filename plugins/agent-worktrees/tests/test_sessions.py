@@ -946,7 +946,8 @@ class TestMuxSpawnFailureDegrades:
     def test_has_mux_session_survives_oserror(self):
         from agent_worktrees.sessions import has_mux_session
 
-        with patch("subprocess.run", side_effect=self._BLOCKED):
+        with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
+             patch("subprocess.run", side_effect=self._BLOCKED):
             assert has_mux_session("anything") is False
 
     def test_list_mux_sessions_survives_oserror(self):
@@ -964,7 +965,8 @@ class TestMuxSpawnFailureDegrades:
     def test_has_mux_session_still_handles_missing_binary(self):
         from agent_worktrees.sessions import has_mux_session
 
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
+        with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
+             patch("subprocess.run", side_effect=FileNotFoundError()):
             assert has_mux_session("anything") is False
 
 

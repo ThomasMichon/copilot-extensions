@@ -61,7 +61,8 @@ def git_only_mux(monkeypatch):
     """Git-only fixtures never own a mux or contact the host's mux service."""
     from agent_worktrees import sessions
 
-    monkeypatch.setattr(sessions, "has_mux_session", lambda _worktree: False)
+    monkeypatch.setattr(sessions, "has_mux_session", lambda _worktree, **_kwargs: False)
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda **_kwargs: {})
     monkeypatch.setattr(sessions, "kill_tmux_session", lambda _worktree: False)
 
 

@@ -249,7 +249,8 @@ def _overlay_cached_state(raw: dict, rec) -> None:
         lock_live, stale_pids = sessions.worktree_session_lock_state(rec)
     except Exception:
         lock_live, stale_pids = False, []
-    live = lock_live or (raw.get("session_bound_live") is True)
+    live = lock_live
+    raw["session_lock_live"] = lock_live
 
     if rec.session_turns is not None:
         raw["turn_count"] = rec.session_turns

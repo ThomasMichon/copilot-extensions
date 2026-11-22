@@ -105,7 +105,7 @@ def _stopped(record, checkout: Path) -> None:
         if has_retained_receiving_operation(record, record.yaml_path.parent):
             raise ValueError("missing original receiving proof during owner revalidation")
     verdict = sessions.verify_worktree_active(record, strict=True)
-    if not verdict.probes_ok or verdict.active:
+    if not verdict.probes_ok or verdict.active or verdict.mux_live:
         raise ValueError("relocation requires confirmed inactive session/process owners")
     blocker = procs.checkout_retirement_blocker(str(checkout))
     if blocker:

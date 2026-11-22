@@ -278,24 +278,25 @@ def _empty_ctx():
     return types.SimpleNamespace(active_sessions={})
 
 
-def test_fresh_bound_hint_marks_active_when_no_mux(tmp_path):
-    """Bare-resume core case: no mux batch, no mux hint, no lock -- but a FRESH
-    bound_live=True hint surfaces the worktree ACTIVE."""
+def test_fresh_bound_hint_protects_checkout_without_qualifying_activity(tmp_path):
+    """A legacy positive hint protects cleanup, not matching-CWD activity."""
     rec = _rec("aaaa", path="/tmp/a", bound_live=True, bound_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False):
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
 
 
-def test_fresh_bound_hint_is_additive_even_with_mux_batch(tmp_path):
+def test_fresh_bound_hint_is_additive_for_checkout_protection(tmp_path):
     """The bound hint is unioned REGARDLESS of the mux batch (not a
     batch-unavailable fallback) -- it catches what the mux/lock scans structurally
     miss, so it must apply on the batch-present path too."""
     rec = _rec("aaaa", path="/tmp/a", bound_live=True, bound_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value={}), \
          patch("agent_worktrees.sessions.has_mux_session") as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
     m_has.assert_not_called()  # batch present -> no per-worktree mux probe
 

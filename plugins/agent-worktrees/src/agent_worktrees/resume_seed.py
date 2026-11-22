@@ -102,9 +102,9 @@ def cold_start_error(
             f"{kind.title()} prompt requires a confirmed stopped session; liveness "
             "could not be verified. Refresh and retry. The seed remains staged."
         )
-    if verdict.active:
+    if verdict.active or verdict.mux_live:
         return (
-            f"{kind.title()} prompt is cold-start-only; this worktree already has a live "
+            f"{kind.title()} prompt is cold-start-only; this worktree already has a Copilot or mux "
             "session. Use Open instead. The seed remains staged."
         )
     return None

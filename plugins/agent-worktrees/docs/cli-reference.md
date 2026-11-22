@@ -40,11 +40,17 @@ explains missing or last-known facts; it does not confirm liveness or identify a
 specific worktree as the cause of project-wide cleanup. Consumers of older
 responses without this metadata must still require explicit fact confirmation.
 Forced and ordinary work are separated by the resident's coalescing boundary,
-including callers that use the legacy shared request key. Authoritative native
-liveness requires a successful, well-formed mux listing or a confirmed native
-presence/absence probe; failed or malformed evidence cannot confirm inactivity.
-Ordinary display helpers retain
-their existing best-effort fallback.
+including callers that use the legacy shared request key. Worktree ACTIVE means
+a live Copilot PID lock whose recorded session CWD is the checkout or a
+descendant, with platform-appropriate path normalization. Mux occupancy is a
+separate fact: the selected `psmux` or `tmux` session listing is matched by exact
+session name. An unrelated mux server process does not invalidate that listing.
+Failed or malformed listing evidence remains unknown, not confirmed absence.
+A mux-only worktree is not ACTIVE and may be logically finalized. Physical
+removal still checks mux/process occupancy and retained data independently.
+`finalize --retain-checkout` does not require mux absence; its source and
+obligation checks still apply. Ordinary display helpers retain their existing
+best-effort fallback.
 Overlapping request and background refreshes use per-worktree publication
 generations: an older computation may finish its own response, but cannot
 replace a newer generation's cached or durable facts or renew their age.

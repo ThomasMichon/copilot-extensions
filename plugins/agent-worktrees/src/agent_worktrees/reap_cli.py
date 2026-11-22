@@ -443,7 +443,7 @@ def sweep_managed_worktrees(
         return result
     activity_by_name = sessions._mux_session_activity()
     session_ctx = sessions.scan_sessions_fast(managed)
-    active_paths = _build_active_paths(managed, session_ctx)
+    active_paths = _build_active_paths(managed, session_ctx, copilot_only=False)
 
     for rec in managed:
         if reason := terminal_pair_progress.gc_preservation_reason(
@@ -576,7 +576,7 @@ def sweep_managed_worktrees(
                 continue
             fresh_name = sessions.mux_session_name(current.worktree_id)
             fresh_ctx = sessions.scan_sessions_fast([current])
-            fresh_active_paths = _build_active_paths([current], fresh_ctx)
+            fresh_active_paths = _build_active_paths([current], fresh_ctx, copilot_only=False)
             fresh_norm = sessions._normalize_path(current.worktree_path) if current.worktree_path else ""
             if current.worktree_path and Path(current.worktree_path).exists():
                 if (
@@ -796,7 +796,7 @@ def sweep_finished_session_worktrees(
         return result
 
     session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = _build_active_paths(records, session_ctx)
+    active_paths = _build_active_paths(records, session_ctx, copilot_only=False)
     activity_by_name = sessions._mux_session_activity()
     mux = sessions._list_mux_sessions()
     if mux is None:

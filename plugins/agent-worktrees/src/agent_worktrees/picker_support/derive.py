@@ -148,18 +148,18 @@ def _state(w):
     # A live process owns the worktree regardless of a cached or concurrently
     # derived git/tracking state. Check this before the explicit ``state`` field
     # so a first-paint WIP/FINAL cannot hide a live PID lock.
-    # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
-    # before any git status/PR consideration). A live mux, a live
-    # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
-    # bridge-lock means a live Copilot session.
-    if (w.get("mux_session") or w.get("mux_attached")
-            or w.get("session_lock_live") or w.get("session_bound_live")
+    # Mux occupancy is not Copilot activity. A current lock observation also
+    # supersedes older process hints that did not qualify the session's CWD.
+    lock_observed = "session_lock_live" in w
+    if (w.get("session_lock_live") or not lock_observed and (w.get("session_bound_live")
             or w.get("session_bridge_live") or w.get("session_ahp_live")
             or w.get("execution_leg_live")
-            or w.get("session_bare_orphan")):
+            or w.get("session_bare_orphan"))):
         return "ACTIVE"
     st = (w.get("state") or "").lower()
     if st:
+        if st == "active" and lock_observed:
+            return "UNKNOWN"
         # Conversation-only refinement: an UNUSED worktree whose session held
         # turns is not idle -- it's CONVO.
         if st == "unused" and w.get("turn_count", 0) > 0:

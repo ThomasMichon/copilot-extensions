@@ -89,6 +89,10 @@ def resolve_bound_copilots(
         if not live_pids or sessions._is_detached_session(entry):
             continue
         cwd = reclaim._session_cwd(entry)
+        if strict and worktree_path and not cwd:
+            from .push_timeout import ObservationUnavailable
+
+            raise ObservationUnavailable("Registered session working directory is unavailable")
         if worktree_path and not reclaim._cwd_under(cwd, worktree_path):
             continue
         if session_ids is not None and worktree_id:

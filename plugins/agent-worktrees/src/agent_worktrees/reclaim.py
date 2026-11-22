@@ -267,7 +267,10 @@ def _cwd_under(cwd: str, root: str) -> bool:
     a = sessions._normalize_path(cwd)
     b = sessions._normalize_path(root)
     if platform.system() == "Windows":
-        a, b = a.lower(), b.lower()
+        import ntpath
+
+        a = ntpath.normcase(ntpath.normpath(a))
+        b = ntpath.normcase(ntpath.normpath(b))
     return a == b or a.startswith(b + "/") or a.startswith(b + "\\")
 
 

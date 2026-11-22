@@ -454,7 +454,7 @@ def _count_user_turns(entry: Path) -> int:
 
 
 def _session_entry_lock_state(
-    state_dir: Path, session_id: str,
+    state_dir: Path, session_id: str, worktree_path: str | None = None,
 ) -> tuple[int | None, list[int]]:
     """Return ``(live_pid_or_None, stale_pids)`` for one session's lock dir.
 
@@ -472,6 +472,11 @@ def _session_entry_lock_state(
     # signal for THIS worktree (mirrors _enrich_session_dir).
     if _is_detached_session(sdir):
         return None, []
+    if worktree_path is not None:
+        from . import reclaim
+
+        if not reclaim._cwd_under(reclaim._session_cwd(sdir), worktree_path):
+            return None, []
     try:
         lock_files = list(sdir.glob("inuse.*.lock"))
     except OSError:
@@ -498,12 +503,12 @@ def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
     """Return live-binding presence and stale lock PIDs for one worktree.
 
     The targeted scan covers only the worktree's registered session directories
-    and their ``inuse.<pid>.lock`` files. It does not read events/workspace data
-    or enumerate the machine process table. A PID owned by a live Copilot is a
-    binding; any other PID is stale lock residue.
+    and their ``inuse.<pid>.lock`` files plus recorded CWD. It does not read
+    conversation bodies or enumerate the machine process table. Only a live
+    Copilot in this checkout is activity; other PIDs are stale lock residue.
 
     Best-effort: never raises. An unindexed worktree returns ``(False, [])``;
-    the cached ``bound_live`` hint and the full populate cover that case.
+    explicit registry repair supplies missing session identities.
     """
     sessions_list = getattr(rec, "sessions", None)
     if not sessions_list:
@@ -516,7 +521,7 @@ def worktree_session_lock_state(rec) -> tuple[bool, list[int]]:
         sid = getattr(entry, "session_id", None)
         if not sid:
             continue
-        pid, stale = _session_entry_lock_state(state_dir, sid)
+        pid, stale = _session_entry_lock_state(state_dir, sid, getattr(rec, "worktree_path", "") or "")
         if pid is not None:
             return True, stale_pids
         stale_pids.extend(stale)
@@ -541,7 +546,7 @@ def session_id_is_live(rec, session_id: str) -> bool:
     state_dir = _session_state_dir()
     if not state_dir.exists():
         return False
-    pid, _stale = _session_entry_lock_state(state_dir, session_id)
+    pid, _stale = _session_entry_lock_state(state_dir, session_id, getattr(rec, "worktree_path", "") or "")
     return pid is not None
 
 
@@ -569,6 +574,10 @@ def _enrich_session_dir(
     # subconscious runs); they reuse the parent's cwd and must not be
     # attributed to this worktree.
     if _is_detached_session(entry):
+        return
+    from . import reclaim
+
+    if not reclaim._cwd_under(reclaim._session_cwd(entry), worktree_path):
         return
 
     norm_path = _normalize_path(worktree_path)
@@ -1142,15 +1151,13 @@ class LiveVerdict:
     ``list-sessions`` + the per-worktree session registry). This verdict is the
     opposite trade: the *truth* for the ONE worktree the operator is about to act
     on, paid for only at (a) Actions-menu open and (b) Enter->Open/Resume. It
-    combines mux presence with the authoritative, **cwd-independent**
-    ``inuse.<pid>.lock`` binding (via :mod:`reclaim`), so it also catches a
-    **bare** (un-muxed) bound Copilot that the mux fleet view cannot see -- the
-    session-registration reality that the picker's cwd-keyed populate scan misses
-    (test-chamber #662/#1416).
+    keeps mux occupancy separate from lock-backed Copilot activity. A live
+    native session lock must have a CWD inside the addressed checkout; a bare
+    Copilot counts, while a mux shell without Copilot does not.
     """
 
     active: bool = False
-    """A live mux session OR a live bound Copilot owns the worktree right now."""
+    """A live lock-backed Copilot session has a matching worktree CWD."""
 
     mux_live: bool = False
     """A ``wt-<id>`` mux session exists."""
@@ -1165,7 +1172,10 @@ class LiveVerdict:
     """A bound Copilot exists with NO mux ancestor (an un-muxed/orphaned one)."""
 
     source: str = "none"
-    """Where liveness came from: ``mux`` | ``lock`` | ``both`` | ``none``."""
+    """Observed signals: ``mux`` | ``lock`` | ``both`` | ``none``.
+
+    A mux-only source does not imply Copilot activity.
+    """
 
     probes_ok: bool = True
     """False when either the mux or the reclaim/lock probe raised and was
@@ -1182,9 +1192,7 @@ class LiveVerdict:
 
 
 def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
-    """Verify one worktree's mux and registered lock-backed Copilot liveness.
-
-    Lock identity, not cwd, also finds bare Copilots resumed elsewhere.
+    """Verify independent mux occupancy and matching-CWD Copilot activity.
     Use this point-in-time probe for individual actions, not fleet population.
     ``strict=True`` treats unavailable lock/process evidence as unconfirmed.
     Returns a :class:`LiveVerdict`; probe failures retain successful signals
@@ -1207,9 +1215,13 @@ def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
     live_ids: list[str] = []
     bare = False
     try:
+        worktree_path = getattr(record, "worktree_path", "")
+        if not worktree_path:
+            raise ValueError("Worktree working directory is unavailable")
         binding_options = {"strict": True} if strict else {}
         bound = reclaim.resolve_bound_copilots(
             worktree_id=wt_id,
+            worktree_path=worktree_path,
             session_ids=[
                 entry.session_id for entry in (getattr(record, "sessions", None) or ())
             ],
@@ -1232,7 +1244,7 @@ def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
         source = "none"
 
     return LiveVerdict(
-        active=(mux_live or lock_live),
+        active=lock_live,
         mux_live=mux_live,
         mux_clients=(info.clients or 0),
         live_session_ids=live_ids,
@@ -1310,14 +1322,14 @@ def has_mux_session(
     import subprocess
     from agent_procutil import no_window_kwargs
 
-    if strict and platform.system() == "Windows":
-        from .psmux_observation import observe
-        return mux_session_name(worktree_id) in observe(timeout=timeout)
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
-        from agent_remote_driver.mux_observation import observe_psmux
+        from .mux_list_result import MuxObservationUnavailable
 
-        return observe_psmux(sess_name, timeout=min(timeout, 5)).presence()
+        observed = _list_mux_sessions(strict=True, timeout=min(timeout, 5))
+        if observed is None:
+            raise MuxObservationUnavailable("PSMux session listing is unavailable")
+        return sess_name in observed
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
@@ -1332,19 +1344,15 @@ def has_mux_session(
         return False
 
 
-def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
+def _list_mux_sessions(*, strict: bool = False, timeout: float = 5) -> dict[str, int] | None:
     """Return client counts, or None when passive listing is unavailable."""
     import subprocess
     from agent_procutil import no_window_kwargs
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
-    if platform.system() == "Windows":
-        from .psmux_observation import list_session_counts
-
-        return list_session_counts()
-    cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+    cmd = [_mux_bin(), "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **no_window_kwargs())
         if result.returncode != 0:
             return {} if is_empty_tmux_listing(cmd[0], result) else None
         if (result.stderr or "").strip():
@@ -1404,11 +1412,6 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     if not worktree_ids:
         return result
 
-    if platform.system() == "Windows":
-        from .psmux_observation import session_status
-
-        return session_status(worktree_ids, strict=strict)
-
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
@@ -1418,10 +1421,10 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             else:
                 result[wt_id] = MuxInfo(exists=False, clients=0)
     else:
-        if platform.system() == "Windows" and not strict:
+        if platform.system() == "Windows":
             from .mux_list_result import MuxObservationUnavailable
             raise MuxObservationUnavailable(
-                "Passive PSMux CLI observation is unsupported; mux presence is unknown",
+                "PSMux session listing is unavailable; mux presence is unknown",
             )
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
@@ -1441,10 +1444,6 @@ def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     """Keep independent display facts usable without inventing mux negatives."""
     from .mux_list_result import MuxObservationUnavailable
 
-    if platform.system() == "Windows":
-        from .psmux_observation import display_status
-
-        return display_status(worktree_ids)
     try:
         return mux_status_many(worktree_ids)
     except MuxObservationUnavailable:

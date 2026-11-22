@@ -189,13 +189,13 @@ class TestFastPassActive:
         base.update(kw)
         return base
 
-    def test_mux_session_marks_active_without_git(self):
+    def test_mux_session_does_not_mark_active_without_copilot(self):
         n = derive.norm(self._raw_active(mux_session=True), "m", "e")
-        assert n["state"] == "ACTIVE"
+        assert n["state"] == "UNUSED"
 
-    def test_mux_attached_marks_active_without_git(self):
+    def test_mux_attached_does_not_mark_active_without_copilot(self):
         n = derive.norm(self._raw_active(mux_attached=True), "m", "e")
-        assert n["state"] == "ACTIVE"
+        assert n["state"] == "UNUSED"
 
     def test_lock_live_marks_active_without_git(self):
         n = derive.norm(self._raw_active(session_lock_live=True), "m", "e")
@@ -218,18 +218,25 @@ class TestFastPassActive:
         n = derive.norm(self._raw_active(session_bridge_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
-    def test_live_session_beats_merged_pr(self):
+    def test_mux_only_does_not_override_merged_pr(self):
         # A just-merged PR with the session still running must render ACTIVE, not
         # FINAL -- the git pass returns ACTIVE (active_paths precedence), so the
         # fast pass must too, or the row flickers FINAL -> ACTIVE after ~5 s.
         n = derive.norm(
             self._raw_active(mux_session=True, pr={"state": "merged"}), "m", "e")
-        assert n["state"] == "ACTIVE"
+        assert n["state"] != "ACTIVE"
 
-    def test_live_session_beats_finalized_status(self):
+    def test_mux_only_does_not_override_finalized_status(self):
         n = derive.norm(
             self._raw_active(status="finalized", mux_session=True), "m", "e")
-        assert n["state"] == "ACTIVE"
+        assert n["state"] != "ACTIVE"
+
+    def test_qualified_lock_absence_overrides_legacy_bound_and_active_cache(self):
+        n = derive.norm(self._raw_active(
+            mux_session=True, session_lock_live=False, session_bound_live=True,
+            state="active",
+        ), "m", "e")
+        assert n["state"] != "ACTIVE"
 
     def test_no_live_signal_falls_back_to_wip_unused(self):
         # No mux, no lock: unchanged legacy behaviour (turns -> WIP, else UNUSED).

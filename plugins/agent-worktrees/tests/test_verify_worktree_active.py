@@ -23,12 +23,12 @@ def _bound(sid, homing):
             "worktree_id": "aaaa", "homing": homing}
 
 
-def test_mux_only_is_active_source_mux():
+def test_mux_only_is_inactive_source_mux():
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=True, clients=1)}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots", return_value=[]):
         v = sessions.verify_worktree_active(_rec())
-    assert v.active is True
+    assert v.active is False
     assert v.mux_live is True and v.mux_clients == 1
     assert v.live_session_ids == [] and v.bare is False
     assert v.source == "mux"
@@ -86,13 +86,13 @@ def test_dedupes_and_sorts_session_ids():
 
 
 def test_degrades_when_reclaim_raises(caplog):
-    """A reclaim hiccup never crashes the verify; mux liveness still counts."""
+    """Mux occupancy cannot manufacture Copilot activity after a failed probe."""
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=True, clients=0)}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots",
                side_effect=RuntimeError("boom")):
         v = sessions.verify_worktree_active(_rec())
-    assert v.active is True and v.mux_live is True
+    assert v.active is False and v.mux_live is True
     assert v.live_session_ids == [] and v.source == "mux"
     assert v.probes_ok is False  # the reclaim probe raised
     # The MUX probe itself succeeded (conclusively found a live mux) --
@@ -121,5 +121,49 @@ def test_verification_passes_only_the_authoritative_session_registry():
     with patch("agent_worktrees.sessions.mux_status_many", return_value={}), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots", return_value=[]) as probe:
         verdict = sessions.verify_worktree_active(record)
-    probe.assert_called_once_with(worktree_id="aaaa", session_ids=["registered-session"])
+    probe.assert_called_once_with(
+        worktree_id="aaaa", worktree_path="/tmp/wt", session_ids=["registered-session"],
+    )
     assert verdict.probes_ok
+
+
+def test_live_registered_lock_requires_matching_session_cwd(tmp_path, monkeypatch):
+    import json
+
+    from agent_worktrees import process_table_cache, reclaim
+
+    state = tmp_path / "session-state"
+    entry = state / "registered-session"
+    entry.mkdir(parents=True)
+    (entry / "inuse.123.lock").touch()
+    workspace = entry / "workspace.yaml"
+    workspace.write_text(json.dumps({"cwd": str(tmp_path / "other")}), encoding="utf-8")
+    record = _rec()
+    record.worktree_path = str(tmp_path / "worktree")
+    record.sessions = [types.SimpleNamespace(session_id="registered-session")]
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: state)
+    monkeypatch.setattr(sessions, "_is_process_alive", lambda pid: True)
+    monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: True)
+    monkeypatch.setattr(sessions, "mux_status_many", lambda *_a, **_k: {})
+    monkeypatch.setattr(process_table_cache, "cached", lambda *_a: {})
+    monkeypatch.setattr(reclaim, "homing_of", lambda *_a: "mux")
+    monkeypatch.setattr(reclaim.locks, "process_start_time", lambda _pid: "123")
+
+    assert sessions.worktree_session_lock_state(record)[0] is False
+    assert sessions.session_id_is_live(record, "registered-session") is False
+    assert sessions.scan_sessions_fast([record]).active_sessions == {}
+    assert sessions.verify_worktree_active(record).active is False
+
+    workspace.write_text(json.dumps({"cwd": record.worktree_path}), encoding="utf-8")
+    assert sessions.worktree_session_lock_state(record)[0] is True
+    assert sessions.session_id_is_live(record, "registered-session") is True
+    assert sessions.verify_worktree_active(record).active is True
+
+
+def test_windows_session_cwd_normalizes_case_separators_and_parent_parts(monkeypatch):
+    from agent_worktrees import reclaim
+
+    monkeypatch.setattr(reclaim.platform, "system", lambda: "Windows")
+    assert reclaim._cwd_under("C:/SOURCE/owned/child", r"c:\source\owned")
+    assert not reclaim._cwd_under(r"C:\source\owned-sibling", r"c:\source\owned")
+    assert not reclaim._cwd_under(r"C:\source\owned\..\other", r"c:\source\owned")
