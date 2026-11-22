@@ -40,6 +40,10 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     # These copies exist in a composed release but not in the development checkout.
     for consumer in ("plugins/example", "worktree-manager/scripts/runtime-input-provider"):
         payloads.extend(f"{consumer}/{path}" for path in admitted_payloads if path.startswith("libs/"))
+    payloads.extend(
+        f"plugins/{product}/scripts/installer-engine.ps1"
+        for product in ("agent-vault", "agent-ssh", "agent-pull-requests")
+    )
     names = {Path(name).name for name in payloads}
     ignored = {
         "tests", "fixtures", "__pycache__", "node_modules", ".venv",
@@ -54,7 +58,17 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
             )
     payloads = sorted(set(payloads))
     content = b"Write-Output 'literal promotion fixture'\n"
-    sources = dict.fromkeys(admitted_payloads, hashlib.sha256(content).hexdigest())
+    lf_names = {
+        "daemon_instances.ps1", "native_daemon.ps1", "native_owned.ps1",
+        "windows_broker_task.ps1", "versioned_runtime_native.ps1",
+    }
+    expected = {
+        name: content if Path(name).name in lf_names else content.replace(b"\n", b"\r\n")
+        for name in payloads
+    }
+    assert any(expected[name] == content for name in admitted_payloads)
+    assert any(expected[name] != content for name in admitted_payloads)
+    sources = {name: hashlib.sha256(expected[name]).hexdigest() for name in admitted_payloads}
     attributes = root / ".gitattributes"
     attributes.write_bytes(b"*.ps1 text eol=crlf\n")
     for name in payloads:
@@ -82,5 +96,5 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     materialize()
     verify_sources(root, sources)
     for name in payloads:
-        assert (root / name).read_bytes() == content, name
+        assert (root / name).read_bytes() == expected[name], name
     assert control.read_bytes() == content.replace(b"\n", b"\r\n")

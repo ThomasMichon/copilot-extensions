@@ -1134,7 +1134,8 @@ authorizes critical main-path acceptance or a bounded administrative change.
   units freshly executed. Broader parent gates stay open.
 - [ ] Qualify and land 704 original source-derived command ownership cases
   through 31 exact unchanged functions, plus three focused hash-bound-data
-  controls. Preserve writer-body, newline/BOM, peer, root/module/publisher,
+  controls and four candidate-data origin/refusal controls. Preserve
+  writer-body, newline/BOM, peer, root/module/publisher,
   customization, legacy and malformed-source witnesses without launching any
   native program. Bind the 46 actual checked-in command/writer/manifest inputs
   as data only, retaining changed-byte, executable-source and target refusals.
@@ -1144,6 +1145,9 @@ authorizes critical main-path acceptance or a bounded administrative change.
   decisions, compact/flat-v1 identity, the 300-second bound, strict typing,
   current-head review and complete Linux source CI. Add the actual command
   parser to coverage targets; native, cleanup and broader parent gates remain.
+  The bounded source-only candidate-reader correction follows the existing
+  declared canonical-to-local routes for six native data copies. It changes no
+  materializer writer, workflow, activation, native-run authority or custody.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

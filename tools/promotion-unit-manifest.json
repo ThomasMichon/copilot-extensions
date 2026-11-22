@@ -3,6 +3,15 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_candidate_units.py",
+      [
+        "test_declared_native_engine_data_copies_are_bound_before_execution[none]",
+        "test_declared_native_engine_data_copies_are_bound_before_execution[changed-copy]",
+        "test_declared_native_engine_data_copies_are_bound_before_execution[missing-copy]",
+        "test_declared_native_engine_data_copies_are_bound_before_execution[retargeted-installer]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_command_ownership.py",
       [
         "test_every_current_admitted_native_writer[lf-agent-bridge:agent-bridge0]",
@@ -10361,7 +10370,7 @@
     "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
     "tools/promotion_artifact_readiness.py": "173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",
     "tools/promotion_candidate.py": "0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",
-    "tools/promotion_candidate_units.py": "3034c8bc4f05e45ef5154845d525a769509478258647280c3b844d0fe15f18c8",
+    "tools/promotion_candidate_units.py": "03d7069fd97038e5167ff0dd9d58f8d4a390481ff3a2a51ada129730def46d0a",
     "tools/promotion_complete_source.py": "a953f716d381bb035f5e0cb01652a862758d0560ee51ba180b67b58bf667f250",
     "tools/promotion_control.py": "9777ab406146428745267252d22c60932053014e04b66395ea60d06c5924621a",
     "tools/promotion_control_transition.py": "a7daabfe99b88722b78d9c3a7e9db8303fb798f4d7e1d3d5e778bae0a278f03c",
@@ -10375,12 +10384,12 @@
     "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
     "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
     "tools/promotion_source_archive.py": "81d81229ea298b3cf4ca9e47740efd2c4787d8db51a71ffa08b747aff53d4d4e",
-    "tools/promotion_unit_contract.py": "d692b1192717f5a81da18e2031304dfedc935ecf03bbbc07799ae30eb06d11ea",
+    "tools/promotion_unit_contract.py": "4f64b4b1caf1a2fdb34e4301c4429681d06e45059eedbcd3edba087d76efc796",
     "tools/promotion_unit_effects.py": "d8c8b2fd44c7aff1d46b95fd0cff48a2addbed59183b9fc6bbb2a6156d3a33a1",
     "tools/promotion_unit_packet.py": "56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
     "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
     "tools/promotion_unit_tests/test_activation_preservation.py": "f3a7375ccfa905d15ee5f631a1c2cde166d403f80a772e9aa4a1e6d2ad3e578b",
-    "tools/promotion_unit_tests/test_candidate_units.py": "730a1047a2de63d9850b3bbb4d52a4dce0a8f0d6e65d9d9a550421b36178552d",
+    "tools/promotion_unit_tests/test_candidate_units.py": "eba5201f3533fbf3736c0129831c22c5bc665254cef5cfd3a35591dbdc59175f",
     "tools/promotion_unit_tests/test_cell_installer.py": "3f693bae1f341033227a77f3d48a4155a959777d471e6479714cb5fbaddc0e95",
     "tools/promotion_unit_tests/test_chat_collaboration.py": "c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
     "tools/promotion_unit_tests/test_ci_contract.py": "30c9c69cfd1fc1a227d0dd03e3b145b6b8875e5223b784cdb0174623fb8eaf8c",
