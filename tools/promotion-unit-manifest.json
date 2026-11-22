@@ -5,6 +5,7 @@
     [
       "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py",
       [
+        "test_harness_emitted_procutil_provider_is_candidate_local_and_unambiguous",
         "test_inventory_rejects_new_or_ambiguous_python",
         "test_directory_prefixes_do_not_claim_neighboring_components",
         "test_paths_cannot_inject_response_file_arguments",
@@ -10811,7 +10812,7 @@
     ]
   ],
   "sources": {
-    "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py": "2e5b0c767fa13f160d59ac9de27498a8acc68655ab74c419c83c1fdae68319d7",
+    "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py": "ce79172a7bf7519b50bd10e58a5eeaf877fd156533d8c47d6d6c6732872e8726",
     "tools/promotion_unit_tests/test_original_installer_guard_units.py": "07ad74dea05179c41390934e2e61ce06815190ad3dd9d02c333e056ed2972ccc",
     "tools/test_check_install_contract.py": "048688b68f424c34214539c1a1f62c1eaa4c0ee9d92df4f7149c733ce887e650",
     "tools/test_installer_finalizers.py": "c01cee8b28537b990e8c0ae6e3512106f456cb4e59791beaa5501c919758475d",
