@@ -294,9 +294,13 @@ def test_actual_budget_hook_hands_drift_to_native_supervisor(
         (root / "allow-terminal").touch()
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
-            text = log.read_text(encoding="utf-8-sig", errors="replace")
+            # Windows foundation construction precedes the ordinary receipt.
+            diagnostics = [log, *root.glob("process-first-use-*.log"), *root.glob("foundation-launch-*.log")]
+            text = "\n".join(path.read_text(encoding="utf-8-sig", errors="replace") for path in diagnostics)
             if "controlled Budget foundation refusal" in text:
                 break
+            if owner is not None and owner.poll() is not None:
+                pytest.fail("Native owner exited before the controlled foundation boundary:\n" + text)
             time.sleep(.05)
         else:
             pytest.fail(text)
