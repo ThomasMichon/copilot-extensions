@@ -44,7 +44,10 @@ on:
       - plugins/agent-dispatch/tests/test_retained_bootstrap.py
       - plugins/agent-index/scripts/runtime-gate.ps1
       - plugins/agent-index/scripts/runtime-gate.sh
+      - plugins/agent-index/scripts/resolve_effective_config.py
+      - plugins/agent-index/scripts/config_yaml.py
       - plugins/agent-index/tests/test_runtime_gate.py
+      - plugins/agent-index/tests/test_bootstrap_yaml.py
       - plugins/budget-guidance/payload-invocation.json
       - plugins/budget-guidance/scripts/install.ps1
       - plugins/budget-guidance/scripts/bootstrap-check.ps1
@@ -129,6 +132,10 @@ jobs:
           assert all(sum(c.find('skipped') is None for c in groups[name])==count
           for name,count in [('retained-bootstrap',2),('index-bootstrap',4)]);
           assert all(c.find(t) is None for cases in groups.values() for c in cases for t in ('error','failure'))"
+      - name: Qualify dependency-free YAML block scalars
+        run: >-
+          python tools/run-plugin-tests.py agent-index
+          --test-file tests/test_bootstrap_yaml.py --allow-explicit-tiers
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5

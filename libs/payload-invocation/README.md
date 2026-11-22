@@ -99,6 +99,10 @@ Python paths retain their existing ownership.
 Index uses the same selector before its configuration reader. Dispatch's
 retained admission directory includes the declaration and selector closure,
 so its copied helpers do not revert to PATH Python.
+Index's dependency-free reader and its packaged tokenizer support the
+`>` and `|` YAML block-scalar forms with strip, clip and keep endings,
+including prose in repository state-policy files. They do not require
+PyYAML from an ambient interpreter.
 
 Ordinary selection uses PATH uv, the declared managed interpreter and
 `--no-python-downloads`. Missing uv or an unprepared interpreter stops with a

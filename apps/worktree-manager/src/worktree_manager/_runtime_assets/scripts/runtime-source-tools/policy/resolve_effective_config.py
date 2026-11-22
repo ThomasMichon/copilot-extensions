@@ -251,18 +251,17 @@ def _parse_scalar(text: str) -> Any:
         return text
 
 
+@cache
+def _yaml_tokenizer() -> ModuleType:
+    path = Path(__file__).with_name("config_yaml.py")
+    module = ModuleType(__name__ + "_yaml")
+    module.__file__ = str(path)
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
+    return module
+
+
 def _parse_simple_yaml(text: str) -> dict[str, Any]:
-    tokens: list[tuple[int, str]] = []
-    for raw in text.splitlines():
-        if "\t" in raw:
-            raise ConfigError("tabs are not supported in YAML indentation")
-        content = _strip_comment(raw).rstrip()
-        if not content.strip():
-            continue
-        stripped = content.lstrip(" ")
-        if stripped.startswith(("%", "---", "...")):
-            raise ConfigError("YAML directives and document markers are unsupported")
-        tokens.append((len(content) - len(stripped), stripped))
+    tokens = cast(list[tuple[int, str]], _yaml_tokenizer().tokenize(text, _strip_comment, ConfigError))
     if not tokens:
         return {}
 
@@ -310,7 +309,7 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
                 nested_item, index = parse_block(index, tokens[index][0])
                 result.append(nested_item)
                 continue
-            if ":" not in remainder:
+            if remainder.startswith(("'", '"')) or ":" not in remainder:
                 result.append(_parse_scalar(remainder))
                 if index < len(tokens) and tokens[index][0] > indent:
                     raise ConfigError("scalar list item has nested content")

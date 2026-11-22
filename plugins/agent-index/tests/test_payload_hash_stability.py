@@ -49,7 +49,7 @@ def _configuration_bundle(payload: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     for name in (
         "resolve-activation-role.py", "resolve_effective_config.py", "config_commands.py",
-        "config_schema.py",
+        "config_schema.py", "config_yaml.py",
     ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
