@@ -3,6 +3,31 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_coverage_policy.py",
+      [
+        "TestSelectTests::test_selects_exact_covering_tests_for_a_changed_line",
+        "TestSelectTests::test_selects_union_across_multiple_changed_lines",
+        "TestSelectTests::test_falls_back_for_a_line_with_no_attribution_in_a_known_file",
+        "TestSelectTests::test_falls_back_for_a_file_absent_from_the_baseline",
+        "TestSelectTests::test_mixed_known_and_unattributed_lines_still_selects_the_known_ones",
+        "TestComputeFallbackSet::test_covers_the_full_universe_within_a_generous_budget",
+        "TestComputeFallbackSet::test_prefers_cheaper_higher_yield_tests_under_a_tight_budget",
+        "TestComputeFallbackSet::test_budget_too_small_for_any_candidate_yields_an_empty_selection",
+        "TestComputeFallbackSet::test_empty_baseline_yields_an_empty_fully_covered_fallback",
+        "TestComputeFallbackSet::test_eligible_tests_restriction_excludes_ineligible_candidates",
+        "TestComputeFallbackSet::test_missing_or_invalid_duration_excludes_a_test_as_ineligible",
+        "TestComputeFallbackSet::test_negative_or_non_finite_duration_is_also_excluded",
+        "TestComputeFallbackSet::test_skips_an_unaffordable_higher_scoring_candidate_for_a_cheaper_one",
+        "TestComputeFallbackSet::test_curation_is_deterministic_across_repeated_runs",
+        "TestDefaultTierEligibleTests::test_excludes_t3_and_t4_includes_t0_through_t2",
+        "TestDefaultTierEligibleTests::test_untiered_test_is_eligible",
+        "TestDefaultTierEligibleTests::test_a_v2_baseline_with_no_portfolio_tier_key_at_all_is_eligible",
+        "TestDefaultTierEligibleTests::test_empty_baseline_yields_an_empty_eligible_set",
+        "TestDefaultTierEligibleTests::test_tier_value_is_matched_case_sensitively_as_recorded",
+        "TestDefaultTierEligibleTests::test_a_t4_test_with_the_best_coverage_per_cost_score_is_never_curated"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_fallback_equivalence.py",
       [
         "test_unusable_budget_skips_heap_but_keeps_universe_metrics[-1]",
@@ -10220,6 +10245,15 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_coverage_policy.py": "007f28af1e4a1bcc560b1f8a63fb040d400951a30e26ed77408eb99612d6e899",
+    "tools/test_coverage_guided_selection.py": "5a906e5b6ff4cdb877fa328a6cda5578c5968ac85651a0a0f53016c8ef745ddc",
+    "tools/coverage_guided_selection/baseline.py": "218df21cb37575062e4a7534697b949b1b8f4243bff75be0af16ec2be3013929",
+    "tools/coverage_guided_selection/baseline_chunks.py": "1e7977754ddd27eee44b253891987a4f8df381d65afdfa1d623a4b06c2a691f8",
+    "tools/coverage_guided_selection/debt.py": "6ee2b26456e6f008e3346f013accd2d31f99fe7c6740fceb6ce6668c8f6ef33c",
+    "tools/coverage_guided_selection/decide.py": "91920c9b1c0693c1b70f92ddd4d2563bb55abd062770d1a7374f47e77331673f",
+    "tools/coverage_guided_selection/diff.py": "32d4d6443f34ee1359dcbad64d6bd92cd6febf227a23edb32309ed8b000c9fa5",
+    "tools/coverage_guided_selection/cli.py": "b6a0320de576cc205447731b81bae6c82fda8e7d479800c2645318c2c8eceee0",
+    "tools/coverage_baseline_chunk_contract.py": "f98e12bfa8f0bc19c5e2447c7af5aa81271cb8bf3fd4c7220c41accb64e9a840",
     "tools/promotion_unit_tests/test_original_fallback_equivalence.py": "d6f7b4a3a3d7a8df35536666a3e5aa8d08e3c7b6cd1af570130e23c82560b491",
     "tools/test_coverage_fallback_equivalence.py": "40a071d2db6cc5d9e8516d216b585a93be126fdda21338832221a98c6e38e39e",
     "tools/coverage_guided_selection/fallback.py": "527cbb7ee4cb40c8820e91e42eb94c0e739508954b9ed3ecba04e6a560e1f291",
