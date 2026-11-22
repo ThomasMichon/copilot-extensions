@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original strict-checker source-view controls while preserving packet order and unchanged auditing",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

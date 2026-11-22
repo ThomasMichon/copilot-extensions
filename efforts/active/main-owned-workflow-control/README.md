@@ -1776,7 +1776,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   sources in 987,506 bytes without changing nodes, targets or the bound.
   The 1,228-source/985,329-byte qualification above describes this leaf's
   reviewed head, not the combined merged base.
-- [ ] Qualify fourteen additional original strict-checker lifecycle controls
+- [x] Qualify fourteen additional original strict-checker lifecycle controls
   across eleven original functions: input-drift cleanup, conservative consumer
   selection, missing-preparation refusal, pending-probe non-admission,
   dependency-policy refusal, captured-lock installation, failed-cache repair,
@@ -1800,8 +1800,38 @@ authorizes critical main-path acceptance or a bounded administrative change.
   call-phase lines per case. Only fourteen new nodes are appended within the
   first group; all 8,817 preceding nodes retain their relative order and all
   1,244 other current-base hashes remain intact. The compact-v2 candidate
-  contains 8,831 nodes, 1,245 sources and 460 targets. Current-head review and
-  complete fresh Linux CI remain pending; this leaf is not complete.
+  contains 8,831 nodes, 1,245 sources and 460 targets. #14081 merges at
+  `cb2cfa00afdec9e52c3a69437a59918e8a747de3` after exact-head Copilot approval
+  and complete required Linux CI with all 8,831 selected units freshly
+  executed. Only this fourteen-case leaf is complete; broader gates remain open.
+- [ ] Qualify 46 additional original strict-checker source-view controls across
+  eleven original functions: guard-alias scope/mapping/drift, physical line
+  mapping, native-loader source preservation, copied input custody,
+  loader-mutation and directive refusals, declared fragment order, stale
+  composition, code/suppression preservation and imported-view drift cleanup.
+  Preserve exact original functions, parameter values, both autouse fixtures,
+  helpers, existing collaborator stubs and assertions. Keep actual MyPy,
+  native/process, symlink, repository-catalog, platform-specific guard-shadow
+  and all other excluded cases unchanged outside the selection.
+  Qualify all 110 adapter cases before admitting only 46 new nodes after the
+  current 64 in the same first group. Bind the original guard helper's one
+  canonical Python read without adding a coverage target; preserve preceding
+  node order, all other current source hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require closed Python
+  reads, positive actual owner calls per case, zero prohibited effects, normal
+  strict typing, current-head review and complete fresh Linux CI. No new mock,
+  preload, wrapper, effect exception, data admission, workflow, runtime,
+  native process or cleanup action is authorized.
+  Complete collection verifies all 236 original cases and 110 adapter cases,
+  exact function/fixture identity and every selected parameter value.
+  Initial unchanged-guard qualification passes all 110 in 9.000 seconds, with
+  zero prohibited effects, 27 bound Python reads and actual checker-owner
+  call-phase lines per case. Only 46 new nodes are appended within the first
+  group; all 8,831 preceding nodes retain their relative order. Only the
+  existing adapter hash changes and the canonical guard source binding is
+  added, preserving all other 1,244 current-base hashes. The compact-v2
+  candidate contains 8,877 nodes, 1,246 sources and 460 targets. Normal review
+  and complete fresh Linux CI remain pending; this leaf is not complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
