@@ -6386,6 +6386,65 @@ any refused candidate, complete the parent or demonstrate comparable
 whole-flow savings. The prior one-PR metadata-refresh authorization remains
 consumed and is not reused.
 
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013710897` names exact head
+`467a896a6c829bcf9da2e283c556eaf4dfc437de`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45054115176`, unit job `137305448170`, executes all 8,962
+cases with 48 deselections in 157.95 pytest / 178.437 packet seconds.
+It reports `mode=executed`, origin run `45054115176` attempt one,
+execution identity
+`d23dcb18283dc5b5fb7a7667bd42e6ad7b909c4bedd8c04fd7a37c928dcfee18`
+and packet digest
+`1d5675047f76273b3efd74a9e5433d174545e1be3e75365626dba1ef399bd4ec`.
+Guards, required aggregate `137307033907` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge. No manual workflow is dispatched.
+
+Source #14114 merges at `2026-11-22T18:24:08Z` as
+`9aea321ce3dc00afd1064498504e78dda0f966bd`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+19-case leaf. Separate data/native-load/thread refusals, release, owner,
+custody and completion gates remain open.
+
+### November 22 original non-CLI dispatch decisions
+
+The adapter exports 17 complete original dispatch-decision functions
+(45 cases), covering source-CI evidence and ordering, terminal-promoter
+reconciliation, retry/no-op/coalescing decisions, pause/resume behavior,
+retirement history, invalid input, fork provenance and exact source/base
+ownership across automatic wakes. Both original CLI functions remain outside
+this selection. All original functions, multiple parameter decorators,
+in-memory backend/request callbacks and assertions remain unchanged.
+
+Complete collection verifies all 102 original cases and exactly 45 adapter
+cases with original function-object and parameter-object identity, matching
+cross-module values/types and exact node identities. Identity is verified
+against every original decorator row, including stacked parameterizations.
+Initial unchanged effect/source auditing passes all 45 in 1.531 seconds,
+with zero prohibited effects, six bound canonical Python reads and actual
+dispatch-owner call-phase lines in every case. All 135 setup/call/teardown
+reports pass.
+
+Only the adapter source binding is added; there are no new targets.
+All 8,962 prior nodes retain relative order; all 1,273 current source hashes,
+467 coverage targets, 89 helper decisions and the 300-second bound remain
+intact. Compact-v2 and flat-v1 logical identity agree; the candidate contains
+9,007 nodes and 1,274 sources in 1,010,396 bytes. Exact-head review and complete
+fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes are not applicable because installation and
+runtime behavior do not change; normal fresh source CI supplies the external
+Linux consumer proof. This distinct selection does not replay or settle
+any refused candidate, complete the parent or demonstrate comparable
+whole-flow savings. The prior one-PR metadata-refresh authorization remains
+consumed and is not reused.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original
