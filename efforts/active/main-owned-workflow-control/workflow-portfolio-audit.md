@@ -4697,9 +4697,59 @@ The compact-v2 candidate contains 8,435 nodes, 1,208 bound sources and 453
 targets in 949,924 bytes. All 8,425 preceding nodes and their order, all
 1,207 current source hashes, every target, 89 helper decisions and the
 300-second bound remain intact. Only the adapter is newly hash-bound;
-both baseline owners are already targets. Normal strict typing, current-head
-review and complete fresh Linux CI remain required before closing this leaf.
+both baseline owners are already targets. Fatal Ruff, strict Python
+3.10/Linux and Windows typing, documentation consistency and diff checks pass.
+Copilot approval `6011664545` covers exact head
+`69796aacf199e7f11a82a59feded32394e0ac2d5` with no active findings.
+Source CI `45011565131`, unit job `137174808574`, freshly passes all 8,435
+cases with 40 deselections, 157.63 pytest seconds and 177.995 packet seconds.
+It reports `mode=executed`, origin run `45011565131` attempt one, execution
+identity `d16bd624c0d0cf6ed58ffe51d01236b6a9dd4887c5979f82f9c23f514ea416f8`
+and packet digest
+`47cc73ba0ca47ee8cae3280f01385d7fc31dd29738943526f3ffa80fb89af57b`.
+Required aggregate `137175781004`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14068 merges at `2026-11-22T10:21:45Z` as
+`d29e522962d577f539d44b98859546b5003fffb4`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the ten-case leaf.
 This is synthetic error-contract coverage, not native/process qualification,
+portfolio activation or resolution of retained owner/refusal boundaries.
+Fresh-install/native lanes are not exercised because no installation,
+runtime, workflow or original-test behavior changes.
+
+### November 22 original synthetic chunk-control qualification
+
+The adapter exports the four unchanged original imported chunk-control
+functions followed by the exact `TestCoverageGuidedSelectionCli` class,
+preserving original relative order, method/parameter objects, fixtures,
+helpers, existing collaborator stubs and assertions. Complete collection
+checks 157 original cases and seventeen adapter cases. The manifest selects
+exactly fourteen: four chunk-error cases, two collector-isolation cases,
+five invalid-worker cases, two shared-containment-budget cases and the
+pure CLI-summary method. The class's three real-Git methods remain unchanged
+outside the packet; the whole four-case class is not unit-qualified.
+Actual threaded/process witnesses and workflow inspection remain outside
+this leaf.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer, selecting the fourteen cases explicitly at the
+pytest consumer. It passes in 2.188 seconds with zero prohibited effects,
+23 bound Python reads and positive actual baseline/chunk/summary-owner
+call-phase lines for every selected case. The three real-Git CLI cases
+are deselected, never executed or counted as skipped units. No mock,
+preload, wrapper or effect exception is added; original collaborator stubs
+remain unchanged.
+
+The compact-v2 candidate contains 8,449 nodes, 1,209 bound sources and 454
+targets in 951,244 bytes. All 8,435 preceding nodes and their order, all
+1,208 current source hashes, every preceding target, 89 helper decisions
+and the 300-second bound remain intact. Only the adapter is newly
+hash-bound; the already-bound CLI module becomes a coverage target.
+Normal strict typing, current-head review and complete fresh Linux CI
+remain required before closing this leaf. This is synthetic orchestration
+and summary coverage, not native/process/concurrency/Git qualification,
 portfolio activation or resolution of retained owner/refusal boundaries.
 Fresh-install/native lanes are not exercised because no installation,
 runtime, workflow or original-test behavior changes.
