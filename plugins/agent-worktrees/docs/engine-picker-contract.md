@@ -464,8 +464,11 @@ Tracking-write receivers advertise `tracking_write_completion_wait_version: 1`;
 those requests carry JSON `deadline: null` and have no socket completion
 timeout. A deadline-only receiver is never sent that request: the existing
 locked same-code pre-send fallback executes instead. Background writer budgets
-remain unchanged. Default foreground source fetches also wait to finish;
-explicit caller resource bounds and independent bounded policy observations
+remain unchanged, including automatic seed cleanup outside foreground scopes.
+Default foreground source fetches also wait to finish; their existing
+non-terminating preparation-stage heartbeats remain visible during silence
+instead of requesting a separate stream-idle timer from that process owner.
+Explicit caller resource bounds and independent bounded policy observations
 remain effective. Real disconnects retain unknown-outcome protections.
 
 The [SSH-first terminal launch effort](../../../efforts/active/ssh-first-terminal-launch/README.md)

@@ -202,6 +202,10 @@ Do not globally unbound passive reads or unrelated background operations.
   a fresh bounded read budget, clamped to any enclosing acquisition limit.
   Real-Git controls with simulated 301-second policy fetches cover unlimited
   completion, a still-valid outer bound and an exhausted outer bound.
+- Restored finite defaults for seed cleanup outside explicit foreground
+  scopes. Foreground source fetches explicitly select caller-owned completion
+  capture and use the existing non-terminating stage heartbeats during silence;
+  background stream-idle warnings remain unchanged.
 
 ### 2026-11-21 - Kickoff
 

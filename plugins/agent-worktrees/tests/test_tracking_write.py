@@ -387,6 +387,25 @@ class TestRunDirectFallback:
 
 
 class TestDispatch:
+    def test_seed_cleanup_is_bounded_unless_its_caller_is_foreground(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        from agent_worktrees import launch_seed_state, status_monitor_runtime
+
+        deadlines: list[float | None] = []
+
+        def send(**kwargs: Any) -> dict[str, Any]:
+            deadlines.append(kwargs["request_deadline_s"])
+            return {"removed": True}
+
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        monkeypatch.setattr(tracking_write, "write_with_boot", send)
+        args = {"yaml_path": str(tmp_path / "fixture.yaml"), "worktree_id": "fixture"}
+        launch_seed_state._dispatch("launch_seed_remove", args)
+        with tracking_write.foreground_completion():
+            launch_seed_state._dispatch("launch_seed_remove", args)
+        assert deadlines == [tracking_write.REQUEST_DEADLINE_S, None]
+
     def test_foreground_completion_outlives_the_old_socket_and_server_deadlines(self) -> None:
         calls: list[dict[str, Any]] = []
 

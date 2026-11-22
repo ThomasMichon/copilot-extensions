@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+import threading
 from collections.abc import Iterator
 from contextlib import nullcontext
 from pathlib import Path
@@ -84,6 +85,38 @@ def test_foreground_creation_fetch_waits_without_an_aggregate_source_deadline(
     assert prepared.fetched and prepared.fetch_error is None
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == expected
     assert observed and all(item == (None, None) for item in observed)
+
+
+def test_quiet_foreground_creation_retains_nonterminating_stage_heartbeats(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_worktrees import activity, launch_progress, tracking_write
+
+    _, anchor = local_repositories
+    heartbeat = threading.Event()
+    fetch = git_ops._fetch_refspecs
+
+    def record(_kind: str, **fields: Any) -> None:
+        if fields.get("state") == "waiting":
+            heartbeat.set()
+
+    def quiet_fetch(*args: Any, **kwargs: Any) -> None:
+        assert heartbeat.wait(timeout=2), "quiet creation lost its elapsed-stage diagnostic"
+        assert kwargs["timeout"] is None
+        fetch(*args, **kwargs)
+
+    monkeypatch.setattr(launch_progress, "HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(activity, "log_event", record)
+    monkeypatch.setattr(git_ops, "_fetch_refspecs", quiet_fetch)
+    with tracking_write.foreground_completion():
+        prepared = worktree_creation._prepare_worktree_source(
+            anchor, remote="origin", default_branch="trunk",
+            fast_forward_anchor=False, label="fixture",
+        )
+    assert prepared.fetched and prepared.fetch_error is None
+    progress = capsys.readouterr().err
+    assert "running" in progress or "still working" in progress
 
 
 @pytest.mark.parametrize("outer_seconds", [None, 350.0, 10.0])

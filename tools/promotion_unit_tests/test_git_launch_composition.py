@@ -375,9 +375,9 @@ def test_foreground_fetch_keeps_caller_custody_without_a_completion_clock(
 
     result = PROCESS.execute(
         ["git", "fetch"], cwd="selected", env={"PATH": "selected"},
-        capture=True, timeout=None, kill_tree=False, input_data=None,
+        capture=True, timeout=None, kill_tree=True, input_data=None,
         observation_deadline=None, run=unexpected, bounded_run=unexpected,
-        window_options=unexpected, soft_timeout=30,
+        window_options=unexpected, soft_timeout=None,
     )
     assert result.stdout == "ready" and result.stderr == "non-utf8: \ufffd"
     assert len(calls) == 1
