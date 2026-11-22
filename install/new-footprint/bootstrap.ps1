@@ -23,7 +23,7 @@ try {
         $savedAuthEnvironment[$key] = [Environment]::GetEnvironmentVariable($key)
         [Environment]::SetEnvironmentVariable($key, $null)
     }
-    if (-not $ClearTrial -and ($Repo -or $KnowledgeRepo)) {
+    if (-not $ClearTrial) {
         $headless = $env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY -or
             $env:COPILOT_AGENT_SESSION_ID -or [Console]::IsInputRedirected -or
             [Console]::IsOutputRedirected -or -not [Environment]::UserInteractive

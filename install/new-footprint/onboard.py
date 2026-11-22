@@ -92,6 +92,8 @@ def main() -> None:
     harness._git(args.workspace, "clone", "--no-checkout", "--no-recurse-submodules", "--", url, str(checkout))
     if reference == "main":
         reference = "refs/remotes/origin/main"
+    elif reference.startswith("refs/heads/"):
+        reference = "refs/remotes/origin/" + reference.removeprefix("refs/heads/")
     commit = harness._git(checkout, "rev-parse", "--verify", "--end-of-options", reference + "^{commit}")
     print(f"Selected {url} {reference} at {commit}", flush=True)
 

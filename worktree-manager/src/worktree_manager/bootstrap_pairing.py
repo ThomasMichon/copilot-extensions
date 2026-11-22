@@ -13,6 +13,11 @@ from . import bootstrap_harness, harness_state, runtime_source_repository
 from .config_write_lock import config_write_lock
 
 
+def _portable_identity(remote: str) -> str:
+    normalized = bootstrap_harness.repository_remote(remote)[1]
+    return normalized.casefold() if normalized.startswith("https://github.com/") else normalized
+
+
 def _portable_file(onedrive: Path, harness: str) -> Path:
     if not onedrive.is_absolute() or not onedrive.is_dir():
         raise ValueError("Portable pairing directory must be an existing absolute directory")
@@ -25,7 +30,7 @@ def _portable_file(onedrive: Path, harness: str) -> Path:
 def remember_bound(local_config: Path, harness_remote: str, knowledge_remote: str, onedrive: Path,
                    *, registered_knowledge: Path) -> None:
     """Persist only repo identities; never replace a different saved preference implicitly."""
-    harness = bootstrap_harness.repository_remote(harness_remote)[1]
+    harness = _portable_identity(harness_remote)
     name, knowledge = bootstrap_harness.repository_remote(knowledge_remote)
     if select(local_config, harness, None, None) != ("local", name):
         raise ValueError("Cannot remember a pairing without a matching local binding")
@@ -66,7 +71,7 @@ def select(
         return "explicit", bootstrap_harness.repository_remote(explicit)[1]
     if onedrive is None or not harness_remote:
         return "absent", None
-    normalized = bootstrap_harness.repository_remote(harness_remote)[1]
+    normalized = _portable_identity(harness_remote)
     path = _portable_file(onedrive, normalized)
     saved = _read_portable(path, normalized)
     return ("portable", saved) if saved else ("absent", None)
