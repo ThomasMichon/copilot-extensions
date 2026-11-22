@@ -1,0 +1,9 @@
+{
+  "comment": "Include all original ZIP32 and ZIP64 directory-count boundary controls in the guarded promotion unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

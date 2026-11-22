@@ -6027,6 +6027,39 @@ new mock, preload, guard exception, data, production, routing or cleanup change
 is introduced. This selection does not settle any separate native-load/thread
 refusal or parent completion and makes no whole-flow savings claim.
 
+### November 22 original ZIP32/ZIP64 directory-count boundaries
+
+The adapter exports the complete original
+`test_stdlib_directory_count_boundaries_allow_zip32_and_zip64` with all
+three original entry counts: 65,534, 65,535 and 65,536. It preserves actual
+in-memory ZIP_STORED archives, the original limits fixture, twenty-second
+preflight deadlines, the stream-reset assertion and the reduced-count
+refusal. No archive is reduced and no clock, deadline or assertion changes.
+
+Complete collection verifies all 104 original cases and exactly three adapter
+cases with original function, fixture and parameter-object identity.
+Initial unchanged effect/source auditing passes all three in 11.734 seconds
+with zero prohibited effects, nine bound canonical Python reads and actual
+`preflight_archive` call-phase lines per case. The selected owner path uses
+the in-memory stream, struct parsing and existing deadline checks; it does
+not invoke retained native handles, threads, profile environment collection
+or the original module's subprocess controls.
+
+Only the adapter binding is added. All 8,893 prior nodes retain relative
+order; all 1,259 previous source hashes, 463 targets, 89 helper decisions
+and the 300-second bound remain intact. Compact-v2 and flat-v1 logical
+identity agree; the candidate contains 8,896 nodes, 1,260 sources and
+463 targets in 996,926 bytes. Fatal Ruff passes; strict checks, committed
+changefile presence, exact-head review and complete fresh Linux CI remain
+required.
+
+Fresh-install/native lanes are not applicable because installation,
+runtime, workflow and original-test behavior do not change. No new mock,
+preload, guard exception, data admission, native policy, routing or cleanup
+change is introduced. This distinct selection does not replay or settle
+any refused candidate, complete the parent or demonstrate comparable
+whole-flow savings.
+
 ### November 22 original aggregate source-tree budget refusals
 
 The adapter exports the complete original
@@ -6056,6 +6089,31 @@ Fresh-install/native lanes are not applicable because installation and
 runtime behavior do not change. This distinct selection does not replay or
 settle the separate wheel-verification native-load refusal, complete the
 parent or demonstrate comparable whole-flow savings.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6012940006` names exact head
+`ab297ec52318d153359994662e16078e38d592ec`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45036294192`, unit job `137250686678`, executes all 8,893
+cases with 43 deselections in 155.05 pytest / 176.473 packet seconds.
+It reports `mode=executed`, origin run `45036294192` attempt one,
+execution identity
+`cc8206605050d74a5e64a8a968a6e08356bec10be22c902723f491efaa1fb31a`
+and packet digest
+`71e95112e9f59507db51f9636b9e54846ee595cf1618ee00fa89093087a1bfda`.
+Guards, required aggregate `137252211369` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge.
+
+Source #14095 merges at `2026-11-22T15:12:27Z` as
+`bcc3242e7c0f5e7da778bb44b86b1a209b080f10`. Independent provider readback
+confirms merged state and open parent #6237. The managed source sync succeeds,
+and the complete reviewed/merged-tree comparison is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this two-case leaf. The separate source-wheel verification native-load
+refusal remains unadmitted and is not replayed; broader owner, release,
+custody and completion gates remain open.
 
 ### November 22 original source-wheel verification native-load refusal
 
