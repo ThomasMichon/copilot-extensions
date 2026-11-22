@@ -15,6 +15,7 @@ checkbox. This test proves:
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shutil
@@ -22,6 +23,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
+from agent_procutil import no_window_kwargs
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _PLUGIN_NAME = _PLUGIN_ROOT.name
@@ -49,19 +52,19 @@ def _resolve_bash() -> str | None:
 _BASH = _resolve_bash()
 
 
-def test_hook_scripts_exist():
+def test_hook_scripts_exist() -> None:
     assert _PS1.is_file()
     assert _SH.is_file()
 
 
-def test_ps1_has_no_opt_in_gate():
+def test_ps1_has_no_opt_in_gate() -> None:
     text = _PS1.read_text(encoding="utf-8")
     assert "optInKey" not in text
     assert "optedIn" not in text
     assert "background reconcile SKIPPED" not in text
 
 
-def test_sh_has_no_opt_in_gate():
+def test_sh_has_no_opt_in_gate() -> None:
     text = _SH.read_text(encoding="utf-8")
     assert "optInKey" not in text
     assert "optedIn" not in text
@@ -69,11 +72,12 @@ def test_sh_has_no_opt_in_gate():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows generation selection")
-def test_ps1_profile_generation_uses_its_deployed_package_version(tmp_path, monkeypatch):
+def test_ps1_profile_generation_uses_its_deployed_package_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.syspath_prepend(str(_PLUGIN_ROOT.parents[1] / "tools"))
-    from test_native_wheel_installers import assert_native_bootstrap
-
-    assert_native_bootstrap(tmp_path, monkeypatch, _PLUGIN_NAME)
+    helper = importlib.import_module("test_native_wheel_installers")
+    helper.assert_native_bootstrap(tmp_path, monkeypatch, _PLUGIN_NAME)
 
 
 def _make_fake_install(home: Path, name: str) -> Path:
@@ -133,9 +137,10 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_reconciles_without_any_opt_in_config(tmp_path):
+def test_sh_reconciles_without_any_opt_in_config(tmp_path: Path) -> None:
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
+    assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -158,10 +163,11 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
+def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path: Path) -> None:
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
     now inert."""
+    assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -184,6 +190,71 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     )
     assert "SKIPPED" not in result.stderr, result.stderr
     assert "reconciling in background" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("record", ["recent", "expired", "malformed", "directory"])
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
+def test_legacy_reconcile_record_never_authorizes_process_retirement(
+    tmp_path: Path, record: str, host: str,
+) -> None:
+    shell = _BASH if host == "bash" else shutil.which(host)
+    if shell is None or (host == "bash" and os.name == "nt"):
+        pytest.skip(f"{host} unavailable for this native fixture")
+    home = tmp_path / "home"
+    home.mkdir()
+    installation = _make_fake_install(home, _PLUGIN_NAME)
+    payload = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    scripts = payload / "scripts"
+    shutil.copy2(_PS1, scripts / _PS1.name)
+    lock = installation / "reconcile.lock"
+    if record == "directory":
+        lock.mkdir()
+    else:
+        lock.write_text("invalid\n" if record == "malformed" else "12345\n")
+    if record != "recent":
+        os.utime(lock, (1_000_000_000, 1_000_000_000))
+    before = lock.stat().st_mtime_ns
+    probe = tmp_path / "process-probe"
+    install = tmp_path / "installer-ran"
+    environment = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "BOOTSTRAP_PROBE": str(probe),
+        "BOOTSTRAP_INSTALL": str(install), "COPILOT_EXTENSIONS_CONTEXT": "",
+    })
+    if host == "bash":
+        injection = tmp_path / "fixture.sh"
+        injection.write_text(
+            'kill() { printf "%s\\n" "$*" >>"$BOOTSTRAP_PROBE"; return 0; }\n',
+        )
+        environment["BASH_ENV"] = str(injection)
+        (scripts / "install.sh").write_text(
+            '#!/usr/bin/env bash\nprintf ran >"$BOOTSTRAP_INSTALL"\n',
+        )
+        command = [shell, str(scripts / _SH.name)]
+    else:
+        (scripts / "install.ps1").write_text(
+            "[IO.File]::WriteAllText($env:BOOTSTRAP_INSTALL, 'ran')\n",
+        )
+        entry = tmp_path / "fixture.ps1"
+        entry.write_text(
+            "function Get-Process { [IO.File]::AppendAllText($env:BOOTSTRAP_PROBE, 'get'); $true }\n"
+            "function Stop-Process { [IO.File]::AppendAllText($env:BOOTSTRAP_PROBE, 'stop') }\n"
+            "function Start-Process { [IO.File]::WriteAllText($env:BOOTSTRAP_INSTALL, 'launch') }\n"
+            "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/bootstrap-check.ps1')\n",
+        )
+        command = [shell, "-NoProfile", "-NonInteractive", "-File", str(entry)]
+    result = subprocess.run(
+        command, cwd=home, env=environment, capture_output=True, text=True,
+        timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    assert "legacy reconcile ownership is unsettled" in result.stderr
+    assert not probe.exists() and not install.exists()
+    assert lock.stat().st_mtime_ns == before
+    if record == "directory":
+        assert lock.is_dir()
+    else:
+        assert lock.read_text() == ("invalid\n" if record == "malformed" else "12345\n")
 
 
 if __name__ == "__main__":
