@@ -1,0 +1,9 @@
+{
+  "comment": "Admit thirty-nine unchanged original artifact-schema and wheel-validation controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

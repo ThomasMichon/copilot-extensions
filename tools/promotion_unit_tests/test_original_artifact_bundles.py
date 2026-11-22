@@ -20,6 +20,11 @@ _SELECTED = (
     "test_build_cli_reports_invalid_output_directory",
     "test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order",
     "test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest",
+    "test_validator_accepts_declared_vendored_library_wheel",
+    "test_schema3_requires_complete_provenance_and_computed_identity",
+    "test_forged_content_address_fails_even_when_manifest_index_filename_and_digest_agree",
+    "test_trusted_wheel_validation_reads_real_metadata_and_members",
+    "test_encoded_runtime_metadata_is_a_structured_refusal",
 )
 for _name in _SELECTED:
     assert _name not in globals(), f"duplicate original bundle control: {_name}"

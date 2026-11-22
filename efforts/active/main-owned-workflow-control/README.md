@@ -1247,7 +1247,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,016
   units freshly executed. The withdrawn lookup cohort and threaded readiness
   proposal remain unadmitted; broader parent gates stay open.
-- [ ] Qualify and land all 33 cases from six original synthetic bundle
+- [x] Qualify and land all 33 cases from six original synthetic bundle
   functions: transfer roundtrip, structured wheel-read failures, output
   directory handling, deterministic bytes and archive-corruption refusal.
   Preserve every original parameter, fixture, callback, clock witness and
@@ -1258,6 +1258,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   current-head review and complete fresh Linux CI remain required. Actual
   hosted publication, threaded readback, native/installed and parent gates
   remain separate.
+  #14043 merges at `a73ea800609c804721d48f48a015405983d24dce` after
+  exact-head Copilot approval and complete required Linux CI with all 8,049
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify all 39 cases from five adjacent original artifact-schema and
+  wheel-validation functions: declared vendored-library acceptance, complete
+  provenance and computed identity, forged content-address refusal, real
+  wheel metadata/member validation, and structured encoded-metadata refusal.
+  Extend the existing bundle adapter with exact original objects and retain
+  its autouse fixture, every parameter, callback and assertion. Require
+  closed reads, positive per-case actual owner calls and zero prohibited
+  effects before admission, without replacing an original witness. Preserve
+  preceding node order, unrelated hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Normal strict typing,
+  current-head review and complete fresh Linux CI remain required; native,
+  installed, hosted publication and parent gates stay separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
