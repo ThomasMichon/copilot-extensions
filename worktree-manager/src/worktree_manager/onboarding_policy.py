@@ -32,6 +32,13 @@ def observe(app: str, root: Path, project: str, anchor: Path, companion: Path | 
         state, external = native._requires_external(anchor)
         if state != "ready" or (external and not companion):
             raise ValueError("Index configuration root unresolved")
+        status, _, _ = native._load_repo_candidate(anchor, compose_preferences=False)
+        if status == "absent" and external:
+            status, _, _ = native._load_repo_candidate(companion, compose_preferences=False)
+        if status == "absent":
+            return "unconfigured"
+        if status != "ready":
+            raise ValueError("Invalid native Index activation configuration")
         result = owner("agent_index.configuration_layers").explicit_repository_layers(
             anchor, context, local, config / "config.yaml", parser=native._parse_yaml_for_layers)
         if result["layers"] == ["defaults"]:
@@ -42,8 +49,12 @@ def observe(app: str, root: Path, project: str, anchor: Path, companion: Path | 
         vault = owner("agent_vault.configuration")
         machine = owner("configuration_layers").read_source(str(config), "config.json") if config.exists() else None
         data = machine["values"] if machine else {}
-        owner("agent_vault.config")._validate_config_data(data, "machine vault configuration")
-        result = vault.explicit_preferences(anchor, context, str(local), {}, data, {}, anchor, config)
+        document = owner("configuration_layers").read_source(str(anchor), ".agent-vault.json")
+        repository = document["values"] if document else {}
+        validate = owner("agent_vault.config")._validate_config_data
+        validate(repository, "repository vault configuration")
+        validate(data, "machine vault configuration")
+        result = vault.explicit_preferences(anchor, context, str(local), repository, data, {}, anchor, config)
         return "configured" if result["values"]["enabled"] else "configuration-empty"
     raise ValueError("Unsupported activation reader")
 

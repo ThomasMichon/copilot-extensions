@@ -42,8 +42,21 @@ class InstalledPolicyTest(unittest.TestCase):
             index.write_text("indexer:\n  machine: fixture\n", encoding="utf-8")
             vault = companion / ".agent-vault.json"
             vault.write_text('{"enabled":true}', encoding="utf-8")
+            observe("agent-index", "unconfigured")
+            policy = anchor / ".agent-worktrees" / "config.yaml"
+            policy.parent.mkdir()
+            policy.write_text("requires_external_state_root: true\n", encoding="utf-8")
             observe("agent-index", "host")
             observe("agent-vault", "configured")
+            base_vault = anchor / ".agent-vault.json"
+            base_vault.write_text('{"enabled":true,"port":"invalid"}', encoding="utf-8")
+            observe("agent-vault", None)
+            base_vault.unlink()
+            base_index = anchor / ".agent-index" / "config.yaml"
+            base_index.parent.mkdir()
+            base_index.write_text("indexers: not-a-list", encoding="utf-8")
+            observe("agent-index", None)
+            base_index.unlink()
             vault.write_text('{"enabled":"false"}', encoding="utf-8")
             index.write_text("indexers: not-a-list", encoding="utf-8")
             observe("agent-vault", None)
