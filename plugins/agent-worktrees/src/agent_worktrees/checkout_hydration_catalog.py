@@ -273,6 +273,57 @@ def hydration_state(record: Any) -> str:
     return STATE_DEHYDRATED if is_dehydrated(record) else STATE_HYDRATED
 
 
+def placement_matches(record: Any, config: Any) -> bool:
+    """Prove a dehydrated checkout's original placement for receiving admission.
+
+    A removed checkout cannot supply Git worktree proof, so namespace admission
+    may instead accept the catalog entry beside the recorded checkout path. It
+    must name the same worktree id, repository, branch, checkout path, creation
+    nonce and receiving anchor as the record and as its on-disk receiving
+    ledger. Any absence, mismatch or unreadable evidence fails closed.
+    """
+    from . import config as cfg, tracking
+
+    try:
+        worktree_id = record.worktree_id
+        checkout = Path(record.worktree_path)
+        repo = config.repos.get(record.repo)
+        if (
+            repo is None or not isinstance(worktree_id, str) or not worktree_id
+            or Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id
+            or not checkout.is_absolute() or checkout.name != worktree_id
+            or os.path.lexists(checkout) or not record.branch
+        ):
+            return False
+        ledger = cfg.project_dir(record.repo) / "worktrees" / f"{worktree_id}.yaml"
+        if (
+            record.yaml_path is None or ledger.is_symlink() or not ledger.is_file()
+            or Path(record.yaml_path).resolve() != ledger.resolve()
+        ):
+            return False
+        proven = tracking.load_record(ledger)
+        fields = ("repo", "worktree_id", "worktree_path", "branch", "creation_nonce")
+        if any(getattr(proven, name) != getattr(record, name) for name in fields):
+            return False
+        entry_file = entry_path(checkout.parent, worktree_id)
+        if entry_file.is_symlink() or entry_file.parent.is_symlink():
+            return False
+        entry = read_entry(entry_file)
+        if entry is None:
+            return False
+        identity, git = entry["identity"], entry["git"]
+        return bool(
+            identity.get("worktree_id") == worktree_id
+            and identity.get("repo") == record.repo
+            and git.get("branch") == record.branch
+            and same_path(str(identity.get("checkout_path") or ""), checkout)
+            and (identity.get("creation_nonce") or "") == (record.creation_nonce or "")
+            and identity.get("anchor") and same_path(str(identity["anchor"]), str(repo.anchor))
+        )
+    except (AttributeError, KeyError, TypeError, OSError, ValueError, RuntimeError):
+        return False
+
+
 def _repos(config: Any) -> list[Any]:
     found: list[Any] = list((getattr(config, "repos", None) or {}).values())
     try:

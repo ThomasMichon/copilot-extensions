@@ -83,6 +83,14 @@ shared guards, before they read or change the catalog or checkout (code
 `mutation-refused`). Recover applies it to the rebuilt record before it
 writes anything.
 
+A removed checkout cannot supply Git worktree proof. When the recorded path is
+absent and outside today's worktree root, namespace admission
+(`record_namespace_matches`) accepts the catalog entry beside that path as
+placement evidence. The entry must match the record and its on-disk receiving
+ledger in worktree ID, repository, branch, checkout path and creation nonce,
+and must name the configured anchor. Missing, unreadable or mismatched
+evidence still refuses. Ownership and platform checks are unchanged.
+
 The operation holds the finalize lock, then the lifecycle and launch-admission
 guards. It then runs `git worktree remove <path>` from the anchor **without
 `--force`**. With Git 2.56, plain removal deletes ignored files and refuses

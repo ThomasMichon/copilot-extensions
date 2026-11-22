@@ -715,3 +715,66 @@ def test_observation_batches_parse_the_catalog_once(
     assert catalog.is_dehydrated_checkout(env.checkout) and len(reads) == 2
     catalog.delete_entry(env.entry)
     assert not catalog.is_dehydrated_checkout(env.checkout)
+
+def _real_admission_config(env: SimpleNamespace, root: Path) -> cfg.Config:
+    return cfg.Config(
+        srcroot=str(env.anchor.parent), machine="fixture", platform=detect_platform(),
+        repo_name="sample",
+        repos={"sample": cfg.RepoConfig(anchor=str(env.anchor), worktree_root=str(root))},
+    )
+
+
+def test_root_change_round_trip_passes_real_admission(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from agent_worktrees import legacy_wsl_record_locality
+
+    record = tracking.load_record(env.ledger)
+    record.platform = detect_platform()
+    tracking.save_record(record, env.ledger)
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", _REAL_ADMISSION)
+    original = _real_admission_config(env, env.root)
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: original)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: original)
+    hydration.dehydrate(WT_ID, original)
+
+    moved = tmp_path / "new-root"
+    moved.mkdir()
+    changed = _real_admission_config(env, moved)
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: changed)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: changed)
+    assert legacy_wsl_record_locality.record_namespace_matches(tracking.load_record(env.ledger), changed)
+
+    assert hydration.reconcile(WT_ID, changed)["state"] == "dehydrated"
+    restored = hydration.rehydrate(WT_ID, changed)
+    assert restored["state"] == "hydrated" and restored["head"] == env.head
+    assert (env.checkout / "wip.txt").read_text(encoding="utf-8") == "wip\n"
+    assert not env.entry.exists()
+
+
+@pytest.mark.parametrize("field", ["creation_nonce", "branch", "anchor", "checkout_path", "repo"])
+def test_mismatched_placement_evidence_is_refused_by_real_admission(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, field: str,
+) -> None:
+    from agent_worktrees import legacy_wsl_record_locality
+
+    record = tracking.load_record(env.ledger)
+    record.platform = detect_platform()
+    tracking.save_record(record, env.ledger)
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    section = entry["git"] if field == "branch" else entry["identity"]
+    section[field] = str(tmp_path / "foreign") if field in ("anchor", "checkout_path") else "foreign"
+    catalog.write_entry(env.entry, entry)
+    moved = tmp_path / "new-root"
+    moved.mkdir()
+    changed = _real_admission_config(env, moved)
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: changed)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: changed)
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", _REAL_ADMISSION)
+    assert not legacy_wsl_record_locality.record_namespace_matches(tracking.load_record(env.ledger), changed)
+    before = env.entry.read_bytes()
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.rehydrate(WT_ID, changed)
+    assert caught.value.code == "mutation-refused"
+    assert env.entry.read_bytes() == before and not env.checkout.exists()
