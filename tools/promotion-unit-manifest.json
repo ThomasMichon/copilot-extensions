@@ -10363,7 +10363,7 @@
     "plugins/agent-worktrees/scripts/registry_root.py": "ae0cf831dba7c2c47e45d5f6b33ed82c9a81db0e249f2d541d3a740d17c897b1",
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "ae5d48db9d420fe8290b24e9021b4a9f07c3f038845b8531665916201446e4b4",
     "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "8b79b6f54d92258ae22de133470c4389eb3b84ea19865a4b7e439a884484d4f3",
-    "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "367cb336a16bf2d8ac09abeaef573e16dc89cf84de83ba4d20f4f0897d347798",
+    "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "a4ffeda9e474870de31368d303cb98d40b61376768898d563791c4482cf10231",
     "plugins/agent-worktrees/src/agent_worktrees/native_arguments.py": "bc7cc0af49a6d95baaa7b2727342117292f98160fcb8d6d9f5f044d96ba4c84e",
     "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py": "eaa2eb00a19e6c60dac772cdb1de9d928e1b8a523d313cbe13321fdca80c57f3",
     "plugins/agent-worktrees/src/agent_worktrees/process_launcher.py": "cc325a19659111db404dc3bcacf7913a7e4d4f4eea30e7d9d4245c115796b055",
