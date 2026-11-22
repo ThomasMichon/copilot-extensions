@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_parallel_hash_refusals.py",
+      [
+        "test_payload_hash_rejects_unbounded_worker_counts_before_read[0]",
+        "test_payload_hash_rejects_unbounded_worker_counts_before_read[5]",
+        "test_payload_hash_rejects_unbounded_worker_counts_before_read[True]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_core_python_artifacts.py",
       [
         "test_core_builds_each_canonical_project_once_and_roundtrips",
@@ -10091,6 +10099,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_parallel_hash_refusals.py": "3be56bcd93cbe59c43ff3f1a5e3cf97d5e8f6c5891db96addd07ca211dca8d0a",
+    "tools/test_parallel_artifact_hash.py": "8f0112f07ba75823d050d964b104e1185e48970061790169aa70dc7b92451440",
     "tools/promotion_unit_tests/test_original_core_python_artifacts.py": "759bd97930589a41905b59d7acae729650cdf677da285c2db2e9f0a031e17d5a",
     "tools/test_core_python_artifacts.py": "1286eaa9fc37da899d91622d57bf10038b6af6a4c311f02a9abe7541731b9328",
     "tools/test_standalone_python_artifacts.py": "f6b4b5cd3817d8569bf2a8e5e66d7c115c89065e1aa33a21e176b31a89386834",
