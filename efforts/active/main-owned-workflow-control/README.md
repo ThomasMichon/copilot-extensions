@@ -1227,6 +1227,22 @@ authorizes critical main-path acceptance or a bounded administrative change.
   the 300-second bound. Normal strict typing, current-head review and complete
   Linux source CI remain required. These source-level doubles do not qualify
   actual Windows lookup, private-root creation, links or installed behavior.
+  Linux CI refuses the original lazy `ctypes` import at `PyDLL(None)` before
+  the lookup doubles are installed. All seven additions are withdrawn;
+  the passing Windows development run is not cross-platform admission.
+  No preload, guard exception or original-test rewrite is substituted.
+- [ ] Qualify and land three original artifact-readiness refusal controls:
+  changed source refuses before release access, failed preparation emits no
+  receipt and final publication does not repair it, and missing premerge
+  identity refuses before release access. Preserve the exact original
+  synthetic hosted and autouse identity fixtures, callbacks and assertions.
+  Require original-object/parameter identity, closed reads, positive per-case
+  actual owner calls and zero prohibited effects before admission; retain
+  preceding nodes/hashes, targets, helper decisions, compact/flat-v1 identity
+  and the 300-second bound. Normal strict typing, current-head review and
+  complete fresh Linux CI remain required. Parallel download verification,
+  actual hosted publication, native execution, installed and parent gates
+  remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

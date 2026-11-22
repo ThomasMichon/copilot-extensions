@@ -4097,11 +4097,60 @@ Immutable-base/head strict typing and committed changefile-presence checks
 pass; a concurrently advanced shared remote-tracking ref is not treated as
 part of this contribution.
 
-Current-head review and complete fresh Linux source CI remain required
-before this finite leaf is complete. Fresh-install/native/installed lanes
+Exact-head Copilot approval `6010619971` covers
+`d196d0682edfd9b320a300c1c5dc0bbc4060e155`, but Linux CI `44991242578`,
+unit job `137112545445`, refuses the first added case on `ctypes.dlopen`.
+Its original helper imports `ctypes` before installing the lookup doubles;
+Linux initializes `pythonapi = PyDLL(None)` at that import. The unchanged
+guard refuses it, after 1,043 preceding passes, with one failure and 39
+deselections in 16.71 pytest seconds. No complete packet evidence is produced
+and the required aggregate fails. This is a genuine cross-platform admission
+failure caused by this candidate, not an unrelated flake or passing review.
+
+All seven additions and the adapter-hash change are withdrawn, restoring the
+target's 8,013-node admission. No loader preload, guard exception, callback
+replacement or original-test rewrite is introduced. The local nineteen-case
+pass does not qualify this cohort on Linux. Required review and CI for any
+corrected source contribution remain independent merge gates.
+Fresh-install/native/installed lanes
 are not exercised because no installation or runtime behavior changes.
 Full-census, every-release, comparable whole-flow, owner, native, installed
 and retained-custody gates remain open.
+
+### November 22 original artifact-readiness early-refusal qualification
+
+The initial twenty-case synthetic hosted-readiness proposal is refused on
+its first success-path case when real download verification starts the
+existing thread pool. No thread-pool replacement or serial callback is
+introduced. That original success/readback path remains outside the unit
+packet; no passing result is inferred for the unexecuted cases.
+
+Three separate complete original functions stop before that parallel
+readback: source-byte mismatch refuses before any release request; failed
+preparation emits no readiness receipt and final publication never repairs
+it; and empty premerge identity refuses before release access. The adapter
+exports their exact test objects plus the original synthetic `hosted` and
+autouse `no_ambient_git_identity` fixture objects. All callbacks, assertions
+and fixture bodies remain unchanged. The 58-case original collection matches
+the three selected nodes and identities.
+
+A fresh guarded process passes three cases in 2.000 seconds, with zero
+prohibited effects, 43 bound Python reads and positive actual call-phase
+owner lines for every case. Four sources are newly bound: the adapter, its
+original module, the original artifact-fixture module and their workflow
+test-support import. No previous source binding changes. The candidate has
+8,016 nodes, 1,172 sources, 448 targets and 909,154 compact-v2 bytes,
+retaining all preceding 8,013 nodes, 89 helper decisions, compact/flat-v1
+identity and the 300-second bound.
+
+Ruff and whole-file strict Python 3.10/Linux and Windows typing pass for the
+corrected contribution, including the restored UV adapter.
+Current-head review and complete fresh Linux source CI remain required.
+No live publication, artifact download, thread, native execution, runtime
+update or Main/controller mutation occurs in this qualification. Fresh-install
+and installed external lanes are not exercised because no installation or
+runtime behavior changes. Full-census, every-release, comparable whole-flow,
+owner, native, installed and retained-custody gates remain open.
 
 ### November 20 path-gated audit-guard native boundary
 
