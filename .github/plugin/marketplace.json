@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.21.15-dev1",
+      "version": "0.21.16-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -123,7 +123,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.10.393-dev1",
+      "version": "0.10.394-dev1",
       "source": "plugins/agent-index"
     },
     {

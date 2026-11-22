@@ -1044,11 +1044,19 @@ deploy_binstub() {
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1 \
         runtime-gate.sh runtime-gate.ps1 \
-        delegated-waiter-callback.ps1 delegated-waiter-callback.sh; do
+        delegated-waiter-callback.ps1 delegated-waiter-callback.sh \
+        bootstrap-python-version.txt bootstrap-python-launcher.txt; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi
     done
+    if [[ -d "$SCRIPT_DIR/_bootstrap_python" ]]; then
+        mkdir -p "$INSTALL_DIR/bin/_bootstrap_python" || return 1
+        for r in "$SCRIPT_DIR/_bootstrap_python/"*; do
+            [[ -f "$r" ]] || continue
+            _runtime_publication_copy "$r" "$INSTALL_DIR/bin/_bootstrap_python/${r##*/}" || return 1
+        done
+    fi
     mkdir -p "$INSTALL_DIR/bin/installation-context" || return 1
     while IFS= read -r r; do
         _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \

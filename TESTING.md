@@ -7746,6 +7746,12 @@ publication, native maintenance or application adoption.
 for Linux's native checkout semantics, covering manifests, parents, standalone
 versions, fallbacks, templates, the catalog and changefile directories/files.
 Actor-free preflight cases cover all version destinations before any write.
+The same real-Git packet exercises generated LF command wrappers under declared
+CRLF checkout attributes and `core.safecrlf=true`, both in ordinary staging and
+inside an ignored generated application. Canonical composition scopes the
+round-trip-check override to those staging commands; attributes still normalize
+the stored blobs, and neither working bytes nor repository/global Git settings
+are rewritten.
 
 ### Complete local application preparation and reuse
 

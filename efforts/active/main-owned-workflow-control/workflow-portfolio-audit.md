@@ -6185,6 +6185,30 @@ runtime behavior do not change; normal fresh source CI supplies the external
 Linux consumer proof. This finite source-only slice does not establish
 controlled whole-flow savings, close the parent or settle retained refusals.
 
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013340905` names exact head
+`375ccaba36471a069302444aafd566b2d413bf61`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45045589367`, unit job `137279371212`, executes all 8,915
+cases with 48 deselections in 204.88 pytest / 227.499 packet seconds.
+It reports `mode=executed`, origin run `45045589367` attempt one,
+execution identity
+`756d11a302060ebcc4239e5ed7590ca06e99952c4e1f4d314f56a1ee7bb70169`
+and packet digest
+`0739f9fdbfebe5fa9367a5005f0019305a00642e912c614218f8499ab9a36655`.
+Guards, required aggregate `137280841098` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge.
+
+Source #14106 merges at `2026-11-22T16:52:50Z` as
+`f80b5c109f43c5b82e3bec919dd68a47f502e865`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+five-case leaf. Separate data/native-load/thread refusals, release, owner,
+custody and completion gates remain open.
+
 ### November 22 original invalid freeze-deadline refusal
 
 The complete original function retains all three `0`/infinite/boolean
@@ -6209,6 +6233,36 @@ none is replayed. The existing data-admission owner retains the gap.
 All 8,907 current nodes, 1,267 bound source hashes, 467 targets, 89 helper
 decisions and the 300-second bound remain unchanged. The parent stays open;
 independent source-only consolidation continues.
+
+### November 22 original deferred-dispatch evidence-state controls
+
+The adapter exports three complete original parameterized functions: six
+recorded Gate status/conclusion decisions, five unavailable or malformed
+admission responses, and eight incomplete or malformed retirement connections.
+All original parameters, in-memory backend/request callbacks and assertions
+remain intact, including errors, missing data, truncated inventories, state,
+merge, duplicate and cursor failures. No fixture or OS skip is changed.
+
+Complete collection verifies all 102 original cases and exactly 19 adapter
+cases. Each adapter function is the original object; collected parameters
+retain their exact objects from that function's own parametrization, and
+their values and types match the independently collected original module.
+Initial unchanged source/effect auditing passes all 19 in 1.109 seconds
+with zero prohibited effects, six bound canonical Python reads and actual
+admission/dispatch owner call-phase coverage per case. No actual backend,
+workflow, Main or artifact operation is performed.
+
+Only the adapter source binding is added. All 8,915 prior nodes retain relative
+order; all 1,270 current source hashes, 467 targets, 89 helper decisions and
+the 300-second bound remain intact. Compact-v2 and flat-v1 logical identity
+agree; the candidate contains 8,934 nodes and 1,271 sources in 1,002,798
+bytes. Exact-head review and complete fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, guard, workflow,
+runtime, native, data-admission or cleanup change is introduced.
+Fresh-install/native/installed lanes are not exercised because no installation
+or runtime behavior changes. Separate retained refusals, owner, release,
+custody, every-release, full-census and whole-flow gates remain open.
 
 ### November 22 original vault cache-policy inspection
 

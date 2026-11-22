@@ -3,6 +3,30 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_dispatch_evidence_states_units.py",
+      [
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[queued-None-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[in_progress-None-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-skipped-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-cancelled-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-failure-False]",
+        "test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops[completed-success-True]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed0]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed1]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed2]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed3]",
+        "test_unavailable_admission_evidence_refuses_instead_of_guessing[malformed4]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[errors]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[missing]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[truncated]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[wrong-state]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[merged]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[duplicate]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[invalid-cursor]",
+        "test_retirement_connection_cannot_hide_incomplete_or_malformed_history[repeated-cursor]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_history_units.py",
       [
         "test_admission_binds_the_actual_gate_attempt_and_reuses_it_for_job_only_recovery",
@@ -10904,6 +10928,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_dispatch_evidence_states_units.py": "30932c3b296fc1c71f2acf6568d44b0d9314daa418f0554fdc763e7cf36c18bc",
     "tools/promotion_unit_tests/test_original_dispatch_history_units.py": "ec9cf3f6baf21d20f8d8fe6bf935534feb646d070b327cb64c77337b6198f5de",
     "tools/promotion_unit_tests/test_original_dispatch_recovery_units.py": "59d54478c962b3e47137b2f535aaa6b39e66ff95080aae1d84e096c62c44ac90",
     "tools/test_promotion_dispatch.py": "f75de93ee3906617471aac2e5d129ae8ada84755dd3ac954cb5a3fe20416198f",
@@ -11000,8 +11025,8 @@
     "plugins/agent-bridge/scripts/install.sh": "85439d5ff1cb57ffd607dd4141d81fc4ebe0c2ce82f0942fa14a6bde9d869ef3",
     "plugins/agent-bridge/scripts/install.ps1": "88446b1317d04de659120a5c07d38259380033bfee6085ee480b08d6f440624a",
     "plugins/agent-dispatch/plugin.json": "16e513b1cfd29c203b98719ce30d574da2fd7cd6cd602a5cad9b178002848315",
-    "plugins/agent-dispatch/scripts/install.sh": "64e8c399194a683a796359e913d8e820e349c95276e28e50afeac52085a33fd1",
-    "plugins/agent-dispatch/scripts/install.ps1": "79eb88e8d6706b673a4ed7bd03d7f9f1558dddc3c7c70199bdc0fbd63f470dce",
+    "plugins/agent-dispatch/scripts/install.sh": "32a8f13a57b544f5ad107203042b90a0e9438dce73b7ad2ef40325415d2af97e",
+    "plugins/agent-dispatch/scripts/install.ps1": "86b8526515b8dff99c0456d7b388af4a98b99a21fdbe1cc23b82df8e74e41b63",
     "plugins/agent-vault/plugin.json": "3f191fb32f9763f4c5717ea9e711c467e9746e182dd806b600fb1d4f00ca99c4",
     "plugins/agent-vault/scripts/install.sh": "21d2c46c4b135c95a73b59830a1e4f3fce2875478bd33ef1985f075cbe40a22e",
     "plugins/agent-vault/scripts/install.ps1": "726d2051a4201d27f0be69471db78cc7e252b048978e3fd71671d09fc9d74a12",
@@ -11625,7 +11650,7 @@
     "tools/plugin_test_environment.py": "52ea6846d91c74eacce935fa8225761fc2850312f4556fd19193756ad8242d06",
     "tools/plugin_test_lifecycle.py": "88ad7b2acc7fe5cc73d332f5603968d8c14168b9b5320de27dde8e49c6730e1a",
     "tools/promotion_unit_tests/test_lifecycle_pins.py": "ba6f6ab2d947eec5684be35e77421e07e00b0b6281b9a793b84287b31e6e1093",
-    "tools/promote_release.py": "b226d383d6a2a4dc9375dbfdee80bf61ed6b1249d5ddd129e611acea80c2a217",
+    "tools/promote_release.py": "fdac616944c8cfa87f02a35180989e6c965f32f6551540b99c74e534c090a345",
     "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
     "tools/promotion_artifact_readiness.py": "173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",
     "tools/promotion_candidate.py": "0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",

@@ -52,7 +52,7 @@ from promotion_candidate import (
 )
 from promotion_source_archive import (
     changefile_existed_at as changefile_existed_at,
-    git_environment,
+    git_environment as git_environment,
     git_text,
     git_timeout_options,
     is_ancestor,
@@ -567,11 +567,13 @@ def _remove_pycache(root: Path) -> None:
 
 def build_promotion_tree(scratch: Path, *, control: dict[str, Any] | None = None) -> str:
     _remove_pycache(scratch)
-    _git(["add", "-A"], cwd=scratch)
+    # Normalize generated LF inputs through attributes without a checkout round-trip veto.
+    stage = ["-c", "core.safecrlf=false", "add"]
+    _git([*stage, "-A"], cwd=scratch)
     from materialize_source_applications import promotion_outputs
     for application in promotion_outputs(scratch):
         # A generated app is one complete distribution, including ignored source shims.
-        _git(["add", "-f", "-A", "--", application], cwd=scratch)
+        _git([*stage, "-f", "-A", "--", application], cwd=scratch)
     if control is not None:
         # Stage pinned blobs after checkout filters and core.filemode handling.
         for path, blob in control["files"].items():
