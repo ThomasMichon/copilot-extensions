@@ -3,6 +3,16 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_source_index_units.py",
+      [
+        "test_source_owned_index_accepts_an_equivalent_composition_in_another_container",
+        "test_source_owned_index_still_rejects_changed_source_or_composition[dev_head]",
+        "test_source_owned_index_still_rejects_changed_source_or_composition[content_tree]",
+        "test_legacy_index_retains_its_original_parent_binding",
+        "test_source_owned_index_refuses_a_second_container_identity"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_control_manifest_units.py",
       [
         "test_manifest_rejects_nonportable_or_noncontrol_paths[files0]",
@@ -11094,6 +11104,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_source_index_units.py": "6eebf6b2ca82066adace0e6372d6e2aab32efd37103056292494ca7ea9a119e7",
+    "tools/test_promotion_source_identity.py": "320111aa725b431330dea1a6f99fdc730923bb919af7c9cd4b2d6207600f8aad",
     "tools/promotion_unit_tests/test_original_control_manifest_units.py": "56fc3a56edbdf11678ac4c21f6090074b288d7a27d38289fd3d0fe2fd2d25c87",
     "tools/test_promotion_control.py": "ace80617f9d6a55fde718d5ace0118434863b5ec4135a3d80d06cee5dfe05e4c",
     "tools/promotion_unit_tests/test_original_lifecycle_cli_units.py": "d5961b427d81cf26d49ba39608758dcf9fea47b470b0032bfc4ab4cbaaa7a095",
