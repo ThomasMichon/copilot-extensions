@@ -5,12 +5,6 @@
     [
       "tools/promotion_unit_tests/test_original_core_python_artifacts.py",
       [
-        "test_core_preserves_only_the_existing_exact_manager_wheel_exception[direct]",
-        "test_core_preserves_only_the_existing_exact_manager_wheel_exception[conditional]",
-        "test_core_preserves_only_the_existing_exact_manager_wheel_exception[bytes]",
-        "test_core_preserves_only_the_existing_exact_manager_wheel_exception[project]",
-        "test_core_preserves_only_the_existing_exact_manager_wheel_exception[dependency]",
-        "test_core_preserves_only_the_existing_exact_manager_wheel_exception[filename]",
         "test_core_builds_each_canonical_project_once_and_roundtrips",
         "test_core_source_binding_refuses_incomplete_or_changed_composition[missing]",
         "test_core_source_binding_refuses_incomplete_or_changed_composition[duplicate]",
@@ -10097,7 +10091,7 @@
     ]
   ],
   "sources": {
-    "tools/promotion_unit_tests/test_original_core_python_artifacts.py": "3dce9928d4ff6fa470ce3ece8607ee4e679be3dec957041ea4bf391d45c3c507",
+    "tools/promotion_unit_tests/test_original_core_python_artifacts.py": "759bd97930589a41905b59d7acae729650cdf677da285c2db2e9f0a031e17d5a",
     "tools/test_core_python_artifacts.py": "1286eaa9fc37da899d91622d57bf10038b6af6a4c311f02a9abe7541731b9328",
     "tools/test_standalone_python_artifacts.py": "f6b4b5cd3817d8569bf2a8e5e66d7c115c89065e1aa33a21e176b31a89386834",
     "tools/runtime_profile_cases.py": "a400cc0c62e6aaf0c905a98b15e0e99efe994899cb6dfac5a978a8f5bf29fb9f",

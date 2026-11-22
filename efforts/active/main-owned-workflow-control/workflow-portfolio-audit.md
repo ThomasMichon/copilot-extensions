@@ -4420,33 +4420,41 @@ acceptance of any broader owner or parent gate.
 
 ### November 22 original synthetic core-artifact qualification
 
-A new adapter exports thirteen exact original core-artifact test functions as
-29 cases. They retain the existing manager-wheel exception, canonical project
+A new adapter initially exports thirteen original core-artifact test functions
+as 29 cases. Review identifies six manager-wheel exception cases reading
+`worktree-manager/pyproject.toml` outside the source/build-data admission.
+The initial zero-effect result does not bind that TOML. Withdraw the complete
+original function from the adapter and defer all six cases with their data
+admission owner; preserve the original test, inputs and assertions and do not
+widen the data allowlist.
+
+The remaining twelve exact original functions cover 23 cases: canonical project
 composition, conditional dependencies and extras, shared toolchain, malformed
 selection/manifest refusals, CLI argument forwarding and complete release
 profile binding. Original synthetic build callbacks, fixture helpers,
 parameters and assertions remain unchanged. The original isolated
 builder-help subprocess smoke stays outside this unit packet.
 
-The complete original collection has thirty cases; all 29 selected adapter
-identities and function objects match. A fresh process passes all 29 through
-the unchanged effect auditor in 7.875 seconds, with zero prohibited effects,
-49 bound Python reads and positive actual call-phase owner lines per case.
-Only the adapter, original core test module, original standalone fixture
-module and runtime-profile fixture module add bindings. The production
-coverage targets and copied canonical fixture inputs are already bound.
-No actual build toolchain, subprocess, thread pool or external publication
-is substituted for a required witness.
+The initial 29-case guarded development execution takes 7.875 seconds, with
+zero prohibited effects and positive call-phase owner lines; that incomplete
+input binding is not full qualification. The reduced collection matches all
+23 selected parameter identities and twelve exact original functions against
+the thirty-case original. A fresh process passes all 23 through the unchanged
+auditor in 7.969 seconds, with zero prohibited effects, 49 bound Python reads
+and positive actual call-phase owner lines for every case.
 
-The packet contains 8,243 nodes, 1,181 bound sources, 448 targets and 931,892
-compact-v2 bytes. All preceding 8,214 nodes retain relative order and all
-1,177 existing hashes remain unchanged. Coverage targets, 89 helper decisions,
-compact/flat-v1 identity, byte cap and 300-second bound remain enforced.
-Normal strict typing, current-head review and complete fresh Linux CI remain
-required. Fresh-install/native/installed lanes are not exercised because no
-installation or runtime behavior changes. This is not a reuse hit, controlled
-whole-flow saving, real build/publication, resolution of the threaded witness
-or acceptance of any broader owner or parent gate.
+The reduced packet contains 8,237 nodes, 1,181 bound sources, 448 targets and
+931,359 compact-v2 bytes. Only the adapter, original core test module,
+original standalone fixture module and runtime-profile fixture module add
+bindings. All 8,214 preceding nodes and 1,177 existing source hashes remain,
+with unchanged targets, 89 helper decisions, compact/flat-v1 identity, byte
+cap and 300-second bound. Normal strict typing, current-head review and
+complete fresh Linux CI remain required; initial-head green is not current
+qualification and does not settle the undeclared-data finding.
+Fresh-install/native/installed lanes are not exercised because no installation
+or runtime behavior changes. This is not a reuse hit, controlled whole-flow
+saving, real build/publication, resolution of either deferred witness or
+acceptance of any broader owner or parent gate.
 
 ### November 20 path-gated audit-guard native boundary
 

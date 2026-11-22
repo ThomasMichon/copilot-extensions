@@ -13,7 +13,6 @@ sys.modules[_spec.name] = _original
 _spec.loader.exec_module(_original)
 
 _SELECTED = (
-    "test_core_preserves_only_the_existing_exact_manager_wheel_exception",
     "test_core_builds_each_canonical_project_once_and_roundtrips",
     "test_core_source_binding_refuses_incomplete_or_changed_composition",
     "test_core_uses_existing_marketplace_version_and_hashes_selection",

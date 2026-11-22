@@ -1337,7 +1337,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,214
   units freshly executed. The distinct threaded witness and broader parent
   gates remain open.
-- [ ] Qualify the 29 synthetic cases from thirteen original core-artifact
+- [ ] Resolve the six original core manager-wheel exception cases' undeclared
+  build-data input with the existing data-admission owner. Review of #14058
+  identifies `worktree-manager/pyproject.toml` outside the admitted source/data
+  closure. Withdraw the entire original function without changing its inputs
+  or assertions; a green Python-read effect audit does not bind that TOML.
+  Do not widen the data allowlist to admit this cohort.
+- [ ] Qualify the other 23 synthetic cases from twelve original core-artifact
   functions, preserving their exact functions, fixture helpers, build
   callbacks, parameters and assertions. Keep the original isolated builder
   CLI smoke with its existing integration owner. Require closed reads,
