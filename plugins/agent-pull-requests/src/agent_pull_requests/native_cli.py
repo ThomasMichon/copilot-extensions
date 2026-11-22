@@ -9,6 +9,7 @@ import math
 import subprocess
 import sys
 import time
+from typing import Any, cast
 
 from .native_command import run_command
 from .watch_provider import NATIVE_SNAPSHOT_TIMEOUT, command_path, fetch_snapshot
@@ -21,12 +22,16 @@ def validate_selector(value: str) -> str:
 
 
 class MergeMethodAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(
+        self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+        values: Any, option_string: str | None = None,
+    ) -> None:
         namespace.method = self.const
         namespace.method_explicit = True
 
 
-def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
+def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict[str, Any]]:
+    creation_environment: dict[str, str] | None = None
     if args.command == "create":
         if not args.head.strip():
             raise ValueError("native create requires a nonempty pushed head branch")
@@ -43,7 +48,12 @@ def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
         if args.draft:
             argv.append("--draft")
         from .native_author import create_options
-        argv.extend(create_options(args, prefix))
+        options, bounded = create_options(args, prefix)
+        argv.extend(options)
+        if bounded:
+            creation_environment = {
+                "AGENT_WORKTREES_FOREIGN_CREATE_DEADLINE_V1": str(time.monotonic() + 75),
+            }
     else:
         if args.method_explicit or args.delete_branch or args.auto:
             raise ValueError(
@@ -52,7 +62,10 @@ def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
             )
         argv = ["pr-merge", args.repo, str(args.number), "--now", "--json"]
     try:
-        result = run_command([*prefix, *argv], timeout=90.0)
+        result = (
+            run_command([*prefix, *argv], timeout=90.0, env=creation_environment)
+            if creation_environment is not None else run_command([*prefix, *argv], timeout=90.0)
+        )
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
         raise RuntimeError(
             "native PR command did not return a confirmed result; it may have applied. "
@@ -83,7 +96,7 @@ def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
     return 0, payload
 
 
-def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
+def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict[str, Any]]:
     waiting = args.command == "wait"
     if waiting and any(
         not math.isfinite(value) or value < 0 for value in (args.timeout, args.interval)
@@ -95,6 +108,8 @@ def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
             args.repo, args.number, args.worktrees_command, prefix=prefix,
             runner=lambda argv: run_command(argv, timeout=NATIVE_SNAPSHOT_TIMEOUT),
         )
+        if snapshot.native_snapshot is None:
+            raise ValueError("native snapshot is missing its owner response")
         payload = dict(snapshot.native_snapshot)
         if not waiting:
             return 0, payload
@@ -111,16 +126,18 @@ def run(
 ) -> int:
     if args.command == "diff":
         from .native_diff import run as diff_run
-        return diff_run(args, prefix_factory)
+        return cast(Callable[..., int], diff_run)(args, prefix_factory)
     if args.command == "threads":
         from .native_threads import run as threads_run
         return threads_run(args, prefix_factory)
     if args.command == "complete":
         from .native_source_complete import run as complete_run
-        return complete_run(args, prefix_factory)
+        return cast(Callable[..., int], complete_run)(args, prefix_factory)
+    code: int
+    payload: dict[str, Any]
     if args.command == "cancel-creation":
         from .native_creation_cancel import run as cancellation_run
-        code, payload = cancellation_run(args, prefix_factory)
+        code, payload = cast(Callable[..., tuple[int, dict[str, Any]]], cancellation_run)(args, prefix_factory)
         if args.json or not payload.get("error"):
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
@@ -136,7 +153,7 @@ def run(
             code, payload = resolution_run(args, launch)
         elif args.command == "nudge":
             from .native_reviewer_request import run as nudge_run
-            code, payload = nudge_run(args, launch)
+            code, payload = cast(Callable[..., tuple[int, dict[str, Any]]], nudge_run)(args, launch)
         elif args.command in ("author-capabilities", "update", "push", "ready"):
             from .native_author import run as author_run
             code, payload = author_run(args, launch)
@@ -151,11 +168,11 @@ def run(
             from .native_author import readiness_failure
             payload = readiness_failure(args.repo, args.number, str(exc))
         elif args.command == "nudge":
-            from .native_reviewer_request import failure
-            payload = failure(args.repo, args.number, str(exc))
+            from .native_reviewer_request import failure as reviewer_failure
+            payload = cast(Callable[..., dict[str, Any]], reviewer_failure)(args.repo, args.number, str(exc))
         elif args.command in ("resolve-thread", "reopen-thread"):
-            from .native_thread_resolution import failure
-            payload = failure(args, str(exc))
+            from .native_thread_resolution import failure as resolution_failure
+            payload = resolution_failure(args, str(exc))
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     elif payload.get("error"):

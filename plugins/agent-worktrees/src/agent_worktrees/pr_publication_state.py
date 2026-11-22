@@ -7,9 +7,10 @@ from datetime import datetime, timedelta
 import json
 
 from . import config as cfg, tracking
+from .providers.base import PullResult
 
 
-def authority(pr: tracking.PRRecord) -> tuple:
+def authority(pr: tracking.PRRecord) -> tuple[object, ...]:
     return tuple(getattr(pr, name) for name in (
         "branch", "repo", "provider", "number", "url", "state",
         "base_sha", "head_sha", "patch_id", "remote", "head_repo",
@@ -62,14 +63,25 @@ def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord
             raise ValueError("Tracked PR authority changed before publication; reload it before retrying.")
 
 
-def persist_pull(config, record, target, pull, *, head_sha: str, marker_published: bool, session: str):
-    from . import pr_ops, pr_publish
+def persist_pull(
+    config: cfg.Config, record: tracking.WorktreeRecord, target: tracking.PRRecord, pull: PullResult,
+    *, head_sha: str, marker_published: bool, session: str, prcfg: cfg.PRConfig | None = None,
+) -> str | None:
+    from . import obligations, pr_ops, pr_publish, pr_unverified_creation
+    from .providers import creation_receipt
+    from .providers.base import ProviderError
 
+    policy = prcfg or config.default_repo.pr
+    try:
+        creation_receipt.validate(pull, target.provider or policy.provider, target.repo, policy.api_base)
+    except ProviderError as exc:
+        raise ValueError(str(exc) + " Reconcile the retained attempt.") from exc
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     with pr_publish.metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
+        pr_unverified_creation.require_owner(fresh, record)
         current = pr_publish._publication_pr(fresh, target)
-        if not matches(current, target):
+        if current is None or not matches(current, target):
             raise ValueError("Provider PR opened, but tracking authority changed; reconcile the provider identity.")
         current.url = pull.url
         current.number = pull.number
@@ -80,6 +92,15 @@ def persist_pull(config, record, target, pull, *, head_sha: str, marker_publishe
         if not fresh.parent_session and session:
             fresh.parent_session = session
         claimed_ref = pr_ops._ensure_pr_claim(fresh, current)
+        if current.state not in ("closed", "merged") and not any(
+            claim.kind == "pr" and claim.ref == pr_ops._pr_claim_ref(current) and claim.state == obligations.ACTIVE
+            for claim in fresh.resources
+        ):
+            raise ValueError("Provider PR opened without an active responsibility claim; retain its unknown receipt.")
+        if current.creation.get("provider_outcome") == "publishing":
+            current.creation.update(
+                provider_outcome="verified", provider_number=str(pull.number), provider_url=pull.url,
+            )
         tracking.save_record(fresh)
         copy_pr(target, current)
         record.resources = fresh.resources
@@ -87,7 +108,10 @@ def persist_pull(config, record, target, pull, *, head_sha: str, marker_publishe
         return claimed_ref
 
 
-def provisional_lease(pr, remote: str, branch: str, cwd: str, *, record=None, prcfg=None) -> str | None:
+def provisional_lease(
+    pr: tracking.PRRecord | None, remote: str, branch: str, cwd: str, *,
+    record: tracking.WorktreeRecord | None = None, prcfg: cfg.PRConfig | None = None,
+) -> str | None:
     """Create an absent ref or resume only a prepared, exact first push."""
     from . import pr_creation_state, pr_publish
 
@@ -120,7 +144,7 @@ def unpublished_retry(
     pr: tracking.PRRecord | None, branch: str, provider: str, repo: str,
 ) -> bool:
     """Match a never-published attempt without borrowing another destination."""
-    if unpublished(pr) and pr.branch == branch and (pr.provider, pr.repo) != (provider, repo):
+    if pr is not None and unpublished(pr) and pr.branch == branch and (pr.provider, pr.repo) != (provider, repo):
         raise ValueError("Unpublished PR destination changed; select a distinct head before retrying.")
     return bool(
         unpublished(pr) and pr is not None

@@ -132,6 +132,10 @@ def assess(
         return PruneVerdict(False, "active", "live Copilot session in use",
                             turn_count)
 
+    blocker = retirement_blocker(rec, advisory=True)
+    if blocker is not None and blocker.bucket in ("open-pr", "unknown-publication"):
+        return PruneVerdict(False, blocker.bucket, blocker.reason, turn_count)
+
     # Directory missing -- the caller must verify the branch is merged before
     # deleting; surface it distinctly rather than guessing.
     if state == S.GONE:
@@ -201,9 +205,6 @@ def _content_verdict(
     # no unique commits and the *real* merge state lives on the PR(s).  Trust
     # the (reconciled) PR records over git heuristics here.
     if rec.prs:
-        blocker = retirement_blocker(rec)
-        if blocker is not None and blocker.bucket == "open-pr":
-            return PruneVerdict(False, blocker.bucket, blocker.reason, turn_count)
         merged = [p.number for p in rec.prs if p.state == "merged"]
         if merged:
             nums = ", ".join(f"#{n}" for n in merged if n is not None) or "?"
@@ -338,7 +339,7 @@ def cleanup_disposition(
     if info.state == S.ACTIVE:
         return CleanupDisposition(False, "active", v.reason)
 
-    if v.category == "open-pr":
+    if v.category in ("open-pr", "unknown-publication"):
         return CleanupDisposition(False, v.category, v.reason)
 
     # Claimed-resource safety spares an IN-FLIGHT owned resource while its

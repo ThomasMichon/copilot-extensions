@@ -11,13 +11,42 @@ growing an already very large file further.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
 
-from . import finalize as fin
-from . import git_ops, tracking
+from . import config as cfg, finalize as fin, git_ops, tracking
+from .retirement_safety import pending_prs
 
 
-def _resolve_repo(config, record):
+def foreign_publication_guard(
+    function: Callable[..., tuple[bool, list[str]]],
+) -> Callable[..., tuple[bool, list[str]]]:
+    @wraps(function)
+    def guarded(
+        rec: tracking.WorktreeRecord, repo: cfg.RepoConfig, tracking_path: Path, *, force: bool = False,
+    ) -> tuple[bool, list[str]]:
+        from . import launch_seed_state, retirement_safety
+        from .receiving_allocation import serialized_receipt
+
+        path = tracking_path / f"{rec.worktree_id}.yaml"
+        try:
+            with launch_seed_state.removal_transaction(path):
+                fresh = tracking.load_record(path)
+                fields = ("worktree_id", "worktree_path", "branch", "machine", "creation_nonce")
+                if (
+                    any(getattr(fresh, name) != getattr(rec, name) for name in fields)
+                    or serialized_receipt(fresh) != serialized_receipt(rec)
+                ):
+                    return False, ["managed removal owner changed"]
+                retirement_safety.require_publication_settled(fresh)
+                return function(fresh, repo, tracking_path, force=force)
+        except (OSError, ValueError, TimeoutError) as exc:
+            return False, [str(exc)]
+    return guarded
+
+
+def _resolve_repo(config: cfg.Config, record: tracking.WorktreeRecord) -> cfg.RepoConfig | None:
     """Resolve a record's repository with the legacy/default fallback.
 
     A small local duplicate of ``__main__._repo_for_record`` -- kept here
@@ -31,7 +60,7 @@ def _resolve_repo(config, record):
     same-named branch in the invoking default repo could be inspected and
     deleted instead).
     """
-    repos = getattr(config, "repos", {})
+    repos: dict[str, cfg.RepoConfig] = getattr(config, "repos", {})
     record_repo = getattr(record, "repo", "")
     repo = repos.get(record_repo) if hasattr(repos, "get") else None
     if repo is not None:
@@ -45,7 +74,8 @@ def _resolve_repo(config, record):
 
 
 def owner_ref_blocker(
-    rec, *, content_confirmed_merged: bool, resolve_alive=None,
+    rec: tracking.WorktreeRecord, *, content_confirmed_merged: bool,
+    resolve_alive: Callable[[str], bool | None] | None = None,
 ) -> str | None:
     """Return a blocker string when ``rec``'s inbound ``owner_ref`` claim still
     looks live, or ``None`` when it's safe to ignore.
@@ -86,7 +116,7 @@ def owner_ref_blocker(
     return None
 
 
-def blockers_for(rec, repo) -> list[str]:
+def blockers_for(rec: tracking.WorktreeRecord, repo: cfg.RepoConfig) -> list[str]:
     """Reasons a managed (system/bridge) worktree is not safe to discard.
 
     Mirrors the checks ``cleanup`` already applies to ordinary worktrees --
@@ -101,6 +131,9 @@ def blockers_for(rec, repo) -> list[str]:
     still exists, so the merge check below runs unconditionally.
     """
     blockers: list[str] = []
+    from . import pr_foreign_receipts
+    if pr_foreign_receipts.owner_receipts(rec)[1]:
+        blockers.append("Foreign PR creation is unverified; reconcile it before removal.")
     checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
     if checkout_exists:
         info = git_ops.classify_worktree(
@@ -176,8 +209,7 @@ def blockers_for(rec, repo) -> list[str]:
     # cleanup/gc already use. An unpopulated-but-real PR record is exactly as
     # much a recovery source as an open one; only skip terminal (merged/
     # closed) PRs.
-    if rec.has_live_pr():
-        live_prs = [p for p in rec.prs if p.state in tracking._PR_NON_TERMINAL]
+    if live_prs := pending_prs(rec, live_only=True):
         blockers.append(
             "in-progress or open PR(s): "
             + ", ".join(
@@ -243,6 +275,24 @@ def refusal_message(
     )
 
 
+def landed_branch_oid(rec: tracking.WorktreeRecord, repo: cfg.RepoConfig) -> str:
+    """Capture a squash-aware landed branch before physical teardown."""
+    if not rec.branch:
+        return ""
+    head = git_ops.git(
+        "rev-parse", "--verify", "--quiet", f"refs/heads/{rec.branch}^{{commit}}",
+        cwd=repo.anchor, check=False,
+    )
+    if head.returncode == 1:
+        return ""
+    if head.returncode or not head.stdout.strip():
+        raise ValueError("branch content recheck failed")
+    oid = head.stdout.strip()
+    if not git_ops.is_branch_merged(oid, f"{repo.remote}/{repo.default_branch}", cwd=repo.anchor):
+        raise ValueError("branch gained local commits before removal")
+    return oid
+
+
 @dataclasses.dataclass
 class GuardedRemoval:
     """Outcome of :func:`perform`."""
@@ -254,7 +304,10 @@ class GuardedRemoval:
     rec: object = None
 
 
-def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
+def _perform(
+    wt_id: str, yaml_path: Path, config: cfg.Config, *, force: bool,
+    remove_fn: Callable[..., tuple[bool, list[str]]], tracking_path: Path,
+) -> GuardedRemoval:
     """Run the full guarded remove-system flow.
 
     Checks blockers (unless ``force``), then serializes against other
@@ -284,7 +337,10 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
             return GuardedRemoval(ok=False, message=refusal_message(wt_id, blockers))
 
     from contextlib import ExitStack
-    from . import worktree_lifecycle
+    from .pr_transport_fence import cleanup_lifecycle_guard
+    from .launch_seed_state import removal_transaction
+    from .launch_admission import LaunchAdmissionBusy
+    from .retirement_safety import record_paths
 
     lifecycle_lock = fin.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock", timeout=3, stale_after=3600,
@@ -293,8 +349,10 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
     try:
         lifecycle_lock.acquire()
         removal_locks.callback(lifecycle_lock.release)
-        removal_locks.enter_context(worktree_lifecycle.guard(yaml_path))
-    except TimeoutError:
+        removal_locks.enter_context(cleanup_lifecycle_guard(yaml_path))
+        locked_paths = record_paths(tracking.load_record(yaml_path), tracking_path)
+        removal_locks.enter_context(removal_transaction(yaml_path, record_paths=locked_paths))
+    except (TimeoutError, LaunchAdmissionBusy):
         removal_locks.close()
         return GuardedRemoval(
             ok=False,
@@ -305,6 +363,8 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
         raise
     try:
         rec = tracking.load_record(yaml_path)
+        if record_paths(rec, tracking_path) != locked_paths:
+            return GuardedRemoval(ok=False, message=f"retirement owners changed for {wt_id}; retry before removal")
         repo = _resolve_repo(config, rec)
         if repo is None:
             return GuardedRemoval(
@@ -314,6 +374,8 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
                     f"(record repo {rec.repo!r} is not registered) -- refusing"
                 ),
             )
+        from .pr_transport_fence import cleanup_guard
+        removal_locks.enter_context(cleanup_guard(rec, repo))
         if not force:
             blockers = blockers_for(rec, repo)
             if blockers:
@@ -323,7 +385,18 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
                         wt_id, blockers, appeared_after_initial_check=True
                     ),
                 )
-        removed, warnings = remove_fn(rec, repo, tracking_path, force=True)
+        removed, warnings = remove_fn(rec, repo, tracking_path, force=force)
     finally:
         removal_locks.close()
     return GuardedRemoval(ok=True, removed=removed, warnings=warnings, rec=rec)
+
+
+def perform(
+    wt_id: str, yaml_path: Path, config: cfg.Config, *, force: bool,
+    remove_fn: Callable[..., tuple[bool, list[str]]], tracking_path: Path,
+) -> GuardedRemoval:
+    """Qualify retained attempts without bypassing the native removal guards."""
+    from .pr_retirement_consumers import managed_removal
+    return managed_removal(
+        wt_id, yaml_path, config, force=force, remove_fn=remove_fn, tracking_path=tracking_path,
+    )

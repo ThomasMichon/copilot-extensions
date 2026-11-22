@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .tracking import WorktreeRecord
+    from .tracking import PRRecord, WorktreeRecord
 
 
 @dataclass(frozen=True)
@@ -17,9 +17,21 @@ class RetirementBlocker:
     reason: str
 
 
+def require_publication_settled(record: WorktreeRecord) -> None:
+    from . import pr_foreign_receipts, pr_unverified_creation
+
+    pr_foreign_receipts.require_settled(record)
+    if any(pr_unverified_creation.pending({}, pr) for pr in record.prs):
+        raise ValueError("PR creation outcome is unverified; reconcile it before finalization or cleanup.")
+
+
 def retains_artifact_metadata(record: WorktreeRecord) -> bool:
-    """Keep retained-byte custody and historical delivery receipts after retirement."""
-    return any(
+    """Keep retained-byte custody and uncertain publication history after retirement."""
+    from . import pr_creation_reconcile, pr_foreign_receipts, pr_unverified_creation
+
+    return pr_foreign_receipts.owner_receipts(record)[0] or any(
+        pr_creation_reconcile.requires_qualification(pr) or pr_unverified_creation.pending({}, pr) for pr in record.prs
+    ) or any(
         claim.has_producer and isinstance(claim.producer, dict)
         and (
             claim.producer.get("lifetime") == "artifact-owned"
@@ -31,9 +43,42 @@ def retains_artifact_metadata(record: WorktreeRecord) -> bool:
     )
 
 
-def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
-    """Require explicit terminal PR state and released outbound ownership."""
-    pending = [pr for pr in record.prs if pr.state not in ("merged", "closed")]
+def record_paths(record: WorktreeRecord, tracking_path: Path) -> list[Path]:
+    """Lock the same complete owner set before teardown and ledger retirement."""
+    from . import config as cfg
+
+    paths = {tracking_path / f"{record.worktree_id}.yaml"}
+    ref = record.pair_claim_ref if record.is_paired else None
+    if ref is not None and ref.is_qualified and ref.project:
+        paths.add(cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml")
+    return sorted(paths, key=str)
+
+
+def pending_prs(record: WorktreeRecord, *, live_only: bool = False) -> list[PRRecord]:
+    """Preserve each consumer's terminal-state policy and require held receipt proof."""
+    from . import pr_creation_reconcile, pr_unverified_creation, tracking
+
+    pending = []
+    for pr in record.prs:
+        if pr_unverified_creation.pending({}, pr):
+            held = True
+        elif pr_creation_reconcile.requires_qualification(pr):
+            held = not pr_creation_reconcile.qualified(record, pr)
+        else:
+            held = pr.state in tracking._PR_NON_TERMINAL if live_only else pr.state not in ("merged", "closed")
+        if held:
+            pending.append(pr)
+    return pending
+
+
+def retirement_blocker(record: WorktreeRecord, *, advisory: bool = False) -> RetirementBlocker | None:
+    """Require terminal or freshly fenced PR disposition and released ownership."""
+    from . import pr_foreign_receipts
+
+    receipts = pr_foreign_receipts.advisory_owner_receipts if advisory else pr_foreign_receipts.owner_receipts
+    if receipts(record)[1]:
+        return RetirementBlocker("unknown-publication", "Foreign PR creation is pending or unconfirmed; retain its owner")
+    pending = pending_prs(record)
     if pending:
         numbers = ", ".join(
             "?" if pr.number is None else f"#{pr.number}" for pr in pending

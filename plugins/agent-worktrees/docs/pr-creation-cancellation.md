@@ -104,4 +104,9 @@ publication-state and numbered-abandonment controls. Their disposable Git
 fixtures and read-only provider adapters do not qualify a production runtime or
 authorize cancellation of any real record.
 
+For owner-stamped legacy publishing reservations without prepared-source
+evidence, [explicit local reconciliation](pr-creation-reconciliation.md) is a
+distinct, narrower recovery path. It preserves publication ambiguity rather
+than weakening this cancellation contract.
+
 See [CLI reference](cli-reference.md) and [publication architecture](architecture.md).

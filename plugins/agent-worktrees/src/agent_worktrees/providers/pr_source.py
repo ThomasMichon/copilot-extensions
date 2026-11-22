@@ -4,9 +4,19 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, TypedDict
 from urllib.parse import quote, unquote, urlsplit
 
 from .base import ProviderError
+
+
+class SourceRef(TypedDict):
+    head_ref: str
+    head_url: str
+
+
+class SourceHead(SourceRef):
+    head_sha: str
 
 
 def same_repository(source_identity: str, destination_identity: str, provider: str) -> bool:
@@ -35,7 +45,7 @@ def same_repository(source_identity: str, destination_identity: str, provider: s
     )
 
 
-def pull_payload(body: str) -> dict:
+def pull_payload(body: str) -> dict[str, Any]:
     """Decode a provider response without accepting a non-object payload."""
     try:
         data = json.loads(body)
@@ -46,7 +56,7 @@ def pull_payload(body: str) -> dict:
     return data
 
 
-def source_text(data: dict, field: str) -> str:
+def source_text(data: dict[str, Any], field: str) -> str:
     """Return a nullable source field, rejecting non-string identity values."""
     value = data.get(field)
     if value is None:
@@ -56,7 +66,7 @@ def source_text(data: dict, field: str) -> str:
     return value
 
 
-def source_object(data: dict, field: str) -> dict:
+def source_object(data: dict[str, Any], field: str) -> dict[str, Any]:
     value = data.get(field)
     if value is None:
         return {}
@@ -65,7 +75,7 @@ def source_object(data: dict, field: str) -> dict:
     return value
 
 
-def github_source(data: dict) -> dict[str, str]:
+def github_source(data: dict[str, Any]) -> SourceRef:
     repository = source_object(data, "headRepository")
     name = source_text(repository, "nameWithOwner")
     try:
@@ -86,7 +96,7 @@ def github_source(data: dict) -> dict[str, str]:
     }
 
 
-def gitea_source(data: dict) -> dict[str, str]:
+def gitea_source(data: dict[str, Any]) -> SourceHead:
     head = source_object(data, "head")
     return {
         "head_sha": source_text(head, "sha"),
@@ -95,7 +105,7 @@ def gitea_source(data: dict) -> dict[str, str]:
     }
 
 
-def azure_source(data: dict) -> dict[str, str]:
+def azure_source(data: dict[str, Any]) -> SourceRef:
     fork = data.get("forkSource")
     repository = (
         source_object(source_object(data, "forkSource"), "repository")

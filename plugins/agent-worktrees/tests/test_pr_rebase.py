@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Callable
+
 import dataclasses
 import json
 import hashlib
@@ -26,15 +29,15 @@ exhaustive = pytest.mark.skipif(
 )
 
 
-def _git(*args, cwd):
+def _git(*args: str, cwd: str | Path) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
 
-def _record(wid):
+def _record(wid: str) -> Any:
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
-def _backups(path, branch):
+def _backups(path: Path, branch: str) -> dict[str, str]:
     """The newest retained backup set for *branch*, by label."""
     rows = _git(
         "for-each-ref", "--sort=-refname", "--format=%(refname) %(objectname)",
@@ -50,7 +53,7 @@ def _backups(path, branch):
 
 
 @pytest.fixture(scope="session")
-def _rebase_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
+def _rebase_snapshot_pr_seed(tmp_path_factory: pytest.TempPathFactory, _pr_repo_seed: Any) -> Path:
     # The general snapshot fixture publishes "Add feature", not "Own change".
     with _seed_directory(tmp_path_factory, "rebase-snapshot") as (seed, build):
         if build:
@@ -58,11 +61,12 @@ def _rebase_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
                 config, wid, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
                 first = pr_ops.create_pr(wid, config, title="Own change")
                 assert first["success"], first
+        assert isinstance(seed, Path)
         return seed
 
 
 @pytest.fixture
-def pr_repo(request):
+def pr_repo(request: pytest.FixtureRequest) -> Any:
     params = getattr(getattr(request.node, "callspec", None), "params", {})
     if params.get("branch") is not None:
         seed = request.getfixturevalue("_pr_repo_seed")
@@ -79,7 +83,7 @@ def pr_repo(request):
     )
 
 
-def _prepare(pr_repo, scheme="refspec", branch=None):
+def _prepare(pr_repo: Any, scheme: str="refspec", branch: str | None=None) -> Any:
     config, wid, path, remote = pr_repo
     record = _record(wid)
     published = record.pr
@@ -105,14 +109,14 @@ def _prepare(pr_repo, scheme="refspec", branch=None):
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
 @pytest.mark.parametrize("branch", [None, "feature/custom-rebase"])
 def test_rebase_setup_preserves_publication_scheme_title_and_custom_branch(
-    pr_repo, monkeypatch, scheme, branch,
-):
+    pr_repo: Any, monkeypatch: pytest.MonkeyPatch, scheme: str, branch: str,
+) -> None:
     config, wid, path, remote = pr_repo
     before = _record(wid).pr
     create_pr = pr_ops.create_pr
     calls = []
 
-    def observe(*args, **kwargs):
+    def observe(*args: Any, **kwargs: Any) -> Any:
         calls.append(kwargs)
         return create_pr(*args, **kwargs)
 
@@ -138,7 +142,7 @@ def test_rebase_setup_preserves_publication_scheme_title_and_custom_branch(
 
 
 @pytest.mark.parametrize("mismatch", ["scheme", "title", "branch"])
-def test_rebase_setup_does_not_reuse_mismatched_publication(pr_repo, monkeypatch, mismatch):
+def test_rebase_setup_does_not_reuse_mismatched_publication(pr_repo: Any, monkeypatch: pytest.MonkeyPatch, mismatch: Any) -> None:
     config, wid, path, remote = pr_repo
     if mismatch == "scheme":
         config = dataclasses.replace(config, repos={"ext": dataclasses.replace(
@@ -154,7 +158,7 @@ def test_rebase_setup_does_not_reuse_mismatched_publication(pr_repo, monkeypatch
         monkeypatch.setattr(sys.modules[__name__], "_record", lambda _: record)
     calls = []
 
-    def create(*args, **kwargs):
+    def create(*args: Any, **kwargs: Any) -> Any:
         calls.append((args, kwargs))
         return {"success": True, "branch": "new-branch", "head_sha": "new-head"}
 
@@ -167,7 +171,7 @@ def test_rebase_setup_does_not_reuse_mismatched_publication(pr_repo, monkeypatch
     assert kwargs == {"title": "Own change", "branch": None}
 
 
-def _advance(config, path, filename="upstream.txt"):
+def _advance(config: Any, path: Path, filename: Any="upstream.txt") -> Any:
     anchor = Path(config.default_repo.anchor)
     (anchor / filename).write_text("upstream advance\n")
     _git("add", "-A", cwd=anchor)
@@ -177,14 +181,14 @@ def _advance(config, path, filename="upstream.txt"):
     return _git("rev-parse", "origin/master", cwd=path)
 
 
-def _publish(command, config, wid):
+def _publish(command: str, config: Any, wid: str) -> Any:
     if command == "push-changes":
         return finalize.push_changes(wid, config)
     result = pr_ops.create_pr(wid, config, title="Own change")
     return result.get("success", False)
 
 
-def _partial_success_then_rebase(pr_repo, monkeypatch):
+def _partial_success_then_rebase(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     config, wid, path, remote, branch, old = _prepare(pr_repo, "refspec")
     (path / "accepted.txt").write_text("already accepted source feedback\n")
     _git("add", "accepted.txt", cwd=path)
@@ -192,7 +196,7 @@ def _partial_success_then_rebase(pr_repo, monkeypatch):
     accepted = _git("rev-parse", "HEAD", cwd=path)
     original_push = git_ops.push
 
-    def lost_acknowledgement(*args, **kwargs):
+    def lost_acknowledgement(*args: Any, **kwargs: Any) -> Any:
         result = original_push(*args, **kwargs)
         assert result
         return git_ops.PushResult(ok=False, stderr="transport acknowledgement lost after acceptance")
@@ -211,7 +215,7 @@ def _partial_success_then_rebase(pr_repo, monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def _partial_success_seed(tmp_path_factory, _published_refspec_pr_seed):
+def _partial_success_seed(tmp_path_factory: pytest.TempPathFactory, _published_refspec_pr_seed: Any) -> Any:
     with _seed_directory(tmp_path_factory, "rebase-partial-success") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory) as patch:
@@ -225,7 +229,7 @@ def _partial_success_seed(tmp_path_factory, _published_refspec_pr_seed):
 
 
 @pytest.fixture
-def partial_success_repo(tmp_path, monkeypatch, _partial_success_seed):
+def partial_success_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _partial_success_seed: Any) -> Any:
     config, wid, path, remote = _copy_pr_repo(_partial_success_seed, tmp_path, monkeypatch)
     config = dataclasses.replace(config, repos={"ext": dataclasses.replace(
         config.default_repo, pr=dataclasses.replace(config.default_repo.pr, head_scheme="refspec"),
@@ -237,8 +241,8 @@ def partial_success_repo(tmp_path, monkeypatch, _partial_success_seed):
 
 @pytest.mark.parametrize("iteration", range(2))
 def test_partial_success_copy_preserves_saved_inputs_and_private_history(
-    partial_success_repo, _partial_success_seed, iteration, tmp_path, monkeypatch,
-):
+    partial_success_repo: Any, _partial_success_seed: Any, iteration: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config, wid, path, remote, branch, old, accepted = partial_success_repo
     assert config.default_repo.pr.head_scheme == "refspec"
     assert cfg.load_config() is config
@@ -307,7 +311,7 @@ def test_partial_success_copy_preserves_saved_inputs_and_private_history(
     } == sibling_files
 
 
-def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo, monkeypatch):
+def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
     monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr, **kwargs: accepted)
     tip = _git("rev-parse", "HEAD", cwd=path)
@@ -325,8 +329,8 @@ def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_
 
 @pytest.mark.parametrize("provider", ["unavailable", "different", "foreign", "racing"])
 def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
-    partial_success_repo, monkeypatch, provider, _partial_success_seed,
-):
+    partial_success_repo: Any, monkeypatch: pytest.MonkeyPatch, provider: Any, _partial_success_seed: Any,
+) -> None:
     config, wid, path, remote, branch, old, accepted = partial_success_repo
     seed_tracking = (_partial_success_seed / "tracking" / f"{wid}.yaml").read_bytes()
     seed_refs = _git("--git-dir", str(_partial_success_seed / "remote.git"), "show-ref", cwd=path)
@@ -345,7 +349,7 @@ def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
             _git("push", "origin", branch, cwd=other)
     observed = "" if provider == "unavailable" else "0" * 40 if provider == "different" else remote_head
     observations = []
-    def provider_head(repo, pr, **kwargs):
+    def provider_head(repo: Any, pr: Any, **kwargs: Any) -> Any:
         observations.append(observed)
         if provider == "racing":
             _git("push", "origin", branch, cwd=other)
@@ -366,7 +370,7 @@ def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
     pytest.param("refspec", "push-changes", "manual", marks=pytest.mark.guard),
     pytest.param("refspec", "create-pr", "sync", marks=exhaustive),
 ])
-def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, scheme, command, flow):
+def test_owned_pr_rebase_publishes_with_original_lease(pr_repo: Any, monkeypatch: pytest.MonkeyPatch, scheme: str, command: str, flow: Any) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo, scheme)
     (path / "feedback.txt").write_text("preserve unpublished source work\n")
     _git("add", "-A", cwd=path)
@@ -387,13 +391,13 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, sch
     original_rows = pr_rebase._commit_rows
     observed_rows = []
 
-    def url_with_credentials(*args, cwd):
+    def url_with_credentials(*args: Any, cwd: str | Path) -> Any:
         if args == ("remote", "get-url", "--push", "origin"):
             return raw_url
-        return original_git(*args, cwd=cwd)
+        return original_git(*args, cwd=str(cwd))
 
-    def read_rows(base, head, cwd):
-        rows = original_rows(base, head, cwd)
+    def read_rows(base: Any, head: str, cwd: str | Path) -> Any:
+        rows = original_rows(base, head, str(cwd))
         observed_rows.append(((base, head), rows))
         return rows
 
@@ -438,7 +442,7 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, sch
     pytest.param("push-changes", marks=pytest.mark.guard),
     pytest.param("create-pr", marks=exhaustive),
 ])
-def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo, command):
+def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo: Any, command: str) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
     _git("rebase", "origin/master", cwd=path)
@@ -462,7 +466,7 @@ def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo, command):
 @pytest.mark.parametrize("drop_source", [False, True], ids=["preserved", "dropped"])
 @pytest.mark.parametrize("empty_upstream", [False, True], ids=["content-only", "empty-upstream"])
 def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(
-    pr_repo, drop_source: bool, empty_upstream: bool,
+    pr_repo: Any, drop_source: bool, empty_upstream: bool,
 ) -> None:
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     old_base = _record(wid).pr.base_sha
@@ -509,7 +513,7 @@ def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(
 
 @pytest.mark.guard
 @pytest.mark.parametrize("drop_empty", [False, True], ids=["retained", "dropped"])
-def test_owned_pr_rebase_publishes_source_owned_empty_commits_with_backup(pr_repo, drop_empty: bool) -> None:
+def test_owned_pr_rebase_publishes_source_owned_empty_commits_with_backup(pr_repo: Any, drop_empty: bool) -> None:
     config, wid, path, remote, branch, published = _prepare(pr_repo)
     _git("commit", "--allow-empty", "-m", "source bookkeeping", cwd=path)
     _advance(config, path)
@@ -524,7 +528,7 @@ def test_owned_pr_rebase_publishes_source_owned_empty_commits_with_backup(pr_rep
 
 
 @pytest.mark.guard
-def test_owned_pr_rebase_still_refuses_upstream_merge_commits(pr_repo) -> None:
+def test_owned_pr_rebase_still_refuses_upstream_merge_commits(pr_repo: Any) -> None:
     _, wid, path, _, _, published = _prepare(pr_repo)
     base = _record(wid).pr.base_sha
     tree = _git("rev-parse", f"{base}^{{tree}}", cwd=path)
@@ -537,7 +541,7 @@ def test_owned_pr_rebase_still_refuses_upstream_merge_commits(pr_repo) -> None:
 
 @exhaustive
 @pytest.mark.parametrize("mutation", ["same-tree-reset", "amend", "drop"])
-def test_owner_rewrite_without_replay_proof_publishes_with_backup(pr_repo, mutation):
+def test_owner_rewrite_without_replay_proof_publishes_with_backup(pr_repo: Any, mutation: str) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
     if mutation == "same-tree-reset":
@@ -561,7 +565,7 @@ def test_owner_rewrite_without_replay_proof_publishes_with_backup(pr_repo, mutat
 
 
 @pytest.mark.guard
-def test_owner_rewrite_refuses_publishing_an_empty_pr(pr_repo):
+def test_owner_rewrite_refuses_publishing_an_empty_pr(pr_repo: Any) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
     _git("reset", "--hard", "origin/master", cwd=path)
@@ -570,7 +574,7 @@ def test_owner_rewrite_refuses_publishing_an_empty_pr(pr_repo):
 
 
 @pytest.mark.guard
-def test_owner_rewrite_refuses_branch_tracked_by_another_worktree(pr_repo, tmp_path):
+def test_owner_rewrite_refuses_branch_tracked_by_another_worktree(pr_repo: Any, tmp_path: Path) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     other = dataclasses.replace(
         _record(wid), worktree_id=wid[:-4] + "bbbb", worktree_path=str(tmp_path / "other-checkout"),
@@ -592,7 +596,7 @@ def test_owner_rewrite_refuses_branch_tracked_by_another_worktree(pr_repo, tmp_p
 
 
 @pytest.mark.guard
-def test_owner_rewrite_replaces_provider_refreshed_head_it_already_carries(pr_repo, monkeypatch):
+def test_owner_rewrite_replaces_provider_refreshed_head_it_already_carries(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
     # A server-side base refresh rewrites the PR branch to a rebased copy.
@@ -621,7 +625,7 @@ def test_owner_rewrite_replaces_provider_refreshed_head_it_already_carries(pr_re
 
 @pytest.mark.guard
 @pytest.mark.parametrize("edited", [False, True])
-def test_refreshed_only_rejects_merge_commits_hiding_unpublished_edits(pr_repo, edited):
+def test_refreshed_only_rejects_merge_commits_hiding_unpublished_edits(pr_repo: Any, edited: bool) -> None:
     config, _, path, _, _, old = _prepare(pr_repo)
     upstream = _advance(config, path)
     _git("checkout", "--detach", old, cwd=path)
@@ -635,7 +639,7 @@ def test_refreshed_only_rejects_merge_commits_hiding_unpublished_edits(pr_repo, 
     assert pr_rebase.refreshed_only(tip, old, old, upstream, str(path)) is not edited
 
 
-def test_backup_refs_are_bounded_per_branch(pr_repo):
+def test_backup_refs_are_bounded_per_branch(pr_repo: Any) -> None:
     _, _, path, _, branch, old = _prepare(pr_repo)
     prefixes = [
         pr_rebase.backup(branch, {"published": old, "missing": "f" * 40}, cwd=str(path), limit=2)
@@ -646,7 +650,7 @@ def test_backup_refs_are_bounded_per_branch(pr_repo):
 
 
 @exhaustive
-def test_owned_pr_rebase_does_not_authorize_shared_default_or_foreign_heads(pr_repo):
+def test_owned_pr_rebase_does_not_authorize_shared_default_or_foreign_heads(pr_repo: Any) -> None:
     config, wid, path, remote, original_branch, old = _prepare(pr_repo)
     onto = _advance(config, path)
     _git("rebase", "origin/master", cwd=path)
@@ -666,7 +670,7 @@ def test_owned_pr_rebase_does_not_authorize_shared_default_or_foreign_heads(pr_r
 
 
 @exhaustive
-def test_owned_pr_rebase_keeps_generic_push_fail_closed(pr_repo):
+def test_owned_pr_rebase_keeps_generic_push_fail_closed(pr_repo: Any) -> None:
     config, _, path, remote, branch, old = _prepare(pr_repo)
     _advance(config, path)
     _git("rebase", "origin/master", cwd=path)
@@ -684,7 +688,7 @@ def test_owned_pr_rebase_keeps_generic_push_fail_closed(pr_repo):
 
 
 @exhaustive
-def test_owned_pr_rebase_publishes_legacy_checked_out_private_head(pr_repo):
+def test_owned_pr_rebase_publishes_legacy_checked_out_private_head(pr_repo: Any) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo, "snapshot")
     _git("checkout", branch, cwd=path)
     _advance(config, path)
@@ -697,7 +701,7 @@ def test_owned_pr_rebase_publishes_legacy_checked_out_private_head(pr_repo):
 
 
 @exhaustive
-def test_owned_pr_rebase_recovers_legacy_stale_published_patch_cache(pr_repo):
+def test_owned_pr_rebase_recovers_legacy_stale_published_patch_cache(pr_repo: Any) -> None:
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     original_patch = _record(wid).pr.patch_id
     (path / "reviewed-feedback.txt").write_text("already published\n")
@@ -726,7 +730,7 @@ def test_owned_pr_rebase_recovers_legacy_stale_published_patch_cache(pr_repo):
     pytest.param("snapshot", marks=exhaustive),
     pytest.param("refspec", marks=pytest.mark.guard),
 ])
-def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys, monkeypatch):
+def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo: Any, scheme: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo, scheme)
     _advance(config, path)
     _git("rebase", "origin/master", cwd=path)
@@ -747,7 +751,7 @@ def test_owned_pr_rebase_honors_real_pre_push_rejection(pr_repo, scheme, capsys,
 
 @exhaustive
 @pytest.mark.parametrize("command", ["push-changes", "create-pr"])
-def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, command):
+def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo: Any, command: str) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     # The resolver's explicit continuation changes a patch; retain one-to-one
     # source identity, base lineage, and all other source work.
@@ -773,11 +777,11 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
 
 @pytest.mark.guard
 @pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
-def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
+def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch: pytest.MonkeyPatch, changed_message: Any) -> None:
     old, new, onto = "a" * 40, "b" * 40, "c" * 40
     messages = []
 
-    def fake_git(*args, cwd, check, isolated_repository):
+    def fake_git(*args: Any, cwd: str | Path, check: Any, isolated_repository: Any) -> Any:
         assert isolated_repository
         if args[-1] == "base..original":
             stdout = f"{old} base\n"
@@ -787,7 +791,7 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
             stdout = "current-tree\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
-    def fake_run(args, **kwargs):
+    def fake_run(args: Any, **kwargs: Any) -> Any:
         assert not kwargs.get("text")
         if "log" in args:
             return subprocess.CompletedProcess(
@@ -799,7 +803,7 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
         return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b"")
 
     monkeypatch.setattr(git_ops, "git", fake_git)
-    monkeypatch.setattr(pr_rebase.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(pr_rebase, "_ancestor", lambda *args: False)
     monkeypatch.setattr(pr_rebase, "_merge_tree", lambda *a: ("replay-tree", True))
     assert pr_rebase._conflict_lineage(
@@ -810,7 +814,7 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
 
 
 @pytest.mark.guard
-def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tmp_path):
+def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tmp_path: Path) -> None:
     path = tmp_path / "raw-patches"
     path.mkdir()
     _git("init", cwd=path)
@@ -835,7 +839,7 @@ def test_owned_pr_rebase_patch_pipeline_preserves_non_utf8_and_trailing_space(tm
 
 
 @pytest.mark.guard
-def test_owned_pr_rebase_poisoned_git_context_cannot_redirect_proof_or_push(pr_repo, monkeypatch):
+def test_owned_pr_rebase_poisoned_git_context_cannot_redirect_proof_or_push(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     config, wid, path, remote, branch, old = _prepare(pr_repo)
     onto = _advance(config, path)
     _git("rebase", "origin/master", cwd=path)
@@ -868,7 +872,7 @@ def test_owned_pr_rebase_poisoned_git_context_cannot_redirect_proof_or_push(pr_r
 
 
 @pytest.mark.guard
-def test_owned_pr_rebase_repeated_regions_require_actual_tree_replay(tmp_path, monkeypatch):
+def test_owned_pr_rebase_repeated_regions_require_actual_tree_replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "repeated-regions"
     path.mkdir()
     _git("init", cwd=path)
@@ -879,7 +883,7 @@ def test_owned_pr_rebase_repeated_regions_require_actual_tree_replay(tmp_path, m
     original_text = region * 2
     data = path / "data.txt"
 
-    def commit(content, parent, message):
+    def commit(content: str, parent: str | None, message: str) -> Any:
         data.write_text(content)
         _git("add", "data.txt", cwd=path)
         tree = _git("write-tree", cwd=path)
@@ -913,7 +917,7 @@ def test_owned_pr_rebase_repeated_regions_require_actual_tree_replay(tmp_path, m
 
 
 @pytest.mark.guard
-def test_owned_pr_rebase_proof_reads_raw_objects_despite_replacement_refs(tmp_path):
+def test_owned_pr_rebase_proof_reads_raw_objects_despite_replacement_refs(tmp_path: Path) -> None:
     path = tmp_path / "replacement-refs"
     path.mkdir()
     _git("init", cwd=path)
@@ -948,17 +952,19 @@ def test_owned_pr_rebase_proof_reads_raw_objects_despite_replacement_refs(tmp_pa
     ).returncode == 0
     assert not git_ops.is_commit_ancestor(original, changed, cwd=path)
     assert not pr_rebase._ancestor(original, changed, str(path))
-    result = git_ops.push("origin", changed, cwd=path, force_with_lease_expect=original)
+    result = git_ops.push(
+        "origin", f"{changed}:refs/heads/raw-proof", cwd=path, force_with_lease_expect=original,
+    )
     assert not result and "not an ancestor" in result.stderr
 
 
 @pytest.mark.guard
 @pytest.mark.parametrize("command", ["log", "patch-id"])
-def test_owned_pr_rebase_binary_timeouts_are_reported_as_git_errors(monkeypatch, command):
-    def timeout(args, **kwargs):
+def test_owned_pr_rebase_binary_timeouts_are_reported_as_git_errors(monkeypatch: pytest.MonkeyPatch, command: str) -> None:
+    def timeout(args: Any, **kwargs: Any) -> None:
         raise subprocess.TimeoutExpired(args, 30)
 
-    monkeypatch.setattr(pr_rebase.subprocess, "run", timeout)
+    monkeypatch.setattr(subprocess, "run", timeout)
     with pytest.raises(git_ops.GitError, match="timed out after 30 seconds") as error:
         pr_rebase._git_bytes(command, cwd="unused", stdin=b"patch" if command == "patch-id" else None)
     assert error.value.returncode == 124
@@ -975,7 +981,9 @@ def test_owned_pr_rebase_binary_timeouts_are_reported_as_git_errors(monkeypatch,
     sys.platform != "win32" or os.environ.get("AGENT_WORKTREES_NATIVE_HEADLESS_TEST") != "1",
     reason="Opt-in native Windows consoleless-parent observation",
 )
-def test_owned_pr_rebase_native_headless_two_cycles(pr_repo, tmp_path):
+def test_owned_pr_rebase_native_headless_two_cycles(
+    pr_repo: Any, tmp_path: Path, record_property: Callable[[str, object], None],
+) -> None:
     from agent_procutil import no_window_kwargs
 
     _config, _wid, path, _remote, _branch, head = _prepare(pr_repo)
@@ -991,6 +999,7 @@ def test_owned_pr_rebase_native_headless_two_cycles(pr_repo, tmp_path):
     )
     assert result.is_file(), proc.stderr
     observation = json.loads(result.read_text(encoding="utf-8"))
+    record_property("native_headless_observation", json.dumps(observation, sort_keys=True))
     assert proc.returncode == 0, (proc.stderr, observation)
     assert observation["cycles"] == 2
     assert observation["observed_descendants"] > 0

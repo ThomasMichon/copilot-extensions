@@ -14,13 +14,18 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import quote
 
 from .base import ProviderError, PRScope, PullResult, run_cli
 from .pr_source import azure_source, pull_payload, source_object, source_text
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRDiff, PRSnapshot, ThreadsResult
+    from ..pr_bar import Snapshot as BarSnapshot
+    from ..pr_contract import PRDiff, PRSnapshot, RepoPolicy, Review, ReviewNudgeResult, ThreadsResult
+    from ..pr_observation_config import ObservationConfig
+    from .observation_credentials import CredentialSource
 
 #: Canonical consent marker Azure DevOps emits in a snapshot's ``labels`` when
 #: the PR has native auto-complete set. A repo on this provider binds
@@ -121,17 +126,20 @@ class AzureDevOpsProvider:
                 f"{scope.head}->{scope.base}: {proc.stderr.strip() or proc.stdout.strip()}"
             )
         data = json.loads(proc.stdout)
-        number = data.get("pullRequestId")
+        from . import creation_receipt
+
+        number = creation_receipt.number(data, "pullRequestId")
         state = self._canonical_state(str(data.get("status", "active")).lower())
         from ..pr_metadata import MetadataPullResult, draft_confirmation
 
         result = MetadataPullResult(
-            url=self._web_url(scope.api_base, project, name, number),
-            number=int(number) if number is not None else None,
+            url=self._web_url(scope.api_base, quote(project, safe=""), quote(name, safe=""), number),
+            number=number,
             state=state,
             merged=state == "merged",
             draft=data.get("isDraft") if type(data.get("isDraft")) is bool else None,
         )
+        creation_receipt.validate(result, self.name, scope.repo, scope.api_base)
         if result.number is not None:
             try:
                 result.metadata = self.update_pull_metadata(
@@ -149,13 +157,15 @@ class AzureDevOpsProvider:
                 result.metadata.setdefault("actions", {})["draft"] = draft_confirmation(result.draft)
         return result
 
-    def update_pull_metadata(self, repo, number, **kwargs):
+    def update_pull_metadata(self, repo: str, number: int, **kwargs: Any) -> dict[str, Any]:
         """Verify author metadata on an existing PR, preserving partial outcomes."""
         from ..pr_metadata_azure import update
 
         return update(self, repo, number, **kwargs)
 
-    def observe_branch(self, repo, branch, *, api_base="", token=None):
+    def observe_branch(
+        self, repo: str, branch: str, *, api_base: str = "", token: str | None = None,
+    ) -> dict[str, str]:
         """Read an exact authoritative remote branch tip, never local Git state."""
         import re
         from urllib.parse import quote
@@ -190,12 +200,14 @@ class AzureDevOpsProvider:
         return {"head_sha": sha.lower(), "repository": repo, "branch": branch}
 
     @staticmethod
-    def _web_url(org: str, project: str, repo: str, number) -> str:
+    def _web_url(org: str, project: str, repo: str, number: int | None) -> str:
         if number is None:
             return ""
         return f"{org.rstrip('/')}/{project}/_git/{repo}/pullrequest/{number}"
 
-    def _publication_labels_request(self, method, repo, number, api_base, token, payload=None):
+    def _publication_labels_request(
+        self, method: str, repo: str, number: int, api_base: str, token: str | None, payload: str | None = None,
+    ) -> dict[str, Any]:
         from urllib.parse import quote
 
         if not api_base:
@@ -209,9 +221,11 @@ class AzureDevOpsProvider:
         status, body = self._rest_call(method, url, auth, payload)
         if status not in (200, 201):
             raise ProviderError(f"Publication labels {method} returned HTTP {status}")
-        return json.loads(body or "{}")
+        return cast(dict[str, Any], json.loads(body or "{}"))
 
-    def get_publication_labels(self, repo, number, *, api_base="", token=None):
+    def get_publication_labels(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+    ) -> tuple[str, ...]:
         data = self._publication_labels_request("GET", repo, number, api_base, token)
         items = data.get("value") if isinstance(data, dict) else None
         if not isinstance(items, list) or any(
@@ -219,7 +233,9 @@ class AzureDevOpsProvider:
             raise ProviderError("Malformed publication-label response")
         return tuple(item["name"] for item in items)
 
-    def add_publication_labels(self, repo, number, labels, *, api_base="", token=None):
+    def add_publication_labels(
+        self, repo: str, number: int, labels: tuple[str, ...], *, api_base: str = "", token: str | None = None,
+    ) -> None:
         for label in labels:
             self._publication_labels_request(
                 "POST", repo, number, api_base, token, json.dumps({"name": label}),
@@ -347,18 +363,18 @@ class AzureDevOpsProvider:
         _ = (repo, number, api_base, token, title, wip_title_prefixes)
         return "mark_ready is not supported for azure-devops provider"
 
-    def resolve_selected_thread(self, repo: str, number: int, thread: int, **kwargs: Any) -> dict:
+    def resolve_selected_thread(self, repo: str, number: int, thread: int, **kwargs: Any) -> dict[str, Any]:
         """Close one fingerprint-pinned native thread; never use the bulk resolver."""
         from .azure_thread_resolution import resolve
         return resolve(self, repo, number, thread, **kwargs)
 
-    def reopen_selected_thread(self, repo: str, number: int, thread: int, **kwargs: Any) -> dict:
+    def reopen_selected_thread(self, repo: str, number: int, thread: int, **kwargs: Any) -> dict[str, Any]:
         """Reopen one fingerprint-pinned native thread through the same status owner."""
         from .azure_thread_resolution import resolve
         return resolve(self, repo, number, thread, reopening=True, **kwargs)
 
     def ready_pull(self, repo: str, number: int, *, api_base: str = "",
-                   token: str | None = None) -> dict:
+                   token: str | None = None) -> dict[str, Any]:
         """Perform the optional explicit-target draft-only author transition."""
         from .azure_readiness import ready
         return ready(self, repo, number, api_base=api_base, token=token)
@@ -443,20 +459,25 @@ class AzureDevOpsProvider:
         )
 
     def get_configured_snapshot(
-        self, repo, number, *, api_base="", token=None, observation=None, credential_source=None,
-    ):
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        observation: ObservationConfig | None = None, credential_source: CredentialSource | None = None,
+    ) -> PRSnapshot:
         from .azure_observation import get_snapshot
-        return get_snapshot(
+        return cast("PRSnapshot", get_snapshot(
             self, repo, number, api_base=api_base, token=token, observation=observation,
             credential_source=credential_source,
+        ))
+
+    def get_thread_report(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+    ) -> dict[str, Any]:
+        from .azure_discussions import get_report
+        return cast(Callable[..., dict[str, Any]], get_report)(
+            self, repo, number, api_base=api_base, token=token,
         )
 
-    def get_thread_report(self, repo, number, *, api_base="", token=None):
-        from .azure_discussions import get_report
-        return get_report(self, repo, number, api_base=api_base, token=token)
-
     @staticmethod
-    def _reviews_from_show(data: dict) -> tuple:
+    def _reviews_from_show(data: dict[str, Any]) -> tuple[Review, ...]:
         """Map ``az repos pr show`` reviewer votes onto contract ``Review``s."""
         from ..pr_contract import Review
 
@@ -554,7 +575,7 @@ class AzureDevOpsProvider:
     def request_review(
         self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
         token: str | None = None,
-    ):
+    ) -> ReviewNudgeResult:
         """Not implemented: no automated PR-reviewer bot mapped for ADO today."""
         from .base import _unsupported_review_request
         _ = (repo, number, api_base, token)
@@ -574,7 +595,7 @@ class AzureDevOpsProvider:
     def get_repo_policy(
         self, repo: str, *, default_branch: str = "", api_base: str = "",
         token: str | None = None,
-    ):
+    ) -> RepoPolicy:
         """Not implemented: adopt-time settings research is GitHub-only today."""
         from .base import _unsupported_repo_policy
         _ = (repo, default_branch, api_base, token)
@@ -758,7 +779,9 @@ class AzureDevOpsProvider:
             status = 0
         return status, body
 
-    def get_bar_snapshot(self, repo: str, number: int, *, api_base: str = "", token: str | None = None):
+    def get_bar_snapshot(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+    ) -> BarSnapshot:
         from ..pr_bar import unsupported  # no merge-bar read here yet: every clause is unknown
         return unsupported(repo, number, self.name)
 

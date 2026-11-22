@@ -12,7 +12,7 @@ existing ``prune.X`` call site keeps working unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from . import git_ops, tracking
 
@@ -90,6 +90,7 @@ _BUCKET_TO_BLOCKER: dict[str, str] = {
     "held-claims": "held-claims",
     "held-claims-cross-machine": "held-claims",
     "open-pr": "open-pr",
+    "unknown-publication": "incomplete-evidence",
     "closed-unmerged": "closed-unmerged",
     "unmerged": "unmerged",
     "dirty": "dirty",
@@ -112,6 +113,7 @@ _BUCKET_TO_ACTION_DISPOSITION: dict[str, str] = {
     "held-claims": "blocked",
     "held-claims-cross-machine": "blocked",
     "open-pr": "blocked",
+    "unknown-publication": "blocked",
     "closed-unmerged": "blocked",
     "dirty": "unsafe",
     "wip": "unsafe",
@@ -143,25 +145,25 @@ class ClosureDescriptor:
 
     version: int
     computed_at: str
-    facts: dict
+    facts: dict[str, dict[str, Any]]
     base_state: str
     label: str
     style: str
     compact: str
-    git: dict
-    claims: dict
-    follow_ups: dict
-    blockers: list[dict]
+    git: dict[str, Any]
+    claims: dict[str, Any]
+    follow_ups: dict[str, Any]
+    blockers: list[dict[str, Any]]
     final: bool
     action_disposition: str
     action_bucket: str
-    display: dict | None = None
+    display: dict[str, Any] | None = None
 
     @property
     def display_compact(self) -> str:
         return self.display["compact"] if self.display else self.compact
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "computed_at": self.computed_at,
@@ -281,7 +283,7 @@ def assemble_closure_descriptor(
         disposition.bucket == "clean" or info.state == S.COMPLETED
     )
 
-    blockers: list[dict] = []
+    blockers: list[dict[str, Any]] = []
     if rec.status == "finalizing":
         blockers.append({"code": "finalizing", "count": 1})
     bucket_code = _BUCKET_TO_BLOCKER.get(disposition.bucket)
@@ -300,7 +302,7 @@ def assemble_closure_descriptor(
     fresh_and_complete = evidence_mode == "refreshed" and evidence_complete
     upstream_confirmed = fresh_and_complete or repo_fetch_fresh
 
-    facts = {
+    facts: dict[str, dict[str, Any]] = {
         "checkpoint_activity": {
             "confirmed": True,
             "turns_since_checkpoint": turn_count,
@@ -439,7 +441,7 @@ def assemble_closure_descriptor(
     )
 
 
-def interpret_descriptor_payload(payload: dict | None) -> dict:
+def interpret_descriptor_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Mixed-version fleet safety (Phase 5): interpret a raw closure-descriptor
     payload from a remote/cached source without trusting fields it may not
     understand. An absent/malformed/version-mismatched payload is NEVER
@@ -481,6 +483,9 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
         if not isinstance(field_value, dict):
             return _unsupported_descriptor(
                 f"unsupported-descriptor:{field_name}-missing-or-not-a-mapping")
+    closure, action, claims, follow_ups = (
+        cast(dict[str, Any], value) for value in (closure, action, claims, follow_ups)
+    )
     label = payload.get("label")
     style = payload.get("style")
     final_value = closure.get("final")
@@ -556,7 +561,7 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     }
 
 
-def _unsupported_descriptor(reason: str) -> dict:
+def _unsupported_descriptor(reason: str) -> dict[str, Any]:
     """The shared degrade-to-neutral result for any ``interpret_descriptor_
     payload`` rejection path -- every field renders as if there were no
     descriptor at all, never partially trusting a malformed payload."""
@@ -568,7 +573,7 @@ def _unsupported_descriptor(reason: str) -> dict:
     }
 
 
-def _non_negative_int(value) -> int | None:
+def _non_negative_int(value: object) -> int | None:
     """Validate a claim/follow-up count from an untrusted descriptor payload
     as a non-negative int, returning ``None`` for anything else (a string, a
     list, ``None``, a bool, or a negative number) rather than silently

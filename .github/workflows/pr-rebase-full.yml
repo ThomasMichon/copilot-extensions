@@ -23,9 +23,16 @@ jobs:
           AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard"
+          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source or pr_review_reconciliation or pr_creation_review or pr_review_destination or pr_review_receipts or pr_creation_reconcile or pr_legacy_admission or github_head_reconciliation"
           --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800
+      - name: Run native creation caller contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_native_cli.py
+          --test-file tests/test_native_foreign_source.py
+          --allow-explicit-tiers
+          --timeout 300 --plugin-timeout 900 --max-files-per-sub-suite 1
   windows:
     name: owned PR replay (Windows)
     runs-on: windows-latest
@@ -42,6 +49,13 @@ jobs:
           AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard"
+          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source or pr_review_reconciliation or pr_creation_review or pr_review_destination or pr_review_receipts or pr_creation_reconcile or pr_legacy_admission or github_head_reconciliation"
           --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800
+      - name: Run native creation caller contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_native_cli.py
+          --test-file tests/test_native_foreign_source.py
+          --allow-explicit-tiers
+          --timeout 300 --plugin-timeout 900 --max-files-per-sub-suite 1

@@ -5,58 +5,75 @@ worktree (``pull-request-capability`` effort, Phase 2d)."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import pr_config, pr_foreign_create, tracking
+from agent_worktrees import pr_config, pr_foreign_create, tracking, tracking_lifecycle
 from agent_worktrees.providers import base as providers
 
+TrackingSetup = tuple[Path, str]
 
-class _FakePull:
-    def __init__(self, *, url, number, state="open", label_error="", draft=None):
-        self.url = url
-        self.number = number
-        self.state = state
-        self.label_error = label_error
-        self.base_ref = "dev"
-        self.draft = draft
+
+class _FakePull(providers.PullResult):
+    def __init__(
+        self, *, url: str, number: int, state: str = "open", label_error: str = "", draft: Any = None,
+    ) -> None:
+        super().__init__(
+            url=url, number=number, state=state, label_error=label_error, base_ref="dev", draft=draft,
+        )
+        self.metadata: dict[str, Any] = {}
 
 
 class _FakeProvider:
     name = "gitea"
+    get_publication_labels: Callable[..., tuple[str, ...]]
+    add_publication_labels: Callable[..., None]
 
-    def __init__(self, result=None, error=None, existing=None):
+    def authority_endpoint(self, api_base: str = "") -> str:
+        return api_base.rstrip("/")
+
+    def __init__(
+        self, result: providers.PullResult | None = None, error: Exception | None = None,
+        existing: providers.PullResult | None = None,
+    ) -> None:
         self._result = result
         self._error = error
         self._existing = existing
-        self.calls: list = []
-        self.find_calls: list = []
+        self.calls: list[tuple[providers.PRScope, str | None]] = []
+        self.find_calls: list[tuple[str, str, str, str | None]] = []
 
-    def find_pull_by_head(self, repo, head, *, api_base="", token=None):
+    def find_pull_by_head(
+        self, repo: str, head: str, *, api_base: str = "", token: str | None = None,
+    ) -> providers.PullResult | None:
         self.find_calls.append((repo, head, api_base, token))
         return self._existing
 
-    def create_pull(self, scope, *, token=None):
+    def create_pull(self, scope: providers.PRScope, *, token: str | None = None) -> providers.PullResult:
         self.calls.append((scope, token))
         if self._error:
             raise self._error
+        assert self._result is not None
         return self._result
 
 
 @pytest.fixture
-def _tracking_setup(tmp_path, monkeypatch):
+def _tracking_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     tracking_d = tmp_path / "tracking"
     tracking_d.mkdir()
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_d)
     worktree_id = "caller-wt-20261004-aaaa"
-    tracking.create_new_record(
+    tracking_lifecycle.create_new_record(
         worktree_id, f"worktree/{worktree_id}", str(tmp_path / "caller"),
         "caller-repo", "test", "linux", tracking_d,
     )
     return tracking_d, worktree_id
 
 
-def _config(worktree_repo="caller-repo"):
+def _config(worktree_repo: str = "caller-repo") -> cfg.Config:
     return cfg.Config(
         srcroot="/tmp", machine="test", platform="linux",
         repo_name=worktree_repo,
@@ -69,15 +86,16 @@ def _config(worktree_repo="caller-repo"):
 
 
 def _foreign_resolution(
-    *, same_as_active=False, provider="gitea", labels=(),
-    required_body_sections=(), source_attribution="codename",
-    enabled=True, source_attribution_configured=True,
-):
+    *, same_as_active: bool = False, provider: str = "gitea", labels: tuple[str, ...] = (),
+    required_body_sections: tuple[str, ...] = (), source_attribution: cfg.SourceAttribution = "codename",
+    enabled: bool = True, source_attribution_configured: bool = True,
+) -> pr_config.ForeignRepoResolution:
     repo_cfg = cfg.RepoConfig(
         anchor="/tmp/other-anchor", worktree_root="/tmp/other-wt",
         default_branch="dev", remote="origin",
         pr=cfg.PRConfig(
             enabled=enabled, provider=provider, labels=labels,
+            api_base="https://example" if provider != "github" else "",
             required_body_sections=required_body_sections,
             source_attribution=source_attribution,
             source_attribution_configured=source_attribution_configured,
@@ -94,8 +112,9 @@ def _foreign_resolution(
     ("codename", True, "custom", True),
 ])
 def test_author_export_roundtrip_preserves_attribution_consent(
-    monkeypatch, tmp_path, _tracking_setup, attribution, configured, codename_source, marker,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _tracking_setup: TrackingSetup,
+    attribution: cfg.SourceAttribution, configured: bool, codename_source: str, marker: bool,
+) -> None:
     from dataclasses import replace
     from agent_worktrees import pr_author_cli, pr_worker_config
 
@@ -107,6 +126,7 @@ def test_author_export_roundtrip_preserves_attribution_consent(
     target = _foreign_resolution(
         source_attribution=attribution, source_attribution_configured=configured,
     ).repo_config
+    assert target is not None
     target = replace(target, pr=replace(target.pr, api_base="https://forge.invalid"))
     policy = tmp_path / "worker-author.json"
     pr_worker_config.export_config(
@@ -120,7 +140,7 @@ def test_author_export_roundtrip_preserves_attribution_consent(
         ),
     )
     loaded = pr_author_cli.load_author_config(str(policy), "owner/other-repo", claimant=True)
-    backend = _FakeProvider(result=_FakePull(url="https://forge.invalid/7", number=7))
+    backend = _FakeProvider(result=_FakePull(url="https://forge.invalid/owner/other-repo/pulls/7", number=7))
     monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
     result = pr_foreign_create.create_foreign_pr_from_branch(
@@ -128,16 +148,19 @@ def test_author_export_roundtrip_preserves_attribution_consent(
     )
     assert result["pr_opened"] and result["claimed"], result
     assert ("agent-worktrees:source" in backend.calls[0][0].body) is marker
-    assert pr_config.resolve_repo_config_for_slug(
+    resolved_repo = pr_config.resolve_repo_config_for_slug(
         loaded, "owner/other-repo",
-    ).repo_config.pr.source_attribution_configured is configured
+    ).repo_config
+    assert resolved_repo is not None
+    assert resolved_repo.pr.source_attribution_configured is configured
 
 
 @pytest.mark.parametrize("body", ["Incomplete description", "## Intent\n\nComplete description"])
 @pytest.mark.parametrize("caller_origin", [None, "conflicting"])
 def test_author_export_roundtrip_enforces_required_body_and_labels(
-    monkeypatch, tmp_path, _tracking_setup, body, caller_origin,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _tracking_setup: TrackingSetup,
+    body: str, caller_origin: str | None,
+) -> None:
     from dataclasses import replace
     from agent_worktrees import pr_author_cli, pr_publication_labels, pr_worker_config
 
@@ -154,6 +177,7 @@ def test_author_export_roundtrip_enforces_required_body_and_labels(
     target = _foreign_resolution(
         required_body_sections=("Intent",), labels=("policy-required",), source_attribution=False,
     ).repo_config
+    assert target is not None
     target = replace(target, pr=replace(
         target.pr, api_base="https://forge.invalid", push_timeout_seconds=37.5,
         publication_origin=pr_publication_labels.PublicationOrigin("author", ("source:target",)),
@@ -170,7 +194,7 @@ def test_author_export_roundtrip_enforces_required_body_and_labels(
         ),
     )
     loaded = pr_author_cli.load_author_config(str(policy), "owner/other-repo", claimant=True)
-    backend = _FakeProvider(result=_FakePull(url="https://forge.invalid/7", number=7))
+    backend = _FakeProvider(result=_FakePull(url="https://forge.invalid/owner/other-repo/pulls/7", number=7))
     current = ["unrelated"]
     backend.get_publication_labels = lambda *a, **k: tuple(current)
     backend.add_publication_labels = lambda repo, number, values, **k: current.extend(values)
@@ -188,21 +212,24 @@ def test_author_export_roundtrip_enforces_required_body_and_labels(
     else:
         assert "missing required non-empty section" in result["error"]
         assert not backend.calls
-    assert pr_config.resolve_repo_config_for_slug(
+    resolved_repo = pr_config.resolve_repo_config_for_slug(
         loaded, "owner/other-repo",
-    ).repo_config.pr.push_timeout_seconds == 37.5
+    ).repo_config
+    assert resolved_repo is not None
+    assert resolved_repo.pr.push_timeout_seconds == 37.5
 
 
 @pytest.mark.parametrize("qualified", [True, False])
 def test_qualified_foreign_creation_retains_claim_and_postcreate_uncertainty(
-    monkeypatch, _tracking_setup, qualified,
-):
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup, qualified: bool,
+) -> None:
     from dataclasses import replace
     from agent_worktrees import pr_foreign_checks
     from agent_worktrees.pr_publication_config import PublicationChecksConfig
 
     _, wid = _tracking_setup
     resolution = _foreign_resolution(provider="azure-devops")
+    assert resolution.repo_config is not None
     resolution = replace(
         resolution, repo_config=replace(
             resolution.repo_config, pr=replace(
@@ -211,13 +238,13 @@ def test_qualified_foreign_creation_retains_claim_and_postcreate_uncertainty(
         ),
     )
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
-    pull = _FakePull(url="https://forge.invalid/7", number=7)
+    pull = _FakePull(url="https://example/owner/_git/other-repo/pullrequest/7", number=7)
     pull.metadata = {"ok": False, "actions": {"description": {"status": "unknown"}}}
     backend = _FakeProvider(result=pull)
     monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
 
-    def qualify(*args, **kwargs):
+    def qualify(*args: Any, **kwargs: Any) -> dict[str, Any]:
         if not qualified:
             raise ValueError("reviewed source changed")
         return {"ok": True, "head": "a" * 40}
@@ -242,11 +269,13 @@ def test_qualified_foreign_creation_retains_claim_and_postcreate_uncertainty(
 
 
 @pytest.mark.parametrize("base", ["dev", "release", ""])
-def test_ado_retry_requires_the_authoritative_configured_base(monkeypatch, _tracking_setup, base):
+def test_ado_retry_requires_the_authoritative_configured_base(
+    monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup, base: str,
+) -> None:
     _, wid = _tracking_setup
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                         lambda *_: _foreign_resolution(provider="azure-devops"))
-    pull = _FakePull(url="https://forge.invalid/7", number=7)
+    pull = _FakePull(url="https://example/owner/_git/other-repo/pullrequest/7", number=7)
     pull.base_ref = base
     backend = _FakeProvider(existing=pull)
     monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
@@ -264,12 +293,12 @@ def test_ado_retry_requires_the_authoritative_configured_base(monkeypatch, _trac
 class TestCreateForeignPrFromBranch:
     @pytest.mark.parametrize("observed", [False, None, "true"])
     def test_ado_reuse_retains_failed_or_unknown_requested_draft(
-        self, monkeypatch, _tracking_setup, observed,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup, observed: Any,
+    ) -> None:
         _, wid = _tracking_setup
         monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                             lambda *_: _foreign_resolution(provider="azure-devops"))
-        pull = _FakePull(url="https://forge.invalid/7", number=7, draft=observed)
+        pull = _FakePull(url="https://example/owner/_git/other-repo/pullrequest/7", number=7, draft=observed)
         backend = _FakeProvider(existing=pull)
         monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
@@ -287,12 +316,12 @@ class TestCreateForeignPrFromBranch:
     @pytest.mark.parametrize("reuse", [False, True])
     @pytest.mark.parametrize("observed", [False, True])
     def test_reports_observed_draft_for_new_and_reused_ado_pr(
-        self, monkeypatch, _tracking_setup, reuse, observed,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup, reuse: bool, observed: bool,
+    ) -> None:
         _, wid = _tracking_setup
         monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                             lambda *_: _foreign_resolution(provider="azure-devops"))
-        pull = _FakePull(url="https://forge.invalid/7", number=7, draft=observed)
+        pull = _FakePull(url="https://example/owner/_git/other-repo/pullrequest/7", number=7, draft=observed)
         backend = _FakeProvider(existing=pull) if reuse else _FakeProvider(result=pull)
         monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
@@ -306,12 +335,12 @@ class TestCreateForeignPrFromBranch:
 
     @pytest.mark.parametrize("reuse", [False, True])
     def test_explicit_origin_uses_target_binding_and_preserves_create_labels(
-        self, monkeypatch, _tracking_setup, reuse,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup, reuse: bool,
+    ) -> None:
         _, wid = _tracking_setup
         monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                             lambda *_: _foreign_resolution(labels=("create-only",)))
-        pull = _FakePull(url="https://example/owner/other-repo/pull/9", number=9)
+        pull = _FakePull(url="https://example/owner/other-repo/pulls/9", number=9)
         backend = _FakeProvider(result=pull, existing=pull if reuse else None)
         current = ["unrelated"]
         backend.get_publication_labels = lambda *a, **k: tuple(current)
@@ -329,7 +358,9 @@ class TestCreateForeignPrFromBranch:
         if not reuse:
             assert backend.calls[0][0].labels == ("create-only",)
 
-    def test_unregistered_target_fails_honestly(self, monkeypatch, _tracking_setup):
+    def test_unregistered_target_fails_honestly(
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
@@ -342,7 +373,9 @@ class TestCreateForeignPrFromBranch:
         assert "error" in result
         assert "not a registered repo" in result["error"]
 
-    def test_same_as_active_is_refused(self, monkeypatch, _tracking_setup):
+    def test_same_as_active_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
@@ -356,14 +389,14 @@ class TestCreateForeignPrFromBranch:
         assert "own active repo" in result["error"]
 
     def test_opens_pr_and_claims_it_onto_the_calling_worktree(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        fake_pull = _FakePull(url="https://example/owner/other-repo/pull/9", number=9)
+        fake_pull = _FakePull(url="https://example/owner/other-repo/pulls/9", number=9)
         fake_provider = _FakeProvider(result=fake_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -394,8 +427,8 @@ class TestCreateForeignPrFromBranch:
         assert fake_pull.url in refs
 
     def test_provider_failure_degrades_to_an_error_result(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
@@ -409,12 +442,13 @@ class TestCreateForeignPrFromBranch:
             wid, _config(), target_repo="owner/other-repo",
             from_branch="topic", title="x",
         )
-        assert result["error"] == "boom"
+        assert "boom" in result["error"]
+        assert result["publication_state"] == "unknown"
         assert "pr_opened" not in result
 
-    def test_missing_tracking_record_warns_instead_of_crashing(
-        self, monkeypatch, tmp_path,
-    ):
+    def test_missing_tracking_record_refuses_before_creating(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
         tracking_d = tmp_path / "tracking"
         tracking_d.mkdir()
         import agent_worktrees.config as cfg_mod
@@ -424,27 +458,27 @@ class TestCreateForeignPrFromBranch:
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        fake_pull = _FakePull(url="https://example/owner/other-repo/pull/1", number=1)
-        monkeypatch.setattr(
-            providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
-        )
+        fake_pull = _FakePull(url="https://example/owner/other-repo/pulls/1", number=1)
+        backend = _FakeProvider(result=fake_pull)
+        monkeypatch.setattr(providers, "get_provider", lambda name: backend)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
 
         result = pr_foreign_create.create_foreign_pr_from_branch(
             "nonexistent-wt", _config(), target_repo="owner/other-repo",
             from_branch="topic", title="x",
         )
-        assert result["pr_opened"] is True
-        assert result["claimed"] is False
-        assert "claim_warning" in result
+        assert "existing managed owner" in result["error"]
+        assert not result.get("pr_opened") and not backend.calls
 
-    def test_attribution_disabled_strips_any_marker(self, monkeypatch, _tracking_setup):
+    def test_attribution_disabled_strips_any_marker(
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        fake_pull = _FakePull(url="https://example/owner/other-repo/pull/2", number=2)
+        fake_pull = _FakePull(url="https://example/owner/other-repo/pulls/2", number=2)
         fake_provider = _FakeProvider(result=fake_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -459,8 +493,8 @@ class TestCreateForeignPrFromBranch:
         assert "hello" in scope.body
 
     def test_respects_the_target_repos_required_body_sections(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
@@ -469,7 +503,7 @@ class TestCreateForeignPrFromBranch:
             ),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/3", number=3),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/3", number=3),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -483,8 +517,8 @@ class TestCreateForeignPrFromBranch:
         assert fake_provider.calls == []  # never reached the provider
 
     def test_defaults_attribution_from_the_target_repos_own_config(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """``attribution=None`` (the default, no ``--no-attribution``) must
         resolve from the TARGET repo's own ``pr.source_attribution``, not an
         unconditional True -- a target configured ``source_attribution:
@@ -496,7 +530,7 @@ class TestCreateForeignPrFromBranch:
             lambda config, slug: _foreign_resolution(source_attribution=False),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/4", number=4),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/4", number=4),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -509,8 +543,8 @@ class TestCreateForeignPrFromBranch:
         assert "agent-worktrees:source" not in scope.body
 
     def test_a_claim_persistence_exception_degrades_to_a_warning(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """The PR already exists on the provider once ``_ensure_pr_claim``/
         ``save_record``/``record_pr_event`` run -- any exception there must
         never escape and read as the whole create failing."""
@@ -519,7 +553,7 @@ class TestCreateForeignPrFromBranch:
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        fake_pull = _FakePull(url="https://example/pr/5", number=5)
+        fake_pull = _FakePull(url="https://example/owner/other-repo/pulls/5", number=5)
         monkeypatch.setattr(
             providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
         )
@@ -540,15 +574,15 @@ class TestCreateForeignPrFromBranch:
         assert fake_pull.url in result["claim_warning"]
 
     def test_refuses_when_the_target_repo_has_pr_mode_disabled(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(enabled=False),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/6", number=6),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/6", number=6),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
 
@@ -561,8 +595,8 @@ class TestCreateForeignPrFromBranch:
         assert fake_provider.calls == []
 
     def test_normalizes_azure_devops_active_state_to_open_for_the_claim(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """ADO's own create_pull() returns its native status ("active"),
         never the cross-provider "open" literal _ensure_pr_claim requires --
         an unnormalized ADO PR would otherwise silently open unclaimed."""
@@ -572,7 +606,7 @@ class TestCreateForeignPrFromBranch:
             lambda config, slug: _foreign_resolution(provider="azure-devops"),
         )
         fake_pull = _FakePull(
-            url="https://example/pr/7", number=7, state="active",
+            url="https://example/owner/_git/other-repo/pullrequest/7", number=7, state="active",
         )
         monkeypatch.setattr(
             providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
@@ -590,8 +624,8 @@ class TestCreateForeignPrFromBranch:
         assert fake_pull.url in refs
 
     def test_codename_from_a_custom_wordlist_never_publishes_unconfigured(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """Mirrors the local path's provenance gate: an implicit (never
         explicitly reviewed) custom-wordlist codename must never publish,
         even though it's a syntactically valid handle."""
@@ -608,7 +642,7 @@ class TestCreateForeignPrFromBranch:
             ),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/8", number=8),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/8", number=8),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -622,8 +656,8 @@ class TestCreateForeignPrFromBranch:
         assert "shimmering-quartz" not in scope.body
 
     def test_codename_from_a_custom_wordlist_publishes_once_configured(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         record = tracking.load_record(_tracking_d / f"{wid}.yaml")
         record.codename = "shimmering-quartz"
@@ -637,7 +671,7 @@ class TestCreateForeignPrFromBranch:
             ),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/9", number=9),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/9", number=9),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -650,8 +684,8 @@ class TestCreateForeignPrFromBranch:
         assert "shimmering-quartz" in scope.body
 
     def test_codename_marker_is_folded_with_the_root_chain_owner(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """The foreign-PR path must apply the SAME root-aware codename
         composition as the local `create_pr` path: a calling worktree with
         an `owner_ref` chain must publish `root=<root-codename>` alongside
@@ -666,7 +700,7 @@ class TestCreateForeignPrFromBranch:
         root_project_dir = tracking_d.parent / "root-project"
         root_tracking_d = root_project_dir / "worktrees"
         root_tracking_d.mkdir(parents=True)
-        tracking.create_new_record(
+        tracking_lifecycle.create_new_record(
             "root-wt", "worktree/root-wt", str(tracking_d.parent / "root"),
             "root-repo", "test", "linux", root_tracking_d,
             codename="amber-thicket", codename_source="built-in",
@@ -689,7 +723,7 @@ class TestCreateForeignPrFromBranch:
             ),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/10", number=10),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/10", number=10),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -703,8 +737,8 @@ class TestCreateForeignPrFromBranch:
         assert "root=amber-thicket" in scope.body
 
     def test_raw_marker_uses_the_records_own_machine_and_latest_live_session(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """The raw (non-codename) marker must identify the CALLING worktree's
         own record (machine + latest live session), matching the local
         path's selection -- never this process's own config.machine, and
@@ -731,7 +765,7 @@ class TestCreateForeignPrFromBranch:
             lambda config, slug: _foreign_resolution(source_attribution=True),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/10", number=10),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/10", number=10),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -749,8 +783,8 @@ class TestCreateForeignPrFromBranch:
         assert "process-own-machine-should-be-ignored" not in scope.body
 
     def test_reuses_an_existing_open_pr_on_the_same_head_instead_of_duplicating(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """Matches create_pr's own idempotent "safe to re-run" contract: a
         retried --repo/--from-branch call for the SAME head must not ask
         the forge to open a duplicate PR."""
@@ -759,7 +793,7 @@ class TestCreateForeignPrFromBranch:
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        existing_pull = _FakePull(url="https://example/pr/11", number=11, state="open")
+        existing_pull = _FakePull(url="https://example/owner/other-repo/pulls/11", number=11, state="open")
         fake_provider = _FakeProvider(existing=existing_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -775,15 +809,15 @@ class TestCreateForeignPrFromBranch:
         assert len(fake_provider.find_calls) == 1
 
     def test_ignores_a_terminal_existing_pr_and_opens_a_fresh_one(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        terminal_pull = _FakePull(url="https://example/pr/12", number=12, state="merged")
-        fresh_pull = _FakePull(url="https://example/pr/13", number=13, state="open")
+        terminal_pull = _FakePull(url="https://example/owner/other-repo/pulls/12", number=12, state="merged")
+        fresh_pull = _FakePull(url="https://example/owner/other-repo/pulls/13", number=13, state="open")
         fake_provider = _FakeProvider(result=fresh_pull, existing=terminal_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -796,14 +830,16 @@ class TestCreateForeignPrFromBranch:
         assert result["number"] == 13
         assert len(fake_provider.calls) == 1
 
-    def test_new_flag_skips_the_reuse_lookup_entirely(self, monkeypatch, _tracking_setup):
+    def test_new_flag_skips_the_reuse_lookup_entirely(
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        existing_pull = _FakePull(url="https://example/pr/14", number=14, state="open")
-        fresh_pull = _FakePull(url="https://example/pr/15", number=15, state="open")
+        existing_pull = _FakePull(url="https://example/owner/other-repo/pulls/14", number=14, state="open")
+        fresh_pull = _FakePull(url="https://example/owner/other-repo/pulls/15", number=15, state="open")
         fake_provider = _FakeProvider(result=fresh_pull, existing=existing_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -817,8 +853,8 @@ class TestCreateForeignPrFromBranch:
         assert len(fake_provider.calls) == 1
 
     def test_raw_marker_never_passes_the_branch_name_as_a_sha(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """build_marker's `head=` is documented as a commit SHA; this
         no-checkout path has no verified SHA before creation and must omit
         the field rather than passing the branch name as if it were one."""
@@ -828,7 +864,7 @@ class TestCreateForeignPrFromBranch:
             lambda config, slug: _foreign_resolution(source_attribution=True),
         )
         fake_provider = _FakeProvider(
-            result=_FakePull(url="https://example/pr/16", number=16),
+            result=_FakePull(url="https://example/owner/other-repo/pulls/16", number=16),
         )
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -842,8 +878,8 @@ class TestCreateForeignPrFromBranch:
         assert "worktree=" in scope.body
 
     def test_required_body_sections_check_is_skipped_on_an_idempotent_reuse(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """An idempotent retry (an existing open PR found) must not fail
         the required_body_sections check just because the caller didn't
         resupply the original body -- no NEW PR is being opened at all."""
@@ -854,7 +890,7 @@ class TestCreateForeignPrFromBranch:
                 required_body_sections=("## Intent",),
             ),
         )
-        existing_pull = _FakePull(url="https://example/pr/17", number=17, state="open")
+        existing_pull = _FakePull(url="https://example/owner/other-repo/pulls/17", number=17, state="open")
         fake_provider = _FakeProvider(existing=existing_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -868,14 +904,14 @@ class TestCreateForeignPrFromBranch:
         assert result["number"] == 17
 
     def test_reused_pr_reports_draft_false_regardless_of_the_callers_request(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         _tracking_d, wid = _tracking_setup
         monkeypatch.setattr(
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        existing_pull = _FakePull(url="https://example/pr/18", number=18, state="open")
+        existing_pull = _FakePull(url="https://example/owner/other-repo/pulls/18", number=18, state="open")
         fake_provider = _FakeProvider(existing=existing_pull)
         monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
         monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
@@ -888,8 +924,8 @@ class TestCreateForeignPrFromBranch:
         assert result["draft"] is False
 
     def test_an_idempotent_retry_reports_claimed_true_not_a_bogus_warning(
-        self, monkeypatch, _tracking_setup,
-    ):
+        self, monkeypatch: pytest.MonkeyPatch, _tracking_setup: TrackingSetup,
+    ) -> None:
         """_ensure_pr_claim returns None both when a claim genuinely fails
         AND when it's already active (nothing new to journal) -- a retry
         whose ledger is already correct must report claimed: true, not a
@@ -899,7 +935,7 @@ class TestCreateForeignPrFromBranch:
             pr_config, "resolve_repo_config_for_slug",
             lambda config, slug: _foreign_resolution(),
         )
-        fake_pull = _FakePull(url="https://example/pr/19", number=19)
+        fake_pull = _FakePull(url="https://example/owner/other-repo/pulls/19", number=19)
         monkeypatch.setattr(
             providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
         )

@@ -4,12 +4,14 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 from types import SimpleNamespace
 import textwrap
 
 import pytest
 
-from agent_worktrees import config as cfg, pr_config, pr_ops, pr_publish, providers, tracking
+from agent_worktrees import config as cfg, pr_config, pr_ops, pr_publish, providers, tracking, tracking_lifecycle
 from agent_worktrees import pr_publication_labels as labels
 from agent_worktrees.providers.base import ProviderError
 from agent_worktrees.providers.github import GitHubProvider
@@ -19,27 +21,32 @@ from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
 ORIGIN = {"id": "control-plane", "labels": ["source:control-plane"]}
 
 
+def required(value: dict[str, Any] | None) -> dict[str, Any]:
+    assert value is not None
+    return value
+
+
 class Backend:
-    def authority_endpoint(self, api_base=""):
+    def authority_endpoint(self, api_base: Any="") -> Any:
         return api_base or "github.com"
 
-    def __init__(self):
-        self.labels = ["unrelated"]
-        self.additions = []
+    def __init__(self) -> None:
+        self.labels: list[str] = ["unrelated"]
+        self.additions: list[tuple[str, ...]] = []
         self.fail = False
 
-    def get_publication_labels(self, repo, number, **kwargs):
+    def get_publication_labels(self, repo: Any, number: Any, **kwargs: Any) -> Any:
         assert (repo, number) == ("base/project", 7)
         return tuple(self.labels)
 
-    def add_publication_labels(self, repo, number, requested, **kwargs):
+    def add_publication_labels(self, repo: Any, number: Any, requested: Any, **kwargs: Any) -> None:
         self.additions.append(requested)
         if self.fail:
             raise ProviderError("metadata unavailable")
         self.labels.extend(requested)
 
 
-def config():
+def config() -> cfg.Config:
     return cfg.Config(
         srcroot=".", machine="fixture", platform="windows", repo_name="fixture",
         repos={"fixture": cfg.RepoConfig(
@@ -55,12 +62,12 @@ def config():
     {"id": "../x", "labels": ["ok"]}, {"id": "x", "labels": ["bad\nlabel"]},
     {"id": "x", "labels": [" ok"]}, {"id": "x", "labels": [1]},
 ])
-def test_invalid_policy_is_not_silently_admitted(raw):
+def test_invalid_policy_is_not_silently_admitted(raw: Any) -> None:
     with pytest.raises(ValueError):
         cfg._parse_pr({"publication_origin": raw})
 
 
-def test_explicit_activation_is_required_and_not_sticky():
+def test_explicit_activation_is_required_and_not_sticky() -> None:
     conf = config()
     assert labels.activate(conf, None) is conf
     assert labels.selected(conf.default_repo.pr) is None
@@ -80,8 +87,8 @@ def test_explicit_activation_is_required_and_not_sticky():
 
 @pytest.mark.parametrize("caller_origin", [None, "conflicting"])
 def test_explicit_target_origin_drives_metadata_without_changing_caller(
-    monkeypatch, caller_origin,
-):
+    monkeypatch: pytest.MonkeyPatch, caller_origin: Any,
+) -> None:
     from agent_worktrees import pr_metadata
 
     caller = config()
@@ -102,10 +109,10 @@ def test_explicit_target_origin_drives_metadata_without_changing_caller(
     assert labels.selected_for_config(labels.activate(active, None)) is None
     backend = Backend()
 
-    def update(repo, number, *, origin, **kwargs):
-        return labels.reconcile(backend, repo, number, origin)
+    def update(repo: Any, number: Any, *, origin: Any, **kwargs: Any) -> Any:
+        return required(labels.reconcile(backend, repo, number, origin))
 
-    backend.update_pull_metadata = update
+    monkeypatch.setattr(backend, "update_pull_metadata", update, raising=False)
     monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
     result = pr_metadata.update_metadata(
@@ -114,7 +121,7 @@ def test_explicit_target_origin_drives_metadata_without_changing_caller(
     assert result["ok"] and backend.labels == ["unrelated", "source:control-plane"]
 
 
-def test_explicit_target_controls_reserved_origin_labels():
+def test_explicit_target_controls_reserved_origin_labels() -> None:
     caller = config()
     target = replace(caller.default_repo, pr=replace(
         caller.default_repo.pr, automerge_label="source:control-plane",
@@ -127,38 +134,38 @@ def test_explicit_target_controls_reserved_origin_labels():
     ["source:control-plane"],
     ["source:control-plane", "secondary", "source:control-plane"],
 ])
-def test_additive_readback_idempotency_and_repair(requested):
+def test_additive_readback_idempotency_and_repair(requested: Any) -> None:
     backend = Backend()
     backend.fail = True
     origin = labels.parse_origin({"id": "control-plane", "labels": requested})
-    failed = labels.reconcile(backend, "base/project", 7, origin)
+    failed = required(labels.reconcile(backend, "base/project", 7, origin))
     assert not failed["ok"] and failed["publication_retained"]
     assert failed["number"] == 7 and failed["repair"] == "pr-publication-labels"
     backend.fail = False
-    assert labels.reconcile(backend, "base/project", 7, origin)["ok"]
+    assert required(labels.reconcile(backend, "base/project", 7, origin))["ok"]
     backend.additions.clear()
-    assert labels.reconcile(backend, "base/project", 7, origin)["ok"]
+    assert required(labels.reconcile(backend, "base/project", 7, origin))["ok"]
     assert backend.labels == ["unrelated", *dict.fromkeys(requested)]
     assert backend.additions == []
 
 
-def test_readback_failure_retains_created_identity():
+def test_readback_failure_retains_created_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = Backend()
-    backend.add_publication_labels = lambda *a, **k: None
-    result = labels.reconcile(backend, "base/project", 7, labels.parse_origin(ORIGIN))
+    monkeypatch.setattr(backend, "add_publication_labels", lambda *a, **k: None)
+    result = required(labels.reconcile(backend, "base/project", 7, labels.parse_origin(ORIGIN)))
     assert not result["ok"] and result["publication_retained"]
     assert "read-back" in result["error"]
     assert labels.reconcile(object(), "base/project", 7, None) is None
 
 
-def test_existing_label_casing_is_preserved_without_readding():
+def test_existing_label_casing_is_preserved_without_readding() -> None:
     backend = Backend()
     backend.labels.append("SOURCE:CONTROL-PLANE")
-    assert labels.reconcile(backend, "base/project", 7, labels.parse_origin(ORIGIN))["ok"]
+    assert required(labels.reconcile(backend, "base/project", 7, labels.parse_origin(ORIGIN)))["ok"]
     assert backend.additions == [] and backend.labels[-1] == "SOURCE:CONTROL-PLANE"
 
 
-def test_origin_scope_and_outcome_round_trip():
+def test_origin_scope_and_outcome_round_trip() -> None:
     target = tracking.PRRecord(repo="base/project", number=7,
                                publication_origin=ORIGIN, publication_labels={"ok": False})
     restored = tracking._parse_pr_mapping(tracking._pr_to_yaml_dict(target), "")
@@ -171,12 +178,12 @@ def test_origin_scope_and_outcome_round_trip():
 
 
 @pytest.mark.parametrize("state", ["open", "closed", "merged"])
-def test_frozen_scope_survives_label_failure_and_repair_without_republication(tmp_path, monkeypatch, state):
+def test_frozen_scope_survives_label_failure_and_repair_without_republication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: Any) -> None:
     directory = tmp_path / "tracking"
     directory.mkdir()
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: directory)
-    tracking.create_new_record("fixture", "worktree/fixture", str(tmp_path / "source"),
-                               "fixture", "fixture", "windows", directory)
+    tracking_lifecycle.create_new_record("fixture", "worktree/fixture", str(tmp_path / "source"),
+                                         "fixture", "fixture", "windows", directory)
     path = directory / "fixture.yaml"
     record = tracking.load_record(path)
     record.prs.append(tracking.PRRecord(
@@ -189,25 +196,25 @@ def test_frozen_scope_survives_label_failure_and_repair_without_republication(tm
     monkeypatch.setattr(providers, "get_provider", lambda _: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
     conf = labels.activate(config(), "control-plane")
-    failed = labels.refresh(conf, record, record.prs[0])
+    failed = required(labels.refresh(conf, record, record.prs[0]))
     assert not failed["ok"]
     fresh = tracking.load_record(path)
     assert fresh.prs[0].publication_origin == ORIGIN and fresh.prs[0].number == 7
     backend.fail = False
-    assert labels.refresh(config(), fresh, fresh.prs[0])["ok"]
+    assert required(labels.refresh(config(), fresh, fresh.prs[0]))["ok"]
     assert tracking.load_record(path).prs[0].publication_labels["ok"]
 
 
-def test_provider_mismatch_refuses_before_credentials_or_scope_attachment(monkeypatch):
+def test_provider_mismatch_refuses_before_credentials_or_scope_attachment(monkeypatch: pytest.MonkeyPatch) -> None:
     conf = labels.activate(config(), "control-plane")
     target = tracking.PRRecord(repo="base/project", number=7, provider="azure-devops")
 
-    def unexpected(*args, **kwargs):
+    def unexpected(*args: Any, **kwargs: Any) -> None:
         pytest.fail("A foreign provider binding must not resolve credentials or a backend")
 
     monkeypatch.setattr(providers, "get_provider", unexpected)
     monkeypatch.setattr(providers, "account_token_for_slug", unexpected)
-    result = labels.refresh(conf, None, target)
+    result = required(labels.refresh(conf, None, target))
     assert not result["ok"] and result["publication_retained"]
     assert "provider differs" in result["error"]
     assert not target.publication_origin
@@ -222,7 +229,7 @@ def test_provider_mismatch_refuses_before_credentials_or_scope_attachment(monkey
     ("github", "", "https://github.com/base/project/pull/8"),
 ])
 def test_tracked_identity_mismatch_refuses_before_credentials_or_scope_attachment(
-        monkeypatch, provider, endpoint, url):
+        monkeypatch: pytest.MonkeyPatch, provider: Any, endpoint: Any, url: Any) -> None:
     conf = labels.activate(config(), "control-plane")
     conf.repos["fixture"] = replace(conf.default_repo, pr=replace(
         conf.default_repo.pr, provider=provider, api_base=endpoint))
@@ -231,14 +238,14 @@ def test_tracked_identity_mismatch_refuses_before_credentials_or_scope_attachmen
     monkeypatch.setattr(providers, "get_provider", lambda _: backend)
     monkeypatch.setattr(providers, "account_token_for_slug",
                         lambda *_: pytest.fail("Mismatched identity must not resolve credentials"))
-    result = labels.refresh(conf, None, target)
+    result = required(labels.refresh(conf, None, target))
     assert not result["ok"] and result["publication_retained"]
     assert "owning binding endpoint" in result["error"]
     assert not target.publication_origin and not backend.additions
 
 
 @pytest.mark.parametrize("reserved", [False, True])
-def test_foreign_target_uses_owning_policy_endpoint_and_credentials(monkeypatch, reserved):
+def test_foreign_target_uses_owning_policy_endpoint_and_credentials(monkeypatch: pytest.MonkeyPatch, reserved: Any) -> None:
     conf = labels.activate(config(), "control-plane")
     owner = replace(conf.default_repo, pr=replace(
         conf.default_repo.pr, api_base="https://forge.invalid",
@@ -254,7 +261,7 @@ def test_foreign_target_uses_owning_policy_endpoint_and_credentials(monkeypatch,
     bindings = []
     monkeypatch.setattr(providers, "account_token_for_slug",
                         lambda repo, prcfg: bindings.append((repo, prcfg)))
-    result = labels.refresh(conf, None, target)
+    result = required(labels.refresh(conf, None, target))
     assert result["ok"] is not reserved
     if reserved:
         assert "merge-consent" in result["error"]
@@ -264,14 +271,14 @@ def test_foreign_target_uses_owning_policy_endpoint_and_credentials(monkeypatch,
         assert backend.additions == [("source:control-plane",)]
 
 
-def test_unresolved_owner_does_not_inherit_active_binding(monkeypatch):
+def test_unresolved_owner_does_not_inherit_active_binding(monkeypatch: pytest.MonkeyPatch) -> None:
     conf = labels.activate(config(), "control-plane")
     target = tracking.PRRecord(repo="base/project", number=7)
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                         lambda *_: pr_config.ForeignRepoResolution(None))
     monkeypatch.setattr(providers, "get_provider",
                         lambda *_: pytest.fail("Unresolved owner must not select a backend"))
-    result = labels.refresh(conf, None, target)
+    result = required(labels.refresh(conf, None, target))
     assert not result["ok"] and "owning repository binding" in result["error"]
     assert not target.publication_origin
 
@@ -284,7 +291,7 @@ def test_unresolved_owner_does_not_inherit_active_binding(monkeypatch):
     ("My%20Project/My Repo", "My%2520Project/_git/My%20Repo", True),
 ])
 def test_encoded_azure_identity_labels_and_repairs_only_the_matching_target(
-        monkeypatch, frozen, repository, path, matches):
+        monkeypatch: pytest.MonkeyPatch, frozen: Any, repository: Any, path: str, matches: Any) -> None:
     conf = config()
     conf.repos["fixture"] = replace(conf.default_repo, pr=replace(
         conf.default_repo.pr, provider="azure-devops", repository=repository,
@@ -298,16 +305,16 @@ def test_encoded_azure_identity_labels_and_repairs_only_the_matching_target(
     )
     backend = Backend()
 
-    def read(repo, number, **kwargs):
+    def read(repo: Any, number: Any, **kwargs: Any) -> Any:
         assert (repo, number, kwargs["api_base"]) == (repository, 7, "https://dev.azure.com/own")
         return tuple(backend.labels)
 
-    backend.get_publication_labels = read
+    monkeypatch.setattr(backend, "get_publication_labels", read)
     monkeypatch.setattr(providers, "get_provider", lambda _: backend)
     bindings = []
     monkeypatch.setattr(providers, "account_token_for_slug",
                         lambda repo, prcfg: bindings.append((repo, prcfg)))
-    result = labels.refresh(conf, None, target)
+    result = required(labels.refresh(conf, None, target))
     assert result["ok"] is matches
     if matches:
         assert bindings == [(repository, conf.default_repo.pr)]
@@ -318,7 +325,7 @@ def test_encoded_azure_identity_labels_and_repairs_only_the_matching_target(
         assert target.publication_origin == (ORIGIN if frozen else {})
 
 
-def test_successful_push_attaches_origin_to_preexisting_pr(monkeypatch):
+def test_successful_push_attaches_origin_to_preexisting_pr(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = Backend()
     conf = config()
     conf = labels.activate(conf, "control-plane")
@@ -330,21 +337,22 @@ def test_successful_push_attaches_origin_to_preexisting_pr(monkeypatch):
     monkeypatch.setattr(pr_ops, "refresh_source_attribution", lambda *a: "")
     monkeypatch.setattr(providers, "get_provider", lambda _: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda repo, _: None)
-    pr_publish.record_pushed_head(conf, None, "fixture", target, "a" * 40)
+    record: Any = None
+    pr_publish.record_pushed_head(conf, record, "fixture", target, "a" * 40)
     assert order == ["pushed"]
     assert target.publication_origin == ORIGIN
-    assert labels.last_result.get()["ok"]
+    assert required(labels.last_result.get())["ok"]
     assert backend.additions == [("source:control-plane",)]
 
 
-def test_reused_local_pr_labels_without_another_create(monkeypatch):
+def test_reused_local_pr_labels_without_another_create(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = Backend()
     conf = config()
     conf = labels.activate(conf, "control-plane")
     monkeypatch.setattr(providers, "get_provider", lambda _: backend)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda repo, _: None)
     target = tracking.PRRecord(repo="base/project", number=7, url="https://github.com/base/project/pull/7")
-    result = {"success": True}
+    result: dict[str, Any] = {"success": True}
     pr_ops._finish_auto_open(
         result, conf, None, target, title="fixture", body="", worktree_id="fixture",
         head_sha="a" * 40, open_pr=True, draft=False, attribution=False,
@@ -353,11 +361,11 @@ def test_reused_local_pr_labels_without_another_create(monkeypatch):
     assert result["number"] == 7 and result["publication_labels"]["ok"]
 
 
-def test_github_label_transport_is_add_only_and_host_scoped(monkeypatch):
+def test_github_label_transport_is_add_only_and_host_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees.providers import github
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: Any, **kwargs: Any) -> Any:
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, json.dumps([[{"name": "unrelated"}]]), "")
 
@@ -368,17 +376,19 @@ def test_github_label_transport_is_add_only_and_host_scoped(monkeypatch):
                                     api_base="https://forge.invalid", token="fixture")
     argv, kwargs = calls[-1]
     assert "--method" in argv and "POST" in argv and "DELETE" not in argv and "PATCH" not in argv
-    assert "repos/base/project/issues/7/labels" in argv and "labels[]=source:control-plane" in argv
+    assert any(value.startswith("https://forge.invalid/")
+               and value.endswith("/repos/base/project/issues/7/labels") for value in argv)
+    assert "labels[]=source:control-plane" in argv
     assert "labels[]=secondary" in argv
     assert kwargs["env"]["GH_HOST"] == "forge.invalid"
 
 
-def test_azure_labels_use_per_label_post_and_encoded_target(monkeypatch):
-    provider = AzureDevOpsProvider()
+def test_azure_labels_use_per_label_post_and_encoded_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider: Any = AzureDevOpsProvider()
     calls = []
     monkeypatch.setattr(provider, "_auth_header", lambda _: ("fixture", ""))
 
-    def request(method, url, auth, payload=None):
+    def request(method: Any, url: Any, auth: Any, payload: Any=None) -> Any:
         calls.append((method, url, payload))
         return 200, json.dumps({"value": [{"name": "unrelated"}]})
 
@@ -393,12 +403,12 @@ def test_azure_labels_use_per_label_post_and_encoded_target(monkeypatch):
     ]
 
 
-def test_unsupported_provider_is_a_repairable_partial_result():
-    result = labels.reconcile(SimpleNamespace(), "base/project", 7, labels.parse_origin(ORIGIN))
+def test_unsupported_provider_is_a_repairable_partial_result() -> None:
+    result = required(labels.reconcile(SimpleNamespace(), "base/project", 7, labels.parse_origin(ORIGIN)))
     assert not result["ok"] and result["number"] == 7 and result["publication_retained"]
 
 
-def test_real_cli_subprocess_repairs_with_fake_backend_without_publication(tmp_path):
+def test_real_cli_subprocess_repairs_with_fake_backend_without_publication(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs
 
     path = tmp_path / "policy.json"

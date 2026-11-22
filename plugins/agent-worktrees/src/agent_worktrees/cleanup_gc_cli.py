@@ -7,6 +7,7 @@ import dataclasses
 import json
 import types
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -21,10 +22,10 @@ from .cleanup_blockers import (
     _enrich_reason_with_blockers as _enrich_reason_with_blockers,
 )
 from .retirement_safety import retirement_blocker
+from .pr_transport_fence import QualificationRefused
 
 if TYPE_CHECKING:
     from .finalize_lock import FinalizeLock
-
 
 def _core() -> types.ModuleType:
     from . import __main__ as core
@@ -135,7 +136,7 @@ def _cleanup_one(args: argparse.Namespace) -> int:
 #: from `cleanup`'s report entirely -- neither listed as skipped nor counted.
 _CLEANUP_PER_ITEM_BUCKETS = frozenset({
     "claimed", "open-pr", "closed-unmerged", "paired-pending",
-    "held-claims", "held-claims-cross-machine", "follow-up", "retained-data",
+    "held-claims", "held-claims-cross-machine", "follow-up", "retained-data", "unknown-publication",
 })
 
 
@@ -275,17 +276,19 @@ def _revalidate_cleanup_safety(
         )
 
     try:
-        from . import worktree_lifecycle
+        from .pr_transport_fence import cleanup_lifecycle_guard
 
-        with worktree_lifecycle.guard(yaml_path), tracking._RecordLock(
+        with cleanup_lifecycle_guard(yaml_path), tracking._RecordLock(
             yaml_path, require_sidecar=True,
-        ):
+        ), ExitStack() as qualification:
             from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
 
             try:
                 latest = tracking.load_record(yaml_path)
             except (ExecutionSpaceError, ValueError, OSError, yaml.YAMLError) as exc:
                 return RevalidationResult(False, f"record/reporting context unavailable: {exc}", "execution-space")
+            from .pr_transport_fence import cleanup_guard
+            qualification.enter_context(cleanup_guard(latest, repo))
             if automatic and (
                 latest.dispatch_attempt is not None or latest.dispatch_attempt_opaque
             ):
@@ -305,8 +308,13 @@ def _revalidate_cleanup_safety(
                 return RevalidationResult(
                     False, "mux presence is unknown; cleanup deferred", "mux-unknown",
                 )
+            mux_live = sessions.mux_session_name(latest.worktree_id) in mux
+            if mux_live and not session_lease.latch_eligible(latest):
+                return RevalidationResult(
+                    False, "worktree became active since the initial scan", "active",
+                )
             fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
-            if sessions.mux_session_name(latest.worktree_id) in mux and session_lease.pane_holds_checkout(
+            if mux_live and session_lease.pane_holds_checkout(
                 latest, active_paths, session_ctx.active_sessions,
             ):
                 return RevalidationResult(
@@ -362,6 +370,8 @@ def _revalidate_cleanup_safety(
                 if error:
                     return RevalidationResult(False, error, "unmerged")
             return _do_reap(latest, fresh_info, disp.reason, disp.bucket)
+    except QualificationRefused as exc:
+        return RevalidationResult(False, f"PR qualification refused: {exc}", "open-pr")
     except TimeoutError:
         return RevalidationResult(
             False, "revalidation lock contended", "locked")
@@ -863,7 +873,7 @@ def _run_claim_history_mirror(args: argparse.Namespace) -> dict[str, object]:
         }
 
 
-def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None:
+def _print_gc_claim_history_mirror(result: dict[str, Any], dry: bool) -> None:
     if not result.get("available"):
         return
     refs = cast(list[dict[str, Any]], result.get("refs") or [])
@@ -912,7 +922,7 @@ def _run_lease_gc(args: argparse.Namespace) -> dict[str, object]:
     return {"available": True, "squashed": squashed}
 
 
-def _print_gc_lease(lease_gc: dict[str, object], dry: bool) -> None:
+def _print_gc_lease(lease_gc: dict[str, Any], dry: bool) -> None:
     if not lease_gc.get("available"):
         return
     squashed = cast(list[dict[str, Any]], lease_gc.get("squashed") or [])

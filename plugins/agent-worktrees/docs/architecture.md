@@ -197,6 +197,15 @@ an exact, durably qualified reservation and retains ambiguous legacy attempts.
 Never edit the ledger or close a numbered association merely to satisfy
 publication ownership.
 
+The [legacy creation reconciliation owner](pr-creation-reconciliation.md)
+can explicitly retire one owner-stamped publishing reservation without a
+prepared first-push source. It preserves the unknown transport outcome and
+original identity, checks current provider/ref/source proof under the existing
+publication/finalization fences, and never invents provider closure or merge.
+Its legacy-reader hold keeps the original publishing state while moving the
+actionable branch into the preserved retirement receipt. Older numberless
+healing cannot reassign it, and older ordinary finalization remains blocked.
+
 ### Transport boundaries
 
 The clone-wide `agent-worktrees-publish.lock` protects shared remote
@@ -218,6 +227,12 @@ A changed fork identity before capture
 is still refused.
 
 Ordinary incremental publications on unrelated branches can overlap at transport.
+An exact destination/head fence excludes matching recovery or cleanup while a
+transport is admitted. Its opaque generation invalidates observations if
+publication intervened; unrelated heads keep independent fences and can still
+overlap. Retirement finalization captures remote observations before cleanup
+locks, then validates the same-operation snapshot under these short head fences.
+This coordination state is not a PR ledger or evidence of provider success.
 Explicit `--rewrite-pr` retains its outer publication/installation authority
 locks through transport because destructive ownership changes remain serialized;
 the ordinary transport concurrency guarantee does not apply to that path.

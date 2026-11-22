@@ -13366,8 +13366,19 @@ manually dispatched `PR rebase full` workflow on Linux and Windows:
 
 ```powershell
 $env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
-python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard or pr_source_binding or pr_fork_source or pr_review_reconciliation or pr_creation_review or pr_review_destination or pr_review_receipts or pr_creation_reconcile or pr_legacy_admission or github_head_reconciliation" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-pull-requests --test-file tests/test_native_cli.py --test-file tests/test_native_foreign_source.py --allow-explicit-tiers --timeout 300 --plugin-timeout 900 --max-files-per-sub-suite 1
 ```
+
+The same manual lane checks the native creation caller on both OSes, including
+current/prior capability selection, the real child-environment handoff and
+truthful unknown responses. Provider parsing uses synthetic transport responses;
+it does not install or contact Gitea or Azure services. Worktrees receipt,
+claim and lock persistence remain real. The foreign creation deadline controls
+share a synthetic clock across real adapter/request construction and durable
+receipt settlement, proving startup consumption and a retained unknown POST
+without a long-running backend. Existing item, sub-suite and job limits remain
+unchanged; no exhaustive lane is added to required unit-only CI.
 
 Use the exhaustive mode when changing replay authorization or its publication
 adapters; unrelated PRs and ordinary promotion runs do not pay the matrix cost.
@@ -13375,6 +13386,18 @@ The same manual lane covers exact operator-recovery previews, advanced live
 heads, backed-sync bookkeeping settlement, immutable source/lease races and
 ordinary stale-tip reconciliation against disposable Git repositories. It
 requires no live PR, credentials or effectful operator recovery.
+
+The same manual lane owns `test_pr_source_binding.py`: real Git source movement
+at fence acquisition, physical GitHub endpoint aliases, nonblocking completion
+admission, differently named foreign forks and a retained-history routing
+control, plus the small `test_pr_fork_source.py` provider-response contract.
+It also runs the retirement, physical-admission refusal and exact-head provider
+contracts in `test_pr_creation_reconcile.py`, `test_pr_legacy_admission.py` and
+`test_github_head_reconciliation.py`, alongside the four creation/review consumer
+files named in the selector above. Local focused runs keep the existing
+30-second item and 300-second suite bounds. The native frontend's small capability/forwarding controls are
+`agent-pull-requests/tests/test_native_foreign_source.py`; they require no forge
+or installed-runtime mutation.
 
 Required pull-request CI is a fast regression gate, not the complete test
 inventory. Its design target is a wall time below five minutes under normal

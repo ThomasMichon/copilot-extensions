@@ -8,11 +8,12 @@ import tempfile
 import shlex
 import uuid
 import os
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar
 from pathlib import Path
+from collections.abc import Iterator, Sequence
 
-from . import git_ops, push_timeout
+from . import git_ops, git_push_binding, git_push_tracking, pr_transport_fence, push_timeout
 from .github_credentials import GitAuthArgs
 
 _destination: ContextVar[
@@ -29,7 +30,7 @@ def _auth_attempts(auth: list[str]) -> list[list[str]]:
 
 @contextmanager
 def pinned_destination(remote: str, urls: tuple[str, ...],
-                       settings: tuple[tuple[str, str], ...] = (), *, fetch_url: str | None = None):
+                       settings: tuple[tuple[str, str], ...] = (), *, fetch_url: str | None = None) -> Iterator[None]:
     """Bind this publication's transport/auth to an already verified URL."""
     token = _destination.set((remote, urls, settings, fetch_url))
     try:
@@ -43,8 +44,10 @@ def captured_urls(remote: str) -> tuple[str, ...]:
 
 
 @contextmanager
-def _url_aliases(pairs, *, logical_remote: str = "", logical_fetch: str = ""):
-    def quoted(value):
+def _url_aliases(
+    pairs: Sequence[tuple[str, str]], *, logical_remote: str = "", logical_fetch: str = "",
+) -> Iterator[list[str]]:
+    def quoted(value: str) -> str:
         return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t") + '"'
     with tempfile.TemporaryDirectory(prefix="agent-worktrees-url-config-") as directory:
         config = Path(directory) / "pin.config"
@@ -64,34 +67,74 @@ def _url_aliases(pairs, *, logical_remote: str = "", logical_fetch: str = ""):
 
 
 @contextmanager
-def _hook_identity(remote: str, cwd: str | Path):
-    """Forward the real pre-push hook unchanged except for its logical remote name."""
+def _hook_identity(remote: str, cwd: str | Path, *, source: str, published_oid: str, target: str) -> Iterator[list[str]]:
+    """Retain the real hook's logical remote and original source-ref identity."""
     hook = git_ops.git("rev-parse", "--git-path", "hooks/pre-push", cwd=cwd,
                        isolated_repository=True).stdout.strip()
     path = Path(cwd, hook).resolve()
     if not path.is_file() or (os.name != "nt" and not os.access(path, os.X_OK)):
         yield []
         return
+    hook_source = source.removeprefix("+")
+    binding = git_push_binding.current.get()
+    if binding is not None and hook_source == binding.object_id:
+        hook_source = binding.hook_ref
+    elif hook_source and hook_source != "HEAD":
+        hook_source = git_ops.git(
+            "rev-parse", "--symbolic-full-name", hook_source, cwd=cwd,
+            isolated_repository=True,
+        ).stdout.strip() or hook_source
+    stdin = ""
+    if published_oid:
+        stdin = (
+            "while read -r local_ref local_sha remote_ref remote_sha; do\n"
+            f"  if [ \"$local_ref\" = {shlex.quote(published_oid)} ] && "
+            f"[ \"$local_sha\" = {shlex.quote(published_oid)} ] && "
+            f"[ \"$remote_ref\" = {shlex.quote(target)} ]; then\n"
+            f"    local_ref={shlex.quote(hook_source)}\n  fi\n"
+            '  printf "%s %s %s %s\\n" "$local_ref" "$local_sha" "$remote_ref" "$remote_sha"\n'
+            "done | "
+        )
     with tempfile.TemporaryDirectory(prefix="agent-worktrees-push-hook-") as directory:
         proxy = Path(directory) / "pre-push"
         proxy.write_text(
-            "#!/bin/sh\nexec " + shlex.quote(path.as_posix()) + " " +
+            "#!/bin/sh\n" + stdin + shlex.quote(path.as_posix()) + " " +
             shlex.quote(remote) + ' "$2"\n', encoding="utf-8", newline="\n",
         )
         proxy.chmod(0o700)
         yield ["-c", f"core.hooksPath={Path(directory).as_posix()}"]
 
 
+@git_push_binding.capture
+@pr_transport_fence.publication
 def push(
     remote: str, branch: str, *, cwd: str | Path,
     force_with_lease: bool = False, force_with_lease_expect: str | None = None,
     timeout: float | None = push_timeout.DEFAULT_PUSH_TIMEOUT,
 ) -> git_ops.PushResult:
+    pinned = _destination.get()
+    destinations = pinned[1] if pinned and pinned[0] == remote else ()
+    binding = git_push_binding.current.get()
+    published_oid = binding.object_id if binding is not None else ""
+    source, separator, target = branch.partition(":")
+    if destinations:
+        if not separator:
+            return git_ops.PushResult(ok=False, stderr="Pinned transport requires its resolved destination ref.")
+        if source:
+            try:
+                binding = git_push_binding.current.get()
+                published_oid = binding.object_id if binding is not None else git_ops.git(
+                    "rev-parse", "--verify", source.removeprefix("+") + "^{object}",
+                    cwd=cwd, isolated_repository=True, timeout=timeout, kill_tree=True,
+                ).stdout.strip()
+            except (git_ops.GitError, subprocess.SubprocessError) as exc:
+                return git_ops.PushResult(ok=False, stderr=f"Cannot pin the pushed source object: {exc}")
+            if not published_oid:
+                return git_ops.PushResult(ok=False, stderr="The pushed source object is unavailable.")
+            branch = ("+" if source.startswith("+") else "") + published_oid + ":" + target
     extra = ([f"--force-with-lease={branch.rsplit(':', 1)[-1]}:{force_with_lease_expect}"]
              if force_with_lease_expect is not None else
              ["--force-with-lease"] if force_with_lease else [])
-    pinned = _destination.get()
-    destinations = pinned[1] if pinned and pinned[0] == remote else ()
     destination = destinations[0] if destinations else remote
     transport_remote = f"agent-worktrees-pinned-{uuid.uuid4().hex}" if destinations else remote
     destination_args = ([
@@ -110,12 +153,26 @@ def push(
     except git_ops.GitError as exc:
         return git_ops.PushResult(ok=False, stderr=exc.stderr)
     attempts = _auth_attempts(auth_args)
+    deletion = None
+    if not source and pinned and pinned[0] == remote:
+        try:
+            deletion = git_push_tracking.capture_deletion(
+                remote, destinations, target, cwd, fetch_url=pinned[3],
+            )
+        except (OSError, git_ops.GitError, TimeoutError, subprocess.SubprocessError) as exc:
+            return git_ops.PushResult(ok=False, stderr=f"Cannot capture pre-transport deletion tracking: {exc}")
     last_stderr = last_stdout = ""
     for prefix in attempts:
         try:
             aliases = [(url, f"{transport_remote}-url-{index}") for index, url in enumerate(destinations)]
-            with _url_aliases(aliases, logical_remote=remote, logical_fetch=pinned[3] or "") if destinations else nullcontext([]) as alias_args, \
-                    _hook_identity(remote, cwd) if destinations else nullcontext([]) as hook_args:
+            fetch_url = (pinned[3] or "") if pinned is not None else ""
+            alias_context: AbstractContextManager[list[str]] = nullcontext([])
+            hook_context: AbstractContextManager[list[str]] = nullcontext([])
+            if destinations:
+                alias_context = _url_aliases(aliases, logical_remote=remote, logical_fetch=fetch_url)
+            if destinations or binding is not None:
+                hook_context = _hook_identity(remote, cwd, source=source, published_oid=published_oid, target=target)
+            with alias_context as alias_args, hook_context as hook_args:
                 result = git_ops.git(
                     *prefix, *destination_args, *alias_args, *hook_args, "push", transport_remote, branch, *extra, "--quiet",
                     cwd=cwd, check=False, timeout=timeout, kill_tree=True,
@@ -127,17 +184,20 @@ def push(
             warning = ""
             if pinned and pinned[0] == remote:
                 try:
-                    _refresh_tracking(remote, destinations, branch, cwd, timeout,
-                                      force_with_lease_expect)
+                    _refresh_tracking(
+                        remote, destinations, branch, cwd, force_with_lease_expect,
+                        published_oid=published_oid,
+                        **({"deletion": deletion} if not source else {}),
+                    )
                 except (OSError, git_ops.GitError, TimeoutError, subprocess.TimeoutExpired) as exc:
                     if isinstance(exc, subprocess.TimeoutExpired):
-                        detail = f"remote-ref probe timed out after {exc.timeout:g} seconds"
+                        detail = f"tracking refresh timed out after {exc.timeout:g} seconds"
                     else:
                         detail = exc.stderr if isinstance(exc, git_ops.GitError) else str(exc)
                     warning = (f"Push succeeded, but local remote-tracking refresh failed: "
                                f"{type(exc).__name__}: {detail.strip() or 'no further diagnostic details'}.")
                     logging.getLogger("agent-worktrees").warning(warning)
-            return git_ops.PushResult(ok=True, stderr=warning)
+            return git_ops.PushResult(ok=True, stderr=warning, published_head_sha=published_oid)
         last_stderr, last_stdout = result.stderr or last_stderr, result.stdout or last_stdout
     return git_ops.PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
 
@@ -181,59 +241,11 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
 
 
 def _refresh_tracking(remote: str, destinations: tuple[str, ...], refspec: str, cwd: str | Path,
-                      timeout: float | None, expected: str | None = None) -> None:
+                      expected: str | None = None, *, published_oid: str,
+                      deletion: git_push_tracking.Deletion | None = None) -> None:
     """Preserve Git's named-remote tracking update only for the still-matching remote."""
-    from . import pr_publish
-
-    _, separator, target = refspec.partition(":")
-    if not separator:
-        target = "refs/heads/" + refspec.removeprefix("refs/heads/")
-    if not target.startswith("refs/heads/"):
-        return
-    sha = published_ref(remote, destinations, target, cwd)
-    with pr_publish.publish_lock(str(cwd), acquire_timeout=1.0):
-        current = git_ops.git("remote", "get-url", "--push", "--all", remote,
-                              cwd=cwd, check=False, isolated_repository=True)
-        if current.returncode or tuple(current.stdout.splitlines()) != destinations:
-            return
-        pinned = _destination.get()
-        if pinned and pinned[0] == remote and pinned[3] is not None:
-            current_fetch = git_ops.git("remote", "get-url", remote, cwd=cwd,
-                                        check=False, isolated_repository=True)
-            if current_fetch.returncode or current_fetch.stdout.rstrip("\r\n") != pinned[3]:
-                return
-        mappings = git_ops.git("config", "--get-all", f"remote.{remote}.fetch",
-                               cwd=cwd, check=False, isolated_repository=True).stdout.splitlines()
-        for mapping in mappings:
-            if not mapping.startswith("^"):
-                continue
-            excluded = mapping[1:]
-            if excluded == target:
-                return
-            if excluded.count("*") == 1:
-                prefix, suffix = excluded.split("*")
-                if target.startswith(prefix) and target.endswith(suffix) and len(target) >= len(prefix) + len(suffix):
-                    return
-        for mapping in mappings:
-            fetch_source, _, fetch_target = mapping.lstrip("+").partition(":")
-            if fetch_source == target and fetch_target:
-                tracked = fetch_target
-            elif fetch_source.count("*") == 1 and fetch_target.count("*") == 1:
-                prefix, suffix = fetch_source.split("*")
-                if not target.startswith(prefix) or (suffix and not target.endswith(suffix)):
-                    continue
-                end = len(target) - len(suffix) if suffix else len(target)
-                if end < len(prefix):
-                    continue
-                tracked = fetch_target.replace("*", target[len(prefix):end])
-            else:
-                continue
-            previous = git_ops.git("rev-parse", "--verify", tracked, cwd=cwd,
-                                   check=False, isolated_repository=True).stdout.strip()
-            if previous and previous != expected and not git_ops.is_commit_ancestor(previous, sha, cwd=cwd):
-                # Another completed publication may already have advanced this
-                # tracking ref. Never roll it back to an older successful push.
-                return
-            git_ops.git("update-ref", tracked, sha, previous or "0" * len(sha), cwd=cwd,
-                        isolated_repository=True)
-            return
+    pinned = _destination.get()
+    git_push_tracking.refresh(
+        remote, destinations, refspec, cwd, expected, published_oid=published_oid,
+        fetch_url=pinned[3] if pinned and pinned[0] == remote else None, deletion=deletion,
+    )

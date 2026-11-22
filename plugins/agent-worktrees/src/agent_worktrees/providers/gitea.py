@@ -155,7 +155,8 @@ class GiteaProvider:
 
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         if not token:
-            raise ProviderError(
+            from .base import CreationRefused
+            raise CreationRefused(
                 "Gitea provider needs a token. Set 'pr.token_command' (e.g. a "
                 "vault fetch) or 'pr.token_env' in the repo config."
             )
@@ -186,11 +187,19 @@ class GiteaProvider:
             data = json.loads(body)
         except json.JSONDecodeError as e:
             raise ProviderError(f"Gitea returned non-JSON PR response: {e}") from e
+        from . import creation_receipt
+        from .github_pull_source import CreatedSourceMismatch
+
+        number = creation_receipt.number(data, "number")
         result = PullResult(
             url=str(data.get("html_url", "")),
-            number=int(data["number"]) if data.get("number") is not None else None,
+            number=number,
             state=str(data.get("state", "open")) or "open",
         )
+        try:
+            creation_receipt.validate(result, self.name, scope.repo, scope.api_base)
+        except ProviderError as exc:
+            raise CreatedSourceMismatch(result) from exc
         if scope.labels and result.number is not None:
             result.label_error = self._apply_labels(scope, result.number, token)
         return result

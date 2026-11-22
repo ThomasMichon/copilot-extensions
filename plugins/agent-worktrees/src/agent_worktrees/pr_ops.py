@@ -15,10 +15,11 @@ import re
 import string
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
 from . import claim_history, config as cfg
 from . import git_ops, hooks, obligations, output, pr_authority, pr_creation_state, pr_publication_checks, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
-from .config import Config, SourceAttribution
+from .config import Config, PRConfig, RepoConfig, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
     _patch_id as _patch_id,
@@ -27,6 +28,10 @@ from .pr_bypass_note import self_merge_bypass_note
 from .pr_observation_persistence import persist_observation as _persist_pr_observation
 from .providers.base import PullResult
 from .tracking import PRRecord
+from .tracking_claims import ResourceClaim, add_resource_claim, settle_resource_claim
+from .tracking_session_registry import record_repo_fetch_confirmed
+
+_ObservedPulls = dict[tuple[str | tuple[str, str], int], PullResult]
 
 HOLD_LABEL = "do-not-merge"
 
@@ -184,7 +189,7 @@ def _resolve_username(cwd: str | None) -> str:
     return "user"
 
 
-def resolve_head_pattern(prcfg) -> str:
+def resolve_head_pattern(prcfg: PRConfig) -> str:
     """The PR head-name template for *prcfg* (explicit override or default).
 
     An explicit ``head_pattern`` wins. Azure DevOps otherwise defaults to
@@ -218,7 +223,7 @@ def _augment_default_head_pattern_for_topic(pattern: str, *, has_topic: bool) ->
     return pattern.replace("{suffix}", "{topic}-{suffix}", 1)
 
 
-def _effective_head_pattern(prcfg, *, topic: str = "") -> tuple[str, str | None]:
+def _effective_head_pattern(prcfg: PRConfig, *, topic: str = "") -> tuple[str, str | None]:
     """Resolved head pattern plus an optional note about ignored ``topic``."""
     pattern = resolve_head_pattern(prcfg)
     if not topic:
@@ -265,7 +270,7 @@ def audit_attribution_risk(config: Config) -> list[str]:
 
 
 def pr_head_name(
-    prcfg,
+    prcfg: PRConfig,
     title: str,
     worktree_id: str,
     *,
@@ -355,7 +360,7 @@ def create_pr(
     confirm_fork: bool = False,
     publication_origin: str | None = None,
     publication_labels: tuple[str, ...] = (),
-) -> dict:
+) -> dict[str, Any]:
     """Squash worktree commits, create + push a feature branch for a PR.
 
     Returns a JSON-friendly result dict.  On success it includes ``branch``,
@@ -425,7 +430,7 @@ def create_pr(
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     wt_branch = f"worktree/{worktree_id}"
 
-    base: dict = {"success": False, "worktree_id": worktree_id}
+    base: dict[str, Any] = {"success": False, "worktree_id": worktree_id}
 
     if not prcfg.enabled:
         return {**base, "error": (
@@ -448,6 +453,15 @@ def create_pr(
             record = tracking.load_record(yaml_path)
         except Exception:
             record = None
+    from . import pr_creation_reconcile
+    if record is not None:
+        from . import pr_unverified_creation
+        for retained in record.prs:
+            if pr_unverified_creation.pending(base, retained):
+                return base
+    error = pr_creation_reconcile.publication_error(record, new=new)
+    if error:
+        return {**base, "error": error}
 
     # Round-22 finding: preflight the same allocation-time policy
     # `_open_via_provider`'s lazy backfill would otherwise only catch too
@@ -589,7 +603,7 @@ def create_pr(
             active = record.active_pr() if record else None
             active_is_live = active is not None and not tracking._pr_is_terminal(active)
 
-    needs_body = new or not active_is_live or active.number is None
+    needs_body = new or not active_is_live or active is None or active.number is None
     if needs_body:
         missing_body = missing_required_body_sections(
             body,
@@ -605,7 +619,7 @@ def create_pr(
                 ),
             }
 
-    topic_slug = slugify(topic) if (topic or "").strip() else ""
+    topic_slug = slugify(topic) if topic and topic.strip() else ""
     topic_note = None
 
     # Resolve the feature branch name: explicit > live active PR > derived.
@@ -613,7 +627,7 @@ def create_pr(
         feature_branch = branch
         if topic_slug:
             topic_note = "Ignoring --topic because --branch fully overrides the head name."
-    elif active_is_live and not new and active.branch:
+    elif active_is_live and active is not None and not new and active.branch:
         feature_branch = active.branch
     else:
         _pattern, topic_note = _effective_head_pattern(prcfg, topic=topic_slug)
@@ -621,6 +635,9 @@ def create_pr(
             prcfg, eff_title, worktree_id,
             cwd=worktree_path, machine=config.machine, topic=topic_slug,
         )
+    error = pr_creation_reconcile.publication_error(record, new=new, branch=feature_branch)
+    if error:
+        return {**base, "error": error}
 
     # Branch-name leak class (pr-attribution-codenames Phase 5): whichever way
     # the head above was resolved (explicit --branch, a reused existing-PR
@@ -718,13 +735,14 @@ def create_pr(
             pass
         else:
             if record and record.repo:
-                tracking.record_repo_fetch_confirmed(record.repo)
+                record_repo_fetch_confirmed(record.repo)
 
     head_branch = git_ops._get_current_branch_safe(worktree_path)
-    publish_remote, fork_owner, fork_head_repo, fork_head_identity = pr_publish.update_remote(
+    updated_remote, fork_owner, fork_head_repo, fork_head_identity = pr_publish.update_remote(
         repo, record, feature_branch, worktree_path, publish_remote, fork_owner, fork_head_repo, fork_head_identity)
-    if publish_remote is None:
+    if updated_remote is None:
         return {**base, "error": pr_publish.UNREADABLE_REMOTE}
+    publish_remote = updated_remote
 
     try:
         candidate = pr_publish._pr_for(record, feature_branch)
@@ -907,7 +925,8 @@ def create_pr(
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
     try:
-        pr_creation_state.start_publication(record, target_pr, remote=publish_remote, source_ref=wt_branch if use_refspec else feature_branch, head_sha=head_sha, base_sha=base_sha, backup_sha=squash_backup)
+        if record is not None:
+            pr_creation_state.start_publication(record, target_pr, remote=publish_remote, source_ref=wt_branch if use_refspec else feature_branch, head_sha=head_sha, base_sha=base_sha, backup_sha=squash_backup)
     except ValueError as exc:
         return {**base, "error": str(exc)}
     expected_publication = replace(target_pr) if target_pr is not None else None
@@ -978,7 +997,7 @@ def create_pr(
     if record is not None and target_pr is not None:
         pr_publication_state.settle_creation(record, target_pr)
         target_pr.branch = feature_branch
-        pr_publish.record_remote_identity(target_pr, publish_remote, remote, pushed.head_repo, getattr(pushed, "head_identity", ""), fork_owner)
+        pr_publish.record_remote_identity(target_pr, publish_remote, remote, getattr(pushed, "head_repo", ""), getattr(pushed, "head_identity", ""), fork_owner)
         target_pr.base_sha = base_sha
         target_pr.head_sha = head_sha
         target_pr.head_observed_at = ""
@@ -1092,9 +1111,9 @@ def _ensure_pr_claim(
         for c in record.resources
     )
     try:
-        tracking.add_resource_claim(
+        add_resource_claim(
             record,
-            tracking.ResourceClaim(
+            ResourceClaim(
                 kind="pr", ref=ref, created_at=tracking._now_iso(),
                 state=obligations.ACTIVE,
                 note=f"PR #{pr.number}" + (f" ({pr.repo})" if pr.repo else ""),
@@ -1128,13 +1147,13 @@ def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | Non
     match = next((c for c in record.resources if c.kind == "pr" and c.ref == ref), None)
     if match is None or not match.is_live:
         return None
-    settled = tracking.settle_resource_claim(record, ref, obligations.RELEASED, save=False)
+    settled = settle_resource_claim(record, ref, obligations.RELEASED, save=False)
     return ref if settled is not None else None
 
 
 @pr_authority.publication
 def _open_via_provider(
-    result: dict,
+    result: dict[str, Any],
     config: Config,
     record: tracking.WorktreeRecord | None,
     target_pr: PRRecord,
@@ -1143,13 +1162,17 @@ def _open_via_provider(
     worktree_id: str,
     head_sha: str,
     *,
-    prcfg,
+    prcfg: PRConfig,
     draft: bool = False,
     attribution: SourceAttribution = False,
+    published_identity: str = "",
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
     from . import providers, pr_publication_labels
     from .providers import attribution as attr
+    from . import pr_unverified_creation
+    if pr_unverified_creation.pending(result, target_pr):
+        return
 
     machine = record.execution_machine if record else ""
     session = ""
@@ -1245,29 +1268,24 @@ def _open_via_provider(
     scope = providers.scope_from_create_result(
         result, title=title, body=full_body, prcfg=prcfg, machine=machine,
     )
+    scope.head_identity = published_identity or target_pr.head_identity
+    scope.expected_head_sha = head_sha
     if draft:
         scope.draft = True
-    try:
-        if record is not None:
-            pr_publication_state.require_current(record, target_pr)
-        provider = providers.get_provider(prcfg.provider)
-        token = providers.account_token_for_slug(scope.repo, prcfg)
-        pull = provider.create_pull(scope, token=token)
-    except (providers.ProviderError, OSError) as e:
-        # A provider failure (or a spawn error that slipped past run_cli) must
-        # degrade to a recorded pr_open_error, never crash create-pr -- the
-        # feature branch is already pushed, so the agent can open the PR
-        # manually from the surfaced error.
-        result["pr_open_error"] = str(e)
-        result["pr_opened"] = False
-        result["draft"] = False  # nothing opened -> no draft was created
+    created = pr_unverified_creation.create(result, config, record, target_pr, prcfg, scope)
+    if created is None:
         return
+    provider, token, pull = created
 
     if record is not None:
-        claimed_ref = pr_publication_state.persist_pull(
-            config, record, target_pr, pull,
-            head_sha=head_sha, marker_published=marker_published, session=session,
-        )
+        try:
+            claimed_ref = pr_publication_state.persist_pull(
+                config, record, target_pr, pull,
+                head_sha=head_sha, marker_published=marker_published, session=session, prcfg=prcfg,
+            )
+        except (OSError, ValueError, TimeoutError) as exc:
+            pr_unverified_creation.retain(result, config, record, target_pr, exc, pull=pull)
+            return
         if claimed_ref:
             claim_history.record_pr_event(
                 claimed_ref, worktree_id=record.worktree_id,
@@ -1500,7 +1518,7 @@ def refresh_head_observation(
 
 
 def _finish_auto_open(
-    result: dict,
+    result: dict[str, Any],
     config: Config,
     record: tracking.WorktreeRecord | None,
     target_pr: PRRecord | None,
@@ -1512,9 +1530,9 @@ def _finish_auto_open(
     open_pr: bool | None,
     draft: bool,
     attribution: SourceAttribution | None,
-    prcfg,
+    prcfg: PRConfig,
     published_identity: str = "",
-    observed_pulls: dict | None = None,
+    observed_pulls: _ObservedPulls | None = None,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
     Both initial and incremental create-pr publication record ownership here.
@@ -1581,10 +1599,11 @@ def _finish_auto_open(
             )
             if record is not None:
                 tracking.save_record(record)
-        want_attribution = tracking.attribution_from_frozen_mode(target_pr)
+        want_attribution = cast(SourceAttribution, tracking.attribution_from_frozen_mode(target_pr))
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
             head_sha, prcfg=prcfg, draft=draft, attribution=want_attribution,
+            published_identity=published_identity,
         )
         return
     # The PR is already open on the provider -- report it so the caller trusts
@@ -1622,7 +1641,7 @@ def _reconcile_active_pr(
     config: Config,
     *,
     best_effort: bool = False,
-) -> dict:
+) -> _ObservedPulls:
     """Reconcile tracked PRs and their claims against the configured provider.
 
     Includes terminal records with lingering live PR claims. Unavailable or
@@ -1631,10 +1650,10 @@ def _reconcile_active_pr(
     """
     if record is None:
         return {}
-    observations = {}
+    observations: _ObservedPulls = {}
     for pr in list(record.prs):
         pull = _reconcile_pr(record, pr, config, best_effort=best_effort)
-        if pull is not None:
+        if pull is not None and pr.number is not None:
             observations[(pr.pr_id or (pr.provider, pr.repo), pr.number)] = pull
     return observations
 
@@ -1654,8 +1673,8 @@ def _reconcile_pr(
     *, best_effort: bool = False,
 ) -> PullResult | None:
     """Persist one authority-matched provider observation and claim transition."""
-    if active is None or not _pr_needs_reconcile(record, active):
-        return
+    if active is None or active.number is None or not _pr_needs_reconcile(record, active):
+        return None
     prcfg = config.default_repo.pr
     api_base = getattr(prcfg, "api_base", "") or ""
     from .finalize_open_pr_gate import trusted_target
@@ -1663,7 +1682,7 @@ def _reconcile_pr(
     if not target:
         # Unresolvable, or not provably this PR at the configured provider and
         # authority: keep the local state rather than confirm an unrelated PR.
-        return
+        return None
     provider, target_repo = target
     try:
         from . import providers
@@ -1675,7 +1694,7 @@ def _reconcile_pr(
     except Exception:
         # Provider unconfigured/unreachable -- keep the local state rather than
         # guessing.  (Conservative: an unverifiable open PR is still iterated.)
-        return
+        return None
     state = (pull.state or "").strip().lower()
     # ``merged`` is authoritative: a squash-merged PR reports state="closed" on
     # some providers, so prefer it -- the record should say the work actually
@@ -1688,7 +1707,7 @@ def _reconcile_pr(
     elif state == "open":
         resolved = ""
     else:
-        return
+        return None
 
     provider_terminal = resolved in ("merged", "closed")
     # Zombie self-heal (#1375/#1703): the provider says non-terminal, but if the
@@ -1706,12 +1725,12 @@ def _reconcile_pr(
             resolved = "merged"
 
     if active.state == "merged" and not provider_terminal:
-        return
+        return None
     try:
         _persist_pr_observation(record, active, state, resolved, provider_terminal, pull, best_effort=best_effort)
     except pr_authority.PublicationAuthorityBusy:
         if best_effort:
-            return
+            return None
         if tracking._thread_sidecar_counts():
             raise
         # Never wait for publication authority while holding a record lock.
@@ -1726,8 +1745,8 @@ def _live_pr_state(
     active: PRRecord | None,
     config: Config,
     *,
-    prcfg=None,
-) -> dict | None:
+    prcfg: PRConfig | None = None,
+) -> dict[str, Any] | None:
     """Read the shared watch snapshot, gates and consent for a tracked PR.
 
     Unavailable provider evidence is reported separately from tracked metadata;
@@ -1787,7 +1806,7 @@ def _live_pr_state(
                 getattr(prcfg, "wip_title_prefixes", ()) or ()
             ),
         )
-    live: dict = {
+    live: dict[str, Any] = {
         **pr_checks.checks_payload(snap.checks_state, snap.check_failures, complete=snap.checks_complete, omitted=snap.check_failures_omitted),
         "verdict": st.verdict,
         "approval_stale": st.approval_stale,
@@ -1834,7 +1853,7 @@ def set_pr(
     select_number: int | None = None,
     select_branch: str | None = None,
     config: Config | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Record PR metadata (URL/number/state/provider) on a worktree record.
 
     Called by the agent after a provider sub-agent creates the PR.  Updates
@@ -1842,7 +1861,7 @@ def set_pr(
     ``--branch``, so create-pr's branch/base/head SHAs are preserved.  When a
     state transition reaches a terminal state, ``closed_at`` is stamped.
     """
-    base: dict = {"success": False, "worktree_id": worktree_id}
+    base: dict[str, Any] = {"success": False, "worktree_id": worktree_id}
 
     if state is not None and state not in _VALID_PR_STATES:
         return {**base, "error": (
@@ -1901,7 +1920,7 @@ def _repo_slug_from_pr_url(url: str, api_base: str = "") -> str:
 
 
 def _set_pr_locked(
-    base: dict,
+    base: dict[str, Any],
     yaml_path: Path,
     *,
     url: str | None,
@@ -1912,7 +1931,7 @@ def _set_pr_locked(
     select_number: int | None,
     select_branch: str | None,
     config: Config | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """The load -> mutate -> save body of :func:`set_pr`, run under the record
     lock. Split out so the lock scope is exactly the RMW window."""
     worktree_id = base["worktree_id"]
@@ -1972,6 +1991,9 @@ def _set_pr_locked(
     # BEFORE applying any branch/number correction below (see
     # tracking.ensure_pr_id's docstring for why this must be its own save,
     # not folded into the final one below).
+    from . import pr_creation_reconcile
+    if pr_creation_reconcile.requires_qualification(pr):
+        return {**base, "error": "A local retirement cannot be reassigned; create a separate association for new work."}
     if tracking.ensure_pr_id(pr):
         tracking.save_record(record)
 
@@ -2048,7 +2070,7 @@ def pr_ready(
     *,
     target_repo: str | None = None,
     pr_number: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Move a PR out of draft (draft -> ready-for-review).
 
     ``pr-ready`` is an **un-draft** verb: it clears the native draft state (a
@@ -2066,7 +2088,7 @@ def pr_ready(
     draft but does carry that hold label, it is removed (the equivalent
     transition) and reported as a legacy-hold release.
     """
-    base: dict = {"success": False, "worktree_id": worktree_id}
+    base: dict[str, Any] = {"success": False, "worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
     if record is None:
         return {**base, "error": f"No tracking record found for '{worktree_id}'."}
@@ -2164,7 +2186,7 @@ def pr_ready(
 
 def pr_status(worktree_id: str, *, all_prs: bool = False,
               live: bool = True, config: Config | None = None,
-              prcfg=None) -> dict:
+              prcfg: PRConfig | None = None) -> dict[str, Any]:
     """Return the tracked PR metadata for a worktree (for pr-status).
 
     Returns the **active** PR by default.  With ``all_prs`` the full ``prs``
@@ -2182,7 +2204,7 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
     so one command answers "where is my PR?".  The block is omitted silently when
     the provider is unconfigured/unreachable.
     """
-    base: dict = {"worktree_id": worktree_id}
+    base: dict[str, Any] = {"worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
     if record is None:
         return {**base, "has_pr": False, "pr_count": 0,
@@ -2196,8 +2218,17 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
         except pr_authority.PublicationAuthorityBusy as exc:
             reconciliation = exc.status_result()
     active = record.active_pr()
+    from . import pr_legacy_admission
     result = {**base, "has_pr": active is not None, "pr_count": len(record.prs),
-              "creation_cancellation_contract": pr_creation_state.CONTRACT}
+              "creation_cancellation_contract": pr_creation_state.CONTRACT,
+              "legacy_publication_admission": {
+                  "contract": pr_legacy_admission.CONTRACT,
+                  "authority_contract": pr_legacy_admission.AUTHORITY_CONTRACT,
+                  "implementation": "receiver-only",
+                  "recovery_supported": False,
+                  "quiescence": "later-same-native-execution-domain-boot",
+                  "seal_operation": None,
+              }}
     if active is not None:
         result.update(_pr_to_dict(active))
         rec = _pull_forward_recommendation(record, active, config, live=live)
@@ -2218,7 +2249,7 @@ def pr_threads(
     *,
     resolve: bool = False,
     config: Config | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Read (and optionally resolve) the active PR's review comment threads.
 
     First-class comment-threading tied to the worktree flow: resolves the
@@ -2228,7 +2259,7 @@ def pr_threads(
     (never fatal: an unsupported/unreachable provider yields ``supported:
     False`` with a ``reason``).
     """
-    base: dict = {"worktree_id": worktree_id}
+    base: dict[str, Any] = {"worktree_id": worktree_id}
     record = _load_record_or_none(worktree_id)
     if record is None:
         return {**base, "has_pr": False,
@@ -2242,7 +2273,7 @@ def pr_threads(
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or (record.repo or "")
     api_base = getattr(prcfg, "api_base", "") or ""
-    out: dict = {**base, "has_pr": True, "number": active.number, "repo": target_repo}
+    out: dict[str, Any] = {**base, "has_pr": True, "number": active.number, "repo": target_repo}
     try:
         from . import providers
 
@@ -2289,21 +2320,7 @@ def pr_threads(
 from .pr_pull_forward import pull_forward_recommendation as _pull_forward_recommendation  # noqa: E402,F401
 
 
-def _pr_to_dict(pr: PRRecord) -> dict:
-    return {
-        "pr_id": pr.pr_id, "pr_revision": pr.pr_revision, "creation": dict(pr.creation),
-        "state": pr.state,
-        "branch": pr.branch,
-        "base_sha": pr.base_sha,
-        "head_sha": pr.head_sha,
-        "patch_id": pr.patch_id,
-        "url": pr.url,
-        "number": pr.number,
-        "provider": pr.provider,
-        "repo": pr.repo,
-        "opened_at": pr.opened_at,
-        "closed_at": pr.closed_at,
-    }
+from .pr_metadata import pr_to_dict as _pr_to_dict  # noqa: E402
 
 
 @pr_authority.publication
@@ -2311,10 +2328,10 @@ def _push_existing_feature(
     worktree_path: str,
     feature_branch: str,
     remote: str,
-    repo,
-    prcfg,
+    repo: RepoConfig,
+    prcfg: PRConfig,
     record: tracking.WorktreeRecord | None,
-    base: dict,
+    base: dict[str, Any],
     *,
     config: Config,
     worktree_id: str,
@@ -2324,8 +2341,8 @@ def _push_existing_feature(
     draft: bool,
     attribution: SourceAttribution | None,
     pr_head: str = "", fork_head_repo: str = "", fork_head_identity: str = "", source_ref: str = "",
-    observed_pulls: dict | None = None,
-) -> dict:
+    observed_pulls: _ObservedPulls | None = None,
+) -> dict[str, Any]:
     """Resume an exact prepared source or update an existing feature branch.
 
     Complete pending auto-open, surfacing an existing number/url without duplication.
@@ -2360,11 +2377,14 @@ def _push_existing_feature(
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
     try:
-        pr_creation_state.start_publication(record, target, remote=remote, source_ref=source_ref, head_sha=head_sha, base_sha=target.base_sha if target else "")
+        if record is not None:
+            if target is None:
+                raise ValueError("Tracked publication has no current PR target.")
+            pr_creation_state.start_publication(record, target, remote=remote, source_ref=source_ref, head_sha=head_sha, base_sha=target.base_sha)
     except ValueError as exc:
         return {**base, "error": str(exc)}
     expected_publication = replace(target) if target is not None else None
-    squash_backup = target.creation.get("push_backup", "") if pr_publication_state.unpublished(target) else ""
+    squash_backup = target.creation.get("push_backup", "") if target is not None and pr_publication_state.unpublished(target) else ""
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
             record, remote, f"{source_ref}:refs/heads/{feature_branch}", cwd=worktree_path,
@@ -2381,13 +2401,13 @@ def _push_existing_feature(
                 retry_command="agent-worktrees create-pr"
             )
         return {**base, "error": f"{error}\n{pushed.stderr.strip()}" if pushed.stderr else error}
-    if record is not None:
+    if record is not None and target is not None:
         # target is always non-terminal here (a live match or a fresh record).
         if pr_publication_state.unpublished(target):
             pr_publication_state.settle_creation(record, target)
         else:
             target.state = "open"
-        pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
+        pr_publish.record_remote_identity(target, remote, repo.remote, getattr(pushed, "head_repo", ""), getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
         target.base_sha = getattr(pushed, "rebase_base_sha", "") or target.base_sha or target.creation.get("push_base", "")
         head_sha = target.head_sha = getattr(pushed, "published_head_sha", "") or head_sha
         target.head_observed_at = ""
