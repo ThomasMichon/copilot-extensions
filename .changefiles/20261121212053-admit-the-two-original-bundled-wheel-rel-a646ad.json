@@ -1,0 +1,9 @@
+{
+  "comment": "Admit the two original bundled-wheel release-age controls to the guarded unit packet without changing their witnesses or native lanes.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
