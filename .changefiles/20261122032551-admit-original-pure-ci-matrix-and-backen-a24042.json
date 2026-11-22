@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original pure CI matrix and backend decision cases with closed source bindings",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
