@@ -85,7 +85,15 @@ def test_adopted_configuration_reader_ignores_path_python(
         [uv, "python", "dir"], text=True, timeout=15,
     ).strip()
     script, env = _fixture(tmp_path, "bash" if shell == "bash" else "pwsh")
-    (tmp_path / ".agent-index" / "config.yaml").unlink()
+    policy = tmp_path / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text(
+        "description: >-\n"
+        "  The owner's \"quoted\" setup guidance is ordinary prose.\n"
+        "  It does not change repository state policy.\n"
+        "stateless: false\nrequires_external_state_root: false\n",
+        encoding="utf-8",
+    )
     bootstrap = runpy.run_path(str(PLUGIN.parents[1] / "libs/payload-invocation/bootstrap_python.py"))
     outputs = bootstrap["expected_files"](
         script.parents[1] / "payload-invocation.json",
@@ -102,10 +110,13 @@ def test_adopted_configuration_reader_ignores_path_python(
         for name in ("python", "python3"):
             (tools / name).write_text("#!/bin/sh\nexit 98\n", encoding="utf-8")
             (tools / name).chmod(0o755)
-        for name in ("bash", "dirname", "wc", "cat", "git"):
+        for name in ("bash", "dirname", "wc", "cat", "git", "id", "cut", "awk", "sed", "grep", "tr", "date"):
             executable = shutil.which(name)
             assert executable
             shutil.copy2(executable, tools / name)
+        getent = shutil.which("getent")
+        if getent:
+            shutil.copy2(getent, tools / "getent")
     if uv_available:
         shutil.copy2(uv, tools / Path(uv).name)
     old_python = os.environ.get("TEST_OLD_PYTHON")
@@ -303,7 +314,7 @@ def _fixture(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
-    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py"):
+    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py", "config_yaml.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
@@ -730,7 +741,7 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
     for name in (
         "resolve_effective_config.py", "resolve_effective_probe.py",
-        "config_commands.py", "resolve-activation-role.py", "config_schema.py",
+        "config_commands.py", "resolve-activation-role.py", "config_schema.py", "config_yaml.py",
     ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts)
     plugin_name = "agent-index-bootstrap-probe"
@@ -1265,7 +1276,7 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
-    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py"):
+    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py", "config_yaml.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
