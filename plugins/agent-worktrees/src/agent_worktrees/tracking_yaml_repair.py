@@ -25,7 +25,7 @@ active_effort activity activity_at bound_agent bound_live bound_live_at branch
 caller_worktree checkout_managed codename codename_source completed_at
 controller_revision controllers creation_nonce dispatch_attempt effort_revision
 execution_leg finalized_checkout follow_up follow_ups git_state handoff_counter
-handoffs head_revision head_session head_transitions hydration interface kind
+handoffs head_revision head_session head_transitions interface kind
 last_finalize_released last_finalized_at last_resumed_at lifecycle_revision
 machine mux_live mux_live_at origin owner owner_ref pair_id pair_kind pair_ref
 pair_role parent_session paused paused_revision pending_seed pending_seed_revision

@@ -21,6 +21,7 @@ never deletes the branch, unpairs, releases claims or changes lifecycle status.
 | `rehydrate <id> [--json]` | Recreate the checkout from the cataloged branch and HEAD. |
 | `hydration --reconcile <id> [--json]` | Settle an interrupted dehydrate or rehydrate from fresh evidence. |
 | `hydration --recover [--apply] [--json]` | Report (and with `--apply`, rebuild) tracking from catalog entries. |
+| `hydration --release-recovery-hold <id> [--json]` | Clear a recovery hold after relationships are reconciled. |
 | `dehydrate --capabilities` | The `agent-worktrees.checkout-hydration.v1` contract. |
 
 Exit codes: `0` success, `2` a hold that needs inspection, `1` a structured
@@ -29,24 +30,30 @@ refusal (`--json` prints `{"complete": false, "code": ..., "error": ...}`).
 ## Catalog
 
 Each dehydrated worktree has one entry at
-`<worktree-root>/.dehydrated/<worktree-id>.json`, where `<worktree-root>` is the
-project's resolved worktree root. The entry is written atomically (temporary
+`<checkout-parent>/.dehydrated/<worktree-id>.json`, beside the recorded checkout
+path (normally the project's resolved worktree root). Lookups use the recorded
+checkout path first, so a later change of the configured root does not lose
+the entry. When the `.dehydrated` directory is first created, its parent
+directory is also synced. The entry is written atomically (temporary
 file, `fsync`, replace) **before** removal, and is retired only after a
 verified rehydration. Schema `agent-worktrees.checkout-dehydration` version 1:
 
 - **identity**: repo, worktree ID, creation nonce, checkout path, anchor.
-- **git**: expected local branch, exact HEAD, recorded per-worktree config.
+- **git**: expected local branch, exact HEAD, and the exact per-worktree
+  config. Each key keeps its ordered value list (multi-valued keys such as
+  `remote.origin.fetch`), and a valueless key (`[commit] gpgSign`) stays
+  distinct from an empty value.
 - **agency**: references from the tracking record (status, disposition,
   sessions, pair, claims, PR, worktree-data locators). It holds references
   only, never transcripts or credentials.
 - **operation**: operation ID, `stage` (`removing`, `dehydrated`,
   `rehydrating`), prior state and timestamps.
 
-The tracking record carries an additive `hydration` field
-(`state`, `catalog`, `operation_id`, `head`, `revision`, `at`). A record is
-treated as dehydrated when that state is a catalog stage **or** a catalog
-entry exists, so a lost or stale field never turns a stored checkout into
-garbage. Older readers ignore the field.
+The catalog entry is the only hydration state; the tracking record schema is
+unchanged. A record is dehydrated while its catalog entry exists. Every
+transition re-reads the entry under the record lock and checks its identity
+(worktree ID, repo, branch, path, creation nonce and anchor) against the
+tracking record. A mismatch is a hold, and nothing changes.
 
 ## Dehydrate gates
 
@@ -80,8 +87,8 @@ Rehydrate requires that the branch exists and its tip equals the cataloged
 HEAD; a moved tip is a `conflict` refusal (never a reset or a recreated
 branch). The destination must be absent or empty. It runs
 `git worktree add <path> <branch>` (no `-b`, no fetch), restores recorded
-per-worktree config, verifies branch and HEAD, marks the record `hydrated`,
-and deletes the catalog entry last.
+per-worktree config retry-safely (`--unset-all`, then each value in order),
+verifies branch and HEAD, and deletes the catalog entry last.
 
 Reconcile never removes a valid checkout:
 
@@ -94,14 +101,24 @@ Reconcile never removes a valid checkout:
 
 Recover rebuilds a missing tracking record only for a `dehydrated` entry whose
 identity matches its location and project and whose branch tip still equals
-the snapshot. The rebuilt record is non-active (`complete`) and dehydrated, so
-it never becomes a live owner. Anything contradictory is reported as a hold.
+the snapshot. With `--apply` it takes the lifecycle and admission guards and
+the record lock, re-reads the entry, and creates the record only if it is
+still absent. The rebuilt record is non-active (`complete`), so it never
+becomes a live owner. Its catalog entry gains a `recovery_hold`, because only
+references, not relationships, are restored: `rehydrate` refuses with code
+`recovery-hold`, and the entry is kept, until an operator reconciles the
+relationships and runs `hydration --release-recovery-hold <id>`. Anything
+contradictory is reported as a hold.
 
 ## Consumers
 
 A dehydrated worktree has the `DEHYDRATED` git state instead of `GONE`.
 `prune`/`cleanup` give it the non-cleanable `dehydrated` bucket (UNSAFE),
 `gc` skips it as `dehydrated` and ignores the `.dehydrated` directory in its
-orphan sweep, the stale-record health check skips it, pair sync is blocked,
-`remove-system` names it as a blocker and `finalize` refuses until it is
-rehydrated. No path deletes its branch.
+orphan sweep, pair sync is blocked and `remove-system` names it as a blocker.
+`finalize` (including `--abandon --handoff-to`) refuses before it rehomes or
+publishes any obligation. Claimant resolution treats a dehydrated record, or
+a catalog-only recovery candidate, as a held live claimant, so the sweep does
+not abandon its inbound or outbound claims. Managed branch deletion and
+feature-branch moves (`branch -f`) refuse a branch that a catalog entry
+reserves.

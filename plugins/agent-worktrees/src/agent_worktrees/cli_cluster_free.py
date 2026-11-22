@@ -7,7 +7,6 @@ not just parser help: transitive deferred-global dependencies need runtime proof
 CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "attribution_prepare_cli",
     "agenda_cli",
-    "checkout_hydration_cli",
     "identity_vault_cli",
     "claims_cli",
     "cleanup_gc_cli",

@@ -155,6 +155,17 @@ def _is_ancestor(maybe_ancestor: str, ref: str, *, cwd: str | Path) -> bool:
     return r.returncode == 0
 
 
+def _dehydrated_feature(feature: str, worktree_path: str | Path, config: Config) -> bool:
+    """Refuse moving a branch retained by a dehydrated checkout (its only HEAD copy)."""
+    from . import checkout_hydration_catalog
+
+    holder = checkout_hydration_catalog.dehydrated_branch_holder(worktree_path, feature, config)
+    if holder:
+        output.err(f"{feature} is retained by dehydrated worktree {holder}; rehydrate it first.")
+        return True
+    return False
+
+
 def manage_feature_branch(
     worktree_id: str,
     config: Config,
@@ -195,6 +206,8 @@ def manage_feature_branch(
             f"Worktree is on '{feature}' itself; shared-branch commands operate on "
             f"it as a ref from the worktree branch, not while it is checked out."
         )
+        return False
+    if _dehydrated_feature(feature, worktree_path, config):
         return False
 
     # --- sync: pull the shared branch forward -----------------------------
@@ -311,6 +324,8 @@ def merge_to_feature(
         return False
     if branch == feature:
         output.err(f"Worktree is on '{feature}' itself; nothing to merge.")
+        return False
+    if _dehydrated_feature(feature, worktree_path, config):
         return False
     if not git_ops.is_clean(cwd=worktree_path):
         dirty = git_ops.get_dirty_files(cwd=worktree_path)

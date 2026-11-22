@@ -75,7 +75,6 @@ _BASE_STATE_LABELS: dict[git_ops.WorktreeState, str] = {
     git_ops.WorktreeState.UNUSED: "UNUSED",
     git_ops.WorktreeState.CONVO: "CONVO",
     git_ops.WorktreeState.GONE: "GONE",
-    git_ops.WorktreeState.DEHYDRATED: "DEHYDRATED",
     git_ops.WorktreeState.ORPHAN: "ORPHAN",
     git_ops.WorktreeState.UNKNOWN: "UNKNOWN",
 }

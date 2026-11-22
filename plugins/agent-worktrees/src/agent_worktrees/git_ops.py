@@ -1467,7 +1467,17 @@ def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:
 
 
 def delete_branch(name: str, *, cwd: str | Path, force: bool = False) -> bool:
-    """Delete a local branch. Returns True on success."""
+    """Delete a local branch. Returns True on success.
+
+    Refuses a branch retained by a dehydrated checkout: it is the only durable
+    copy of that checkout's HEAD until rehydration.
+    """
+    from . import checkout_hydration_catalog
+
+    holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name)
+    if holder:
+        log.warning("Refusing to delete branch %s: retained by dehydrated worktree %s", name, holder)
+        return False
     flag = "-D" if force else "-d"
     result = git("branch", flag, name, cwd=cwd, check=False)
     return result.returncode == 0

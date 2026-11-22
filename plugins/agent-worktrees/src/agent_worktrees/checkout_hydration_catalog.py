@@ -66,8 +66,11 @@ def validate(data: object) -> dict[str, Any]:
         raise CatalogError("dehydration catalog entry is not an object")
     if data.get("schema") != SCHEMA or data.get("schema_version") != SCHEMA_VERSION:
         raise CatalogError("unsupported dehydration catalog schema")
-    if data.get("stage") not in STAGES:
-        raise CatalogError(f"unknown dehydration stage: {data.get('stage')!r}")
+    stage = data.get("stage")
+    if not isinstance(stage, str) or stage not in STAGES:
+        raise CatalogError(f"unknown dehydration stage: {stage!r}")
+    if not isinstance(data.get("agency", {}), dict) or not isinstance(data.get("recovery_hold") or {}, dict):
+        raise CatalogError("dehydration catalog entry has malformed agency or recovery sections")
     identity = data.get("identity")
     git = data.get("git")
     if not isinstance(identity, dict) or not isinstance(git, dict):
@@ -99,7 +102,10 @@ def write_entry(path: Path, data: dict[str, Any]) -> None:
     from . import checkout_durability
 
     validate(data)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.parent.is_dir():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # The new directory entry itself must be durable before any removal.
+        checkout_durability.directory(path.parent.parent)
     staging = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         with staging.open("w", encoding="utf-8") as stream:
@@ -135,48 +141,139 @@ def iter_entries(worktree_root: str | os.PathLike[str]) -> list[Path]:
 def is_dehydrated_checkout(checkout_path: str | os.PathLike[str]) -> bool:
     """Whether a catalog entry claims ``checkout_path``.
 
-    Conservative: an entry that exists but cannot be read still counts, so an
-    unreadable catalog never lets a consumer collect the worktree.
+    Conservative: an entry named for the checkout that cannot be read still
+    counts, so an unreadable catalog never lets a consumer collect it.
     """
-    entry = entry_for_checkout(checkout_path)
+    path = Path(checkout_path)
+    named = entry_for_checkout(path)
     try:
-        data = read_entry(entry)
+        data = read_entry(named)
     except CatalogError:
-        return entry.exists()
-    return data is not None and same_path(data["identity"]["checkout_path"], checkout_path)
+        return True
+    if data is not None and same_path(data["identity"]["checkout_path"], path):
+        return True
+    return entry_claiming(path.parent, path) is not None
 
 
-def record_catalog_path(record: Any) -> Path | None:
-    hydration = getattr(record, "hydration", None)
-    if isinstance(hydration, dict) and isinstance(hydration.get("catalog"), str) and hydration["catalog"]:
-        return Path(hydration["catalog"])
+def entry_claiming(worktree_root: str | os.PathLike[str], checkout_path: str | os.PathLike[str]) -> Path | None:
+    """The readable entry under ``worktree_root`` whose identity names ``checkout_path``."""
+    for entry in iter_entries(worktree_root):
+        try:
+            data = read_entry(entry)
+        except CatalogError:
+            continue
+        if data is not None and same_path(data["identity"]["checkout_path"], checkout_path):
+            return entry
+    return None
+
+
+def record_entry_path(record: Any) -> Path | None:
+    """The entry location persisted by a record's own checkout path.
+
+    The catalog lives beside the recorded checkout (``<parent>/.dehydrated``),
+    so a later change of the configured worktree root does not lose it.
+    """
+    worktree_id = getattr(record, "worktree_id", "")
     path = getattr(record, "worktree_path", "")
-    return entry_for_checkout(path) if isinstance(path, str) and path else None
+    if not isinstance(worktree_id, str) or not isinstance(path, str) or not worktree_id or not path:
+        return None
+    try:
+        return entry_path(Path(path).parent, worktree_id)
+    except CatalogError:
+        return None
 
 
 def is_dehydrated(record: Any) -> bool:
     """Whether a tracking record's missing checkout is held rather than gone."""
     if record is None:
         return False
-    hydration = getattr(record, "hydration", None)
-    if isinstance(hydration, dict) and hydration.get("state") in HELD_STATES:
+    entry = record_entry_path(record)
+    if entry is not None and entry.exists():
         return True
-    catalog = record_catalog_path(record)
-    return bool(catalog is not None and catalog.exists())
-
-
-def _revision(value: object) -> int:
-    revision = value.get("revision") if isinstance(value, dict) else None
-    return revision if isinstance(revision, int) else 0
-
-
-def preserve(record: Any, current: Any) -> None:
-    """Keep a newer on-disk hydration state across a stale full-record save."""
-    theirs = getattr(current, "hydration", None)
-    if isinstance(theirs, dict) and _revision(theirs) > _revision(getattr(record, "hydration", None)):
-        record.hydration = theirs
+    path = getattr(record, "worktree_path", "")
+    return bool(isinstance(path, str) and path and is_dehydrated_checkout(path))
 
 
 def hydration_state(record: Any) -> str:
     """``dehydrated`` (held) or ``hydrated`` for one tracking record."""
     return STATE_DEHYDRATED if is_dehydrated(record) else STATE_HYDRATED
+
+
+def _repos(config: Any) -> list[Any]:
+    found: list[Any] = list((getattr(config, "repos", None) or {}).values())
+    try:
+        default = config.default_repo
+    except Exception:
+        default = None
+    if default is not None and all(repo is not default for repo in found):
+        found.append(default)
+    return found
+
+
+def project_entry(project: str | None, worktree_id: str, config: Any) -> Path | None:
+    """An existing entry for ``worktree_id`` in ``project``'s worktree root.
+
+    Lets a missing tracking record with a catalog entry (a recovery candidate)
+    count as held rather than gone.
+    """
+    try:
+        repos = getattr(config, "repos", None) or {}
+        repo = repos.get(project) if project else None
+        if repo is None and (not project or project == getattr(config, "repo_name", None)):
+            repo = config.default_repo
+        root = getattr(repo, "worktree_root", None) if repo is not None else None
+        if not root:
+            return None
+        entry = entry_path(root, worktree_id)
+    except Exception:
+        return None
+    return entry if entry.exists() else None
+
+
+def _common_dir(cwd: str | os.PathLike[str]) -> str | None:
+    from . import git_ops
+
+    try:
+        result = git_ops.git(
+            "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=Path(cwd), check=False, timeout=30,
+        )
+    except Exception:
+        return None
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    return value or None
+
+
+def dehydrated_branch_holder(cwd: str | os.PathLike[str], branch: str, config: Any = None) -> str | None:
+    """The dehydrated worktree ID whose retained ``branch`` lives in ``cwd``'s repository.
+
+    Managed branch moves and deletions must refuse such a branch: it is the only
+    durable copy of the dehydrated checkout's HEAD.
+    """
+    if config is None:
+        try:
+            from . import config as cfg
+
+            config = cfg.load_config()
+        except Exception:
+            return None
+    holders: list[tuple[str, str]] = []
+    for repo in _repos(config):
+        root = getattr(repo, "worktree_root", None)
+        if not root:
+            continue
+        for path in iter_entries(root):
+            try:
+                data = read_entry(path)
+            except CatalogError:
+                continue
+            if data is not None and data["git"]["branch"] == branch:
+                anchor = data["identity"].get("anchor") or getattr(repo, "anchor", "")
+                holders.append((data["identity"]["worktree_id"], str(anchor)))
+    if not holders:
+        return None
+    common = _common_dir(cwd)
+    for worktree_id, anchor in holders:
+        theirs = _common_dir(anchor) if anchor else None
+        if common is None or theirs is None or same_path(common, theirs):
+            return worktree_id  # same repository, or unprovable: keep the branch
+    return None

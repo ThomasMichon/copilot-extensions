@@ -771,7 +771,7 @@ def _push_changes_pr(
 
     from .pr_publication_labels import validate_scope
     validate_scope(repo.pr, pushed_pr)
-    if not feature:
+    if not feature or pushed_pr is None:
         output.err("PR mode: no tracked PR feature branch to update.")
         return False
     from . import pr_publish
@@ -1188,6 +1188,15 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+def _hydration_hold(record: tracking.WorktreeRecord | None, worktree_path: str, worktree_id: str) -> bool:
+    from .checkout_hydration_catalog import is_dehydrated, is_dehydrated_checkout
+
+    if (record is not None and is_dehydrated(record)) or is_dehydrated_checkout(worktree_path):
+        output.err(f"Worktree {worktree_id} is dehydrated; rehydrate it before finalizing.")
+        return True
+    return False
+
+
 @repository_identity_scope()
 def validate_and_finalize(
     worktree_id: str,
@@ -1256,6 +1265,10 @@ def validate_and_finalize(
         except Exception as exc:
             output.err(f"Cannot finalize {worktree_id}: {exc}")
             return False
+    # A dehydrated checkout is held, not finalizable: refuse before any
+    # abandonment publication, obligation re-homing or ledger freeze.
+    if _hydration_hold(record, worktree_path, worktree_id):
+        return False
     branch = _worktree_branch(record, worktree_id)
     checkout_managed = record is None or record.checkout_managed
 
@@ -1531,6 +1544,8 @@ def validate_and_finalize(
                         "refused until acceptance or decline/cancel resolves them."
                     )
                     return False
+                if _hydration_hold(record, worktree_path, worktree_id):
+                    return False
                 if unsettled and not abandon:
                     output.err(
                         f"Worktree {worktree_id} acquired {len(unsettled)} "
@@ -1584,10 +1599,7 @@ def validate_and_finalize(
             if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
-        from .checkout_hydration_catalog import is_dehydrated, is_dehydrated_checkout
-
-        if (record is not None and is_dehydrated(record)) or is_dehydrated_checkout(worktree_path):
-            output.err(f"Worktree {worktree_id} is dehydrated; rehydrate it before finalizing.")
+        if _hydration_hold(record, worktree_path, worktree_id):
             _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
             return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)

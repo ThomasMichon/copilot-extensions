@@ -201,6 +201,10 @@ def safe_of(claim: tracking_claims.ResourceClaim, config: cfg.Config) -> bool | 
     child, judgeable = load_claim_child_record(claim.ref, config)
     if not judgeable or child is None:
         return None
+    from . import checkout_hydration_catalog
+
+    if checkout_hydration_catalog.is_dehydrated(child):
+        return None  # a dehydrated child is held, not settled
     if child.status == "finalized":
         return True
     if child.status == "orphaned":

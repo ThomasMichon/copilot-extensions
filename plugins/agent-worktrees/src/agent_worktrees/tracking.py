@@ -807,7 +807,6 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
     # Reopen preserves prior finalization time when completed_at is cleared.
     last_finalized_at: str | None = None
     finalized_checkout: dict[str, str] | None = None
-    hydration: dict[str, object] | None = None  # checkout_hydration_catalog (dehydrated checkout)
     # worktree-finality-and-obligations, Phase 3: the itemized follow-up
     # ledger replacing the boolean-only flag above. `follow_up` (the legacy
     # boolean) is preserved as-is for back-compat callers/YAMLs and is treated
@@ -2095,7 +2094,6 @@ def parse_record_data(
                      if data.get("activity_at") else None),
         last_finalized_at=(str(last_finalized_raw) if last_finalized_raw else None),
         finalized_checkout=data.get("finalized_checkout") if isinstance(data.get("finalized_checkout"), dict) else None,
-        hydration=data.get("hydration") if isinstance(data.get("hydration"), dict) else None,
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
         mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
@@ -2130,10 +2128,21 @@ def parse_record_data(
 
 
 def resolve_worktree_path(worktree_id: str, worktree_root: str) -> str:
-    """Return the authoritative on-disk path for ``worktree_id`` (#3026).
+    """Return the authoritative on-disk path for ``worktree_id``.
 
-    The record's existing ``worktree_path`` wins (it survives layout changes);
-    otherwise ``worktree_root / worktree_id``, so "path not found" checks fire.
+    The tracking record's recorded ``worktree_path`` is the source of truth:
+    it stays correct even when the default worktree layout changes (e.g. a
+    worktree created under the older ``<srcroot>/.worktrees/<project>/`` scheme
+    remains reachable after the default moved to ``<anchor>.worktrees/``).
+
+    Resolution order (#3026):
+      1. the tracking record's ``worktree_path``, when the record exists and
+         that path is present and exists on disk;
+      2. otherwise the ``worktree_root / worktree_id`` derivation -- the
+         fallback for untracked worktrees or a record missing the path.
+
+    The derivation is returned as-is when nothing better is found, so callers'
+    existing "path not found" checks still fire for a genuinely-absent worktree.
     """
     record_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if record_path.exists():
@@ -2341,8 +2350,6 @@ def _save_record_contents_unlocked(
     from .checkout_relocation_state import preserve as preserve_checkout_location
 
     preserve_checkout_location(record, current, path)
-    from .checkout_hydration_catalog import preserve as preserve_hydration
-    preserve_hydration(record, current)
     receiving_allocation.preserve(record, current, path)
     resource_producer.preserve_incarnation(record, current)
     dispatch_cohort.preserve(record, current)
@@ -2636,8 +2643,6 @@ def _save_record_contents_unlocked(
         content += f"last_finalized_at: {record.last_finalized_at}\n"
     if record.finalized_checkout is not None:
         content += yaml.safe_dump({"finalized_checkout": record.finalized_checkout})
-    if record.hydration is not None:
-        content += yaml.safe_dump({"hydration": record.hydration})
     if record.active_effort is not None:
         content += yaml.safe_dump(
             {"active_effort": record.active_effort.to_dict()},

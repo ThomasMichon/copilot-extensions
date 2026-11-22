@@ -26,6 +26,10 @@ def add_parsers(sub: Any) -> None:
     effects = p.add_mutually_exclusive_group(required=False)
     effects.add_argument("--reconcile", metavar="WORKTREE_ID", help="Settle one interrupted transition")
     effects.add_argument("--recover", action="store_true", help="Report records reconstructable from the catalog")
+    effects.add_argument(
+        "--release-recovery-hold", metavar="WORKTREE_ID",
+        help="Accept a recovered record once its relationships are reconciled",
+    )
     p.add_argument("--apply", action="store_true", help="With --recover, write reconstructable held records")
     p.add_argument("--capabilities", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -67,8 +71,10 @@ def cmd_hydration(args: argparse.Namespace) -> int:
             result = hydration.reconcile(args.reconcile, config)
         elif args.recover:
             result = hydration.recover(config, apply=args.apply)
+        elif args.release_recovery_hold:
+            result = hydration.release_recovery_hold(args.release_recovery_hold, config)
         else:
-            raise hydration.HydrationRefused("usage", "hydration requires --reconcile <id> or --recover")
+            raise hydration.HydrationRefused("usage", "hydration needs --reconcile, --recover or --release-recovery-hold")
         _emit(args, result)
         held = result.get("state") == "hold" or any(e.get("verdict") == "hold" for e in result.get("entries", []))
         return 2 if held else 0

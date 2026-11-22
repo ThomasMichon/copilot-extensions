@@ -5477,8 +5477,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'agenda-publish': ('agenda_cli', 'cmd_agenda'),
     'agenda-read': ('agenda_cli', 'cmd_agenda'),
     'agenda-feed': ('agenda_cli', 'cmd_agenda'),
-    'dehydrate': ('checkout_hydration_cli', 'cmd_hydration'), 'rehydrate': ('checkout_hydration_cli', 'cmd_hydration'),
-    'hydration': ('checkout_hydration_cli', 'cmd_hydration'),
     'launch-attempts': ('launch_attempt_inspection', 'cmd_launch_attempts'),
     'dev-status': ('installation_cli', 'cmd_dev_status'),
     'dev-release': ('installation_cli', 'cmd_dev_release'),
