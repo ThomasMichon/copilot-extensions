@@ -4845,12 +4845,54 @@ hashes, every preceding target, 89 helper decisions and the 300-second
 bound remain intact. Only the adapter and original tests are new source
 bindings; the already bound watchdog owner becomes one new coverage target.
 
-Complete fresh Linux CI, current-head review, required checks and normal
-managed merge remain required. This is a finite source admission, not
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6011892513` covers exact head
+`98fc1ac776777520d8be786a8b5b8f1899208edd` with no active findings.
+Source CI `45015101983`, unit job `137185651794`, freshly passes all 8,510
+cases with 43 deselections, 118.09 pytest seconds and 132.350 packet seconds.
+It reports `mode=executed`, origin run `45015101983` attempt one, execution
+identity `027da91dadde36db4b958241a33a90a5330a92ea537158148368aadfcff38382`
+and packet digest
+`0c424720e32db692a8dca39ab8b993d38b583bd87ceeabb6892d853384b82903`.
+Required aggregate `137186638754`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14072 merges at `2026-11-22T11:05:48Z` as
+`62aac085ea9728ed4b29111214c62d7a858427a6`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the fifty-case leaf.
+This is a finite source admission, not
 native/API qualification, portfolio activation, a measured saving or
 settlement of retained refusals and owner seams. Fresh-install/native lanes
 are not applicable because installation, runtime, workflow and original
 test behavior do not change.
+
+### November 22 original pure CI-job-admission qualification
+
+The adapter exports seven unchanged original functions: path/dependency
+selection, non-PR full coverage, path validation before widening, union and
+empty diff, and incomplete-commit refusal. Complete original/adapter
+collection verifies 67 original cases and fifty selected cases, including
+identity against each original parameter row for stacked parametrization.
+The seventeen actual Git/CLI, workflow-inspection and aggregate-subprocess
+cases remain unchanged outside the packet. Selected incomplete commit IDs
+are rejected before environment acquisition or process creation.
+
+The initial unchanged effect auditor and coverage-context observer pass
+all fifty in 2.750 seconds, with zero prohibited effects, three bound Python
+reads and actual admission-owner call-phase lines per case. The compact-v2
+candidate contains 8,560 nodes, 1,218 sources and 457 targets in 961,353
+bytes. All 8,510 preceding nodes/order, 1,215 current source hashes, prior
+targets, 89 helper decisions and the 300-second bound remain intact.
+New bindings are the adapter, original test module and unchanged admission
+owner; only that owner becomes a new target.
+
+No new mock, preload, wrapper, effect exception, data allowlist or workflow/
+routing/runtime change is introduced. Complete fresh Linux CI, current-head
+review and normal required merge checks remain necessary. This finite
+qualification does not accept a shared-owner seam or settle retained
+refusals. Fresh-install/native lanes are not applicable because installation,
+runtime, workflow and original-test behavior do not change.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 
