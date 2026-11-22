@@ -8,6 +8,28 @@ import pytest
 import onboard
 
 
+def test_fresh_clone_resolves_remote_branch_and_refuses_ambiguous_tag(tmp_path: Path) -> None:
+    from worktree_manager.bootstrap_harness import _git
+
+    source, clone = tmp_path / "source", tmp_path / "clone"
+    source.mkdir()
+    _git(source, "init", "-q", "-b", "main")
+    _git(source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "-q", "--allow-empty", "-m", "baseline")
+    _git(source, "checkout", "-qb", "topic")
+    _git(source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "-q", "--allow-empty", "-m", "topic")
+    tip = _git(source, "rev-parse", "HEAD")
+    _git(source, "checkout", "-q", "main")
+    _git(tmp_path, "clone", "-q", "--no-checkout", str(source), str(clone))
+    assert onboard.resolve_commit(clone, "topic") == tip
+    _git(clone, "tag", "topic", "HEAD")
+    with pytest.raises(ValueError, match="Ambiguous"):
+        onboard.resolve_commit(clone, "topic")
+    assert onboard.resolve_commit(clone, "refs/heads/topic") == tip
+    assert onboard.resolve_commit(clone, "refs/tags/topic") == _git(source, "rev-parse", "HEAD")
+
+
 def test_select_each_harness_independently(tmp_path: Path) -> None:
     anchors = {name: tmp_path / name for name in ("default", "other", "bound")}
     choices = [("explicit", "example/one"), ("portable", "example/two"), ("local", "retained")]

@@ -44,6 +44,20 @@ def selected_companions(root: Path, default: str, anchors: dict[str, Path], expl
     return selections
 
 
+def resolve_commit(checkout: Path, reference: str) -> str:
+    if reference == "main" or reference.startswith("refs/heads/"):
+        reference = "refs/remotes/origin/" + reference.removeprefix("refs/heads/")
+    elif not reference.startswith("refs/"):
+        remote = "refs/remotes/origin/" + reference
+        # A fresh clone creates a local branch only for the default branch.
+        if remote in harness._git(checkout, "for-each-ref", "--format=%(refname)", remote).splitlines():
+            tag = "refs/tags/" + reference
+            if tag in harness._git(checkout, "for-each-ref", "--format=%(refname)", tag).splitlines():
+                raise ValueError("Ambiguous suite reference; qualify the branch or tag")
+            reference = remote
+    return harness._git(checkout, "rev-parse", "--verify", "--end-of-options", reference + "^{commit}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)
@@ -97,11 +111,7 @@ def main() -> None:
         raise ValueError("Invalid source reference")
     checkout = args.workspace / "source"
     harness._git(args.workspace, "clone", "--no-checkout", "--no-recurse-submodules", "--", url, str(checkout))
-    if reference == "main":
-        reference = "refs/remotes/origin/main"
-    elif reference.startswith("refs/heads/"):
-        reference = "refs/remotes/origin/" + reference.removeprefix("refs/heads/")
-    commit = harness._git(checkout, "rev-parse", "--verify", "--end-of-options", reference + "^{commit}")
+    commit = resolve_commit(checkout, reference)
     print(f"Selected {url} {reference} at {commit}", flush=True)
 
     import bootstrap_manager_release
