@@ -3,6 +3,13 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_reconcile_early_return_units.py",
+      [
+        "test_implicit_contained_reconciliation_never_invokes_a_shell",
+        "test_missing_runtime_scope_never_invokes_a_shell"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_vault_cache_inspection_units.py",
       [
         "test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission[no-write]",
@@ -10879,6 +10886,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_reconcile_early_return_units.py": "7edb279ce83e42867c286f495cb00cfb6b0dcd2abc1887099996163c27e81583",
+    "tools/test_installer_instance_reconcile.py": "b7eb0cf025b974dc98333834f1989d5591d263715b8589bdf118426d13199163",
     "tools/promotion_unit_tests/test_original_vault_cache_inspection_units.py": "f67ed9cb0181fb386e14f2e47a6f1d2db3c0a6f598bc08ee08de804f816253dd",
     "tools/promotion_unit_tests/test_original_historical_argv_units.py": "1ba9da0636c1545db8b5ec36a0167ee46c552299697ff1042f9d9857551e4790",
     "tools/test_installer_engine_stop.py": "d2663dcb0272a52097d738fba1623bfcaa1f71b2d7ee091330e75b1bd9600ea7",
@@ -12144,6 +12153,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "libs/installer-engine/installer_instance_reconcile.py",
     "libs/installer-engine/installer_engine_stop.py",
     "libs/installer-engine/installer_source_build.py",
     "tools/pytest_portfolio_guard.py",
