@@ -4,7 +4,9 @@ The original ``handoff_started_at`` is attempt one. A started record that was
 never marked submitted may be granted again to the current enrolled consumer
 while that consumer is idle; every grant is recorded here. Once the bound is
 reached the original row receives an explicit terminal ``failed`` disposition
-instead of lingering in an ambiguous started state.
+instead of lingering in an ambiguous started state. Late acceptance or
+consumption evidence for an exhausted original is kept on its final attempt so
+the receiver's report settles while the terminal disposition stays unchanged.
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ _SQL = (
     f"CREATE TABLE IF NOT EXISTS {TABLE} ("
     "message_id INTEGER NOT NULL, attempt INTEGER NOT NULL CHECK(attempt>=2), "
     "session_id TEXT NOT NULL, incarnation TEXT NOT NULL, at REAL NOT NULL, "
-    "PRIMARY KEY(message_id,attempt))"
+    "late_outcome TEXT CHECK(late_outcome IS NULL OR late_outcome IN ('sdk_accepted','consumed')), "
+    "late_at REAL, PRIMARY KEY(message_id,attempt))"
 )
 
 
@@ -86,6 +89,30 @@ def regrant(
     return True
 
 
+def late_stage(conn: sqlite3.Connection, message_id: int) -> str | None:
+    """Late SDK evidence observed after the original was exhausted, if any."""
+    if not available(conn):
+        return None
+    row = conn.execute(
+        f"SELECT late_outcome FROM {TABLE} WHERE message_id=? ORDER BY attempt DESC LIMIT 1",
+        (message_id,),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
+def record_late(conn: sqlite3.Connection, message_id: int, outcome: str, *, now: float) -> str | None:
+    """Record late acceptance/consumption for an exhausted original; consumed wins."""
+    if outcome not in ("sdk_accepted", "consumed") or not available(conn):
+        return late_stage(conn, message_id)
+    conn.execute(
+        f"UPDATE {TABLE} SET late_outcome=?, late_at=? WHERE message_id=? "
+        f"AND attempt=(SELECT MAX(attempt) FROM {TABLE} WHERE message_id=?) "
+        "AND (late_outcome IS NULL OR (late_outcome='sdk_accepted' AND ?='consumed'))",
+        (outcome, now, message_id, message_id, outcome),
+    )
+    return late_stage(conn, message_id)
+
+
 def failures(conn: sqlite3.Connection, session_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
     """Visible terminal failures for one session, newest first and bounded."""
     if not available(conn):
@@ -96,6 +123,9 @@ def failures(conn: sqlite3.Connection, session_id: str, *, limit: int = 20) -> l
         "json_extract(m.disposition_json,'$.attempts') AS attempts "
         f"FROM live_messages m WHERE m.id IN (SELECT DISTINCT message_id FROM {TABLE} "
         "WHERE session_id=?) AND m.session_id=? AND m.consumed_at IS NULL "
+        "AND m.delivered_at IS NULL "
+        f"AND (SELECT late_outcome FROM {TABLE} a WHERE a.message_id=m.id "
+        "ORDER BY a.attempt DESC LIMIT 1) IS NULL "
         "AND json_extract(m.disposition_json,'$.code')=? ORDER BY m.id DESC LIMIT ?",
         (session_id, session_id, EXHAUSTED, limit),
     ).fetchall()

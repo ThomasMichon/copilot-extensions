@@ -32,7 +32,9 @@ native effects that have not been confirmed submitted; an idle current receiver
 re-attempts them (see below), so they are not a permanent state.
 A started original whose bounded re-attempts were exhausted leaves
 `messages` and is listed under `failed` with stage `failed`, code
-`delivery_attempts_exhausted`, the attempt count and its failure time.
+`delivery_attempts_exhausted`, the attempt count and its failure time. Late
+acceptance or consumption evidence for such an original removes it from that
+list while its terminal disposition stays recorded.
 That list is bounded (newest 20) and body-free. The existing hook's last emitted count can appear separately
 when this serving process observed its diagnostic event in the last 60 seconds.
 It is not a current set or a queue census; an observed consumer incarnation

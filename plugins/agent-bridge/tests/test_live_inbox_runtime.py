@@ -355,6 +355,15 @@ def test_idle_successor_reattempts_unsubmitted_original_until_bounded_failure(se
     exhausted = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
     assert exhausted.json()["messages"] == []
     assert client.post(PREFIX + "/begin", json={**again, "attempt": 3}).status_code == 409
+    # Late consumption evidence still settles the report; the disposition stays.
+    late = report(first, row, "consumed")
+    assert client.post(PREFIX + "/outcome", json=late).json() == {"stage": "consumed"}
+    kept, = db.execute_read("SELECT disposition_json FROM live_messages WHERE id=?", (message_id,))
+    assert json.loads(kept["disposition_json"])["code"] == "delivery_attempts_exhausted"
+    assert client.post(PREFIX + "/outcome", json=late).json() == {"stage": "consumed"}
+    late_ledger = db.execute_read(
+        "SELECT attempt,late_outcome FROM live_message_attempts WHERE late_outcome IS NOT NULL")
+    assert [tuple(entry) for entry in late_ledger] == [(3, "consumed")]
 
 
 def test_reattempt_requires_a_message_base_receiver(serving: Serving) -> None:

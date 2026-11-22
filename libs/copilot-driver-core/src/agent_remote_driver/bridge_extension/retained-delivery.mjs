@@ -361,7 +361,8 @@ export function createRetainedInbox({
   }
 
   // Without a bounded history API, read the full log at most once per started
-  // original attempt in this process; never sweep it again for the same record.
+  // original in this process. Later attempts made here are covered by live
+  // input observation, which clears this memo if it ever overflows.
   async function readHistory(sid, rows) {
     if (typeof session.rpc?.eventLog?.read === "function") return readRecentHistory(sid, rows);
     const key = (row) => `${row.message_id}:${row.handoff_id}`;
@@ -396,6 +397,7 @@ export function createRetainedInbox({
       && (bounded || !fullHistoryRead.has(`${row.message_id}:${row.handoff_id}`)));
     const candidates = [...(idleAt === null ? []
       : unsubmitted.filter((row) => verified.get(row.message_id) !== idleAt)), ...accepted];
+    let unsettled = false;
     if (candidates.length) {
       // A page skipped during cooldown has not been reconciled; keep its cursor.
       if (now() < historyAt) return false;
@@ -415,10 +417,13 @@ export function createRetainedInbox({
         } else if (history.covered.has(receipt.message_id)) {
           verified.set(receipt.message_id, idleAt);
         } else {
+          unsettled = true;
           note(`original handoff ${receipt.message_id}/${receipt.handoff_id} beyond bounded history scan; rechecking`);
         }
       }
     }
+    // The resume nudge needs every page of this idle episode reconciled.
+    if (!unsettled && response.next_after === null && episode?.id === idleAt) episode.swept = true;
     after = response.next_after ?? 0;
     return response.next_after !== null;
   }
@@ -437,14 +442,19 @@ export function createRetainedInbox({
     const idleAt = idleEpisode();
     if (idleAt !== null && idleAt > 0 && after === 0 && episode?.id !== idleAt) {
       // Snapshot what was queued when this idle episode began, for the nudge.
-      episode = {
-        id: idleAt, nudged: false, redundant: new Set(),
-        awaiting: new Set(receipts.filter((row) => !TERMINAL.has(row.stage)).map((row) => row.message_id)),
-      };
+      episode = { id: idleAt, nudged: false, swept: false, redundant: new Set(), awaiting: new Set() };
+    }
+    if (episode?.id === idleAt && !episode.swept) {
+      // Accumulate every recovery page; the nudge waits for the whole sweep.
+      for (const row of receipts) if (!TERMINAL.has(row.stage)) episode.awaiting.add(row.message_id);
+      if (!managed && response.next_after === null) episode.swept = true;
     }
     if (nativeInputOverflow) {
       note("native input observation overflow; original receipts remain uncertain");
       nativeInputOverflow = false;
+      // Live observation covered in-process attempts; once lossy, a fallback
+      // full read is needed again before any re-attempt.
+      fullHistoryRead.clear();
     }
     const observed = new Set();
     const settleInput = async (receipt) => {
@@ -718,14 +728,17 @@ export function createRetainedInbox({
     if (!consumerValid(receipt.consumer, sid, compatible)) {
       throw new Error("original handoff receiver unavailable");
     }
-    if (reattempting && [...nativeInputs.values()].some((input) => input.sid === sid
-        && input.id === msg.id
-        && input.event.data.transformedContent.startsWith(retainedHeader(receipt)))) {
+    const alreadyInput = () => [...nativeInputs.values()].some((input) => input.sid === sid
+      && input.id === msg.id && input.event.data.transformedContent.startsWith(retainedHeader(receipt)));
+    const settleRedundant = async () => {
       // Already present in this session's own input: delivered, never resent.
       verified.delete(msg.id);
       await nativeContext(sid);
       consumed(sid, msg.id);
       await report(receipt, "consumed");
+    };
+    if (reattempting && alreadyInput()) {
+      await settleRedundant();
       return;
     }
     const readiness = async () => {
@@ -745,6 +758,15 @@ export function createRetainedInbox({
     options.prompt = options.prompt.replace(/^<agent-message /, retainedHeader(receipt));
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
+    // Input or a new turn may have arrived while readiness was awaited.
+    if (reattempting && alreadyInput()) {
+      await settleRedundant();
+      return;
+    }
+    if (reattempting && idleEpisode() !== idleAt) {
+      note(`original handoff ${msg.id}/${msg.handoff_id} re-attempt deferred; session left idle`);
+      return;
+    }
     const grant = await currentRequest(sid, "begin", {
       ...owner, consumer: context.consumer.message_base === 1 ? context.consumer : receipt.consumer,
       binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
@@ -762,12 +784,18 @@ export function createRetainedInbox({
       note(`original handoff ${msg.id}/${msg.handoff_id} has no final grant; no send`);
       return;
     }
+    let redundant = false;
     try {
       await nativeContext(sid);
       await readiness();
       if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed after final admission");
       await nativeCall(async () => {
         if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed at SDK invocation");
+        if (alreadyInput()) {
+          redundant = true;
+          return;
+        }
+        if (reattempting && idleEpisode() !== idleAt) throw new Error("session left idle before re-attempt");
         const mode = deliveryPlan(msg, {
           mainTurnRunning: mainTurn ? mainTurn.running : true,
         }).options.mode;
@@ -783,6 +811,10 @@ export function createRetainedInbox({
       await report(receipt, "unknown");
       return;
     }
+    if (redundant) {
+      await settleRedundant();
+      return;
+    }
     await report(receipt, "sdk_accepted");
   }
 
@@ -790,7 +822,7 @@ export function createRetainedInbox({
   // originals and every one of them proved already delivered (none submitted).
   async function nudge(sid, allowSend) {
     const idleAt = idleEpisode();
-    if (!episode || episode.nudged || episode.id !== idleAt || idleAt === 0
+    if (!episode || episode.nudged || !episode.swept || episode.id !== idleAt || idleAt === 0
         || submittedEpisode === idleAt || episode.awaiting.size === 0
         || [...episode.awaiting].some((id) => !episode.redundant.has(id))) return;
     episode.nudged = true;

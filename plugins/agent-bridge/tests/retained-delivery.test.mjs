@@ -1464,6 +1464,63 @@ test("a bridge without re-attempt support never resends and clears the pending n
   assert.equal(f.calls.some((call) => call.body?.reattempt), false);
 });
 
+test("a queued backlog beyond the first recovery page is fully reconciled before any nudge", async () => {
+  const f = managedFixture();
+  const rows = Array.from({ length: 101 }, () => f.started("unknown"));
+  f.events = rows.slice(0, 100).map((row) => f.history(row));
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.nudges(), 0, "the second page is still unreconciled");
+  f.clock += 30_001;
+  for (let i = 0; i < 3; i++) await inbox.tick(sid);
+  assert.ok(rows.slice(0, 100).every((row) => row.handoff_stage === "consumed"));
+  assert.equal(rows[100].handoff_stage, "sdk_accepted");
+  assert.equal(f.sends.length, 1);
+  assert.match(f.sends[0].prompt, /msg-id="101"/);
+  assert.equal(f.nudges(), 0);
+});
+
+test("matching input observed while a re-attempt is granted is never sent again", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  let inbox;
+  f.after = async (_method, path, body) => {
+    if (path.endsWith("/begin") && body.attempt !== undefined) inbox.observe(sid, f.history(row));
+  };
+  inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.filter((send) => send.prompt !== RESUME_NUDGE).length, 0);
+  assert.equal(row.handoff_stage, "consumed");
+});
+
+test("a turn starting during a re-attempt grant defers the send to the next idle", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  let started = false;
+  f.after = async (_method, path, body) => {
+    if (!started && path.endsWith("/begin") && body.attempt !== undefined) {
+      started = true;
+      f.run();
+    }
+  };
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0);
+  assert.equal(row.handoff_stage, "unknown");
+  f.turn.observe({ type: "session.idle" });
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.equal(row.attempt, 3);
+});
+
 test("bounded recent-first history is preferred over a full event read", async () => {
   const f = managedFixture();
   const row = f.started("unknown");

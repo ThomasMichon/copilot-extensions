@@ -295,7 +295,11 @@ While the session is idle, each drain tick:
    fourth attempt is requested, the backend records the terminal
    `failed`/`delivery_attempts_exhausted` disposition instead of granting it.
    The record then leaves recovery and the pending notice and appears in the
-   `pending-queue` `failed` list.
+   `pending-queue` `failed` list. Late `sdk_accepted`/`consumed` evidence for
+   an exhausted original is still accepted: it is kept on the final attempt
+   row, the `/outcome` reply returns the observed stage so the receiver's
+   report settles, the terminal disposition is unchanged, and the record
+   leaves the `failed` list.
 3. Submits granted and offered records through the ordinary `session.send`
    path with the original `<agent-message ... msg-id=...>` header and reports
    `sdk_accepted`.
@@ -320,9 +324,17 @@ per read and stops at the oldest candidate's start time. It caches a
 per-session high-water mark, so later reads only examine newer events. Without
 that RPC, each started record's handoff is checked with at most one full
 `getEvents()` read for the life of the extension. Its re-attempts then rely on
-live observation. After a submission is accepted, the original still seeks
-consumption evidence through the same bounded read; without the RPC, that is
-one full read per accepted handoff.
+live observation; if that observation overflows its bound, the memo is cleared
+so the next re-attempt reads history again first. After a submission is
+accepted, the original still seeks consumption evidence through the same
+bounded read; without the RPC, that is one full read per handoff.
+
+The receiver checks live input again immediately before requesting a
+re-attempt grant and immediately before the SDK send; a matching input settles
+the record as consumed instead. A re-attempt whose session leaves idle before
+the send is deferred, or reported `unknown` once granted, and retried on a
+later idle. The resume prompt waits until every recovery page of the idle
+episode has been reconciled, so records beyond the first page are never missed.
 
 Durable SDK history is read lazily, at most once per 30 seconds, and shared
 across the bounded receipt page. It is not an event-handler operation or a
