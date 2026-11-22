@@ -432,6 +432,12 @@ ownership. `AGENT_VAULT_SOCKET`, `AGENT_VAULT_PIPE`, `AGENT_VAULT_PID`,
 `AGENT_VAULT_LOG`, `AGENT_VAULT_RUN_DIR`, `AGENT_VAULT_ENDPOINT` select runtime
 transport/state paths. They do not become repository preferences.
 
+The legacy global shortcut binds `AGENT_VAULT_HOME` to its addressed runtime
+before the prepared-runtime fast path, matching its cold dispatcher. An enabled
+local cache therefore defaults to that runtime's `cache` directory, not the
+global configuration directory. An explicit `AGENT_VAULT_CACHE_DIR` still wins;
+the shortcut does not enable caching or move existing cache data.
+
 `AGENT_VAULT_BIND_PORT` supplies a daemon-start default in `0..65535`, where
 `0` requests an OS-assigned ephemeral listener. It does not change client
 discovery or the strictly validated client `port`. An explicit start argument
