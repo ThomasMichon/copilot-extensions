@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [POSIX cue and fixture-boundary continuation](journal/2026/11.21-posix-cue-and-fixture-boundaries.md)
+records scoped delivery, the audited offline protocol completion and retained independent owners; all campaign gates remain unchanged.
+
 The [offline protocol fulfillment proposal](journal/2026/11.21-offline-protocol-source-fulfillment.md)
 records the current finite implementation/regression crosswalk and its review limits; source disposition still requires the standing final checks.
 
