@@ -21,6 +21,19 @@ from machine_transport import MachineEntry, SSHEnvironment
 from agent_worktrees import config as cfg, remote_seed_launch, resolve_cli, resolve_machine_cli
 
 pytestmark = pytest.mark.guard
+
+
+def test_foreground_completion_fence_is_target_local_before_config_loading(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid capability selection reached configuration or creation")
+
+    monkeypatch.setattr(cfg, "load_config", forbidden)
+    assert resolve_cli.cmd_resolve(_parse([
+        "--json", "--new", "--machine", "remote-host", "--require-foreground-completion",
+    ])) == 2
+    assert "target-local" in json.loads(capfd.readouterr().out)["error"]
 Remote = tuple[cfg.Config, MachineEntry, list[dict[str, Any]]]
 
 

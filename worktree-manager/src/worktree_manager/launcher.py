@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -124,6 +125,16 @@ class LaunchExec:
     muxed: bool
     exit_code: int
     session: str | None
+    error: str = ""
+
+
+def _windows_host() -> bool:
+    return os.name == "nt"
+
+
+def _windows_command_too_long(argv: list[str]) -> bool:
+    # CreateProcessW counts UTF-16 code units, including its terminating NUL.
+    return len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 > 32767
 
 
 def compose_launch(
@@ -149,9 +160,16 @@ def compose_launch(
             return LaunchExec(
                 kind="invalid", argv=[], cwd=None, env={},
                 muxed=False, exit_code=1, session=None)
+        argv = ["ssh", "-t", "-o", "ConnectTimeout=10", ssh_alias, remote_command]
+        if _windows_host() and _windows_command_too_long(argv):
+            return LaunchExec(
+                kind="invalid", argv=[], cwd=None, env={}, muxed=False, exit_code=1, session=None,
+                error="SSH arguments exceed the Windows command-line limit; "
+                "shorten the startup prompt. The target was not contacted.",
+            )
         return LaunchExec(
             kind="exec",
-            argv=["ssh", "-t", "-o", "ConnectTimeout=10", ssh_alias, remote_command],
+            argv=argv,
             cwd=None,
             env=dict(os.environ),
             muxed=False,
@@ -187,6 +205,8 @@ def execute(le: LaunchExec) -> int:
     if le.kind == "none":
         return le.exit_code
     if le.kind != "exec" or not le.argv:
+        if le.error:
+            print(f"error: {le.error}", file=sys.stderr)
         return 1
     proc = subprocess.run(le.argv, cwd=le.cwd, env=le.env)
     return proc.returncode

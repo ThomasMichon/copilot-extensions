@@ -120,6 +120,45 @@ def test_remote_action_composes_to_ssh_handoff() -> None:
     assert le.session is None
 
 
+@pytest.mark.parametrize("command,allowed", [
+    ("project --new", True),
+    ("x" * 32000, True),
+    ("x" * 40000, False),
+    ("\U0001f600" * 17000, False),
+    ('"' * 17000, False),
+], ids=["ordinary", "near-os-limit", "too-long", "utf16", "quoted"])
+def test_windows_remote_arguments_refuse_before_spawn_without_truncating(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    command: str, allowed: bool,
+) -> None:
+    monkeypatch.setattr(launcher, "_windows_host", lambda: True)
+    plan = _exec_plan(action="remote", raw={
+        "ssh_alias": "target", "remote_command": command,
+    })
+    composed = launcher.compose_launch(plan)
+    if allowed:
+        assert composed.kind == "exec" and composed.argv[-1] == command
+    else:
+        def unexpected(*args: object, **kwargs: object) -> None:
+            pytest.fail("unrepresentable SSH command reached a process")
+
+        monkeypatch.setattr(subprocess, "run", unexpected)
+        assert composed.kind == "invalid" and launcher.execute(composed) == 1
+        assert "target was not contacted" in capsys.readouterr().err
+
+
+def test_nonwindows_remote_arguments_do_not_inherit_the_windows_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(launcher, "_windows_host", lambda: False)
+    command = "x" * 40000
+    plan = _exec_plan(action="remote", raw={
+        "ssh_alias": "target", "remote_command": command,
+    })
+    composed = launcher.compose_launch(plan)
+    assert composed.kind == "exec" and composed.argv[-1] == command
+
+
 def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from worktree_manager import __main__ as entrypoint, process_priority

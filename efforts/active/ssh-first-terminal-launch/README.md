@@ -206,6 +206,10 @@ Do not globally unbound passive reads or unrelated background operations.
   scopes. Foreground source fetches explicitly select caller-owned completion
   capture and use the existing non-terminating stage heartbeats during silence;
   background stream-idle warnings remain unchanged.
+- Added exact Windows SSH command-line capacity checks (including quoting and
+  UTF-16 code units) before process creation, without truncating input. The
+  target-local completion fence also refuses remote use before configuration,
+  so no required capability can disappear through legacy forwarding.
 
 ### 2026-11-21 - Kickoff
 

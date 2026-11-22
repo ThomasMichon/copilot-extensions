@@ -334,7 +334,7 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
     parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
     parser.add_argument("--require-foreground-completion", action="store_true",
-                        help="Require foreground completion waiting; excludes older launch commands")
+                        help="Target-local completion capability; excludes older launch commands")
     parser.add_argument(
         "--require-terminal-handoff", action="store_true",
         help="With --json --machine: package target-local execution without remote precreation",
@@ -415,6 +415,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    if getattr(args, "require_foreground_completion", False) and getattr(args, "machine", None):
+        return output._json_error("Foreground completion capability is target-local; use terminal handoff for a remote selection", exit_code=2)
     if getattr(args, "require_terminal_handoff", False) and (
         not getattr(args, "json", False) or not getattr(args, "machine", None)
         or getattr(args, "dry_run", False)

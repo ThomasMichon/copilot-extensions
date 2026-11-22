@@ -2102,6 +2102,10 @@ context is omitted only when registry-aware resolution proves it redundant.
 Recovery fast-path arguments are refused for this packaged flow because the
 legacy shell preprocessors bypass ordinary resolution; invoke recovery
 explicitly on the target instead.
+Windows SSH execution rejects argument vectors exceeding its actual UTF-16
+process command-line limit before contacting the target. It does not shorten
+prompt text or retry another launch; confirmed attempts retain their original
+options in protected history.
 
 Foreground writer completion waits are capability-qualified against the running
 target service. A deadline-only resident uses the existing locked pre-send

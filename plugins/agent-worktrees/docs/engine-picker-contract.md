@@ -444,6 +444,8 @@ the required flag before effects; Manager never retries the old admission path.
 The packaged target command carries `--require-foreground-completion`.
 An older target rejects that syntax in the SSH terminal before creation,
 without an originating preflight, admission exchange or weaker retry.
+This fence is target-local: combining it with `--machine` refuses before remote
+resolution rather than silently dropping it in a legacy remote plan.
 
 The in-place Picker has exited before `ssh -t -o ConnectTimeout=10` takes its
 terminal. The target's project command owns creation, current policy checks,
@@ -458,6 +460,10 @@ Supported detached presentation retains its separate terminal lifetime.
 Recovery fast-path arguments are refused for this packaged flow because the
 legacy shell preprocessors bypass ordinary target resolution for them. Run
 recovery explicitly on the target instead; normal launch options remain intact.
+On Windows, the fully quoted SSH argument vector is checked against the actual
+CreateProcessW UTF-16 command-line limit before spawning. Oversized input is
+reported without truncation or contacting the target, not retried through a
+different transport.
 
 Foreground creation and native launch boundaries opt into completion waiting.
 Tracking-write receivers advertise `tracking_write_completion_wait_version: 1`;
