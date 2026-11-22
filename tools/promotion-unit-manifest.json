@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_build_tools_noncontained_units.py",
+      [
+        "test_private_build_tools_still_refuse_noncontained_roots[sibling]",
+        "test_private_build_tools_still_refuse_noncontained_roots[outside]",
+        "test_private_build_tools_still_refuse_noncontained_roots[relative]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_pytest_temp_link_units.py",
       [
         "test_windows_suppresses_only_current_link_helper_and_restores_it[False]",
@@ -10829,6 +10837,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_build_tools_noncontained_units.py": "4f046b4992b5338f3178c7d68f1dcb0d2a0e6b7ccc2c85f0a97cb39dd499eb04",
+    "tools/test_installer_build_tools_root.py": "7706afc5004cd5155b9ccba92b46fc20391666002275c2f18a470a93b280696b",
     "tools/promotion_unit_tests/test_original_pytest_temp_link_units.py": "6c6e9cf6afdff8056fd524ad0d09f7bb82ae86595641003c8ae3e2da641f7043",
     "tools/test_pytest_windows_paths.py": "e446aa197e61dd0b3f81236b7b2cc71075bbf8f5f40249243ae312ed16a58f41",
     "tools/promotion_unit_tests/test_original_h1_optional_shape_units.py": "7b7fceccbed57982b788ab2bfb8665d1dc7f358ae2449621486601094e2afc2f",
@@ -12083,6 +12093,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "libs/installer-engine/installer_source_build.py",
     "tools/pytest_portfolio_guard.py",
     "tools/capture_bridge_host_inspection.py",
     "tools/check-install-contract.py",
