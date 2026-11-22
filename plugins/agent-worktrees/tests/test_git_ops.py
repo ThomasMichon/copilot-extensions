@@ -44,6 +44,7 @@ class _GitCall(typing.TypedDict, total=False):
     isolated_repository: bool
     auth_acquisition: bool
     timeout: float | None
+    soft_timeout: float | None
 
 
 class _ObservedTimeout(subprocess.TimeoutExpired):
@@ -55,6 +56,27 @@ class _ObservedTimeout(subprocess.TimeoutExpired):
 # ---------------------------------------------------------------------------
 
 class TestGitWrapper:
+    def test_soft_timeout_uses_the_owned_runner_and_retains_a_shorter_outer_budget(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import time
+        from agent_procutil import owned_process
+        from agent_worktrees import git_acquisition_budget, git_ops as go
+
+        calls: list[dict[str, typing.Any]] = []
+
+        def bounded(cmd: list[str], **kwargs: typing.Any) -> subprocess.CompletedProcess[str]:
+            calls.append(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(go, "resolve_git", lambda **kwargs: str(Path("git.exe").absolute()))
+        monkeypatch.setattr(owned_process, "run_owned", bounded)
+        with git_acquisition_budget.acquisition_budget(time.monotonic() + 2):
+            go.git("fetch", "origin", timeout=300, soft_timeout=30)
+        assert len(calls) == 1
+        assert 0 < calls[0]["timeout"] <= 2
+        assert calls[0]["soft_timeout"] == 30
+
     @pytest.mark.parametrize("selection", [
         "bin", "explicit",
         pytest.param("", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX empty PATH entry")),
@@ -1497,8 +1519,10 @@ class TestFetchTimeout:
             *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
             timeout: float | None = None, no_hooks: bool = False,
             isolated_repository: bool = False, auth_acquisition: bool = False,
+            soft_timeout: float | None = None,
         ) -> _GitResult:
             captured["timeout"] = timeout
+            captured["soft_timeout"] = soft_timeout
             captured["args"] = args
             captured["isolated_repository"] = isolated_repository
             captured["auth_acquisition"] = auth_acquisition
@@ -1508,7 +1532,8 @@ class TestFetchTimeout:
         monkeypatch.setattr(go, "git", fake_git)
         go.fetch("origin", cwd=".")
         assert captured["timeout"] == go.DEFAULT_FETCH_TIMEOUT
-        assert captured["args"] == ("fetch", "origin", "--quiet")
+        assert captured["args"] == ("fetch", "origin", "--progress")
+        assert captured["soft_timeout"] == 30
         assert captured["isolated_repository"] is False
         assert captured["auth_acquisition"] is True
         assert captured["no_hooks"] is False
@@ -1537,6 +1562,7 @@ class TestFetchTimeout:
             *args: str, cwd: str | Path | None = None, check: bool = True, capture: bool = True,
             timeout: float | None = None, isolated_repository: bool = False,
             auth_acquisition: bool = False,
+            soft_timeout: float | None = None,
         ) -> typing.NoReturn:
             assert timeout is not None
             raise subprocess.TimeoutExpired(cmd=["git", *args], timeout=timeout)
@@ -1545,9 +1571,12 @@ class TestFetchTimeout:
         with pytest.raises(GitError) as exc:
             go.fetch("origin", cwd=".")
         assert exc.value.returncode == 124
-        assert "timed out" in str(exc.value)
+        assert "hard timeout" in str(exc.value)
 
-    def test_fetch_none_timeout_preserves_unbounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("requested", [None, 900])
+    def test_fetch_never_exceeds_its_hard_cap(
+        self, monkeypatch: pytest.MonkeyPatch, requested: float | None,
+    ) -> None:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
         def fake_git(
@@ -1557,8 +1586,8 @@ class TestFetchTimeout:
             return _GitResult(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
-        go.fetch("origin", cwd=".", timeout=None)
-        assert captured["timeout"] is None
+        go.fetch("origin", cwd=".", timeout=requested)
+        assert captured["timeout"] == 300
 
 
 # ---------------------------------------------------------------------------

@@ -20,9 +20,11 @@ import time
 import urllib.parse
 from dataclasses import dataclass, replace
 from pathlib import Path
+from collections.abc import Callable, Iterator
+from typing import BinaryIO, TypedDict
 
-from . import git_ops, output, publication_deadline, push_timeout, tracking
-from .config import Config, PRConfig, SourceAttribution
+from . import git_acquisition_budget, git_ops, output, publication_deadline, push_timeout, tracking
+from .config import Config, PRConfig, RepoConfig, SourceAttribution
 
 #: Why ``push-changes``/``create-pr`` refuse when :func:`push_remote` can't tell.
 UNREADABLE_REMOTE = (
@@ -32,7 +34,7 @@ UNREADABLE_REMOTE = (
     "one out. Nothing was pushed."
 )
 #: How long one ``ls-remote`` probe may take (``fetch``'s own bound).
-PROBE_TIMEOUT = 30.0
+PROBE_TIMEOUT = git_acquisition_budget.NETWORK_HARD_TIMEOUT
 #: Long enough for another worktree to finish the longest bounded push it can make
 #: while holding the publication lock: ``git_ops.push`` retries once without its auth
 #: override after a failure, each attempt bounded by the push timeout; plus buffer
@@ -54,7 +56,11 @@ class PushTarget:
     head_identity: str = ""
 
 
-def _fork_remotes(repo) -> list[str]:
+class _RewriteOptions(TypedDict, total=False):
+    allow_history_rewrite: bool
+
+
+def _fork_remotes(repo: RepoConfig) -> list[str]:
     """Every fork remote this repo's config can publish through: the base
     ``pr.fork`` and each role override's (``create-pr`` publishes through the
     role-resolved one) that is *enabled* -- ``remote`` defaults to ``fork`` even
@@ -172,7 +178,8 @@ def _tip(remote: str, branch: str, worktree_path: str) -> str | None:
             return observed_ref(remote, destinations, ref, worktree_path)
         out = git_ops.git(*git_ops._auth_config_args(remote, cwd=worktree_path),
                           "ls-remote", remote, ref, cwd=worktree_path,
-                          check=False, timeout=PROBE_TIMEOUT, kill_tree=True)
+                          check=False, timeout=PROBE_TIMEOUT,
+                          soft_timeout=git_acquisition_budget.NETWORK_SOFT_TIMEOUT, kill_tree=True)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if out.returncode != 0:
@@ -184,7 +191,9 @@ def _tip(remote: str, branch: str, worktree_path: str) -> str | None:
     return ""
 
 
-def _provider_head(repo, pr, *, expected_ref: str = "", expected_identity: str = "") -> str:
+def _provider_head(
+    repo: RepoConfig, pr: tracking.PRRecord, *, expected_ref: str = "", expected_identity: str = "",
+) -> str:
     """The PR's actual head commit, from the provider; "" when it can't be read."""
     number, slug = getattr(pr, "number", None), getattr(pr, "repo", "") or ""
     if not number or "/" not in slug:
@@ -208,19 +217,19 @@ def _provider_head(repo, pr, *, expected_ref: str = "", expected_identity: str =
             )
         ):
             return ""
-        return (getattr(result, "head_sha", "") or "").strip()
+        return result.head_sha.strip()
     except Exception:
         return ""
 
 
-def _own_remote(repo, worktree_path: str) -> PushTarget | None:
+def _own_remote(repo: RepoConfig, worktree_path: str) -> PushTarget | None:
     """The repo's own remote as the push target, only while ``git push`` writes where
     it fetches from: the push's lease and credential come from the fetch URL, so a
     ``pushurl`` naming another destination is refused (``None``) like a fork's."""
     return PushTarget(repo.remote) if push_slug(repo.remote, cwd=worktree_path) else None
 
 
-def push_target(repo, pr, worktree_path: str) -> PushTarget | None:
+def push_target(repo: RepoConfig, pr: tracking.PRRecord, worktree_path: str) -> PushTarget | None:
     """The git remote holding *pr*'s head, to push its updates to, read under
     :func:`publish_lock`: the branch tips it compares and the identity it returns
     come from one snapshot, never across a fork setup that repoints the remote
@@ -232,7 +241,7 @@ def push_target(repo, pr, worktree_path: str) -> PushTarget | None:
         return None
 
 
-def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
+def _select_push_target(repo: RepoConfig, pr: tracking.PRRecord, worktree_path: str) -> PushTarget | None:
     """The git remote holding *pr*'s head, to push its updates to.
 
     The remote ``create-pr`` recorded on the PR, when it isn't the repo's own
@@ -280,6 +289,7 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     tips[repo.remote] = _tip(repo.remote, branch, worktree_path)
     if tips[repo.remote] is None:
         return None
+    found: str | None
     if not tips[repo.remote] and len(holding) == 1:
         found = holding[0]
     else:
@@ -295,12 +305,12 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     return PushTarget(found, slug if fork else "", candidate.head_identity if fork else "") if slug else None
 
 
-def push_remote(repo, pr, worktree_path: str) -> str | None:
+def push_remote(repo: RepoConfig, pr: tracking.PRRecord, worktree_path: str) -> str | None:
     target = push_target(repo, pr, worktree_path)
     return target.remote if target else None
 
 
-def head_branch_gone(repo, pr, worktree_path: str) -> bool:
+def head_branch_gone(repo: RepoConfig, pr: tracking.PRRecord, worktree_path: str) -> bool:
     """Whether *pr*'s head branch is confirmed absent from the remote holding it
     (a fork-headed PR's fork): the remote and the absence check are one snapshot
     under :func:`publish_lock`, since a fork setup repointing the remote between
@@ -316,7 +326,7 @@ def head_branch_gone(repo, pr, worktree_path: str) -> bool:
         return False
 
 
-def _pr_for(record, branch: str):
+def _pr_for(record: tracking.WorktreeRecord | None, branch: str) -> tracking.PRRecord | None:
     """The live tracked PR whose head is *branch*, if any."""
     return next((p for p in (record.prs if record is not None else [])
                  if p.branch == branch and not tracking._pr_is_terminal(p)), None)
@@ -335,7 +345,7 @@ def _publish_lock_timeout_message(timeout: float) -> str:
     )
 
 
-def _try_publish_lock(fh) -> bool:
+def _try_publish_lock(fh: BinaryIO) -> bool:
     fh.seek(0, os.SEEK_END)
     if fh.tell() == 0:
         fh.write(b"\0")
@@ -345,17 +355,19 @@ def _try_publish_lock(fh) -> bool:
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            lock: Callable[[int, int, int], None] = getattr(msvcrt, "locking")
+            lock(fh.fileno(), getattr(msvcrt, "LK_NBLCK"), 1)
         else:
             import fcntl
 
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            flock: Callable[[int, int], None] = getattr(fcntl, "flock")
+            flock(fh.fileno(), getattr(fcntl, "LOCK_EX") | getattr(fcntl, "LOCK_NB"))
         return True
     except OSError:
         return False
 
 
-def _lock_publish_file(fh, *, timeout: float = PUBLISH_LOCK_ACQUIRE_TIMEOUT_S) -> None:
+def _lock_publish_file(fh: BinaryIO, *, timeout: float = PUBLISH_LOCK_ACQUIRE_TIMEOUT_S) -> None:
     deadline = time.monotonic() + timeout
     while True:
         if _try_publish_lock(fh):
@@ -366,16 +378,18 @@ def _lock_publish_file(fh, *, timeout: float = PUBLISH_LOCK_ACQUIRE_TIMEOUT_S) -
         time.sleep(min(PUBLISH_LOCK_RETRY_INTERVAL_S, remaining))
 
 
-def _unlock_publish_file(fh) -> None:
+def _unlock_publish_file(fh: BinaryIO) -> None:
     fh.seek(0)
     if os.name == "nt":
         import msvcrt
 
-        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        unlock: Callable[[int, int, int], None] = getattr(msvcrt, "locking")
+        unlock(fh.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
     else:
         import fcntl
 
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        flock: Callable[[int, int], None] = getattr(fcntl, "flock")
+        flock(fh.fileno(), getattr(fcntl, "LOCK_UN"))
 
 
 #: The publication locks this thread holds: a nested acquisition (a decision made
@@ -385,7 +399,7 @@ _held = threading.local()
 
 @contextlib.contextmanager
 def publish_lock(cwd: str, *, acquire_timeout: float | None = None,
-                 push_timeout_seconds: float = push_timeout.DEFAULT_PUSH_TIMEOUT):
+                 push_timeout_seconds: float = push_timeout.DEFAULT_PUSH_TIMEOUT) -> Iterator[None]:
     """Serialize remote configuration and snapshot verification across worktrees.
 
     Push transport uses a captured URL outside this lock. Re-entrant within a
@@ -418,7 +432,9 @@ def publish_lock(cwd: str, *, acquire_timeout: float | None = None,
             _unlock_publish_file(fh)
 
 
-def metadata_lock(worktree_id: str, *, project: str | None = None, timeout: float | None = None):
+def metadata_lock(
+    worktree_id: str, *, project: str | None = None, timeout: float | None = None,
+) -> contextlib.AbstractContextManager[object]:
     """Serialize explicit publication and manual PR reassignment, not Picker stamps."""
     from . import config as cfg
     path = (cfg.tracking_dir(project) if project else cfg.tracking_dir()) / f"{worktree_id}.pr-authority.yaml"
@@ -427,7 +443,7 @@ def metadata_lock(worktree_id: str, *, project: str | None = None, timeout: floa
     )
 
 
-def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
+def record_rewrite_ownership(config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
                              branch: str, head_sha: str, identity: str) -> str:
     """Stamp a successful create-pr publication through a fresh, generation-bound RMW."""
     from . import config as cfg, pr_publication_state
@@ -438,7 +454,8 @@ def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracki
         with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
             fresh = tracking.load_record(path)
             current = _publication_pr(fresh, pr)
-            if (not pr_publication_state.matches(current, pr) or current.branch != branch or current.head_sha != head_sha
+            if (current is None or not pr_publication_state.matches(current, pr)
+                    or current.branch != branch or current.head_sha != head_sha
                     or current.state not in ("open", "active")
                     or current.number != pr.number or current.repo.lower() != pr.repo.lower()
                     or current.provider != pr.provider):
@@ -455,13 +472,14 @@ def record_rewrite_ownership(config, record: tracking.WorktreeRecord, pr: tracki
         return f"Could not record rewrite ownership: {exc}"
 
 
-def push_checked(record, remote: str, refspec: str, *, cwd: str,
+def push_checked(record: tracking.WorktreeRecord | None, remote: str, refspec: str, *, cwd: str,
                  expected_head_repo: str = "", expected_head_identity: str = "",
                  force_with_lease: bool = False,
                  force_with_lease_expect: str | None = None,
                  timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT,
-                 allow_history_rewrite: bool = False, repo=None,
-                 strict_lease: bool = False, validate_source=None) -> git_ops.PushResult:
+                 allow_history_rewrite: bool = False, repo: RepoConfig | None = None,
+                 strict_lease: bool = False,
+                 validate_source: Callable[[], None] | None = None) -> git_ops.PushResult:
     """Verify the destination under the short configuration lock, then push a
     pinned URL without holding the clone-wide lock through hooks/network I/O.
     When it goes to
@@ -501,15 +519,15 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             elif record is not None:
                 got = candidate.head_repo.lower()
                 identity = candidate.head_identity
-            if getattr(pr, "rewrite_identity", "") and pr.rewrite_identity != identity:
+            if pr is not None and pr.rewrite_identity and pr.rewrite_identity != identity:
                 return git_ops.PushResult(ok=False, stderr=REPOINTED)
-            rewrite_args = {"allow_history_rewrite": True} if allow_history_rewrite else {}
+            rewrite_args: _RewriteOptions = {"allow_history_rewrite": True} if allow_history_rewrite else {}
             # get-url expands insteadOf/pushInsteadOf before the snapshot leaves
             # the lock. A later remote-name repoint cannot redirect transport or auth.
-            destinations = urls.stdout.splitlines() if urls.returncode == 0 else []
-            if not destinations or any(not url.strip() for url in destinations):
+            destination_rows = urls.stdout.splitlines() if urls.returncode == 0 else []
+            if not destination_rows or any(not url.strip() for url in destination_rows):
                 return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
-            destinations = tuple(destinations)
+            destinations = tuple(destination_rows)
             if len({_identity(url, cwd) for url in destinations}) != 1:
                 return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
             fetch_url = fetch.stdout.rstrip("\r\n")
@@ -530,15 +548,18 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 prepared = pr_creation_state.publication_source(
                     record, pr, remote, pr.branch if pr else "", cwd, getattr(repo, "pr", None),
                 )
-                if prepared and (identity != pr.creation["identity"] or git_ops.git(
-                    "rev-parse", "--verify", f"{refspec.partition(':')[0]}^{{commit}}",
-                    cwd=cwd, isolated_repository=True,
-                ).stdout.strip() != pr.creation["push_head"]):
-                    raise ValueError("Prepared first-push destination or source changed before transport.")
+                prepared_pr = pr if prepared else None
                 if prepared:
+                    if prepared_pr is None:
+                        raise ValueError("Prepared publication has no tracked PR.")
+                    if identity != prepared_pr.creation["identity"] or git_ops.git(
+                        "rev-parse", "--verify", f"{refspec.partition(':')[0]}^{{commit}}",
+                        cwd=cwd, isolated_repository=True,
+                    ).stdout.strip() != prepared_pr.creation["push_head"]:
+                        raise ValueError("Prepared first-push destination or source changed before transport.")
                     strict_lease = True
-                    destination = refspec.partition(":")[2] or f"refs/heads/{pr.branch}"
-                    refspec = f"{pr.creation['push_head']}:{destination}"
+                    destination = refspec.partition(":")[2] or f"refs/heads/{prepared_pr.branch}"
+                    refspec = f"{prepared_pr.creation['push_head']}:{destination}"
             except ValueError as exc:
                 return git_ops.PushResult(ok=False, stderr=str(exc))
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
@@ -574,8 +595,8 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             if result:
                 result.head_repo = got
                 result.head_identity = identity
-                if prepared:
-                    result.published_head_sha = pr.creation["push_head"]
+                if prepared_pr is not None:
+                    result.published_head_sha = prepared_pr.creation["push_head"]
                 elif checked_policy is not None:
                     result.published_head_sha = publication["head"]
             return result
@@ -583,7 +604,8 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
         return git_ops.PushResult(ok=False, stderr=str(exc))
 
 
-def update_remote(repo, record, branch: str, worktree_path: str, default: str,
+def update_remote(repo: RepoConfig, record: tracking.WorktreeRecord | None,
+                  branch: str, worktree_path: str, default: str,
                   owner: str = "", head_repo: str = "",
                   head_identity: str = "") -> tuple[str | None, str, str, str]:
     """Where ``create-pr`` pushes *branch*, the fork owner for its ``<owner>:<branch>``
@@ -614,7 +636,7 @@ def update_remote(repo, record, branch: str, worktree_path: str, default: str,
             target.head_identity)
 
 
-def record_remote(pr, remote: str, repo_remote: str, worktree_path: str) -> None:
+def record_remote(pr: tracking.PRRecord, remote: str, repo_remote: str, worktree_path: str) -> None:
     """Record on *pr* the remote its head was published to and, for a fork, that fork's
     ``owner/name``, which :func:`push_remote` checks the remote still points at."""
     fork = remote != repo_remote
@@ -626,7 +648,7 @@ def record_remote(pr, remote: str, repo_remote: str, worktree_path: str) -> None
         pr.head_repo = pr.head_identity = ""
 
 
-def record_remote_identity(pr, remote: str, repo_remote: str, head_repo: str = "",
+def record_remote_identity(pr: tracking.PRRecord, remote: str, repo_remote: str, head_repo: str = "",
                            head_identity: str = "", head_owner: str = "") -> None:
     fork = remote != repo_remote
     pr.remote = remote if fork else ""
@@ -635,7 +657,7 @@ def record_remote_identity(pr, remote: str, repo_remote: str, head_repo: str = "
     pr.head_owner = (head_owner or pr.head_owner) if fork else ""
 
 
-def push_history_message(pushed, feature: str, source: str) -> str:
+def push_history_message(pushed: git_ops.PushResult, feature: str, source: str) -> str:
     if getattr(pushed, "rebase_base_sha", ""):
         return f"Published a verified source-owned PR rebase on '{feature}' from '{source}'."
     return (
@@ -644,7 +666,7 @@ def push_history_message(pushed, feature: str, source: str) -> str:
     )
 
 
-def _advance_published_snapshot(pr, head_sha: str, *, cwd: str) -> None:
+def _advance_published_snapshot(pr: tracking.PRRecord, head_sha: str, *, cwd: str) -> None:
     """Advance only an idle snapshot contained in the previous published head."""
     if not pr.branch or not pr.head_sha or not Path(cwd).is_dir():
         return
@@ -716,7 +738,8 @@ def record_reconciled_head(
 
 
 def record_pushed_head(
-    config, record: tracking.WorktreeRecord, worktree_id: str, pushed_pr, head_sha: str,
+    config: Config, record: tracking.WorktreeRecord, worktree_id: str,
+    pushed_pr: tracking.PRRecord | None, head_sha: str,
     *, remote: str = "", head_repo: str = "", head_identity: str = "", rebase_base_sha: str = "",
 ) -> None:
     """Record a successful push, then refresh provider observation and attribution."""

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from .push_timeout import DEFAULT_PUSH_TIMEOUT
+from .git_acquisition_budget import NETWORK_HARD_TIMEOUT
 
 # Poll-based waits use signed 32-bit millisecond budgets on supported platforms.
 MAX_WAIT_SECONDS = (2**31 - 1) / 1000
@@ -21,22 +22,22 @@ def validate(value: object, *, location: str = "pr.push_timeout_seconds") -> flo
         raise ValueError(error) from None
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError(error)
-    if 8 * timeout + 180 > MAX_WAIT_SECONDS:
+    if 8 * timeout + 3 * NETWORK_HARD_TIMEOUT + 90 > MAX_WAIT_SECONDS:
         raise ValueError(
             f"{location} must keep dependent wait budgets at or below {MAX_WAIT_SECONDS:.3f} seconds"
         )
     return timeout
 
 
-def configured(prcfg) -> float:
+def configured(prcfg: object) -> float:
     return validate(getattr(prcfg, "push_timeout_seconds", DEFAULT_PUSH_TIMEOUT))
 
 
 def lock_wait(timeout: float) -> float:
     """Allow initial/recovery pushes, their authentication retries, and tip cleanup."""
-    return 4 * validate(timeout) + 30.0
+    return 4 * validate(timeout) + NETWORK_HARD_TIMEOUT
 
 
-def lifecycle_budget(prcfg) -> float:
+def lifecycle_budget(prcfg: object) -> float:
     """Cover waiting for a publisher, our own push, and fetch/rebase overhead."""
-    return 2 * lock_wait(configured(prcfg)) + 120.0
+    return 2 * lock_wait(configured(prcfg)) + NETWORK_HARD_TIMEOUT + 90.0

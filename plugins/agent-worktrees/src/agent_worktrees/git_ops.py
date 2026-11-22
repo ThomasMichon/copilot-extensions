@@ -127,6 +127,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -143,6 +144,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -159,6 +161,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -174,6 +177,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -190,6 +194,7 @@ def git(
         capture: If True, capture stdout and stderr.
         timeout: Optional subprocess bound; None preserves unbounded network ops.
             Inspection callers pass a bound to prevent stalled probes.
+        soft_timeout: Warn after output inactivity without renewing the hard bound.
         observation_deadline: Optional absolute monotonic, cleanup-inclusive
             deadline for independently contained text observations; never persisted.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's client-side
@@ -226,6 +231,7 @@ def git(
             run=cast(_ProcessRunner, subprocess.run),
             bounded_run=cast(_ProcessRunner, push_timeout.run_bounded),
             window_options=no_window_kwargs,
+            soft_timeout=soft_timeout,
         )
 
     requested_timeout = timeout
@@ -613,12 +619,9 @@ def ensure_remote(name: str, url: str, *, cwd: str | Path) -> bool:
     return result.returncode == 0
 
 
-#: Default bound (seconds) for a network ``fetch``. An unbounded fetch hangs the
-#: whole flow when the remote is unreachable (Gitea down / offline) -- every
-#: fetch caller here is best-effort or has a fast-path fallback, so a stalled
-#: fetch should fail fast, not wedge push-changes / create-pr / pr-status /
-#: sync. Generous enough for a slow-but-live remote; callers may override.
-DEFAULT_FETCH_TIMEOUT = 30.0
+#: Hard ceiling for network fetch, including quiet credential acquisition.
+#: Its output-idle warning is separate from this non-renewable hard ceiling.
+DEFAULT_FETCH_TIMEOUT = git_acquisition_budget.NETWORK_HARD_TIMEOUT
 
 
 def fetch(
@@ -627,10 +630,11 @@ def fetch(
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
-    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
-    :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
-    ``timeout=None`` is unbounded. ``branch`` explicitly refreshes that tracking
-    ref independently of the remote's configured fetch mappings.
+    Output inactivity warns after 30 seconds; the hard ceiling is five minutes.
+    Explicit shorter timeouts and enclosing acquisition budgets still apply.
+    ``None`` retains the hard ceiling rather than allowing an unbounded fetch.
+    Hard expiry raises :class:`GitError` (returncode 124). ``branch`` refreshes
+    its tracking ref independently of configured fetch mappings.
     """
     _fetch_branches(
         remote, cwd=cwd, branches=(branch,) if branch else (), timeout=timeout,
@@ -804,6 +808,8 @@ class PushResult:
     stdout: str = ""
     rebase_base_sha: str = ""
     published_head_sha: str = ""
+    head_repo: str = ""
+    head_identity: str = ""
 
     def __bool__(self) -> bool:
         return self.ok

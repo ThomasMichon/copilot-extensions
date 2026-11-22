@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import Path
 import subprocess
-from typing import TypedDict
+from typing import TypedDict, cast
 
 ProcessResult = subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]
 ProcessRunner = Callable[..., ProcessResult]
@@ -50,7 +50,16 @@ def execute(
     input_data: bytes | None, observation_deadline: float | None,
     run: ProcessRunner, bounded_run: ProcessRunner,
     window_options: Callable[[], Mapping[str, object]],
+    soft_timeout: float | None = None,
 ) -> ProcessResult:
+    if soft_timeout is not None and observation_deadline is None:
+        if input_data is not None or not capture:
+            raise ValueError("soft timeout requires captured text output without input")
+        from agent_procutil.owned_process import run_owned
+
+        return cast(ProcessResult, run_owned(
+            command, cwd=cwd, env=env, timeout=timeout, soft_timeout=soft_timeout,
+        ))
     if observation_deadline is not None or (kill_tree and timeout is not None):
         bounded: _BoundedOptions = {}
         if observation_deadline is not None:
