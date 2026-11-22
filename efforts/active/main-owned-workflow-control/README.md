@@ -1533,7 +1533,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Copilot approval and complete required Linux CI with all 8,435 selected
   units freshly executed. Only this ten-case leaf is complete; broader
   parent gates remain open.
-- [ ] Qualify thirteen original synthetic chunk-control cases and the pure
+- [x] Qualify thirteen original synthetic chunk-control cases and the pure
   original CLI-summary case. Preserve the four original imported function
   objects, class/method and parameter objects, fixtures, helpers, existing
   collaborator stubs and assertions. Keep actual concurrency/process cases,
@@ -1554,8 +1554,50 @@ authorizes critical main-path acceptance or a bounded administrative change.
   real-Git CLI cases are deselected, never executed or counted as skipped
   units. Only the adapter needs a new source binding; the already-bound CLI
   module becomes a coverage target. The compact-v2 candidate contains 8,449
-  nodes, 1,209 sources and 454 targets. Current-head review and complete fresh
-  Linux CI remain required before this leaf closes.
+  nodes, 1,209 sources and 454 targets. #14069 merges at
+  `e6f58dd9792676c21f2813b8aa19ef374c332f44` after exact-head Copilot approval
+  and complete required Linux CI with all 8,449 selected units freshly
+  executed. Only this fourteen-case leaf is complete; broader parent gates
+  remain open.
+- [ ] Qualify the six original auditability-declaration refusal cases and
+  three existing stubbed selected-execution CLI cases. Preserve original
+  function/parameter objects, fixtures, helpers, collaborator stubs and
+  assertions. Keep actual Git/process execution, workflow inspection and
+  host-profile-dependent auditability cases unchanged outside the packet.
+  Require complete original/adapter collection identity, closed source reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes, current-base hashes, targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require normal
+  strict typing, current-head review and complete fresh Linux CI; no new
+  mocks, preloads, process/thread execution, network access, workflow, runtime
+  or native contract changes.
+  Complete collection verifies all sixty original cases and nine exact
+  adapter cases, including original parameter objects and the explicit Python
+  import closure. Initial unchanged-guard qualification refuses during
+  collection because collected nodes differ from the exact admitted
+  inventory. No tests execute and no case is admitted. The underlying
+  collection cause is not exposed by that inventory refusal; it remains
+  unknown. Retain the failed adapter and candidate without replay, preload,
+  loader exception or guard change. This leaf remains open.
+- [ ] Qualify the eleven original pure CI-telemetry cases, preserving exact
+  function and module-fixture objects, synthetic records, helpers and
+  assertions. Keep the original persistence test and all API/fetch paths
+  unchanged outside the packet. Require complete original/adapter collection
+  identity, closed source reads, positive per-case actual telemetry-owner
+  calls and zero prohibited effects before admission. Preserve preceding
+  nodes, current-base hashes, targets, helper decisions, compact/flat-v1
+  identity and the 300-second bound. Require normal strict typing,
+  current-head review and complete fresh Linux CI; no new mocks, preloads,
+  process/thread execution, network access, workflow, runtime or native
+  contract changes.
+  Complete collection verifies twelve original cases and eleven exact
+  adapter cases, including the unchanged module fixture. Initial unchanged
+  guard qualification passes all eleven in 1.171 seconds, with zero
+  prohibited effects, four bound Python reads and actual telemetry-owner
+  call-phase lines per case. The compact-v2 candidate contains 8,460 nodes,
+  1,213 sources and 455 targets. Current-head review and complete fresh Linux
+  CI remain required before this leaf closes; the refused nine-case candidate
+  contributes no nodes or source bindings.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
