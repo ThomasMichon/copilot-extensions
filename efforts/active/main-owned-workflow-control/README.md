@@ -1745,7 +1745,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `bdaf43f00ad3653ab8cc9129c0d125acf2e2bdc4` after exact-head Copilot approval
   and complete required Linux CI with all 8,787 selected units freshly
   executed. Only this twenty-case leaf is complete; broader gates remain open.
-- [ ] Qualify thirty additional original strict-checker import-custody cases
+- [x] Qualify thirty additional original strict-checker import-custody cases
   across eight original functions: import-root manifests, native path-list
   separator refusal, ordered temporary import delivery, namespace/WIP members,
   temporary extension aliases and input/root-change refusals. Extend the
@@ -1766,8 +1766,42 @@ authorizes critical main-path acceptance or a bounded administrative change.
   lines per case. Only thirty new nodes are appended within the existing first
   group; all 8,787 preceding nodes retain their relative order and all 1,227
   other source hashes remain intact. The compact-v2 candidate contains 8,817
-  nodes, 1,228 sources and 460 targets. Current-head review and complete fresh
-  Linux CI remain pending; this leaf is not complete.
+  nodes, 1,228 sources and 460 targets. #14080 merges at
+  `c492d6e5d9ea3bbdc087e91747b82d6251e75a46` after exact-head Copilot approval
+  and complete required Linux CI with all 8,817 selected units freshly
+  executed. Only this thirty-case leaf is complete; broader gates remain open.
+  The merged Dev base also contains independently landed #14007 at
+  `9f2293251a342c62d8e2f557b6673a8aaaa2db19`: its seventeen added source
+  bindings and four refreshed hashes bring the merged manifest to 1,245
+  sources in 987,506 bytes without changing nodes, targets or the bound.
+  The 1,228-source/985,329-byte qualification above describes this leaf's
+  reviewed head, not the combined merged base.
+- [ ] Qualify fourteen additional original strict-checker lifecycle controls
+  across eleven original functions: input-drift cleanup, conservative consumer
+  selection, missing-preparation refusal, pending-probe non-admission,
+  dependency-policy refusal, captured-lock installation, failed-cache repair,
+  unqualified include refusal, replaced-directory refusal, lease-time readiness
+  and checker-timeout cleanup. Preserve exact original functions, parameter
+  values, both autouse fixtures, helpers, existing collaborator stubs and
+  assertions. Keep actual Git/MyPy/frontdoor, repository-catalog, symlink,
+  nonordinary-global-metadata and platform-specific fallback cases excluded.
+  Qualify all 64 adapter cases before admitting only the fourteen new nodes
+  after the current fifty in the same first group. Preserve preceding node
+  order, every other current source hash, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require closed Python
+  reads, positive actual owner calls per case, zero prohibited effects, normal
+  strict typing, current-head review and complete fresh Linux CI. No new mock,
+  preload, wrapper, effect exception, data admission, workflow, runtime,
+  native process or cleanup action is authorized.
+  Complete collection verifies all 236 original cases and 64 adapter cases,
+  exact function/fixture identity and every selected parameter value.
+  Initial unchanged-guard qualification passes all 64 in 3.250 seconds, with
+  zero prohibited effects, 24 bound Python reads and actual checker-owner
+  call-phase lines per case. Only fourteen new nodes are appended within the
+  first group; all 8,817 preceding nodes retain their relative order and all
+  1,244 other current-base hashes remain intact. The compact-v2 candidate
+  contains 8,831 nodes, 1,245 sources and 460 targets. Current-head review and
+  complete fresh Linux CI remain pending; this leaf is not complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

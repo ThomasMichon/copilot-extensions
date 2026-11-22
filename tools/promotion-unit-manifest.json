@@ -54,7 +54,21 @@
         "test_import_input_snapshot_refuses_member_and_root_changes[added]",
         "test_import_input_snapshot_refuses_member_and_root_changes[stub]",
         "test_import_input_snapshot_refuses_member_and_root_changes[replacement]",
-        "test_import_input_snapshot_refuses_member_and_root_changes[root]"
+        "test_import_input_snapshot_refuses_member_and_root_changes[root]",
+        "test_import_input_drift_is_refused_and_settles_cleanup[success]",
+        "test_import_input_drift_is_refused_and_settles_cleanup[failure]",
+        "test_import_input_drift_is_refused_and_settles_cleanup[timeout]",
+        "test_import_input_drift_is_refused_and_settles_cleanup[cleanup]",
+        "test_changed_selection_conservatively_checks_all_admitted_consumers",
+        "test_missing_preparation_is_actionable_and_does_not_create_environment",
+        "test_pending_probe_never_certifies_admission",
+        "test_dependency_policy_refusal_has_the_setup_error_contract",
+        "test_preparation_installs_the_same_lock_bytes_that_keyed_the_cache",
+        "test_failed_cache_repair_cannot_preserve_preparation_marker",
+        "test_preparation_refuses_unqualified_requirement_includes",
+        "test_preparation_refuses_replaced_leased_directory",
+        "test_readiness_is_revalidated_under_the_checker_lease",
+        "test_checker_timeout_settles_targets_and_environment_lease"
       ]
     ],
     [
@@ -10751,7 +10765,7 @@
     ]
   ],
   "sources": {
-    "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py": "dca56a928b291f8b657e5b1c7b35881429c26779fdf6f1189d252116cafab724",
+    "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py": "496d9aca7f05ac11de71274563fd42974896f45fb9fc26c7aed1212b70b0f9f6",
     "tools/promotion_unit_tests/test_original_installer_guard_units.py": "07ad74dea05179c41390934e2e61ce06815190ad3dd9d02c333e056ed2972ccc",
     "tools/test_check_install_contract.py": "048688b68f424c34214539c1a1f62c1eaa4c0ee9d92df4f7149c733ce887e650",
     "tools/test_installer_finalizers.py": "c01cee8b28537b990e8c0ae6e3512106f456cb4e59791beaa5501c919758475d",
