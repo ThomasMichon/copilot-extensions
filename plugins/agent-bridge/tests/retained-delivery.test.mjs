@@ -1574,3 +1574,83 @@ test("bounded recent-first history is preferred over a full event read", async (
   assert.equal(row.handoff_stage, "consumed");
   assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
 });
+
+test("a deep backward history scan keeps its progress past any number of user messages", async () => {
+  const f = managedFixture();
+  const row = f.started("unknown");
+  // Far more user messages than any overlap cache; all arrived after the handoff.
+  const total = 60_000;
+  let pages = 0;
+  let maxPerTick = 0;
+  let perTick = 0;
+  f.session.rpc.eventLog = { read: async ({ cursor, max }) => {
+    pages++;
+    perTick++;
+    const start = cursor ? Number(cursor) : 0;
+    const end = Math.min(total, start + max);
+    const events = [];
+    for (let i = start; i < end; i++) {
+      events.push({ id: `user-${i}`, type: "user.message", timestamp: new Date(3_000).toISOString(),
+        data: { content: `ordinary ${i}` } });
+    }
+    return { events, cursor: end < total ? String(end) : null, hasMore: end < total, cursorStatus: "ok" };
+  } };
+  const inbox = f.managed();
+  f.idle();
+  for (let i = 0; i < 120 && f.sends.length === 0; i++) {
+    perTick = 0;
+    await inbox.tick(sid);
+    maxPerTick = Math.max(maxPerTick, perTick);
+    f.clock += 30_001;
+  }
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.equal(f.sends.length, 1);
+  assert.ok(maxPerTick <= 8, "each check reads a bounded number of pages");
+  assert.ok(pages < total / 100 + 200, "the deep scan never restarts from the newest event");
+});
+
+test("deferred history checks never hold a recovery page from later unsubmitted originals", async () => {
+  const f = managedFixture();
+  Array.from({ length: 100 }, () => f.started("sdk_accepted"));
+  const row = f.started("unknown");
+  let reads = 0;
+  f.session.rpc.eventLog = { read: async () => {
+    if (reads++ === 0) throw new Error("history briefly unavailable");
+    return { events: [], cursor: null, hasMore: false, cursorStatus: "ok" };
+  } };
+  const inbox = f.managed();
+  f.idle();
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(f.sends.length, 0, "the cooldown still bounds history reads");
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  await inbox.tick(sid);
+  assert.equal(reads, 2, "one history read covers both pages' deferred checks");
+  assert.equal(row.handoff_stage, "sdk_accepted");
+  assert.deepEqual(f.sends.map((send) => send.prompt.match(/msg-id="(\d+)"/)?.[1]), ["101"]);
+  assert.equal(f.nudges(), 0);
+});
+
+test("a fresh offer whose send fails blocks the resume prompt after a redundant original", async () => {
+  const f = managedFixture();
+  const redundant = f.started("unknown");
+  f.events = [f.history(redundant)];
+  const send = f.session.send;
+  f.session.send = async (options) => {
+    if (options.prompt !== RESUME_NUDGE) throw new Error("SDK reply lost");
+    return send(options);
+  };
+  const inbox = f.managed();
+  f.run();
+  await inbox.tick(sid);
+  const offer = f.add();
+  f.idle();
+  for (let i = 0; i < 8; i++) {
+    await inbox.tick(sid);
+    f.clock += 30_001;
+  }
+  assert.equal(redundant.handoff_stage, "consumed");
+  assert.notEqual(offer.handoff_stage, "offered");
+  assert.equal(f.nudges(), 0);
+});

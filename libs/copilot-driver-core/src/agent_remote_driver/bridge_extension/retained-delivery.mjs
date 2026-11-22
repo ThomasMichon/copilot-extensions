@@ -15,8 +15,8 @@ const NATIVE_HEADER_LIMIT = 4_096;
 // Bounded recent-first history: user.message pages only, a few per read.
 const HISTORY_PAGE = 100;
 const HISTORY_PAGES = 8;
-const HISTORY_SEEN_LIMIT = 50_000;
 const HISTORY_SLACK_S = 60;
+const DEFERRED_LIMIT = 1_000;
 export const RESUME_NUDGE = "All queued agent-bridge messages were already delivered; resume.";
 const STAGES = new Set(["offered", "sending", "unknown", "sdk_accepted", "consumed", "rejected"]);
 const TERMINAL = new Set(["sdk_accepted", "consumed", "rejected"]);
@@ -160,11 +160,16 @@ export function createRetainedInbox({
   let episode = null;
   let submittedEpisode = null;
   const verified = new Map();
+  // History checks deferred by cooldown or a failed read, folded into the next
+  // read without holding any recovery page. Bounded; recovery re-adds entries.
+  const deferred = new Map();
+  let sweepUnsettled = false;
   const fullHistoryRead = new Set();
   let historyCache = null;
   const consumed = (sid, id) => {
     if (episode && episode.id === idleEpisode() && episode.awaiting.has(id)) episode.redundant.add(id);
     verified.delete(id);
+    deferred.delete(id);
     onConsumed(sid, id);
   };
   let lastLog = "";
@@ -281,15 +286,19 @@ export function createRetainedInbox({
 
   // Bounded history: read recent root user.message pages newest-first, keep only
   // compact retained headers, and remember how far back the contiguous scan
-  // reached so later checks only page through newer events.
+  // reached so later checks only page through newer events. Only the newest
+  // page's IDs are kept to detect overlap, so a deep backward scan keeps its
+  // progress however many user messages precede an inherited handoff.
   async function readRecentHistory(sid, rows) {
     const log = session.rpc.eventLog;
     if (historyCache?.sid !== sid) {
-      historyCache = { sid, seen: new Set(), inputs: [], cursor: null, reached: Infinity, done: false };
+      historyCache = {
+        sid, head: new Set(), inputs: [], inputIds: new Set(), cursor: null, reached: Infinity, done: false,
+      };
     }
     const cache = historyCache;
     const reset = () => {
-      Object.assign(cache, { seen: new Set(), cursor: null, reached: Infinity, done: false });
+      Object.assign(cache, { head: new Set(), cursor: null, reached: Infinity, done: false });
     };
     const page = async (cursor) => {
       const result = await nativeCall(() => log.read({
@@ -304,18 +313,12 @@ export function createRetainedInbox({
       return result;
     };
     const remember = (event) => {
-      if (typeof event?.id === "string") {
-        if (cache.seen.has(event.id)) return false;
-        if (cache.seen.size >= HISTORY_SEEN_LIMIT) {
-          reset();
-          cache.inputs = [];
-          throw new Error("bounded SDK history cache overflow; rescanning later");
-        }
-        cache.seen.add(event.id);
-      }
       const input = compactRetainedInput(sid, event, acceptsSource);
-      if (input) cache.inputs.push(input.event);
-      return true;
+      const id = typeof event?.id === "string" ? event.id : null;
+      if (input && !(id && cache.inputIds.has(id))) {
+        if (id) cache.inputIds.add(id);
+        cache.inputs.push(input.event);
+      }
     };
     let pages = 0;
     try {
@@ -324,11 +327,14 @@ export function createRetainedInbox({
       let reached = Infinity;
       let connected = false;
       let done = false;
+      let head = null;
       while (pages < HISTORY_PAGES) {
         const result = await page(cursor);
         pages++;
+        head ??= new Set(result.events.map((event) => event?.id).filter((id) => typeof id === "string"));
         for (const event of result.events) {
-          if (!remember(event)) { connected = true; continue; }
+          if (typeof event?.id === "string" && cache.head.has(event.id)) { connected = true; continue; }
+          remember(event);
           const at = eventSeconds(event);
           if (at !== null) reached = Math.min(reached, at);
         }
@@ -336,6 +342,7 @@ export function createRetainedInbox({
         if (!result.hasMore) { done = true; break; }
         if (connected && !fresh) break;
       }
+      if (head?.size) cache.head = head;
       if (done) Object.assign(cache, { cursor: null, reached, done: true });
       else if (fresh || !connected) Object.assign(cache, { cursor, reached, done: false });
       const floor = Math.min(...rows.map((row) => row.handoff_started_at)) - HISTORY_SLACK_S;
@@ -396,37 +403,49 @@ export function createRetainedInbox({
     const bounded = typeof session.rpc?.eventLog?.read === "function";
     const accepted = attempts.filter((row) => row.stage === "sdk_accepted"
       && (bounded || !fullHistoryRead.has(`${row.message_id}:${row.handoff_id}`)));
-    const candidates = [...(idleAt === null ? []
-      : unsubmitted.filter((row) => verified.get(row.message_id) !== idleAt)), ...accepted];
-    let unsettled = false;
-    if (candidates.length) {
-      // A page skipped during cooldown has not been reconciled; keep its cursor.
-      if (now() < historyAt) return false;
+    for (const row of [...(idleAt === null ? []
+      : unsubmitted.filter((row) => verified.get(row.message_id) !== idleAt)), ...accepted]) {
+      deferred.delete(row.message_id);
+      deferred.set(row.message_id, row);
+    }
+    while (deferred.size > DEFERRED_LIMIT) deferred.delete(deferred.keys().next().value);
+    // Unsubmitted originals are checked only while idle; accepted ones anytime.
+    const candidates = [...deferred.values()].filter((row) => row.stage === "sdk_accepted"
+      || (idleAt !== null && verified.get(row.message_id) !== idleAt));
+    const blocking = candidates.some((row) => row.stage !== "sdk_accepted");
+    // A deferred check never holds this page: later pages keep being discovered,
+    // and the resume prompt waits for a sweep with nothing left unverified.
+    if (candidates.length && now() < historyAt) {
+      if (blocking) sweepUnsettled = true;
+    } else if (candidates.length) {
       historyAt = now() + RECHECK_MS;
-      let history;
+      let history = null;
       try {
         history = await readHistory(sid, candidates);
       } catch (error) {
         note(`durable SDK history unavailable: ${errorText(error)}; rechecking when idle`);
-        return false;
+        if (blocking) sweepUnsettled = true;
       }
-      await nativeContext(sid);
-      for (const receipt of candidates) {
-        if (history.events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
-          consumed(sid, receipt.message_id);
-          await report(receipt, "consumed");
-        } else if (history.covered.has(receipt.message_id)) {
-          // Only unsubmitted originals become re-attempt eligible; submitted
-          // ones keep seeking consumption without occupying the retry list.
-          if (receipt.stage !== "sdk_accepted") verified.set(receipt.message_id, idleAt);
-        } else {
-          unsettled = true;
-          note(`original handoff ${receipt.message_id}/${receipt.handoff_id} beyond bounded history scan; rechecking`);
+      if (history) {
+        await nativeContext(sid);
+        for (const receipt of candidates) {
+          if (history.events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
+            consumed(sid, receipt.message_id);
+            await report(receipt, "consumed");
+          } else if (history.covered.has(receipt.message_id)) {
+            deferred.delete(receipt.message_id);
+            // Only unsubmitted originals become re-attempt eligible; submitted
+            // ones keep seeking consumption without occupying the retry list.
+            if (receipt.stage !== "sdk_accepted") verified.set(receipt.message_id, idleAt);
+          } else {
+            if (receipt.stage !== "sdk_accepted") sweepUnsettled = true;
+            note(`original handoff ${receipt.message_id}/${receipt.handoff_id} beyond bounded history scan; rechecking`);
+          }
         }
       }
     }
     // The resume nudge needs every page of this idle episode reconciled.
-    if (!unsettled && response.next_after === null && episode?.id === idleAt) episode.swept = true;
+    if (!sweepUnsettled && response.next_after === null && episode?.id === idleAt) episode.swept = true;
     after = response.next_after ?? 0;
     return response.next_after !== null;
   }
@@ -442,6 +461,7 @@ export function createRetainedInbox({
       throw new Error("malformed original handoff recovery response");
     }
     const receipts = response.messages;
+    if (after === 0) sweepUnsettled = false;
     const idleAt = idleEpisode();
     if (idleAt !== null && idleAt > 0 && after === 0 && episode?.id !== idleAt) {
       // Snapshot what was queued when this idle episode began, for the nudge.
@@ -461,7 +481,10 @@ export function createRetainedInbox({
     }
     const observed = new Set();
     const settleInput = async (receipt) => {
-      if (TERMINAL.has(receipt.stage)) verified.delete(receipt.message_id);
+      if (TERMINAL.has(receipt.stage)) {
+        verified.delete(receipt.message_id);
+        deferred.delete(receipt.message_id);
+      }
       if (receipt.stage === "consumed" || receipt.stage === "rejected") {
         forgetNativeInput(sid, receipt.message_id);
       } else if ([...nativeInputs.values()].some((input) => input.sid === sid
@@ -585,6 +608,8 @@ export function createRetainedInbox({
       after = 0;
       historyAt = 0;
       verified.clear();
+      deferred.clear();
+      sweepUnsettled = false;
       fullHistoryRead.clear();
       historyCache = null;
       episode = null;
@@ -718,6 +743,9 @@ export function createRetainedInbox({
         || (String(msg.kind || "").startsWith("startup:") && !startup)) {
       throw new Error("unsupported retained message; no SDK or control effect");
     }
+    // A fresh offer joins an idle episode that began with queued originals, so
+    // a failed send keeps it unresolved and blocks the resume prompt.
+    if (episode && episode.id === idleAt && episode.awaiting.size > 0) episode.awaiting.add(msg.id);
     const reattempting = msg.handoff_stage !== "offered";
     if (reattempting && !(managed && canReattempt && idleAt !== null
         && verified.get(msg.id) === idleAt && positive(msg.attempt) && msg.consumer)) {

@@ -92,7 +92,9 @@ later idle tick; it is never a permanent "no resend". If the receiver goes
 idle with queued records and every one of them proves already delivered, it
 sends one short resume prompt for that idle episode only. An empty queue, a
 real submission or a later tick of the same episode sends nothing, and a
-receiver without re-attempt support never sends the resume prompt.
+receiver without re-attempt support never sends the resume prompt. A new
+message offered during that episode whose send fails or stays uncertain also
+withholds the prompt.
 
 The command first reads the selected executing provider's
 `GET /api/v1/live-sessions/pending-queue-contract` declaration, then pins its

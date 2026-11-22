@@ -327,7 +327,10 @@ The SDK's `getEvents()` takes no options and returns the whole log. When the
 runtime exposes the `session.rpc.eventLog.read` RPC, the receiver reads root
 `user.message` events backward, in pages of 100. It reads at most eight pages
 per read and stops at the oldest candidate's start time. It caches a
-per-session high-water mark, so later reads only examine newer events. Without
+per-session high-water mark, so later reads only examine newer events. A deep
+backward scan toward an older handoff keeps its cursor across reads; only the
+newest page's event IDs are kept to detect overlap, so progress never resets
+however many user messages precede the handoff. Without
 that RPC, each started record's handoff is checked with at most one full
 `getEvents()` read for the life of the extension. Its re-attempts then rely on
 live observation; if that observation overflows its bound, the memo is cleared
@@ -341,10 +344,19 @@ the record as consumed instead. A re-attempt whose session leaves idle before
 the send is deferred, or reported `unknown` once granted, and retried on a
 later idle. The resume prompt waits until every recovery page of the idle
 episode has been reconciled, so records beyond the first page are never missed.
+A fresh offer delivered during an idle episode that began with queued records
+joins that episode, so a failed or uncertain send also withholds the prompt.
+
+With re-attempt support, a history check deferred by the cooldown or a failed
+read never holds a recovery page. The checks are kept in a bounded set and
+folded into the next read, and later pages keep being discovered. Any
+unsubmitted original left unverified withholds the resume prompt for that
+sweep.
 
 Durable SDK history is read lazily, at most once per 30 seconds, and shared
 across the bounded receipt page. It is not an event-handler operation or a
-per-message RPC. A page awaiting the history-read cooldown keeps its cursor;
+per-message RPC. Without re-attempt support, a page awaiting the history-read
+cooldown keeps its cursor;
 older unknown receipts cannot phase-lock all reads to the first page and starve
 later consumption evidence. One outstanding history observation has its own
 bounded slot; a rejected or timed-out read does not block compatible ordinary
