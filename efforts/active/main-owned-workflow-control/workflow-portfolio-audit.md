@@ -6671,6 +6671,33 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 22 original compatibility-root migration scanner
+
+The adapter exports every one of the original 22 scanner tests and the same
+repository-redirection fixture. Original functions, helper bodies, synthetic
+plugin trees, captured diagnostics and assertions remain unchanged. Collection
+compares complete original and adapter node lists and verifies function and
+fixture object identity. The selected tests cover plugin/name validation,
+definition and alias/accessor calls, indented imports, all dotted/object patch
+shapes, quote variants, whole-identifier matching and aggregate progress.
+
+Initial unchanged auditing passes all 22 cases in 1.844 observation seconds,
+with zero prohibited effects and canonical Python reads limited to the adapter,
+original test and production scanner module. All 66 setup/call/teardown reports
+pass; every node has actual production-owner call-phase lines. Source scans
+are confined by the original fixture to synthetic temporary plugin trees.
+No live repository or native/process behavior is selected.
+
+Only those three Python source bindings and the scanner coverage target are
+added. Compact-v2 stores 9,115 nodes and 1,289 bindings in 1,022,181 bytes,
+preserving all 9,093 prior nodes, 1,286 prior hashes and the order of the
+468 prior targets after the one new target. The 89 helper decisions and
+300-second bound remain unchanged. Complete fresh Linux source CI and
+exact-head review remain required; local observation is not a full packet
+execution, whole-flow savings proof, native qualification or parent completion.
+The operator retains the separate assessment-phase refusal and selects
+continued independent census rather than changing the phase contract.
+
 ### November 22 original fixture-only construction inventory
 
 The adapter exports the complete original thirty-method
@@ -6700,6 +6727,29 @@ phase-contract change, workflow change or parent completion is claimed.
 Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
 documentation consistency pass before publication. A worktree-manager patch
 changefile retains release intent; it is not writer activation or rollout.
+Approval `6014589512` names exact head
+`eef0d8378789bfc87b4b4eab71be4493c6985320`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45071351603`, attempt one, unit job `137358789940`, executes all
+9,093 selected cases with 55 deselections in 126.50 pytest / 141.700 packet
+seconds. It reports `mode=executed`, origin run `45071351603`, attempt one,
+execution identity
+`afbb5f5903b2cec7904e9d50aaea60efee21fd8d4cfbab2a46ac3db1c5c412fe`
+and packet digest
+`99d3720ef6ad02ee57035a6e9e2cd3ffe1e2501d22802023589afeefd682b31e`.
+Evidence upload succeeds as artifact `14773422956`. Guard job `137358790225`,
+required aggregate `137360358049` and trusted metadata checks pass.
+Seven fresh required-check verifier reads and final head/review/thread/hold/
+parent-reference fences pass before normal managed merge. No CI retry,
+manual workflow or deadline waiver is used.
+
+Source #14128 merges at `2026-11-22T21:26:36Z` as
+`75df360b0ca23286d29702006d467bff35ae1127`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+23-case leaf. Separate data/native-load/thread and assessment-phase refusals,
+release, owner, custody and completion gates remain open.
 
 ### November 22 original construction-assessment phase refusal
 
