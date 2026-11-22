@@ -253,6 +253,7 @@ class CarrierRequestRouter:
             "session.events",
             "session.events.ack",
             "host.status",
+            "bridge.inventory",
         }
     )
 
@@ -417,6 +418,11 @@ class CarrierRequestRouter:
             if operation == "host.status":
                 from .status_carrier import prepare_stream
                 return await prepare_stream(envelope, self._client())
+            if operation == "bridge.inventory":
+                result = await asyncio.to_thread(
+                    self._client().list_bridges, all_projects=True, local_only=True,
+                )
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "session.create":
                 client = self._client()
                 return Envelope(
@@ -954,6 +960,12 @@ class RemoteOperationService:
                     ) from exc
         finally:
             await lease.release()
+
+    async def bridge_inventory(self, host: str) -> dict[str, Any]:
+        from .bridge_fleet_inventory import validate_report
+
+        response = await self._request(host, {"operation": "bridge.inventory"}, timeout=15.0)
+        return validate_report(response.get("result"))
 
     async def session_status(
         self, host: str, session_id: str, caller_id: str

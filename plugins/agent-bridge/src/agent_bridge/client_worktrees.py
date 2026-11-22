@@ -21,6 +21,37 @@ class InventoryClient(Protocol):
 class InventoryClientMixin:
     """Machine inventory and version-gated worktree rendering facades."""
 
+    def list_bridges(
+        self: InventoryClient, *, project: str | None = None, machine: str | None = None,
+        namespace: str | None = None, status: str | None = None, live: bool = False,
+        all_projects: bool = False, hosts: list[str] | None = None, local_only: bool = False,
+    ) -> dict[str, Any]:
+        from .bridge_fleet_inventory import validate_report
+        from .client import BridgeClientError
+        from .client_protocol_floor import protocol_floored_request
+        from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+        if not project and not all_projects:
+            raise ValueError("select a project or explicitly select all projects")
+        params = {
+            key: value for key, value in {
+                "project": project, "machine": machine, "namespace": namespace, "status": status,
+                "live": "true" if live else None,
+                "hosts": ",".join(hosts) if hosts else None,
+                "local_only": "true" if local_only else None,
+            }.items() if value is not None
+        }
+        send = protocol_floored_request(
+            self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={"bridge_inventory": 1},
+        )
+        try:
+            return validate_report(send(
+                "GET", "/api/v1/bridges", params=params or None,
+                request_timeout=(15.0 * ((len(hosts) + 3) // 4) + 10.0) if hosts else None,
+            ))
+        except ValueError as error:
+            raise BridgeClientError(502, "Bridge conversation inventory is unconfirmed") from error
+
     def list_machines(self: InventoryClient) -> list[dict[str, Any]]:
         """GET /api/v1/machines"""
         machines, _errors = self.list_machines_with_diagnostics()

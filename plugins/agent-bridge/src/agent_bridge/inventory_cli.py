@@ -536,8 +536,19 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
     core = _core()
-    client = core._get_client()
     action = getattr(args, "live_action", None)
+    if action in {None, "list"} and (
+        getattr(args, "all_sources", False) or getattr(args, "hosts", None)
+    ):
+        from .bridge_listing_cli import command
+
+        if getattr(args, "include_dead", False) or getattr(args, "supervisor", None):
+            raise SystemExit("--all and --supervisor apply to registered-only listings")
+        args.all_projects = True
+        args.live = True
+        command(args)
+        return
+    client = core._get_client()
     if action == "resolve":
         try:
             session = client.resolve_live_session(args.handle)
@@ -770,6 +781,12 @@ def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
     live_list_p.add_argument("--worktree-id", help="Filter by worktree id")
     live_list_p.add_argument("--supervisor", help="Only venue sessions supervised by this worktree ref (machine/project/worktree_id)")
     live_list_p.add_argument("--all", dest="include_dead", action="store_true", help="include dead (expired / taken-over) rows, normally hidden")
+    live_list_p.add_argument(
+        "--all-sources", action="store_true",
+        help="List managed, registered and standalone conversations in the versioned Bridge envelope",
+    )
+    live_list_p.add_argument("--host", dest="hosts", action="append", help="Read this configured Bridge host (repeatable)")
+    live_list_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     live_list_p.set_defaults(func=_cmd_live_sessions)
     live_resolve_p = live_sub.add_parser("resolve", help="Resolve a session id OR worktree handle to its live session")
     live_resolve_p.add_argument("--handle", required=True, help="Exact session id OR worktree handle")
