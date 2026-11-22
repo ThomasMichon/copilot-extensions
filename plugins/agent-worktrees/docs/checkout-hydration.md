@@ -108,7 +108,10 @@ modified or untracked files, so the clean gate is enough and force is never
 needed. Removal is verified (path absent and not in `git worktree list`)
 before the stage becomes `dehydrated`. The catalog publication and the
 removal run under a per-repository reservation lock in the Git common
-directory. If removal fails, the entry is kept and reconcile decides: an
+directory. Under that lock, after the final clean probe and immediately
+before removal, the retained-data hold is checked again, so an ignored
+`.effort-agenda` created while the lock was awaited refuses instead of being
+deleted. If removal fails, the entry is kept and reconcile decides: an
 intact clean checkout rolls back, a partly removed one is a hold.
 
 ## Rehydrate, reconcile and recover
@@ -119,7 +122,9 @@ branch). The destination must be absent or empty. It runs
 `git worktree add --no-checkout <path> <branch>` (no `-b`, no fetch), restores
 the recorded per-worktree config file atomically and verifies its entries, and
 only then populates the files with `git reset --hard HEAD` inside the new
-checkout. That reset is safe only because the checkout was just created and
+checkout. The entry records `config_restored: true` before the files are
+populated; a retry after that marker never rewrites the per-worktree config,
+so newer settings survive an interrupted catalog retirement. That reset is safe only because the checkout was just created and
 holds nothing but its `.git` file and no index. Overrides such as
 `core.symlinks` or `core.autocrlf` therefore apply to the files. It then
 requires a clean status, verifies branch and HEAD, and deletes the catalog
@@ -133,6 +138,9 @@ Reconcile never removes a valid checkout:
 - A valid checkout at any other stage completes the rehydrate. An unpopulated
   checkout (only `.git`, no index) gets its config and then its files; files
   without an index, or a checkout that is not clean afterwards, are a hold.
+  The snapshot config is restored only at stage `rehydrating` without the
+  `config_restored` marker; a populated checkout whose per-worktree config
+  differs from the snapshot is a `worktree-config-conflict` hold.
 - A partial or foreign path, or an absent path that Git still registers, is a
   hold.
 - An absent, unregistered path becomes `dehydrated`.
@@ -164,13 +172,18 @@ directory cannot be read, the claimant is unknown, not dead. Managed branch dele
 feature-branch moves (`branch -f`) refuse a branch that a catalog entry
 reserves. Every managed `branch -f` write uses `git_ops.force_branch`: the
 feature-branch sync and merge paths, and the PR-head snapshot writes in
-`create-pr`, `finalize` and the PR rewrite. Each write checks reservations
+`create-pr`, `finalize` and the PR rewrite. `create-pr` prepares its
+snapshot ref before it persists publishing intent, so a reservation refusal
+leaves the attempt retryable. Each write checks reservations
 again, under the same reservation lock as dehydration, so a dehydration that
 starts during a fetch cannot be overwritten. Branches named by a cataloged PR
 reference are reserved too. When a readable entry names a different branch
-than its tracking record, both branches are held. Reservation discovery reads fresh entries from today's configured
+than its tracking record, both branches are held. When an entry's
+recorded anchor names another repository, the reservation also stays with the
+repository whose catalog placement holds it. The Git common-directory probe
+ignores inherited `GIT_DIR`-style selectors. Reservation discovery reads fresh entries from today's configured
 roots and from the catalog beside every recorded checkout, so it survives a
-worktree-root change. It fails closed: for an unreadable or corrupt entry the
+worktree-root change. It fails closed: when configuration cannot be loaded the mutation refuses; for an unreadable or corrupt entry the
 branch comes from its tracking record; when that is unknown, or the catalog
 directory cannot be listed, every branch of that repository is held until the
 entry is reconciled.

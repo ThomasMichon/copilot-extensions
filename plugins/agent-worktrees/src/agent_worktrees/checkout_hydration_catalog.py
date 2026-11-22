@@ -76,6 +76,8 @@ def validate(data: object) -> dict[str, Any]:
         raise CatalogError(f"unknown dehydration stage: {stage!r}")
     if not isinstance(data.get("agency", {}), dict) or not isinstance(data.get("recovery_hold") or {}, dict):
         raise CatalogError("dehydration catalog entry has malformed agency or recovery sections")
+    if not isinstance(data.get("config_restored", False), bool):
+        raise CatalogError("dehydration catalog field config_restored is malformed")
     identity = data.get("identity")
     git = data.get("git")
     if not isinstance(identity, dict) or not isinstance(git, dict):
@@ -542,6 +544,7 @@ def _common_dir(cwd: str | os.PathLike[str]) -> str | None:
     try:
         result = git_ops.git(
             "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=Path(cwd), check=False, timeout=30,
+            isolated_repository=True,
         )
     except Exception:
         return None
@@ -622,8 +625,8 @@ def dehydrated_branch_holder(cwd: str | os.PathLike[str], branch: str, config: A
             from . import config as cfg
 
             config = cfg.load_config()
-        except Exception:
-            return None
+        except Exception as exc:
+            raise CatalogError(f"cannot load configuration to check branch reservations: {exc}") from exc
     ledgers = _ledgers(config)
     by_stem = {str(data["_stem"]): data.get("branch") for _repo, data in ledgers}
     by_path = {
@@ -639,6 +642,9 @@ def dehydrated_branch_holder(cwd: str | os.PathLike[str], branch: str, config: A
         for held, worktree_id, anchor, checkout in index.branches:
             if branch in (held, by_stem.get(worktree_id), by_path.get(checkout)):
                 holders.append((worktree_id, anchor or repo_anchor))
+                if anchor and repo_anchor:
+                    # A foreign anchor never releases the receiving placement's reservation.
+                    holders.append((worktree_id, repo_anchor))
         for entry in index.unreadable:
             known = by_stem.get(entry.stem)
             if not isinstance(known, str) or not known or known == branch:

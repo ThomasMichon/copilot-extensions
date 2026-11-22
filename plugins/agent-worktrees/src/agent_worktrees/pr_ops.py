@@ -915,6 +915,12 @@ def create_pr(
     if reusing and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
+    if not use_refspec:
+        # Prepare the snapshot ref before persisting publishing intent, so a
+        # reservation refusal leaves the attempt retryable.
+        refused = git_ops.force_branch(feature_branch, "HEAD", cwd=worktree_path, config=config)
+        if refused:
+            return {**base, "error": refused}
     try:
         pr_creation_state.start_publication(record, target_pr, remote=publish_remote, source_ref=wt_branch if use_refspec else feature_branch, head_sha=head_sha, base_sha=base_sha, backup_sha=squash_backup)  # type: ignore[arg-type]
     except ValueError as exc:
@@ -961,9 +967,6 @@ def create_pr(
         #
         # No checkout dance: `git push` publishes the named local ref while HEAD
         # stays on worktree/<id>.
-        refused = git_ops.force_branch(feature_branch, "HEAD", cwd=worktree_path, config=config)
-        if refused:
-            return {**base, "error": refused}
         with hooks.allow_pr_push():
             pushed = pr_publish.push_checked(
                 record, publish_remote, feature_branch, cwd=worktree_path,

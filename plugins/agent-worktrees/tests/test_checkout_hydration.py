@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from machine_transport import detect_platform
@@ -1003,3 +1004,157 @@ def test_branch_writes_wait_for_an_in_flight_dehydration(env: SimpleNamespace) -
         assert worker.is_alive() and not env.entry.exists() and env.checkout.exists()
     worker.join(60)
     assert done and env.entry.exists() and not env.checkout.exists()
+
+
+def test_agenda_created_while_waiting_for_the_reservation_refuses(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = catalog.reservation_lock
+
+    @contextmanager
+    def slow(cwd: str | Path) -> Iterator[None]:
+        (env.checkout / ".effort-agenda").mkdir()  # ignored, so status stays clean
+        with real(cwd):
+            yield
+
+    monkeypatch.setattr(catalog, "reservation_lock", slow)
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "retained-data"
+    assert (env.checkout / ".effort-agenda").is_dir() and _registered(env) and not env.entry.exists()
+
+
+def test_common_dir_probe_ignores_an_inherited_git_dir(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    common = catalog._common_dir(env.anchor)
+    assert common is not None and Path(common).resolve() == (env.anchor / ".git").resolve()
+
+
+def test_config_load_failure_refuses_branch_mutation(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _git(env.anchor, "branch", "unrelated", env.head)
+
+    def broken(*_a: object, **_k: object) -> object:
+        raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr(cfg, "load_config", broken)
+    with pytest.raises(catalog.CatalogError):
+        catalog.dehydrated_branch_holder(env.anchor, "unrelated")
+    assert git_ops.delete_branch("unrelated", cwd=env.anchor, force=True) is False
+    refused = git_ops.force_branch("unrelated", "main", cwd=env.anchor)
+    assert refused is not None and "cannot verify" in refused
+    assert _git(env.anchor, "rev-parse", "unrelated") == env.head
+
+
+def test_foreign_anchor_keeps_the_receiving_reservation(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from agent_worktrees import git_collab
+
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    _git(foreign, "init", "-q")
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    entry["identity"]["anchor"] = str(foreign)
+    entry["git"]["branch"] = "feature/shared"
+    catalog.write_entry(env.entry, entry)
+    _git(env.anchor, "branch", "feature/shared", env.head)
+    for branch in (env.branch, "feature/shared"):
+        assert catalog.dehydrated_branch_holder(env.anchor, branch, env.config) == WT_ID
+        assert git_ops.delete_branch(branch, cwd=env.anchor, force=True) is False
+        assert git_ops.force_branch(branch, "main", cwd=env.anchor, config=env.config) is not None
+        assert _git(env.anchor, "rev-parse", branch) == env.head
+    monkeypatch.setattr(tracking, "resolve_worktree_path", lambda *_a: str(env.anchor))
+    assert git_collab.manage_feature_branch("other", env.config, "shared") is False
+    assert _git(env.anchor, "rev-parse", "feature/shared") == env.head
+
+
+def _config_file(checkout: Path) -> Path:
+    return Path(_git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "config.worktree"))
+
+
+def test_retry_after_interrupted_catalog_retirement_keeps_newer_config(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_worktree_config(env)
+    hydration.dehydrate(WT_ID, env.config)
+
+    def boom(*_a: object) -> None:
+        raise RuntimeError("crash before catalog retirement")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog, "delete_entry", boom)
+        with pytest.raises(RuntimeError):
+            hydration.rehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    assert entry["config_restored"] is True and (env.checkout / "wip.txt").exists()
+    _git(env.checkout, "config", "--worktree", "core.newer", "kept")
+    assert hydration.reconcile(WT_ID, env.config)["state"] == "hydrated"
+    assert _git(env.checkout, "config", "--worktree", "core.newer") == "kept"
+    assert not env.entry.exists()
+
+
+def test_populated_checkout_with_differing_config_is_a_conflict(env: SimpleNamespace) -> None:
+    _write_worktree_config(env)
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    entry["stage"] = catalog.STAGE_REHYDRATING
+    catalog.write_entry(env.entry, entry)
+    _git(env.anchor, "worktree", "add", "-q", str(env.checkout), env.branch)
+    _config_file(env.checkout).write_text("[core]\n\tnewer = kept\n", encoding="utf-8")
+    report = hydration.reconcile(WT_ID, env.config)
+    assert report["state"] == "hold" and "worktree-config-conflict" in report["reason"]
+    assert _git(env.checkout, "config", "--worktree", "core.newer") == "kept" and env.entry.exists()
+
+
+def test_files_without_index_keep_config_untouched(env: SimpleNamespace) -> None:
+    _write_worktree_config(env)
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    entry["stage"] = catalog.STAGE_REHYDRATING
+    catalog.write_entry(env.entry, entry)
+    _git(env.anchor, "worktree", "add", "-q", "--no-checkout", str(env.checkout), env.branch)
+    (env.checkout / "a.txt").write_bytes(b"a\n")
+    report = hydration.reconcile(WT_ID, env.config)
+    assert report["state"] == "hold" and "rehydrate-partial" in report["reason"]
+    assert not _config_file(env.checkout).exists()
+    assert "config_restored" not in (catalog.read_entry(env.entry) or {})
+
+
+def test_create_pr_reservation_refusal_stays_retryable(pr_repo: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+
+    from agent_worktrees import pr_ops
+
+    config, wid, wt, _remote = pr_repo
+    config = replace(config, repos={config.repo_name: replace(
+        config.default_repo, pr=replace(
+            config.default_repo.pr, head_scheme="snapshot", api_base="https://example.com/gitea",
+        ),
+    )})
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    real = git_ops.force_branch
+    calls: list[str] = []
+
+    def reserved(name: str, target: str, *, cwd: str | Path, config: object = None) -> str | None:
+        calls.append(name)
+        if len(calls) == 1:
+            return f"{name} is retained by dehydrated worktree fixture; rehydrate it first."
+        return real(name, target, cwd=cwd, config=config)
+
+    monkeypatch.setattr(git_ops, "force_branch", reserved)
+    refused = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
+    assert not refused["success"] and "rehydrate it first" in refused["error"]
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    assert not (record.pr and record.pr.creation and record.pr.creation.get("phase") == "publishing")
+    result = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
+    assert result["success"], result
+    assert result["head_sha"] == git_ops.git("rev-parse", "HEAD", cwd=wt).stdout.strip()

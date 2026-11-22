@@ -346,6 +346,8 @@ def _read_for(worktree_id: str, entry_path: Path) -> dict[str, Any] | None:
 
 
 def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
+    from . import checkout_data
+
     ledger = _ledger(worktree_id, config)
     anchor, root = _repo(config)
     with _locked(ledger, root):
@@ -387,6 +389,10 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
             catalog.write_entry(entry_path, entry)
             try:
                 _require_clean(checkout)
+                # Retained data can appear while the registry and lock were awaited.
+                hold = checkout_data.preservation_hint(checkout)
+                if hold:
+                    raise HydrationRefused("retained-data", hold)
             except HydrationRefused:
                 catalog.delete_entry(entry_path)
                 raise
@@ -473,18 +479,48 @@ def _materialize(checkout: Path) -> None:
     _git(checkout, "reset", "-q", "--hard", "HEAD")
 
 
+def _restore_config_once(checkout: Path, entry_path: Path, entry: dict[str, Any], *, populated: bool) -> None:
+    """Restore the snapshot config only while restoration is provably unfinished.
+
+    The ``config_restored`` marker proves restoration already happened, so a
+    retry keeps any newer per-worktree settings. Without it, only a checkout
+    created by this rehydration (stage ``rehydrating``) is restored; a populated
+    one is restored only when it has no differing per-worktree config yet.
+    """
+    snapshot = entry["git"].get("worktree_config")
+    if entry.get("config_restored") or not isinstance(snapshot, dict):
+        return
+    if entry.get("stage") != catalog.STAGE_REHYDRATING:
+        raise HydrationRefused(
+            "rehydrate-unverified", "checkout was not created by rehydration; catalog retained",
+        )
+    if populated:
+        target = _worktree_config_file(checkout)
+        wanted = base64.b64decode(str(snapshot["file_b64"]), validate=True)
+        if target.exists() and target.read_bytes() != wanted:
+            raise HydrationRefused(
+                "worktree-config-conflict", "checkout has different per-worktree config; catalog retained",
+            )
+    _restore_worktree_config(checkout, snapshot)
+    entry["config_restored"] = True
+    catalog.write_entry(entry_path, entry)
+
+
 def _complete_rehydrate(worktree_id: str, anchor: Path, entry_path: Path, entry: dict[str, Any]) -> dict[str, Any]:
     checkout = Path(entry["identity"]["checkout_path"])
     branch = entry["git"]["branch"]
     actual = _valid_checkout(checkout, anchor, branch)
     if actual is None:
         raise HydrationRefused("rehydrate-unverified", "rehydrated checkout failed verification; catalog retained")
-    # Per-worktree config (e.g. core.symlinks, core.autocrlf) must apply before files exist.
-    _restore_worktree_config(checkout, entry["git"].get("worktree_config"))
     if _unpopulated(checkout):
+        # Per-worktree config (e.g. core.symlinks, core.autocrlf) must apply before
+        # files exist. Restore it once: a retry after the marker keeps newer settings.
+        _restore_config_once(checkout, entry_path, entry, populated=False)
         _materialize(checkout)
     elif not Path(_git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "index").stdout.strip()).exists():
         raise HydrationRefused("rehydrate-partial", "checkout has files but no index; catalog retained")
+    else:
+        _restore_config_once(checkout, entry_path, entry, populated=True)
     try:
         _require_clean(checkout)
     except HydrationRefused as exc:
