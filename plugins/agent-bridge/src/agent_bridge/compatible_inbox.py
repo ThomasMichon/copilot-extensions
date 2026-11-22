@@ -258,13 +258,13 @@ def poll(
 
                 try:
                     require_contract(envelope(conn, row, consumer), row["kind"])
+                    require_supported(conn, row, now)
                 except RuntimeCustodyError:
                     dispose(
                         conn, consumer, row["id"], "rejected", "unsupported_reader",
                         "This reader cannot enforce the stored message contract.", now=now,
                     )
                     continue
-                require_supported(conn, row, now)
             if row["handoff_json"] is None:
                 retain_message(conn, row["id"])
                 row = conn.execute("SELECT * FROM live_messages WHERE id=?", (row["id"],)).fetchone()

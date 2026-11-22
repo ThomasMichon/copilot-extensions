@@ -58,6 +58,32 @@ def test_native_interrupt_waits_for_original_consumption_before_its_one_grant(
     assert consumed is not None and consumed["stage"] == "consumed"
 
 
+def test_unversioned_native_poll_rejects_unsupported_interrupt_without_blocking_ordinary_input(
+    serving: Serving,
+) -> None:
+    _, client, db, consumer = serving
+    enroll(client, consumer)
+    owner = native_enroll(client, replace(consumer, incarnation="unversioned-native"))
+    interrupt = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "unsupported interrupt", "delivery": "interrupt",
+    })
+    assert interrupt.status_code == 200, interrupt.text
+    interrupted_id = interrupt.json()["message_id"]
+    ordinary = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "ordinary input after interrupt", "delivery": "steer",
+    })
+    assert ordinary.status_code == 200, ordinary.text
+    for _ in range(2):
+        response = client.post(PREFIX + "/poll", json=current(owner))
+        assert response.status_code == 200, response.text
+        assert [row["id"] for row in response.json()["messages"]] == [ordinary.json()["message_id"]]
+    rejected = db.live_message_receipt(consumer.session_id, interrupted_id)
+    assert rejected is not None and rejected["stage"] == "rejected"
+    assert rejected["disposition"]["code"] == "unsupported_reader"
+    original = db.execute_read("SELECT * FROM live_messages WHERE id=?", (interrupted_id,))[0]
+    assert original["handoff_started_at"] is None and original["consumed_at"] is None
+
+
 @pytest.mark.parametrize("kind,body", [
     ("control:set-mode", "autopilot"),
     ("control:set-mode-ready", '{"mode":"plan","plugin_readiness":{}}'),
