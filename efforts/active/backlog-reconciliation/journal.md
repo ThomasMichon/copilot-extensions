@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Naming-source and Git-read deadlines](journal/2026/11.21-naming-source-and-git-read-deadlines.md)
+
 - [2026-11-21 - Budget prerequisites and telemetry planning](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md)
 
 - [2026-11-21 - Protected-capacity and activity intake](journal/2026/11.21-protected-capacity-and-activity-intake.md)

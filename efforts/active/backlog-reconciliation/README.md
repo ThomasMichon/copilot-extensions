@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [naming-source and Git-read deadline continuation](journal/2026/11.21-naming-source-and-git-read-deadlines.md)
+retains the unresolved ID-first naming default after a loader move and the expanded remote-read/retry/publication contract, without repeating unchanged originals or changing issue state.
+
 The [Budget prerequisite and telemetry-planning continuation](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md)
 credits three scoped source deliveries without claiming consumer adoption or a passing full native portfolio, retains the distinct suite-wide telemetry planning request and records a complete 905-open census.
 
