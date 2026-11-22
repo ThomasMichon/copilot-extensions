@@ -6059,6 +6059,41 @@ network, new mock, preload, guard exception, data, production, routing or
 cleanup change is introduced. This selection neither settles separate refused
 candidates nor completes the parent, and makes no whole-flow savings claim.
 
+Fresh Linux CI `45031811112`, unit job `137236831883`, refuses the proposed
+packet during collection at exact source head
+`373c16c7eedcf883a4dfcd885f91f7a75914b19e`. The adapter imports
+`test_installer_source_build.py`, which imports
+`test_installer_wheel_acquisition.py`; that module's top-level `ctypes`
+import constructs `PyDLL(None)` and the unchanged guard refuses
+`ctypes.dlopen`. No new selected case executes. Local Windows auditing did
+not expose this cold-import effect and is not portable qualification.
+Guards/lint job `137236831673` passes, but the unit job and required
+aggregate `137237842410` fail. Exact-head approval `6012686164` does not
+override this required-CI failure; #14092 remains open and unmerged.
+
+The failed exact head, adapter, helper, candidate and local observations are
+retained without replay, subset admission, preload or guard exception.
+Read-only use tracing finds `ctypes` referenced only by the separate Windows
+branch of `_running` at lines 885-888. Moving that import into its owning
+branch was proposed as an ordinary source correction, not an accepted replay.
+The explicit `correct-import-and-requalify` decision permits only that
+source correction and qualification of a distinct corrected head, preserving
+all three selected functions, fixtures, assertions and effect policy. It grants
+no native-test or runtime authority and does not permit rerunning the failed
+head.
+
+The corrected revision moves only `import ctypes` into its sole Windows helper
+branch. Comparison against the retained failed source blob verifies that exact
+two-line import-locality change and no other original-test edit. Complete
+collection retains 47 original and exactly three adapter cases with unchanged
+function identity. A fresh unchanged-guard audit passes all three in 2.422
+seconds with zero prohibited effects, the same seventeen bound canonical reads
+and actual owner call-phase lines. Only that source binding changes; all 8,891
+nodes, 1,258 bindings, 463 targets, 89 helper decisions and the 300-second bound
+remain. The local corrected result is not portable qualification: a new exact-head
+review and complete fresh Linux CI remain required. Broader native, release,
+owner and custody gates remain.
+
 ## Source-attribution server failure - #7906
 
 Direct parent: [A7906-P and A7906-G](README.md). Preserve the existing
