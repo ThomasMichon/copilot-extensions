@@ -536,7 +536,6 @@
       "r:plugins/agent-worktrees/scripts/invoke-payload-runtime.sh::<script>::nohup": 2,
       "r:plugins/agent-worktrees/scripts/launch-command.ps1::<script>::Start-Process": 1,
       "r:plugins/agent-worktrees/scripts/service-utils.ps1::<script>::Start-Process": 1,
-      "r:plugins/budget-guidance/scripts/bootstrap-check.ps1::<script>::Start-Process": 1,
       "r:plugins/budget-guidance/scripts/bootstrap-check.sh::<script>::nohup": 1,
       "r:plugins/budget-guidance/scripts/install.ps1::<script>::Start-Process": 5,
       "r:plugins/efforts/scripts/emit-policy.ps1::<script>::Process.Start": 2,

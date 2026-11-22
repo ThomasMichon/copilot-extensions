@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,24 +72,11 @@ def test_sh_has_no_opt_in_gate() -> None:
     assert "background reconcile SKIPPED" not in text
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows generation selection")
-def test_ps1_profile_generation_uses_its_deployed_package_version(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.syspath_prepend(str(_PLUGIN_ROOT.parents[1] / "tools"))
-    helper = importlib.import_module("test_native_wheel_installers")
-    helper.assert_native_bootstrap(tmp_path, monkeypatch, _PLUGIN_NAME)
-
-
 def _make_fake_install(home: Path, name: str) -> Path:
     """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1.
 
-    Multi-line, indented JSON: budget-guidance's bootstrap-check (the
-    'pythonless' family member) parses the manifest with a line-oriented awk
-    script, not a real JSON parser, so it needs 'source'/'version' on their
-    own lines the way a real ``ConvertTo-Json``/``json.dump(indent=...)``
-    deploy would produce -- a compact single-line dump silently fails to
-    match its patterns.
+    No runtime selector is present, so the hook must submit the fixed install
+    recipe rather than trusting a package-version match alone.
     """
     install_dir = home / f".{name}"
     install_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +96,7 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     """An isolated copy of the plugin dir shape bootstrap-check.sh expects,
     with a harmless stub installer so a spawned reconcile does no real work
     (never invoke the REAL install.sh from a test -- it does a live install)."""
-    plugin_dir = root / "plugin"
+    plugin_dir = root / "home/.copilot/installed-plugins/fixture-market" / name
     scripts_dir = plugin_dir / "scripts"
     scripts_dir.mkdir(parents=True)
     (plugin_dir / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
@@ -119,6 +107,38 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     )
     (scripts_dir / "install.sh").chmod(0o755)
     (scripts_dir / "bootstrap-check.sh").chmod(0o755)
+    shutil.copyfile(_PS1, scripts_dir / _PS1.name)
+    shutil.copyfile(
+        _PLUGIN_ROOT / "scripts/versioned_runtime_native.ps1", scripts_dir / "versioned_runtime_native.ps1",
+    )
+    query = scripts_dir / "installation-context/json-query.awk"
+    query.parent.mkdir()
+    shutil.copyfile(
+        _PLUGIN_ROOT / "scripts/installation-context/json-query.awk", query,
+    )
+    driver = plugin_dir / "libs/update-driver/scripts"
+    driver.mkdir(parents=True)
+    (driver / "first-use.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Installation driver lifecycle contract: budget-install-v1\n"
+        'printf "%s\\n" "$@" >"$HOME/driver-args"\n'
+        '[[ "${BOOTSTRAP_DRIVER_STATUS:-0}" == 0 ]] || exit "$BOOTSTRAP_DRIVER_STATUS"\n'
+        'printf "%s\\n" "${BOOTSTRAP_DRIVER_ACK:-launched:42 log:'
+        '$1/first-use-12345678-1234-1234-1234-123456789abc.log}"\n',
+        encoding="utf-8",
+    )
+    (driver / "first-use.ps1").write_text(
+        "# Installation driver lifecycle contract: budget-install-v1\n"
+        "param($Root, $Payload, $RuntimeRoot, $Project, $InstallerAction)\n"
+        "[IO.File]::WriteAllLines((Join-Path $env:USERPROFILE 'driver-args'), "
+        "@($Root, $Payload, $RuntimeRoot, $Project, '--installer-action', $InstallerAction))\n"
+        "if ($env:BOOTSTRAP_DRIVER_STATUS) { exit ([int]$env:BOOTSTRAP_DRIVER_STATUS) }\n"
+        "if ($env:BOOTSTRAP_DRIVER_ACK) { $env:BOOTSTRAP_DRIVER_ACK } else {\n"
+        "@{launched=$true; pid=42; created=123; "
+        "log=(Join-Path $Root 'first-use-12345678123412341234123456789abc.log')} | ConvertTo-Json -Compress\n"
+        "}\nexit 0\n",
+        encoding="utf-8",
+    )
     return plugin_dir
 
 
@@ -129,6 +149,9 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     ``command -v python3`` resolve to a dud and silently short-circuit this
     hook before it ever reaches the gate under test."""
     env = dict(os.environ)
+    for key in tuple(env):
+        if key.startswith(("COPILOT_", "BUDGET_GUIDANCE_", "UPDATE_DRIVER_")):
+            del env[key]
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
@@ -136,7 +159,7 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(_BASH is None or not sys.platform.startswith("linux"), reason="native Linux admission")
 def test_sh_reconciles_without_any_opt_in_config(tmp_path: Path) -> None:
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
@@ -159,10 +182,16 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path: Path) -> None:
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    assert "bootstrap install supervision launched" in result.stderr, result.stderr
+    assert (home / "driver-args").read_text().splitlines() == [
+        str(home / ".copilot-extensions/update-driver"), str(plugin_dir),
+        str(home / ".budget-guidance"), str(project), "--installer-action", "install",
+    ]
+    assert not (home / ".budget-guidance/reconcile.lock").exists()
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(_BASH is None or not sys.platform.startswith("linux"), reason="native Linux admission")
 def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path: Path) -> None:
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
@@ -189,7 +218,99 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path: Path) -> Non
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    assert "bootstrap install supervision launched" in result.stderr, result.stderr
+    assert (home / "driver-args").is_file()
+
+
+def _run_hook(
+    tmp_path: Path, host: str, *, overrides: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
+    shell = _BASH if host == "bash" else shutil.which(host)
+    if shell is None or (host == "bash" and not sys.platform.startswith("linux")):
+        pytest.skip(f"{host} unavailable for this native fixture")
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project with spaces"
+    project.mkdir()
+    payload = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    installation = _make_fake_install(home, _PLUGIN_NAME)
+    environment = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home), **(overrides or {}),
+    })
+    command = (
+        [shell, str(payload / "scripts/bootstrap-check.sh")] if host == "bash" else
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(payload / "scripts/bootstrap-check.ps1")]
+    )
+    result = subprocess.run(
+        command, cwd=project, env=environment, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    return result, home, payload, installation
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
+def test_driver_submission_retains_fixed_install_action_and_project(tmp_path: Path, host: str) -> None:
+    result, home, payload, installation = _run_hook(tmp_path, host)
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    assert "bootstrap install supervision launched" in result.stderr
+    assert "Launch is not durable request acceptance" in result.stderr
+    assert (home / "driver-args").read_text(encoding="utf-8-sig").splitlines() == [
+        str(home / ".copilot-extensions/update-driver"), str(payload),
+        str(installation), str(tmp_path / "project with spaces"), "--installer-action", "install",
+    ]
+    assert not (installation / "reconcile.lock").exists()
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
+@pytest.mark.parametrize("fault", ["exit", "malformed", "foreign-log"])
+def test_driver_failure_never_falls_back_to_raw_installer(tmp_path: Path, host: str, fault: str) -> None:
+    overrides = {
+        "exit": {"BOOTSTRAP_DRIVER_STATUS": "19"},
+        "malformed": {"BOOTSTRAP_DRIVER_ACK": "not-an-ack"},
+        "foreign-log": {"BOOTSTRAP_DRIVER_ACK": (
+            json.dumps({"launched": True, "pid": 42, "created": 123, "log": "/foreign/owner.log"})
+            if host != "bash" and os.name == "nt" else "launched:42 log:/foreign/owner.log"
+        )},
+    }[fault]
+    result, home, _payload, installation = _run_hook(tmp_path, host, overrides=overrides)
+    assert result.returncode == 3 and result.stdout == "{}", result.stdout + result.stderr
+    assert (home / "driver-args").exists()
+    assert "supervision launched" not in result.stderr
+    assert "stub-install-ran" not in result.stdout + result.stderr
+    assert not (installation / "reconcile.lock").exists()
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
+@pytest.mark.parametrize("gate", ["no-self", "pinned", "context", "nested"])
+def test_automatic_driver_submission_preserves_context_gates(tmp_path: Path, host: str, gate: str) -> None:
+    key, value = {
+        "no-self": ("BUDGET_GUIDANCE_NO_SELFPROVISION", "1"),
+        "pinned": ("BUDGET_GUIDANCE_PINNED_CONTEXT", "pinned"),
+        "context": ("COPILOT_EXTENSIONS_CONTEXT", "selected"),
+        "nested": ("UPDATE_DRIVER_WITNESS", "existing-owner"),
+    }[gate]
+    result, home, _payload, installation = _run_hook(tmp_path, host, overrides={key: value})
+    assert result.returncode == (3 if gate == "nested" else 0)
+    assert result.stdout == "{}", result.stdout + result.stderr
+    assert not (home / "driver-args").exists()
+    assert not (installation / "reconcile.lock").exists()
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
+@pytest.mark.parametrize("managed_available", [True, False])
+def test_managed_runtime_requires_prepared_uv_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, managed_available: bool, host: str,
+) -> None:
+    shell = _BASH if host == "bash" else shutil.which(host)
+    if shell is None or (host == "bash" and not sys.platform.startswith("linux")):
+        pytest.skip(f"{host} unavailable for this native fixture")
+    monkeypatch.syspath_prepend(str(_PLUGIN_ROOT.parents[1] / "tools"))
+    helper = importlib.import_module("test_native_wheel_installers")
+    helper.assert_native_bootstrap(
+        tmp_path, monkeypatch, _PLUGIN_NAME, shell=shell, managed_available=managed_available,
+        powershell=host != "bash",
+    )
 
 
 @pytest.mark.parametrize("record", ["recent", "expired", "malformed", "directory"])
