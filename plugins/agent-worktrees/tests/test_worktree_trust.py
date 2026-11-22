@@ -268,7 +268,7 @@ def _assert_embody_trust(
     )
     tracking.save_record(record, tmp_tracking_dir / f"{record.worktree_id}.yaml")
     if mode == "invalid-config":
-        home.mkdir()
+        home.mkdir(parents=True)
         (home / "config.json").write_text("malformed", encoding="utf-8")
     monkeypatch.setattr(cfg, "load_config", lambda: config)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: record.worktree_id)
