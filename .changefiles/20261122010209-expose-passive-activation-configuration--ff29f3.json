@@ -1,0 +1,13 @@
+{
+  "comment": "Expose passive activation configuration for installed Manager onboarding.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
