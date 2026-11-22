@@ -236,6 +236,8 @@ def test_postwrite_identity_lifecycle_or_value_mismatch_stays_unknown(
         "    <!-- agent-worktrees:source codename=example-only -->\n",
         "`<!-- agent-worktrees:source codename=example-only -->`\n",
         "- ```\n  <!-- agent-worktrees:source codename=example-only -->\n  ```\n",
+        "1. > <!-- agent-worktrees:source codename=example-only -->\n",
+        "> - <!-- agent-worktrees:source codename=example-only -->\n",
     ],
 )
 def test_literal_source_examples_are_retained_not_selected_or_deleted(example: str) -> None:
@@ -254,6 +256,9 @@ def test_literal_source_examples_are_retained_not_selected_or_deleted(example: s
         ("<!-- agent-worktrees:source codename=bad enc=invalid -->", "after"),
         ("<!-- agent-worktrees:source workflow=another-producer -->", "after"),
         ("prefix <!-- agent-worktrees:source codename=inline-source -->", "after"),
+        ("- " + MARKER, "after"),
+        ("1. " + MARKER, "after"),
+        ("*" + MARKER + "*", "after"),
     ],
 )
 def test_missing_anonymous_conflicting_or_ambiguous_source_refuses(

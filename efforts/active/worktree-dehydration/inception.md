@@ -62,3 +62,20 @@ automatic dehydration and rollout are not inferred.
   They must preserve the operator's simpler content and branch contract.
 - Automatic process-exit behavior is the intended end state, not authorization
   to activate deletion during this planning publication.
+
+## Configured-feed dependency follow-up
+
+The private feed name is generalized in these public-safe quotations.
+
+> Fix the stub package version to fit within the seasoning; it should be something provided via [configured feed]
+
+> Since this machine has to pull packages from the [configured feeds], help update the dependencies to use a set that can resolve from this machine
+
+> This just means we have to work around with different dependencies.
+
+The later assignment permits a compatible dependency-set change, rather than
+repeating the earlier unsuccessful stub-pin candidates. The clarification
+includes replacing a dependency and adapting its direct consumer while
+preserving behavior and type checking. It does not relax seasoning or integrity
+checks, replace the configured feeds, or authorize an agenda migration, doctor
+workaround or fleet rollout.
