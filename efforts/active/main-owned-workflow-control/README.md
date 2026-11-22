@@ -1970,7 +1970,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `37633fdcd039ec661180ddc97317e25fb8834f56` after exact-head approval and
   complete fresh Linux CI executes all 8,888 selected units. Only this
   three-case leaf is complete.
-- [ ] Qualify three original in-process source-phase controls: independent
+- [x] Qualify three original in-process source-phase controls: independent
   phase allowances and deadline cause, preservation of an integrity failure's
   original cause, and progress-output coalescing without losing completed work.
   Preserve the complete original functions, clocks, monkeypatches and assertions.
@@ -1991,7 +1991,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   bindings are added; no coverage target changes. The compact-v2 candidate
   contains 8,891 nodes, 1,258 sources and 463 targets in 996,013 bytes.
   Full fresh Linux CI and normal review/merge remain required.
-  #14092 is open, not merged: fresh Linux CI `45031811112` refuses
+  At #14092's initial head, fresh Linux CI `45031811112` refuses
   `ctypes.dlopen` during collection through the original test's imported
   wheel-acquisition module. No selected case executes in that run.
   The local audit is not portable qualification; retain the failed exact
@@ -2006,8 +2006,53 @@ authorizes critical main-path acceptance or a bounded administrative change.
   47 original and three adapter cases. Unchanged auditing passes all three in
   2.422 seconds with zero effects, the same seventeen bound reads and actual
   owner calls. Only that source hash changes; all nodes, targets, helper
-  decisions and bounds remain unchanged. Fresh Linux CI and new exact-head
-  review remain required.
+  decisions and bounds remain unchanged. The distinct corrected head receives
+  fresh exact-head approval and complete Linux CI executes all 8,891 units.
+  #14092 merges at `1701f179a4f2e4ffdd985b7fc0101089c68fdf06`;
+  reviewed and merged trees match. Only this three-case leaf is complete;
+  the failed initial head remains retained and was not replayed.
+- [ ] Qualify the separate original source-wheel verification case that
+  requires a fresh bounded I/O budget on repeated verification.
+  Export the complete original function, retaining both clock values,
+  wheel bytes, real archive digest and original assertions. Require complete
+  original/adapter collection identity, initial unchanged source/effect
+  auditing and actual source-build owner calls before admission.
+  Reuse the now-bound original import closure without invoking installer,
+  feed, threaded-tree or native fixtures. Add only its adapter binding;
+  preserve all 8,891 nodes, 1,258 source hashes, 463 targets, 89 helper
+  decisions and the 300-second bound. Normal strict checks, committed
+  changefile presence, exact-head review and complete fresh Linux CI remain
+  required. No replay of the failed phase head, new mock, preload, data,
+  guard exception, native/runtime/routing or cleanup authority is added.
+  Complete collection verifies all 47 original cases and exactly one
+  adapter case with original function-object identity. Initial unchanged
+  auditing refuses `ctypes.dlopen`: `SourceWheelInputs.verify` calls
+  `_digest_file`, whose Windows retained `_open` loads `kernel32`.
+  No complete observation report is written and this case is not admitted.
+  Retain the exact adapter outside the source tree, helper, candidate and
+  selector inventory without replay, preload, substitution or guard change.
+  The packet remains 8,891 nodes, 1,258 sources and 463 targets.
+- [ ] Qualify the separate original aggregate source-tree budget refusal
+  function with both original file/byte parameters. Preserve its temporary
+  inputs, preexisting digest-failure callback and original assertions.
+  The selected refusal must occur before pool construction or file dispatch;
+  do not export any successful tree/thread or wheel-open case.
+  Require complete original/adapter collection identity, initial unchanged
+  source/effect auditing and actual owner calls before adding only the new
+  adapter binding. Preserve all 8,891 nodes, 1,258 hashes, 463 targets,
+  89 helper decisions and the 300-second bound. Normal strict checks,
+  committed changefile presence, exact-head review and complete fresh Linux
+  CI remain required. No replay of any refused case, new mock, preload,
+  data admission, guard exception, native/runtime/routing or cleanup
+  authority is added.
+  Complete collection verifies all 47 original cases and exactly two adapter
+  cases with original function and parameter-object identity. Initial
+  unchanged auditing passes both in 1.969 seconds with zero prohibited
+  effects, seventeen bound canonical reads and actual owner call-phase
+  lines per case. Only the adapter binding is added; no target changes.
+  Compact-v2 contains 8,893 nodes, 1,259 sources and 463 targets in 996,431
+  bytes, preserving prior node order and all previous source hashes.
+  Full fresh source CI and normal review/merge remain required.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

@@ -6027,6 +6027,58 @@ new mock, preload, guard exception, data, production, routing or cleanup change
 is introduced. This selection does not settle any separate native-load/thread
 refusal or parent completion and makes no whole-flow savings claim.
 
+### November 22 original aggregate source-tree budget refusals
+
+The adapter exports the complete original
+`test_source_tree_checks_aggregate_budget_before_dispatching_reads`,
+preserving both file/byte parameters, temporary input bytes, preexisting
+digest-failure callback and original assertions. Both selected cases must
+refuse before constructing the pool or dispatching reads. Successful tree,
+threaded retention and wheel-open cases remain outside this selection.
+
+Complete collection verifies all 47 original cases and exactly two adapter
+cases with original function and parameter-object identity. Initial unchanged
+effect/source auditing passes both in 1.969 seconds with zero prohibited
+effects, seventeen bound canonical Python reads and actual source-build
+owner call-phase lines per case. Only the adapter binding is added; the
+original import closure and production target are already bound.
+
+All 8,891 prior nodes retain relative order, and all 1,258 source hashes,
+463 targets, 89 helper decisions and the 300-second bound remain intact.
+Compact-v2 and flat-v1 logical identity agree; the candidate contains 8,893
+nodes, 1,259 sources and 463 targets in 996,431 bytes. Fatal Ruff passes;
+strict checks, committed changefile presence, exact-head review and complete
+fresh source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes are not applicable because installation and
+runtime behavior do not change. This distinct selection does not replay or
+settle the separate wheel-verification native-load refusal, complete the
+parent or demonstrate comparable whole-flow savings.
+
+### November 22 original source-wheel verification native-load refusal
+
+The separate adapter exports the complete original
+`test_source_wheel_verification_uses_a_fresh_bounded_io_budget`, preserving
+both clock values, real wheel bytes/digest and assertions. Complete
+collection verifies all 47 original cases and exactly one adapter case
+with original function-object identity. Only its adapter would add a
+source binding; all imports and owner targets are already bound.
+
+Initial unchanged effect auditing refuses `ctypes.dlopen` during the
+first `SourceWheelInputs.verify`: `_digest_file` reaches the Windows
+retained `_open`, which loads `kernel32`. This is an actual selected-case
+effect, not the separate corrected collection-import failure. No complete
+observation report is written and this case is not admitted.
+The exact adapter is retained outside the source tree with its helper,
+candidate and selector inventory, without replay, preload, new mock,
+substitution or guard exception. No source hash, packet node, target,
+deadline or runtime policy changes; the packet remains 8,891 nodes,
+1,258 bound sources, 463 targets, 89 helper decisions and 300 seconds.
+The distinct merged phase leaf neither settles this refusal nor grants
+native execution. Parent acceptance and all owner/custody gates remain open.
+
 ### November 22 original in-process source-phase controls
 
 The adapter exports three complete original functions from
@@ -6069,7 +6121,7 @@ import constructs `PyDLL(None)` and the unchanged guard refuses
 not expose this cold-import effect and is not portable qualification.
 Guards/lint job `137236831673` passes, but the unit job and required
 aggregate `137237842410` fail. Exact-head approval `6012686164` does not
-override this required-CI failure; #14092 remains open and unmerged.
+override that required-CI failure; the initial head is not merged or replayed.
 
 The failed exact head, adapter, helper, candidate and local observations are
 retained without replay, subset admission, preload or guard exception.
@@ -6093,6 +6145,37 @@ nodes, 1,258 bindings, 463 targets, 89 helper decisions and the 300-second bound
 remain. The local corrected result is not portable qualification: a new exact-head
 review and complete fresh Linux CI remain required. Broader native, release,
 owner and custody gates remain.
+
+Corrected-head approval `6012861283` names
+`3b605596c41d80b1ef50c2c915de73e42d7adbb4`; the old-head approval is
+dismissed, with no active review findings or unresolved threads and complete
+review/discussion/thread pagination. Fresh Linux CI `45034439651`, unit job
+`137244927142`, executes all 8,891 cases with 43 deselections in 180.52 pytest /
+201.586 packet seconds. It reports `mode=executed`, origin run `45034439651`
+attempt one, execution identity
+`b6eb4c6eacf628e4eed4700502cbcfabe67d1cb53468d15ee612536794ec7c92` and
+packet digest
+`70cb70b84a76067c2e9a6301e4f2dfffcbfeb24263c500e8931296998eedfc22`.
+Guards, required aggregate `137246153723` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede normal managed merge.
+
+Source #14092 merges at `2026-11-22T14:50:36Z` as
+`1701f179a4f2e4ffdd985b7fc0101089c68fdf06`. Independent provider readback
+confirms merged state and open parent #6237; the complete reviewed/merged-tree
+comparison is empty. The first managed local sync safely auto-aborts while
+replaying the two already squash-merged commits. Clean-state and identical-tree
+checks precede backup-retaining, empty-range local rebase onto the verified
+merge; subsequent managed sync succeeds. No reset, stash, work deletion,
+remote-history rewrite or unmerged change is involved.
+The actual parent Goal, own Plan leaf and Validation Plan are reread before
+resolving only this three-case leaf.
+
+The original cold-import failure and the distinct corrected execution remain
+separate evidence. No native Windows helper was exercised or qualified; the
+specific source-correction decision is exhausted, not a new native grant.
+Qualification costs are not a whole-flow savings claim, and the parent remains
+active.
 
 ## Source-attribution server failure - #7906
 
