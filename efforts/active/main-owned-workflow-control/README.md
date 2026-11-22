@@ -1776,7 +1776,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   sources in 987,506 bytes without changing nodes, targets or the bound.
   The 1,228-source/985,329-byte qualification above describes this leaf's
   reviewed head, not the combined merged base.
-- [ ] Qualify fourteen additional original strict-checker lifecycle controls
+- [x] Qualify fourteen additional original strict-checker lifecycle controls
   across eleven original functions: input-drift cleanup, conservative consumer
   selection, missing-preparation refusal, pending-probe non-admission,
   dependency-policy refusal, captured-lock installation, failed-cache repair,
@@ -1800,8 +1800,99 @@ authorizes critical main-path acceptance or a bounded administrative change.
   call-phase lines per case. Only fourteen new nodes are appended within the
   first group; all 8,817 preceding nodes retain their relative order and all
   1,244 other current-base hashes remain intact. The compact-v2 candidate
-  contains 8,831 nodes, 1,245 sources and 460 targets. Current-head review and
-  complete fresh Linux CI remain pending; this leaf is not complete.
+  contains 8,831 nodes, 1,245 sources and 460 targets. #14081 merges at
+  `cb2cfa00afdec9e52c3a69437a59918e8a747de3` after exact-head Copilot approval
+  and complete required Linux CI with all 8,831 selected units freshly
+  executed. Only this fourteen-case leaf is complete; broader gates remain open.
+- [x] Qualify 46 additional original strict-checker source-view controls across
+  eleven original functions: guard-alias scope/mapping/drift, physical line
+  mapping, native-loader source preservation, copied input custody,
+  loader-mutation and directive refusals, declared fragment order, stale
+  composition, code/suppression preservation and imported-view drift cleanup.
+  Preserve exact original functions, parameter values, both autouse fixtures,
+  helpers, existing collaborator stubs and assertions. Keep actual MyPy,
+  native/process, symlink, repository-catalog, platform-specific guard-shadow
+  and all other excluded cases unchanged outside the selection.
+  Qualify all 110 adapter cases before admitting only 46 new nodes after the
+  current 64 in the same first group. Bind the original guard helper's one
+  canonical Python read without adding a coverage target; preserve preceding
+  node order, all other current source hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require closed Python
+  reads, positive actual owner calls per case, zero prohibited effects, normal
+  strict typing, current-head review and complete fresh Linux CI. No new mock,
+  preload, wrapper, effect exception, data admission, workflow, runtime,
+  native process or cleanup action is authorized.
+  Complete collection verifies all 236 original cases and 110 adapter cases,
+  exact function/fixture identity and every selected parameter value.
+  Initial unchanged-guard qualification passes all 110 in 9.000 seconds, with
+  zero prohibited effects, 27 bound Python reads and actual checker-owner
+  call-phase lines per case. Only 46 new nodes are appended within the first
+  group; all 8,831 preceding nodes retain their relative order. Only the
+  existing adapter hash changes and the canonical guard source binding is
+  added, preserving all other 1,244 current-base hashes. The compact-v2
+  candidate contains 8,877 nodes, 1,246 sources and 460 targets. #14083 merges at
+  `630385013436e640dd72fa3940cbc67ece00571a` after exact-head Copilot approval
+  and complete required Linux CI with all 8,877 selected units freshly
+  executed. Only this 46-case leaf is complete; broader gates remain open.
+- [ ] Qualify seven original in-process promotion source-identity controls
+  across six complete original functions: equivalent-composition index
+  acceptance, changed-source/composition refusal, legacy parent binding,
+  second-container refusal, immutable-set reuse and changed-asset refusal.
+  Preserve exact original functions, parameter values, helpers, assertions
+  and existing collaborator stubs. Keep real Git/history/native cases outside.
+  Require complete original/adapter collection identity, unchanged effect
+  auditing, closed Python reads and actual production calls per case before
+  admission. Add only the canonical original/adapter Python source bindings;
+  preserve every prior node and source hash, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI. No new mock,
+  preload, wrapper, effect exception, data admission, workflow, runtime,
+  native process or cleanup action is authorized.
+  Complete collection verifies sixteen original cases and seven adapter
+  cases with exact function/parameter identities and no native repository
+  fixture. Initial unchanged auditing stops after five passes when the
+  original immutable-set reuse case reaches `verify_asset_downloads` and its
+  thread pool; the guard refuses `thread start` before launch. No complete
+  observation report or admission follows. All seven remain outside the
+  packet, with the exact adapter, candidate and helper retained without
+  replay, subset admission, test changes or guard exceptions.
+- [ ] Qualify both original dependency-resource overlap cases, preserving
+  original editable/noneditable parameters, synthetic UV projection probe,
+  actual retained source copies, metadata and hash checks. Require complete
+  original/adapter collection identity, unchanged effect auditing, closed
+  Python reads and actual policy-owner calls before admission. Preserve all
+  prior nodes/hashes, targets, helper decisions and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI. No new mock, preload, wrapper, effect exception, data admission, native
+  process, workflow, runtime or cleanup action is authorized.
+  Complete collection verifies both original and adapter cases with exact
+  function/parameter identity. Initial unchanged auditing stops at the first,
+  noneditable case: Windows `private_retained_root` attempts `ctypes.dlopen`
+  for `advapi32`, which the guard refuses before loading. No complete
+  observation report or admission follows. Both remain outside the packet,
+  with exact adapter, candidate and helper retained without replay, subset
+  admission, preloading, test changes or guard exceptions.
+- [ ] Qualify the original in-process checker procutil-provider control:
+  candidate-local precedence, foreign winning provider refusal and package,
+  module and distribution-stub refusal. Preserve the complete original
+  function and assertions, with both unchanged autouse fixtures. Qualify all
+  111 adapter cases before admitting only this one node at the front of the
+  same checker group, retaining original source order and all prior node
+  order/hashes except the changed adapter binding. Preserve targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require closed
+  Python reads, positive actual owner calls, zero prohibited effects, normal
+  strict typing, current-head review and complete fresh Linux CI. No native
+  launch, preload, new mock, guard exception, data, workflow or runtime change.
+  Complete collection verifies all 236 original cases and 111 adapter cases,
+  exact function/fixture identity and every selected parameter value.
+  Initial unchanged auditing passes all 111 in 8.844 seconds, with zero
+  prohibited effects, 27 bound Python reads and actual checker-owner
+  call-phase lines per case. Only the provider node is inserted at the front
+  of the same checker group; all 8,877 prior nodes retain relative order.
+  Only the existing adapter hash changes, preserving the other 1,245 source
+  hashes. The compact-v2 candidate contains 8,878 nodes, 1,246 sources and
+  460 targets. Normal review and complete fresh Linux CI remain pending;
+  this leaf is not complete.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
