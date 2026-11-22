@@ -15,6 +15,7 @@ sys.path[:0] = [str(KIT / "worktree-manager" / "src"), str(KIT / "tools"),
                 str(KIT / "libs" / "agent-procutil" / "src")]
 
 from worktree_manager import bootstrap_harness as harness
+from worktree_manager import bootstrap_pairing
 from worktree_manager import registered_suite, runtime_source_repository, source_config
 
 
@@ -28,9 +29,25 @@ def main() -> None:
     parser.add_argument("--stage", action="store_true")
     args = parser.parse_args()
     root = args.root.absolute()
+    anchor = None
+    if args.repo:
+        anchor = harness.first_registration(root, args.srcroot.absolute(), args.repo)
+    elif (root / "registry").exists():
+        default, anchors = registered_suite.registrations(root)
+        anchor = anchors[default]
     knowledge_url = ""
-    if args.knowledge_repo and not (root / "registry").exists():
-        _, knowledge_url = harness.repository_remote(args.knowledge_repo)
+    if anchor is not None:
+        default, _ = registered_suite.registrations(root)
+        remote = (harness._git(anchor, "remote", "get-url", "origin")
+                  if "origin" in harness._git(anchor, "remote").splitlines() else "")
+        drive = os.environ.get("OneDrive")
+        kind, value = bootstrap_pairing.select(
+            root / "repos" / default / "config.yaml", remote, args.knowledge_repo,
+            Path(drive) if drive else None,
+        )
+        if kind in {"explicit", "portable"} and value:
+            knowledge_url = value
+    if knowledge_url:
         if not knowledge_url.startswith("https://github.com/"):
             sys.path.insert(0, str(KIT / "plugins/harness-knowledge/skills/binding-knowledge/scripts"))
             from azure_project_visibility import require_private_project
@@ -56,12 +73,6 @@ def main() -> None:
         observed = json.loads(probe.stdout)
         if observed["nameWithOwner"].casefold() != locator.casefold() or observed["isPrivate"] is not True:
             raise ValueError("Selected knowledge repository must resolve to the requested private repository")
-    anchor = None
-    if args.repo:
-        anchor = harness.first_registration(root, args.srcroot.absolute(), args.repo)
-    elif (root / "registry").exists():
-        default, anchors = registered_suite.registrations(root)
-        anchor = anchors[default]
     selection = runtime_source_repository.read(anchor, default_repository=source_config.DEFAULT_REPO)
     _, url = harness._github(selection["repository"])
     reference = selection["reference"]
