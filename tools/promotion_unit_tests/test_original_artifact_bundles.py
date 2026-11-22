@@ -25,6 +25,14 @@ _SELECTED = (
     "test_forged_content_address_fails_even_when_manifest_index_filename_and_digest_agree",
     "test_trusted_wheel_validation_reads_real_metadata_and_members",
     "test_encoded_runtime_metadata_is_a_structured_refusal",
+    "test_digest_matches_sha256_across_multiple_chunks",
+    "test_transfer_rejects_another_composition",
+    "test_transfer_rejects_corruption",
+    "test_bundle_rejects_unsafe_wheels",
+    "test_declared_project_manifest_keeps_the_selected_primary_source",
+    "test_declared_project_manifest_refuses_unsafe_source_root",
+    "test_declared_project_manifest_cannot_select_another_repository_location",
+    "test_signer_requires_configured_policy_and_one_shared_lock",
 )
 for _name in _SELECTED:
     assert _name not in globals(), f"duplicate original bundle control: {_name}"
