@@ -5999,14 +5999,65 @@ coverage target are added. All 8,885 prior nodes retain relative order, and all
 300-second bound remain intact. Compact-v2 and flat-v1 logical identity agree;
 the candidate contains 8,888 nodes, 1,254 sources and 463 targets in 995,204 bytes.
 
-This is development-only qualification, not complete packet or live Actions
-proof. Normal fatal Ruff, strict typing, committed changefile presence,
-exact-head review and complete fresh Linux CI remain required. Fresh-install
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation,
+committed changefile presence and diff checks pass. Approval `6012622183`
+names exact head `2c3102b1dc1204e5e52010049fee9b82cbed1e51`, with no
+findings, comments or unresolved threads and complete review pagination.
+Fresh source CI `45030579953`, unit job `137233057006`, executes all
+8,888 cases with 43 deselections in 206.15 pytest / 230.709 packet seconds.
+It reports `mode=executed`, origin run `45030579953` attempt one, execution
+identity `8c2c4539d27550f87dd1ee8bb21e537d4bb83ae37cbca21f6a2f9d0803ed4ada`
+and packet digest
+`5bd9a57bada2e4698c7006d305f08d0e91ef89f6fafd324dfc995da2ad651a3e`.
+Guards, required aggregate `137234525326` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the managed merge.
+
+Source #14090 merges at `2026-11-22T14:09:05Z` as
+`37633fdcd039ec661180ddc97317e25fb8834f56`. Independent readback confirms
+merged state and open parent #6237; managed source sync succeeds and the
+complete reviewed-head/merged-tree comparison is empty. The actual parent
+Goal, own Plan leaf and Validation Plan are reread before resolving only
+this three-case leaf.
+
+Fresh-install
 and native lanes are not applicable to this selection: installation, runtime,
 workflow and original-test behavior do not change. No native loader, thread,
 new mock, preload, guard exception, data, production, routing or cleanup change
 is introduced. This selection does not settle any separate native-load/thread
 refusal or parent completion and makes no whole-flow savings claim.
+
+### November 22 original in-process source-phase controls
+
+The adapter exports three complete original functions from
+`tools/test_installer_source_build.py`: independent phase allowances and
+deadline-cause reporting, preservation of an integrity failure's original
+cause, and progress-output coalescing without losing completed work.
+Original clocks, monkeypatches, capture fixtures and assertions are unchanged.
+The native path functions, file-batch/tree/thread cases and ordinary
+installer/feed fixtures remain outside this selection.
+
+Complete collection verifies all 47 original cases and exactly three adapter
+cases with original function-object identity. Initial unchanged effect/source
+auditing passes all three in 2.063 seconds with zero prohibited effects,
+seventeen bound canonical Python reads and actual source-build call-phase
+lines per case. The adapter binds the original test and its direct
+`test_installer_closed_wheels.py` and `test_installer_wheel_acquisition.py`
+imports without running their installer or feed fixtures.
+
+Only four canonical Python bindings are added. No coverage target changes.
+All 8,888 previous nodes retain relative order; all 1,254 previous source
+hashes, 463 coverage targets, 89 helper decisions and the 300-second bound
+remain intact. Compact-v2 and flat-v1 logical identity agree; the candidate
+contains 8,891 nodes, 1,258 sources and 463 targets in 996,013 bytes.
+
+Fatal Ruff passes. Strict typing, committed changefile presence,
+exact-head review and complete fresh source CI remain required.
+Fresh-install/native lanes are not applicable: no installation, runtime,
+workflow or original-test behavior changes. No native loader, thread, feed,
+network, new mock, preload, guard exception, data, production, routing or
+cleanup change is introduced. This selection neither settles separate refused
+candidates nor completes the parent, and makes no whole-flow savings claim.
 
 ## Source-attribution server failure - #7906
 

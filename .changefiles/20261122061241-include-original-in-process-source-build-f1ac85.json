@@ -1,0 +1,9 @@
+{
+  "comment": "Include original in-process source-build phase controls in the contained promotion-unit portfolio.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
