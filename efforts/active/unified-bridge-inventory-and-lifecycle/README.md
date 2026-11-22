@@ -128,6 +128,20 @@ publisher's title-only multi-commit squash. It permits no hard reset, other
 branch rewrite, runtime change or gate bypass. The normal managed PR flow
 continues afterward; this is not standing rewrite authority.
 
+### Native validation prerequisite
+
+The operator approved a bounded test-harness correction after the inventory
+branch's Linux native telemetry check read records but lacked the receiver's
+final cost report. The approval question, verbatim:
+
+> The required PR checks are green, but an additional Linux Bridge telemetry test fails: it reads records, then closes the receiver before the receiver writes its final cost report. This test is outside the inventory change, and I found no tracked flake exception. May I make a bounded test-harness fix through the normal source PR gates? This excludes runtime changes and any weakening of the assertions.
+
+Response: **true**. This permits qualifying and correcting that fixture's
+completion protocol through normal review and CI. It does not authorize
+runtime changes, weaker assertions, installation or deployment. The suspected
+close-versus-settlement race still requires source and consumer evidence; the
+approval itself is not a diagnosis.
+
 ## Plan
 
 ### Phase 1 - Review the contract and capture the inception
@@ -306,3 +320,17 @@ not another permanent public discovery path.
   pending while the model is idle; submitting the buffered text resumes work.
   Treat this as a hypothesis to qualify through the existing input owner, not
   permission to inject keys into another active conversation or alter Driver core.
+- Review qualification uses owner-produced registrations, attached clients and
+  parser/serializer observations. It distinguishes Host control handles from
+  native identities, retains native-backed managed worktrees during discovery
+  failure, and checks known-empty versus unavailable repository catalogs.
+  Unknown observations cannot join conflicting project or conversation scopes.
+- The native telemetry lane exposed a separate fixture completion gap: producer
+  pipe writes could finish before receiver fsync and final reporting. Under the
+  bounded approval above, the reading fixture now settles its actual accepted
+  record count before cleanup. Real processes, overflow accounting, failure
+  modes and fsync assertions remain; no runtime behavior or timeout is widened.
+- The combined private-state consumer packet passes 97 cases, including all
+  native performance modes and legacy target-identity controls. Live source CI,
+  review, release and the remaining lifecycle phases still require their own
+  evidence; no installed runtime or retained conversation was changed.

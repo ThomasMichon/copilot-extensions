@@ -60,10 +60,8 @@ async def inventory(
         info = _session_info(session, manager).model_dump(mode="json")
         if info["status"] in {"stopped", "ended", "failed"}:
             continue
-        presence = getattr(manager, "is_session_live", None)
-        if callable(presence):
-            observed = presence(session.session_id)
-            info["session_live"] = observed if type(observed) is bool else None
+        observed = getattr(getattr(session, "client", None), "is_running", None)
+        info["session_live"] = observed if type(observed) is bool else None
         item = {
             "kind": "managed", "handle": info["session_id"],
             "sources": ["managed"], "session": info,

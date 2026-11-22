@@ -45,6 +45,7 @@ def cached_local_worktrees(request: Any) -> dict[str, Any]:
     """Never start or join the global cache's remote-source crawl."""
     from .routes import worktrees
     from .routes.worktree_refresh import worktree_sources
+    from .local_session_catalog import REPOSITORY_INVENTORY_UNAVAILABLE
 
     resolver = getattr(request.app.state, "resolver", None)
     host = local_machine(resolver)
@@ -87,8 +88,9 @@ def cached_local_worktrees(request: Any) -> dict[str, Any]:
         for name in names
     }
     mismatch = any(entry.machine != host for name in expected for entry in cached.get(name, []))
+    catalog_available = not getattr(resolver, "repository_inventory_unavailable", False)
     complete = (
-        bool(names)
+        catalog_available
         and not mismatch
         and all(item.get("completeness") == "complete" for item in observations.values())
     )
@@ -102,7 +104,13 @@ def cached_local_worktrees(request: Any) -> dict[str, Any]:
             "scope": "local",
             "freshness": "fresh" if fresh else "unknown" if not observations else "stale",
             "completeness": "complete" if complete else "incomplete",
-            "diagnostic": "execution_identity_mismatch"
+            "repository_inventory": {
+                "availability": "available" if catalog_available else "unavailable",
+                "reason": None if catalog_available else REPOSITORY_INVENTORY_UNAVAILABLE,
+            },
+            "diagnostic": REPOSITORY_INVENTORY_UNAVAILABLE
+            if not catalog_available
+            else "execution_identity_mismatch"
             if mismatch
             else (None if fresh else "local_cache_incomplete"),
         },

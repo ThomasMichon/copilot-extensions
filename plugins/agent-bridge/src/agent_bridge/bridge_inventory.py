@@ -45,28 +45,47 @@ def _native(item: dict[str, Any]) -> str | None:
         native = _text(row.get("acp_session_id"))
         durable = _text(row.get("durable_session_id"))
         return native or (durable if durable != row.get("session_id") else None)
-    return (
-        _text(row.get("durable_session_id"))
-        or _text(
-            row.get(
-                "session_id" if item.get("kind") == "live" else "acp_session_id",
-            )
+    return _text(row.get("durable_session_id")) or _text(
+        row.get(
+            "session_id" if item.get("kind") == "live" else "acp_session_id",
         )
-        or (_text(row.get("session_id")) if item.get("kind") == "session_host" else None)
+    )
+
+
+def _scope_conflicts(first: dict[str, Any], second: dict[str, Any]) -> bool:
+    a, b = _identity(first), _identity(second)
+    return any(
+        x and y and x != y
+        for x, y in zip(
+            (*a[:3], _scope_path(a[3])),
+            (*b[:3], _scope_path(b[3])),
+            strict=True,
+        )
     )
 
 
 def _matches(first: dict[str, Any], second: dict[str, Any]) -> bool:
+    if _scope_conflicts(first, second):
+        return False
     a, b = _identity(first), _identity(second)
-    if any(x and y and x != y for x, y in zip(a[:2], b[:2], strict=True)):
-        return False
-    if a[3] and b[3] and _scope_path(a[3]) != _scope_path(b[3]):
-        return False
     if a[2] and b[2]:
         return a[2] == b[2]
+    native_a, native_b = _native(first), _native(second)
+    if native_a and native_b:
+        return native_a == native_b
+    return bool(a[1] and b[1] and a[3] and b[3] and (ntpath.isabs(a[3]) or posixpath.isabs(a[3])))
+
+
+def _matches_group(item: dict[str, Any], group: list[dict[str, Any]]) -> bool:
+    if any(_scope_conflicts(item, other) for other in group) or not any(
+        _matches(item, other) for other in group
+    ):
+        return False
+    workspace, native = _identity(item)[2], _native(item)
     return bool(
-        (_native(first) and _native(first) == _native(second))
-        or (a[1] and b[1] and a[3] and b[3] and (ntpath.isabs(a[3]) or posixpath.isabs(a[3])))
+        not native
+        or any(workspace and workspace == _identity(other)[2] for other in group)
+        or not any(_native(other) and _native(other) != native for other in group)
     )
 
 
@@ -114,6 +133,7 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         for value in [
             *[_text(row.get("session_id")) for row in registrations],
             *[_native(item) for item in active_managed],
+            *[_native(item) for item in live if item.get("kind") == "session_host"],
         ]
         if value
     }
@@ -142,7 +162,11 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
     count = count if type(count) is int and count >= 0 else 0
     bound_live = metadata.get("session_bound_live") if owner_current else None
     process_live = bound_live is True or metadata.get("session_live") is True
-    if not workspace and not live:
+    if (
+        not workspace
+        and not live
+        and not any(_identity(item)[2] and _native(item) for item in managed_items)
+    ):
         return None
     project, machine, worktree_id, directory = _identity(workspace or group[0])
     for item in group:
@@ -172,7 +196,10 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         and not any(_native(item) for item in candidates)
     ):
         return None
-    negative = bound_live is False or (bool(session) and session.get("status") in _TERMINAL)
+    negative = bound_live is False or (
+        bool(session)
+        and (session.get("status") in _TERMINAL or session.get("session_live") is False)
+    )
     is_live = True if positive else False if negative else None
     anchor = not worktree_id or metadata.get("kind") in {"anchor", "bare"}
     if anchor and is_live is not True:
@@ -186,7 +213,9 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         or "unknown"
     )
     name = _text(mode_session.get("agent_name")) or _text(metadata.get("agent_name")) or ""
-    namespace = name.split(":", 1)[0] if ":" in name else "local"
+    venue = registration.get("venue")
+    venue = venue if isinstance(venue, dict) else {}
+    namespace = name.split(":", 1)[0] if ":" in name else _text(venue.get("kind")) or "local"
     handle = worktree_id or _text(group[0].get("handle"))
     controlled = not ambiguous and bool(registration or current)
     return {
@@ -296,9 +325,10 @@ def project_bridges(
                 groups.append(group)
                 workspaces[key] = group
                 index(item, group)
-    for item in targets:
-        if item.get("kind") == "worktree":
-            continue
+    for item in sorted(
+        (item for item in targets if item.get("kind") != "worktree"),
+        key=lambda item: _native(item) is None,
+    ):
         candidates = {
             id(group): group
             for group in [
@@ -307,9 +337,7 @@ def project_bridges(
                 *by_path.get(path_key(item) or ("", ""), []),
             ]
         }
-        matches = [
-            group for group in candidates.values() if any(_matches(item, other) for other in group)
-        ]
+        matches = [group for group in candidates.values() if _matches_group(item, group)]
         if len(matches) == 1:
             group = matches[0]
             group.append(item)

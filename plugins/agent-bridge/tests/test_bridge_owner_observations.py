@@ -255,3 +255,95 @@ async def test_real_failed_serializer_fallback_does_not_create_native_history(
     assert serialized["durable_session_id"] == failed.session_id
     state.worktree_discovery_cache._cache = {"example": [replace(bound.entry, session_count=0)]}
     assert (await inventory(bound.request, project="example-project"))["bridges"] == []
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_local_catalog_availability_is_independent_of_cached_row_count(
+    metadata_boundary: Any,
+    empty: bool,
+    unavailable: bool,
+) -> None:
+    from agent_bridge.bridge_observations import cached_local_worktrees
+
+    state = metadata_boundary.request.app.state
+    resolver = state.resolver
+    resolver._local_machine = SimpleNamespace(key=metadata_boundary.entry.machine)
+    resolver.repository_inventory_unavailable = unavailable
+    if empty:
+        resolver.agents = {}
+        state.worktree_discovery_cache._cache = {}
+    else:
+        config = resolver.agents["example"]
+        config.worktree_discovery, config.host, config.provider = True, None, None
+    result = cached_local_worktrees(metadata_boundary.request)
+    assert result["discovery"]["completeness"] == ("incomplete" if unavailable else "complete")
+    assert result["discovery"]["repository_inventory"]["availability"] == (
+        "unavailable" if unavailable else "available"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connected", [None, False, True])
+async def test_idle_ssh_presence_uses_attached_client_through_real_serialization(
+    metadata_boundary: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    connected: bool | None,
+) -> None:
+    from agent_bridge import target_inventory
+    from agent_bridge.routes import worktrees
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.session_status import SessionStatus
+
+    bound = metadata_boundary
+    state = bound.request.app.state
+    state.resolver._local_machine = SimpleNamespace(key="observer-a")
+    state.resolver.resolve_ssh_environment = lambda _address: (
+        SimpleNamespace(key="execution-b"),
+        None,
+    )
+    target = replace(
+        state.resolver.resolve("example"),
+        type="ssh",
+        host="transport-alias",
+        worktree_id=None,
+    )
+    session: Any = Session("control-idle", "Idle conversation", target, agent_name="example")
+    session.acp_session_id = "native-idle"
+    session.status = SessionStatus.IDLE
+    bound.db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=session.agent_name,
+        caller_id=None,
+        target_dir=target.cwd,
+        target_type=target.type,
+        status=session.status.value,
+        now=session.created_at,
+        target_json=target.to_json(),
+        acp_session_id=session.acp_session_id,
+    )
+    bound.manager._sessions[session.session_id] = session
+    session.client = (
+        None if connected is None else SimpleNamespace(is_running=connected, pid=12345)
+    )
+    bound.manager._host_index.register(
+        HostRecord(session.session_id, 12345, 1, 2, boundary="ssh", extra={"cwd": target.cwd})
+    )
+    monkeypatch.setattr(bound.manager, "_rec_host_alive", lambda _record: True)
+
+    async def cached(_request: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"groups": {}, "discovery": sources()["worktrees"]}
+
+    monkeypatch.setattr(worktrees, "list_worktrees", cached)
+    catalog = await target_inventory.inventory(bound.request)
+    (item,) = [item for item in catalog["targets"] if item.get("kind") == "managed"]
+    assert item["session"]["session_live"] is connected
+    result = await inventory(bound.request, project="example-project", live=True)
+    assert len(result["bridges"]) == int(connected is True)
+    if connected:
+        (row,) = result["bridges"]
+        assert row["machine"] == "execution-b"
+        assert row["managed_session_id"] == session.session_id
+        assert row["session_id"] == "native-idle"
