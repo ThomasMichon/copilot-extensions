@@ -4441,14 +4441,63 @@ unchanged fallback implementation add source bindings; the implementation is
 the sole new target. All 8,247 preceding nodes retain relative order, all
 1,186 source hashes and 449 targets remain intact, and all 89 helper
 decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
-enforced. Current-head review and complete fresh required Linux CI remain
-pending; the guarded subset is development evidence, not a full-packet result.
+enforced. Fatal Ruff, strict Python 3.10/Linux and Windows typing,
+documentation consistency and diff checks pass.
+
+Copilot approval `6011423452` covers exact head
+`da647ecf38d9f496ae1de08551e9338a80e69a33`, with no active findings.
+Source CI `45005613085`, unit job `137156421764`, freshly passes all 8,351
+cases with 39 deselections, 153.49 pytest seconds and 174.167 packet seconds.
+It reports `mode=executed`, origin run `45005613085` attempt one, execution
+identity `21745c59bb15e3dd07da718a3ec1d8f685ec65ede4ee658d418fa2cc3536fab1`
+and packet digest
+`0beb9119fd3a8c658d4b4d73559a18963e4d1d100dafe1c3b6e1ed59d200d03b`.
+Required aggregate `137157407607`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14063 merges at `2026-11-22T09:09:07Z` as
+`d56f481a236cacf0ed4090401e50ff8b125fce1f`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 104-case leaf.
 
 This exercises the existing pure algorithm, not portfolio routing, baseline
 adoption, workflow policy, installed behavior or activation. No runtime or
 installation change requires a fresh-install or native lane. The host-query
 and undeclared-data refusals, shared-owner seams and broader parent gates
 remain open. This is not a reuse hit or a measured whole-flow saving.
+
+### November 22 original coverage-policy class qualification
+
+A new adapter exports the complete original `TestSelectTests`,
+`TestComputeFallbackSet` and `TestDefaultTierEligibleTests` classes without
+reconstructing classes or replacing methods. Their 20 original selectors,
+class/method objects, shared synthetic baseline, class helpers and assertions
+are preserved. The other 137 collected original-module cases, including real
+integration witnesses, remain unchanged and outside this admission.
+
+Complete collection identity passes. Fresh guarded execution passes all 20
+cases in 1.500 seconds with zero prohibited effects, 23 bound Python reads
+and positive actual call-phase selection/fallback-owner lines per case.
+Only the adapter, original test module and seven imported Python modules
+require new bindings; this closes reads of the original module's unchanged
+import closure rather than executing its integration tests or changing
+source/data policy.
+
+The compact-v2 candidate contains 8,371 nodes, 1,198 bound sources, the
+existing 450 targets and 942,466 bytes. All 8,351 preceding nodes retain
+relative order and all 1,189 preceding source hashes remain intact. Coverage
+targets, 89 helper decisions, compact/flat-v1 identity, byte cap and the
+300-second bound remain enforced. Current-head review and complete fresh
+required Linux CI remain pending; the subset is development evidence, not a
+full-packet result.
+
+No original test, production implementation, workflow, runtime or effect
+auditor changes. This is pure algorithm-policy coverage, not portfolio
+activation, baseline adoption, real Git, installed execution or scheduled
+integration qualification. Fresh-install/native lanes are not exercised
+because installation/runtime behavior is unchanged. All retained refusals,
+shared-owner seams and broader parent gates remain open.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 

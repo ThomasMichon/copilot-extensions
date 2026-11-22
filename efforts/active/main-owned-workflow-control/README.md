@@ -1397,7 +1397,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,247
   units freshly executed. The original tier-disjointness assertion and
   broader Windows, scheduled-integration and parent gates remain open.
-- [ ] Qualify all 104 original fallback-equivalence cases, preserving all three
+- [x] Qualify all 104 original fallback-equivalence cases, preserving all three
   original functions, the greedy reference implementation, all 100 seeds,
   nine budgets per seed, parameters and assertions without reducing the matrix.
   Require complete original/adapter collection identity, closed reads,
@@ -1413,6 +1413,28 @@ authorizes critical main-path acceptance or a bounded administrative change.
   positive actual call-phase algorithm-owner lines per case. The compact-v2
   candidate contains 8,351 nodes, 1,189 sources and 450 targets; all 8,247
   preceding nodes, source hashes and 89 helper decisions remain intact.
+  #14063 merges at `d56f481a236cacf0ed4090401e50ff8b125fce1f` after
+  exact-head Copilot approval and complete required Linux CI with all 8,351
+  units freshly executed. Only this finite leaf is complete; portfolio
+  activation, shared-owner seams and broader parent gates remain open.
+- [ ] Qualify the 20 original pure coverage-policy methods in the complete
+  `TestSelectTests`, `TestComputeFallbackSet` and
+  `TestDefaultTierEligibleTests` classes. Preserve the exact class and method
+  objects, shared synthetic baseline, class helpers and assertions.
+  Keep all other original-module methods and real integration witnesses
+  unchanged with their existing owners. Require complete selected
+  original/adapter collection identity, a closed source-read import closure,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no portfolio
+  activation, baseline adoption, workflow or native contract changes.
+  Complete collection maps all 20 exact class/method objects from 157 original
+  cases. Fresh guarded qualification passes all 20 in 1.500 seconds, with zero
+  prohibited effects, 23 bound Python reads and positive actual call-phase
+  owner lines per case. Nine bindings close the original module's import
+  closure; no target or admission-policy change is needed. The compact-v2
+  candidate contains 8,371 nodes, 1,198 sources and the existing 450 targets.
   Current-head review and complete fresh required Linux CI remain pending.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
