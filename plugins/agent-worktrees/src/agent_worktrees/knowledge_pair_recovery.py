@@ -123,8 +123,11 @@ def recover(
             }):
                 locks.enter_context(finalize_lock.FinalizeLock(lock, timeout=3, stale_after=3600))
             for member_path in sorted((path, child_path)):
-                locks.enter_context(launch_admission.guard(member_path))
-                locks.enter_context(worktree_lifecycle.guard(member_path))
+                if member_path == path:
+                    locks.enter_context(launch_admission.existing_harness_guard(record))
+                else:
+                    locks.enter_context(launch_admission.guard(member_path))
+                    locks.enter_context(worktree_lifecycle.guard(member_path))
             path, record = _subject(config, worktree_id)
             if initial != (
                 record.creation_nonce, record.worktree_path, record.branch, record.pair_id, record.pair_ref,
