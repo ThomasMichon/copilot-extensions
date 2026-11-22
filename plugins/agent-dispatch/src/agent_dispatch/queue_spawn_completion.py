@@ -147,7 +147,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                 or session_handle is not None and row["session_handle"] not in (None, session_handle)
             ):
                 from .native_attachment_custody import require_not_reassigned
-                require_not_reassigned(conn, row, session_handle)
+                require_not_reassigned(conn, row, session_handle, worktree)
             if row["state"] == SpawnState.COLD and cold_restarted is not None:
                 cold_restarted(conn)
 

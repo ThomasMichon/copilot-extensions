@@ -141,7 +141,7 @@ class SpawnReleaseMixin:
                     f"not {worktree!r}"
                 )
             from .native_attachment_custody import require_not_reassigned
-            require_not_reassigned(conn, row, session_handle)
+            require_not_reassigned(conn, row, session_handle, worktree)
             clear_retirement = False
             if session_handle is not None:
                 from .queue_pool_placement import pool_native_publication

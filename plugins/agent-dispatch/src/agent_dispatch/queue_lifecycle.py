@@ -793,6 +793,9 @@ class QueueLifecycleMixin(QueueProgressMixin, OperatorHoldMixin):
                     f"cannot {note or to} a {task.status!r} task (allowed: {sorted(allowed_set)})"
                 )
             if to == Status.STARTED:
+                if (extra or {}).get("owner_session_id", task.owner_session_id) == task.owner_session_id:
+                    from .native_attachment_custody import require_retained_resume
+                    require_retained_resume(conn, task)
                 require_execution_admission(conn, task_id)
                 from .queue_task_relationships import require_relationship
                 require_relationship(conn, task_id)

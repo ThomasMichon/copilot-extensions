@@ -96,6 +96,85 @@ def test_release_and_native_attachment_cannot_overtake_each_other(
     assert before == (queue.get(new.id), queue.get_reservation(res.key))
 
 
+@pytest.mark.parametrize("release_first", [False, True])
+@pytest.mark.parametrize("incoming", ["native", "other"])
+def test_published_reservation_without_attachment_still_guards_native(
+    tmp_path: Path, release_first: bool, incoming: str,
+) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    old = queue.create("never started", repo="example")
+    new = queue.create("new assignment", repo="example")
+    assert isinstance(old, Task) and isinstance(new, Task)
+    res, _ = queue.reserve_spawn(old.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    assert not queue.attachment_history(old.id)
+    queue.claim_one("host/tree", task_id=new.id)
+
+    def release() -> None:
+        queue.request_spawn_release(res.key)
+
+    def attach() -> None:
+        queue.start(new.id, "host/tree", owner_session_id=incoming)
+
+    first, second = (release, attach) if release_first else (attach, release)
+    first()
+    if incoming != "native":
+        second()
+        return
+    before = queue.get(new.id), queue.get_reservation(res.key)
+    with pytest.raises(TaskError):
+        second()
+    assert before == (queue.get(new.id), queue.get_reservation(res.key))
+
+
+@pytest.mark.parametrize("adopt", [False, True])
+def test_same_native_resume_waits_for_foreign_release(tmp_path: Path, adopt: bool) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    old = queue.create("previous task", repo="example")
+    active = queue.create("suspended assignment", repo="example")
+    assert isinstance(old, Task) and isinstance(active, Task)
+    res, _ = queue.reserve_spawn(old.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    queue.claim_one("host/tree", task_id=active.id)
+    queue.start(active.id, "host/tree", owner_session_id="native")
+    held = queue.suspend(active.id, "host/tree", reason="wait", cooldown_seconds=None)
+    # A previous coordinator admitted release without the original attachment.
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET state='releasing',release_requested=1 WHERE key=?",
+                     (res.key,))
+        conn.commit()
+    before = queue.attachment_history(active.id)
+    with pytest.raises(TaskError, match="remains admitted"):
+        queue.resume(active.id, "host/tree", wake_requested=True, adopt_owner_session_id="native" if adopt else None)
+    assert queue.get(active.id) == held and queue.attachment_history(active.id) == before
+    assert not queue.list_wakes(active.id)
+
+
+def test_scheduled_resume_rechecks_native_before_sending(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    old = queue.create("previous task", repo="example")
+    active = queue.create("resuming assignment", repo="example")
+    assert isinstance(old, Task) and isinstance(active, Task)
+    res, _ = queue.reserve_spawn(old.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    queue.claim_one("host/tree", task_id=active.id)
+    queue.start(active.id, "host/tree", owner_session_id="native")
+    queue.suspend(active.id, "host/tree", reason="wait", cooldown_seconds=None)
+    queue.resume(active.id, "host/tree", wake_requested=True)
+    wake = queue.claim_due_wake()
+    assert wake is not None
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET state='releasing',release_requested=1 WHERE key=?",
+                     (res.key,))
+        conn.commit()
+    with pytest.raises(TaskError, match="remains admitted"):
+        queue.admit_execution_wake(wake, provenance=None)
+    assert queue.list_wakes(active.id)[0].execution_send_state is None
+
+
 @pytest.mark.parametrize("cleanup_first", [False, True])
 @pytest.mark.parametrize("retire", ["fail_spawn", "settle_spawn"])
 def test_retired_cleanup_and_native_attachment_cannot_overtake_each_other(

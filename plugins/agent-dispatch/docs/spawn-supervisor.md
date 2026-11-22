@@ -1178,6 +1178,10 @@ Completion counts even when it leaves the original attachment undetached.
 A release-in-progress or pending/held retired cleanup also retains custody.
 Cleanup retry admission and lease revalidation both reject a later attachment;
 new attachment admission checks the same outstanding effects in reverse.
+A reservation may already name a native and workspace before its task first
+starts. Missing attachment history is not proof that the native is free.
+Resuming a retained session checks outstanding effects even when no new
+attachment row is needed, and wake delivery checks again before sending.
 Reopening startup, changing an existing handle, or restarting a cold
 reservation checks the recorded native even if the caller omits the startup
 flag or reports the restart already complete. Claiming a cooling stop checks

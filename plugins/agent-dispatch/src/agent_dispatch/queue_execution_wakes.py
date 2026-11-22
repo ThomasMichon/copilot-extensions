@@ -349,6 +349,12 @@ class QueueExecutionWakesMixin:
             )
             if not current or task is None:
                 raise TaskError("wake send task fence advanced")
+            if wake.owner_session_id:
+                from .native_attachment_custody import require_no_prior_effect
+                from .queue_common import _claimant_worktree_machine
+                tree = (wake.resume_worktree if isinstance(wake, RunWaiterWakeOperation)
+                        else _claimant_worktree_machine(task)[1])
+                require_no_prior_effect(conn, task.id, wake.owner_session_id, tree)
             if conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id = ?"
                 " AND cooling_token IS NOT NULL LIMIT 1", (task.id,),
