@@ -101,6 +101,11 @@ The `sessionStart` hooks are output-free: runtime bootstrap and a bounded
 Bootstrap consults the packaged [canonical publication admission](../../libs/installation-context/README.md)
 before stamping or drift reconciliation, including without Python. A refusal
 does not suppress the separate posture cue; healthy runtime reuse stays read-only.
+An existing legacy `reconcile.lock` defers automatic drift work without probing,
+signaling or replacing the recorded process. A PID or old timestamp is not
+process ownership. The record is retained for explicit installation management;
+it does not gate the explicit installer or imply that an earlier installation
+succeeded. Adoption of the shared typed installation executor remains separate.
 The cue reads inert configuration with the same pure posture, never authorizes
 readers or refreshes a provider, and uses a reviewed pointer plus a separate
 static advisory boundary. It requires an available Python 3.10+ interpreter

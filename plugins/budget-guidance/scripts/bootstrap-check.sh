@@ -39,9 +39,8 @@ fi
 # update path is always-ZDD (safe to run unattended), that justification is
 # gone; the gate was removed rather than kept as a redundant consent
 # checkbox. Frequency/trigger stays deliberately bounded -- still only once
-# per session start, only on a real version drift. What DOES still bound
-# concurrency is the single-flight + stale-reap guard below (a lock file,
-# not the removed opt-in) -- see its own comment.
+# per session start, only on a real version drift. A legacy reconcile record
+# defers automatic work; it cannot prove process ownership or authorize retirement.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 session_start_json_emitted=0
@@ -130,26 +129,12 @@ fi
 
 assert_bootstrap_publication
 
-# --- Good boot-citizen guard: single-flight + stale-reap ---
-# This hook fires on EVERY new session now that the opt-in gate is gone
-# (agent-bridge-unified-zdd-cutover Phase 0 review finding): without this,
-# a slow or wedged reconcile gets re-spawned every session, stacking
-# orphaned background installers. If a prior reconcile is still running:
-#   YOUNG (<10m) -> already in flight; do nothing (never stack).
-#   STALE (>=10m) -> wedged; reap it, then relaunch (self-heals a one-off
-#                    wedge instead of poisoning every future session).
+# A PID and file age cannot identify an owned process, even if it is live.
+# Keep automatic work off an unsettled legacy owner; explicit setup is separate.
 lockFile="$InstallDir/reconcile.lock"
-staleSeconds=600
-if [ -f "$lockFile" ]; then
-  lockPid="$(tr -d '[:space:]' < "$lockFile" 2>/dev/null)"
-  if [ -n "$lockPid" ] && kill -0 "$lockPid" 2>/dev/null; then
-    lockMtime="$(stat -c %Y "$lockFile" 2>/dev/null || stat -f %m "$lockFile" 2>/dev/null || echo 0)"
-    nowSecs="$(date -u +%s)"
-    if [ "$lockMtime" -gt 0 ] && [ $((nowSecs - lockMtime)) -lt "$staleSeconds" ]; then
-      exit 0
-    fi
-    kill "$lockPid" 2>/dev/null || true
-  fi
+if [[ -e "$lockFile" || -L "$lockFile" ]]; then
+  printf '[%s] bootstrap deferred: legacy reconcile ownership is unsettled; use explicit installation management.\n' "$name" >&2
+  exit 0
 fi
 
 echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
