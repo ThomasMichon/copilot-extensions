@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original installer parser and temporary-file guard units without installer execution",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
