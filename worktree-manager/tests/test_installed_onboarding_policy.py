@@ -1,4 +1,5 @@
 """Exercise the installed passive readers, not checkout imports."""
+import os
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,7 @@ class InstalledPolicyTest(unittest.TestCase):
             anchor.mkdir()
             companion.mkdir()
 
-            def observe(app: str, expected: str | None, *, bound: bool = True) -> None:
+            def observe(app: str, expected: str | None, *, bound: bool = True, index_machine: str = "fixture") -> None:
                 probe = (
                     "import sys,runpy\n"
                     "def guard(event,args):\n"
@@ -25,7 +26,8 @@ class InstalledPolicyTest(unittest.TestCase):
                 )
                 result = subprocess.run(
                     [sys.executable, "-I", "-B", "-c", probe, app, temp, "control",
-                     str(anchor), str(companion) if bound else "", "fixture"], capture_output=True, text=True, timeout=30,
+                     str(anchor), str(companion) if bound else "", "worktrees-alias"], capture_output=True, text=True,
+                    env={**os.environ, "AGENT_INDEX_MACHINE": index_machine}, timeout=30,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 self.assertNotIn("unexpected service effect", result.stderr)
@@ -47,6 +49,7 @@ class InstalledPolicyTest(unittest.TestCase):
             policy.parent.mkdir()
             policy.write_text("requires_external_state_root: true\n", encoding="utf-8")
             observe("agent-index", "host")
+            observe("agent-index", "client", index_machine="different-index-host")
             observe("agent-vault", "configured")
             base_vault = anchor / ".agent-vault.json"
             base_vault.write_text('{"enabled":true,"port":"invalid"}', encoding="utf-8")

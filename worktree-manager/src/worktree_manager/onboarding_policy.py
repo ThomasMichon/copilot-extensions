@@ -45,7 +45,8 @@ def observe(app: str, root: Path, project: str, anchor: Path, companion: Path | 
         if result["layers"] == ["defaults"]:
             return "unconfigured"
         machines = {x["machine"].casefold() for x in native._validate_config(result["values"])["indexers"]}
-        return ("host" if target.casefold() in machines else "client") if machines else "unconfigured"
+        index_machine = owner("agent_index.config").machine_id().casefold()
+        return ("host" if index_machine in machines else "client") if machines else "unconfigured"
     if app == "agent-vault":
         vault = owner("agent_vault.configuration")
         machine = owner("configuration_layers").read_source(str(config), "config.json") if config.exists() else None
