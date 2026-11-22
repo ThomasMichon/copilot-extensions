@@ -70,9 +70,18 @@ Dehydrate refuses, without writing a catalog entry, unless all hold:
    used, because it also flags ordinary ignored build output, which
    dehydration is meant to remove.
 6. `git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none`
-   succeeds and is empty, checked again just before removal.
+   succeeds and is empty, and no index entry has the assume-unchanged or
+   skip-worktree flag (`git ls-files -v`: a lowercase tag or `S`). Both Git
+   status and `git worktree remove` trust those flags, so a hidden edit would
+   otherwise be lost. This is checked again just before removal.
 7. Strict session liveness proves no live registered session, and no process
    uses the checkout. Unknown liveness refuses.
+
+Dehydrate, rehydrate, reconcile and release-recovery-hold apply the
+receiving-side `execution_spaces.require_record_mutation` admission under the
+shared guards, before they read or change the catalog or checkout (code
+`mutation-refused`). Recover applies it to the rebuilt record before it
+writes anything.
 
 The operation holds the finalize lock, then the lifecycle and launch-admission
 guards. It then runs `git worktree remove <path>` from the anchor **without
@@ -86,15 +95,23 @@ before the stage becomes `dehydrated`.
 Rehydrate requires that the branch exists and its tip equals the cataloged
 HEAD; a moved tip is a `conflict` refusal (never a reset or a recreated
 branch). The destination must be absent or empty. It runs
-`git worktree add <path> <branch>` (no `-b`, no fetch), restores recorded
-per-worktree config retry-safely (`--unset-all`, then each value in order),
-verifies branch and HEAD, and deletes the catalog entry last.
+`git worktree add --no-checkout <path> <branch>` (no `-b`, no fetch), restores
+the recorded per-worktree config file atomically and verifies its entries, and
+only then populates the files with `git reset --hard HEAD` inside the new
+checkout. That reset is safe only because the checkout was just created and
+holds nothing but its `.git` file and no index. Overrides such as
+`core.symlinks` or `core.autocrlf` therefore apply to the files. It then
+requires a clean status, verifies branch and HEAD, and deletes the catalog
+entry last.
 
 Reconcile never removes a valid checkout:
 
-- Stage `removing` with a valid checkout at the snapshot HEAD rolls back to
-  hydrated; at a different HEAD it is a hold.
-- A valid checkout at any other stage completes the rehydrate.
+- Stage `removing` with a clean, valid checkout at the snapshot HEAD rolls
+  back to hydrated; a different HEAD or a partly removed (dirty) checkout is a
+  hold.
+- A valid checkout at any other stage completes the rehydrate. An unpopulated
+  checkout (only `.git`, no index) gets its config and then its files; files
+  without an index, or a checkout that is not clean afterwards, are a hold.
 - A partial or foreign path, or an absent path that Git still registers, is a
   hold.
 - An absent, unregistered path becomes `dehydrated`.
@@ -121,4 +138,15 @@ publishes any obligation. Claimant resolution treats a dehydrated record, or
 a catalog-only recovery candidate, as a held live claimant, so the sweep does
 not abandon its inbound or outbound claims. Managed branch deletion and
 feature-branch moves (`branch -f`) refuse a branch that a catalog entry
-reserves.
+reserves. Reservation discovery reads fresh entries from today's configured
+roots and from the catalog beside every recorded checkout, so it survives a
+worktree-root change. It fails closed: for an unreadable or corrupt entry the
+branch comes from its tracking record; when that is unknown, or the catalog
+directory cannot be listed, every branch of that repository is held until the
+entry is reconciled.
+
+Observation paths (for example `prune` assessing every inactive record) share
+one parsed index per catalog directory. The index is revalidated on each call
+by a cheap signature of the entries (name, size, mtime and inode), so any
+publication or retirement re-reads it. Transitions and branch mutations always
+read entries fresh.

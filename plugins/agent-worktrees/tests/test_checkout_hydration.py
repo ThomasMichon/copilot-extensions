@@ -10,13 +10,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from machine_transport import detect_platform
 
 from agent_worktrees import checkout_hydration as hydration
 from agent_worktrees import checkout_hydration_catalog as catalog
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, prune, procs, sessions, tracking
+from agent_worktrees import execution_spaces, git_ops, prune, procs, sessions, tracking
 
 WT_ID = "fixture-win-20261121-100000-abcd"
+_REAL_ADMISSION = execution_spaces.require_record_mutation
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -38,6 +40,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         lambda *_a, **_k: SimpleNamespace(probes_ok=True, active=False),
     )
     monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda *_a, **_k: None)
+    # Receiving-side admission needs a machine registry; refusal tests restore it.
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", lambda *_a, **_k: None)
     anchor = base / "anchor"
     anchor.mkdir()
     _git(anchor, "init", "-q", "-b", "main")
@@ -473,3 +477,241 @@ def test_non_string_stage_is_a_catalog_error() -> None:
             "stage": ["dehydrated"], "identity": {"worktree_id": WT_ID, "checkout_path": "x"},
             "git": {"branch": "b", "head": "0" * 40},
         })
+
+
+# --- second review: hidden index flags, admission, materialization, reservations, index cache ---
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_hidden_index_flags_refuse(env: SimpleNamespace, flag: str) -> None:
+    _git(env.checkout, "update-index", flag, "wip.txt")
+    (env.checkout / "wip.txt").write_bytes(b"hidden edit\n")
+    assert _git(env.checkout, "status", "--porcelain") == ""  # git itself hides the edit
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "hidden-index-flags" and "wip.txt" in caught.value.details["entries"]
+    assert (env.checkout / "wip.txt").read_bytes() == b"hidden edit\n" and not env.entry.exists()
+
+
+def _refuse(*_a: object, **_k: object) -> None:
+    raise execution_spaces.ExecutionSpaceError("owned record has an unqualified owner reference")
+
+
+@pytest.mark.parametrize("operation", ["dehydrate", "rehydrate", "reconcile", "release_recovery_hold"])
+def test_mutation_admission_refuses_before_any_change(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    if operation != "dehydrate":
+        hydration.dehydrate(WT_ID, env.config)
+    before = env.entry.read_bytes() if env.entry.exists() else None
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", _refuse)
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        getattr(hydration, operation)(WT_ID, env.config)
+    assert caught.value.code == "mutation-refused"
+    assert (env.entry.read_bytes() if env.entry.exists() else None) == before
+    assert env.checkout.exists() is (operation == "dehydrate")
+
+
+def test_foreign_platform_record_is_refused_by_real_admission(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_load = hydration._load
+
+    def foreign(ledger: Path) -> object:
+        record = real_load(ledger)
+        other = "linux" if detect_platform() != "linux" else "windows"
+        record.platform = other
+        record._reporting_context = SimpleNamespace(environment=other)
+        return record
+
+    monkeypatch.setattr(hydration, "_load", foreign)
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", _REAL_ADMISSION)
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "mutation-refused" and "platform" in str(caught.value)
+    assert env.checkout.exists() and not env.entry.exists()
+
+
+def test_recover_applies_admission_before_rebuilding(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hydration.dehydrate(WT_ID, env.config)
+    env.ledger.unlink()
+    monkeypatch.setattr(execution_spaces, "require_record_mutation", _refuse)
+    item = hydration.recover(env.config, apply=True)["entries"][0]
+    assert item["verdict"] == "hold" and item["applied"] is False
+    assert not env.ledger.exists() and "recovery_hold" not in (catalog.read_entry(env.entry) or {})
+
+
+def _crlf_fixture(env: SimpleNamespace) -> None:
+    """Repo config keeps LF; the per-worktree config asks for CRLF on checkout."""
+    _git(env.anchor, "config", "core.autocrlf", "false")
+    (env.checkout / "lf.txt").write_bytes(b"one\ntwo\n")
+    _git(env.checkout, "add", "lf.txt")
+    _git(env.checkout, "commit", "-q", "-m", "lf")
+    _git(env.anchor, "config", "extensions.worktreeConfig", "true")
+    _git(env.checkout, "config", "--worktree", "core.autocrlf", "true")
+    assert _git(env.checkout, "status", "--porcelain") == ""
+
+
+def test_worktree_config_applies_before_files_materialize(env: SimpleNamespace) -> None:
+    _crlf_fixture(env)
+    hydration.dehydrate(WT_ID, env.config)
+    hydration.rehydrate(WT_ID, env.config)
+    assert (env.checkout / "lf.txt").read_bytes() == b"one\r\ntwo\r\n"
+    assert _git(env.checkout, "status", "--porcelain") == "" and not env.entry.exists()
+
+
+def _can_symlink(tmp: Path) -> bool:
+    try:
+        (tmp / "probe-link").symlink_to(tmp / "probe-target")
+    except (OSError, NotImplementedError):
+        return False
+    (tmp / "probe-link").unlink()
+    return True
+
+
+def test_worktree_symlink_override_applies_on_rehydrate(env: SimpleNamespace, tmp_path: Path) -> None:
+    if not _can_symlink(tmp_path):
+        pytest.skip("platform cannot create symlinks")
+    _git(env.anchor, "config", "core.symlinks", "true")
+    _git(env.anchor, "config", "extensions.worktreeConfig", "true")
+    _git(env.checkout, "config", "--worktree", "core.symlinks", "false")
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"], cwd=env.checkout, input="a.txt", check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    _git(env.checkout, "update-index", "--add", "--cacheinfo", f"120000,{blob},link")
+    _git(env.checkout, "commit", "-q", "-m", "link")
+    _git(env.checkout, "checkout", "--", "link")
+    assert not (env.checkout / "link").is_symlink()
+    hydration.dehydrate(WT_ID, env.config)
+    hydration.rehydrate(WT_ID, env.config)
+    link = env.checkout / "link"
+    assert not link.is_symlink() and link.read_bytes() == b"a.txt"
+
+
+@pytest.mark.parametrize("crash", ["_restore_worktree_config", "_materialize"])
+def test_interrupted_no_checkout_rehydrate_is_completed_by_reconcile(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, crash: str,
+) -> None:
+    _crlf_fixture(env)
+    hydration.dehydrate(WT_ID, env.config)
+
+    def boom(*_a: object) -> None:
+        raise RuntimeError("crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(hydration, crash, boom)
+        with pytest.raises(RuntimeError):
+            hydration.rehydrate(WT_ID, env.config)
+    assert [p.name for p in env.checkout.iterdir()] == [".git"] and env.entry.exists()
+    assert (catalog.read_entry(env.entry) or {})["stage"] == catalog.STAGE_REHYDRATING
+    report = hydration.reconcile(WT_ID, env.config)
+    assert report["reconciled"] == "interrupted-rehydrate-completed"
+    assert (env.checkout / "lf.txt").read_bytes() == b"one\r\ntwo\r\n"
+    assert (env.checkout / "wip.txt").exists() and not env.entry.exists()
+
+
+def test_unpopulated_checkout_with_stray_files_is_a_hold(env: SimpleNamespace) -> None:
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    entry["stage"] = catalog.STAGE_REHYDRATING
+    catalog.write_entry(env.entry, entry)
+    _git(env.anchor, "worktree", "add", "-q", "--no-checkout", str(env.checkout), env.branch)
+    (env.checkout / "a.txt").write_bytes(b"partial")
+    assert hydration.reconcile(WT_ID, env.config)["state"] == "hold"
+    assert env.entry.exists() and (env.checkout / "a.txt").read_bytes() == b"partial"
+
+
+def test_partially_removed_checkout_is_not_rolled_back(env: SimpleNamespace) -> None:
+    _interrupt_before_remove(env)
+    (env.checkout / "wip.txt").unlink()  # removal stopped part-way
+    assert hydration.reconcile(WT_ID, env.config)["state"] == "hold" and env.entry.exists()
+
+
+def test_root_change_keeps_branch_reservation(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from agent_worktrees import git_collab
+
+    monkeypatch.setattr(cfg, "load_config", lambda: env.config)
+    hydration.dehydrate(WT_ID, env.config)
+    moved = tmp_path / "new-root"
+    moved.mkdir()
+    env.config.default_repo.worktree_root = str(moved)
+    assert git_ops.delete_branch(env.branch, cwd=env.anchor, force=True) is False
+
+    entry = catalog.read_entry(env.entry) or {}
+    entry["git"]["branch"] = "feature/shared"
+    catalog.write_entry(env.entry, entry)
+    _git(env.anchor, "branch", "feature/shared", env.head)
+    monkeypatch.setattr(tracking, "resolve_worktree_path", lambda *_a: str(env.anchor))
+    assert git_collab.manage_feature_branch("other", env.config, "shared") is False
+    assert _git(env.anchor, "rev-parse", "feature/shared") == env.head
+    entry["git"]["branch"] = env.branch
+    catalog.write_entry(env.entry, entry)
+    assert hydration.rehydrate(WT_ID, env.config)["state"] == "hydrated"
+
+
+def test_corrupt_entry_fails_closed_at_branch_mutation(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cfg, "load_config", lambda: env.config)
+    hydration.dehydrate(WT_ID, env.config)
+    _git(env.anchor, "branch", "unrelated", env.head)
+    _git(env.anchor, "branch", "unrelated2", env.head)
+    env.entry.write_bytes(b"{not json")
+    # The ledger still names the retained branch, so only that branch is held.
+    assert git_ops.delete_branch(env.branch, cwd=env.anchor, force=True) is False
+    assert git_ops.delete_branch("unrelated", cwd=env.anchor, force=True) is True
+    env.ledger.unlink()  # unknown reservation: every branch of the repository is held
+    assert catalog.dehydrated_branch_holder(env.anchor, "unrelated2", env.config) is not None
+    assert git_ops.delete_branch("unrelated2", cwd=env.anchor, force=True) is False
+    assert _git(env.anchor, "rev-parse", env.branch) == env.head
+
+
+def test_unreadable_entry_and_directory_fail_closed(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hydration.dehydrate(WT_ID, env.config)
+    env.ledger.unlink()
+
+    def unreadable(_path: Path) -> dict[str, object] | None:
+        raise catalog.CatalogError("dehydration catalog entry is unreadable: denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog, "read_entry", unreadable)
+        assert catalog.dehydrated_branch_holder(env.anchor, "anything", env.config) is not None
+        assert catalog.is_dehydrated_checkout(env.checkout)
+
+    def denied(_directory: Path) -> object:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(catalog, "_signature", denied)
+    assert catalog.dehydrated_branch_holder(env.anchor, "anything", env.config) is not None
+    assert catalog.is_dehydrated_checkout(env.root / "some-other-worktree")
+
+
+def test_observation_batches_parse_the_catalog_once(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hydration.dehydrate(WT_ID, env.config)
+    reads: list[Path] = []
+    real = catalog.read_entry
+
+    def counting(path: Path) -> dict[str, object] | None:
+        reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(catalog, "read_entry", counting)
+    others = [SimpleNamespace(worktree_id=f"other-{i}", worktree_path=str(env.root / f"other-{i}")) for i in range(20)]
+    for _ in range(3):
+        assert not any(catalog.is_dehydrated(record) for record in others)
+    assert len(reads) == 1
+    entry = real(env.entry) or {}
+    entry["dehydrated_at"] = "changed"
+    catalog.write_entry(env.entry, entry)
+    assert catalog.is_dehydrated_checkout(env.checkout) and len(reads) == 2
+    catalog.delete_entry(env.entry)
+    assert not catalog.is_dehydrated_checkout(env.checkout)

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -138,34 +139,107 @@ def iter_entries(worktree_root: str | os.PathLike[str]) -> list[Path]:
         return []
 
 
+@dataclass(frozen=True)
+class CatalogIndex:
+    """One parse of a ``.dehydrated`` directory.
+
+    ``claims`` maps each readable entry's normalized checkout path to the
+    entry; ``unreadable`` lists entries that exist but cannot be trusted; and
+    ``directory_unreadable`` means the directory itself could not be listed.
+    """
+
+    claims: dict[str, Path] = field(default_factory=dict)
+    branches: tuple[tuple[str, str, str], ...] = ()  # (branch, worktree_id, anchor)
+    unreadable: tuple[Path, ...] = ()
+    directory_unreadable: bool = False
+
+
+_EMPTY = CatalogIndex()
+_Signature = tuple[tuple[str, int, int, int], ...]
+_INDEX_CACHE: dict[str, tuple[_Signature, CatalogIndex]] = {}
+
+
+def _key(path: str | os.PathLike[str]) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(str(path))))
+
+
+def _signature(directory: Path) -> _Signature:
+    """Per-entry (name, size, mtime_ns, inode); raises when the directory is absent.
+
+    Atomic replacement gives an entry a new inode, so any publication or
+    retirement changes the signature even within one mtime tick.
+    """
+    items: list[tuple[str, int, int, int]] = []
+    with os.scandir(directory) as listing:
+        for item in listing:
+            if item.name.endswith(".json") and not item.name.startswith("."):
+                stat = item.stat(follow_symlinks=False)
+                items.append((item.name, stat.st_size, stat.st_mtime_ns, item.inode()))
+    return tuple(sorted(items))
+
+
+def _build_index(directory: Path) -> CatalogIndex:
+    claims: dict[str, Path] = {}
+    branches: list[tuple[str, str, str]] = []
+    unreadable: list[Path] = []
+    for path in iter_entries(directory.parent):
+        try:
+            data = read_entry(path)
+        except CatalogError:
+            unreadable.append(path)
+            continue
+        if data is None:
+            continue
+        identity = data["identity"]
+        claims[_key(identity["checkout_path"])] = path
+        branches.append((data["git"]["branch"], identity["worktree_id"], str(identity.get("anchor") or "")))
+    return CatalogIndex(claims, tuple(branches), tuple(unreadable))
+
+
+def catalog_index(worktree_root: str | os.PathLike[str], *, fresh: bool = False) -> CatalogIndex:
+    """The (cached) index of one root's catalog.
+
+    Observation batches such as ``prune.assess`` over every inactive record
+    reuse one parse per root; the cache is revalidated by a cheap directory
+    signature on every call, and ``fresh=True`` (mutation boundaries) always
+    re-reads every entry.
+    """
+    directory = catalog_dir(worktree_root)
+    try:
+        signature = _signature(directory)
+    except (FileNotFoundError, NotADirectoryError):
+        _INDEX_CACHE.pop(_key(directory), None)
+        return _EMPTY
+    except OSError:
+        return CatalogIndex(directory_unreadable=True)
+    if not signature:
+        return _EMPTY
+    cached = _INDEX_CACHE.get(_key(directory))
+    if not fresh and cached is not None and cached[0] == signature:
+        return cached[1]
+    index = _build_index(directory)
+    _INDEX_CACHE[_key(directory)] = (signature, index)
+    return index
+
+
 def is_dehydrated_checkout(checkout_path: str | os.PathLike[str]) -> bool:
     """Whether a catalog entry claims ``checkout_path``.
 
-    Conservative: an entry named for the checkout that cannot be read still
-    counts, so an unreadable catalog never lets a consumer collect it.
+    Conservative: an entry named for the checkout that cannot be read (or an
+    unlistable catalog directory) still counts, so an unreadable catalog never
+    lets a consumer collect it.
     """
     path = Path(checkout_path)
-    named = entry_for_checkout(path)
-    try:
-        data = read_entry(named)
-    except CatalogError:
+    index = catalog_index(path.parent)
+    if index.directory_unreadable or _key(path) in index.claims:
         return True
-    if data is not None and same_path(data["identity"]["checkout_path"], path):
-        return True
-    return entry_claiming(path.parent, path) is not None
+    named = _key(entry_for_checkout(path))
+    return any(_key(entry) == named for entry in index.unreadable)
 
 
 def entry_claiming(worktree_root: str | os.PathLike[str], checkout_path: str | os.PathLike[str]) -> Path | None:
     """The readable entry under ``worktree_root`` whose identity names ``checkout_path``."""
-    for entry in iter_entries(worktree_root):
-        try:
-            data = read_entry(entry)
-        except CatalogError:
-            continue
-        if data is not None and same_path(data["identity"]["checkout_path"], checkout_path):
-            return entry
-    return None
-
+    return catalog_index(worktree_root).claims.get(_key(checkout_path))
 
 def record_entry_path(record: Any) -> Path | None:
     """The entry location persisted by a record's own checkout path.
@@ -243,11 +317,67 @@ def _common_dir(cwd: str | os.PathLike[str]) -> str | None:
     return value or None
 
 
+def _ledgers(config: Any) -> list[tuple[Any, dict[str, Any]]]:
+    """``(repo, ledger data)`` for every tracking record of every configured repository."""
+    import yaml
+
+    from . import config as cfg
+
+    repos: dict[str, Any] = dict(getattr(config, "repos", None) or {})
+    name = getattr(config, "repo_name", None)
+    if isinstance(name, str) and name and name not in repos:
+        try:
+            repos[name] = config.default_repo
+        except Exception:
+            pass
+    found: list[tuple[Any, dict[str, Any]]] = []
+    for repo_name, repo in repos.items():
+        try:
+            ledgers = sorted(cfg.tracking_dir(repo_name).glob("*.yaml"))
+        except Exception:
+            continue
+        for ledger in ledgers:
+            try:
+                # Only two top-level scalars are needed; skip parsing the whole record.
+                lines = [
+                    line for line in ledger.read_text(encoding="utf-8").splitlines()
+                    if line.startswith(("branch:", "worktree_path:"))
+                ]
+                data = yaml.safe_load("\n".join(lines))
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                found.append((repo, {**data, "_stem": ledger.stem}))
+    return found
+
+
+def _placements(config: Any, ledgers: list[tuple[Any, dict[str, Any]]]) -> list[tuple[Path, str]]:
+    """Every catalog directory parent to consult, with its repository anchor.
+
+    Today's configured roots plus the parent of every recorded checkout, so an
+    entry written before a worktree-root change is still found.
+    """
+    seen: dict[str, tuple[Path, str]] = {}
+    for repo in _repos(config):
+        root = getattr(repo, "worktree_root", None)
+        if root:
+            seen.setdefault(_key(root), (Path(root), str(getattr(repo, "anchor", "") or "")))
+    for repo, data in ledgers:
+        path = data.get("worktree_path")
+        if isinstance(path, str) and path:
+            parent = Path(path).parent
+            seen.setdefault(_key(parent), (parent, str(getattr(repo, "anchor", "") or "")))
+    return list(seen.values())
+
+
 def dehydrated_branch_holder(cwd: str | os.PathLike[str], branch: str, config: Any = None) -> str | None:
     """The dehydrated worktree ID whose retained ``branch`` lives in ``cwd``'s repository.
 
     Managed branch moves and deletions must refuse such a branch: it is the only
-    durable copy of the dehydrated checkout's HEAD.
+    durable copy of the dehydrated checkout's HEAD. Fails closed: an unreadable
+    entry whose branch cannot be recovered from its tracking record, or an
+    unlistable catalog directory, holds every branch of that repository until
+    it is reconciled.
     """
     if config is None:
         try:
@@ -256,19 +386,20 @@ def dehydrated_branch_holder(cwd: str | os.PathLike[str], branch: str, config: A
             config = cfg.load_config()
         except Exception:
             return None
+    ledgers = _ledgers(config)
+    ledger_branch = {str(data["_stem"]): data.get("branch") for _repo, data in ledgers}
     holders: list[tuple[str, str]] = []
-    for repo in _repos(config):
-        root = getattr(repo, "worktree_root", None)
-        if not root:
-            continue
-        for path in iter_entries(root):
-            try:
-                data = read_entry(path)
-            except CatalogError:
-                continue
-            if data is not None and data["git"]["branch"] == branch:
-                anchor = data["identity"].get("anchor") or getattr(repo, "anchor", "")
-                holders.append((data["identity"]["worktree_id"], str(anchor)))
+    for root, repo_anchor in _placements(config, ledgers):
+        index = catalog_index(root, fresh=True)
+        if index.directory_unreadable:
+            holders.append((f"{catalog_dir(root)} (unreadable dehydration catalog)", repo_anchor))
+        for held, worktree_id, anchor in index.branches:
+            if held == branch:
+                holders.append((worktree_id, anchor or repo_anchor))
+        for entry in index.unreadable:
+            known = ledger_branch.get(entry.stem)
+            if not isinstance(known, str) or not known or known == branch:
+                holders.append((f"{entry.stem} (unreadable dehydration catalog)", repo_anchor))
     if not holders:
         return None
     common = _common_dir(cwd)

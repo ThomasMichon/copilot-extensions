@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
+from machine_transport import detect_platform
+
 from . import checkout_hydration_catalog as catalog
 from . import config as cfg
 
@@ -50,9 +52,10 @@ def capabilities() -> dict[str, Any]:
         "refuses": [
             "anchor-or-unmanaged", "missing-checkout", "branch-mismatch", "detached-head",
             "operation-in-progress", "submodules", "sparse-checkout", "dirty-checkout",
-            "retained-data", "live-session",
+            "hidden-index-flags", "retained-data", "live-session", "mutation-refused",
         ],
         "ignored_files": "removed-without-force",
+        "materialization": "add-no-checkout-then-config-then-reset",
     }
 
 
@@ -86,6 +89,22 @@ def _load(ledger: Path) -> Any:
     if not ledger.exists():
         raise HydrationRefused("no-record", f"no tracking record at {ledger}")
     return tracking.load_record(ledger)
+
+
+def _admit(record: Any, config: Any) -> None:
+    """Receiving-side mutation admission; call under the shared guards."""
+    from . import execution_spaces
+
+    try:
+        execution_spaces.require_record_mutation(record, config)
+    except execution_spaces.ExecutionSpaceError as exc:
+        raise HydrationRefused("mutation-refused", f"record mutation is not admitted here: {exc}") from exc
+
+
+def _load_admitted(ledger: Path, config: Any) -> Any:
+    record = _load(ledger)
+    _admit(record, config)
+    return record
 
 
 @contextmanager
@@ -155,6 +174,17 @@ def _require_clean(checkout: Path) -> None:
     if status.stdout.strip("\0"):
         entries = [e for e in status.stdout.split("\0") if e][:10]
         raise HydrationRefused("dirty-checkout", "checkout has uncommitted or untracked changes", entries=entries)
+    # status and `worktree remove` both trust assume-unchanged/skip-worktree, so
+    # edits under those flags would pass as clean and be lost.
+    listing = _git(checkout, "ls-files", "-v", "-z", check=False)
+    if listing.returncode != 0:
+        raise HydrationRefused("status-unavailable", "git ls-files failed; checkout retained")
+    hidden = [e[2:] for e in listing.stdout.split("\0") if e and (e[0].islower() or e[0] == "S")]
+    if hidden:
+        raise HydrationRefused(
+            "hidden-index-flags", "index hides tracked changes (assume-unchanged/skip-worktree)",
+            entries=hidden[:10],
+        )
 
 
 def _worktree_config_entries(checkout: Path) -> list[list[str | None]]:
@@ -316,7 +346,7 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
     ledger = _ledger(worktree_id, config)
     anchor, root = _repo(config)
     with _locked(ledger, root):
-        record = _load(ledger)
+        record = _load_admitted(ledger, config)
         entry_path = _entry_location(record, root, worktree_id)
         existing = _read_for(worktree_id, entry_path)
         if existing is not None:
@@ -325,7 +355,7 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
                 return {**report, "complete": True, "already": True}
             if report["state"] != catalog.STATE_HYDRATED:
                 raise HydrationRefused("hold", "dehydration catalog needs inspection", report=report)
-            record = _load(ledger)
+            record = _load_admitted(ledger, config)
             entry_path = _entry_location(record, root, worktree_id)
         checkout = Path(record.worktree_path)
         git = _inspect(record, checkout, anchor)
@@ -371,7 +401,7 @@ def rehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
     ledger = _ledger(worktree_id, config)
     anchor, root = _repo(config)
     with _locked(ledger, root):
-        record = _load(ledger)
+        record = _load_admitted(ledger, config)
         entry_path = _entry_location(record, root, worktree_id)
         entry = _read_for(worktree_id, entry_path)
         if entry is None:
@@ -399,12 +429,27 @@ def rehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
             raise HydrationRefused("destination-occupied", f"checkout path is not empty: {checkout}")
         entry["stage"] = catalog.STAGE_REHYDRATING
         catalog.write_entry(entry_path, entry)
-        added = _git(anchor, "worktree", "add", str(checkout), branch, check=False)
+        added = _git(anchor, "worktree", "add", "--no-checkout", str(checkout), branch, check=False)
         if added.returncode != 0:
             entry["stage"] = catalog.STAGE_DEHYDRATED
             catalog.write_entry(entry_path, entry)
             raise HydrationRefused("add-failed", f"git worktree add failed: {added.stderr.strip()}")
         return _complete_rehydrate(worktree_id, anchor, entry_path, entry)
+
+
+def _unpopulated(checkout: Path) -> bool:
+    """True only for the exact shape `worktree add --no-checkout` leaves: no index, only `.git`."""
+    index = Path(_git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "index").stdout.strip())
+    return not index.exists() and [p.name for p in checkout.iterdir()] == [".git"]
+
+
+def _materialize(checkout: Path) -> None:
+    """Populate a just-added empty checkout from HEAD.
+
+    `reset --hard` is safe here only because the caller proved the checkout
+    holds nothing but its `.git` file and has no index yet.
+    """
+    _git(checkout, "reset", "-q", "--hard", "HEAD")
 
 
 def _complete_rehydrate(worktree_id: str, anchor: Path, entry_path: Path, entry: dict[str, Any]) -> dict[str, Any]:
@@ -413,7 +458,18 @@ def _complete_rehydrate(worktree_id: str, anchor: Path, entry_path: Path, entry:
     actual = _valid_checkout(checkout, anchor, branch)
     if actual is None:
         raise HydrationRefused("rehydrate-unverified", "rehydrated checkout failed verification; catalog retained")
+    # Per-worktree config (e.g. core.symlinks, core.autocrlf) must apply before files exist.
     _restore_worktree_config(checkout, entry["git"].get("worktree_config"))
+    if _unpopulated(checkout):
+        _materialize(checkout)
+    elif not Path(_git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "index").stdout.strip()).exists():
+        raise HydrationRefused("rehydrate-partial", "checkout has files but no index; catalog retained")
+    try:
+        _require_clean(checkout)
+    except HydrationRefused as exc:
+        raise HydrationRefused(
+            "rehydrate-unverified", f"rehydrated checkout is not clean ({exc.code}); catalog retained",
+        ) from exc
     catalog.delete_entry(entry_path)
     return {
         "schema": SCHEMA, "worktree_id": worktree_id, "state": catalog.STATE_HYDRATED, "complete": True,
@@ -443,12 +499,19 @@ def _reconcile_locked(
         if entry.get("recovery_hold"):
             return _hold(worktree_id, entry, "recovered entry has a checkout but unreconciled relationships")
         if stage == catalog.STAGE_REMOVING and valid == entry["git"]["head"]:
+            try:
+                _require_clean(checkout)
+            except HydrationRefused as exc:
+                return _hold(worktree_id, entry, f"interrupted dehydration left a partial checkout ({exc.code})")
             catalog.delete_entry(entry_path)
             return {**base, "state": catalog.STATE_HYDRATED, "reconciled": "interrupted-dehydrate-rolled-back"}
         if stage == catalog.STAGE_REMOVING:
             return _hold(worktree_id, entry, "checkout changed during an interrupted dehydration")
         # A valid checkout always wins over a stale snapshot; never remove it.
-        report = _complete_rehydrate(worktree_id, anchor, entry_path, entry)
+        try:
+            report = _complete_rehydrate(worktree_id, anchor, entry_path, entry)
+        except HydrationRefused as exc:
+            return _hold(worktree_id, entry, f"{exc.code}: {exc}")
         return {**report, "stage": stage, "reconciled": "interrupted-rehydrate-completed"}
     if checkout.exists() and (not checkout.is_dir() or any(checkout.iterdir())):
         return _hold(worktree_id, entry, "checkout path holds a partial or foreign checkout")
@@ -468,7 +531,7 @@ def reconcile(worktree_id: str, config: Any) -> dict[str, Any]:
     ledger = _ledger(worktree_id, config)
     anchor, root = _repo(config)
     with _locked(ledger, root):
-        record = _load(ledger)
+        record = _load_admitted(ledger, config)
         entry_path = _entry_location(record, root, worktree_id)
         try:
             entry = catalog.read_entry(entry_path)
@@ -484,7 +547,7 @@ def release_recovery_hold(worktree_id: str, config: Any) -> dict[str, Any]:
     ledger = _ledger(worktree_id, config)
     anchor, root = _repo(config)
     with _locked(ledger, root):
-        record = _load(ledger)
+        record = _load_admitted(ledger, config)
         entry_path = _entry_location(record, root, worktree_id)
         entry = _read_for(worktree_id, entry_path)
         if entry is None:
@@ -544,11 +607,13 @@ def recover(config: Any, *, apply: bool = False) -> dict[str, Any]:
             continue
         item["verdict"] = "reconstructable"
         if apply:
-            item.update(_recover_one(entry_path, ledger, anchor, root, tracking))
+            item.update(_recover_one(entry_path, ledger, anchor, root, tracking, config))
     return {"schema": SCHEMA, "catalog_dir": str(catalog.catalog_dir(root)), "entries": results, "apply": apply}
 
 
-def _recover_one(entry_path: Path, ledger: Path, anchor: Path, root: Path, tracking: Any) -> dict[str, Any]:
+def _recover_one(
+    entry_path: Path, ledger: Path, anchor: Path, root: Path, tracking: Any, config: Any,
+) -> dict[str, Any]:
     with _locked(ledger, root):
         if ledger.exists():
             return {"verdict": "tracked", "applied": False}
@@ -561,13 +626,18 @@ def _recover_one(entry_path: Path, ledger: Path, anchor: Path, root: Path, track
         identity, git = entry["identity"], entry["git"]
         agency = entry.get("agency") or {}
         now = _now()
-        entry["recovery_hold"] = {"at": now, "reason": "relationships-unreconciled"}
-        catalog.write_entry(entry_path, entry)
         record = tracking.WorktreeRecord(
             worktree_id=identity["worktree_id"], branch=git["branch"], worktree_path=identity["checkout_path"],
-            repo=identity["repo"], machine="", platform="", started_at=entry.get("created_at") or now,
+            repo=identity["repo"], machine=str(getattr(config, "machine", "") or ""),
+            platform=detect_platform(), started_at=entry.get("created_at") or now,
             last_resumed_at=now, resume_count=0, title=agency.get("title"), status="complete",
             completed_at=now, creation_nonce=identity.get("creation_nonce") or "",
         )
+        try:
+            _admit(record, config)
+        except HydrationRefused as exc:
+            return {"verdict": "hold", "reason": str(exc), "applied": False}
+        entry["recovery_hold"] = {"at": now, "reason": "relationships-unreconciled"}
+        catalog.write_entry(entry_path, entry)
         tracking.save_record(record, ledger)
         return {"applied": True, "recovery_hold": True}
