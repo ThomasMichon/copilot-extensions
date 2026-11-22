@@ -410,6 +410,9 @@ the non-public approval conversation.
 
 ## Plan
 
+The [offline protocol fulfillment proposal](journal/2026/11.21-offline-protocol-source-fulfillment.md)
+records the current finite implementation/regression crosswalk and its review limits; source disposition still requires the standing final checks.
+
 The [Windows cue and offline protocol continuation](journal/2026/11.21-windows-cue-and-offline-protocol.md)
 records scoped source delivery, unresolved crosswalks and the complete 900-open census without changing acceptance or ownership.
 
