@@ -144,7 +144,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                 admit_cold_lane(self, row)
 
         def verify_transfer(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
-            if startup_complete is False and session_handle:
+            if startup_complete is False:
                 from .native_attachment_custody import require_not_reassigned
                 require_not_reassigned(conn, row, session_handle)
             if row["state"] == SpawnState.COLD and cold_restarted is not None:

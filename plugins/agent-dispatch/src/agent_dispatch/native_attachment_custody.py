@@ -53,7 +53,8 @@ def require_no_prior_effect(
     rows = conn.execute(
         "SELECT s.* FROM spawn_reservations s WHERE s.task_id<>? AND ("
         "(s.state IN ('spawned','cold','releasing') AND (s.state='releasing' "
-        "OR s.startup_fenced OR (NOT s.startup_complete AND s.startup_revision>1))) "
+        "OR s.cooling_token IS NOT NULL OR s.startup_fenced "
+        "OR (NOT s.startup_complete AND s.startup_revision>1))) "
         "OR (s.state IN ('failed','settled') AND s.conclusion_state IN ('pending','held'))) "
         "AND EXISTS (SELECT 1 FROM task_attachments a WHERE a.task_id=s.task_id "
         "AND (a.session_id=? OR a.worktree_id=?) AND (a.worktree_id=s.worktree OR s.worktree IS NULL "

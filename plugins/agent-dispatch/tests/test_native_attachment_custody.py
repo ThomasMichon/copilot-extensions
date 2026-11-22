@@ -162,6 +162,46 @@ def test_cleanup_claim_revalidation_refuses_legacy_later_attachment(tmp_path: Pa
         queue.validate_spawn_conclusion_claim(res.key, token)
 
 
+@pytest.mark.parametrize("effect_first", [False, True])
+@pytest.mark.parametrize("effect", ["cooling", "reopen-without-handle"])
+def test_dormant_cooling_or_startup_reopen_cannot_overtake_native_transfer(
+    tmp_path: Path, effect_first: bool, effect: str,
+) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    old = queue.create("previous task", repo="example")
+    new = queue.create("new task", repo="example")
+    assert isinstance(old, Task) and isinstance(new, Task)
+    res, _ = queue.reserve_spawn(old.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    queue.claim_one("host-a/tree", task_id=old.id)
+    queue.start(old.id, "host-a/tree", owner_session_id="native")
+    queue.yield_task(old.id, "host-a/tree")
+    queue.record_cold(res.key)
+    queue.claim_one("host-a/tree", task_id=new.id)
+
+    def admit_effect() -> None:
+        if effect == "cooling":
+            queue.claim_spawn_cooling(
+                res.key, startup_revision=res.startup_revision, session_handle="native",
+                state="cold",
+            )
+        else:
+            queue.record_spawn(
+                res.key, startup_complete=False, startup_revision=res.startup_revision,
+            )
+
+    def attach() -> None:
+        queue.start(new.id, "host-a/tree", owner_session_id="native")
+
+    first, second = (admit_effect, attach) if effect_first else (attach, admit_effect)
+    first()
+    before = queue.get(new.id), queue.get_reservation(res.key)
+    with pytest.raises(TaskError, match="another task|remains admitted"):
+        second()
+    assert before == (queue.get(new.id), queue.get_reservation(res.key))
+
+
 def test_return_to_original_native_uses_normalized_host(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
     old = queue.create("original goal", repo="example")
