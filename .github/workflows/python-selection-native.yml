@@ -17,7 +17,10 @@ on:
       - libs/installer-engine/installer_dependency_policy.py
       - libs/installer-engine/installer_pip_index.py
       - libs/payload-invocation/generate.py
+      - libs/payload-invocation/bootstrap_python.py
       - libs/payload-invocation/template_rendering.py
+      - libs/payload-invocation/templates/bootstrap-python-powershell.tmpl
+      - libs/payload-invocation/templates/bootstrap-python-posix.tmpl
       - libs/payload-invocation/templates/posix-shim.tmpl
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
@@ -34,6 +37,7 @@ on:
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
       - plugins/agent-worktrees/scripts/install.ps1
+      - plugins/agent-worktrees/scripts/install.sh
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
       - plugins/budget-guidance/payload-invocation.json
       - plugins/budget-guidance/scripts/install.ps1
