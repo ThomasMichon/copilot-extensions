@@ -173,13 +173,14 @@ def _tip(remote: str, branch: str, worktree_path: str) -> str | None:
     try:
         from .git_push_transport import captured_urls, observed_ref
 
-        destinations = captured_urls(remote)
-        if destinations:
-            return observed_ref(remote, destinations, ref, worktree_path)
-        out = git_ops.git(*git_ops._auth_config_args(remote, cwd=worktree_path),
-                          "ls-remote", remote, ref, cwd=worktree_path,
-                          check=False, timeout=PROBE_TIMEOUT,
-                          soft_timeout=git_acquisition_budget.NETWORK_SOFT_TIMEOUT, kill_tree=True)
+        with git_acquisition_budget.acquisition_budget(time.monotonic() + PROBE_TIMEOUT):
+            destinations = captured_urls(remote)
+            if destinations:
+                return observed_ref(remote, destinations, ref, worktree_path)
+            out = git_ops.git(*git_ops._auth_config_args(remote, cwd=worktree_path),
+                              "ls-remote", remote, ref, cwd=worktree_path,
+                              check=False, timeout=PROBE_TIMEOUT,
+                              soft_timeout=git_acquisition_budget.NETWORK_SOFT_TIMEOUT, kill_tree=True)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if out.returncode != 0:
@@ -257,6 +258,15 @@ def _select_push_target(repo: RepoConfig, pr: tracking.PRRecord, worktree_path: 
     matches, or the chosen remote's push URL names another repo than its fetch
     URL): guessing could keep pushing updates to a branch the PR never sees.
     """
+    try:
+        with git_acquisition_budget.acquisition_budget(time.monotonic() + PROBE_TIMEOUT):
+            return _discover_push_target(repo, pr, worktree_path)
+    except (TimeoutError, subprocess.TimeoutExpired):
+        return None
+
+
+def _discover_push_target(repo: RepoConfig, pr: tracking.PRRecord, worktree_path: str) -> PushTarget | None:
+    """Resolve all candidate remotes within the selection's shared deadline."""
     recorded = (getattr(pr, "remote", "") or "").strip()
     if recorded:
         # The name alone isn't proof: fork setup repoints `fork` when the identity changes,

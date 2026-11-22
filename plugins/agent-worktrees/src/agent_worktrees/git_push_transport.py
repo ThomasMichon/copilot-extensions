@@ -163,11 +163,10 @@ def observed_ref(remote: str, destinations: tuple[str, ...], target: str,
     probe_settings = tuple((key, value) for key, value in (pinned[2] if pinned else ())
                            if key in ("uploadpack", "proxy", "proxyauthmethod", "vcs"))
     probe_remote = f"agent-worktrees-probe-{uuid.uuid4().hex}"
-    auth = git_ops._auth_config_args_for_url(destinations[0])
-    with _url_aliases([(destinations[0], alias)]) as alias_args, \
-            git_acquisition_budget.acquisition_budget(
-                time.monotonic() + git_acquisition_budget.NETWORK_HARD_TIMEOUT,
-            ):
+    with git_acquisition_budget.acquisition_budget(
+        time.monotonic() + git_acquisition_budget.NETWORK_HARD_TIMEOUT,
+    ), _url_aliases([(destinations[0], alias)]) as alias_args:
+        auth = git_ops._auth_config_args_for_url(destinations[0])
         for prefix in _auth_attempts(auth):
             published = git_ops.git(
                 *prefix, *alias_args,

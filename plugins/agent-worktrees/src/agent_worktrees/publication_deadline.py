@@ -9,8 +9,8 @@ from .git_acquisition_budget import NETWORK_HARD_TIMEOUT
 
 # Poll-based waits use signed 32-bit millisecond budgets on supported platforms.
 MAX_WAIT_SECONDS = (2**31 - 1) / 1000
-# Base/fork fetches, two reconciliation fetches, two head proofs and final readback.
-_HOLDER_NETWORK_READS = 2 + 2 + 2 + 1
+# Base/fork fetches, reconciliation, head proofs, readback and shared discovery.
+_HOLDER_NETWORK_READS = 2 + 2 + 2 + 1 + 1
 _HOLDER_LOCAL_SECONDS = 90.0
 
 

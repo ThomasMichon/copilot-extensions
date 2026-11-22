@@ -28,7 +28,7 @@ def test_short_push_budget_still_covers_fork_acquisition_and_authority_contentio
 
     timeout = .5
     holder = publication_deadline.lock_wait(timeout)
-    fork_sequence = 2 * NETWORK_HARD_TIMEOUT + 4 * timeout + NETWORK_HARD_TIMEOUT
+    fork_sequence = 8 * NETWORK_HARD_TIMEOUT + 4 * timeout
     assert holder >= fork_sequence
     assert publication_deadline.lifecycle_budget(
         cfg.PRConfig(push_timeout_seconds=timeout),
@@ -110,7 +110,7 @@ def test_real_publication_forwards_deadline_and_lock_budgets(
     assert finalize.push_changes(wid, config)
 
     assert attempts == [timeout] * 3
-    holder = 4 * timeout + 7 * NETWORK_HARD_TIMEOUT + 90
+    holder = 4 * timeout + 8 * NETWORK_HARD_TIMEOUT + 90
     assert waits and set(waits) == {holder, 1.0}
     assert waits.count(1.0) == 3
     budget = 2 * holder

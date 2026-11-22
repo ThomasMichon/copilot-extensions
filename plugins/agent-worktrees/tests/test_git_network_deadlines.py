@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import git_acquisition_budget, git_ops, git_push_transport, pr_publish
+from agent_worktrees.config import RepoConfig
+from agent_worktrees.tracking import PRRecord
 
 
 def test_unpinned_head_probe_uses_soft_and_hard_deadlines(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,7 +42,7 @@ def test_expired_head_probe_is_unknown_not_confirmed_absent(monkeypatch: pytest.
     assert pr_publish._tip("origin", "topic", ".") is None
 
 
-@pytest.mark.parametrize("outer,expected", [(None, [300, 295]), (20.0, [20, 15])])
+@pytest.mark.parametrize("outer,expected", [(None, [295, 290]), (20.0, [15, 10])])
 def test_pinned_head_retries_share_the_original_budget(
     monkeypatch: pytest.MonkeyPatch, outer: float | None, expected: list[int],
 ) -> None:
@@ -65,9 +67,14 @@ def test_pinned_head_retries_share_the_original_budget(
             "" if len(observed) == 1 else f"{'a' * 40}\t{target}\n", "",
         )
 
+    def prepare_auth(destination: str) -> list[str]:
+        assert git_acquisition_budget.remaining_timeout(300) == (300 if outer is None else outer)
+        clock.now += 5
+        return []
+
     monkeypatch.setattr(git_push_transport, "_url_aliases", aliases)
     monkeypatch.setattr(git_push_transport, "_auth_attempts", lambda auth: [[], []])
-    monkeypatch.setattr(git_ops, "_auth_config_args_for_url", lambda destination: [])
+    monkeypatch.setattr(git_ops, "_auth_config_args_for_url", prepare_auth)
     monkeypatch.setattr(git_ops, "git", run)
     with (
         git_acquisition_budget.acquisition_budget(clock.now + outer)
@@ -77,3 +84,68 @@ def test_pinned_head_retries_share_the_original_budget(
             "origin", ("https://example.com/owner/project.git",), target, ".",
         ) == "a" * 40
     assert observed == expected
+
+
+@pytest.mark.parametrize("pinned", [False, True])
+def test_head_probe_credential_preparation_cannot_renew_expired_acquisition(
+    monkeypatch: pytest.MonkeyPatch, pinned: bool,
+) -> None:
+    clock = SimpleNamespace(now=100.0)
+    time_source = SimpleNamespace(monotonic=lambda: clock.now)
+    for module in (git_acquisition_budget, git_push_transport, pr_publish):
+        monkeypatch.setattr(module, "time", time_source)
+    observed: list[float | None] = []
+    destination = "https://example.com/owner/project.git"
+
+    def prepare_auth(*args: object, **kwargs: object) -> list[str]:
+        observed.append(git_acquisition_budget.remaining_timeout(300))
+        clock.now += 301
+        return []
+
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        git_acquisition_budget.remaining_timeout(300)
+        pytest.fail("expired credential acquisition reached the remote")
+
+    monkeypatch.setattr(git_push_transport, "captured_urls", lambda remote: (destination,) if pinned else ())
+    monkeypatch.setattr(git_push_transport, "_url_aliases", lambda *args, **kwargs: nullcontext([]))
+    monkeypatch.setattr(git_ops, "_auth_config_args", prepare_auth)
+    monkeypatch.setattr(git_ops, "_auth_config_args_for_url", prepare_auth)
+    monkeypatch.setattr(git_ops, "git", run)
+    assert pr_publish._tip("origin", "topic", ".") is None
+    assert observed == [300]
+    assert git_acquisition_budget.remaining_timeout(None) is None
+
+
+@pytest.mark.parametrize("outer", [None, 20.0])
+def test_legacy_fork_discovery_shares_one_budget_across_all_candidates(
+    monkeypatch: pytest.MonkeyPatch, outer: float | None,
+) -> None:
+    clock = SimpleNamespace(now=100.0)
+    time_source = SimpleNamespace(monotonic=lambda: clock.now)
+    for module in (git_acquisition_budget, git_push_transport, pr_publish):
+        monkeypatch.setattr(module, "time", time_source)
+    observed: list[float] = []
+    forks = [f"fork-{index}" for index in range(7)]
+
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        remaining = git_acquisition_budget.remaining_timeout(300)
+        assert remaining is not None
+        observed.append(remaining)
+        clock.now += min(299, remaining)
+        git_acquisition_budget.remaining_timeout(300)
+        return subprocess.CompletedProcess(args, 0, f"{'a' * 40}\trefs/heads/topic\n", "")
+
+    monkeypatch.setattr(pr_publish, "_fork_remotes", lambda repo: forks)
+    monkeypatch.setattr(pr_publish, "_provider_head", lambda *args: "a" * 40)
+    monkeypatch.setattr(git_ops, "has_remote", lambda *args, **kwargs: True)
+    monkeypatch.setattr(git_push_transport, "captured_urls", lambda remote: ())
+    monkeypatch.setattr(git_ops, "_auth_config_args", lambda *args, **kwargs: [])
+    monkeypatch.setattr(git_ops, "git", run)
+    with (
+        git_acquisition_budget.acquisition_budget(clock.now + outer)
+        if outer is not None else nullcontext()
+    ):
+        assert pr_publish._select_push_target(RepoConfig(".", "."), PRRecord(branch="topic"), ".") is None
+    assert observed == ([300, 1] if outer is None else [20])
+    assert clock.now - 100 == (300 if outer is None else outer)
+    assert git_acquisition_budget.remaining_timeout(None) is None
