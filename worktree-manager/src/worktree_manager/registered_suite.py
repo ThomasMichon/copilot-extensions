@@ -8,9 +8,12 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from . import application_footprints, harness_state, repository_suite_roster, runtime_source_repository, source_config
+from . import harness_state, runtime_source_repository, source_config
+
+if TYPE_CHECKING:
+    from . import application_footprints
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,8 @@ def registered_plan(
     observe: Callable[[str, Path], HarnessPolicy],
 ) -> tuple[application_footprints.Application, ...]:
     """Source acquisition and harness-specific policy observations belong to the caller."""
+    from . import application_footprints, repository_suite_roster
+
     default, anchors = registrations(root)
     selection = runtime_source_repository.read(anchors[default], default_repository=source_config.DEFAULT_REPO)
     suite = resolve(selection["repository"], selection["reference"])

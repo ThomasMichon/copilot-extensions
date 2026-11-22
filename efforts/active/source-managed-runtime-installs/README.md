@@ -12,6 +12,20 @@
 
 ## Goal
 
+Provide a separate terminal bootstrap for the new footprint without changing
+the current Manager installer. Discover the source root, registered harnesses
+and knowledge pairings before choosing whether to clone or update a harness.
+Refresh registered harnesses before resolving the suite commit. Install that
+commit's Manager first; its onboard tools own pairing, plugin hoisting and
+staging the union of required applications. A fresh machine with no requested
+harness can install Manager alone from current remote Main. A remote harness
+and an explicit source root must work without a preinstalled Manager.
+Successful knowledge setup remembers the default knowledge repository for
+each harness in the user's OneDrive. Existing local pairings remain
+authoritative; an environment input can select the knowledge repo on an
+unbound machine without a prompt. See the [installer vision](../../../visions/installer/README.md#boot-from-zero)
+and [onboarding architecture](../../../docs/architecture.md#new-footprint-onboarding).
+
 Fleet Manager is an independently selected application, not a dependency of
 `agent-worktrees`. The bound knowledge repository opts a target machine into
 Fleet Manager by its assigned role (for example, controller). Installing
@@ -966,6 +980,28 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+- [ ] Qualify onboarding using only the bootstrap script and its arguments
+  for all target setup effects. After a blocker, retain the diagnostic,
+  clear only the bootstrap-owned trial footprint, fix the source, and rerun
+  the script from an empty footprint. Preserve source checkouts, legacy
+  installs, credentials, synced preferences, and unrelated or live state.
+  Manually prepared registries, transferred wheels and direct component
+  setup calls do not count as a successful boot-from-zero run.
+
+- [ ] Run the published terminal entry on a fresh machine with an explicit
+  source root and remote harness. Verify clone, registration, resolved commit,
+  installed Manager identity, plugin hoisting and the full staged service
+  union. Repeat with an existing checkout and multiple registered harnesses;
+  verify reuse and include a service required only by the second harness.
+- [ ] Pair a harness on one machine; verify a second unbound machine can
+  discover that pairing through OneDrive without prompting. Test an explicit
+  environment selection without OneDrive, and a conflicting synced default
+  or environment input with an existing local binding: the local binding
+  must remain unchanged. Keep actual repository identities out of shared docs.
+- [ ] On an empty machine, omit the starting harness: install only Manager
+  from remote `main`. On an existing machine, omission must not erase
+  registrations or pairings. Verify the legacy bootstrap remains independent.
 
 - [ ] Build and stage Worktrees without a Fleet distribution or source input.
   Inspect its wheel metadata, including extras. With the same Worktrees build

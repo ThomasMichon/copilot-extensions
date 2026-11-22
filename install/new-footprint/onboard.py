@@ -1,0 +1,89 @@
+"""Resolve harness and incoming release before handing off to the staged Manager."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import time
+
+KIT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(KIT / "worktree-manager" / "src"), str(KIT / "tools")]
+
+from worktree_manager import bootstrap_harness as harness
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--srcroot", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--repo")
+    parser.add_argument("--knowledge-repo")
+    parser.add_argument("--stage", action="store_true")
+    args = parser.parse_args()
+    root = args.root.absolute()
+    if args.knowledge_repo and not (root / "registry").exists():
+        _, knowledge_url = harness._github(args.knowledge_repo)
+        locator = knowledge_url.removeprefix("https://github.com/")
+        probe = subprocess.run(
+            ["gh", "repo", "view", locator, "--json", "nameWithOwner,isPrivate"],
+            env={**os.environ, "GH_PROMPT_DISABLED": "1"}, capture_output=True,
+            text=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if probe.returncode:
+            raise ValueError("Selected knowledge repository is not readable by the target's GitHub CLI identity")
+        observed = json.loads(probe.stdout)
+        if observed["nameWithOwner"].casefold() != locator.casefold() or observed["isPrivate"] is not True:
+            raise ValueError("Selected knowledge repository must resolve to the requested private repository")
+    anchor = None
+    if args.repo:
+        anchor = harness.first_registration(root, args.srcroot.absolute(), args.repo)
+    elif (root / "registry").exists():
+        default, anchors = harness.registered_suite.registrations(root)
+        anchor = anchors[default]
+    selection = harness.runtime_source_repository.read(anchor, default_repository=harness.source_config.DEFAULT_REPO)
+    _, url = harness._github(selection["repository"])
+    reference = selection["reference"]
+    if reference.startswith("-") or ":" in reference or reference.startswith("+"):
+        raise ValueError("Invalid source reference")
+    checkout = args.workspace / "source"
+    harness._git(args.workspace, "clone", "--no-checkout", "--no-recurse-submodules", "--", url, str(checkout))
+    if reference == "main":
+        reference = "refs/remotes/origin/main"
+    commit = harness._git(checkout, "rev-parse", "--verify", "--end-of-options", reference + "^{commit}")
+    print(f"Selected {url} {reference} at {commit}", flush=True)
+
+    import bootstrap_manager_release
+    from source_preparation_process import procutil_module
+
+    procutil_module("owned_process")
+    uv = shutil.which("uv")
+    if not uv:
+        raise ValueError("uv is required")
+    footprint = bootstrap_manager_release.prepare(
+        checkout, commit, url.removeprefix("https://github.com/"),
+        args.workspace / "prepared", Path(uv), time.monotonic() + 1200,
+    )
+    # Keep the executor outside the copyable input. Its dependency source is
+    # the same verified local wheel set the incoming application will use.
+    executor = args.workspace / "executor"
+    shutil.copytree(footprint / "apps" / "worktree-manager", executor)
+    env = {**os.environ, "UV_OFFLINE": "1", "UV_PYTHON_DOWNLOADS": "never"}
+    subprocess.run([uv, "sync", "--project", str(executor), "--locked", "--no-dev", "--no-build",
+                    "--no-editable", "--python", sys.executable], env=env, check=True, timeout=180)
+    python = executor / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    command = [str(python), "-I", "-B", "-m", "worktree_manager.application_footprints",
+               str(footprint), "--apps-root", str(root / "apps"), "--apply"]
+    if args.stage:
+        command.append("--stage")
+    subprocess.run(command, env=env, check=True, timeout=1800)
+    if anchor is not None:
+        raise RuntimeError("Manager staged; installed harness onboarding still required")
+
+
+if __name__ == "__main__":
+    main()
