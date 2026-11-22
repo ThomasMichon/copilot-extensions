@@ -28,11 +28,14 @@ def main() -> None:
     parser.add_argument("--stage", action="store_true")
     args = parser.parse_args()
     root = args.root.absolute()
+    knowledge_url = ""
     if args.knowledge_repo and not (root / "registry").exists():
         _, knowledge_url = harness.repository_remote(args.knowledge_repo)
         if not knowledge_url.startswith("https://github.com/"):
-            raise ValueError("Azure Repos Git access is separate from knowledge privacy; "
-                             "verify private project visibility before binding")
+            sys.path.insert(0, str(KIT / "plugins/harness-knowledge/skills/binding-knowledge/scripts"))
+            from azure_project_visibility import require_private_project
+            require_private_project(knowledge_url)
+    if knowledge_url.startswith("https://github.com/"):
         locator = knowledge_url.removeprefix("https://github.com/")
         probe = subprocess.run(
             ["gh", "repo", "view", locator, "--json", "nameWithOwner,isPrivate"],

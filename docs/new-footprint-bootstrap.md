@@ -32,7 +32,10 @@ Credential Manager configured. In a local terminal Git can prompt via GCM;
 the bootstrap checks read access to each remote with `git ls-remote`. Installing
 GCM does not itself grant repository access. A readable repository is not
 necessarily private: binding must independently establish knowledge-repository
-privacy. The draft does not yet verify Azure DevOps project visibility.
+privacy. For Azure Repos the draft uses the existing Azure DevOps CLI
+project reader and requires a private project matching the requested
+organization and project. A missing CLI, unreadable project or unknown
+visibility does not permit binding.
 Gitea authentication is not configured by default; advanced users can
 provide an independently configured checkout. Downloading and verifying
 the suite's GitHub release artifacts is separate from repository authentication.
