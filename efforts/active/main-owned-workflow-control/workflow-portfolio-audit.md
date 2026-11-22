@@ -5291,13 +5291,75 @@ sources and 461 targets in 993,848 bytes.
 The first local admission invocation uses a Python environment without
 coverage and stops during helper import, before manifest mutation. The
 existing qualification environment supplies that dependency; admission then
-passes without changing the observation or guard. Fatal Ruff passes.
-Strict typing, committed changefile presence, current-head review and complete
-fresh source CI remain required. Fresh-install/native lanes are not applicable:
+passes without changing the observation or guard. Fatal Ruff, strict
+Python 3.10/Linux and Windows typing, committed changefile presence,
+documentation and diff checks pass.
+
+Source CI `45027693135`, unit job `137224215672`, freshly passes all 8,881
+cases with 43 deselections in 151.28 pytest / 170.823 packet seconds.
+It reports `mode=executed`, origin run `45027693135` attempt one,
+execution identity
+`faac01f0d790048e492144454e0d6b170b0edd3b768aeef1d7b82dae93a21881`
+and packet digest
+`826f320e4c4860383eca9238eedfef2592b725555d6b5ee16abd1cfd2eb78058`.
+Aggregate `137225204543`, guards and trusted metadata pass.
+
+A subsequent PR-description edit triggers another natural CI run on the
+unchanged source head. The final pending-check fence refuses before merge,
+then awaits that run rather than relying on the earlier green state.
+Run `45028070008`, unit job `137225338430`, freshly passes the same 8,881
+cases with 43 deselections in 197.50 pytest / 220.033 packet seconds.
+It reports `mode=executed`, origin run `45028070008` attempt one and digest
+`1f7e0046f18f697a0ef8a748a767028571b3768404703995e8bdf79a19b6c340`.
+The provider lookup exhausts its budget, so this run publishes an unqualified
+reuse artifact instead of claiming reusable evidence; actual fresh execution
+and required aggregate `137226638959` still pass. This is two full packet
+executions for one source head, not measured consolidation savings.
+
+Approval `6012515521` names exact head
+`810fe36395e760324a7e11e1986303d8a7b74575`; complete review/comment/thread
+pagination has no remaining findings or unresolved threads. Seven fresh
+required-check verifier reads and final head/hold/parent-reference checks
+precede the managed merge. Source #14087 merges at
+`2026-11-22T13:40:30Z` as `63cd3dd4acf78d12aa5b3820b7153c355adab9fb`.
+Independent readback confirms merged state and open parent #6237.
+The managed source sync succeeds and the complete reviewed-head/merged-tree
+comparison is empty. The actual parent Goal, own Plan leaf and Validation
+Plan are reread before resolving only this three-case leaf.
+
+Fresh-install/native lanes are not applicable:
 installation, runtime, workflow and original-test behavior do not change.
 No capture, listener, process, publication, cleanup, new mock, preload, guard
 exception, data, production or routing change is introduced. This selection
 does not settle either separate thread/native-load refusal or parent completion.
+
+### November 22 original pytest temporary-link controls
+
+The adapter exports both complete original functions from
+`tools/test_pytest_windows_paths.py`, preserving four cases and their
+parameter objects, original monkeypatches, assertions and restoration.
+Windows alias-present/absent cases suppress and restore only pytest's
+optional convenience helper while retaining `os.symlink`; Linux/macOS cases
+leave that helper untouched. No actual symlink is created.
+
+Complete collection verifies all four original and adapter cases, both exact
+original function objects and every selected parameter object. Initial
+unchanged auditing passes all four in 1.032 seconds with zero prohibited
+effects, fourteen bound Python reads and actual guard call-phase lines per
+case. Only the adapter/original Python bindings and existing guard coverage
+target are added. All 8,881 previous nodes retain relative order, and all
+1,250 previous source hashes, 461 previous targets, 89 helper decisions and
+the 300-second bound remain intact. Compact-v2 and flat-v1 logical identity
+agree; the candidate contains 8,885 nodes, 1,252 sources and 462 targets in
+994,539 bytes.
+
+Fatal Ruff passes. Strict typing, committed changefile presence, exact-head
+review and complete fresh source CI remain required. Fresh-install/native
+lanes are not applicable: installation, runtime, workflow and original-test
+behavior do not change. No native/process effect, new mock, preload, guard
+exception, data, production, workflow, routing or cleanup change is introduced.
+The preceding H1 leaf's merge and this independent selection do not settle
+either separate thread/native-load refusal or parent completion.
 
 ### November 22 original machine-gate mutation-source failure
 

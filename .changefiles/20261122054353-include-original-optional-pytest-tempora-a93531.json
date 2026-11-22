@@ -1,0 +1,9 @@
+{
+  "comment": "Include original optional pytest temporary-link controls in the guarded promotion unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

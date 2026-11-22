@@ -3,6 +3,15 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_pytest_temp_link_units.py",
+      [
+        "test_windows_suppresses_only_current_link_helper_and_restores_it[False]",
+        "test_windows_suppresses_only_current_link_helper_and_restores_it[True]",
+        "test_other_platforms_keep_pytest_current_links[linux]",
+        "test_other_platforms_keep_pytest_current_links[darwin]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_h1_optional_shape_units.py",
       [
         "test_h1_optional_validator_defers_malformed_shape_to_registry_owner[None]",
@@ -10820,6 +10829,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_pytest_temp_link_units.py": "6c6e9cf6afdff8056fd524ad0d09f7bb82ae86595641003c8ae3e2da641f7043",
+    "tools/test_pytest_windows_paths.py": "e446aa197e61dd0b3f81236b7b2cc71075bbf8f5f40249243ae312ed16a58f41",
     "tools/promotion_unit_tests/test_original_h1_optional_shape_units.py": "7b7fceccbed57982b788ab2bfb8665d1dc7f358ae2449621486601094e2afc2f",
     "tools/test_capture_bridge_host_inspection.py": "f5fe8932100c639efcd0f9455e08ef4b2dac2a83f12af1db8d83607fc46267a1",
     "tools/capture_bridge_host_inspection.py": "6f79738c1527fa3ac021e082ab60e686d7a5bf79cb11cf36fda36e78cfb45c11",
@@ -12072,6 +12083,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/pytest_portfolio_guard.py",
     "tools/capture_bridge_host_inspection.py",
     "tools/check-install-contract.py",
     "tools/module-health-watchdog.py",
