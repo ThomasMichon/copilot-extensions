@@ -236,11 +236,11 @@ def manage_feature_branch(
                 f"force it. Resolve by hand."
             )
             return False
-        r = git_ops.git(
-            "branch", "-f", feature, remote_feature, cwd=worktree_path, check=False,
-        )
-        if r.returncode != 0:
-            output.err(f"Failed to update {feature} to {remote_feature}: {r.stderr.strip()}")
+        # Fresh reservation check + ref write under the reservation lock: a
+        # dehydration that ran during the fetch must still win.
+        refused = git_ops.force_branch(feature, remote_feature, cwd=worktree_path, config=config)
+        if refused:
+            output.err(refused)
             return False
         print(f"[OK] {feature} synced to {remote_feature}.")
         return True
@@ -264,12 +264,15 @@ def manage_feature_branch(
                 f"'git merge-to-feature {name}' instead."
             )
             return False
-        r = git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
+        refused = git_ops.force_branch(feature, "HEAD", cwd=worktree_path, config=config)
+        if refused:
+            output.err(refused)
+            return False
     else:
         r = git_ops.git("branch", feature, "HEAD", cwd=worktree_path, check=False)
-    if r.returncode != 0:
-        output.err(f"Failed to set {feature}: {r.stderr.strip()}")
-        return False
+        if r.returncode != 0:
+            output.err(f"Failed to set {feature}: {r.stderr.strip()}")
+            return False
     print(f"[OK] {feature} {'updated to' if exists else 'created at'} worktree HEAD.")
 
     if push:
@@ -358,7 +361,10 @@ def merge_to_feature(
 
     # Track the latest remote feature locally (force-update is safe: it is not
     # checked out, and we are about to rebase onto it).
-    git_ops.git("branch", "-f", feature, remote_feature, cwd=worktree_path, check=False)
+    refused = git_ops.force_branch(feature, remote_feature, cwd=worktree_path, config=config)
+    if refused:
+        output.err(refused)
+        return False
 
     print(f"Rebasing {branch} onto {feature}...")
     if not git_ops.rebase(feature, cwd=worktree_path):
@@ -369,9 +375,9 @@ def merge_to_feature(
         return False
 
     # ff-merge: feature is now an ancestor of HEAD, so advancing it is a pure ff.
-    r = git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
-    if r.returncode != 0:
-        output.err(f"Failed to fast-forward {feature}: {r.stderr.strip()}")
+    refused = git_ops.force_branch(feature, "HEAD", cwd=worktree_path, config=config)
+    if refused:
+        output.err(refused)
         return False
     print(f"[OK] {feature} fast-forwarded to {branch}.")
 

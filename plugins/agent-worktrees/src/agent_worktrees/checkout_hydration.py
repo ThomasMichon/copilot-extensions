@@ -27,7 +27,10 @@ from . import checkout_hydration_catalog as catalog
 from . import config as cfg
 
 SCHEMA = "agent-worktrees.checkout-hydration.v1"
-_IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply")
+_IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply",
+    # A multi-commit cherry-pick/revert leaves a clean tree between steps.
+    "sequencer",
+)
 
 
 class HydrationRefused(ValueError):
@@ -371,30 +374,48 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
             "git": git,
             "agency": _agency(record, worktree_id),
         }
-        catalog.write_entry(entry_path, entry)
         try:
-            _require_clean(checkout)
-        except HydrationRefused:
-            catalog.delete_entry(entry_path)
-            raise
-        removed = _git(anchor, "worktree", "remove", str(checkout), check=False)
-        if removed.returncode != 0:
-            _abandon_removal(entry_path, checkout, anchor, record.branch, removed.stderr)
-        if checkout.exists() or _is_registered(anchor, checkout):
-            raise HydrationRefused("removal-unverified", "checkout still present after removal; catalog retained")
-        entry["stage"] = catalog.STAGE_DEHYDRATED
-        entry["dehydrated_at"] = _now()
-        catalog.write_entry(entry_path, entry)
+            # The registry must name this root before its first entry exists.
+            catalog.register_root(record.repo, entry_path.parent.parent)
+            reservation = catalog.reservation_lock(anchor)
+            reservation.__enter__()
+        except (catalog.CatalogError, OSError, TimeoutError) as exc:
+            raise HydrationRefused("catalog-unavailable", f"cannot publish the dehydration catalog: {exc}") from exc
+        try:
+            # Managed branch writes recheck the reservation under this lock, so none
+            # can move or delete the branch between publication and removal.
+            catalog.write_entry(entry_path, entry)
+            try:
+                _require_clean(checkout)
+            except HydrationRefused:
+                catalog.delete_entry(entry_path)
+                raise
+            removed = _git(anchor, "worktree", "remove", str(checkout), check=False)
+            if removed.returncode != 0:
+                _abandon_removal(worktree_id, record, anchor, entry_path, entry, removed.stderr)
+            if checkout.exists() or _is_registered(anchor, checkout):
+                raise HydrationRefused("removal-unverified", "checkout still present after removal; catalog retained")
+            entry["stage"] = catalog.STAGE_DEHYDRATED
+            entry["dehydrated_at"] = _now()
+            catalog.write_entry(entry_path, entry)
+        finally:
+            reservation.__exit__(None, None, None)
         return {
             "schema": SCHEMA, "worktree_id": worktree_id, "state": catalog.STATE_DEHYDRATED,
             "complete": True, "catalog": str(entry_path), "branch": git["branch"], "head": git["head"],
         }
 
 
-def _abandon_removal(entry_path: Path, checkout: Path, anchor: Path, branch: str, stderr: str) -> NoReturn:
-    if _valid_checkout(checkout, anchor, branch):
-        catalog.delete_entry(entry_path)
-    raise HydrationRefused("remove-failed", f"git worktree remove refused: {stderr.strip()}")
+def _abandon_removal(
+    worktree_id: str, record: Any, anchor: Path, entry_path: Path, entry: dict[str, Any], stderr: str,
+) -> NoReturn:
+    """A failed removal may have deleted some files: let reconciliation decide.
+
+    Only a complete, clean checkout at the snapshot HEAD rolls back (catalog
+    retired); anything else stays a hold with the catalog retained.
+    """
+    report = _reconcile_locked(worktree_id, record, anchor, entry_path, entry)
+    raise HydrationRefused("remove-failed", f"git worktree remove refused: {stderr.strip()}", report=report)
 
 
 def rehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
@@ -579,7 +600,16 @@ def recover(config: Any, *, apply: bool = False) -> dict[str, Any]:
 
     anchor, root = _repo(config)
     results: list[dict[str, Any]] = []
-    for entry_path in catalog.iter_entries(root):
+    roots = [root]
+    try:
+        registered = catalog.registered_roots(config.repo_name)
+    except catalog.CatalogError as exc:
+        registered = []
+        results.append({"catalog": None, "verdict": "hold", "reason": str(exc)})
+    for extra in registered:
+        if not any(catalog.same_path(extra, known) for known in roots):
+            roots.append(extra)
+    for entry_path in (path for each in roots for path in catalog.iter_entries(each)):
         item: dict[str, Any] = {"catalog": str(entry_path), "worktree_id": entry_path.stem}
         results.append(item)
         try:
@@ -608,7 +638,10 @@ def recover(config: Any, *, apply: bool = False) -> dict[str, Any]:
         item["verdict"] = "reconstructable"
         if apply:
             item.update(_recover_one(entry_path, ledger, anchor, root, tracking, config))
-    return {"schema": SCHEMA, "catalog_dir": str(catalog.catalog_dir(root)), "entries": results, "apply": apply}
+    return {
+        "schema": SCHEMA, "catalog_dir": str(catalog.catalog_dir(root)),
+        "catalog_dirs": [str(catalog.catalog_dir(each)) for each in roots], "entries": results, "apply": apply,
+    }
 
 
 def _recover_one(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -315,7 +315,7 @@ def test_contradictory_catalog_is_a_hold(env: SimpleNamespace) -> None:
 def test_catalog_identity_mismatch_is_a_hold(env: SimpleNamespace, field: str, value: str) -> None:
     hydration.dehydrate(WT_ID, env.config)
     entry = catalog.read_entry(env.entry) or {}
-    entry["identity"][field] = value
+    entry["identity"][field] = str(env.checkout.parent / value) if field == "checkout_path" else value
     catalog.write_entry(env.entry, entry)
     assert hydration.reconcile(WT_ID, env.config)["state"] == "hold"
     with pytest.raises(hydration.HydrationRefused) as caught:
@@ -778,3 +778,228 @@ def test_mismatched_placement_evidence_is_refused_by_real_admission(
         hydration.rehydrate(WT_ID, changed)
     assert caught.value.code == "mutation-refused"
     assert env.entry.read_bytes() == before and not env.checkout.exists()
+
+def test_sequencer_state_refuses(env: SimpleNamespace) -> None:
+    for name in ("x.txt", "y.txt"):
+        _git(env.anchor, "checkout", "-q", "-b", f"pick-{name}", "main")
+        (env.anchor / name).write_text("theirs\n", encoding="utf-8")
+        _git(env.anchor, "add", name)
+        _git(env.anchor, "commit", "-q", "-m", name)
+    _git(env.anchor, "checkout", "-q", "main")
+    (env.checkout / "x.txt").write_text("ours\n", encoding="utf-8")
+    _git(env.checkout, "add", "x.txt")
+    _git(env.checkout, "commit", "-q", "-m", "ours")
+    subprocess.run(["git", "cherry-pick", "pick-x.txt", "pick-y.txt"], cwd=env.checkout, capture_output=True)
+    (env.checkout / "x.txt").write_text("ours\n", encoding="utf-8")
+    _git(env.checkout, "add", "x.txt")
+    _git(env.checkout, "-c", "core.editor=true", "commit", "-q", "--allow-empty", "--no-edit")
+    sequencer = Path(_git(env.checkout, "rev-parse", "--path-format=absolute", "--git-path", "sequencer"))
+    assert sequencer.exists() and _git(env.checkout, "status", "--porcelain") == ""
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "operation-in-progress" and env.checkout.exists() and not env.entry.exists()
+
+
+@pytest.mark.parametrize("corrupt", [
+    "config-not-dict", "config-bad-base64", "config-bad-entries", "config-bad-entry-shape",
+    "head", "branch", "relative-checkout", "operation-id", "prior-state",
+])
+def test_malformed_snapshot_is_a_hold_not_a_traceback(env: SimpleNamespace, corrupt: str) -> None:
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    git, identity = entry["git"], entry["identity"]
+    good_config = {"file_b64": "", "entries": []}
+    mutation: dict[str, Callable[[], None]] = {
+        "config-not-dict": lambda: git.update(worktree_config=["x"]),
+        "config-bad-base64": lambda: git.update(worktree_config={**good_config, "file_b64": "!!notbase64"}),
+        "config-bad-entries": lambda: git.update(worktree_config={**good_config, "entries": "core.x"}),
+        "config-bad-entry-shape": lambda: git.update(worktree_config={**good_config, "entries": [["", 1]]}),
+        "head": lambda: git.update(head="HEAD~1"),
+        "branch": lambda: git.update(branch="-x"),
+        "relative-checkout": lambda: identity.update(checkout_path="relative/path"),
+        "operation-id": lambda: entry.update(operation_id=5),
+        "prior-state": lambda: entry.update(prior_state="x"),
+    }
+    mutation[corrupt]()
+    with pytest.raises(catalog.CatalogError):
+        catalog.validate(entry)
+    env.entry.write_text(json.dumps(entry), encoding="utf-8")
+    assert hydration.reconcile(WT_ID, env.config)["state"] == "hold"
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.rehydrate(WT_ID, env.config)
+    assert caught.value.code == "hold" and not env.checkout.exists() and env.entry.exists()
+
+
+def _failing_remove(monkeypatch: pytest.MonkeyPatch, before: object = None) -> None:
+    real = hydration._git
+
+    def fake(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ("worktree", "remove"):
+            if callable(before):
+                before()
+            return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: simulated failure")
+        return real(cwd, *args, check=check)
+
+    monkeypatch.setattr(hydration, "_git", fake)
+
+
+def test_failed_removal_with_partial_checkout_keeps_the_catalog(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with monkeypatch.context() as patch:
+        _failing_remove(patch, before=lambda: (env.checkout / "wip.txt").unlink())
+        with pytest.raises(hydration.HydrationRefused) as caught:
+            hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "remove-failed"
+    assert caught.value.details["report"]["state"] == "hold" and env.entry.exists()
+    assert (catalog.read_entry(env.entry) or {})["stage"] == catalog.STAGE_REMOVING
+    assert hydration.reconcile(WT_ID, env.config)["state"] == "hold" and env.entry.exists()
+
+
+def test_failed_removal_of_intact_checkout_rolls_back(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _failing_remove(monkeypatch)
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "remove-failed"
+    assert caught.value.details["report"]["reconciled"] == "interrupted-dehydrate-rolled-back"
+    assert env.checkout.exists() and not env.entry.exists()
+
+
+def test_ledger_branch_stays_held_when_catalog_disagrees(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    hydration.dehydrate(WT_ID, env.config)
+    entry = catalog.read_entry(env.entry) or {}
+    entry["git"]["branch"] = "other"
+    catalog.write_entry(env.entry, entry)
+    _git(env.anchor, "branch", "other", env.head)
+    assert catalog.dehydrated_branch_holder(env.anchor, env.branch, env.config) == WT_ID
+    assert git_ops.delete_branch(env.branch, cwd=env.anchor, force=True) is False
+    assert git_ops.force_branch(env.branch, "main", cwd=env.anchor, config=env.config) is not None
+    assert _git(env.anchor, "rev-parse", env.branch) == env.head
+
+
+def _with_pr_head(env: SimpleNamespace, branch: str) -> None:
+    record = tracking.load_record(env.ledger)
+    record.prs = [tracking.PRRecord(state="open", branch=branch, head_sha=env.head)]
+    tracking.save_record(record, env.ledger)
+    _git(env.anchor, "branch", branch, env.head)
+
+
+def test_dehydrated_pr_head_branch_is_reserved(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import finalize, pr_rewrite
+
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    _with_pr_head(env, "feature/pr-x")
+    hydration.dehydrate(WT_ID, env.config)
+    refused = git_ops.force_branch("feature/pr-x", "main", cwd=env.anchor, config=env.config)
+    assert refused is not None and WT_ID in refused
+    assert git_ops.force_branch("feature/pr-x", "main", cwd=env.anchor) is not None  # default config lookup
+    assert git_ops.delete_branch("feature/pr-x", cwd=env.anchor, force=True) is False
+    assert _git(env.anchor, "rev-parse", "feature/pr-x") == env.head
+    # Every snapshot-publication site routes its local-head write through force_branch.
+    import inspect
+
+    from agent_worktrees import pr_ops
+    for module in (pr_ops, finalize, pr_rewrite):
+        source = inspect.getsource(module)
+        assert '"branch", "-f"' not in source and "force_branch(" in source
+    hydration.rehydrate(WT_ID, env.config)
+    assert git_ops.force_branch("feature/pr-x", "main", cwd=env.anchor, config=env.config) is None
+
+
+def test_root_change_plus_lost_tracking_uses_the_root_registry(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from agent_worktrees import claimant
+
+    env.config.machine = "fixture"
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    monkeypatch.setattr(claimant, "_claimant_is_local", lambda *_a: True)
+    monkeypatch.setattr(claimant, "_record_execution_conflicts", lambda *_a: False)
+    hydration.dehydrate(WT_ID, env.config)
+    assert catalog.registered_roots("sample") == [env.root]
+    moved = tmp_path / "new-root"
+    moved.mkdir()
+    env.config.default_repo.worktree_root = str(moved)
+    env.ledger.unlink()
+
+    report = hydration.recover(env.config)
+    assert [(r["catalog"], r["verdict"]) for r in report["entries"]] == [(str(env.entry), "reconstructable")]
+    assert catalog.dehydrated_branch_holder(env.anchor, env.branch, env.config) == WT_ID
+    assert git_ops.delete_branch(env.branch, cwd=env.anchor, force=True) is False
+    assert git_ops.force_branch(env.branch, "main", cwd=env.anchor, config=env.config) is not None
+    assert claimant.local_claimant_alive(f"fixture/sample/{WT_ID}") is True
+    assert _git(env.anchor, "rev-parse", env.branch) == env.head
+
+
+def test_corrupt_root_registry_holds_every_branch(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    hydration.dehydrate(WT_ID, env.config)
+    _git(env.anchor, "branch", "unrelated", env.head)
+    (env.root.parent / "proj" / catalog.ROOTS_FILENAME).write_text("{oops", encoding="utf-8")
+    assert git_ops.delete_branch("unrelated", cwd=env.anchor, force=True) is False
+    assert any(item["verdict"] == "hold" for item in hydration.recover(env.config)["entries"])
+
+
+def test_claimant_resolves_the_target_projects_own_catalog(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import claimant
+
+    env.config.machine = "fixture"
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    monkeypatch.setattr(claimant, "_claimant_is_local", lambda *_a: True)
+    monkeypatch.setattr(claimant, "_record_execution_conflicts", lambda *_a: False)
+    hydration.dehydrate(WT_ID, env.config)
+    env.ledger.unlink()
+    adopted = SimpleNamespace(default_repo=SimpleNamespace(worktree_root=str(env.root), anchor=str(env.anchor)))
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: adopted)
+    assert catalog.project_entry_state("adopted", WT_ID, env.config) == catalog.ENTRY_PRESENT
+    assert claimant.local_claimant_alive(f"fixture/adopted/{WT_ID}") is True
+    assert catalog.project_entry_state("adopted", "missing-id", env.config) == catalog.ENTRY_ABSENT
+
+    def unresolvable(*_a: object, **_k: object) -> object:
+        raise RuntimeError("project config unavailable")
+
+    monkeypatch.setattr(cfg, "load_project_config", unresolvable)
+    # The root registry is written before any entry, so it alone still answers.
+    assert catalog.project_entry_state("adopted", WT_ID, env.config) == catalog.ENTRY_PRESENT
+    assert catalog.project_entry_state("adopted", "missing-id", env.config) == catalog.ENTRY_ABSENT
+    (cfg.project_dir("adopted") / catalog.ROOTS_FILENAME).write_text("{not json", encoding="utf-8")
+    assert catalog.project_entry_state("adopted", "missing-id", env.config) == catalog.ENTRY_UNKNOWN
+    assert claimant.local_claimant_alive("fixture/adopted/missing-id") is None
+
+
+def _feature_sync_fixture(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: env.config)
+    monkeypatch.setattr(tracking, "resolve_worktree_path", lambda *_a: str(env.anchor))
+    _with_pr_head(env, "feature/shared")
+    _git(env.anchor, "branch", "-f", "feature/shared", "main")
+    _git(env.anchor, "update-ref", "refs/remotes/origin/feature/shared", env.head)
+
+
+def test_dehydration_during_feature_fetch_wins(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import git_collab
+
+    _feature_sync_fixture(env, monkeypatch)
+    main_tip = _git(env.anchor, "rev-parse", "main")
+    monkeypatch.setattr(git_ops, "fetch", lambda *_a, **_k: hydration.dehydrate(WT_ID, env.config))
+    assert git_collab.manage_feature_branch("other", env.config, "shared", sync=True) is False
+    assert env.entry.exists() and _git(env.anchor, "rev-parse", "feature/shared") == main_tip
+
+
+def test_branch_writes_wait_for_an_in_flight_dehydration(env: SimpleNamespace) -> None:
+    import threading
+
+    done: list[object] = []
+    with catalog.reservation_lock(env.anchor):
+        worker = threading.Thread(target=lambda: done.append(hydration.dehydrate(WT_ID, env.config)))
+        worker.start()
+        worker.join(1.5)
+        assert worker.is_alive() and not env.entry.exists() and env.checkout.exists()
+    worker.join(60)
+    assert done and env.entry.exists() and not env.checkout.exists()

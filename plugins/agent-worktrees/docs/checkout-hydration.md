@@ -34,7 +34,12 @@ Each dehydrated worktree has one entry at
 path (normally the project's resolved worktree root). Lookups use the recorded
 checkout path first, so a later change of the configured root does not lose
 the entry. When the `.dehydrated` directory is first created, its parent
-directory is also synced. The entry is written atomically (temporary
+directory is also synced. Each root that holds a catalog is also recorded in
+`dehydration-roots.json` in the project's state directory (written
+atomically before the entry). Recovery, branch reservations and claimant
+lookup use this registry, so they find an entry after a root change even when
+the tracking record is lost. An unreadable registry holds every branch of the
+repository. The entry is written atomically (temporary
 file, `fsync`, replace) **before** removal, and is retired only after a
 verified rehydration. Schema `agent-worktrees.checkout-dehydration` version 1:
 
@@ -53,7 +58,11 @@ The catalog entry is the only hydration state; the tracking record schema is
 unchanged. A record is dehydrated while its catalog entry exists. Every
 transition re-reads the entry under the record lock and checks its identity
 (worktree ID, repo, branch, path, creation nonce and anchor) against the
-tracking record. A mismatch is a hold, and nothing changes.
+tracking record. A mismatch is a hold, and nothing changes. Before any
+checkout change, the whole snapshot is validated (absolute checkout path,
+hexadecimal HEAD, a safe branch name, the per-worktree config structure and
+its base64 payload, and other field types). A malformed entry is a hold, not
+an error trace.
 
 ## Dehydrate gates
 
@@ -62,7 +71,8 @@ Dehydrate refuses, without writing a catalog entry, unless all hold:
 1. The worktree is managed (not the anchor, a reference or an unmanaged
    checkout) and is not finalizing.
 2. HEAD is the recorded branch: detached, unborn or another branch refuses.
-3. No merge, rebase, cherry-pick, revert or bisect is in progress.
+3. No merge, rebase, cherry-pick, revert, bisect or multi-commit sequencer
+   operation is in progress.
 4. No submodules and no sparse checkout (refused explicitly for now).
 5. No checkout-local retained data, using the same
    `checkout_data.preservation_hint` hold as finalize (for example a
@@ -96,7 +106,10 @@ guards. It then runs `git worktree remove <path>` from the anchor **without
 `--force`**. With Git 2.56, plain removal deletes ignored files and refuses
 modified or untracked files, so the clean gate is enough and force is never
 needed. Removal is verified (path absent and not in `git worktree list`)
-before the stage becomes `dehydrated`.
+before the stage becomes `dehydrated`. The catalog publication and the
+removal run under a per-repository reservation lock in the Git common
+directory. If removal fails, the entry is kept and reconcile decides: an
+intact clean checkout rolls back, a partly removed one is a hold.
 
 ## Rehydrate, reconcile and recover
 
@@ -144,9 +157,18 @@ orphan sweep, pair sync is blocked and `remove-system` names it as a blocker.
 `finalize` (including `--abandon --handoff-to`) refuses before it rehomes or
 publishes any obligation. Claimant resolution treats a dehydrated record, or
 a catalog-only recovery candidate, as a held live claimant, so the sweep does
-not abandon its inbound or outbound claims. Managed branch deletion and
+not abandon its inbound or outbound claims. The lookup uses the target
+project's own configuration and the root registry (which alone suffices when
+that configuration cannot be loaded); when the registry or a catalog
+directory cannot be read, the claimant is unknown, not dead. Managed branch deletion and
 feature-branch moves (`branch -f`) refuse a branch that a catalog entry
-reserves. Reservation discovery reads fresh entries from today's configured
+reserves. Every managed `branch -f` write uses `git_ops.force_branch`: the
+feature-branch sync and merge paths, and the PR-head snapshot writes in
+`create-pr`, `finalize` and the PR rewrite. Each write checks reservations
+again, under the same reservation lock as dehydration, so a dehydration that
+starts during a fetch cannot be overwritten. Branches named by a cataloged PR
+reference are reserved too. When a readable entry names a different branch
+than its tracking record, both branches are held. Reservation discovery reads fresh entries from today's configured
 roots and from the catalog beside every recorded checkout, so it survives a
 worktree-root change. It fails closed: for an unreadable or corrupt entry the
 branch comes from its tracking record; when that is unknown, or the catalog

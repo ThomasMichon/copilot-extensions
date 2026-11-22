@@ -685,9 +685,7 @@ def _reconcile_merged_pointers(
                 "rev-parse", upstream, cwd=anchor, check=False
             ).stdout.strip()
             if up_sha:
-                git_ops.git(
-                    "branch", "-f", branch, up_sha, cwd=anchor, check=False
-                )
+                git_ops.force_branch(branch, up_sha, cwd=anchor)
     except Exception:
         pass
 
@@ -839,7 +837,10 @@ def _push_changes_pr(
             tracking_session_registry.record_repo_fetch_confirmed(record.repo)
 
         if on_wt:
-            git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
+            refused = git_ops.force_branch(feature, "HEAD", cwd=worktree_path, config=config)
+            if refused:
+                output.err(f"{refused} Nothing was pushed.")
+                return False
 
         # push-changes always updates an already-published PR head -- lease
         # the push against its LAST-OBSERVED tip, never a live re-query

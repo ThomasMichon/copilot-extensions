@@ -1474,13 +1474,40 @@ def delete_branch(name: str, *, cwd: str | Path, force: bool = False) -> bool:
     """
     from . import checkout_hydration_catalog
 
-    holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name)
-    if holder:
-        log.warning("Refusing to delete branch %s: retained by dehydrated worktree %s", name, holder)
+    try:
+        with checkout_hydration_catalog.reservation_lock(cwd):
+            holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name)
+            if holder:
+                log.warning("Refusing to delete branch %s: retained by dehydrated worktree %s", name, holder)
+                return False
+            flag = "-D" if force else "-d"
+            result = git("branch", flag, name, cwd=cwd, check=False)
+    except checkout_hydration_catalog.CatalogError as exc:
+        log.warning("Refusing to delete branch %s: %s", name, exc)
         return False
-    flag = "-D" if force else "-d"
-    result = git("branch", flag, name, cwd=cwd, check=False)
     return result.returncode == 0
+
+
+def force_branch(name: str, target: str, *, cwd: str | Path, config: object = None) -> str | None:
+    """``git branch -f name target`` unless a dehydrated checkout retains ``name``.
+
+    The reservation check and the ref write run under the repository's
+    reservation lock, so a concurrent dehydration cannot interleave. Returns
+    ``None`` on success or a refusal/failure message.
+    """
+    from . import checkout_hydration_catalog
+
+    try:
+        with checkout_hydration_catalog.reservation_lock(cwd):
+            holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name, config)
+            if holder:
+                return f"{name} is retained by dehydrated worktree {holder}; rehydrate it first."
+            result = git("branch", "-f", name, target, cwd=cwd, check=False)
+    except checkout_hydration_catalog.CatalogError as exc:
+        return f"cannot verify branch reservation for {name}: {exc}"
+    if result.returncode != 0:
+        return f"Failed to set {name} to {target}: {result.stderr.strip()}"
+    return None
 
 
 def get_dirty_files(cwd: str | Path) -> list[str]:

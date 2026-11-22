@@ -258,8 +258,11 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     if not rec_path.exists():
         # A dehydration catalog entry is a recovery candidate for a lost ledger:
         # its agency (and claims) are retained, so the owner is not gone.
-        if _hydration_catalog().project_entry(project, parsed.worktree_id, config) is not None:
+        state = _hydration_catalog().project_entry_state(project, parsed.worktree_id, config)
+        if state == _hydration_catalog().ENTRY_PRESENT:
             return True
+        if state != _hydration_catalog().ENTRY_ABSENT:
+            return None  # the target project's catalog could not be consulted
         return False  # owner record gone -> claim is stale
     try:
         owner_rec = tracking.load_record(rec_path)
