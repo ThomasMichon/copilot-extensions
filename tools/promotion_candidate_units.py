@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
+import sys
+from typing import Any
 
 import installer_engine_ref
 from promotion_unit_contract import (
@@ -12,10 +15,10 @@ from promotion_unit_contract import (
 
 
 def candidate_manifest(
-    template: dict, *, dev_sha: str, candidate_tree: str,
+    template: dict[str, Any], *, dev_sha: str, candidate_tree: str,
     development_sources: dict[str, bytes], candidate_sources: dict[str, bytes],
     origins: dict[str, str],
-) -> dict:
+) -> dict[str, Any]:
     """Keep positive selection fixed; bind the actual composed execution closure."""
     template = admit_manifest(template)
     if template["profile"] == CANDIDATE_PROFILE:
@@ -55,7 +58,7 @@ def candidate_manifest(
     })
 
 
-def _bytes(root: Path, names) -> dict[str, bytes]:
+def _bytes(root: Path, names: Iterable[str]) -> dict[str, bytes]:
     result = {}
     for name in names:
         path = root / relative_file(name)
@@ -71,13 +74,13 @@ def _bytes(root: Path, names) -> dict[str, bytes]:
 
 
 def derive_manifest(
-    template: dict, *, development_root: Path, candidate_root: Path,
+    template: dict[str, Any], *, development_root: Path, candidate_root: Path,
     dev_sha: str, candidate_tree: str,
-) -> tuple[dict, dict[str, bytes], dict[str, bytes]]:
+) -> tuple[dict[str, Any], dict[str, bytes], dict[str, bytes]]:
     """Admit exact copies through declared uv and installer-engine routes."""
-    try:
+    if sys.version_info >= (3, 11):
         import tomllib
-    except ModuleNotFoundError:
+    else:
         import tomli as tomllib
 
     verify_sources(development_root.resolve(), template["sources"])
