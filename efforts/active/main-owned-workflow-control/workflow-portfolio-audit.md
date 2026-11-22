@@ -6671,6 +6671,43 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 22 original pure storage monitor
+
+The adapter exports the first five complete original monitoring functions:
+resume freshness, exact threshold refusals, sample age/cadence/lifetime/loss,
+invalid-measurement invalidation and finite bounded policy inputs. All original
+functions, helpers, parameter rows, supplied timestamps, thresholds, loops and
+assertions remain unchanged. Complete collection compares 64 original cases
+with exactly 19 adapter cases, verifies original function/mark-row object
+identity and compares cross-module values and types. The initial collection-only
+comparison exposes the original NaN row's non-reflexive equality; the
+development-only comparison recognizes NaN on both sides with identical types.
+No test row or guarded execution is changed. All 23 reader/guest/native/process
+functions, comprising 45 cases, remain outside execution.
+
+The initial unchanged effect/source guard passes all 19 selected cases in
+0.84 pytest / 1.562 observation seconds with zero prohibited effects, twelve
+bound canonical Python reads and actual production storage-owner call-phase
+lines for every case. All 57 setup/call/teardown reports pass. Only the adapter
+adds a source binding; the original monitoring test, storage owner and complete
+canonical import closure are already bound. One production coverage target is
+added. Compact-v2 contains 9,347 nodes and 1,304 sources in 1,040,977 bytes.
+All 9,328 prior nodes and 471 targets retain order, all 1,303 prior source hashes
+remain intact, and 89 helper decisions and the 300-second bound are unchanged.
+
+This is below-altitude source-test selection, not a workflow, production,
+installer, service-contract or runtime change. Supplied usage dataclasses and
+timestamps do not prove real measurement, quotas, capacity, custody, Docker or
+native execution. Fresh-install/native/installed lanes are not exercised because
+no installation or runtime behavior changes. Normal exact-head review and
+complete fresh Linux CI remain required. No held refusal, prior qualification,
+guard exception, manual workflow, retry or native grant is replayed; broader
+owner, release, custody and parent gates remain open.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
+documentation consistency pass before publication. A worktree-manager patch
+changefile retains release intent; it is not writer activation or rollout.
+
 ### November 22 original synthetic network inventory
 
 The adapter exports seven complete original pure network-inventory functions:
@@ -6708,6 +6745,29 @@ the parent and separate owner, release, custody and cleanup gates remain open.
 Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
 documentation consistency pass before publication. A worktree-manager patch
 changefile retains release intent; it is not writer activation or rollout.
+Approval `6014895983` names exact head
+`e8db51da4db953bdd64e02c0821565d2205099b6`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45078485943`, attempt one, unit job `137380979960`, executes all
+9,328 selected cases with 55 deselections in 162.71 pytest / 183.918 packet
+seconds. It reports `mode=executed`, origin run `45078485943`, attempt one,
+execution identity
+`118032bb58be385f08ad0258f697e17475173726123df92575cc6e75161fee1b`
+and packet digest
+`89f0b695b47c06266fa4c35750ddec4f3e6faca5f8a43412c13d98f05c303b63`.
+Evidence upload succeeds as artifact `14776152340`. Guard job `137380979712`,
+required aggregate `137382394506` and trusted metadata checks pass.
+Seven fresh required-check verifier reads and final head/review/thread/hold/
+parent-reference fences pass before normal managed merge. No CI retry,
+manual workflow or deadline waiver is used.
+
+Source #14134 merges at `2026-11-22T22:41:22Z` as
+`842e6ac8aaa9257308341c01897eaac7a89b3dad`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent Goal,
+Plan, own leaf and Validation Plan are reread before resolving only this
+43-case leaf. Separate data/native-load/thread and assessment-phase refusals,
+release, owner, custody and completion gates remain open.
 
 ### November 22 original synthetic reproducer static boundary
 

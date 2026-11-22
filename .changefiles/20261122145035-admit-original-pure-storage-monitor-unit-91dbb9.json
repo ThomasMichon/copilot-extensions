@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original pure storage monitor unit controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
