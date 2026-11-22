@@ -1371,7 +1371,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   evaluation reaches `platform.uname()` and `socket.gethostname`, refused by the
   unchanged effect auditor. None of the 52 cases is admitted. Retain the
   candidate and failed helper; do not preload host state or retry variants.
-- [ ] Qualify the three original bounded-hash worker-count refusal cases,
+- [x] Qualify the three original bounded-hash worker-count refusal cases,
   preserving their exact function, parameters and assertions. Keep the two
   original threaded hashing witnesses unchanged with their integration owner.
   Require closed reads, positive per-case actual owner calls and zero
@@ -1379,6 +1379,20 @@ authorizes critical main-path acceptance or a bounded administrative change.
   targets, helper decisions, compact/flat-v1 identity and the 300-second bound.
   Require normal strict typing, current-head review and complete fresh Linux
   CI; the refused runtime-profile class and broader parent gates remain open.
+  #14061 merges at `55479aa6685d8536b530a4e132de09aa11bfe7be` after
+  exact-head Copilot approval and complete required Linux CI with all 8,240
+  units freshly executed. Both threaded witnesses, the 52-case host-query
+  refusal and broader parent gates remain open.
+- [ ] Qualify seven original deterministic Windows-rotation selector cases,
+  preserving their exact functions, fixed dates, CLI arguments and assertions.
+  Keep the original tier-disjointness assertion outside this call-coverage
+  admission without reclassifying it or inventing an owner call.
+  Require complete original/adapter collection identity, closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no actual Windows
+  workflow, platform qualification, runtime or native contract changes.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

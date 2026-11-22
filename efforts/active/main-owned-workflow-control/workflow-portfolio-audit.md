@@ -4375,6 +4375,35 @@ installation or runtime behavior changes. This is not a reuse hit,
 controlled whole-flow saving, real publication or acceptance of any broader
 owner or parent gate.
 
+### November 22 original deterministic rotation qualification
+
+A new adapter exports seven unchanged functions from the eight-case original
+Windows-rotation selector module: five fixed-date algorithm controls and both
+in-process CLI output formats. It retains the original arguments, date
+fixtures and assertions without substituting functions or adding restoration
+fixtures. The original tier-disjointness assertion remains outside this
+call-coverage admission because it executes no production owner function;
+that does not reclassify it or make the unit census complete.
+
+Complete collection preserves every selected original function identity.
+Fresh qualification passes all seven in 1.469 seconds under the unchanged
+auditor, with zero prohibited effects, exactly three bound Python reads and
+positive actual call-phase selector-owner lines for every case.
+
+The candidate contains 8,247 nodes, 1,186 bound sources, 449 targets and
+932,816 compact-v2 bytes. Only the adapter, original test module and unchanged
+selector owner add bindings; the selector is the sole additional target.
+All 8,240 preceding nodes, 1,183 existing source hashes, 448 preceding targets
+and 89 helper decisions remain unchanged, as do compact/flat-v1 identity,
+byte cap and the 300-second bound. Normal strict typing, current-head review
+and complete fresh Linux CI remain required.
+
+This tests deterministic selector logic, not the Windows workflow, platform
+support, native execution or actual scheduled-suite completeness. Those
+contracts and the host-query, undeclared-data and broader parent gates remain
+separate. Fresh-install and installed/native lanes are not exercised because
+no runtime, installation, workflow or scheduling behavior changes.
+
 ### November 22 original runtime-profile refusal and worker-limit qualification
 
 The original runtime-profile class adapter preserves all 53 collected class,
@@ -4397,10 +4426,27 @@ The resulting candidate contains 8,240 nodes, 1,183 bound sources, 448 targets
 and 931,948 compact-v2 bytes. Only the new adapter and original hashing test
 module add source bindings. All 8,237 preceding nodes and 1,181 hashes retain
 their order and values; targets, 89 helper decisions, compact/flat-v1 identity
-and the 300-second bound remain unchanged. Complete fresh Linux packet CI
-and normal current-head review remain required. This is not qualification
-of the refused runtime-profile cohort, native threading, fresh installation,
-real builds or the broader owner and parent gates.
+and the 300-second bound remain unchanged. Fatal Ruff, strict Python
+3.10/Linux and Windows typing, documentation consistency and diff checks pass.
+Copilot approval `6011267593` covers exact head
+`de7fd2730af28cf0aacc7ed58428357eee41ac4e`, with no active findings.
+
+Source CI `45003249669`, unit job `137149162624`, freshly passes all 8,240
+cases with 39 deselections, 114.58 pytest seconds and 128.313 packet seconds.
+It reports `mode=executed`, origin run `45003249669` attempt one, execution
+identity `c85c243735ca05146cca6c31689c4cbed62b08550880f086a138608a6615c344`
+and packet digest
+`7df773d3102119a09ff39044b61ba2c44ffea79362e1df61c7e65e7d75e9d9ac`.
+Required aggregate `137150171239`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14061 merges at `2026-11-22T08:39:29Z` as
+`55479aa6685d8536b530a4e132de09aa11bfe7be`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the three-case leaf.
+This is not qualification of the refused runtime-profile cohort, native
+threading, fresh installation, real builds or the broader owner and parent gates.
 
 ### November 22 original subject-verifier retry qualification
 
