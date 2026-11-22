@@ -32,7 +32,11 @@ def phase(root: Path, name: Phase) -> Iterator[None]:
         record = {"schema": "copilot-extensions.onboarding-failure/v1", "phase": name,
                   "reason": reason, "code": code}
         message = json.dumps(record, sort_keys=True)
-        print(message, file=sys.stderr, flush=True)
+        try:
+            print(message, file=sys.stderr, flush=True)
+        except Exception:
+            # A closed or broken diagnostic stream must not mask the child failure.
+            pass
         # Retention is best effort; never replace the original failure.
         try:
             if root.parent == Path(tempfile.gettempdir()).resolve() and root.name.startswith("ce-bootstrap-trial-"):

@@ -1,4 +1,5 @@
 import json
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -26,3 +27,23 @@ def test_silent_child_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     assert json.loads(capsys.readouterr().err) == expected
     assert [json.loads(p.read_bytes()) for p in root.glob(".onboarding-failure-*.json")] == (
         [expected] if owned else [])
+
+
+def test_closed_stderr_preserves_original_failure_and_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    root = tmp_path / "ce-bootstrap-trial-closed-stream"
+    root.mkdir()
+    (root / ".bootstrap-trial.json").write_text(json.dumps(str(root)))
+    stream = io.StringIO()
+    stream.close()
+    failure = subprocess.CalledProcessError(17, ["private-fixture"])
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sys, "stderr", stream)
+        with pytest.raises(subprocess.CalledProcessError) as caught, phase(root, "manager-handoff"):
+            raise failure
+    assert caught.value is failure
+    record, = root.glob(".onboarding-failure-*.json")
+    assert json.loads(record.read_bytes()) == {
+        "schema": "copilot-extensions.onboarding-failure/v1", "phase": "manager-handoff",
+        "reason": "child-exit", "code": 17,
+    }
