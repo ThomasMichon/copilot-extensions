@@ -410,8 +410,11 @@ the non-public approval conversation.
 
 ## Plan
 
+The [protected-capacity and activity intake](journal/2026/11.21-protected-capacity-and-activity-intake.md)
+retains two distinct requests, scoped #14008 delivery and a complete 903-open census; it also restores the recorded later 60-second owner amendment rather than reviving a historical latency gate.
+
 The [native operability and original-acceptance continuation](journal/2026/11.21-native-operability-and-original-acceptance.md)
-distinguishes the reviewed 60-second read correction from the original 20-second request, and retains installed/older-mux qualification separately from source completion.
+distinguishes operability from latency improvement, accepts the later 60-second owner amendment and retains installed/older-mux qualification separately from source completion.
 
 The [bounded inventory, telemetry and continuity continuation](journal/2026/11.21-bounded-inventory-and-continuity-intake.md)
 records two merged source leaves, three distinct new requests and an external departure; the complete census is 902 open, 173 above the fixed target.
