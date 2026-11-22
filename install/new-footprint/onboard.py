@@ -35,7 +35,16 @@ def main() -> None:
             text=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if probe.returncode:
-            raise ValueError("Selected knowledge repository is not readable by the target's GitHub CLI identity")
+            login = subprocess.run(
+                ["gh", "api", "--hostname", "github.com", "user", "--jq", ".login"],
+                env={**os.environ, "GH_PROMPT_DISABLED": "1"}, capture_output=True,
+                timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if login.returncode or not login.stdout.strip():
+                raise ValueError("GitHub CLI could not verify a signed-in identity on the target; "
+                                 "check gh auth status --hostname github.com in the target terminal")
+            raise ValueError("Target GitHub CLI identity is authenticated, but could not read "
+                             "the selected private knowledge repository; verify repository access and SSO")
         observed = json.loads(probe.stdout)
         if observed["nameWithOwner"].casefold() != locator.casefold() or observed["isPrivate"] is not True:
             raise ValueError("Selected knowledge repository must resolve to the requested private repository")
