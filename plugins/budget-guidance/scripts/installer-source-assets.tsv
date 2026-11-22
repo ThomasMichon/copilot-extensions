@@ -210,10 +210,13 @@ copy	libs/agent-procutil/tests/test_wsl.py	libs/agent-procutil/tests/test_wsl.py
 copy	libs/agent-procutil/tests/test_wsl_native.py	libs/agent-procutil/tests/test_wsl_native.py
 copy	libs/agent-procutil/tests/wsl_caller_fixture.py	libs/agent-procutil/tests/wsl_caller_fixture.py
 copy	libs/installer-engine/bootstrap-protected-install.sh	scripts/bootstrap-protected-install.sh
+copy	libs/installer-engine/bootstrap-uv.ps1	scripts/bootstrap-uv.ps1
 copy	libs/installer-engine/bootstrap-uv.sh	scripts/bootstrap-uv.sh
 copy	libs/installer-engine/bootstrap_uv_capture.py	scripts/bootstrap_uv_capture.py
 copy	libs/installer-engine/install_source.py	scripts/install_source.py
+copy	libs/installer-engine/installer-engine.ps1	scripts/installer-engine.ps1
 copy	libs/installer-engine/installer-engine.sh	scripts/installer-engine.sh
+copy	libs/installer-engine/installer-human-output.ps1	scripts/installer-human-output.ps1
 copy	libs/installer-engine/installer_dependency_arguments.py	scripts/installer_dependency_arguments.py
 copy	libs/installer-engine/installer_dependency_config.py	scripts/installer_dependency_config.py
 copy	libs/installer-engine/installer_dependency_policy.py	scripts/installer_dependency_policy.py

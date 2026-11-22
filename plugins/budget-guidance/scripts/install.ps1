@@ -831,6 +831,84 @@ function Publish-BudgetCommandPath {
     }
 }
 
+function Assert-BudgetSnapshotPath {
+    param([string]$Root, [string]$Relative)
+    if ($Relative -cnotmatch '^(scripts|libs)/[A-Za-z0-9_./-]+$' -or
+        $Relative -match '(^|/)\.\.?(/|$)') {
+        throw 'Invalid source snapshot asset path'
+    }
+    $current = $Root
+    foreach ($component in $Relative.Split('/')) {
+        $current = [IO.Path]::Combine($current, $component)
+        try {
+            $attributes = [IO.File]::GetAttributes($current)
+            if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Linked source snapshot asset refused'
+            }
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] { }
+    }
+}
+
+function Copy-BudgetSourceSnapshotAssets {
+    param([string]$Snapshot)
+    $reader = Join-Path $PSScriptRoot 'pip-index-config'
+    if (-not [IO.File]::Exists($reader)) { throw 'The index reader is not prepared' }
+    if ([IO.File]::ReadAllText($reader) -notmatch '\A<!-- VENDOR_POINTER:') { return }
+    $root = [IO.Path]::GetFullPath((Join-Path $PluginDir '../..'))
+    $canonical = Join-Path $root 'libs/installer-engine/installer_pip_index.py'
+    if ([IO.File]::ReadAllText($reader).Trim() -cne
+        '<!-- VENDOR_POINTER: source=libs/installer-engine/installer_pip_index.py kind=file -->' -or
+        [IO.Path]::GetFileName($PluginDir) -cne 'budget-guidance' -or
+        [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($PluginDir)) -cne 'plugins' -or
+        -not [IO.File]::Exists((Join-Path $root '.github/plugin/marketplace.json')) -or
+        -not [IO.File]::Exists((Join-Path $root 'tools/materialize_main.py')) -or
+        -not [IO.File]::Exists($canonical)) {
+        throw 'The index reader is not prepared; use the owning source-preparation flow'
+    }
+    $plan = Join-Path $PSScriptRoot 'installer-source-assets.tsv'
+    if (-not [IO.File]::Exists($plan) -or [IO.File]::ReadAllText($plan).Length -eq 0) {
+        throw 'The owning native source asset plan is unavailable'
+    }
+    $copies = @()
+    foreach ($line in [IO.File]::ReadLines($plan)) {
+        $fields = $line.Split([char]"`t")
+        if ($fields.Count -ne 3) { throw 'Invalid source snapshot asset record' }
+        $operation, $source, $target = $fields
+        Assert-BudgetSnapshotPath $Snapshot $target
+        $destination = Join-Path $Snapshot $target
+        switch -CaseSensitive ($operation) {
+            'copy' {
+                Assert-BudgetSnapshotPath $root $source
+                if (-not [IO.File]::Exists((Join-Path $root $source)) -or
+                    ($source -cne $target -and
+                        ($target -cnotlike 'scripts/*' -or $source -cnotlike 'libs/installer-engine/*'))) {
+                    throw 'Invalid source snapshot copy'
+                }
+                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))
+                [IO.File]::Copy((Join-Path $root $source), $destination, $true)
+                $copies += ,@($source, $target)
+            }
+            'request' {
+                if ($target -cne 'scripts/bootstrap-python-version.txt' -or
+                    $source -cnotmatch '^cpython@3\.[0-9]+\.[0-9]+$') {
+                    throw 'Invalid source snapshot Python request'
+                }
+                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))
+                [IO.File]::WriteAllText($destination, "$source`n", $utf8NoBom)
+            }
+            default { throw 'Unknown source snapshot asset operation' }
+        }
+    }
+    foreach ($copy in $copies) {
+        Assert-BudgetSnapshotPath $root $copy[0]
+        Assert-BudgetSnapshotPath $Snapshot $copy[1]
+        if (-not [IO.File]::Exists((Join-Path $Snapshot $copy[1]))) {
+            throw 'Source snapshot asset is missing after copying'
+        }
+    }
+}
+
 function Invoke-Stamp {
     Test-SourceRuntimeUnchanged
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
@@ -858,9 +936,9 @@ function Invoke-Stamp {
         }
     }
     if (-not $reuseSnapshot) {
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $snapTmp = "$snapDir.tmp-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $snapTmp | Out-Null
+    try {
     # Copy everything needed to `uv pip install .` from the slot (src, libs,
     # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
     $exclude = if ($SourceRuntimeIdentity) { @() } else {
@@ -870,6 +948,7 @@ function Invoke-Stamp {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
     if (-not $SourceRuntimeIdentity) {
+    Copy-BudgetSourceSnapshotAssets $snapTmp
     $procutil = Get-BudgetProcutilSource
     $snapshotLib = Join-Path $snapTmp 'libs/agent-procutil'
     if (-not (Test-Path $snapshotLib)) {
@@ -892,6 +971,9 @@ function Invoke-Stamp {
     Test-SourceRuntimeUnchanged
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    } finally {
+        if ([IO.Directory]::Exists($snapTmp)) { Remove-Item -LiteralPath $snapTmp -Recurse -Force }
+    }
     }
     Test-SourceRuntimeUnchanged
     if ($SourceRuntimeIdentity) {
