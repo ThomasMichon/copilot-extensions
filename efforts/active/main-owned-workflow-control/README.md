@@ -2575,7 +2575,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   seconds within the unchanged bound. Reviewed and merged trees match.
   Only this 170-case leaf is complete; the parent, separate refusals and
   native qualifications remain open.
-- [ ] Qualify seven complete original synthetic network-inventory functions:
+- [x] Qualify seven complete original synthetic network-inventory functions:
   exact physical inventory, single subject, unsafe network, missing fields,
   peer attachments, bounded distinct selections and malformed inventory.
   Compare all 47 original cases with the expected 43 selected cases, retaining
@@ -2598,8 +2598,38 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Eleven source bindings and one production target are added; Compact-v2
   contains 9,328 nodes and 1,303 sources in 1,039,347 bytes, preserving prior
   node/target order and every current hash. Fatal Ruff, whole-file strict
-  Linux/Win32 typing and documentation consistency pass. Exact-head review and
-  complete fresh Linux CI remain pending; this leaf and the parent remain open.
+  Linux/Win32 typing and documentation consistency pass. #14134 merges at
+  `842e6ac8aaa9257308341c01897eaac7a89b3dad` after exact-head approval and
+  complete fresh Linux CI executes all 9,328 selected units in 183.918 packet
+  seconds within the unchanged bound. Reviewed and merged trees match.
+  Only this 43-case leaf is complete; the parent, separate refusals and
+  native qualifications remain open.
+- [ ] Qualify five complete original in-memory storage-monitor functions:
+  resume freshness, exact thresholds, cadence/lifetime/loss, invalid
+  measurement invalidation and finite bounded policy. Compare all 64 original
+  cases with the expected 19 selected cases, retaining original functions,
+  parameter rows, helpers and assertions. Exclude all reader, guest, native
+  and process cases before execution. Require initial unchanged effect/source
+  auditing and actual storage-owner call-phase coverage per selected case.
+  Add only one adapter source binding and the already-bound production
+  storage module as a coverage target; preserve all 9,328 nodes, 1,303 current
+  hashes, 471 targets, 89 helper decisions and the 300-second bound.
+  Require strict checks, committed release intent, exact-head review and
+  complete fresh Linux CI. Supplied timestamps and usage dataclasses are not
+  real storage measurement, quota, custody or capacity proof. No native lane,
+  held refusal, guard exception or consumed retry is replayed.
+  Complete collection confirms all 64 original cases, exactly 19 adapter
+  cases, original function/parameter-row identity and equal cross-module
+  values/types, treating the unchanged NaN input as NaN rather than equality
+  to itself. Initial unchanged auditing passes all 19 in 1.562 seconds with
+  zero prohibited effects, twelve bound canonical Python reads and actual
+  storage-owner call-phase coverage per case; all 57 phase reports pass.
+  One adapter binding and one already-bound production coverage target are
+  added. Compact-v2 contains 9,347 nodes and 1,304 sources in 1,040,977 bytes,
+  preserving prior node/target order, every current hash, all 89 helper
+  decisions and the 300-second bound. Fatal Ruff, whole-file strict Linux/Win32
+  typing and documentation consistency pass. Normal review and complete fresh
+  Linux CI remain pending; this local qualification does not complete the leaf.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

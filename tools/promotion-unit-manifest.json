@@ -3,6 +3,30 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_reproducer_storage_monitor_units.py",
+      [
+        "test_monitor_requires_measurement_again_on_resume",
+        "test_exact_threshold_refuses_new_work[persistent_bytes-4294967296-persistent usage]",
+        "test_exact_threshold_refuses_new_work[output_bytes-67108864-evidence usage]",
+        "test_exact_threshold_refuses_new_work[minimum_free_bytes-1024-backing free space]",
+        "test_slow_sample_age_cadence_lifetime_and_loss",
+        "test_invalid_measurement_clears_previous_success[changes0]",
+        "test_invalid_measurement_clears_previous_success[changes1]",
+        "test_invalid_measurement_clears_previous_success[changes2]",
+        "test_invalid_measurement_clears_previous_success[changes3]",
+        "test_invalid_measurement_clears_previous_success[changes4]",
+        "test_invalid_measurement_clears_previous_success[changes5]",
+        "test_invalid_measurement_clears_previous_success[changes6]",
+        "test_policy_requires_finite_bounded_inputs[values0]",
+        "test_policy_requires_finite_bounded_inputs[values1]",
+        "test_policy_requires_finite_bounded_inputs[values2]",
+        "test_policy_requires_finite_bounded_inputs[values3]",
+        "test_policy_requires_finite_bounded_inputs[values4]",
+        "test_policy_requires_finite_bounded_inputs[values5]",
+        "test_policy_requires_finite_bounded_inputs[values6]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_reproducer_network_inventory_units.py",
       [
         "test_exact_physical_inventory_is_not_egress_or_custody_proof",
@@ -11382,6 +11406,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_reproducer_storage_monitor_units.py": "841d8167a3bdf3de7752f3f2d4148547e87a77feb4d2df4b23c7f68be26ce829",
     "tools/promotion_unit_tests/test_original_reproducer_network_inventory_units.py": "22dd6ddb568b4fe4c80fb9d1854a888d1b985a2c0a5c088c8291d81f4f4e945b",
     "tools/test_reproducer_lab_network.py": "cde3c08216e41557ca4066e393238b1b001d26fe043e20ba5c981c3ff53bf029",
     "tools/reproducer-lab/network.py": "f42390a4836909d6f7dfd7fd47dbbf8d0bd538d4b6f3e91875c71b15bced78ab",
@@ -12687,6 +12712,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/reproducer-lab/storage.py",
     "tools/reproducer-lab/network.py",
     "tools/reproducer-lab/boundary.py",
     "tools/compat-root-migration.py",
