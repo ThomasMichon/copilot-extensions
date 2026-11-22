@@ -1178,6 +1178,11 @@ Completion counts even when it leaves the original attachment undetached.
 A release-in-progress or pending/held retired cleanup also retains custody.
 Cleanup retry admission and lease revalidation both reject a later attachment;
 new attachment admission checks the same outstanding effects in reverse.
+A retired cleanup lease also checks the checkout independently of the native.
+While workspace cleanup is pending or held, a different native cannot take the
+same checkout; an intervening attachment prevents lease issue and revalidation.
+A completed workspace component with its recorded outcome leaves only native
+custody to check. A legacy or ambiguous cleanup detail is not such evidence.
 A reservation may already name a native and workspace before its task first
 starts. Missing attachment history is not proof that the native is free.
 For ordinary Bridge startup, publishing the created or resumed identity and

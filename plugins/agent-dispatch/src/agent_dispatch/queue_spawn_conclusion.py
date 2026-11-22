@@ -29,7 +29,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from .native_attachment_custody import require_not_reassigned
+from .native_attachment_custody import require_checkout_cleanup_custody, require_not_reassigned
 from .retained_conversation_cleanup import pending_conversation, require_conversation_released
 from .queue_common import Task
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
@@ -304,6 +304,7 @@ class SpawnConclusionMixin:
                 # Newer worktrees transition durably to held above; only a
                 # real lease grant needs the remaining allocation fences.
                 validate_recovery(self, conn, row, claimant_machine=claimant_machine)
+                require_checkout_cleanup_custody(conn, row)
                 require_not_reassigned(conn, row)
                 claim_token = uuid.uuid4().hex
                 payload = {
@@ -369,6 +370,7 @@ class SpawnConclusionMixin:
             )
             from .cleanup_recovery import validate_recovery
             validate_recovery(self, conn, row, claimant_machine=claimant_machine)
+            require_checkout_cleanup_custody(conn, row)
             require_not_reassigned(conn, row)
             newer = _newer_worktree_reservation(conn, row, key)
             if newer is not None:

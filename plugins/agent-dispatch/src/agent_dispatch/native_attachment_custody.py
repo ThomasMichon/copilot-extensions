@@ -1,5 +1,6 @@
 """Compare reservation effects with the native's durable assignment history."""
 
+import json
 import sqlite3
 
 from .bridge_remote import normalize_host
@@ -45,6 +46,37 @@ def _last_other(conn: sqlite3.Connection, task_id: str, key: str | None, *, tree
     row = conn.execute(f"SELECT id FROM task_attachments WHERE {column}=? AND task_id<>? "
                        "ORDER BY id DESC LIMIT 1", (key, task_id)).fetchone()
     return int(row[0]) if row else 0
+
+
+def _cleanup_checkout(row: sqlite3.Row) -> str | None:
+    tree = row["worktree"]
+    if not isinstance(tree, str) or not tree or row["state"] not in ("failed", "settled") or (
+        row["conclusion_state"] not in ("pending", "held")
+    ):
+        return None
+    try:
+        detail = json.loads(row["conclusion_detail"] or "{}")
+    except (ValueError, TypeError):
+        return tree
+    component = detail.get("worktree_cleanup") if isinstance(detail, dict) else None
+    if isinstance(component, dict) and component.get("state") == "complete" and isinstance(component.get("outcome"), dict):
+        return None
+    return tree  # Legacy or incomplete evidence cannot narrow the lease to process-only.
+
+
+def require_checkout_cleanup_custody(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+    tree = _cleanup_checkout(row)
+    if tree is None:
+        return
+    task = row["task_id"]
+    first = conn.execute("SELECT min(id) FROM task_attachments WHERE task_id=? AND worktree_id=?",
+                         (task, tree)).fetchone()[0]
+    if _last_other(conn, task, tree, tree=True) > (first or 0) or conn.execute(
+        "SELECT 1 FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.worktree_id=? "
+        "AND a.task_id<>? AND a.detached_at IS NULL AND a.session_id=t.owner_session_id "
+        "AND t.status IN ('claimed','started','suspended','submitted') LIMIT 1", (tree, task),
+    ).fetchone():
+        raise TaskError("cleanup checkout belongs to another task")
 
 
 def require_not_reassigned(
@@ -120,7 +152,8 @@ def require_no_prior_effect(
     )
     # A different machine spelling is not proof of a distinct endpoint.
     # Reservation publication can precede any attachment for the original task.
-    if any(reservation_native_identity(conn, row) in (None, native) for row in rows):
+    if any((worktree is not None and _cleanup_checkout(row) == worktree)
+           or reservation_native_identity(conn, row) in (None, native) for row in rows):
         raise TaskError("original native delivery or terminal cleanup remains admitted")
 
 

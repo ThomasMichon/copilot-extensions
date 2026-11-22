@@ -234,8 +234,9 @@ def test_scheduled_resume_rechecks_native_before_sending(tmp_path: Path) -> None
 
 @pytest.mark.parametrize("cleanup_first", [False, True])
 @pytest.mark.parametrize("retire", ["fail_spawn", "settle_spawn"])
+@pytest.mark.parametrize(("incoming", "tree"), [("native", "tree"), ("different", "tree"), ("different", "other")])
 def test_retired_cleanup_and_native_attachment_cannot_overtake_each_other(
-    tmp_path: Path, cleanup_first: bool, retire: str,
+    tmp_path: Path, cleanup_first: bool, retire: str, incoming: str, tree: str,
 ) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
     old = queue.create("previous task", repo="example")
@@ -248,7 +249,8 @@ def test_retired_cleanup_and_native_attachment_cannot_overtake_each_other(
     queue.start(old.id, "host-a/tree", owner_session_id="native")
     queue.complete(old.id, "host-a/tree")
     getattr(queue, retire)(res.key)
-    queue.claim_one("host-a/tree", task_id=new.id)
+    worker = f"host-a/{tree}"
+    queue.claim_one(worker, task_id=new.id)
 
     def cleanup() -> None:
         queue.record_spawn_conclusion(res.key, conclusion_state="pending", conclusion_detail="{}")
@@ -257,10 +259,13 @@ def test_retired_cleanup_and_native_attachment_cannot_overtake_each_other(
         queue.validate_spawn_conclusion_claim(res.key, token)
 
     def attach() -> None:
-        queue.start(new.id, "host-a/tree", owner_session_id="native")
+        queue.start(new.id, worker, owner_session_id=incoming)
 
     first, second = (cleanup, attach) if cleanup_first else (attach, cleanup)
     first()
+    if tree != "tree":
+        second()
+        return
     before = queue.get(new.id)
     with pytest.raises(TaskError, match="another task|remains admitted"):
         second()
@@ -270,7 +275,8 @@ def test_retired_cleanup_and_native_attachment_cannot_overtake_each_other(
         assert retained is not None and retained.cleanup_claim_token is None
 
 
-def test_cleanup_claim_revalidation_refuses_legacy_later_attachment(tmp_path: Path) -> None:
+@pytest.mark.parametrize("incoming", ["native", "different"])
+def test_cleanup_claim_revalidation_refuses_legacy_later_attachment(tmp_path: Path, incoming: str) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
     old = queue.create("previous task", repo="example")
     new = queue.create("new task", repo="example")
@@ -291,11 +297,35 @@ def test_cleanup_claim_revalidation_refuses_legacy_later_attachment(tmp_path: Pa
             "INSERT INTO task_attachments "
             "(task_id,session_id,worktree_id,machine,attached_at,detached_at) "
             "VALUES (?,?,?,?,?,NULL)",
-            (new.id, "native", "tree", "host-a", queue._now(None)),
+            (new.id, incoming, "tree", "host-a", queue._now(None)),
         )
         conn.commit()
     with pytest.raises(TaskError, match="another task"):
         queue.validate_spawn_conclusion_claim(res.key, token)
+
+
+@pytest.mark.parametrize("incoming", ["old-native", "different"])
+def test_process_only_retry_keeps_native_but_not_completed_checkout(tmp_path: Path, incoming: str) -> None:
+    queue = TaskQueue(tmp_path / "queue.db")
+    old = queue.create("previous task", repo="example")
+    new = queue.create("different goal", repo="example")
+    assert isinstance(old, Task) and isinstance(new, Task)
+    res, _ = queue.reserve_spawn(old.id, driver="cli")
+    queue.record_spawn(res.key, session_handle="old-native", worktree="tree", startup_complete=True,
+                       startup_revision=res.startup_revision)
+    queue.fail_spawn(res.key, conclusion_state="pending", conclusion_detail=(
+        '{"worktree_cleanup":{"state":"complete","outcome":{"action":"preserved","reason":"targeted-worktree"}},'
+        '"session_end":{"state":"pending","session_id":"old-native"}}'
+    ))
+    _, claimed, token = queue.claim_spawn_conclusion_retry(res.key)
+    assert claimed and token
+    queue.claim_one("host/tree", task_id=new.id)
+    if incoming == "old-native":
+        with pytest.raises(TaskError, match="remains admitted"):
+            queue.start(new.id, "host/tree", owner_session_id=incoming)
+    else:
+        queue.start(new.id, "host/tree", owner_session_id=incoming)
+    queue.validate_spawn_conclusion_claim(res.key, token)
 
 
 @pytest.mark.parametrize("effect_first", [False, True])
