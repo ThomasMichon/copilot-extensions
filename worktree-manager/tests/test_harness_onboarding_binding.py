@@ -6,6 +6,12 @@ from types import ModuleType
 import unittest
 
 from worktree_manager import harness_onboarding as onboarding
+from worktree_manager import bootstrap_harness
+
+
+class NonpersistingWriter(ModuleType):
+    def write_binding(self, *args: object, **kwargs: object) -> None:
+        pass
 
 
 def check_registered_checkout_readback(tmp_path: Path, case: unittest.TestCase) -> None:
@@ -14,12 +20,11 @@ def check_registered_checkout_readback(tmp_path: Path, case: unittest.TestCase) 
     harness, companion = src / "control", src / "records"
     for path in (harness, companion):
         path.mkdir(parents=True)
-        onboarding.boot._git(path, "init", "--quiet")
-        onboarding.boot._git(path, "remote", "add", "origin", f"https://github.com/example/{path.name}")
-    onboarding.boot.first_registration(root, src, str(harness))
+        bootstrap_harness._git(path, "init", "--quiet")
+        bootstrap_harness._git(path, "remote", "add", "origin", f"https://github.com/example/{path.name}")
+    bootstrap_harness.first_registration(root, src, str(harness))
     remote = "example/records"
-    no_write = ModuleType("nonpersisting_writer")
-    no_write.write_binding = lambda *args, **kwargs: None
+    no_write = NonpersistingWriter("nonpersisting_writer")
     with case.assertRaisesRegex(ValueError, "read back"):
         onboarding.bind_companion(root, harness.name, remote, companion, no_write)
 

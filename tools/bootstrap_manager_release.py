@@ -93,7 +93,7 @@ def main() -> None:
         components = tuple(args.component)
         if args.frozen_seeds:
             snapshots = application_footprint.prepare_frozen(
-                checkout, args.commit, *args.frozen_seeds, output,
+                checkout, args.commit, args.frozen_seeds[0], args.frozen_seeds[1], output,
                 components=components, uv=uv, deadline=deadline,
             )
         else:

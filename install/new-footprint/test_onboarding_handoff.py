@@ -12,7 +12,7 @@ import onboard
 def test_probe_uses_incoming_environment(tmp_path: Path, exit_code: int) -> None:
     python = tmp_path / "executor" / "python"
     env = {"UV_OFFLINE": "1"}
-    with patch.object(onboard.subprocess, "run", return_value=subprocess.CompletedProcess([], exit_code)) as run:
+    with patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], exit_code)) as run:
         if exit_code:
             with pytest.raises(RuntimeError, match="no app slots staged"):
                 onboard.require_onboarding(python, env)
