@@ -4802,11 +4802,55 @@ original tests, telemetry owner and its unchanged failure-signature owner;
 only telemetry becomes a coverage target. No refused-candidate source
 binding or node is admitted.
 
-Normal strict typing, current-head review and complete fresh Linux CI remain
-required before closing the telemetry leaf. This does not qualify actual
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation
+consistency and diff checks pass. Copilot approval `6011825471` covers exact
+head `210fbb21f511320c4f5018e52be4ae399e1d9435` with no active findings.
+Source CI `45013773355`, unit job `137181576952`, freshly passes all 8,460
+cases with 43 deselections, 147.54 pytest seconds and 166.746 packet seconds.
+It reports `mode=executed`, origin run `45013773355` attempt one, execution
+identity `0d30a66006a961fe8187a15edaf6cca4290c77c97a503f83b1059123336721b8`
+and packet digest
+`0bf45b36663f9beb2f1c4f706a78c7664c34b8675e4bcfad45541d452468fd43`.
+Required aggregate `137182932572`, guards and trusted metadata pass.
+The guard job completes in 5 minutes 34 seconds; the unit packet's
+independently enforced 300-second bound remains unchanged.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14071 merges at `2026-11-22T10:50:36Z` as
+`de9a977f150f983f64615c4dcf4144bcdec135b4`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the eleven-case leaf.
+This does not qualify actual
 API/database execution or resolve any retained refusal/owner seam.
 Fresh-install/native lanes are not exercised because no installation,
 runtime, workflow or original-test behavior changes.
+
+### November 22 original CI-failure-watchdog qualification
+
+The adapter exports all 47 unchanged original watchdog test functions and
+their exact module fixture. Complete original/adapter collection agrees on
+fifty expanded cases, including all four original promotion-job parameters.
+Synthetic logs, helper/load behavior, existing subprocess/API stubs,
+temporary `GITHUB_OUTPUT` files and assertions remain unchanged. The
+selected calls do not execute actual GitHub, subprocess, thread or network
+operations; no new mock, preload, wrapper or effect exception is introduced.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer. All fifty pass in 1.984 seconds with zero
+prohibited effects, three bound Python reads and positive actual
+watchdog-owner call-phase lines for every selected case. The compact-v2
+candidate contains 8,510 nodes, 1,215 sources and 456 targets in 956,675
+bytes. All 8,460 preceding nodes and their order, all 1,213 current source
+hashes, every preceding target, 89 helper decisions and the 300-second
+bound remain intact. Only the adapter and original tests are new source
+bindings; the already bound watchdog owner becomes one new coverage target.
+
+Complete fresh Linux CI, current-head review, required checks and normal
+managed merge remain required. This is a finite source admission, not
+native/API qualification, portfolio activation, a measured saving or
+settlement of retained refusals and owner seams. Fresh-install/native lanes
+are not applicable because installation, runtime, workflow and original
+test behavior do not change.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 
