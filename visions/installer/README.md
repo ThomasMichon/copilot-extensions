@@ -9,11 +9,26 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-16
+- **Last revised:** 2026-11-21
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
 ## Purpose & Intent
+
+### Boot from zero
+
+A user should be able to onboard a machine from a terminal without an
+installed harness or working Manager. With no harness, a fresh machine can
+start with Manager alone. With a harness, its registration and source choice
+should determine **which Manager is installed first**. That Manager should
+then prepare the services required across all registered harnesses, rather
+than treating the first harness or the machine's existing apps as the roster.
+
+A user who has already paired a harness with a private knowledge repository
+should not have to repeat that choice on every machine. A machine's existing
+pairing wins; a portable default or an explicit onboarding input can supply a
+first pairing. Remembering the repository does not grant access to it.
+See the [onboarding architecture](../../docs/architecture.md#new-footprint-onboarding).
 
 The friction this vision exists to abolish: delivered Copilot knowledge and
 connectors are not an installed backend. Applications, commands, services and

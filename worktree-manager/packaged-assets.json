@@ -3,6 +3,32 @@
   "version": 2,
   "groups": [
     {
+      "canonicalDir": "libs/configuration-layers/src",
+      "payloadDir": "scripts/runtime-source-tools/policy",
+      "files": ["configuration_layers/__init__.py", "configuration_context/__init__.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-index/scripts",
+      "payloadDir": "scripts/runtime-source-tools/policy",
+      "files": ["resolve_effective_config.py", "config_schema.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-index/src/agent_index",
+      "payloadDir": "scripts/runtime-source-tools/policy/agent_index",
+      "files": ["__init__.py", "config.py", "configuration_layers.py", "_knowledge_overlay.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-vault/src/agent_vault",
+      "payloadDir": "scripts/runtime-source-tools/policy/agent_vault",
+      "files": ["__init__.py", "configuration.py", "config.py", "invocation.py", "configuration_scope.py",
+                "_peer_launch.py", "cache_limits.py", "cache_manifests.py", "cache_targets.py", "credential_fields.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-worktrees/src/agent_worktrees",
+      "payloadDir": "scripts/runtime-source-tools/knowledge_composition",
+      "files": ["knowledge_overlay.py", "knowledge_plugin_committed.py"]
+    },
+    {
       "canonicalDir": "tools",
       "payloadDir": "scripts/runtime-source-tools",
       "files": [
@@ -303,6 +329,7 @@
       "files": [
         "agent-containers/setup.py",
         "agent-worktrees/setup.py",
+        "harness-knowledge/skills/binding-knowledge/scripts/binding_yaml.py",
         "customizing-copilot/skills/reviewing-customizations/scripts/instruction_copies.py",
         "customizing-copilot/skills/reviewing-customizations/scripts/instruction_delivery.py",
         "customizing-copilot/skills/reviewing-customizations/scripts/instruction_delivery_io.py",
@@ -328,11 +355,16 @@
       "files": [
         "accumulate_bumps.py",
         "application_footprint.py",
+        "bootstrap_manager_release.py",
         "application_sources.py",
         "artifact_attestation.py",
         "artifact_builder_cli.py",
         "artifact_bundle_validation.py",
         "artifact_release_discovery.py",
+        "promotion_source_history.py",
+        "runtime_marketplace_source.py",
+        "runtime_source_authentication.py",
+        "runtime_source_capture.py",
         "artifact_source_build.py",
         "build_python_artifacts.py",
         "build_toolchain_lock.py",

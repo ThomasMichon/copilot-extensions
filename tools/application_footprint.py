@@ -24,7 +24,8 @@ _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 def prepare_frozen(
     repository: Path, commit: str, main_head: str, dev_head: str, output: Path, *,
-    uv: str, deadline: float,
+    uv: str, deadline: float, components: tuple[str, ...] = ("worktree-manager",),
+    extras: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, str]:
     """Prepare an explicitly frozen WIP commit, never mutable working files."""
     import local_install_source as preparation
@@ -61,7 +62,10 @@ def prepare_frozen(
     output = output.resolve()
     processes.procutil_module("_daemon_instance_owner").mkdir_private(output)
     built = output / "inputs"
-    projects = ("standalone:worktree-manager",)
+    if not components or len(set(components)) != len(components) or not all(_NAME.fullmatch(n) for n in components):
+        raise ValueError("Invalid frozen application roster")
+    from standalone_python_artifacts import COMPONENTS
+    projects = tuple("standalone:" + n if n in COMPONENTS else n for n in components)
     record = preparation.compose(
         repository, commit, main_head, built, projects=projects, deadline=deadline,
     )
@@ -69,7 +73,7 @@ def prepare_frozen(
         built, record, projects=projects, uv=uv, deadline=deadline, retain_toolchain=True,
     ) as (_record, toolchain):
         snapshots = preparation._prepare_profiles(
-            built, record, output, ("worktree-manager",), {}, toolchain,
+            built, record, output, components, extras or {}, toolchain,
             uv=uv, deadline=deadline,
         )
     if snapshots is None:

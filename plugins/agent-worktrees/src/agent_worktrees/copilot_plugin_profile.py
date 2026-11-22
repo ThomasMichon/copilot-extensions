@@ -18,7 +18,9 @@ from typing import Any
 
 from . import config as cfg, git_ops, installer, pr_authority, repos
 
-KEY = "_agentWorktreesToolPluginOverlay"
+from .knowledge_overlay import (KEY as KEY, preserve_guard as preserve_guard, protect_tool_receipts as protect_tool_receipts,
+                                unique_json_object as unique_json_object, validate_personal_version as validate_personal_version)
+
 REGISTRY_KEY = "copilot_plugin_profile_root"
 SETTING_KEYS = ("extraKnownMarketplaces", "enabledPlugins")
 
@@ -32,17 +34,7 @@ class _Family:
     identities: frozenset[str]
 
 
-def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """Refuse ambiguous duplicate keys at every JSON object depth."""
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON key {key!r}")
-        result[key] = value
-    return result
-
-
-def _error(detail: str):
+def _error(detail: str) -> RuntimeError:
     from .knowledge_plugins import KnowledgePluginError
 
     return KnowledgePluginError(detail)
@@ -79,7 +71,7 @@ def _common(path: Path, *, deadline: float | None = None) -> str:
     try:
         result = git_ops.git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path,
                              isolated_repository=True, input_data=b"",
-                             **({"timeout": remaining, "kill_tree": True} if remaining is not None else {}))
+                             timeout=remaining, kill_tree=remaining is not None)
     except git_ops.GitError as exc:
         raise _error(f"cannot inspect project Git custody: {exc}") from exc
     return _identity(Path(os.fsdecode(result.stdout).removesuffix("\n")))
@@ -127,7 +119,7 @@ def _family(project: str, *, anchor_only: bool = False, deadline: float | None =
     return _Family(project, root, common, tuple(family), frozenset(identities))
 
 
-def _profile(root: Path, selected: str | None) -> tuple[str | None, dict[str, dict]]:
+def _profile(root: Path, selected: str | None) -> tuple[str | None, dict[str, dict[str, Any]]]:
     from . import knowledge_plugins as kp
 
     empty: dict[str, dict[str, Any]] = {key: {} for key in SETTING_KEYS}
@@ -170,7 +162,7 @@ def _profile(root: Path, selected: str | None) -> tuple[str | None, dict[str, di
     return _identity(path), desired
 
 
-def preparation_profile(root: Path) -> tuple[dict, dict[str, dict]]:
+def preparation_profile(root: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     """Read the selected checkout, not a registered anchor's default branch."""
     from . import config_sources, inrepo_config_source
 
@@ -189,7 +181,7 @@ def preparation_profile(root: Path) -> tuple[dict, dict[str, dict]]:
             config_path = path
             break
     profile, desired = _profile(root, selected)
-    binding = {
+    binding: dict[str, Any] = {
         "configPath": str(config_path) if config_path else None,
         "configurationDigest": hashlib.sha256(config_path.read_bytes()).hexdigest() if config_path else None,
         "profilePath": profile,
@@ -213,8 +205,8 @@ def preparation_profile(root: Path) -> tuple[dict, dict[str, dict]]:
     return binding, desired
 
 
-def validate_marker(existing: dict, path: Path, *, project: str | None = None,
-                    root: Path | None = None, family: _Family | None = None) -> dict | None:
+def validate_marker(existing: dict[str, Any], path: Path, *, project: str | None = None,
+                    root: Path | None = None, family: _Family | None = None) -> dict[str, Any] | None:
     """Authenticate exact contributor scope, never just value equality."""
     marker = existing.get(KEY)
     if KEY not in existing:
@@ -243,77 +235,6 @@ def validate_marker(existing: dict, path: Path, *, project: str | None = None,
     return marker
 
 
-def preserve_guard(result: dict) -> None:
-    """Older personal owners must refuse mixed contributor documents."""
-    from . import knowledge_plugins as kp
-
-    if KEY in result:
-        marker = result.setdefault(kp._OVERLAY_KEY, {"marketplaces": {}, "enabledPlugins": {}})
-        marker["version"] = 2
-    elif kp.same_json_value(result.get(kp._OVERLAY_KEY), {"version": 2, "marketplaces": {}, "enabledPlugins": {}}):
-        result.pop(kp._OVERLAY_KEY)
-    elif kp._OVERLAY_KEY in result:
-        result[kp._OVERLAY_KEY]["version"] = 1
-
-
-def protect_tool_receipts(existing: dict, result: dict, personal: dict,
-                          marketplace_conflicts: list, enabled_conflicts: list) -> None:
-    """A missing live tool value does not transfer its receipt to personal input."""
-    tool = existing.get(KEY)
-    if tool is None:
-        return
-    rejected_marketplaces = set()
-    for setting, receipt, conflicts in (
-        ("extraKnownMarketplaces", "marketplaces", marketplace_conflicts),
-        ("enabledPlugins", "enabledPlugins", enabled_conflicts),
-    ):
-        authored = personal[receipt]
-        overlaps = set(authored) & set(tool[setting])
-        if setting == "extraKnownMarketplaces":
-            rejected_marketplaces.update(overlaps)
-        for name in overlaps:
-            authored.pop(name)
-            if name in existing.get(setting, {}):
-                result[setting][name] = existing[setting][name]
-            else:
-                result.get(setting, {}).pop(name, None)
-            conflicts.append(name)
-        if not result.get(setting) and setting not in existing:
-            result.pop(setting, None)
-    from . import knowledge_plugins as kp
-
-    prior_enabled = existing.get(kp._OVERLAY_KEY, {}).get("enabledPlugins", {})
-    existing_enabled = existing.get("enabledPlugins", {})
-    for source in tuple(personal["enabledPlugins"]):
-        if kp.split_source(source)[1] in rejected_marketplaces:
-            personal["enabledPlugins"].pop(source)
-            if source in existing_enabled and (
-                source not in prior_enabled
-                or not kp.same_json_value(existing_enabled[source], prior_enabled[source])
-            ):
-                result.setdefault("enabledPlugins", {})[source] = existing_enabled[source]
-            else:
-                result.get("enabledPlugins", {}).pop(source, None)
-            enabled_conflicts.append(source)
-    if not result.get("enabledPlugins") and "enabledPlugins" not in existing:
-        result.pop("enabledPlugins", None)
-
-
-def validate_personal_version(marker: dict, path: Path, existing: dict) -> None:
-    from . import knowledge_plugins as kp
-
-    if marker.get("version") not in (1, 2) or (marker.get("version") == 2 and KEY not in existing):
-        raise _error(
-            f"cannot safely manage {path}: unsupported '{kp._OVERLAY_KEY}' version {marker.get('version')!r}"
-        )
-    tool = existing.get(KEY)
-    if isinstance(tool, dict):
-        for key, personal_key in (("extraKnownMarketplaces", "marketplaces"), ("enabledPlugins", "enabledPlugins")):
-            owned = marker.get(personal_key)
-            if isinstance(owned, dict) and set(owned) & set(tool[key]):
-                raise _error(f"ambiguous tool/personal receipt ownership in {path}")
-
-
 def _verify_checkout(root: Path, checkout: Path, project: str, family: _Family) -> None:
     if project not in installer.read_projects_registry(strict=True).get("projects", {}):
         raise _error("tool profile project is not registered")
@@ -324,13 +245,13 @@ def _verify_checkout(root: Path, checkout: Path, project: str, family: _Family) 
         raise _error("checkout is not in the registered project Git family")
 
 
-@pr_authority.registry_transaction
-def _stage(root: Path, checkout: Path, project: str, profile: str | None, desired: dict[str, dict]) -> dict[str, Any]:
-    return _stage_locked(root, checkout, project, profile, desired, _family(project))
+def _stage(root: Path, checkout: Path, project: str, profile: str | None, desired: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    with pr_authority.guard():
+        return _stage_locked(root, checkout, project, profile, desired, _family(project))
 
 
 def _project(root: Path, checkout: Path, project: str, profile: str | None,
-             desired: dict[str, dict], family: _Family, existing: dict) -> tuple[dict, dict]:
+             desired: dict[str, dict[str, Any]], family: _Family, existing: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     from . import knowledge_plugins as kp
 
     path = checkout / ".github" / "copilot" / "settings.local.json"
@@ -360,7 +281,8 @@ def _project(root: Path, checkout: Path, project: str, profile: str | None,
                 continue
             if name in legacy_values:
                 native = {**existing, key: current}
-                tiers = kp._read_harness_settings(
+                from .knowledge_overlay import _read_harness_settings
+                tiers = _read_harness_settings(
                     checkout, native, ignored_native_marketplaces=set(), ignored_native_enabled=set())
                 effective = tiers.marketplaces.get(name) if key == "extraKnownMarketplaces" else tiers.enabled.get(name)
                 if not kp.same_json_value(legacy_values[name], value) or not kp.same_json_value(effective, value):
@@ -383,7 +305,7 @@ def _project(root: Path, checkout: Path, project: str, profile: str | None,
 
 
 def _stage_locked(root: Path, checkout: Path, project: str, profile: str | None,
-                  desired: dict[str, dict], family: _Family, *, retire_only: bool = False) -> dict[str, Any]:
+                  desired: dict[str, dict[str, Any]], family: _Family, *, retire_only: bool = False) -> dict[str, Any]:
     """Use only this owner's guarded transaction evidence; recheck the target."""
     from . import knowledge_plugins as kp
 
@@ -409,7 +331,7 @@ def _has_profile_input(config: cfg.Config) -> bool:
     return path.is_file() and KEY in path.read_text(encoding="utf-8")
 
 
-def _observe(config: cfg.Config, family: _Family, profile: str | None, desired: dict) -> str:
+def _observe(config: cfg.Config, family: _Family, profile: str | None, desired: dict[str, Any]) -> str:
     from . import knowledge_plugins as kp
 
     root = family.root
@@ -436,7 +358,7 @@ def observe_for_admission(config: cfg.Config, *, deadline: float | None = None) 
 
 
 def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
-                     checked_profile: str | None = None) -> dict:
+                     checked_profile: str | None = None) -> dict[str, Any]:
     """Stage only one registered checkout; no profile preserves old behavior."""
     if config is not None and not hasattr(config, "default_repo"):
         config = None
@@ -486,57 +408,57 @@ def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
         return summary
 
 
-@pr_authority.registry_transaction
-def reconcile_project(project: str, repo_dir: str | Path | None, registry: dict) -> None:
+def reconcile_project(project: str, repo_dir: str | Path | None, registry: dict[str, Any]) -> None:
     """Register/re-register the anchor and existing family, retaining retry scope."""
-    entry = registry["projects"][project]
-    try:
-        config = cfg.load_project_config(project, include_control_plane_related_pr=False)
-    except cfg.ProjectNotRegisteredError:
-        # Legacy registry-only adoption can precede an available checkout.
-        # It cannot enable this optional feature or retire prior receipts.
-        declared = cfg._load_inrepo_config(str(repo_dir)) if repo_dir is not None else {}
-        if REGISTRY_KEY in entry or declared.get("copilot_plugin_profile") is not None:
-            raise
-        return
-    repo = config.default_repo
-    if repo.copilot_plugin_profile is None and REGISTRY_KEY not in entry:
-        return
-    family = _family(project)
-    root = family.root
-    if repo_dir is not None and _identity(Path(repo_dir)) != _identity(root):
-        raise _error("register target differs from the registered project root")
-    if _identity(Path(repo.anchor)) != _identity(root):
-        raise _error("effective project anchor differs from its registered root")
-    if REGISTRY_KEY in entry and entry[REGISTRY_KEY] != _identity(root):
-        raise _error("project tool receipt retry root has changed")
-    profile, desired = _profile(root, repo.copilot_plugin_profile)
-    entry[REGISTRY_KEY] = _identity(root)
-    installer.write_projects_registry(registry)
-    for checkout in family.paths:
-        summary = _stage_locked(root, checkout, project, profile, desired, family)
-        if any(summary["conflicts"].values()):
-            raise _error(f"tool plugin conflicts in {checkout}: {summary['conflicts']}")
-
-
-@pr_authority.registry_transaction
-def retire_project(project: str) -> list[dict]:
-    """Retire only tool receipts before deregistration; failures retain registry."""
-    registry = installer.read_projects_registry(strict=True)
-    entry = registry.get("projects", {}).get(project, {})
-    if REGISTRY_KEY not in entry:
-        return []
-    family = _family(project)
-    root = family.root
-    if entry[REGISTRY_KEY] != _identity(root):
-        raise _error("project tool receipt retry root has changed")
-    completed = []
-    try:
+    with pr_authority.guard():
+        entry = registry["projects"][project]
+        try:
+            config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+        except cfg.ProjectNotRegisteredError:
+            # Legacy registry-only adoption can precede an available checkout.
+            # It cannot enable this optional feature or retire prior receipts.
+            declared = cfg._load_inrepo_config(str(repo_dir)) if repo_dir is not None else {}
+            if REGISTRY_KEY in entry or declared.get("copilot_plugin_profile") is not None:
+                raise
+            return
+        repo = config.default_repo
+        if repo.copilot_plugin_profile is None and REGISTRY_KEY not in entry:
+            return
+        family = _family(project)
+        root = family.root
+        if repo_dir is not None and _identity(Path(repo_dir)) != _identity(root):
+            raise _error("register target differs from the registered project root")
+        if _identity(Path(repo.anchor)) != _identity(root):
+            raise _error("effective project anchor differs from its registered root")
+        if REGISTRY_KEY in entry and entry[REGISTRY_KEY] != _identity(root):
+            raise _error("project tool receipt retry root has changed")
+        profile, desired = _profile(root, repo.copilot_plugin_profile)
+        entry[REGISTRY_KEY] = _identity(root)
+        installer.write_projects_registry(registry)
         for checkout in family.paths:
-            summary = _stage_locked(root, checkout, project, None,
-                                    {key: {} for key in SETTING_KEYS}, family, retire_only=True)
-            if summary.get("action") != "no-op":
-                completed.append(summary)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise _error(f"tool retirement failed; project retained for retry; completed checkouts={completed}: {exc}") from exc
-    return completed
+            summary = _stage_locked(root, checkout, project, profile, desired, family)
+            if any(summary["conflicts"].values()):
+                raise _error(f"tool plugin conflicts in {checkout}: {summary['conflicts']}")
+
+
+def retire_project(project: str) -> list[dict[str, Any]]:
+    """Retire only tool receipts before deregistration; failures retain registry."""
+    with pr_authority.guard():
+        registry = installer.read_projects_registry(strict=True)
+        entry = registry.get("projects", {}).get(project, {})
+        if REGISTRY_KEY not in entry:
+            return []
+        family = _family(project)
+        root = family.root
+        if entry[REGISTRY_KEY] != _identity(root):
+            raise _error("project tool receipt retry root has changed")
+        completed = []
+        try:
+            for checkout in family.paths:
+                summary = _stage_locked(root, checkout, project, None,
+                                        {key: {} for key in SETTING_KEYS}, family, retire_only=True)
+                if summary.get("action") != "no-op":
+                    completed.append(summary)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise _error(f"tool retirement failed; project retained for retry; completed checkouts={completed}: {exc}") from exc
+        return completed

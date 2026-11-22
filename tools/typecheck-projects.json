@@ -765,9 +765,11 @@
     {
       "name": "repository-tools",
       "include": [
-        "tools"
+        "tools",
+        "install/new-footprint"
       ],
       "import_roots": [
+        "plugins/harness-knowledge/skills/binding-knowledge/scripts",
         "tools",
         "libs/installer-engine",
         "libs/versioned-runtime",

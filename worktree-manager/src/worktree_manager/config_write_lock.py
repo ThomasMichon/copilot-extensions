@@ -17,6 +17,14 @@ def config_write_lock(path: Path, *, timeout: float = 5.0) -> Iterator[None]:
     if path.is_symlink():
         raise OSError("Manager configuration is linked; edit its owning source instead")
     lock = path.with_name("." + path.name + ".lock")
+    with retained_sidecar_lock(lock, timeout=timeout):
+        yield
+
+
+@contextmanager
+def retained_sidecar_lock(lock: Path, *, timeout: float) -> Iterator[None]:
+    """Lock the caller's protocol-defined sibling without replacing its inode."""
+    lock.parent.mkdir(parents=True, exist_ok=True)
     if lock.is_symlink():
         raise OSError("Manager configuration writer lock is linked")
     with lock.open("a+b") as stream:

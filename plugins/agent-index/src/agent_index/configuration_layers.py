@@ -165,8 +165,16 @@ def load_repository_layers(
         return {"values": merged, "provenance": {}, "layers": []}
     context = context_from_owner(report)
     context["base_root"] = str(root.absolute())
+    return explicit_repository_layers(root, context, Path(report["repository_machine_root"]), cfg.config_path().absolute(),
+                                      parser=parser, marketplace=cfg._repo_marketplace_overlay_path(root))
+
+
+def explicit_repository_layers(
+    root: Path, context: dict[str, Any], local: Path, machine_path: Path, *,
+    parser: Callable[[str], object] | None = None, marketplace: Path | None = None,
+) -> Composition:
     layers: list[Layer] = [{"id": "defaults", "tier": "defaults", "origin": "defaults", "values": {}}]
-    merged = {}
+    merged: dict[str, Any] = {}
 
     def append(owner: Path, path: Path, tier: str, origin: str) -> None:
         nonlocal merged
@@ -212,16 +220,13 @@ def load_repository_layers(
 
     for path in _repository_paths(root):
         append(root, path, "repository", "base")
-    marketplace = cfg._repo_marketplace_overlay_path(root)
     if marketplace is not None:
         append(root, marketplace, "repository", "base")
     if context["binding"] == "bound":
         knowledge = Path(context["knowledge_root"])
         for path in _repository_paths(knowledge):
             append(knowledge, path, "repository", "knowledge")
-    machine_path = cfg.config_path().absolute()
     append(machine_path.parent, machine_path, "machine", "local_machine")
-    local = Path(report["repository_machine_root"])
     for path in _repository_paths(local):
         append(local, path, "repository_machine", "repository_machine")
     result = compose(context, layers)

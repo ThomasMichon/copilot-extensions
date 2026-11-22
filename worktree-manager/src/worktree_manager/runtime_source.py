@@ -21,18 +21,11 @@ from pathlib import Path
 import time
 
 from agent_procutil import no_window_kwargs
+from .git_routing import checkout_environment
 
 from .runtime_source_config import RuntimeSource
 from .runtime_identity import running_payload_dir, runtime_scripts
 from .source_config import absolute_local_source, default_root
-
-_GIT_ROUTING_ENV = {
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX",
-    "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_CONFIG",
-}
-
 
 class SourceAcquisitionError(RuntimeError):
     """The configured runtime source could not be acquired without substitution."""
@@ -81,10 +74,7 @@ def _git(
     checkout: Path, *arguments: str, deadline: float | None = None,
     environment: dict[str, str] | None = None,
 ) -> str:
-    environment = {
-        key: value for key, value in (os.environ if environment is None else environment).items()
-        if key.upper() not in _GIT_ROUTING_ENV
-    }
+    environment = checkout_environment(os.environ if environment is None else environment)
     environment.update(
         GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0",
     )
