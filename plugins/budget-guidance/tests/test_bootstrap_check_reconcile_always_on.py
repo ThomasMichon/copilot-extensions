@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_procutil import no_window_kwargs
+
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _PLUGIN_NAME = _PLUGIN_ROOT.name
 _PS1 = _PLUGIN_ROOT / "scripts" / "bootstrap-check.ps1"
@@ -184,6 +186,71 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     )
     assert "SKIPPED" not in result.stderr, result.stderr
     assert "reconciling in background" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("record", ["recent", "expired", "malformed", "directory"])
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
+def test_legacy_reconcile_record_never_authorizes_process_retirement(
+    tmp_path: Path, record: str, host: str,
+) -> None:
+    shell = _BASH if host == "bash" else shutil.which(host)
+    if shell is None or (host == "bash" and os.name == "nt"):
+        pytest.skip(f"{host} unavailable for this native fixture")
+    home = tmp_path / "home"
+    home.mkdir()
+    installation = _make_fake_install(home, _PLUGIN_NAME)
+    payload = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    scripts = payload / "scripts"
+    shutil.copy2(_PS1, scripts / _PS1.name)
+    lock = installation / "reconcile.lock"
+    if record == "directory":
+        lock.mkdir()
+    else:
+        lock.write_text("invalid\n" if record == "malformed" else "12345\n")
+    if record != "recent":
+        os.utime(lock, (1_000_000_000, 1_000_000_000))
+    before = lock.stat().st_mtime_ns
+    probe = tmp_path / "process-probe"
+    install = tmp_path / "installer-ran"
+    environment = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "BOOTSTRAP_PROBE": str(probe),
+        "BOOTSTRAP_INSTALL": str(install), "COPILOT_EXTENSIONS_CONTEXT": "",
+    })
+    if host == "bash":
+        injection = tmp_path / "fixture.sh"
+        injection.write_text(
+            'kill() { printf "%s\\n" "$*" >>"$BOOTSTRAP_PROBE"; return 0; }\n',
+        )
+        environment["BASH_ENV"] = str(injection)
+        (scripts / "install.sh").write_text(
+            '#!/usr/bin/env bash\nprintf ran >"$BOOTSTRAP_INSTALL"\n',
+        )
+        command = [shell, str(scripts / _SH.name)]
+    else:
+        (scripts / "install.ps1").write_text(
+            "[IO.File]::WriteAllText($env:BOOTSTRAP_INSTALL, 'ran')\n",
+        )
+        entry = tmp_path / "fixture.ps1"
+        entry.write_text(
+            "function Get-Process { [IO.File]::AppendAllText($env:BOOTSTRAP_PROBE, 'get'); $true }\n"
+            "function Stop-Process { [IO.File]::AppendAllText($env:BOOTSTRAP_PROBE, 'stop') }\n"
+            "function Start-Process { [IO.File]::WriteAllText($env:BOOTSTRAP_INSTALL, 'launch') }\n"
+            "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/bootstrap-check.ps1')\n",
+        )
+        command = [shell, "-NoProfile", "-NonInteractive", "-File", str(entry)]
+    result = subprocess.run(
+        command, cwd=home, env=environment, capture_output=True, text=True,
+        timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    assert "legacy reconcile ownership is unsettled" in result.stderr
+    assert not probe.exists() and not install.exists()
+    assert lock.stat().st_mtime_ns == before
+    if record == "directory":
+        assert lock.is_dir()
+    else:
+        assert lock.read_text() == ("invalid\n" if record == "malformed" else "12345\n")
 
 
 if __name__ == "__main__":
