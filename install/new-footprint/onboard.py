@@ -17,6 +17,7 @@ sys.path[:0] = [str(KIT / "worktree-manager" / "src"), str(KIT / "tools"),
 from worktree_manager import bootstrap_harness as harness
 from worktree_manager import bootstrap_pairing
 from worktree_manager import registered_suite, runtime_source_repository, source_config
+from worktree_manager.onboarding_failure import phase
 
 
 def require_onboarding(python: Path, env: dict[str, str]) -> None:
@@ -159,7 +160,8 @@ def main() -> None:
             handoff.append("--stage")
         # The installed preparer still needs release discovery and governed
         # dependency acquisition. Offline mode applies to closed-wheel setup.
-        subprocess.run(handoff, executable=str(interpreter), check=True, timeout=1800)
+        with phase(root, "manager-handoff"):
+            subprocess.run(handoff, executable=str(interpreter), check=True, timeout=1800)
 
 
 if __name__ == "__main__":
