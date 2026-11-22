@@ -3,6 +3,33 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_compat_root_migration_units.py",
+      [
+        "test_main_rejects_unresolvable_plugin",
+        "test_main_accepts_resolvable_plugin",
+        "test_cmd_name_rejects_completely_unknown_name",
+        "test_cmd_name_reports_done_when_definition_exists_but_no_calls",
+        "test_find_core_call_sites_does_not_match_alias_suffix",
+        "test_find_core_call_sites_matches_real_alias_call",
+        "test_find_core_call_sites_matches_accessor_call_shape",
+        "test_root_aliases_detected_when_import_is_indented",
+        "test_find_monkeypatch_sites_single_line",
+        "test_find_monkeypatch_sites_multi_line",
+        "test_find_monkeypatch_sites_detects_dotted_string_patch",
+        "test_find_monkeypatch_sites_dotted_patch_is_alias_independent",
+        "test_find_monkeypatch_sites_detects_dotted_string_setattr",
+        "test_find_monkeypatch_sites_detects_patch_object",
+        "test_find_monkeypatch_sites_detects_single_quoted_dotted_patch",
+        "test_find_monkeypatch_sites_detects_single_quoted_dotted_setattr",
+        "test_find_monkeypatch_sites_detects_single_quoted_alias_setattr",
+        "test_find_monkeypatch_sites_detects_single_quoted_patch_object",
+        "test_cmd_progress_excludes_alias_suffix_false_positive",
+        "test_cmd_progress_counts_dotted_string_setattr",
+        "test_cmd_progress_counts_patch_object",
+        "test_cmd_progress_counts_single_quoted_patch_object"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_construction_inventory_units.py",
       [
         "ConstructionInventoryTests::test_cli_errors_are_visible_and_not_success_shaped",
@@ -11132,6 +11159,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_compat_root_migration_units.py": "cfdfc35c377dfa569c8dd20107c90c7d30e58e234d124235abb82a897e621833",
+    "tools/test_compat_root_migration.py": "6acdf03433ae49c5d6e12214cd940e7eb0aeadb183fe426a3355394664981253",
+    "tools/compat-root-migration.py": "1b1debf9ab53d1a37f23043acd59a84710d2c48ce2f2ea1d70ad1f1f357b6bb4",
     "tools/promotion_unit_tests/test_original_construction_inventory_units.py": "19b191e6719a8285bd5bd89c85ef3258589e5984324f10253ddf70c279eb4a17",
     "tools/test_construction_inventory.py": "d3e2d392f519a8dbfb2a0c769060968cec4cb0653cf90cddc51841b80866202a",
     "tools/construction_inventory.py": "73074755b99c587950c9438c7b7fa70213baa640b82917ad88f72b909c4d96eb",
@@ -12420,6 +12450,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/compat-root-migration.py",
     "tools/construction_inventory.py",
     "libs/installer-engine/installer_instance_reconcile.py",
     "libs/installer-engine/installer_engine_stop.py",

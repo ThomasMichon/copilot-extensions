@@ -2491,7 +2491,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   The exact adapter is retained outside source discovery with its candidate,
   helper and refusal evidence. No subtest filtering, assertion change,
   phase-contract waiver or replay is authorized.
-- [ ] Qualify the 23 original fixture-only construction-inventory methods,
+- [x] Qualify the 23 original fixture-only construction-inventory methods,
   exporting the complete original thirty-method class without subclassing or
   method substitution. Use exact positive node selectors; leave the five
   subtest-emitting methods and the real symlink and real Git/CLI methods
@@ -2512,8 +2512,35 @@ authorizes critical main-path acceptance or a bounded administrative change.
   inventory-owner call-phase coverage per case. All 69 phase reports pass.
   Compact-v2 contains 9,093 nodes and 1,286 sources in 1,020,285 bytes,
   retaining all prior node order and source hashes and adding only the
-  production target ahead of the prior 467. Source review and complete fresh
-  Linux CI remain pending; this leaf and the parent are not complete.
+  production target ahead of the prior 467. Fatal Ruff, whole-file strict
+  Linux/Win32 typing and documentation checks pass. #14128 merges at
+  `75df360b0ca23286d29702006d467bff35ae1127` after exact-head approval and
+  complete fresh Linux CI executes all 9,093 selected units in 141.700 packet
+  seconds within the unchanged bound. Reviewed and merged trees match.
+  Only this 23-case leaf is complete; the separate assessment refusal,
+  native qualifications, release/owner/custody gates and parent remain open.
+- [ ] Qualify the complete original 22-case compatibility-root migration
+  scanner tests against their synthetic plugin trees. Preserve original
+  functions, the original repository-redirection fixture, helper bodies,
+  captured diagnostics and assertions. Compare complete original and adapter
+  collection identity before initial unchanged source/effect auditing and
+  actual scanner-owner call-phase coverage for every case. Add only adapter,
+  original-test and production source bindings plus the production target;
+  preserve all 9,093 prior nodes, 1,286 source hashes, 468 prior targets,
+  89 helper decisions and the 300-second bound. Normal strict checks,
+  committed release intent, exact-head review and complete fresh Linux CI
+  remain required. No real repository scan, assertion/fixture change, phase
+  contract change, retained-case replay, native execution or workflow/runtime/
+  routing/cleanup change is authorized.
+  Complete collection verifies all 22 original and adapter nodes with original
+  function and repository-redirection fixture identity. Initial unchanged
+  auditing passes all 22 in 1.844 seconds, with zero prohibited effects,
+  three bound canonical Python reads and actual scanner-owner call-phase
+  coverage per case; all 66 phase reports pass. Compact-v2 contains 9,115
+  nodes and 1,289 sources in 1,022,181 bytes, retaining all prior node order,
+  source hashes and targets and adding one production target. Exact-head
+  review and complete fresh Linux CI remain required; this local proof does
+  not complete the leaf or parent.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
