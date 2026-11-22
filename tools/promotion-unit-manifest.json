@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_vault_cache_inspection_units.py",
+      [
+        "test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission[no-write]",
+        "test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission[shared]",
+        "test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission[legacy]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_historical_argv_units.py",
       [
         "test_closed_historical_inspection_is_not_a_launch[agent-bridge-venv]",
@@ -10871,6 +10879,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_vault_cache_inspection_units.py": "f67ed9cb0181fb386e14f2e47a6f1d2db3c0a6f598bc08ee08de804f816253dd",
     "tools/promotion_unit_tests/test_original_historical_argv_units.py": "1ba9da0636c1545db8b5ec36a0167ee46c552299697ff1042f9d9857551e4790",
     "tools/test_installer_engine_stop.py": "d2663dcb0272a52097d738fba1623bfcaa1f71b2d7ee091330e75b1bd9600ea7",
     "tools/promotion_unit_tests/test_original_zip_directory_boundary_units.py": "84119fd77b2b0c868ea186c0748df20fe63cf85e55cdc1d9015090aa6cf3ff7f",

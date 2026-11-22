@@ -6027,6 +6027,38 @@ new mock, preload, guard exception, data, production, routing or cleanup change
 is introduced. This selection does not settle any separate native-load/thread
 refusal or parent completion and makes no whole-flow savings claim.
 
+### November 22 original vault cache-policy inspection
+
+The adapter exports the complete original
+`test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission`,
+preserving all three `no-write`/`shared`/`legacy` parameters, literal argument
+vectors, hash-derived cache identity and positive, foreign-root,
+unexpected-option, relative-root and foreign-cache assertions.
+Only the pure `admits_argv` inspection is selected; stop, capture, process
+inventory, signaling, native pidfd, unit-writer and Bash execution tests
+remain outside this adapter.
+
+Complete collection verifies all 110 original cases and exactly three adapter
+cases with original function and parameter-object identity. Initial unchanged
+effect/source auditing passes all three in 1.172 seconds, with zero prohibited
+effects, three bound canonical Python reads and actual `admits_argv`
+call-phase lines per case.
+
+Only the adapter binding is added. All 8,902 prior nodes retain relative order;
+all 1,262 current source hashes, including #14098's independent typecheck
+rebindings, 464 targets, 89 helper decisions and the 300-second bound remain
+intact. Compact-v2 and flat-v1 logical identity agree; the candidate contains
+8,905 nodes, 1,263 sources and 464 targets in 998,353 bytes. Exact-head review
+and complete fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes are not applicable because installation and
+runtime behavior do not change; normal fresh source CI supplies the external
+Linux consumer proof. This distinct selection does not replay or settle
+any refused candidate, complete the parent or demonstrate comparable
+whole-flow savings.
+
 ### November 22 original historical-argv inspection
 
 The adapter exports the complete original
@@ -6062,6 +6094,39 @@ runtime behavior do not change; normal fresh source CI supplies the external
 Linux consumer proof. This distinct selection does not replay or settle
 any refused candidate, complete the parent or demonstrate comparable
 whole-flow savings.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013072091` names exact head
+`6dc6829ee99796cd9ad5abe871f7366d20f1480d`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45039654367`, unit job `137261026744`, executes all 8,902
+cases with 43 deselections in 209.83 pytest / 233.707 packet seconds.
+It reports `mode=executed`, origin run `45039654367` attempt one,
+execution identity
+`e5be122ccc5df65b27aafccfe05e7d94ef9c15a43616a29a93bdd06bb163766e`
+and packet digest
+`f300ddb65c3f607b39f6a36388824a72844132de4fa14a167b6c27801b47477d`.
+Guards, required aggregate `137262380726` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge.
+
+Source #14100 merges at `2026-11-22T15:48:17Z` as
+`3b02f94b566ba051ff340b869bc0f951e81cc914`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+Concurrent #14098 at `200be2a466` advances the base with onboarding diagnostics
+and rebinds `tools/test_typecheck_programs.py` and `tools/typecheck_programs.py`.
+The complete reviewed-versus-merged tree difference is attributed to that
+independent base change; it is not empty. This leaf's exact five-file reviewed
+and merged deltas have the same stable patch ID
+`bffb9ddba99f405aca0cd29d820d7193e4b84c1a`, and its four non-manifest files
+are byte-identical. The manifest differs only by those two preserved peer
+source bindings. No claim is made that the pre-merge CI executed the entire
+later merged tree.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this six-case leaf. Separate native-load/thread/data refusals,
+release, owner, custody and completion gates remain open.
 
 ### November 22 original ZIP32/ZIP64 directory-count boundaries
 
