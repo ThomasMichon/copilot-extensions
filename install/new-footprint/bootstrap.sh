@@ -7,6 +7,7 @@ repo=${HARNESS_REPO:-}
 knowledge=${KNOWLEDGE_REPO:-}
 revision=main
 flags=()
+cleanup=false
 while (($#)); do
     case "$1" in
         --root) root=${2:?missing root}; shift 2 ;;
@@ -14,7 +15,8 @@ while (($#)); do
         --repo) repo=${2:?missing repo}; shift 2 ;;
         --knowledge-repo) knowledge=${2:?missing knowledge repo}; shift 2 ;;
         --bootstrap-revision) revision=${2:?missing bootstrap revision}; shift 2 ;;
-        --stage|--clear-trial) flags+=("$1"); shift ;;
+        --stage) flags+=("$1"); shift ;;
+        --clear-trial) flags+=("$1"); cleanup=true; shift ;;
         *) printf 'Unknown bootstrap option: %s\n' "$1" >&2; exit 2 ;;
     esac
 done
@@ -22,6 +24,27 @@ done
 args=(--root "$root" --srcroot "$srcroot")
 [[ -z $repo ]] || args+=(--repo "$repo")
 [[ -z $knowledge ]] || args+=(--knowledge-repo "$knowledge")
+if ! "$cleanup"; then
+    if [[ ! -t 0 || ! -t 1 || -n ${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}${COPILOT_AGENT_SESSION_ID:-} ]]; then
+        export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never
+        if [[ -n ${GH_TOKEN:-}${GITHUB_TOKEN:-} ]]; then
+            export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:-} 'credential.https://github.com.helper=' 'credential.https://github.com.helper=!gh auth git-credential'"
+        fi
+    fi
+    for selected in "$repo" "$knowledge"; do
+        [[ -z $selected || -d $selected ]] && continue
+        if [[ $selected =~ ^[[:alnum:]][[:alnum:]._-]*/[[:alnum:]][[:alnum:]._-]*$ ]]; then
+            url="https://github.com/$selected.git"
+        elif [[ $selected =~ ^https://(github\.com/[^/?#]+/[^/?#]+|dev\.azure\.com/[^/?#]+/[^/?#]+/_git/[^/?#]+|[a-z0-9-]+\.visualstudio\.com/[^/?#]+/_git/[^/?#]+)$ ]]; then
+            url=$selected
+        else
+            printf 'Unsupported remote repository locator\n' >&2; exit 2
+        fi
+        git ls-remote --exit-code "$url" HEAD >/dev/null 2>&1 || {
+            printf 'Git could not read a selected repository\n' >&2; exit 1
+        }
+    done
+fi
 if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
     driver="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/driver.py"
 else

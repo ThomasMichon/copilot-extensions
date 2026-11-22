@@ -1,9 +1,12 @@
 """Verify that the finite onboarding entry consumes the persisted checkout."""
 from pathlib import Path
 import json
+import os
+import subprocess
 from tempfile import TemporaryDirectory
 from types import ModuleType
 import unittest
+from unittest.mock import patch
 
 from worktree_manager import harness_onboarding as onboarding
 from worktree_manager import bootstrap_harness
@@ -56,6 +59,18 @@ def check_registered_checkout_readback(tmp_path: Path, case: unittest.TestCase) 
 
 
 class BindingTest(unittest.TestCase):
+    def test_setup_has_closed_inputs_and_no_release_credentials(self) -> None:
+        keys = ("GH_TOKEN", "GITHUB_TOKEN", "ARTIFACT_VERIFY_TOKEN")
+        with patch.dict(os.environ, {k: "fixture" for k in keys}, clear=True), patch.object(
+            subprocess, "run", return_value=subprocess.CompletedProcess([], 7),
+        ) as child:
+            self.assertEqual(onboarding.install_prepared(["--stage"]), 7)
+            env = child.call_args.kwargs["env"]
+            self.assertTrue(set(keys).isdisjoint(env))
+            self.assertEqual(env["UV_OFFLINE"], "1")
+            self.assertEqual(env["UV_PYTHON_DOWNLOADS"], "never")
+            self.assertTrue(all(os.environ[k] == "fixture" for k in keys))
+
     def test_registered_checkout_readback(self) -> None:
         with TemporaryDirectory() as directory:
             check_registered_checkout_readback(Path(directory), self)

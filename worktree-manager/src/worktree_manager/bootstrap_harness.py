@@ -135,6 +135,22 @@ def first_registration(root: Path, srcroot: Path, repository: str) -> Path:
     return registered_suite.registrations(root)[1][name]
 
 
+def refresh_registrations(root: Path, srcroot: Path, repository: str | None) -> Path:
+    default, anchors = registered_suite.registrations(root)
+    rows = harness_state.repos_registry(
+        strict=True, input_roots=harness_state.ProfileInputRoots(root / "registry", {}),
+    )["repos"]
+    for name, anchor in anchors.items():
+        if name == default and repository:
+            # first_registration refreshed a remote request; a local request
+            # explicitly selects the working checkout without a fetch.
+            continue
+        remote = rows[name].get("remote")
+        if remote:
+            acquire_checkout(srcroot, anchor, repository_remote(remote)[1])
+    return anchors[default]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)

@@ -14,7 +14,6 @@ import tempfile
 import time
 from types import ModuleType
 
-from . import application_footprints as apps
 from . import bootstrap_harness as boot
 from . import bootstrap_pairing, harness_state, registered_suite, runtime_identity, runtime_source_repository
 from .config_write_lock import config_write_lock, retained_sidecar_lock
@@ -88,6 +87,17 @@ def compose_checkout(harness: Path, companion: Path) -> None:
     lock = overlay._overlay_lock_target(output).with_suffix(".lock")
     with retained_sidecar_lock(lock, timeout=30):
         overlay._compose_locked(harness, companion)
+
+
+def install_prepared(command: list[str]) -> int:
+    setup_env = {k: v for k, v in os.environ.items()
+                 if k.upper() not in {"GH_TOKEN", "GITHUB_TOKEN", "ARTIFACT_VERIFY_TOKEN"}}
+    setup_env.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never")
+    return subprocess.run(
+        [sys.executable, "-I", "-B", "-m", "worktree_manager.application_footprints", *command],
+        executable=sys.executable, env=setup_env, timeout=1800, check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    ).returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -186,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
             command.extend(["--app", app.name])
         if args.stage:
             command.append("--stage")
-        return apps.main(command)
+        return install_prepared(command)
 
 
 if __name__ == "__main__":

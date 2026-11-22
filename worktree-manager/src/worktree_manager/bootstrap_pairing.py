@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import warnings
 from typing import Literal
 
 from . import bootstrap_harness, harness_state, runtime_source_repository
@@ -37,7 +38,8 @@ def remember_bound(local_config: Path, harness_remote: str, knowledge_remote: st
         if path.exists():
             saved = _read_portable(path, harness)
             if saved != knowledge:
-                raise ValueError("Portable knowledge preference differs; explicit replacement required")
+                warnings.warn("Keeping the existing portable preference; using the local knowledge binding",
+                              UserWarning, stacklevel=2)
             return
         document = {"version": 1, "harness": harness, "knowledge": knowledge}
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as out:

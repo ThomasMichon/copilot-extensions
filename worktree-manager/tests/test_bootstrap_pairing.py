@@ -44,6 +44,6 @@ def test_remember_requires_local_binding_and_preserves_existing_default(tmp_path
     second_machine = tmp_path / "elsewhere" / "config.yaml"
     assert select(second_machine, remote, None, tmp_path) == ("portable", "https://github.com/example/notes")
     _git(checkout, "remote", "set-url", "origin", "https://github.com/another/notes")
-    with pytest.raises(ValueError, match="explicit replacement"):
+    with pytest.warns(UserWarning, match="using the local knowledge binding"):
         remember_bound(config, remote, "another/notes", tmp_path, registered_knowledge=checkout)
     assert select(second_machine, remote, None, tmp_path)[1] == "https://github.com/example/notes"

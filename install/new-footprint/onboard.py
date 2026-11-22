@@ -42,10 +42,9 @@ def main() -> None:
     root = args.root.absolute()
     anchor = None
     if args.repo:
-        anchor = harness.first_registration(root, args.srcroot.absolute(), args.repo)
-    elif (root / "registry").exists():
-        default, anchors = registered_suite.registrations(root)
-        anchor = anchors[default]
+        harness.first_registration(root, args.srcroot.absolute(), args.repo)
+    if (root / "registry").exists():
+        anchor = harness.refresh_registrations(root, args.srcroot.absolute(), args.repo)
     knowledge_url = ""
     if anchor is not None:
         default, _ = registered_suite.registrations(root)
@@ -139,7 +138,9 @@ def main() -> None:
             handoff.extend(["--knowledge-repo", remote, "--knowledge-checkout", str(knowledge)])
         if args.stage:
             handoff.append("--stage")
-        subprocess.run(handoff, executable=str(interpreter), env=env, check=True, timeout=1800)
+        # The installed preparer still needs release discovery and governed
+        # dependency acquisition. Offline mode applies to closed-wheel setup.
+        subprocess.run(handoff, executable=str(interpreter), check=True, timeout=1800)
 
 
 if __name__ == "__main__":
