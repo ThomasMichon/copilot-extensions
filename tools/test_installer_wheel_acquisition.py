@@ -30,7 +30,6 @@ from typing import Any
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
-import ctypes
 import hashlib
 import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -882,6 +881,8 @@ def test_trickling_http_cannot_renew_the_whole_deadline(feeds: Callable[..., dic
 
 def _running(pid: int) -> bool:
     if os.name == "nt":
+        import ctypes
+
         kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel.OpenProcess.restype = ctypes.c_void_p
         kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]

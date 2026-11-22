@@ -1945,7 +1945,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #14089 merges at `bd213fdfe08692746c8665361c972b193e2b696a` after
   exact-head approval and complete fresh Linux CI with all 8,885 selected
   units executed. Only this four-case leaf is complete.
-- [ ] Qualify the three original noncontained private build-tools-root
+- [x] Qualify the three original noncontained private build-tools-root
   refusals from one complete original function: sibling, outside and relative
   paths. Preserve exact original function, parameter objects and assertions.
   Leave the separate native path-equivalence function and its Windows-only
@@ -1966,8 +1966,48 @@ authorizes critical main-path acceptance or a bounded administrative change.
   call-phase lines per case. Only the two Python bindings and existing
   source-build owner target are added. The compact-v2 candidate contains
   8,888 nodes, 1,254 sources and 463 targets in 995,204 bytes, preserving prior
-  node order and all previous source hashes. Full fresh Linux CI and normal
-  review/merge remain required before this finite leaf is complete.
+  node order and all previous source hashes. #14090 merges at
+  `37633fdcd039ec661180ddc97317e25fb8834f56` after exact-head approval and
+  complete fresh Linux CI executes all 8,888 selected units. Only this
+  three-case leaf is complete.
+- [ ] Qualify three original in-process source-phase controls: independent
+  phase allowances and deadline cause, preservation of an integrity failure's
+  original cause, and progress-output coalescing without losing completed work.
+  Preserve the complete original functions, clocks, monkeypatches and assertions.
+  Exclude the native path checks, file-batch/tree/thread cases and ordinary
+  installer/feed fixtures. Bind the canonical original-test import closure
+  without exercising those fixtures or adding mocks, preloads, data or guard
+  exceptions. Require complete original/adapter collection identity, initial
+  unchanged effect/source auditing and actual owner calls before admission.
+  Preserve all 8,888 nodes, 1,254 hashes, 463 targets, 89 helper decisions and
+  the 300-second bound. Normal strict checks, committed changefile presence,
+  exact-head review and complete fresh Linux CI remain required. No runtime,
+  native, thread, network, workflow, routing or cleanup authority is added.
+  Complete collection verifies all 47 original cases and exactly three adapter
+  cases with original function-object identity. Initial unchanged auditing
+  passes all three in 2.063 seconds, with zero prohibited effects, seventeen
+  bound canonical Python reads and actual source-build call-phase lines per
+  case. Only the adapter, original test and its two direct original-test import
+  bindings are added; no coverage target changes. The compact-v2 candidate
+  contains 8,891 nodes, 1,258 sources and 463 targets in 996,013 bytes.
+  Full fresh Linux CI and normal review/merge remain required.
+  #14092 is open, not merged: fresh Linux CI `45031811112` refuses
+  `ctypes.dlopen` during collection through the original test's imported
+  wheel-acquisition module. No selected case executes in that run.
+  The local audit is not portable qualification; retain the failed exact
+  head and do not rerun, preload, subset or relax the guard. The import is
+  used only by the separate Windows `_running` helper; relocating it to
+  that helper is a possible source correction, not an accepted replay.
+  The explicit `correct-import-and-requalify` decision permits only that
+  ordinary source correction and qualification of a distinct corrected head.
+  It does not permit replay of the failed head or native execution.
+  The import now resides in its sole Windows helper branch; source comparison
+  verifies no other original-test edit. Fresh corrected collection retains
+  47 original and three adapter cases. Unchanged auditing passes all three in
+  2.422 seconds with zero effects, the same seventeen bound reads and actual
+  owner calls. Only that source hash changes; all nodes, targets, helper
+  decisions and bounds remain unchanged. Fresh Linux CI and new exact-head
+  review remain required.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
