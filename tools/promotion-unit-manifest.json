@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_lifecycle_cli_units.py",
+      [
+        "test_cli_status_blocks_dispatch_without_claiming_a_completed_promotion",
+        "test_cli_existing_pr_opening_is_idempotent_but_never_makes_dispatch_idle",
+        "test_cli_transport_failure_is_visible_and_writes_no_success_output"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_cli_units.py",
       [
         "test_cli_exposes_only_a_validated_source_and_active_pr_still_prevents_recovery_dispatch",
@@ -11058,6 +11066,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_lifecycle_cli_units.py": "d5961b427d81cf26d49ba39608758dcf9fea47b470b0032bfc4ab4cbaaa7a095",
     "tools/promotion_unit_tests/test_original_dispatch_cli_units.py": "459322b4c8fa0a36713a54b69465ea58ddc321c8eeafe067c961a076c949d867",
     "tools/promotion_unit_tests/test_original_lifecycle_admission_units.py": "8d8de6b7067d0d0fd8afab0998e05c9ed9df9296c6b8618f151015b5241257d5",
     "tools/test_promotion_lifecycle.py": "73227135f3fde8133cabe1c643835e84e2f601b54f8a281e3805f8afb83dd3cc",

@@ -2341,7 +2341,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   approval and complete fresh Linux CI executes all 9,007 selected units in
   134.840 packet seconds within the unchanged bound. Reviewed and merged trees
   match. Only this 45-case leaf is complete; all parent gates remain open.
-- [ ] Qualify the two complete original dispatch CLI functions alongside
+- [x] Qualify the two complete original dispatch CLI functions alongside
   eleven complete original lifecycle inventory/admission functions (30 cases):
   complete/empty inventory, producing-run independence, exact candidate reuse,
   foreign/nonpromotion/publisher rules, invalid rows/pages/repositories,
@@ -2367,8 +2367,41 @@ authorizes critical main-path acceptance or a bounded administrative change.
   planned source bindings are added, with no target changes. Compact-v2
   contains 9,039 nodes and 1,277 sources in 1,013,461 bytes, preserving prior
   node order and current hashes. Fatal Ruff and whole-file strict Linux/Win32
-  typing pass. Exact-head review and complete fresh Linux CI remain required;
-  this local qualification does not resolve the parent or retained refusals.
+  typing pass. #14117 merges at `e186fb46ca4c4fe969a973041404c1da2727fe8e`
+  after exact-head approval and complete fresh Linux CI executes all 9,039
+  selected units in 180.472 packet seconds within the unchanged bound. One
+  explicitly authorized, PR-scoped metadata refresh resolves a superseded
+  source-attribution failure before all seven verifier reads and managed merge.
+  Independent base #14119 contributes the complete reviewed/merged-tree delta;
+  all 9,039 nodes and this slice's five nonmanifest blobs remain identical.
+  Its one additional source and one existing-source rebind yield 1,278 current
+  bindings in 1,013,579 bytes. Only this 32-case leaf is complete; all parent
+  gates and retained refusals remain open.
+- [ ] Qualify the three complete original lifecycle CLI functions: status
+  blocks dispatch while an open promotion retains ownership, exact existing
+  candidate opening remains non-idle, and transport failure is visible without
+  writing success output. Preserve original functions, callbacks, parameters,
+  monkeypatch, fixture-local files, capture assertions and complete 34-case
+  original collection identity. Keep the real isolated subprocess test outside
+  this selection. Require initial unchanged source/effect auditing and actual
+  lifecycle-owner call-phase coverage before adding only a new adapter binding.
+  Preserve all 9,039 nodes, 1,278 current source hashes, 467 targets, 89 helper
+  decisions and the 300-second bound. Normal strict checks, committed release
+  intent, exact-head review and complete fresh Linux CI remain required.
+  No original assertion, fixture, OS skip, new mock, preload, data/guard
+  exception, workflow, runtime/native/routing or cleanup change is authorized.
+  Both prior PR-specific metadata-refresh authorizations are consumed; neither
+  licenses a later dispatch or refusal replay.
+  Complete collection verifies all 34 original cases and exactly three adapter
+  cases with original function and unparameterized node identity. Initial
+  unchanged auditing passes all three in 1.359 seconds, with zero prohibited
+  effects, six bound canonical Python reads and actual lifecycle-owner
+  call-phase coverage per case; all nine phase reports pass. Only the adapter
+  binding is added. Compact-v2 contains 9,042 nodes and 1,279 sources in
+  1,014,063 bytes, preserving prior order and every current hash. Fatal Ruff
+  and whole-file strict Linux/Win32 typing pass; exact-head review and complete
+  fresh Linux CI remain required. This local result does not complete the
+  parent or any separate refusal or native qualification.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
