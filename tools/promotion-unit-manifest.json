@@ -3,6 +3,22 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_coverage_decide.py",
+      [
+        "TestDecide::test_no_baseline_resolved_falls_back_with_no_evidence",
+        "TestDecide::test_pointer_plugin_mismatch_falls_back_without_fetching",
+        "TestDecide::test_fetch_failure_falls_back_with_the_error_recorded",
+        "TestDecide::test_debt_exceeded_falls_back_to_the_curated_set",
+        "TestDecide::test_debt_exceeded_fallback_defaults_eligible_tests_to_the_real_tier_set",
+        "TestDecide::test_debt_exceeded_fallback_honors_an_explicit_eligible_tests_override",
+        "TestDecide::test_selection_fallback_trigger_curates_from_the_full_baseline",
+        "TestDecide::test_selection_fallback_defaults_eligible_tests_to_the_real_tier_set",
+        "TestDecide::test_selection_fallback_unions_real_selected_tests_with_the_curated_set",
+        "TestDecide::test_clean_selection_returns_the_selected_tests",
+        "TestDecide::test_as_dict_round_trips_through_json"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_coverage_chunks.py",
       [
         "TestPlanChunks::test_default_and_explicit_batches_keep_all_evidence_and_timeout[None-False]",
@@ -10297,6 +10313,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_coverage_decide.py": "5a6cebf9e791e7cd06e9022ccf4476465bc8c5dda1469be51c333a42f623bb72",
     "tools/promotion_unit_tests/test_original_coverage_chunks.py": "7e7bab44ae64f309193f14239b9fa95ff0499632060cc995019a421486993930",
     "tools/promotion_unit_tests/test_original_coverage_correlation.py": "dd03755187c43035bf20211e3ea1c10bac6cdaf802a8c8ee2b0b8011eab19323",
     "tools/promotion_unit_tests/test_original_coverage_policy.py": "007f28af1e4a1bcc560b1f8a63fb040d400951a30e26ed77408eb99612d6e899",
@@ -11505,6 +11522,7 @@
     "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31"
   },
   "coverage_targets": [
+    "tools/coverage_guided_selection/decide.py",
     "tools/coverage_guided_selection/baseline.py",
     "tools/coverage_guided_selection/baseline_chunks.py",
     "tools/coverage_guided_selection/fallback.py",
