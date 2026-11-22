@@ -4,16 +4,16 @@ colorama==0.4.6 \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
     # via -r tools/typecheck-build-requirements.txt
-commonmark==0.9.1 \
-    --hash=sha256:452f9dc859be7f06631ddcb328b6919c67984aca654e5fefb3914d54691aed60 \
-    --hash=sha256:da2f38c92590f83de410ba1a3cbceafbc74fee9def35f9251ba9a971d6d66fd9
-    # via -r tools/typecheck-worktrees-requirements.in
 iniconfig==2.3.1 \
     --hash=sha256:67f4b9c50da0dedf52af349e7749a80a9057a5031199791b906c3bb3ae878960 \
     --hash=sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7
     # via
     #   -r tools/typecheck-build-requirements.txt
     #   pytest
+marko==2.2.5 \
+    --hash=sha256:26380a6b037b5b49cec3847ee3585ba66f6782a4b9aec0d1216b7194ec5871ee \
+    --hash=sha256:3a5bac3a2e3ccb53cd97dcd29e422c4f701c29ec7c61be4c0d827321ef057553
+    # via -r tools/typecheck-worktrees-requirements.in
 mypy==1.18.2 \
     --hash=sha256:01199871b6110a2ce984bde85acd481232d17413868c9807e95c1b0739a58914 \
     --hash=sha256:030c52d0ea8144e721e49b1f68391e39553d7451f0c3f8a7565b59e19fcb608b \
@@ -230,10 +230,6 @@ tomli==2.5.0 \
     --hash=sha256:f79203b3965b4000e91808aaa7c040206093f2b8bf86f455982f2274c9ccf442 \
     --hash=sha256:fd4dc129784e0c5335bd4e61dfcc4487499a013419e655cf2da1d091b7e0efdc
     # via -r tools/typecheck-build-requirements.txt
-types-commonmark==0.9.2.20250330 \
-    --hash=sha256:6c5d27e978cb36d7ad058c178a957ad8187ec9bb30700d671e9a099ae2873750 \
-    --hash=sha256:d1ea71e8a0810339797237ccfb6ea1a48d4ceb7139948252badaeb1a0bb642a8
-    # via -r tools/typecheck-worktrees-requirements.in
 types-pyyaml==6.0.12.20250915 \
     --hash=sha256:0f8b54a528c303f0e6f7165687dd33fafa81c807fcac23f632b63aa624ced1d3 \
     --hash=sha256:e7d4d9e064e89a3b3cae120b4990cd370874d2bf12fa5f46c97018dd5d3c9ab6

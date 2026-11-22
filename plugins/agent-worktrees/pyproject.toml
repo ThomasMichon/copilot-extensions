@@ -20,7 +20,7 @@ dependencies = [
     "agent-configuration-layers",
     "pyyaml>=6.0.3",
     "packaging>=23",
-    "commonmark>=0.9.1,<1",
+    "marko>=2.2.5,<3",
     "tomli>=2 ; python_version < '3.11'",
     "cryptography>=50.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "agent-config-migrate",
