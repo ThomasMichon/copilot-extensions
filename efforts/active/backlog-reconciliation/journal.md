@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-21 - Native operability and original acceptance](journal/2026/11.21-native-operability-and-original-acceptance.md)
+
 - [2026-11-21 - Bounded inventory, telemetry and continuity intake](journal/2026/11.21-bounded-inventory-and-continuity-intake.md)
 
 - [2026-11-21 - POSIX cue delivery and native fixture boundaries](journal/2026/11.21-posix-cue-and-fixture-boundaries.md)
