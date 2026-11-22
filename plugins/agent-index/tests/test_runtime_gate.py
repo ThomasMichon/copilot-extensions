@@ -110,7 +110,7 @@ def test_adopted_configuration_reader_ignores_path_python(
         for name in ("python", "python3"):
             (tools / name).write_text("#!/bin/sh\nexit 98\n", encoding="utf-8")
             (tools / name).chmod(0o755)
-        for name in ("bash", "dirname", "wc", "cat", "git", "id", "cut", "awk", "sed", "grep", "tr", "date"):
+        for name in ("bash", "dirname", "basename", "wc", "cat", "git", "id", "cut", "awk", "sed", "grep", "tr", "date"):
             executable = shutil.which(name)
             assert executable
             shutil.copy2(executable, tools / name)
