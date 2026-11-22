@@ -86,3 +86,18 @@ def test_fallback_clip_does_not_add_a_break_at_eof(style: str) -> None:
     assert _module()._parse_simple_yaml(f"description: {style}\n  prose") == {
         "description": "prose",
     }
+
+
+@pytest.mark.parametrize("header", ["|2-", "|-2", ">2-", ">-2"])
+def test_fallback_supports_explicit_block_indentation_in_either_header_order(header: str) -> None:
+    parsed = _module()._parse_simple_yaml(
+        f"items:\n  - description: {header}\n        indented\n    enabled: true\n",
+    )
+    assert parsed == {"items": [{"description": "  indented", "enabled": True}]}
+
+
+def test_fallback_dedented_comment_ends_block_without_becoming_content() -> None:
+    parsed = _module()._parse_simple_yaml(
+        "description: |-\n    prose\n    # literal text\n  # policy flags follow\nstateless: false\n",
+    )
+    assert parsed == {"description": "prose\n# literal text", "stateless": False}

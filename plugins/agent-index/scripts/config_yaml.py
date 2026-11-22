@@ -24,12 +24,13 @@ def tokenize(
         if stripped.startswith(("%", "---", "...")):
             raise error_type("YAML directives and document markers are unsupported")
         indent = len(content) - len(stripped)
-        block = re.fullmatch(r"(.*:\s+|-\s+)([|>])([-+]?)", stripped)
+        block = re.fullmatch(r"(.*:\s+|-\s+)([|>])([1-9][-+]?|[-+][1-9]?|)", stripped)
         if block:
             prefix = re.match(r"- +", stripped)
             boundary = indent + (prefix.end() if prefix and block[1].strip() != "-" else 0)
             body: list[str] = []
-            body_indent: int | None = None
+            indicator = next((int(char) for char in block[3] if char.isdigit()), 0)
+            body_indent: int | None = boundary + indicator if indicator else None
             while line_index < len(lines):
                 following = lines[line_index]
                 following_indent = len(following) - len(following.lstrip(" "))
@@ -39,6 +40,8 @@ def tokenize(
                     if body_indent is None:
                         body_indent = following_indent
                     if following_indent < body_indent:
+                        if following.lstrip(" ").startswith("#"):
+                            break
                         raise error_type("invalid block scalar indentation")
                 body.append(following)
                 line_index += 1
@@ -60,9 +63,9 @@ def tokenize(
                     if not following_text or following_text.startswith(" "):
                         pieces.append("\n")
             value = "".join(pieces)
-            if block[3] == "-":
+            if "-" in block[3]:
                 value = value.rstrip("\n")
-            elif block[3] != "+":
+            elif "+" not in block[3]:
                 ended = value.endswith("\n")
                 value = value.rstrip("\n")
                 if value and ended:
