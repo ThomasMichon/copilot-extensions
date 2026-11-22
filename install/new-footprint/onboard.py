@@ -30,6 +30,20 @@ def require_onboarding(python: Path, env: dict[str, str]) -> None:
         raise RuntimeError("Selected Manager does not provide harness onboarding; no app slots staged")
 
 
+def selected_companions(root: Path, default: str, anchors: dict[str, Path], explicit: str | None,
+                        drive: Path | None) -> dict[str, str]:
+    selections = {}
+    for project, selected in anchors.items():
+        remote = (harness._git(selected, "remote", "get-url", "origin")
+                  if "origin" in harness._git(selected, "remote").splitlines() else "")
+        kind, value = bootstrap_pairing.select(
+            root / "repos" / project / "config.yaml", remote, explicit if project == default else None, drive,
+        )
+        if kind in {"explicit", "portable"} and value:
+            selections[project] = value
+    return selections
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)
@@ -45,24 +59,17 @@ def main() -> None:
         harness.first_registration(root, args.srcroot.absolute(), args.repo)
     if (root / "registry").exists():
         anchor = harness.refresh_registrations(root, args.srcroot.absolute(), args.repo)
-    knowledge_url = ""
+    selections: dict[str, str] = {}
     if anchor is not None:
-        default, _ = registered_suite.registrations(root)
-        remote = (harness._git(anchor, "remote", "get-url", "origin")
-                  if "origin" in harness._git(anchor, "remote").splitlines() else "")
+        default, anchors = registered_suite.registrations(root)
         drive = os.environ.get("OneDrive")
-        kind, value = bootstrap_pairing.select(
-            root / "repos" / default / "config.yaml", remote, args.knowledge_repo,
-            Path(drive) if drive else None,
-        )
-        if kind in {"explicit", "portable"} and value:
-            knowledge_url = value
-    if knowledge_url:
+        selections = selected_companions(root, default, anchors, args.knowledge_repo, Path(drive) if drive else None)
+    for knowledge_url in set(selections.values()):
         if not knowledge_url.startswith("https://github.com/"):
             sys.path.insert(0, str(KIT / "plugins/harness-knowledge/skills/binding-knowledge/scripts"))
             from azure_project_visibility import require_private_project
             require_private_project(knowledge_url)
-    if knowledge_url.startswith("https://github.com/"):
+            continue
         locator = knowledge_url.removeprefix("https://github.com/")
         probe = subprocess.run(
             ["gh", "repo", "view", locator, "--json", "nameWithOwner,isPrivate"],
@@ -134,10 +141,10 @@ def main() -> None:
         handoff = [str(interpreter), "-I", "-B", "-m", "worktree_manager.harness_onboarding",
                    "--root", str(root), "--srcroot", str(args.srcroot), "--source-checkout",
                    str(checkout), "--source-commit", commit]
-        if knowledge_url:
+        for project, knowledge_url in selections.items():
             name, remote = harness.repository_remote(knowledge_url)
             knowledge = harness.acquire_checkout(args.srcroot.absolute(), args.srcroot.absolute() / name, remote)
-            handoff.extend(["--knowledge-repo", remote, "--knowledge-checkout", str(knowledge)])
+            handoff.extend(["--project-companion", project, remote, str(knowledge)])
         if args.stage:
             handoff.append("--stage")
         # The installed preparer still needs release discovery and governed

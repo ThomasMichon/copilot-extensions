@@ -148,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--knowledge-repo")
     parser.add_argument("--knowledge-checkout", type=Path)
+    parser.add_argument("--project-companion", action="append", nargs=3, default=[])
     parser.add_argument("--stage", action="store_true")
     parser.add_argument("--frozen-seeds", nargs=2, metavar=("MAIN", "DEV"))
     args = parser.parse_args(argv)
@@ -165,6 +166,11 @@ def main(argv: list[str] | None = None) -> int:
     if boot._git(checkout, "rev-parse", "--verify", commit + "^{commit}") != commit:
         raise ValueError("Incoming source commit unavailable")
     default, anchors = registered_suite.registrations(root)
+    selected_pairs: dict[str, tuple[str, Path]] = {}
+    for name, url, path in args.project_companion:
+        if name not in anchors or name in selected_pairs:
+            parser.error("Unknown or duplicate project companion")
+        selected_pairs[name] = url, Path(path)
     kit = Path(__file__).resolve().parent / "_runtime_assets/scripts/runtime-source-tools"
     writer = _asset(kit / "plugins/harness-knowledge/skills/binding-knowledge/scripts", "binding_yaml")
     deadline = time.monotonic() + 1500
@@ -194,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
                 entry = rows[local]
                 remote = entry["remote"]
                 knowledge = Path(entry[harness_state._platform_key()])
+            elif project in selected_pairs:
+                remote, knowledge = selected_pairs[project]
             elif project == default and args.knowledge_repo and args.knowledge_checkout:
                 remote, knowledge = args.knowledge_repo, args.knowledge_checkout
             else:

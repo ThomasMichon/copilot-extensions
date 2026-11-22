@@ -8,6 +8,19 @@ import pytest
 import onboard
 
 
+def test_select_each_harness_independently(tmp_path: Path) -> None:
+    anchors = {name: tmp_path / name for name in ("default", "other", "bound")}
+    choices = [("explicit", "example/one"), ("portable", "example/two"), ("local", "retained")]
+    with patch("worktree_manager.bootstrap_harness._git", return_value=""), patch(
+        "worktree_manager.bootstrap_pairing.select", side_effect=choices,
+    ) as select:
+        result = onboard.selected_companions(tmp_path, "default", anchors, "example/one", tmp_path)
+    assert result == {"default": "example/one", "other": "example/two"}
+    assert [(call.args[0].parent.name, call.args[2]) for call in select.call_args_list] == [
+        ("default", "example/one"), ("other", None), ("bound", None),
+    ]
+
+
 @pytest.mark.parametrize("exit_code", [0, 1])
 def test_probe_uses_incoming_environment(tmp_path: Path, exit_code: int) -> None:
     python = tmp_path / "executor" / "python"
