@@ -4536,8 +4536,25 @@ The compact-v2 candidate contains 8,398 nodes, 1,199 bound sources, the
 existing 450 targets and 944,957 bytes. All 8,371 preceding nodes retain
 relative order and all 1,198 preceding source hashes remain intact. Coverage
 targets, 89 helper decisions, compact/flat-v1 identity, byte cap and the
-300-second bound remain enforced. Current-head review and complete fresh
-Linux CI remain required before normal merge.
+300-second bound remain enforced. Fatal Ruff, strict Python 3.10/Linux and
+Windows typing, documentation consistency and diff checks pass.
+
+Copilot approval `6011511430` covers exact head
+`a50136ec70a923fd91e498cb93e777c30818f497`, with no active findings.
+Source CI `45007888447`, unit job `137163462816`, freshly passes all 8,398
+cases with 39 deselections, 152.41 pytest seconds and 172.384 packet seconds.
+It reports `mode=executed`, origin run `45007888447` attempt one, execution
+identity `867da2f3c37e7a5bd41bef5b7f904b80d89963fcae346aaa80c356e0a941524a`
+and packet digest
+`2f1e356b795675fcf5148027a8db2f00c501fc10b0e9edc3101d9d6a3ed60f70`.
+Required aggregate `137164400676`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14065 merges at `2026-11-22T09:36:17Z` as
+`bbd747b48cbab03f82c117a253d0d1c1a4a79c62`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 27-case leaf.
 
 No original test, production implementation, workflow, runtime, source/data
 policy or effect-auditor changes. This is synthetic correlation/fetch coverage,
@@ -4545,6 +4562,38 @@ not baseline publication/adoption, real fetching or integration qualification.
 Fresh-install/native lanes are not exercised because installation/runtime
 behavior is unchanged. All retained refusals, shared-owner seams and broader
 parent gates remain open.
+
+### November 22 exact-original chunk-planning and result-merging census
+
+The adapter exports the complete original `TestPlanChunks` and
+`TestMergeChunkResults` classes from `tools/test_coverage_guided_selection.py`.
+Complete collection preserves all 15 expanded cases, their original
+class/method and parameter objects, and relative order among 157 original-module
+cases. Original temporary-file fixtures, subprocess stubs and assertions remain
+unchanged. Other original-module cases remain outside this adapter; 47 are
+already admitted through the policy and correlation adapters. Importing the
+module does not execute its integration cases.
+
+Initial guarded qualification passes all 15 in 2.453 seconds with zero
+prohibited effects, 23 bound Python reads and actual baseline-owner call-phase
+lines for every case. Only the adapter requires a new binding. Already-bound
+baseline and chunk-scheduler modules become coverage targets. The existing
+tests stub subprocess execution themselves; no new mocks, preloads, native or
+thread execution, or network access are added.
+
+The compact-v2 candidate contains 8,413 nodes, 1,200 bound sources, 452 targets
+and 946,612 bytes. All 8,398 preceding nodes retain relative order and all
+1,199 preceding source hashes remain intact. Existing targets, 89 helper
+decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
+enforced. Current-head review and complete fresh Linux CI remain required
+before normal merge.
+
+No original test, production implementation, workflow, runtime, source/data
+policy or effect-auditor changes. This is synthetic chunk-planning/merging
+coverage, not real collection, baseline publication/adoption or threaded
+integration qualification. Fresh-install/native lanes are not exercised because
+installation/runtime behavior is unchanged. All retained refusals, shared-owner
+seams and broader parent gates remain open.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 

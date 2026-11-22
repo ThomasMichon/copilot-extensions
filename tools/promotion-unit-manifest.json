@@ -3,6 +3,26 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_coverage_chunks.py",
+      [
+        "TestPlanChunks::test_default_and_explicit_batches_keep_all_evidence_and_timeout[None-False]",
+        "TestPlanChunks::test_default_and_explicit_batches_keep_all_evidence_and_timeout[None-True]",
+        "TestPlanChunks::test_default_and_explicit_batches_keep_all_evidence_and_timeout[7-False]",
+        "TestPlanChunks::test_default_and_explicit_batches_keep_all_evidence_and_timeout[7-True]",
+        "TestPlanChunks::test_later_batch_failure_never_retries_or_returns_partial_evidence[False]",
+        "TestPlanChunks::test_later_batch_failure_never_retries_or_returns_partial_evidence[True]",
+        "TestPlanChunks::test_small_suite_stays_a_single_unsplit_chunk",
+        "TestPlanChunks::test_a_single_file_test_path_stays_a_single_chunk",
+        "TestPlanChunks::test_large_suite_splits_into_bounded_chunks",
+        "TestPlanChunks::test_large_suite_includes_both_default_pytest_filename_patterns",
+        "TestPlanChunks::test_large_suite_outside_cwd_keeps_absolute_paths",
+        "TestMergeChunkResults::test_durations_union_across_chunks",
+        "TestMergeChunkResults::test_coverage_lines_union_when_a_shared_file_spans_chunks",
+        "TestMergeChunkResults::test_tiers_union_across_chunks",
+        "TestMergeChunkResults::test_tiers_default_to_empty_when_a_chunk_predates_the_field"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_coverage_correlation.py",
       [
         "TestCorrelation::test_baseline_path_on_main_is_one_file_per_plugin",
@@ -10277,6 +10297,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_coverage_chunks.py": "7e7bab44ae64f309193f14239b9fa95ff0499632060cc995019a421486993930",
     "tools/promotion_unit_tests/test_original_coverage_correlation.py": "dd03755187c43035bf20211e3ea1c10bac6cdaf802a8c8ee2b0b8011eab19323",
     "tools/promotion_unit_tests/test_original_coverage_policy.py": "007f28af1e4a1bcc560b1f8a63fb040d400951a30e26ed77408eb99612d6e899",
     "tools/test_coverage_guided_selection.py": "5a906e5b6ff4cdb877fa328a6cda5578c5968ac85651a0a0f53016c8ef745ddc",
@@ -11484,6 +11505,8 @@
     "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31"
   },
   "coverage_targets": [
+    "tools/coverage_guided_selection/baseline.py",
+    "tools/coverage_guided_selection/baseline_chunks.py",
     "tools/coverage_guided_selection/fallback.py",
     "tools/select_windows_rotation.py",
     "libs/installer-engine/installer_engine_commands.py",
