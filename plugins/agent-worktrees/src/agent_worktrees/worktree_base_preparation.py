@@ -12,7 +12,7 @@ from pathlib import Path
 from dropin_registry import ScanAuthority
 
 from . import config, config_acquisition, git_ops, inrepo_config_source as source
-from .git_acquisition_budget import acquisition_budget
+from .git_acquisition_budget import acquisition_budget, remaining_timeout
 from .git_errors import GitError
 from .git_repository_environment import repository_identity_scope
 
@@ -217,8 +217,11 @@ def _fetch_rules(anchor: Path, remote: str) -> _FetchRules:
 
 
 def _fetch_worktree_base(anchor: Path, remote: str, default_branch: str) -> _FetchPreparation:
+    from contextlib import nullcontext
+    from . import tracking_write
+
     deadline = time.monotonic() + git_ops.DEFAULT_FETCH_TIMEOUT
-    with acquisition_budget(deadline):
+    with nullcontext() if tracking_write.foreground_completion_active() else acquisition_budget(deadline):
         remotes = git_ops.git("remote", cwd=anchor, isolated_repository=True).stdout.splitlines()
         if remote not in remotes:
             return _FetchPreparation(False)
@@ -226,9 +229,21 @@ def _fetch_worktree_base(anchor: Path, remote: str, default_branch: str) -> _Fet
         return _refresh_sources(anchor, remote, default_branch, deadline, policy_remote)
 
 
+def _policy_observation_deadline(deadline: float) -> float:
+    from . import tracking_write
+
+    if not tracking_write.foreground_completion_active():
+        return deadline
+    remaining = remaining_timeout(git_ops.DEFAULT_FETCH_TIMEOUT)
+    assert remaining is not None
+    return time.monotonic() + remaining
+
+
 def _refresh_sources(
     anchor: Path, remote: str, default_branch: str, deadline: float, policy_remote: str,
 ) -> _FetchPreparation:
+    from . import tracking_write
+
     attempted: dict[tuple[str, str, str], bool] = {}
     errors: list[Exception] = []
     base_source = f"refs/heads/{default_branch}"
@@ -241,7 +256,8 @@ def _refresh_sources(
             try:
                 git_ops._fetch_refspecs(
                     fetch_remote, cwd=anchor, refspec=(f"+{fetch_source}:{target}",),
-                    timeout=git_ops.DEFAULT_FETCH_TIMEOUT, ignore_refmaps=True,
+                    timeout=None if tracking_write.foreground_completion_active()
+                    else git_ops.DEFAULT_FETCH_TIMEOUT, ignore_refmaps=True,
                 )
                 attempted[key] = True
             except Exception as exc:
@@ -290,7 +306,9 @@ def _refresh_sources(
                     errors.append(exc)
 
             try:
-                policy_branch = source._offline_remote_head_branch(anchor, "origin", deadline)
+                policy_branch = source._offline_remote_head_branch(
+                    anchor, "origin", _policy_observation_deadline(deadline),
+                )
                 if policy_branch:
                     _refresh_policy(policy_branch)
                     candidates_paths = (
@@ -299,7 +317,8 @@ def _refresh_sources(
                         Path(config.INREPO_CONFIG_FILENAME),
                     )
                     bootstrap = source._read_committed_batch(
-                        anchor, "origin", policy_branch, candidates_paths, deadline,
+                        anchor, "origin", policy_branch, candidates_paths,
+                        _policy_observation_deadline(deadline),
                     )
                     if bootstrap is not None:
                         data = next((

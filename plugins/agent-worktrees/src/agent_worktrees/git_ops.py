@@ -630,9 +630,13 @@ def fetch(
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
-    Output inactivity warns after 30 seconds; the hard ceiling is five minutes.
+    Background output inactivity warns after 30 seconds; its hard ceiling is five minutes.
     Explicit shorter timeouts and enclosing acquisition budgets still apply.
-    ``None`` retains the hard ceiling rather than allowing an unbounded fetch.
+    ``None`` retains the hard ceiling for background acquisition. Foreground
+    creation explicitly selects ``None`` to wait for completion; numeric or
+    enclosing budgets still apply.
+    Foreground creation reports elapsed stage heartbeats during quiet fetches
+    instead of requesting a stream-idle timer from the unbounded process owner.
     Hard expiry raises :class:`GitError` (returncode 124). ``branch`` refreshes
     its tracking ref independently of configured fetch mappings.
     """

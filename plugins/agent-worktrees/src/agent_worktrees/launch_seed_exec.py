@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
+from typing import Any, cast
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
@@ -32,11 +34,11 @@ def _interactive_console() -> bool:
         import ctypes
 
         # Windows NUL can report isatty() without an attached console.
-        return bool(ctypes.windll.kernel32.GetConsoleCP())
+        return bool(getattr(ctypes, "windll").kernel32.GetConsoleCP())
     return True
 
 
-def _final_cold_error(record) -> str | None:
+def _final_cold_error(record: tracking.WorktreeRecord) -> str | None:
     verdict = sessions.verify_worktree_active(record)
     if verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok:
         return "Could not verify cold Copilot handoff; the seed remains staged."
@@ -217,7 +219,7 @@ def _native_setup_command(
         )
         if inner is None:
             return None
-        copied_setup = Path(inner[_script_index(inner)])
+        copied_setup = Path(inner[cast(int, _script_index(inner))])
         return [
             *command[:outer], str(copied_setup.with_name("launch-command" + suffix)),
             *command[outer + 1:delimiter + 1], *inner,
@@ -233,6 +235,7 @@ def _native_setup_command(
     from . import session_shell
     from .manager_launch_cli import _worktree_manager_root
 
+    value: str | None
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
@@ -452,7 +455,7 @@ def launch(
 ) -> int:
     if (invoke or admission_only) and _headed_session(command) is not None and correlation is None:
         correlation = launch_execution.Correlation(uuid4().hex, uuid4().hex)
-    def work(execution=None):
+    def work(execution: launch_execution.Execution | None = None) -> int:
         return _admitted_launch(
             record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
             preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
@@ -497,25 +500,26 @@ def _launch_headed(
 
     subject = execution.subject
     correlation = launch_execution.Correlation(
-        subject["attempt_id"], subject["resolution_id"], subject["parent_id"],
+        cast(str, subject["attempt_id"]), cast(str, subject["resolution_id"]),
+        cast(str | None, subject["parent_id"]),
     )
 
     planned_status = getattr(execution, "planned_status", None)
 
     def admit() -> None:
         launch_seed_native.admit(
-            record_path, correlation, subject["operation_id"], planned_status=planned_status,
+            record_path, correlation, cast(str, subject["operation_id"]), planned_status=planned_status,
         )
 
     def spawned(pid: int, birth: str) -> None:
         launch_seed_native.spawned(
-            record_path, correlation, subject["operation_id"],
+            record_path, correlation, cast(str, subject["operation_id"]),
             pid=pid, process_start_time=birth,
         )
 
-    attempt = record_path.parent / "launch-attempts" / subject["attempt_id"] / subject["operation_id"]
+    attempt = record_path.parent / "launch-attempts" / cast(str, subject["attempt_id"]) / cast(str, subject["operation_id"])
     try:
-        def run(check):
+        def run(check: Callable[[], None]) -> tuple[int, bool]:
             return execute(
                 prepared.argv, session_id=session_id, attempt_directory=attempt,
                 state_file=attempt / "headed.json", cwd=os.getcwd(),
@@ -524,7 +528,7 @@ def _launch_headed(
             )
         if admission_only:
             with launch_seed_native.admission(
-                record_path, correlation, subject["operation_id"], admission_only=True,
+                record_path, correlation, cast(str, subject["operation_id"]), admission_only=True,
                 preserve_seed_id=preserve_seed_id, require_cold_stop=False,
                 planned_status=planned_status,
             ) as check:
@@ -592,7 +596,7 @@ def _valid_request(
 @dataclass(frozen=True)
 class PreparedLaunch:
     argv: list[str]
-    receipt: dict | None
+    receipt: dict[str, Any] | None
     environment: dict[str, str] | None
     setup_seed_id: str | None = None
 
@@ -662,7 +666,7 @@ def _prepare(
         )
         return 3
     receipt = None
-    argv = command
+    argv: list[str] | None = command
     if invoke and current is not None:
         if Path(command[0]).name.lower() in {"gh", "gh.exe"} and command[1:2] == ["copilot"]:
             print(
@@ -707,7 +711,7 @@ def _prepare(
         child_environment = dict(child_environment if child_environment is not None else os.environ)
         child_environment.pop(ENVIRONMENT_KEY, None)
     return PreparedLaunch(
-        argv, receipt, child_environment, current.seed_id if current is not None and not invoke else None,
+        cast(list[str], argv), receipt, child_environment, current.seed_id if current is not None and not invoke else None,
     )
 
 
@@ -752,7 +756,7 @@ def _launch(
             # consumers must not allocate a new one.
             process = subprocess.Popen(
                 argv, stdout=sys.stdout, stderr=sys.stderr,
-                **({"env": child_environment} if child_environment is not None else {}),
+                **cast(dict[str, Any], {"env": child_environment} if child_environment is not None else {}),
                 **({} if _interactive_console() else no_window_kwargs()),
             )
         except (OSError, ValueError) as exc:
@@ -787,6 +791,7 @@ def _launch(
             continue
 
 
+@tracking_write.foreground_completion()
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record", type=Path, required=True)

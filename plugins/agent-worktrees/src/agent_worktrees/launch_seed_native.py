@@ -452,6 +452,7 @@ def interrupted(
     execution.append("unknown")
 
 
+@tracking_write.foreground_completion()
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,

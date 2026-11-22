@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import subprocess
 import time
+from contextlib import nullcontext
 from pathlib import Path
+from typing import TypedDict
 
 from .git_errors import GitError
 from .git_acquisition_budget import NETWORK_HARD_TIMEOUT, NETWORK_SOFT_TIMEOUT, acquisition_budget
 from .git_state_types import _GitHookOptions
+
+
+class _CompletionOptions(TypedDict, total=False):
+    kill_tree: bool
 
 
 def _fetch_refspecs(
@@ -17,17 +23,22 @@ def _fetch_refspecs(
     isolated_repository: bool = False, no_hooks: bool = False,
     ignore_refmaps: bool = False,
 ) -> None:
-    from . import git_ops
+    from . import git_ops, tracking_write
 
     refmap = ["--refmap="] if refspec and ignore_refmaps else []
     hook_options: _GitHookOptions = {"no_hooks": True} if no_hooks else {}
-    hard_timeout = NETWORK_HARD_TIMEOUT if timeout is None else min(timeout, NETWORK_HARD_TIMEOUT)
+    hard_timeout: float | None = NETWORK_HARD_TIMEOUT if timeout is None else min(timeout, NETWORK_HARD_TIMEOUT)
+    if tracking_write.foreground_completion_active() and timeout is None:
+        hard_timeout = None
+    completion_options: _CompletionOptions = {"kill_tree": True} if hard_timeout is None else {}
     started = time.monotonic()
     try:
-        with acquisition_budget(started + hard_timeout):
+        with acquisition_budget(started + hard_timeout) if hard_timeout is not None else nullcontext():
             git_ops.git(
                 *git_ops._auth_config_args(remote, cwd=cwd), "fetch", remote, "--progress", *refmap, *refspec,
-                cwd=cwd, timeout=hard_timeout, soft_timeout=NETWORK_SOFT_TIMEOUT,
+                cwd=cwd, timeout=hard_timeout,
+                soft_timeout=NETWORK_SOFT_TIMEOUT if hard_timeout is not None else None,
+                **completion_options,
                 isolated_repository=isolated_repository,
                 auth_acquisition=True, **hook_options,
             )
