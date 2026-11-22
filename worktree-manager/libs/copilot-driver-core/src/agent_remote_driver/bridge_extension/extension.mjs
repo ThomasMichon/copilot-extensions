@@ -58,11 +58,11 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
     process.env.AGENT_BRIDGE_DELIVERY || "",
   );
-  // Selected only by an explicit consumer opt-in. Unsupported retained delivery
-  // must hold the original work, never fall through to the legacy ACK path.
+  // Explicit Driver consumers require retained delivery even before discovery.
+  // Ordinary sessions select it from the provider's advertised native contract.
   const HEADED_CLIENT = process.env.COPILOT_DRIVER_HEADED_CLIENT;
   delete process.env.COPILOT_DRIVER_HEADED_CLIENT;
-  const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
+  let RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
     || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT) || HEADED_CLIENT !== undefined;
   // SDK event types we represent (Phase 5). Everything else is intentionally not
   // forwarded -- the bridge-side translator maps exactly this subset into its
@@ -174,6 +174,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
   let endpoint = null;
   let retainedInbox = null;
+  let inboxSelection = null;
+  let inboxHealthUntil = 0;
+  let legacyControlsActive = false;
 
   function ensureBridgeEndpoint() {
     endpoint ??= makeBridgeEndpoint({
@@ -212,6 +215,28 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     } catch {
       return null;
     }
+  }
+
+  async function selectInbox(fromInbox = false) {
+    if (RETAINED_INBOX || Date.now() < inboxHealthUntil) return true;
+    if (inboxSelection) return inboxSelection;
+    if (legacyControlsActive || state.delivering && !fromInbox) return true;
+    inboxSelection = (async () => {
+      const health = await bridgeGetJson("/health");
+      if (!Number.isSafeInteger(health?.protocol_version)) return false;
+      if (health.protocol_version >= 50 && health.capabilities?.compatible_native_inbox === 1
+          && health.capabilities?.native_consumption_inbox === 1) {
+        // Keep legacy settlement running until the provider confirms its ACKs.
+        // Local consumption alone does not release the original server input.
+        if (legacyControlsActive || state.inFlight.pending.size
+            || state.inFlight.unacknowledgedConsumed.size) return true;
+        RETAINED_INBOX = true;
+        extLog("provider selected retained native inbox; legacy ACKs and control effects disabled");
+      }
+      inboxHealthUntil = Date.now() + HEARTBEAT_MS;
+      return true;
+    })().finally(() => { inboxSelection = null; });
+    return inboxSelection;
   }
 
   async function retainedBridgeRequest(method, path, body) {
@@ -355,10 +380,8 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // Poll the bridge inbox and deliver pending messages into THIS session via
   // session.send (off the CLI event loop, on the poll timer). Delivery is on by
   // default; this does nothing only while the session is MUTED (/peer).
-  // Best-effort and serialized; acks only AFTER session.send resolves, so an
-  // undelivered message is redelivered next tick rather than lost, and the ack
-  // makes redelivery a no-op on the bridge (idempotent) rather than a double
-  // injection.
+  // Retained providers durably admit the handoff before SDK invocation and
+  // settle consumption only from original native input, never a send reply.
   //
   // buildDeliveredSendOptions (delivery.mjs) always sets an explicit
   // `source: "agent-bridge"`, not cosmetic: SendRequest.source is the runtime's
@@ -393,6 +416,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     state.inboxAgain = false;
     const sid = state.sessionId;
     try {
+      if (!await selectInbox(true)) return;
       if (RETAINED_INBOX) {
         await retainedInbox.tick(sid, { allowSend: state.deliveryEnabled && state.registered });
         return;
@@ -421,12 +445,15 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     state.controlling = true;
     const sid = state.sessionId;
     try {
+      if (!await selectInbox()) return;
+      legacyControlsActive = !RETAINED_INBOX;
       await drainControls(sid, {
         getJson: bridgeGetJson, post: bridgeFetch, session, replayHistory, log: extLog,
         isCurrent: () => state.registered && state.sessionId === sid,
         readinessTasks: state.readinessTasks, readinessOnly: RETAINED_INBOX,
       });
     } finally {
+      legacyControlsActive = false;
       state.controlling = false;
     }
   }
@@ -486,7 +513,8 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     if (notice) observeDelivery({
       stage: "hook_notice", source: "pending-input-set-v1",
       session_id: state.nativeSessionId,
-      consumer_incarnation: retainedInbox?.consumerIncarnation?.(state.nativeSessionId),
+      ...(RETAINED_INBOX
+        ? { consumer_incarnation: retainedInbox?.consumerIncarnation?.(state.nativeSessionId) } : {}),
       pending_count: state.pendingInput.pending.size,
       incomplete: state.pendingInput.incomplete,
       delivery_path: RETAINED_INBOX ? "retained" : "legacy",
@@ -531,31 +559,31 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
 
   adoptSessionId(state, session.sessionId);
 
+  retainedInbox = createRetainedInbox({
+    session, request: retainedBridgeRequest,
+    receivingApi: "native-sdk-v1",
+    mainTurn: state.mainTurn,
+    replayHistory,
+    cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
+    canSend: () => state.deliveryEnabled && state.registered, log: extLog,
+    onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
+    onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
+    onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
+    onObservation: observeDelivery,
+    sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
+    ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
+      ? {
+        portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null,
+        validateSendContext: () => selectedLoadout(session, {
+          pluginRoot: process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT,
+          expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
+          cwd: process.cwd(),
+          bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
+          extensionPluginRoot: pluginRoot,
+        }),
+      } : {}),
+  });
   if (RETAINED_INBOX) {
-    retainedInbox = createRetainedInbox({
-      session, request: retainedBridgeRequest,
-      receivingApi: "native-sdk-v1",
-      mainTurn: state.mainTurn,
-      replayHistory,
-      cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
-      canSend: () => state.deliveryEnabled && state.registered, log: extLog,
-      onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
-      onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
-      onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
-      onObservation: observeDelivery,
-      sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
-      ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
-        ? {
-          portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null,
-          validateSendContext: () => selectedLoadout(session, {
-            pluginRoot: process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT,
-            expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
-            cwd: process.cwd(),
-            bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
-            extensionPluginRoot: pluginRoot,
-          }),
-        } : {}),
-    });
     extLog("retained inbox selected explicitly; legacy message ACKs and control effects disabled");
   }
 

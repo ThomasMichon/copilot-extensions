@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-remote-driver"
-version = "0.1.80-dev1"
+version = "0.1.81-dev1"
 description = "Independent Copilot execution core and reattachable Session Host"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "agent-copilot-driver-core",
+    "agent-plugin-activation",
 ]
 
 [project.scripts]
@@ -23,6 +24,7 @@ sdk = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
+    "setuptools>=83.0.0",
 ]
 
 [tool.uv]
@@ -30,9 +32,15 @@ exclude-newer = "7 days"
 
 [tool.uv.sources]
 agent-copilot-driver-core = { path = "libs/copilot-driver-core" }
+agent-plugin-activation = { path = "libs/plugin-activation" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.copilot-extensions.application]
+setup = []
+start = ["__source-start"]
+remove = "agent_remote_driver_app.application_removal:main"
 
 [tool.ruff]
 target-version = "py310"

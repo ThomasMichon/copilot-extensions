@@ -7,11 +7,12 @@ from importlib import import_module
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from zipfile import ZipFile
 
 from agent_procutil._interpreter import physical_executable
@@ -119,6 +120,15 @@ def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(
     _qualify_manager_application(tmp_path, monkeypatch, control)
 
 
+@pytest.mark.timeout(300)
+def test_fresh_manager_download_exposes_its_real_launcher_to_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _qualify_manager_application(
+        tmp_path, monkeypatch, "manager-no-mux", download_manager=True,
+    )
+
+
 @pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
 @pytest.mark.timeout(300)
 def test_manager_no_mux_decision(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,6 +193,128 @@ def test_manager_application_inputs_close_declared_resources(
                 assert built.read(prefix + "bin/" + name) == (source / "bin" / name).read_bytes()
 
 
+def test_manager_application_forwards_its_build_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder, governed_feed_trust as feed
+        from tools import standalone_python_artifacts as standalone
+    else:
+        import build_python_artifacts as builder
+        import governed_feed_trust as feed
+        import standalone_python_artifacts as standalone
+
+    started = time.monotonic()
+    preparation_deadlines: list[float] = []
+
+    def prepare(candidate: Path, *, deadline: float) -> tuple[Path, list[tuple[str, Path]], tuple[Path, ...]]:
+        assert started < deadline <= time.monotonic() + 300
+        preparation_deadlines.append(deadline)
+        source = candidate / "worktree-manager"
+        source.mkdir()
+        return source, [], ()
+
+    class BuildBoundaryReached(Exception):
+        pass
+
+    def build(**kwargs: object) -> None:
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, float) and started < deadline <= time.monotonic() + 300
+        assert preparation_deadlines == [deadline]
+        assert kwargs["uv"] == shutil.which("uv")
+        raise BuildBoundaryReached
+
+    monkeypatch.setattr(feed, "_governed_feed_configured", lambda: True)
+    monkeypatch.setattr(sys.modules[__name__], "_prepare_manager_application_inputs", prepare)
+    monkeypatch.setattr(standalone, "source_closure", lambda *args: (
+        tmp_path / "source-inputs" / "source" / "worktree-manager", [], (),
+    ))
+    monkeypatch.setattr(builder, "build_source_artifacts", build)
+    with pytest.raises(BuildBoundaryReached):
+        _qualify_manager_application(tmp_path, monkeypatch, "manager-no-mux")
+
+
+def test_manager_download_precedes_application_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import governed_feed_trust as feed
+    else:
+        import governed_feed_trust as feed
+
+    class DownloadBoundaryReached(Exception):
+        pass
+
+    deadlines: list[float] = []
+
+    def prepare(candidate: Path, *, deadline: float) -> tuple[Path, list[tuple[str, Path]], tuple[Path, ...]]:
+        deadlines.append(deadline)
+        source = candidate / "worktree-manager"
+        source.mkdir()
+        return source, [], ()
+
+    def download(candidate: Path, **options: object) -> tuple[list[str | Path], str]:
+        assert candidate == tmp_path / "source-remote"
+        assert options["deadline"] == deadlines[0]
+        assert options["root"] == tmp_path / "home" / ".worktree-manager"
+        assert not cast(Path, options["root"]).exists()
+        raise DownloadBoundaryReached
+
+    monkeypatch.setattr(feed, "_governed_feed_configured", lambda: True)
+    monkeypatch.setattr(sys.modules[__name__], "_prepare_manager_application_inputs", prepare)
+    monkeypatch.setattr(sys.modules[__name__], "_manager_download_install_command", download)
+    with pytest.raises(DownloadBoundaryReached):
+        _qualify_manager_application(
+            tmp_path, monkeypatch, "manager-no-mux", download_manager=True,
+        )
+
+
+@pytest.mark.parametrize("index_name", [None, "fixture-index"])
+def test_manager_download_preserves_the_qualified_feed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index_name: str | None,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import governed_feed_trust as feed
+    else:
+        import governed_feed_trust as feed
+
+    candidate, root = tmp_path / "source", tmp_path / "manager"
+    payload = candidate / "worktree-manager"
+    payload.mkdir(parents=True)
+    for name in ("bootstrap.ps1", "bootstrap.sh"):
+        (payload / name).write_text("fixture", encoding="utf-8")
+    environment: dict[str, str] = {}
+    index = "https://packages.example.invalid/simple"
+    monkeypatch.setattr(feed, "_validated_trusted_index_url", lambda environment: (index, index_name))
+    monkeypatch.setenv("UV_INDEX_FIXTURE_INDEX_USERNAME", "fixture-user")
+    monkeypatch.setenv("UV_INDEX_FIXTURE_INDEX_PASSWORD", "fixture-secret")
+
+    def run(arguments: list[str | Path], **options: Any) -> subprocess.CompletedProcess[str]:
+        assert options["deadline"] == 123.0 and options["env"] is environment
+        return subprocess.CompletedProcess(arguments, 0, "f" * 40 + "\n", "")
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", run)
+    command, revision = _manager_download_install_command(
+        candidate, root=root, shell="selected-shell" if os.name == "nt" else None,
+        environment=environment, deadline=123.0,
+    )
+    assert revision == "f" * 40
+    assert command[-2] == payload / ("bootstrap.ps1" if os.name == "nt" else "bootstrap.sh")
+    assert command[-1] == "--describe-install"
+    assert not any(str(argument).startswith("--install-source") for argument in command)
+    configuration = Path(environment["UV_CONFIG_FILE"]).read_text(encoding="utf-8")
+    assert f"url = {json.dumps(index)}\ndefault = true\n" in configuration
+    if index_name:
+        assert f"name = {json.dumps(index_name)}\n" in configuration
+        assert environment["UV_INDEX_FIXTURE_INDEX_USERNAME"] == "fixture-user"
+        assert environment["UV_INDEX_FIXTURE_INDEX_PASSWORD"] == "fixture-secret"
+    else:
+        assert "UV_INDEX_FIXTURE_INDEX_PASSWORD" not in environment
+
+
 def _prepare_manager_application_inputs(
     candidate: Path, *, deadline: float,
 ) -> tuple[Path, list[tuple[str, Path]], tuple[Path, ...]]:
@@ -204,12 +336,170 @@ def _prepare_manager_application_inputs(
     return standalone.source_closure("worktree-manager", candidate, builder)
 
 
+def test_manager_download_preserves_bytes_under_caller_git_newline_preferences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import governed_feed_trust as feed
+    else:
+        import governed_feed_trust as feed
+
+    candidate, root = tmp_path / "source", tmp_path / "manager"
+    payload = candidate / "worktree-manager"
+    payload.mkdir(parents=True)
+    expected = b"fixture line one\nfixture line two\n"
+    for name in ("bootstrap.ps1", "bootstrap.sh"):
+        (payload / name).write_bytes(expected)
+    config = tmp_path / "gitconfig"
+    config.write_text("[core]\nautocrlf = true\n", encoding="utf-8")
+    environment = dict(os.environ, GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM="1")
+    for key in list(environment):
+        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")) or key == "GIT_CONFIG_COUNT":
+            environment.pop(key)
+    monkeypatch.setattr(feed, "_validated_trusted_index_url", lambda environment: (
+        "https://packages.example.invalid/simple", None,
+    ))
+    deadline = time.monotonic() + 30
+    _, revision = _manager_download_install_command(
+        candidate, root=root, shell=None, environment=environment, deadline=deadline,
+    )
+    downloaded = tmp_path / "downloaded"
+    _run(
+        [shutil.which("git"), "clone", "--quiet", "--no-local", candidate, downloaded],
+        cwd=tmp_path, env=environment, deadline=deadline,
+    )
+    assert _run(
+        [shutil.which("git"), "-C", downloaded, "rev-parse", "HEAD"],
+        cwd=tmp_path, env=environment, deadline=deadline,
+    ).stdout.strip() == revision
+    assert (downloaded / "worktree-manager" / "bootstrap.ps1").read_bytes() == expected
+
+
+def _manager_download_install_command(
+    candidate: Path, *, root: Path, shell: str | None,
+    environment: dict[str, str], deadline: float,
+) -> tuple[list[str | Path], str]:
+    if TYPE_CHECKING:
+        from tools.governed_feed_trust import _validated_trusted_index_url
+    else:
+        from governed_feed_trust import _validated_trusted_index_url
+
+    index = _validated_trusted_index_url(dict(os.environ))
+    assert index is not None, "Manager download requires the selected qualified package feed"
+    git = shutil.which("git")
+    assert git, "Manager download qualification requires Git"
+    # Pin checkout bytes independently of the caller's global Git newline policy.
+    (candidate / ".gitattributes").write_text("* -text\n", encoding="utf-8")
+    for arguments in (
+        ["init", "--quiet", str(candidate)],
+        [
+            "-C", str(candidate), "-c", "core.longpaths=true",
+            "-c", "core.autocrlf=false", "add", "--force", "--all",
+        ],
+        [
+            "-C", str(candidate), "-c", "user.name=Manager fixture",
+            "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+            "-c", "core.hooksPath=", "commit", "--quiet", "-m", "Manager download fixture",
+        ],
+    ):
+        _run([git, *arguments], cwd=candidate, env=environment, deadline=deadline)
+    revision = _run(
+        [git, "-C", candidate, "rev-parse", "HEAD"],
+        cwd=candidate, env=environment, deadline=deadline,
+    ).stdout.strip()
+    root.mkdir(parents=True)
+    (root / "config.toml").write_text(
+        "[source]\n"
+        f"repo = {json.dumps(candidate.as_posix())}\n"
+        f"ref = {json.dumps(revision)}\n",
+        encoding="utf-8",
+    )
+    index_url, index_name = index
+    uv_config = root / "bootstrap-uv.toml"
+    uv_config.write_text(
+        "[[index]]\n"
+        + (f"name = {json.dumps(index_name)}\n" if index_name else "")
+        + f"url = {json.dumps(index_url)}\ndefault = true\n",
+        encoding="utf-8",
+    )
+    environment["UV_CONFIG_FILE"] = str(uv_config)
+    if index_name:
+        prefix = "UV_INDEX_" + re.sub(r"[^A-Za-z0-9]", "_", index_name).upper()
+        for suffix in ("_USERNAME", "_PASSWORD"):
+            key = prefix + suffix
+            if key in os.environ:
+                environment[key] = os.environ[key]
+    bootstrap = candidate / "worktree-manager" / ("bootstrap.ps1" if os.name == "nt" else "bootstrap.sh")
+    assert bootstrap.is_file()
+    command: list[str | Path] = (
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", bootstrap]
+        if shell is not None else ["bash", bootstrap]
+    )
+    return [*command, "--describe-install"], revision
+
+
+def _manager_application_install_command(
+    candidate: Path, *, inputs: Path, root: Path, profile: Path, shell: str | None,
+    interpreter: str, uv: str, deadline: float, monkeypatch: pytest.MonkeyPatch,
+    source_identity: tuple[str, str] | None = None,
+) -> tuple[list[str | Path], Path]:
+    if TYPE_CHECKING:
+        from tools import build_python_artifacts as builder, local_install_profile as profiles
+        from tools import standalone_python_artifacts as standalone
+    else:
+        import build_python_artifacts as builder
+        import local_install_profile as profiles
+        import standalone_python_artifacts as standalone
+
+    source, dependencies, resources = standalone.source_closure("worktree-manager", candidate, builder)
+    engine = profiles.source_inputs.engine
+    artifacts = inputs / "wheels"
+    with monkeypatch.context() as patch:
+        patch.setattr(builder, "REPO", candidate)
+        artifact = builder.build_source_artifacts(
+            identity={"component": "worktree-manager"}, source_dir=source,
+            dependencies=dependencies, resources=resources,
+            out_dir=artifacts, python=interpreter, toolchain=None,
+            uv=uv, deadline=deadline,
+        )
+    project = cast(_BuilderExports, builder).tomllib.loads((source / "pyproject.toml").read_text())["project"]
+    source_hash = engine.runtime_source.assembly_hash(source)
+    commit, tree = source_identity or ("a" * 40, "b" * 40)
+    identity = engine.runtime_source.SourceIdentity(
+        "worktree-manager", project["version"], commit, tree, source_hash,
+        engine.runtime_source.runtime_version(project["version"], commit, source_hash),
+    )
+    (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
+    (inputs / profiles.source_inputs.MANIFEST).write_text(json.dumps({
+        "schema": profiles.source_inputs.SCHEMA, "version": 1, "kind": "source",
+        "source_commit": identity.source_commit, "source_tree": identity.source_tree,
+        "projects": {"worktree-manager": {
+            "payload": source.relative_to(inputs).as_posix(), "wheels": "wheels",
+            "source": identity.document(), "artifact": artifact,
+        }},
+    }), encoding="utf-8")
+    prepared = profiles.prepare_registry_lock(
+        inputs, profile, uv=uv, deadline=deadline,
+        prepare_profile=True, component="worktree-manager",
+    )
+    assert prepared["install_ready"] is True
+    application = Path(prepared["snapshot"]) / "applications" / "worktree-manager"
+    declaration = json.loads((application / "application.json").read_text())
+    assert declaration["setup"] == declaration["start"] == []
+    slot = root / "versions" / declaration["construction"]["runtime_version"]
+    shutil.copytree(application, slot)
+    install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
+        if shell is not None else [slot / "install"]
+    return install, slot
+
+
 def _qualify_manager_application(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str, *,
     worktrees_python: Path | None = None, worktrees_root: Path | None = None,
     worktrees_environment: dict[str, str] | None = None, caller_jobs: bool = False,
     replacement_slot: Path | None = None, picker_decision: bool = False,
-    rollback_application: Path | None = None,
+    rollback_application: Path | None = None, download_manager: bool = False,
 ) -> None:
     paired = worktrees_python is not None
     assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
@@ -217,10 +507,9 @@ def _qualify_manager_application(
     assert not picker_decision or (not paired and control in {"manager-no-mux", "manager-mux"})
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     if TYPE_CHECKING:
-        from tools import build_python_artifacts as builder, local_install_profile as profiles
+        from tools import local_install_profile as profiles
         from tools.governed_feed_trust import _governed_feed_configured
     else:
-        import build_python_artifacts as builder
         import local_install_profile as profiles
         from governed_feed_trust import _governed_feed_configured
 
@@ -232,77 +521,99 @@ def _qualify_manager_application(
     assert uv and (os.name != "nt" or shell)
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + (270 if _NATIVE_COPILOT or download_manager else 300)
     inputs = tmp_path / "source-inputs"
     candidate = inputs / "source"
-    source, artifacts = candidate / "worktree-manager", inputs / "wheels"
+    if _NATIVE_COPILOT or download_manager:
+        candidate = tmp_path / "source-remote"
+    source = candidate / "worktree-manager"
     candidate.mkdir(parents=True)
-    selected, dependencies, resources = _prepare_manager_application_inputs(candidate, deadline=deadline)
+    selected, _, _ = _prepare_manager_application_inputs(candidate, deadline=deadline)
     assert selected == source
-    with monkeypatch.context() as patch:
-        patch.setattr(builder, "REPO", candidate)
-        artifact = builder.build_source_artifacts(
-            identity={"component": "worktree-manager"}, source_dir=source,
-            dependencies=dependencies, resources=resources,
-            out_dir=artifacts, python=interpreter, toolchain=None,
-        )
     engine = profiles.source_inputs.engine
-    project = cast(_BuilderExports, builder).tomllib.loads((source / "pyproject.toml").read_text())["project"]
-    source_hash = engine.runtime_source.assembly_hash(source)
-    identity = engine.runtime_source.SourceIdentity(
-        "worktree-manager", project["version"], "a" * 40, "b" * 40, source_hash,
-        engine.runtime_source.runtime_version(project["version"], "a" * 40, source_hash),
-    )
-    (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
-    (inputs / profiles.source_inputs.MANIFEST).write_text(json.dumps({
-        "schema": profiles.source_inputs.SCHEMA, "version": 1, "kind": "source",
-        "source_commit": identity.source_commit, "source_tree": identity.source_tree,
-        "projects": {"worktree-manager": {
-            "payload": "source/worktree-manager", "wheels": "wheels",
-            "source": identity.document(), "artifact": artifact,
-        }},
-    }), encoding="utf-8")
-    prepared = profiles.prepare_registry_lock(
-        inputs, tmp_path / "profile", uv=uv, deadline=deadline,
-        prepare_profile=True, component="worktree-manager",
-    )
-    assert prepared["install_ready"] is True
-    application = Path(prepared["snapshot"]) / "applications" / "worktree-manager"
-    declaration = json.loads((application / "application.json").read_text())
-    assert declaration["setup"] == declaration["start"] == []
     home, caller = tmp_path / "home", tmp_path / "caller"
     home.mkdir()
     caller.mkdir()
     root = home / ".worktree-manager"
-    slot = root / "versions" / declaration["construction"]["runtime_version"]
-    shutil.copytree(application, slot)
     environment = _manager_install_environment(
         home, root, tmp_path, interpreter,
         caller_jobs=caller_jobs, worktrees_environment=worktrees_environment,
     )
+    downloaded_revision = None
+    if _NATIVE_COPILOT or download_manager:
+        install, downloaded_revision = _manager_download_install_command(
+            candidate, root=root, shell=shell, environment=environment, deadline=deadline,
+        )
+    else:
+        install, slot = _manager_application_install_command(
+            candidate, inputs=inputs, root=root, profile=tmp_path / "profile", shell=shell,
+            interpreter=interpreter, uv=uv, deadline=deadline, monkeypatch=monkeypatch,
+        )
     from application_python_fixture import managed_python_environment
 
     environment = managed_python_environment(
         environment, directory=tmp_path / "managed-python", uv=uv,
-        deadline=deadline, run=_run,
+        deadline=deadline, run=_run, version="3.11" if downloaded_revision is not None else None,
     )
     (tmp_path / "mux-data").mkdir()
-    install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
-        if os.name == "nt" else [slot / "install"]
     cleanup: list[InstanceCleanupResult] = []
     lifecycle_owner = nullcontext({}) if caller_jobs else daemon_test_lifecycle(
         owner="manager-application-launch-fixture", registry_root=tmp_path / "daemon-instances",
-        deadline=deadline + (180 if paired else 0), cleanup_results=cleanup,
+        deadline=deadline + (30 if downloaded_revision is not None else 0) + (180 if paired else 0),
+        cleanup_results=cleanup,
     )
     try:
         with lifecycle_owner as lifecycle:
             environment.update(lifecycle)
-            installed = _run(install, cwd=caller, env=environment, deadline=deadline)
+            if downloaded_revision is not None:
+                try:
+                    installed = run_caller_owned(
+                        list(map(str, install)), cwd=caller, env=environment,
+                        timeout=max(0.01, deadline - time.monotonic()),
+                        max_stdout_bytes=1048576, max_stderr_bytes=1048576,
+                    )
+                except subprocess.TimeoutExpired as error:
+                    for label, content in (("stdout", error.output), ("stderr", error.stderr)):
+                        if isinstance(content, bytes):
+                            content = content.decode("utf-8", errors="replace")
+                        print(f"Manager bootstrap timeout {label}:\n{(content or '')[-65536:]}", flush=True)
+                    raise
+                assert installed.returncode == 0, installed.stdout + installed.stderr
+            else:
+                installed = _run(install, cwd=caller, env=environment, deadline=deadline)
+            if downloaded_revision is not None:
+                fetched = _run(
+                    [shutil.which("git"), "-C", root / "staging", "rev-parse", "HEAD"],
+                    cwd=caller, env=environment, deadline=deadline,
+                ).stdout.strip()
+                assert fetched == downloaded_revision
+                fetched_tree = _run(
+                    [shutil.which("git"), "-C", root / "staging", "rev-parse", "HEAD^{tree}"],
+                    cwd=caller, env=environment, deadline=deadline,
+                ).stdout.strip()
+                assert (root / "staging" / "worktree-manager" / "scripts" / "runtime_install.py").read_bytes() == (
+                    source / "scripts" / "runtime_install.py"
+                ).read_bytes()
+                assert json.loads(installed.stdout)["schema"] == "copilot-extensions.manager-install-entry"
+                inputs.mkdir()
+                downloaded = inputs / "source"
+                (root / "staging").rename(downloaded)
+                environment = managed_python_environment(
+                    environment, directory=tmp_path / "application-python", uv=uv,
+                    deadline=deadline, run=_run,
+                )
+                install, slot = _manager_application_install_command(
+                    downloaded, inputs=inputs, root=root, profile=tmp_path / "profile", shell=shell,
+                    interpreter=interpreter, uv=uv, deadline=deadline, monkeypatch=monkeypatch,
+                    source_identity=(fetched, fetched_tree),
+                )
+                installed = _run(install, cwd=caller, env=environment, deadline=deadline)
             assert json.loads(installed.stdout.splitlines()[-1])["state"] == "installed"
             assert (root / "current-version").read_text().strip() == slot.name
             completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
             shutil.rmtree(inputs)
-            python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            runtime_environment = slot / ".venv"
+            python = runtime_environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             assets = _run([
                 python, "-I", "-B", "-X", "utf8", "-c",
                 "import json;from worktree_manager.relocated_launch import _relocated_launch_script;"
@@ -311,7 +622,7 @@ def _qualify_manager_application(
                 "print(json.dumps({'script':str(script)}))",
             ], cwd=caller, env=environment, deadline=deadline)
             script = Path(json.loads(assets.stdout)["script"])
-            assert script.is_relative_to(slot / ".venv") and "_runtime_assets" in script.parts
+            assert script.is_relative_to(runtime_environment) and "_runtime_assets" in script.parts
             consumer = _run([
                 str(worktrees_python) if paired else sys.executable, "-I", "-B", "-X", "utf8", "-c",
                 "import json;from agent_worktrees.manager_launch_cli import _usable_worktree_manager_launcher_dir;"
@@ -369,4 +680,6 @@ def _qualify_manager_application(
             assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     finally:
         assert all(result.status == "settled" for result in cleanup), cleanup
-    assert caller_jobs or cleanup, "Manager installation did not start its owned resident"
+    assert caller_jobs or cleanup or downloaded_revision is not None, (
+        "Manager application installation did not start its owned resident"
+    )

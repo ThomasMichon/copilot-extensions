@@ -46,6 +46,7 @@ APPLICATION_RESOURCES = {
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),
     "agent_worktrees": ("scripts/**/*",),
+    "agent_remote_driver_app": ("plugin.json", "extensions/**/*.mjs"),
 }
 APPLICATION_METADATA_RESOURCES = {
     "worktree_manager": (
@@ -55,6 +56,11 @@ APPLICATION_METADATA_RESOURCES = {
     ),
 }
 APPLICATION_SOURCE_FALLBACKS = {
+    "agent_remote_driver_app": (
+        ("extensions/agent-remote-driver",
+         "../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
+         ("sdk-compat.mjs",)),
+    ),
     "worktree_manager": (
         ("scripts/runtime-source-tools/fleet_role_policy", "../fleet-manager/src/fleet_manager",
          ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py")),
@@ -73,7 +79,9 @@ def application_resources(
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
         if path.is_file()
-        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
+        and path.suffix in {
+            ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs", ".mjs",
+        }
     }
     sources.update({
         path.relative_to(project).as_posix(): path

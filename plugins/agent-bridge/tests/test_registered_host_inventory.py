@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,8 +16,18 @@ from agent_bridge.session_host import registered_inventory as inventory
 pytestmark = pytest.mark.contract("agent_bridge.session_host.registered_inventory")
 
 
+@pytest.fixture(params=("agent_bridge", "agent_remote_driver"), autouse=True)
+def inventory_module(request: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        globals(), "inventory",
+        importlib.import_module(request.param + ".session_host.registered_inventory"),
+    )
+
+
 @pytest.fixture
-def host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+def host(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, inventory_module: None,
+) -> Any:
     record = {
         "state": "running", "birth": "native-birth", "artifact_count": "0",
         "purpose": "production", "process_identity_state": "matching",
@@ -161,3 +172,26 @@ def test_wrong_state_instance_cannot_be_adopted_through_matching_process_birth(h
     assert targets[0]["registration"]["session_id"] is None
     assert targets[0]["handle"] == "host-instance:original-instance"
     assert source["availability"] == "unavailable"
+
+
+@pytest.mark.parametrize("damage", ["none", "nonce", "port", "instance"])
+def test_core_private_endpoint_requires_same_live_identity_and_valid_capability(host: Any, damage: str) -> None:
+    if not hasattr(inventory, "registered_host_endpoints"):
+        pytest.skip("Private endpoint selection belongs to Core, not the compatibility wrapper")
+    _, state, path, _ = host
+    state.update(session_id="actual-native", nonce="private-capability-" + "x" * 32)
+    if damage == "nonce":
+        state["nonce"] = "\u00e9" * 32
+    elif damage == "port":
+        state["port"] = True
+    elif damage == "instance":
+        state["host_instance_id"] = "another-owner"
+    path.write_text(json.dumps(state), encoding="utf-8")
+    endpoints, source = inventory.registered_host_endpoints()
+    if damage == "none":
+        assert len(endpoints) == 1
+        assert (endpoints[0].session_id, endpoints[0].port) == ("actual-native", 1234)
+        assert state["nonce"] not in repr(endpoints)
+        assert source["availability"] == "available"
+    else:
+        assert endpoints == [] and source["availability"] == "unavailable"

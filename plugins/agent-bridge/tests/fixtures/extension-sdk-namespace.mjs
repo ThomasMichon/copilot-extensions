@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const root = process.argv[2];
+const portable = process.argv[3] === "portable";
 const entries = [];
 for (const plugin of readdirSync(join(root, "plugins"), { withFileTypes: true })) {
   if (!plugin.isDirectory()) continue;
@@ -23,8 +24,11 @@ for (const plugin of readdirSync(join(root, "plugins"), { withFileTypes: true })
     }
   }
 }
-entries.push(join(root, "libs/copilot-driver-core/src/agent_remote_driver/headed/extension.mjs"));
-assert.ok(entries.length >= 6, "discover all plugin extensions and the shared headed entrypoint");
+if (!portable) entries.push(join(root, "libs/copilot-driver-core/src/agent_remote_driver/headed/extension.mjs"));
+assert.ok(entries.length >= (portable ? 2 : 6), "discover the selected extension entrypoints");
+if (portable) assert.ok(entries.includes(join(
+  root, "plugins/agent-remote-driver/extensions/agent-remote-driver/extension.mjs",
+)), "portable support must include the Driver entrypoint");
 
 const synthetic = (exports) => new vm.SyntheticModule(Object.keys(exports), function () {
   for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
@@ -71,7 +75,9 @@ for (const entry of entries) {
   const source = readFileSync(entry, "utf8");
   await link(source, pathToFileURL(entry).href);
 }
-const helperPath = join(root, "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs");
+const helperPath = join(root, portable
+  ? "plugins/agent-bridge/extensions/agent-bridge/core/sdk-compat.mjs"
+  : "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs");
 const helper = readFileSync(helperPath, "utf8");
   for (const available of ["microsoft", "github", "both", "dependency-failure", "initialization-failure"]) {
     const calls = [];

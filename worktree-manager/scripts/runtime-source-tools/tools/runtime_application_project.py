@@ -12,7 +12,7 @@ from typing import Any, TypedDict
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from runtime_application_binstubs import slot_binstubs  # noqa: E402
-from runtime_application_install import callback_timeouts  # noqa: E402
+from runtime_application_install import callback_timeouts, removal_callback  # noqa: E402
 
 _ROOTS = {
     "worktree-manager": ("WORKTREE_MANAGER_ROOT", ".worktree-manager"),
@@ -59,7 +59,7 @@ def install_callbacks(
         declaration = settings["application"]
         if (
             not isinstance(declaration, dict)
-            or set(declaration) - {"callback_timeout_seconds"} != {"setup", "start"}
+            or set(declaration) - {"callback_timeout_seconds", "remove"} != {"setup", "start"}
             or any(
                 not isinstance(declaration[key], list)
                 or any(not isinstance(argument, str) or "\0" in argument for argument in declaration[key])
@@ -68,6 +68,8 @@ def install_callbacks(
         ):
             raise ValueError("application declaration requires setup and start argument lists")
         callback_timeouts(declaration)
+        if "remove" in declaration:
+            removal_callback(declaration["remove"])
         return list(declaration["setup"]), list(declaration["start"])
     if name == "worktree-manager":
         return [], []
@@ -124,6 +126,7 @@ def emit(
     source_fallbacks: dict[str, Path] | None = None,
     construction: dict[str, Any] | None = None,
     callback_timeout_seconds: dict[str, float] | None = None,
+    remove: str | None = None,
 ) -> Path:
     """First-party wheel paths are relative; uv creates/checks the actual lock."""
     if not commands:
@@ -134,9 +137,13 @@ def emit(
     if primary not in commands:
         raise ValueError("primary application command is not declared")
     python_request = target_python_request(target_environment, target_tags)
+    if remove is not None:
+        removal_callback(remove)
     launchers = {}
     for name, entry in commands.items():
-        for filename, content in slot_binstubs(name, entry, python_request=python_request).items():
+        for filename, content in slot_binstubs(
+            name, entry, python_request=python_request, removal=remove is not None and name == primary,
+        ).items():
             if filename in {"install", "install.cmd", "install.ps1", "install.sh"} and name != primary:
                 continue
             if filename in launchers:
@@ -194,6 +201,8 @@ def emit(
     }
     if callback_timeout_seconds is not None:
         declaration["callback_timeout_seconds"] = dict(callback_timeout_seconds)
+    if remove is not None:
+        declaration["remove"] = remove
     callback_timeouts(declaration)
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "wheels").mkdir()

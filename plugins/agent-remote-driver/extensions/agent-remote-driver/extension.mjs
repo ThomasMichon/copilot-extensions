@@ -52,6 +52,7 @@ import { createSessionDriver } from "./session-driver.mjs";
 import { discoveryDir, descriptorPath, generateToken, buildDescriptor, writeDescriptorAtomic } from "./discovery.mjs";
 import { sweepStale } from "./registry.mjs";
 import { boundedRetry, installSignalCleanup, createIntervalTimer } from "./lifecycle.mjs";
+import { ensureInstalledService } from "./service-startup.mjs";
 
 const { loadExtensionSdk } = await import(
   existsSync(new URL("./sdk-compat.mjs", import.meta.url))
@@ -72,6 +73,10 @@ function extLog(msg) {
     /* ignore */
   }
 }
+
+void ensureInstalledService().then(result => {
+  if (result.state === "unavailable") extLog(`service ensure unavailable (${result.reason})`);
+});
 
 const state = {
   sessionId: process.env.SESSION_ID || null,

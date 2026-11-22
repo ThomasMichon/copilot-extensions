@@ -8,6 +8,10 @@ from artifact_source_build import PromotionArtifactError, validate_static_build
 
 TRUSTED_ROOT = Path(__file__).resolve().parent.parent
 CONSUMER = Path("plugins/agent-containers")
+APPLICATIONS = {
+    "agent-worktrees": "agent_worktrees",
+    "agent-remote-driver": "agent_remote_driver_app",
+}
 
 
 def application_resources(source: Path, package: str) -> dict[str, Path]:
@@ -30,7 +34,7 @@ def application_resources(source: Path, package: str) -> dict[str, Path]:
         package + "/_runtime_assets/" + path.relative_to(source).as_posix(): path
         for pattern in patterns for path in source.glob(pattern)
         if path.is_file() and path.suffix in {
-            ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs",
+            ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs", ".mjs",
         }
     }
     resources.update({
@@ -46,9 +50,13 @@ def application_resources(source: Path, package: str) -> dict[str, Path]:
 
 def build_inputs(source: Path, *, root: Path | None) -> tuple[dict[str, object], dict[str, Path]]:
     """Admit only the registered hook; no candidate build code runs here."""
-    if root is not None and source.absolute() == (
-        root / "plugins" / "agent-worktrees"
-    ).absolute():
+    application = next((
+        name for name in APPLICATIONS
+        if root is not None and source.absolute() == (root / "plugins" / name).absolute()
+    ), None)
+    if application is not None:
+        assert root is not None
+        package = APPLICATIONS[application]
         import uv_editable_ref as uer
 
         if (
@@ -69,10 +77,10 @@ def build_inputs(source: Path, *, root: Path | None) -> tuple[dict[str, object],
         ]
         mapping = ast.literal_eval(declarations[0])
         resources = {
-            "agent_worktrees/" + destination: helper.parent / name
+            package + "/" + destination: helper.parent / name
             for name, destination in mapping.items()
-        }
-        resources.update(application_resources(source, "agent_worktrees"))
+        } if application == "agent-worktrees" else {}
+        resources.update(application_resources(source, package))
         for name, path in resources.items():
             if not path.is_file():
                 raise PromotionArtifactError(f"missing runtime resource: {name}")
@@ -83,7 +91,7 @@ def build_inputs(source: Path, *, root: Path | None) -> tuple[dict[str, object],
         if included_helper.exists() and included_helper.read_bytes() != trusted.read_bytes():
             raise PromotionArtifactError("included runtime build helper differs from its source")
         return validate_static_build(
-            source, trusted_setup=(TRUSTED_ROOT / "plugins/agent-worktrees/setup.py").read_bytes(),
+            source, trusted_setup=(TRUSTED_ROOT / "plugins" / application / "setup.py").read_bytes(),
         ), resources
     if root is None or source.absolute() != (root / CONSUMER).absolute():
         return validate_static_build(source), {}
@@ -126,3 +134,12 @@ def build_inputs(source: Path, *, root: Path | None) -> tuple[dict[str, object],
         source, trusted_setup=(TRUSTED_ROOT / CONSUMER / "setup.py").read_bytes(),
     )
     return data, resources
+
+
+def build_resource_roots(source: Path, *, root: Path) -> set[Path]:
+    """Retain the admitted build owner as well as the bytes it places in wheels."""
+    _data, injected = build_inputs(source, root=root)
+    roots = {path.parent for path in injected.values()}
+    if any(source.absolute() == (root / "plugins" / name).absolute() for name in APPLICATIONS):
+        roots.add(root / "libs" / "versioned-runtime")
+    return roots

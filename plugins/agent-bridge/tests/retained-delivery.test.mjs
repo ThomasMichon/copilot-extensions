@@ -179,6 +179,84 @@ function fixture() {
   return f;
 }
 
+test("native consumption inbox retains mode changes before their one public RPC effect", async () => {
+  const f = fixture();
+  f.capabilities = { compatible_native_inbox: 1, native_consumption_inbox: 1 };
+  f.messageBase = true;
+  f.add();
+  Object.assign(f.rows[0], { kind: "control:set-mode", body: "autopilot", control: true });
+  const modes = [];
+  f.session.rpc.mode = { set: async ({ mode }) => {
+    assert.equal(f.rows[0].disposition.state, "started");
+    modes.push(mode);
+    return { modeApplied: true };
+  } };
+  const inbox = f.consumer("native-mode", { receivingApi: "native-sdk-v1" });
+  await inbox.tick(sid);
+  assert.deepEqual(modes, ["autopilot"]);
+  assert.equal(f.rows[0].disposition.state, "completed");
+  assert.equal(f.sends.length, 0);
+  await inbox.tick(sid);
+  assert.deepEqual(modes, ["autopilot"]);
+});
+
+test("an uncertain native mode change never repeats its RPC", async () => {
+  const f = fixture();
+  f.capabilities = { compatible_native_inbox: 1, native_consumption_inbox: 1 };
+  f.messageBase = true;
+  f.add();
+  Object.assign(f.rows[0], { kind: "control:set-mode", body: "plan", control: true });
+  let effects = 0;
+  f.session.rpc.mode = { set: async () => {
+    effects++;
+    throw new Error("mode reply lost after possible effect");
+  } };
+  const inbox = f.consumer("native-mode", { receivingApi: "native-sdk-v1" });
+  await inbox.tick(sid);
+  assert.equal(f.rows[0].disposition.state, "unknown");
+  await inbox.tick(sid);
+  assert.equal(effects, 1);
+  assert.equal(f.sends.length, 0);
+});
+
+for (const running of [false, true]) {
+  test(`retained interrupt ${running ? "aborts a running turn" : "preserves idle background work"} without replay`, async () => {
+    const f = fixture();
+    f.capabilities = { compatible_native_inbox: 1, native_consumption_inbox: 1 };
+    const row = f.add(1, "interrupt");
+    const effects = [];
+    f.session.abort = async () => {
+      assert.equal(row.handoff_stage, "sending");
+      effects.push("abort");
+    };
+    const send = f.session.send;
+    f.session.send = async (options) => { effects.push("send"); return send(options); };
+    const mainTurn = new MainTurn();
+    if (running) mainTurn.observe({ type: "assistant.turn_start" });
+    const inbox = f.consumer("native-interrupt", { receivingApi: "native-sdk-v1", mainTurn });
+    await inbox.tick(sid);
+    assert.deepEqual(effects, running ? ["abort", "send"] : ["send"]);
+    assert.equal(row.handoff_stage, "sdk_accepted");
+    assert.equal(f.sends[0].mode, "immediate");
+    await inbox.tick(sid);
+    assert.equal(f.sends.length, 1);
+  });
+}
+
+test("an ambiguous native abort retains the original interrupt without sending or retrying", async () => {
+  const f = fixture();
+  f.capabilities = { compatible_native_inbox: 1, native_consumption_inbox: 1 };
+  const row = f.add(1, "interrupt");
+  let effects = 0;
+  f.session.abort = async () => { effects++; throw new Error("abort reply lost"); };
+  const inbox = f.consumer("native-interrupt", { receivingApi: "native-sdk-v1", mainTurn: { running: true } });
+  await inbox.tick(sid);
+  assert.equal(row.handoff_stage, "unknown");
+  await inbox.tick(sid);
+  assert.equal(effects, 1);
+  assert.equal(f.sends.length, 0);
+});
+
 test("runtime datetime prefixes reconcile original SDK input without resending", async () => {
   const f = fixture();
   f.add();
@@ -1298,6 +1376,27 @@ function managedFixture() {
   f.idle = () => { f.run(); f.turn.observe({ type: "session.idle" }); };
   f.nudges = () => f.sends.filter((send) => send.prompt === RESUME_NUDGE).length;
   return f;
+}
+
+for (const stage of ["sending", "unknown"]) {
+  test(`idle re-attempts never repeat an uncertain native interrupt (${stage})`, async () => {
+    const f = managedFixture();
+    f.capabilities.native_consumption_inbox = 1;
+    const row = f.started(stage);
+    row.delivery = "interrupt";
+    let aborts = 0;
+    f.session.abort = async () => { aborts++; };
+    const inbox = f.managed();
+    f.idle();
+    await inbox.tick(sid);
+    await inbox.tick(sid);
+    assert.equal(f.sends.length, 0);
+    assert.equal(aborts, 0);
+    assert.equal(row.handoff_stage, stage);
+    assert.equal(row.attempt ?? 1, 1);
+    assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 0);
+    assert.equal(f.nudges(), 0);
+  });
 }
 
 test("an unsubmitted original from a prior incarnation is submitted once the session goes idle", async () => {

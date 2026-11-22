@@ -350,6 +350,9 @@ def _write_snapshot(
             application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
             requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
             commands=commands, primary=primary, setup=setup, start=start,
+            remove=project_metadata.get("tool", {}).get(
+                "copilot-extensions", {},
+            ).get("application", {}).get("remove"),
             callback_timeout_seconds=project_metadata.get("tool", {}).get(
                 "copilot-extensions", {},
             ).get("application", {}).get("callback_timeout_seconds"),

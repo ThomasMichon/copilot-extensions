@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import ast
+import ast as ast
+import base64
 from contextlib import ExitStack, contextmanager
-from dataclasses import replace
+from dataclasses import replace as replace
 import importlib.util
 import json
 import math
@@ -12,7 +13,7 @@ import os
 from pathlib import Path
 import re
 import stat
-import subprocess
+import subprocess as subprocess
 import sys
 import tempfile
 import time
@@ -26,43 +27,14 @@ APPLICATION_INSTALL_CAPABILITIES = ("global-bin/v1",)
 
 def publication_directory(directory: Path, *, root: Path | None = None) -> Path:
     """Validate an explicit publication selection without creating its ancestry."""
-    if (
-        not directory.is_absolute() or ".." in directory.parts
-        or any(char in str(directory) for char in "\r\n\0")
-    ):
-        raise ValueError("application command directory must be an absolute ordinary path")
-    for parent in reversed((directory, *directory.parents)):
-        try:
-            info = parent.lstat()
-        except FileNotFoundError:
-            continue
-        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
-            raise ValueError("application command directory must have ordinary directory ancestry")
-    if root is not None and directory.resolve().is_relative_to((root / "versions").resolve()):
-        raise ValueError("application command directory cannot overlap runtime version slots")
-    return directory
+    return cast(Path, _qualification().publication_directory(
+        sys.modules[__name__], directory, root=root,
+    ))
 
 
 def require_publication_selection(helper: Path) -> None:
     """Read support from the selected helper, without executing a preflight."""
-    try:
-        content = _read(helper, limit=1 << 20)
-        body = ast.parse(content if content is not None else b"").body
-        declarations = [
-            node.value for node in body if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "APPLICATION_INSTALL_CAPABILITIES"
-                    for target in node.targets)
-        ]
-        capabilities = ast.literal_eval(declarations[0]) if len(declarations) == 1 else ()
-        supported = (
-            isinstance(capabilities, (tuple, list))
-            and all(isinstance(value, str) for value in capabilities)
-            and "global-bin/v1" in capabilities
-        )
-    except (SyntaxError, ValueError, TypeError) as error:
-        raise ValueError("selected application helper lacks global-bin/v1 support") from error
-    if not supported:
-        raise ValueError("selected application helper lacks global-bin/v1 support")
+    _qualification().require_publication_selection(sys.modules[__name__], helper)
 
 
 class ApplicationStartupUncertain(RuntimeError):
@@ -116,102 +88,43 @@ def _write(path: Path, content: bytes, *, executable: bool = False) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _materialize_interpreter(slot: Path) -> None:
-    if sys.platform == "win32":
-        return
-    environment = slot / ".venv"
-    directory = environment / "bin"
-    if environment.is_symlink() or directory.is_symlink():
-        raise RuntimeError("application interpreter directory must not be indirect")
-    aliases = ("python", f"python{sys.version_info.major}",
-               f"python{sys.version_info.major}.{sys.version_info.minor}")
-    links = [directory / name for name in aliases if (directory / name).is_symlink()]
-    if not links:
-        return
-    import fcntl
+def _qualification() -> ModuleType:
+    """Keep copied qualification rules bound to this entry's current hooks."""
+    directory = Path(__file__).parent
+    if (directory / "runtime").is_dir():
+        directory /= "runtime"
+    path = directory / "runtime_application_qualification.py"
+    module = sys.modules.get("_application_qualification")
+    if module is None or Path(module.__file__ or "") != path:
+        module = _load(path, "_application_qualification")
+    return module
 
-    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise RuntimeError("application interpreter preparation is already in progress") from error
-        links = [directory / name for name in aliases if (directory / name).is_symlink()]
-        if not links:
-            return
-        if (slot / ".install-complete.json").exists():
-            raise RuntimeError("completed application contains a linked interpreter")
-        source = Path(sys.executable).resolve(strict=True)
-        if any(not path.resolve(strict=True).samefile(source) for path in links):
-            raise RuntimeError("application interpreter link differs from its running interpreter")
-        content = _read(source, limit=128 << 20)
-        if content is None:
-            raise RuntimeError("application running interpreter is unavailable")
-        for path in links:
-            _write(path, content, executable=True)
-    finally:
-        os.close(descriptor)
+
+def _materialize_interpreter(slot: Path) -> None:
+    _qualification()._materialize_interpreter(sys.modules[__name__], slot)
 
 
 def _application(slot: Path) -> dict[str, Any]:
-    raw = _read(slot / "application.json", limit=4 << 20)
-    if raw is None:
-        raise RuntimeError("the copied application has no install declaration")
-    return _validate_application(json.loads(raw))
+    return cast(dict[str, Any], _qualification()._application(sys.modules[__name__], slot))
 
 
 def callback_timeouts(record: dict[str, Any]) -> dict[str, float]:
     """Read finite per-phase process budgets without changing legacy defaults."""
-    declared = record.get("callback_timeout_seconds", {})
-    if (
-        not isinstance(declared, dict)
-        or set(declared) - {"setup", "start"}
-        or any(
-            type(value) not in (int, float)
-            or not 0 < value <= 3600 or not math.isfinite(value)
-            for value in declared.values()
-        )
-    ):
-        raise ValueError("application callback timeouts must be finite seconds in (0, 3600]")
-    return {"setup": 180, "start": 180, **declared}
+    return cast(dict[str, float], _qualification().callback_timeouts(sys.modules[__name__], record))
 
 
 def application_install_timeout(record: dict[str, Any]) -> float:
     """Leave publication/qualification room outside explicitly budgeted callbacks."""
-    budgets = callback_timeouts(record)
-    if "callback_timeout_seconds" not in record:
-        return 180
-    return _QUALIFICATION_TIMEOUT + _PUBLICATION_ALLOWANCE + sum(
-        budgets[phase] for phase in budgets if record.get(phase)
-    )
+    return cast(float, _qualification().application_install_timeout(sys.modules[__name__], record))
 
 
 def _validate_application(record: dict[str, Any]) -> dict[str, Any]:
-    fields = {
-        "name", "module", "commands", "root_environment", "default_directory",
-        "setup", "start", "construction",
-    }
-    if not isinstance(record, dict) or set(record) - {"callback_timeout_seconds"} != fields:
-        raise ValueError("invalid application install declaration")
-    callback_timeouts(record)
-    if (
-        not isinstance(record["module"], str)
-        or not re.fullmatch(
-            r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?::[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?",
-            record["module"],
-        )
-        or any(
-            not isinstance(record[key], list)
-            or any(not isinstance(argument, str) or "\0" in argument for argument in record[key])
-            for key in ("setup", "start")
-        )
-        or not isinstance(record["commands"], list) or not record["commands"]
-        or any(not isinstance(name, str) for name in record["commands"])
-        or len(set(record["commands"])) != len(record["commands"])
-        or record["name"] not in record["commands"]
-    ):
-        raise ValueError("invalid application command declaration")
-    return record
+    return cast(dict[str, Any], _qualification()._validate_application(sys.modules[__name__], record))
+
+
+def removal_callback(value: Any) -> str:
+    """Require one explicit application-owned removal entry point."""
+    return cast(str, _qualification().removal_callback(sys.modules[__name__], value))
 
 
 class InstalledApplicationSource(NamedTuple):
@@ -223,6 +136,501 @@ class InstalledApplicationSource(NamedTuple):
     identity: object
     payload_hash: str
     profile_lock_id: str
+
+
+class ApplicationRemovalPlan(NamedTuple):
+    """Observed Source/profile and publications; not mutation or deletion authority."""
+
+    slot: Path
+    root: Path
+    command_directory: Path
+    component: str
+    payload_hash: str
+    profile_lock_id: str
+    directory_identities: tuple[tuple[Path, int, int], ...]
+    publications: tuple[tuple[Path, bytes], ...]
+
+
+def _removal_directories(slot: Path, commands: Path) -> tuple[tuple[Path, int, int], ...]:
+    identities = []
+    for path in (slot.parent.parent, slot.parent, slot, slot / ".venv", commands):
+        publication_directory(path)
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("application removal requires ordinary installation directories")
+        identities.append((path, info.st_dev, info.st_ino))
+    return tuple(identities)
+
+
+def _removal_unchanged(plan: ApplicationRemovalPlan) -> None:
+    if _removal_directories(plan.slot, plan.command_directory) != plan.directory_identities:
+        raise RuntimeError("application removal directory identity changed")
+    if any(_read(path) != content for path, content in plan.publications):
+        raise RuntimeError("application removal publication changed")
+
+
+def _external_removal_owner(root: Path) -> None:
+    if any(Path(path).resolve().is_relative_to(root.resolve())
+           for path in (__file__, sys.executable, sys.prefix)):
+        raise ValueError("application removal helper and interpreter must be outside the installation")
+
+
+def plan_application_removal(
+    slot: Path, *, component: str, global_bin: Path | None = None,
+    deadline: float | None = None,
+) -> ApplicationRemovalPlan:
+    """Inspect one selected ordinary application, without importing it or deleting.
+
+    Removal must be driven by a helper and interpreter outside the installation.
+    The eventual mutation owner must reacquire canonical custody and revalidate
+    this observation; a plan alone never permits withdrawal or reclamation.
+    """
+    deadline = time.monotonic() + _QUALIFICATION_TIMEOUT if deadline is None else deadline
+
+    def check_deadline() -> None:
+        if not math.isfinite(deadline) or time.monotonic() >= deadline:
+            raise TimeoutError("application removal preflight deadline expired")
+
+    check_deadline()
+    if (
+        not slot.is_absolute() or ".." in slot.parts or slot.parent.name != "versions"
+        or re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", slot.name) is None
+        or slot.name.endswith(".")
+    ):
+        raise ValueError("application removal requires an absolute numbered version slot")
+    root = slot.parent.parent
+    directory = global_bin or Path.home() / ".local" / "bin"
+    publication_directory(directory, root=root)
+    directories = _removal_directories(slot, directory)
+    _external_removal_owner(root)
+    record = _application(slot)
+    if record["name"] == "worktree-manager":
+        raise ValueError("Manager removal requires its dedicated installation owner")
+    runtime, engine = _resources(slot)
+    association = _construction_inputs(slot, record, runtime, engine, deadline)
+    if association.identity.plugin != component:
+        raise ValueError("application removal Source differs from the requested component")
+    payload_hash = association.inputs["payload_hash"]
+    if not runtime.is_complete(root, slot.name, expect_hash=payload_hash):
+        raise RuntimeError("application removal requires completed Source/profile construction")
+    replacements = _global_replacements(slot, record, directory)
+    selectors = tuple((slot.name + ending).encode("utf-8") for ending in ("\n", "\r\n"))
+    observed: list[tuple[Path, bytes]] = []
+    for name in ("current-version", "last-known-good"):
+        path = root / name
+        content = _read(path)
+        if content not in selectors:
+            raise RuntimeError("application removal requires the exact selected generation")
+        assert content is not None
+        observed.append((path, content))
+    for path, content in replacements.items():
+        if _read(path) != content:
+            raise RuntimeError("application removal command belongs to another publication")
+        observed.append((path, content))
+    plan = ApplicationRemovalPlan(
+        slot, root, directory, component, payload_hash, association.receipt["lock_id"],
+        directories, tuple(observed),
+    )
+    check_deadline()
+    _inspect_application_wheels(slot, association, engine, deadline)
+    runtime.require_immutable_environment(slot)
+    _unchanged_application(slot, association, engine)
+    check_deadline()
+    _removal_unchanged(plan)
+    if not runtime.is_complete(root, slot.name, expect_hash=payload_hash):
+        raise RuntimeError("application removal construction changed during preflight")
+    return plan
+
+
+@contextmanager
+def application_removal_custody(
+    plan: ApplicationRemovalPlan, *, deadline: float | None = None,
+) -> Iterator[None]:
+    """Revalidate a quiescent application under its existing runtime/publication guards.
+
+    The application owner must quiesce its central service first. Independent
+    Hosts retain their ordinary runtime leases and refuse this exclusive custody;
+    this function never stops them, withdraws commands or authorizes raw deletion.
+    """
+    runtime, _engine = _resources(plan.slot)
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    commands = [
+        path for path, _content in plan.publications
+        if path not in (plan.root / "current-version", plan.root / "last-known-good")
+    ]
+    with runtime._leases.batch_removal_custody(plan.root, [plan.slot.name]):
+        with publication.target_leases(plan.root, commands):
+            current = plan_application_removal(
+                plan.slot, component=plan.component, global_bin=plan.command_directory,
+                deadline=deadline,
+            )
+            if current != plan:
+                raise RuntimeError("application removal Source/profile or ownership changed")
+            yield
+
+
+def _removal_packet_location(packet: Path, root: Path) -> None:
+    publication_directory(packet)
+    if packet.resolve().is_relative_to(root.resolve()):
+        raise ValueError("application removal packet must be outside the installation")
+
+
+def _copy_removal_controls(
+    slot: Path, target: Path, entries: dict[str, Any], artifacts: ModuleType, deadline: float,
+) -> None:
+    required = {"install.py", "application.json", "runtime-source.json", "runtime", "wheels"}
+    if not required <= entries.keys() or any(
+        entries[name]["kind"] != ("directory" if name in {"runtime", "wheels"} else "file")
+        for name in required
+    ):
+        raise RuntimeError("application removal controls are incomplete")
+    for name, state in sorted(entries.items(), key=lambda item: (item[0].count("/"), item[0])):
+        if name not in required and not name.startswith(("runtime/", "wheels/")):
+            continue
+        if ".." in Path(name).parts or Path(name).is_absolute():
+            raise ValueError("application removal control name is invalid")
+        artifacts._deadline(deadline)
+        source, destination = slot / name, target / name
+        if artifacts._state(source, deadline) != state:
+            raise RuntimeError("application removal controls changed before retention")
+        if state["kind"] == "directory":
+            artifacts._native(destination).mkdir()
+        elif state["kind"] == "file":
+            with artifacts._native(source).open("rb") as incoming:
+                with artifacts._native(destination).open("xb") as outgoing:
+                    while block := incoming.read(1 << 20):
+                        artifacts._deadline(deadline)
+                        outgoing.write(block)
+                    outgoing.flush()
+                    os.fsync(outgoing.fileno())
+            copied = artifacts._state(destination, deadline)
+            if any(copied[key] != state[key] for key in ("kind", "size", "digest")):
+                raise RuntimeError("application removal retained control differs from its original")
+        else:
+            raise ValueError("application removal controls must be ordinary files")
+        if artifacts._state(source, deadline) != state:
+            raise RuntimeError("application removal controls changed during retention")
+
+
+def retain_application_removal_helper(slot: Path, helper: Path, *, deadline: float) -> None:
+    """Copy only sealed controls for external preflight; never import app or retire native owners."""
+    root = slot.parent.parent
+    _removal_packet_location(helper, root)
+    if any(Path(path).resolve().is_relative_to(root.resolve())
+           for path in (sys.executable, sys.prefix)):
+        raise ValueError("application removal bootstrap interpreter must be outside the installation")
+    artifacts = _artifacts(slot)
+    runtime, _engine = _resources(slot)
+    artifacts._plain(helper.parent)
+    with ExitStack() as custody:
+        custody.enter_context(runtime._leases.construction_lease(root, slot.name, timeout=0))
+        custody.enter_context(runtime._leases._kernel_lease(
+            root, slot.name, kind="retention", shared=True, timeout=0,
+        ))
+        inventory = artifacts._record(slot / artifacts.INVENTORY, deadline)
+        binding = inventory.get("binding")
+        if not isinstance(binding, dict):
+            raise ValueError("application removal original control binding is invalid")
+        expected = artifacts._base(slot, binding, deadline)
+        if (
+            set(inventory) != {*expected, "schema", "directory", "entries"}
+            or inventory["schema"] != "installer-engine.application-artifacts"
+            or any(inventory[key] != value for key, value in expected.items())
+            or inventory["directory"] != artifacts._state(slot, deadline)
+            or not isinstance(inventory["entries"], dict)
+            or not runtime.is_complete(root, slot.name, expect_hash=binding["payload_hash"])
+        ):
+            raise RuntimeError("application removal original controls are not sealed and complete")
+        artifacts._native(helper).mkdir()
+        _copy_removal_controls(slot, helper, inventory["entries"], artifacts, deadline)
+        artifacts._write_once(helper / "removal-helper.json", {
+            "schema": "installer-engine.application-removal-helper", "version": 1,
+            "slot": str(slot), "binding": binding,
+            "directory": artifacts._state(helper, deadline),
+            "entries": artifacts._tree(helper, deadline),
+        }, deadline)
+
+
+def read_application_removal_helper(helper: Path, *, deadline: float) -> Path:
+    """Read the retained original helper, never rebuilding a partial or changed copy."""
+    publication_directory(helper)
+    artifacts = _artifacts(Path(__file__).parent)
+    record = artifacts._record(helper / "removal-helper.json", deadline)
+    if (
+        set(record) != {"schema", "version", "slot", "binding", "directory", "entries"}
+        or record["schema"] != "installer-engine.application-removal-helper"
+        or record["version"] != 1 or not isinstance(record["slot"], str)
+        or not isinstance(record["binding"], dict) or not isinstance(record["entries"], dict)
+    ):
+        raise ValueError("application removal retained helper is invalid")
+    slot = Path(record["slot"])
+    artifacts._slot(slot)
+    artifacts._binding(record["binding"])
+    _removal_packet_location(helper, slot.parent.parent)
+    current = artifacts._tree(helper, deadline)
+    current.pop("removal-helper.json", None)
+    if artifacts._state(helper, deadline) != record["directory"] or current != record["entries"]:
+        raise RuntimeError("application removal retained helper controls changed or are incomplete")
+    return slot
+
+
+def prepare_application_removal(
+    plan: ApplicationRemovalPlan, packet: Path, *, deadline: float,
+    pending_artifacts: tuple[Path, ...] = (),
+) -> None:
+    """Retain original controls and receipts before any application-owned withdrawal.
+
+    An incomplete packet is never resumed or overwritten. Its final record is
+    written only after the original physical inventory and publications agree.
+    """
+    _removal_packet_location(packet, plan.root)
+    artifacts = _artifacts(plan.slot)
+    runtime, _engine = _resources(plan.slot)
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    commands = [path for path, _content in plan.publications
+                if path not in (plan.root / "current-version", plan.root / "last-known-good")]
+    with ExitStack() as custody:
+        custody.enter_context(runtime._leases.construction_lease(
+            plan.root, plan.slot.name, timeout=0,
+        ))
+        custody.enter_context(runtime._leases._kernel_lease(
+            plan.root, plan.slot.name, kind="retention", shared=True, timeout=0,
+        ))
+        custody.enter_context(runtime._leases._publication_lease(plan.root, timeout=0))
+        custody.enter_context(publication.target_leases(plan.root, commands))
+        if plan_application_removal(
+            plan.slot, component=plan.component, global_bin=plan.command_directory,
+            deadline=deadline,
+        ) != plan:
+            raise RuntimeError("application removal Source/profile or ownership changed")
+        artifacts._deadline(deadline)
+        packet.mkdir(parents=True, exist_ok=False)
+        artifacts._plain(packet)
+        binding = {
+            "component": plan.component, "payload_hash": plan.payload_hash,
+            "profile_lock_id": plan.profile_lock_id,
+        }
+        receipt = packet / "original-cleanup.json"
+        pending = artifacts._pending(plan.slot, pending_artifacts, deadline)
+        artifacts.prepare_cleanup(
+            plan.slot, binding, receipt, deadline=deadline, pending_artifacts=pending_artifacts,
+        )
+        original = artifacts._record(receipt, deadline)
+        publications = [
+            {"path": str(path), "content": base64.b64encode(content).decode("ascii"),
+             "state": artifacts._state(path, deadline)}
+            for path, content in plan.publications
+        ]
+        entries = original["entries"]
+        _copy_removal_controls(plan.slot, packet, entries, artifacts, deadline)
+        if artifacts._tree(plan.slot, deadline, include_controls=True) != {**entries, **pending}:
+            raise RuntimeError("application removal original inventory changed during retention")
+        _removal_unchanged(plan)
+        if any(artifacts._state(Path(row["path"]), deadline) != row["state"]
+               for row in publications):
+            raise RuntimeError("application removal publication identity changed during retention")
+        artifacts._write_once(packet / "removal-packet.json", {
+            "schema": "installer-engine.application-removal", "version": 1,
+            "slot": str(plan.slot), "root": str(plan.root),
+            "command_directory": str(plan.command_directory), "binding": binding,
+            "directory_identities": [[str(path), device, inode]
+                                     for path, device, inode in plan.directory_identities],
+            "publications": publications, "pending_artifacts": pending,
+            "directory": artifacts._state(packet, deadline),
+            "entries": artifacts._tree(packet, deadline),
+        }, deadline)
+
+
+def read_application_removal(packet: Path, *, deadline: float) -> ApplicationRemovalPlan:
+    """Read retained original evidence, without fresh preflight of a partial target.
+
+    This does not acquire custody or authorize effects. Later transaction phases
+    must reconcile their original evidence; absent publications cannot be adopted.
+    """
+    publication_directory(packet)
+    artifacts = _artifacts(Path(__file__).parent)
+    record = artifacts._record(packet / "removal-packet.json", deadline)
+    if (
+        set(record) != {
+            "schema", "version", "slot", "root", "command_directory", "binding",
+            "directory_identities", "publications", "pending_artifacts", "directory", "entries",
+        }
+        or record["schema"] != "installer-engine.application-removal" or record["version"] != 1
+        or any(not isinstance(record[key], str) for key in ("slot", "root", "command_directory"))
+        or not isinstance(record["binding"], dict)
+        or not isinstance(record["entries"], dict)
+        or not isinstance(record["pending_artifacts"], dict)
+        or not isinstance(record["directory_identities"], list)
+        or not isinstance(record["publications"], list)
+    ):
+        raise ValueError("application removal packet is invalid or incomplete")
+    slot, root, commands = (Path(record[key]) for key in ("slot", "root", "command_directory"))
+    _removal_packet_location(packet, root)
+    if (
+        not slot.is_absolute() or ".." in slot.parts or slot.parent.name != "versions"
+        or slot.parent.parent != root
+        or re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", slot.name) is None
+        or slot.name.endswith(".")
+    ):
+        raise ValueError("application removal packet has an invalid original target")
+    publication_directory(commands, root=root)
+    artifacts._binding(record["binding"])
+    if artifacts._state(packet, deadline) != record["directory"]:
+        raise RuntimeError("application removal packet directory changed")
+    current = artifacts._tree(packet, deadline)
+    current.pop("removal-packet.json", None)
+    if current != record["entries"]:
+        raise RuntimeError("application removal packet controls changed or are incomplete")
+    directories = record["directory_identities"]
+    if (
+        len(directories) != 5
+        or any(not isinstance(row, list) or len(row) != 3
+               or not isinstance(row[0], str)
+               or any(type(value) is not int for value in row[1:]) for row in directories)
+        or [Path(row[0]) for row in directories] != [
+            root, slot.parent, slot, slot / ".venv", commands,
+        ]
+    ):
+        raise ValueError("application removal packet original directories are invalid")
+    publications = record["publications"]
+    if (
+        len(publications) < 3 or len(publications) > 1024
+        or any(not isinstance(row, dict) or set(row) != {"path", "content", "state"}
+               or not isinstance(row["path"], str) or not isinstance(row["content"], str)
+               for row in publications)
+        or len({row["path"] for row in publications}) != len(publications)
+        or [Path(row["path"]) for row in publications[:2]] != [
+            root / "current-version", root / "last-known-good",
+        ]
+        or any(Path(row["path"]).parent != commands or ".." in Path(row["path"]).parts
+               for row in publications[2:])
+    ):
+        raise ValueError("application removal packet original publications are invalid")
+    receipt = artifacts._record(packet / "original-cleanup.json", deadline)
+    if (
+        receipt.get("schema") != "installer-engine.application-cleanup"
+        or receipt.get("slot") != str(slot) or receipt.get("binding") != record["binding"]
+    ):
+        raise RuntimeError("application removal packet original cleanup receipt differs")
+    binding = record["binding"]
+    return ApplicationRemovalPlan(
+        slot, root, commands, binding["component"], binding["payload_hash"],
+        binding["profile_lock_id"],
+        tuple((Path(path), device, inode) for path, device, inode in directories),
+        tuple((Path(row["path"]), base64.b64decode(row["content"], validate=True))
+              for row in publications),
+    )
+
+
+def _withdrawal_evidence(
+    packet: Path, receipt: Path, plan: ApplicationRemovalPlan, artifacts: ModuleType,
+    deadline: float,
+) -> dict[str, Any]:
+    _external_removal_owner(plan.root)
+    if not receipt.is_absolute() or ".." in receipt.parts:
+        raise ValueError("application withdrawal receipt must be an absolute ordinary path")
+    _removal_packet_location(receipt.parent, plan.root)
+    if receipt.resolve().is_relative_to(packet.resolve()):
+        raise ValueError("application withdrawal receipt must be outside its immutable packet")
+    publication_directory(receipt.parent)
+    record = artifacts._record(packet / "removal-packet.json", deadline)
+    return {
+        "schema": "installer-engine.application-withdrawal", "version": 1,
+        "packet": str(packet),
+        "packet_state": artifacts._state(packet / "removal-packet.json", deadline),
+        "slot": str(plan.slot), "root": str(plan.root), "binding": record["binding"],
+        "publications": record["publications"],
+    }
+
+
+def _withdrawal_directories(
+    plan: ApplicationRemovalPlan, artifacts: ModuleType, *, partial: bool,
+) -> None:
+    for path, device, inode in plan.directory_identities:
+        try:
+            artifacts._plain(path)
+            info = artifacts._native(path).lstat()
+        except FileNotFoundError:
+            if partial and path in (plan.slot, plan.slot / ".venv"):
+                continue
+            raise RuntimeError("application withdrawal original directory is missing") from None
+        if (info.st_dev, info.st_ino) != (device, inode):
+            raise RuntimeError("application withdrawal original directory changed")
+
+
+def withdraw_application_publications(
+    packet: Path, receipt: Path, *, deadline: float,
+) -> None:
+    """Withdraw only original publications, with durable intent before the first unlink.
+
+    The application owner must hold service-start exclusion and first settle its
+    own startup/connector withdrawal. This helper never retries a native operation.
+    """
+    plan = read_application_removal(packet, deadline=deadline)
+    artifacts = _artifacts(packet)
+    evidence = _withdrawal_evidence(packet, receipt, plan, artifacts, deadline)
+    runtime, _engine = _resources(packet)
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    commands = [path for path, _content in plan.publications
+                if path not in (plan.root / "current-version", plan.root / "last-known-good")]
+    with runtime._leases.batch_removal_custody(plan.root, [plan.slot.name]):
+        with publication.target_leases(plan.root, commands):
+            partial = os.path.lexists(artifacts._native(receipt))
+            if partial and artifacts._record(receipt, deadline) != evidence:
+                raise RuntimeError("application withdrawal original receipt changed")
+            _withdrawal_directories(plan, artifacts, partial=partial)
+            remaining = []
+            for row, (path, content) in zip(evidence["publications"], plan.publications):
+                if not os.path.lexists(artifacts._native(path)):
+                    if not partial:
+                        raise RuntimeError("application publication vanished without original intent")
+                    continue
+                if artifacts._state(path, deadline) != row["state"] or _read(path) != content:
+                    raise RuntimeError("application withdrawal publication belongs to a changed owner")
+                remaining.append((path, row["state"]))
+            if not partial:
+                receipt.parent.mkdir(parents=True, exist_ok=True)
+                artifacts._write_once(receipt, evidence, deadline)
+            for path, original in remaining:
+                artifacts._deadline(deadline)
+                if artifacts._state(path, deadline) != original:
+                    raise RuntimeError("application publication changed before withdrawal")
+                artifacts._native(path).unlink()
+                artifacts._deadline(deadline)
+
+
+def reclaim_application_removal(
+    packet: Path, receipt: Path, *, deadline: float,
+    validate: Callable[[], None] | None = None,
+) -> None:
+    """Reclaim the original finite inventory through canonical runtime custody.
+
+    Publication guards from withdrawal must already be released. The application's
+    service-start exclusion remains its caller's responsibility throughout.
+    Additional application references are checked inside canonical runtime
+    custody, immediately before the finite receipted cleanup.
+    """
+    plan = read_application_removal(packet, deadline=deadline)
+    artifacts = _artifacts(packet)
+    evidence = _withdrawal_evidence(packet, receipt, plan, artifacts, deadline)
+    if artifacts._record(receipt, deadline) != evidence:
+        raise RuntimeError("application reclamation requires its original withdrawal receipt")
+    _withdrawal_directories(plan, artifacts, partial=True)
+    if any(os.path.lexists(artifacts._native(path)) for path, _content in plan.publications):
+        raise RuntimeError("application reclamation publications are not withdrawn")
+    runtime, _engine = _resources(packet)
+
+    def remove(candidate: Path) -> None:
+        if artifacts._native(candidate) != artifacts._native(plan.slot):
+            raise RuntimeError("application reclamation selected a different candidate")
+        if validate is not None:
+            validate()
+        artifacts._deadline(deadline)
+        artifacts.remove_from_receipt(
+            candidate, evidence["binding"], packet / "original-cleanup.json", deadline=deadline,
+        )
+
+    runtime.remove_owned_candidate(plan.root, plan.slot.name, remove=remove)
 
 
 def _resources(slot: Path) -> tuple[ModuleType, ModuleType]:
@@ -237,384 +645,85 @@ def _resources(slot: Path) -> tuple[ModuleType, ModuleType]:
     return runtime, engine
 
 
+def _artifacts(slot: Path) -> ModuleType:
+    directory = slot / "runtime"
+    previous = sys.path[:]
+    try:
+        sys.path.insert(0, str(directory))
+        return _load(directory / "runtime_application_artifacts.py", "_application_artifacts")
+    finally:
+        sys.path[:] = previous
+
+
 def _construction_metadata(
     record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
 ) -> SimpleNamespace:
     """Validate claimed Source/profile facts without reading or qualifying a slot."""
-    inputs = record["construction"]
-    fields = {
-        "identity", "runtime_version", "payload_hash", "source_hash", "wheel_inputs",
-        "extras", "local_packages", "excluded_packages",
-    }
-    if not isinstance(inputs, dict) or set(inputs) != fields:
-        raise ValueError("regular install requires the actual Source/profile construction inputs")
-    if not isinstance(inputs["identity"], dict):
-        raise ValueError("application construction identity must be an object")
-    source = inputs["identity"].get("runtime_source")
-    source_owner = runtime._runtime_component("versioned_runtime_source")
-    identity = source_owner.parse_source_identity(source)
-    source = cast(dict[str, Any], source)
-    if (
-        inputs["identity"].get("runtime_version") != source["runtime_version"]
-        or any(
-            not isinstance(inputs[key], str)
-            or re.fullmatch(r"[0-9a-f]{64}", inputs[key]) is None
-            for key in ("source_hash", "payload_hash")
-        )
-        or any(
-            not isinstance(inputs[key], list)
-            or any(
-                not isinstance(name, str)
-                or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
-                for name in inputs[key]
-            )
-            or len(set(inputs[key])) != len(inputs[key])
-            for key in ("extras", "local_packages", "excluded_packages")
-        )
-    ):
-        raise ValueError("application construction inputs differ from their Source identity")
-    wheels = engine.WheelReuseInputs(
-        inputs["runtime_version"],
-        json.dumps(inputs["wheel_inputs"], sort_keys=True, separators=(",", ":")),
-        deadline,
-    )
-    wheels.verify()
-    receipt = wheels.receipt()
-    generation = source["runtime_version"] + ".profile." + receipt["lock_id"][7:23]
-    if (
-        inputs["runtime_version"] != generation
-        or engine._wheel_construction_hash(inputs["source_hash"], wheels) != inputs["payload_hash"]
-        or receipt["binding"].get("release") != {
-            "identity": "source:" + source["source_commit"],
-            "sha256": "sha256:" + source["assembly_hash"],
-        }
-        or receipt["binding"].get("component") != source["plugin"]
-        or not set(inputs["local_packages"]) <= receipt["distributions"].keys()
-        or set(inputs["excluded_packages"]) & receipt["distributions"].keys()
-    ):
-        raise ValueError("application Source/profile construction metadata is inconsistent")
-    return SimpleNamespace(
-        inputs=inputs, identity=identity, source=source, wheels=wheels, receipt=receipt,
-    )
+    return cast(SimpleNamespace, _qualification()._construction_metadata(
+        sys.modules[__name__], record, runtime, engine, deadline,
+    ))
 
 
 def _construction_inputs(
     slot: Path, record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
 ) -> SimpleNamespace:
-    association = _construction_metadata(record, runtime, engine, deadline)
-    inputs, source = association.inputs, association.source
-    wheels = replace(association.wheels, generation=slot.name)
-    receipt = association.receipt
-    source_bytes = _read(slot / "runtime-source.json")
-    declaration = _read(slot / "application.json", limit=4 << 20)
-    if (
-        source_bytes is None or json.loads(source_bytes) != source
-        or declaration is None or json.loads(declaration) != record
-        or re.fullmatch(
-            re.escape(inputs["runtime_version"]) + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name,
-        ) is None
-    ):
-        raise ValueError("application construction inputs differ from their Source identity")
-    origins = {
-        name: (slot / "wheels" / filename).as_uri()
-        for name, _version, filename, _digest in wheels.distributions
-    }
-    proof = {
-        "schema": "installer-engine.frozen-input-origins", "version": 2,
-        "packages": origins, "wheel_inputs": receipt,
-        "local_packages": inputs["local_packages"],
-        **({"extras": inputs["extras"]} if inputs["extras"] else {}),
-    }
-    return SimpleNamespace(
-        inputs=inputs, identity=association.identity, source=source, source_bytes=source_bytes,
-        declaration=declaration, wheels=wheels, receipt=receipt, origins=origins, proof=proof,
-    )
+    return cast(SimpleNamespace, _qualification()._construction_inputs(
+        sys.modules[__name__], slot, record, runtime, engine, deadline,
+    ))
 
 
 def _unchanged_application(slot: Path, association: SimpleNamespace, engine: ModuleType) -> None:
-    proof = _read(slot / ".runtime-input-origins.json", limit=4 << 20)
-    if (
-        _read(slot / "runtime-source.json") != association.source_bytes
-        or _read(slot / "application.json", limit=4 << 20) != association.declaration
-        or proof is None or json.loads(proof) != association.proof
-    ):
-        raise RuntimeError("application construction inputs changed before publication")
-    engine.verify_application_wheels(association.wheels, slot)
+    _qualification()._unchanged_application(sys.modules[__name__], slot, association, engine)
 
 
 def _inspect_application_wheels(
     slot: Path, association: SimpleNamespace, engine: ModuleType, deadline: float,
 ) -> None:
-    from installer_wheel_inputs import WheelLimits, inspect_archive
-
-    wheels, receipt = association.wheels, association.receipt
-    engine.verify_application_wheels(wheels, slot)
-    rows = receipt["binding"].get("wheels")
-    if (
-        not isinstance(rows, list) or len(rows) != len(wheels.distributions)
-        or {row["name"] for row in rows} != receipt["distributions"].keys()
-    ):
-        raise ValueError("application profile does not cover its complete wheel set")
-    limits = WheelLimits(
-        max_archive_bytes=128 << 20, max_expanded_bytes=1 << 30,
-        max_member_bytes=512 << 20, max_metadata_bytes=16 << 20,
-        max_members=100_000, max_tags=10_000, max_metadata_member_bytes=4 << 20,
+    _qualification()._inspect_application_wheels(
+        sys.modules[__name__], slot, association, engine, deadline,
     )
-    expanded = 0
-    for row in rows:
-        with engine._open(slot / "wheels" / row["filename"]) as archive:
-            facts = inspect_archive(archive, limits=limits, deadline=deadline)
-        expanded += facts.unpacked_size
-        if (
-            expanded > limits.max_expanded_bytes
-            or re.sub(r"[-_.]+", "-", facts.name).lower() != row["name"]
-            or any(row[key] != receipt["distributions"][row["name"]][key]
-                   for key in ("version", "filename", "sha256"))
-            or facts.version != row["version"]
-            or facts.requires_python != row["requires_python"]
-            or list(facts.requires_dist) != row["requires_dist"]
-            or list(facts.provides_extras) != row["provides_extras"]
-        ):
-            raise ValueError("application wheel metadata differs from its Source/profile")
 
 
 def qualify_installed_application(
     slot: Path, *, component: str, command: str, entry_point: str,
     deadline: float | None = None,
 ) -> InstalledApplicationSource:
-    """Read selected completed Source/profile evidence without lifecycle effects.
-
-    Use the existing isolated, no-bytecode startup context. This neither imports
-    application code nor replaces installed health, root or provider admission.
-    """
-    if not sys.flags.isolated or not sys.dont_write_bytecode:
-        raise ValueError("application Source reading requires isolated no-bytecode Python")
-    if not slot.is_absolute():
-        raise ValueError("application Source reading requires an absolute physical slot")
-    slot = slot.resolve(strict=True)
-    root = slot.parent.parent
-    if slot.parent.name != "versions" or slot.name == "dev":
-        raise ValueError("application Source reading requires a numbered version slot")
-    for directory in (root, slot.parent, slot, slot / ".venv"):
-        state = directory.lstat()
-        if (
-            not stat.S_ISDIR(state.st_mode) or directory.is_symlink()
-            or getattr(state, "st_file_attributes", 0) & 0x400
-        ):
-            raise ValueError("application Source slot must be an ordinary directory")
-    record = _application(slot)
-    if record["name"] != command or record["module"] != entry_point:
-        raise ValueError("application command differs from the expected entry point")
-    runtime, engine = _resources(slot)
-    python = runtime.slot_python(root, slot.name)
-
-    def normalized(path: Path | str) -> str:
-        return os.path.normcase(cast(
-            str, runtime._normalize_windows_extended_path(os.path.abspath(path)),
-        ))
-
-    if (
-        python is None or normalized(sys.executable) != normalized(python)
-        or not Path(sys.prefix).samefile(slot / ".venv")
-    ):
-        raise ValueError("application Source interpreter differs from the physical slot")
-    deadline = deadline if deadline is not None else time.monotonic() + 600
-    association = _construction_inputs(slot, record, runtime, engine, deadline)
-    if association.identity.plugin != component:
-        raise ValueError("application Source component differs from the expected component")
-    selected = (slot.name + "\n").encode("utf-8")
-    if (
-        _read(root / "current-version") != selected
-        or not runtime.is_complete(root, slot.name, expect_hash=association.inputs["payload_hash"])
-    ):
-        raise ValueError("application Source slot is not selected and complete")
-    _inspect_application_wheels(slot, association, engine, deadline)
-    runtime.require_immutable_environment(slot)
-    _unchanged_application(slot, association, engine)
-    if (
-        _read(root / "current-version") != selected
-        or not runtime.is_complete(root, slot.name, expect_hash=association.inputs["payload_hash"])
-    ):
-        raise RuntimeError("application Source selection changed while reading")
-    return InstalledApplicationSource(
-        slot, root, python, association.identity,
-        association.inputs["payload_hash"], association.receipt["lock_id"],
-    )
+    """Read selected completed Source/profile evidence without lifecycle effects."""
+    return cast(InstalledApplicationSource, _qualification().qualify_installed_application(
+        sys.modules[__name__], slot, component=component, command=command,
+        entry_point=entry_point, deadline=deadline,
+    ))
 
 
 @contextmanager
 def _qualified(
     slot: Path, record: dict[str, Any], *, verify_on_exit: bool = True,
 ) -> Iterator[tuple[ModuleType, Callable[[], None]]]:
-    runtime_path = slot / "runtime"
-    runtime, engine = _resources(slot)
-    started = time.monotonic()
-    deadline = started + _QUALIFICATION_TIMEOUT
-    association = _construction_inputs(slot, record, runtime, engine, deadline)
-    inputs, source = association.inputs, association.source
-    wheels, origins, proof = association.wheels, association.origins, association.proof
-
-    def unchanged() -> None:
-        _unchanged_application(slot, association, engine)
-
-    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        command = list(argv)
-        executable = command[0]
-        cwd: Path | str = slot
-        if os.name == "nt":
-            # CreateProcess rejects long cwd values, including extended paths.
-            # Enter the physical slot inside the same isolated probe interpreter.
-            code = command.index("-c") + 1
-            command[code] = (
-                f"import os; os.chdir({engine._native_retained_path(slot)!r})\n"
-                + command[code]
-            )
-            executable, cwd = engine._native_retained_path(executable), slot.anchor
-        result = subprocess.run(
-            command, executable=executable, cwd=cwd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=max(0.1, min(180, deadline - time.monotonic())),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if result.returncode:
-            print(result.stderr, file=sys.stderr, end="")
-            raise subprocess.CalledProcessError(
-                result.returncode, argv, output=result.stdout, stderr=result.stderr,
-            )
-        return result
-
-    root = slot.parent.parent
-    with ExitStack() as retention:
-        with runtime.construction_lease(root, slot.name, timeout=180):
-            engine._refuse(
-                runtime.check_admission(root, slot.name, payload_hash=inputs["payload_hash"]), slot.name,
-            )
-            complete = runtime.is_complete(root, slot.name, expect_hash=inputs["payload_hash"])
-            _inspect_application_wheels(slot, association, engine, deadline)
-            proof_path = slot / ".runtime-input-origins.json"
-            previous = _read(proof_path, limit=4 << 20)
-            if previous is None and not complete:
-                _write(proof_path, json.dumps(proof, indent=2).encode("utf-8") + b"\n")
-            elif previous is None or json.loads(previous) != proof:
-                raise RuntimeError("application installed origins differ from its construction inputs")
-            bootstrap = slot / ".runtime-bootstrap"
-            bootstrap.mkdir(exist_ok=True)
-            for name in (
-                "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-                "versioned_runtime_source.py", "versioned_runtime_construction.py",
-                "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
-                "versioned_runtime_publication.py",
-                "versioned_runtime_cache.py",
-                "daemon_instance_runtime.pyz",
-            ):
-                content = _read(runtime_path / name, limit=1 << 20)
-                previous = _read(bootstrap / name, limit=1 << 20)
-                if content is None or previous is not None and previous != content:
-                    raise RuntimeError("application retention bootstrap differs from its runtime")
-                if previous is None:
-                    if complete:
-                        raise RuntimeError("completed application is missing its retention bootstrap")
-                    _write(bootstrap / name, content)
-            module = record["module"].partition(":")[0]
-            health_callable = None
-            if source["plugin"] in {"worktree-manager", "agent-worktrees"}:
-                package = "worktree_manager" if source["plugin"] == "worktree-manager" else "agent_worktrees"
-                module, health_callable = package + ".runtime_candidate", "verify_runtime_candidate"
-                if not complete:
-                    run([
-                        sys.executable, "-I", "-X", "utf8", "-B", "-c",
-                        f"from {module} import prepare_runtime_candidate; "
-                        + ("prepare_runtime_candidate({})" if package == "worktree_manager"
-                           else "prepare_runtime_candidate()"),
-                    ])
-            engine.verify_installed_inputs(
-                slot, Path(sys.executable), module, origins=origins,
-                extras=tuple(inputs["extras"]), local_packages=tuple(inputs["local_packages"]),
-                excluded_packages=inputs["excluded_packages"], wheel_inputs=wheels,
-                health_callable=health_callable, run=run,
-            )
-            unchanged()
-            if not complete:
-                runtime.mark_complete(root, slot.name, payload_hash=inputs["payload_hash"])
-            retention.enter_context(runtime.retention_lease(
-                root, slot.name, payload_hash=inputs["payload_hash"], timeout=180,
-            ))
-        if "callback_timeout_seconds" in record:
-            association.wheels = replace(
-                association.wheels, deadline=started + application_install_timeout(record),
-            )
-        yield runtime, unchanged
-        if verify_on_exit:
-            unchanged()
+    with _qualification()._qualified(sys.modules[__name__], slot, record, verify_on_exit=verify_on_exit) as result:
+        yield result
 
 
 def _run(
     record: dict[str, Any], command: list[str], root: Path, slot: Path, *, timeout: float = 180,
 ) -> None:
-    if not command:
-        return
-    environment = {**os.environ, record["root_environment"]: str(root)}
-    target = (
-        [str(slot / (record["name"] + ".py"))] if ":" in record["module"]
-        else ["-m", record["module"]]
-    )
-    python = sys.executable
-    cwd: str | None = None
-    if os.name == "nt":
-        _, engine = _resources(slot)
-        python, cwd = engine._native_retained_path(python), slot.anchor
-        command_directory = root if record["name"] == "worktree-manager" else slot
-        target = [
-            "-c", "import os,runpy,sys\n"
-            f"os.chdir({engine._native_retained_path(command_directory)!r})\n"
-            "target=sys.argv.pop(1)\n"
-            "runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True) "
-            "if target == '-m' else runpy.run_path(target, run_name='__main__')",
-            *target,
-        ]
-    result = subprocess.run(
-        [python, "-I", "-X", "utf8", "-B", *target, *command],
-        executable=python, cwd=cwd, env=environment, timeout=timeout,
-        stdout=sys.stdout, stderr=sys.stderr,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    if result.returncode:
-        raise RuntimeError(f"application command failed with exit code {result.returncode}")
+    _qualification()._run(sys.modules[__name__], record, command, root, slot, timeout=timeout)
 
 
 def _global_replacements(
     slot: Path, record: dict[str, Any], global_bin: Path | None,
 ) -> dict[Path, bytes]:
-    root = slot.parent.parent
-    launchers = _load(slot / "runtime_application_binstubs.py", "_application_binstubs")
-    globals_text: dict[str, str] = {}
-    for name in record["commands"]:
-        globals_text.update(launchers.global_binstubs(
-            name, record["root_environment"], record["default_directory"], root=root,
-        ))
-    directory = global_bin or Path.home() / ".local" / "bin"
-    return {directory / name: text.encode("utf-8") for name, text in globals_text.items()}
+    return cast(dict[Path, bytes], _qualification()._global_replacements(
+        sys.modules[__name__], slot, record, global_bin,
+    ))
 
 
 def _publication_current(
     slot: Path, record: dict[str, Any], *, global_bin: Path | None = None,
 ) -> bool:
     """Verify publication only; the caller retains and health-gates the candidate."""
-    root = slot.parent.parent
-    runtime, _engine = _resources(slot)
-    replacements = _global_replacements(slot, record, global_bin)
-    publication = runtime._runtime_component("versioned_runtime_publication")
-    selectors = tuple((slot.name + ending).encode("utf-8") for ending in ("\n", "\r\n"))
-    success = json.dumps({
-        "state": "installed", "version": slot.name,
-    }, sort_keys=True).encode("utf-8") + b"\n"
-    with runtime._publication_lease(root), publication.target_leases(root, list(replacements)):
-        return (
-            all(_read(root / name) in selectors for name in ("current-version", "last-known-good"))
-            and _read(slot / "install-success.json") == success
-            and runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"])
-            and all(_read(path) == content for path, content in replacements.items())
-        )
+    return cast(bool, _qualification()._publication_current(
+        sys.modules[__name__], slot, record, global_bin=global_bin,
+    ))
 
 
 def install(
@@ -747,7 +856,87 @@ def install(
     return {"state": "installed", "slot": str(slot)}
 
 
+def run_application_removal(
+    slot: Path, workspace: Path, *, arguments: list[str], deadline: float,
+    global_bin: Path | None = None,
+) -> Any:
+    """Reach the app's original callback through sealed external controls, never its venv."""
+    publication_directory(workspace)
+    packet, helper = workspace / "packet", workspace / "helper"
+    if os.path.lexists(packet):
+        original = read_application_removal(packet, deadline=deadline)
+        controls, original_slot = packet, original.slot
+    elif os.path.lexists(helper):
+        controls, original_slot = helper, read_application_removal_helper(helper, deadline=deadline)
+    else:
+        removal_callback(_application(slot).get("remove"))
+        _removal_packet_location(workspace, slot.parent.parent)
+        if os.path.lexists(workspace):
+            raise RuntimeError("application removal workspace is partial; retain its original evidence")
+        workspace.mkdir()
+        retain_application_removal_helper(slot, helper, deadline=deadline)
+        controls, original_slot = helper, slot
+    artifacts = _artifacts(controls)
+    if (
+        artifacts._native(slot) not in {
+            artifacts._native(original_slot), artifacts._native(controls),
+        }
+    ):
+        raise ValueError("application removal workspace belongs to another original slot")
+    _removal_packet_location(workspace, original_slot.parent.parent)
+    if slot == controls:
+        _external_removal_owner(original_slot.parent.parent)
+    if any(Path(path).resolve().is_relative_to(original_slot.parent.parent.resolve())
+           for path in (sys.executable, sys.prefix)):
+        raise ValueError("application removal interpreter must be outside the installation")
+    provider = _load(controls / "install.py", "_external_application_removal_provider")
+    if controls == packet:
+        provider.read_application_removal(packet, deadline=deadline)
+    else:
+        provider.read_application_removal_helper(helper, deadline=deadline)
+    callback = removal_callback(provider._application(controls).get("remove"))
+    module, attribute = callback.split(":")
+    wheels = controls / "wheels"
+    original_path = list(sys.path)
+    try:
+        sys.path[:] = [
+            str(path) for path in sorted(wheels.glob("*.whl"))
+        ] + [
+            path for path in original_path
+            if not {"site-packages", "dist-packages"} & set(Path(path).parts)
+            and path and not Path(path).resolve().is_relative_to(original_slot.parent.parent.resolve())
+        ]
+        owner = importlib.import_module(module)
+        if not Path(owner.__file__ or "").is_relative_to(wheels):
+            raise RuntimeError("application removal callback was not loaded from its retained wheels")
+        command: Any = owner
+        for part in attribute.split("."):
+            command = getattr(command, part)
+        if not callable(command):
+            raise ValueError("application removal callback is not callable")
+        return command(
+            provider=provider, slot=original_slot, workspace=workspace,
+            arguments=arguments, global_bin=global_bin, deadline=deadline,
+        )
+    finally:
+        sys.path[:] = original_path
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["uninstall"]:
+        removal = argparse.ArgumentParser(allow_abbrev=False)
+        removal.add_argument("--workspace", type=Path, required=True)
+        removal.add_argument("--global-bin", type=Path)
+        removal.add_argument("--timeout", type=float, default=60)
+        options, forwarded = removal.parse_known_args(argv[1:])
+        if not math.isfinite(options.timeout) or not 0 < options.timeout <= 600:
+            removal.error("--timeout must be finite seconds in (0, 600]")
+        print(json.dumps(run_application_removal(
+            Path(__file__).parent, options.workspace, arguments=forwarded,
+            global_bin=options.global_bin, deadline=time.monotonic() + options.timeout,
+        )))
+        return 0
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--stage", action="store_true")
     parser.add_argument("--global-bin", type=Path, help="command publication directory (regular install)")

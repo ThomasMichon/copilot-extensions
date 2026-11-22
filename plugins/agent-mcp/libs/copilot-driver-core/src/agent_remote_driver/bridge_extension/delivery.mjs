@@ -105,16 +105,20 @@ export class InFlightMessages {
   constructor(limit = 50) {
     this.pending = new Map();
     this.consumed = new Set();
+    this.unacknowledgedConsumed = new Set();
+    this.unacknowledgedMessages = new Map();
+    this.uncertain = new Set();
     this.consumptionObservers = new Set();
     this.limit = limit;
   }
 
   sent(msg) {
     if (this.consumed.has(msg.id)) return;
-    this.pending.set(msg.id, msg);
-    while (this.pending.size > this.limit) {
-      this.pending.delete(this.pending.keys().next().value);
+    if (!this.pending.has(msg.id)
+        && this.pending.size + this.unacknowledgedConsumed.size >= this.limit) {
+      throw new Error("native delivery observation capacity reached; original input retained");
     }
+    this.pending.set(msg.id, msg);
   }
 
   observe(event) {
@@ -126,7 +130,12 @@ export class InFlightMessages {
   }
 
   _rememberConsumed(id) {
+    if (this.pending.has(id)) {
+      this.unacknowledgedConsumed.add(id);
+      this.unacknowledgedMessages.set(id, this.pending.get(id));
+    }
     this.pending.delete(id);
+    this.uncertain.delete(id);
     this.consumed.delete(id);
     this.consumed.add(id);
     while (this.consumed.size > this.limit) {
@@ -134,9 +143,16 @@ export class InFlightMessages {
     }
   }
 
+  acknowledged(ids) {
+    for (const id of ids) {
+      this.unacknowledgedConsumed.delete(id);
+      this.unacknowledgedMessages.delete(id);
+    }
+  }
+
   watchConsumption() {
     // Keep active delivery observations even when the bounded history evicts them.
-    const consumed = new Set(this.consumed);
+    const consumed = new Set([...this.consumed, ...this.unacknowledgedConsumed]);
     const polled = new Set();
     let selected = false;
     const observer = (id) => {
@@ -479,7 +495,8 @@ export function serializedRegister(
 // whose registration hasn't committed (or was refused) -- the original queue
 // would keep the message and deliver it twice. A rollover that does commit in
 // between is followed by the bridge's alias forwarding. Best-effort and
-// ordered: the batch stops at the first send failure (unacked redelivers).
+// ordered: ACKs require native consumption. A submission with no reply retains
+// its original in-process fence; durable recovery belongs to retained providers.
 //
 // ``mainTurn`` (a MainTurn) says whether an interrupt has a main turn to abort;
 // without one, every interrupt aborts first (the historical behavior).
@@ -498,8 +515,7 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
-  const messages = data?.messages;
-  if (!Array.isArray(messages) || messages.length === 0) return [];
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
   consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
   onPending(sid, messages.filter((msg) => msg && !consumption.has(msg.id)
     && !inFlight.pending.has(msg.id)));
@@ -554,17 +570,20 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
         delivered.push(msg.id);
         continue;
       }
+      if (inFlight.pending.has(msg.id)) continue;
       const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
       // One interrupt per batch: a second interrupt in the same batch must not
       // cancel the turn the first one just started.
       const abort = plan.abortFirst && !interrupted;
       if (msg.delivery === "interrupt") interrupted = true;
+      if (abort && inFlight.uncertain.size) {
+        log(`interrupt ${msg.id} held: original SDK effects remain uncertain; no abort or replay`);
+        break;
+      }
+      inFlight.sent(msg);
+      inFlight.uncertain.add(msg.id);
       if (abort) {
-        try {
-          await session.abort();
-        } catch (e) {
-          log(`abort failed before message ${msg.id}: ${e.message}`);
-        }
+        await session.abort();
         // The abort discarded every message still pending in the CLI;
         // re-send those (oldest first) so the interrupt loses nothing.
         const replay = inFlight.takeBefore(msg.id);
@@ -576,7 +595,9 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
               || !inFlight.pending.has(earlier.id)) {
             continue;
           }
+          inFlight.uncertain.add(earlier.id);
           await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
+          inFlight.uncertain.delete(earlier.id);
         }
       }
       if (!await currentNative(msg) || !stillCurrent(msg)) continue;
@@ -584,8 +605,8 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
         await session.send(deliveryPlan(msg, {
           mainTurnRunning: mainTurn ? mainTurn.running : true,
         }).options);
+        inFlight.uncertain.delete(msg.id);
         onSubmitted(sid, msg.id);
-        if (!consumption.has(msg.id)) inFlight.sent(msg);
       }
       delivered.push(msg.id);
     } catch (e) {
@@ -593,7 +614,26 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
       break;
     }
   }
-  if (delivered.length > 0) await post("POST", `${base}/messages/ack`, { ids: delivered });
+  const observed = delivered.filter((id) => consumption.has(id));
+  const candidates = [...inFlight.unacknowledgedConsumed].filter((id) => !observed.includes(id))
+    .map((id) => ({
+      id, message: inFlight.unacknowledgedMessages.get(id),
+    }));
+  const exact = candidates.find(({ message }) => message?.exact_session);
+  let exactCurrent = false;
+  if (exact) {
+    try {
+      exactCurrent = await currentNative(exact.message);
+    } catch (error) {
+      log(`consumed exact input held: ${error.message}`);
+    }
+  }
+  const consumed = [...candidates.filter(({ message }) => !message?.exact_session
+    || exactCurrent && stillCurrent(message) && message.original_session_id === sid)
+    .map(({ id }) => id), ...observed];
+  if (consumed.length > 0 && await post("POST", `${base}/messages/ack`, { ids: consumed })) {
+    inFlight.acknowledged(consumed);
+  }
   return delivered;
 }
 

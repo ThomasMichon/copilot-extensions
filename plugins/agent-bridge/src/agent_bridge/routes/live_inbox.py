@@ -312,6 +312,15 @@ def disposition(
                     conn, session_id, now, native_only=body.receiving_api is None,
                 )
                 compatible_inbox.require_current(conn, consumer)
+                if body.state == "started":
+                    original = conn.execute(
+                        "SELECT * FROM live_messages WHERE id=? AND session_id=?",
+                        (body.message_id, session_id),
+                    ).fetchone()
+                    if original is None:
+                        raise RuntimeCustodyError("Original message is unavailable")
+                    if original["kind"] in ("control:set-mode", "control:set-mode-ready"):
+                        compatible_inbox.require_control_admission(db, conn, original)
                 return dispose(
                     conn, consumer, body.message_id, body.state, body.code, body.reason, now=now,
                 )

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, Protocol, TypeVar, cast
 
 from windows_qualification_contract import (
-    DESKTOP_CASE, DESKTOP_PACKET, MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET,
+    DESKTOP_CASE, DESKTOP_PACKET, DRIVER_SERVICE_PACKET, MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET,
     NATIVE_LIFETIME_PACKETS, NATIVE_PACKETS, NATIVE_VERSIONS, SOURCE_PACKET, VERSION,
     QualificationTransport, admit, canonical, request,
     validate_files, validate_result,
@@ -165,6 +165,8 @@ def native_command(
     root: Path, output: Path, packet: str = "native-worktrees-embody",
 ) -> list[str]:
     """Select exactly one native consumer with its existing functional bounds."""
+    if packet == DRIVER_SERVICE_PACKET:
+        raise ValueError("Driver service requires its selected native lifetime owner")
     plugin, module, case, _ = NATIVE_PACKETS[packet]
     limits = (
         ("300", "420", "300") if module == "test_manager_application_launch"
@@ -198,7 +200,7 @@ def governed_feed() -> None:
 
 
 def native_prerequisites(owned: NativeProbe, *, require_feed: bool = True) -> dict[str, str]:
-    """Require disposable native binaries; only Worktrees needs its governed feed."""
+    """Require disposable native binaries and the selected packet's feed."""
     if (
         os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1"
@@ -355,6 +357,7 @@ def execute(root: Path, value: dict[str, Any], output: Path) -> dict[str, Any]:
 
     def owned(
         argv: list[str], timeout: float, *, allow_empty: bool = False,
+        environment: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         from agent_procutil.owned_process import run_caller_owned
         index = len(result["phases"])
@@ -364,6 +367,7 @@ def execute(root: Path, value: dict[str, Any], output: Path) -> dict[str, Any]:
                 max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=2 * 1024 * 1024,
                 env={
                     **os.environ,
+                    **(environment or {}),
                     "PYTHONIOENCODING": "utf-8",
                     "PYTHONPATH": os.pathsep.join((
                         str(root / "libs/agent-procutil/src"), str(root / "tools"),
@@ -457,17 +461,31 @@ def execute(root: Path, value: dict[str, Any], output: Path) -> dict[str, Any]:
                     status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
                     raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
                 return native_prerequisites(
-                    owned, require_feed=native[0] == "agent-worktrees",
+                    owned, require_feed=(
+                        native[0] == "agent-worktrees" or selected["name"] == DRIVER_SERVICE_PACKET
+                    ),
                 )
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
             )
-            if selected["name"] in NATIVE_LIFETIME_PACKETS:
+            if selected["name"] == DRIVER_SERVICE_PACKET:
+                from windows_qualification_lifetime import driver_service_lifetime
+
+                phase(native[3], lambda: driver_service_lifetime(root, output, prepare=owned))
+            elif selected["name"] in NATIVE_LIFETIME_PACKETS:
                 from windows_qualification_lifetime import worktrees_lifetime
 
                 phase(native[3], lambda: worktrees_lifetime(
                     root, output, prepare=owned, packet=selected["name"],
                 ))
+            elif native[0] == "agent-worktrees":
+                from windows_qualification_lifetime import bridge_consumer
+
+                with bridge_consumer(root, prepare=owned) as bridge_python:
+                    phase(native[3], lambda: owned(
+                        native_command(root, output, selected["name"]), 1800,
+                        environment={"COPILOT_DRIVER_BRIDGE_PYTHON": str(bridge_python)},
+                    ))
             else:
                 phase(native[3], lambda: owned(native_command(root, output, selected["name"]), 1800))
         elif selected["name"] == MCP_LIFETIME_PACKET:

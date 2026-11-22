@@ -20,6 +20,44 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize("arguments", [
+    ("--describe-install",), ("--describe-install", "--version"),
+    ("--version", "--describe-install"),
+])
+def test_bootstrap_inspects_acquired_installer_without_application_dispatch(
+    tmp_path: Path, arguments: tuple[str, ...],
+) -> None:
+    repo = _source_repo(tmp_path)
+    root = tmp_path / "manager-root"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        f'[source]\nrepo = "{repo.as_posix()}"\nref = "main"\n', encoding="utf-8",
+    )
+    tools = tmp_path / "tools"
+    _fake_tools(tools, uv_exit=0, python_exit=0)
+    handoff = tmp_path / "arguments"
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "WORKTREE_MANAGER_ROOT": str(root), "BOOTSTRAP_ARGUMENT_HANDOFF": str(handoff),
+        "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+    }
+    result = subprocess.run(
+        [BASH, str(BOOTSTRAP), *arguments], env=environment,
+        capture_output=True, text=True, timeout=20,
+    )
+    if len(arguments) != 1:
+        assert result.returncode != 0
+        assert "--describe-install accepts no application or installation arguments" in result.stderr
+        assert not handoff.exists() and not (root / "staging").exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert handoff.read_text(encoding="utf-8").splitlines() == [
+        "-I", "-S", "-B", "-X", "utf8", "scripts/runtime_install.py", "--describe-install",
+    ]
+    assert (root / "staging" / "worktree-manager" / "scripts" / "runtime_install.py").is_file()
+    assert not (root / "current-version").exists()
+
+
 @pytest.mark.parametrize(
     ("python_exit", "incomplete_checkout", "retained_sparse"),
     [(0, False, False), (17, False, False), (0, True, False), (0, False, True)],

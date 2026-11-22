@@ -46,6 +46,24 @@ def test_all_extension_entrypoints_preserve_mixed_sdk_loader_compatibility() -> 
     assert "Microsoft/GitHub SDK compatibility" in result.stdout
 
 
+def test_built_mux_extensions_link_without_registering_a_session(tmp_path: Path) -> None:
+    from agent_procutil.owned_process import run_caller_owned
+
+    node = shutil.which("node")
+    assert node, "portable extension linking requires Node"
+    payload, _ = receiving_bundle.build_mux_support()
+    target = tmp_path / "portable"
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        archive.extractall(target)
+    fixture = Path(__file__).parent / "fixtures" / "extension-sdk-namespace.mjs"
+    result = run_caller_owned(
+        [node, "--experimental-vm-modules", str(fixture), str(target), "portable"],
+        timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Microsoft/GitHub SDK compatibility" in result.stdout
+
+
 def test_selected_extensions_and_canonical_pane_shell_survive_materialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -73,7 +91,12 @@ def test_selected_extensions_and_canonical_pane_shell_survive_materialization(
         standalone = root / "plugins" / "agent-remote-driver"
         for name in archive.namelist():
             if name.startswith("plugins/agent-remote-driver/"):
-                assert archive.read(name) == (standalone / name.removeprefix("plugins/agent-remote-driver/")).read_bytes()
+                relative = name.removeprefix("plugins/agent-remote-driver/")
+                original = (
+                    root / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs"
+                    if relative == "extensions/agent-remote-driver/sdk-compat.mjs" else standalone / relative
+                )
+                assert archive.read(name) == original.read_bytes()
         metadata = json.loads(archive.read("plugins/agent-bridge/plugin.json"))
         assert metadata["name"] == "agent-bridge"
         assert not {"hooks", "sessionContext", "skills", "installerReadiness"} & metadata.keys()

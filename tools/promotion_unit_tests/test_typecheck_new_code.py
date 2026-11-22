@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from contextlib import nullcontext
 import os
-from pathlib import Path, WindowsPath
+from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 from typing import Callable
@@ -603,24 +603,13 @@ def test_checker_composes_canonical_and_copied_installation_programs_once(
         def release(self) -> None:
             events.append("released")
 
-    class ForwardSlashWindowsPath(WindowsPath):
-        def __str__(self) -> str:
-            return super().__str__().replace("\\", "/")
-
-    source_views = typecheck._SourceViews
-
-    def posix_spelled_views(root: Path, stage: Path) -> typecheck._SourceViews:
-        if os.name == "nt":
-            stage = ForwardSlashWindowsPath(stage)
-        return source_views(root, stage)
-
     def run(
         argv: list[str], source_root: Path, *, env: dict[str, str],
     ) -> subprocess.CompletedProcess[str]:
         assert source_root == root
         targets = Path(argv[-1][1:]).read_text(encoding="utf-8").splitlines()
         assert len(targets) == 2 and all(Path(target).is_file() for target in targets)
-        assert all("/" in target and "\\" not in target for target in targets)
+        assert all(Path(target).is_absolute() for target in targets)
         assert sum(Path(target).name == "installation_context.py" for target in targets) == 1
         assert all(Path(target).parent == Path(targets[0]).parent for target in targets)
         assert Path(env["MYPYPATH"].split(os.pathsep)[0]) == Path(targets[0]).parent
@@ -630,7 +619,6 @@ def test_checker_composes_canonical_and_copied_installation_programs_once(
     monkeypatch.setattr(typecheck, "environment_path", lambda *_args: (environment, "fixture"))
     monkeypatch.setattr(typecheck, "environment_python", lambda _path: python)
     monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: Lease())
-    monkeypatch.setattr(typecheck, "_SourceViews", posix_spelled_views)
     monkeypatch.setattr(typecheck, "uuid4", lambda: SimpleNamespace(hex=""))
     monkeypatch.setattr(typecheck, "_run", run)
     project = typecheck.Project(

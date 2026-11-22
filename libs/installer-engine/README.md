@@ -4,6 +4,75 @@ Edit canonical implementation files here. Contributors do not refresh committed
 developer copies to publish a change: the Dev-to-Main composer materializes the
 declared installer family in its candidate tree before freezing that tree.
 
+`runtime_application_install.py` owns ordinary numbered Source/profile
+applications. Its read-only `plan_application_removal` validates completed
+construction, exact selectors and generated commands, ordinary directory identity,
+and an external helper/interpreter. `application_removal_custody` revalidates that
+observation under the existing generation and shared-command publication guards.
+Live runtime references refuse exclusive custody. These APIs do not stop services,
+withdraw plugin registrations or delete files; they are not an uninstall command.
+Manager and legacy runtime removal retain their separate ownership contracts.
+
+The entry delegates declaration, Source/profile, wheel and callback checks to
+the co-located `runtime_application_qualification.py` component. It passes its
+original hooks and clocks explicitly, preserving copied-entry and retained-helper
+behavior. Both files ship through the same canonical installer inventory;
+the component adds no installer, launcher or lifecycle owner.
+
+Applications may opt in with a Python `remove` entry point in their existing
+application declaration. Only their primary slot launcher routes `uninstall`
+to `install.py` under isolated, already available managed base Python, with
+`--no-project --no-sync --no-python-downloads`, before target-venv preflight.
+Ordinary commands and applications without that declaration are unchanged.
+`retain_application_removal_helper` copies only original sealed controls and
+wheels into a new external workspace before importing that callback. It does
+not copy the venv, install dependencies, retire a service or grant deletion
+authority. Partial copies are never overwritten. The helper's readback validates
+its original physical tree without requiring a surviving source slot.
+The canonical entry then calls the application owner from retained wheels;
+the application supplies its native-service and connector semantics. A retained
+`packet/install.py uninstall --workspace <same-workspace> ...` supports original
+settled retry after public commands and the slot are gone.
+
+`prepare_application_removal` retains the original helper, runtime resources,
+Source declaration and profile wheels outside the installation, together with
+original physical cleanup and publication evidence. Preparation uses shared
+runtime retention, not exclusive removal custody, so it can precede service
+retirement. Its completion record is written last; existing/partial destinations
+are never overwritten. `read_application_removal` checks the retained packet
+without freshly inspecting a partially withdrawn or absent target. These APIs
+still do not authorize a withdrawal or delete any installation object.
+
+After application-owned service/startup/connector settlement,
+`withdraw_application_publications` acquires canonical generation and command
+guards and persists original physical intent outside the packet before unlinking
+only those publications. Missing originals without that receipt, replaced
+same-byte files and new owners refuse. A partial retry reuses the original intent
+without fresh target preflight. `reclaim_application_removal` then uses the
+original physical cleanup receipt through canonical `remove_owned_candidate`;
+an optional application `validate` callback runs inside that runtime custody
+immediately before finite cleanup. It can refuse unsettled independent references,
+but does not replace the original cleanup receipt or grant deletion authority.
+Publication guards must be released first. The caller retains service-start
+exclusion across both phases. Neither helper replays native connector operations
+or supplies a complete application-specific uninstall transaction.
+
+New ordinary construction seals its original physical artifact inventory before
+completion, after canonical retained-generation preparation. Completed slots
+are never retroactively sealed. `runtime_application_artifacts.py` supplies a
+finite cleanup callback for the installation owner: it validates that inventory,
+persists the original object identities outside the candidate, and refuses changed
+or unlisted objects on an interrupted retry. The callback must run under canonical
+`remove_owned_candidate` custody, which still refuses selected or live runtimes.
+It is not a standalone uninstall entrypoint. Service retirement, connector/startup
+withdrawal and any application-owned runtime artifacts still need their own owner;
+the callback does not remove them, retained connector assets or user state.
+The application owner may explicitly identify a finite set of pending transient
+files while preparing the receipt. Their original identities are recorded in the
+packet, but they are never adopted into construction cleanup authority. The
+callback refuses until their actual owner has settled them; unknown additions,
+original construction objects and unsafe paths cannot use this exception.
+
 The optional [protected installation-owner entry](protected-installation.md)
 composes the existing prepared-application constructor through an independently
 installed Linux root-owned bootstrap and policy. It adds no elevation,

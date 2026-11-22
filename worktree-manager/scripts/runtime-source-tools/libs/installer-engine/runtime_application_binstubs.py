@@ -36,6 +36,7 @@ def setup_binstubs() -> dict[str, str]:
 def slot_binstubs(
     name: str, module: str, *, python_platform: str | None = None,
     python_request: str | None = None, source_project: bool = False,
+    removal: bool = False,
 ) -> dict[str, str]:
     """Return relocatable app/install stubs without publishing any of them."""
     package, separator, attribute = module.partition(":")
@@ -57,6 +58,9 @@ def slot_binstubs(
     flags = _FLAGS + (f" --python-platform {python_platform}" if python_platform else "")
     if python_request is not None:
         flags += f" --python {python_request}"
+    external_flags = "run --no-project --no-sync --managed-python --no-python-downloads"
+    if python_request is not None:
+        external_flags += f" --python {python_request}"
     result = {}
     for command, target in (
         (name, f"-I -X utf8 -B -m {module}" if not separator else None),
@@ -113,6 +117,26 @@ def slot_binstubs(
         ps_target = target or f"-I -X utf8 -B (Join-Path $slot '{script}')"
         cmd_target = target or f'-I -X utf8 -B "%SLOT%\\{script}"'
         sh_target = target or f'-I -X utf8 -B "$slot/{script}"'
+        ps_removal = cmd_removal = cmd_removal_body = sh_removal = ""
+        if removal and command == name:
+            ps_removal = (
+                "if ($args.Count -gt 0 -and $args[0] -ceq 'uninstall') {\n"
+                f"    & uv {external_flags} python -I -X utf8 -B (Join-Path $slot 'install.py') @forwarded\n"
+                "    exit $LASTEXITCODE\n"
+                "}\n"
+            )
+            cmd_removal = 'if "%~1"=="uninstall" goto application_uninstall\r\n'
+            cmd_removal_body = (
+                ":application_uninstall\r\n"
+                f'uv {external_flags} python -I -X utf8 -B "%SLOT%\\install.py" %*\r\n'
+                "exit /b %errorlevel%\r\n"
+            )
+            sh_removal = (
+                'if [ "${1:-}" = uninstall ]; then\n'
+                f'    exec "$installer_uv" {external_flags} python -I -X utf8 -B "$slot/install.py" "$@"\n'
+                "fi\n"
+            )
+            sh_preflight = 'if [ "${1:-}" != uninstall ]; then\n' + sh_preflight + "fi\n"
         result[command + ".ps1"] = (
             "$ErrorActionPreference = 'Stop'\n"
             "$slot = $PSScriptRoot\n"
@@ -129,7 +153,7 @@ def slot_binstubs(
             "} else {\n"
             "    $forwarded = @($args | ForEach-Object { if ($_ -eq '') { '\"\"' } else { $_ } })\n"
             "}\n"
-            + ps_prepare
+            + ps_removal + ps_prepare
             + f"& uv {selected_flags} --project $slot python {ps_target} @forwarded\n"
             "exit $LASTEXITCODE\n"
         )
@@ -139,9 +163,10 @@ def slot_binstubs(
             + "".join(f'set "{key}="\r\n' for key in _CLEAR)
             + 'if not defined UV_CACHE_DIR for %%I in ("%SLOT%\\..\\..") do '
             'set "UV_CACHE_DIR=%%~fI\\cache\\uv"\r\n'
-            + cmd_prepare
+            + cmd_removal + cmd_prepare
             + f'uv {selected_flags} --project "%SLOT%" python {cmd_target} %*\r\n'
             + "exit /b %errorlevel%\r\n"
+            + cmd_removal_body
         )
         shell = (
             "#!/bin/sh\n"
@@ -163,7 +188,7 @@ def slot_binstubs(
             '    UV_CACHE_DIR=$(cygpath -w "$UV_CACHE_DIR") || exit\n'
             "fi\n"
             "export UV_CACHE_DIR\n"
-            + sh_prepare
+            + sh_removal + sh_prepare
             + f'exec "$installer_uv" {selected_flags} --project "$slot" python {sh_target} "$@"\n'
         )
         result[command + ".sh"] = shell

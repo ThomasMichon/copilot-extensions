@@ -3,7 +3,8 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import {
-  DELIVERY_SOURCE, buildDeliveredSendOptions, deliveryPlan, escAttr, isSubAgentEvent,
+  DELIVERY_SOURCE, buildDeliveredSendOptions, controlPlan, deliveryPlan, escAttr,
+  isSubAgentEvent, modeApplied,
 } from "./delivery.mjs";
 import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
 
@@ -148,6 +149,7 @@ export function createRetainedInbox({
   let enrolled = false;
   let frontendStale = false;
   let healthUntil = 0;
+  let nativeConsumptionInbox = false;
   let historyAt = 0;
   let after = 0;
   let retryAt = 0;
@@ -635,6 +637,7 @@ export function createRetainedInbox({
           || health?.capabilities?.readonly_plugin_controls !== 1)) {
         throw new Error("portable inbox and readonly plugin controls are required; legacy downgrade refused");
       }
+      nativeConsumptionInbox = compatible && health?.capabilities?.native_consumption_inbox === 1;
       healthUntil = now() + RECHECK_MS;
       reattemptSupported = health?.capabilities?.retained_delivery_reattempt === 1;
     }
@@ -745,6 +748,10 @@ export function createRetainedInbox({
       const header = msg.message_contract;
       const startupKind = /^startup:prompt:[1-9]\d*$/.test(msg.kind || "");
       const supported = new Set(["prompt", "notify", "status-check", "reply", "control:replay-history"]);
+      if (nativeConsumptionInbox) {
+        supported.add("control:set-mode");
+        supported.add("control:set-mode-ready");
+      }
       let rejection = null;
       if (!header || header.message_id !== msg.id || header.session_id !== sid
           || header.receiver_incarnation !== context.consumer.incarnation
@@ -756,7 +763,9 @@ export function createRetainedInbox({
         rejection = ["unsupported_message_version", "This receiver does not support the message type or revision."];
       } else if (!Array.isArray(header.requires) || header.requires.length !== 0) {
         rejection = ["unsupported_required_semantics", "This receiver cannot enforce the required message semantics."];
-      } else if (typeof msg.body !== "string" || !["steer", "queue"].includes(msg.delivery)) {
+      } else if (typeof msg.body !== "string"
+          || !(nativeConsumptionInbox ? ["steer", "queue", "interrupt"] : ["steer", "queue"])
+            .includes(msg.delivery)) {
         rejection = ["unsupported_payload", "This receiver cannot interpret the message payload or delivery mode."];
       }
       if (header?.type === "control:replay-history" && (msg.body !== "" || !replayHistory)) {
@@ -764,6 +773,42 @@ export function createRetainedInbox({
       }
       if (rejection) {
         await disposition("rejected", ...rejection);
+        return;
+      }
+      if (header.type === "control:set-mode" || header.type === "control:set-mode-ready") {
+        const plan = controlPlan(msg);
+        if (plan.action !== "set-mode" || !["steer", "queue"].includes(msg.delivery)
+            || typeof session.rpc?.mode?.set !== "function") {
+          await disposition("rejected", "unsupported_mode_control", "The native mode control is unsupported.");
+          return;
+        }
+        const ready = async () => {
+          if (!plan.pluginReadiness) return;
+          const observed = await nativeCall(() => observePluginReadiness(
+            session, plan.pluginReadiness, { isCurrent: () => current(sid), waitForReady: false },
+          ));
+          if (observed.status !== "ready") throw new Error("original mode readiness context is unavailable");
+        };
+        await nativeContext(sid);
+        await ready();
+        if (!sendAllowed(sid, allowSend)) return;
+        const grant = await disposition("started", "mode_change_started", "Original native mode control admitted.");
+        if (grant?.begin !== true) return;
+        let applied = false;
+        try {
+          await nativeContext(sid);
+          await ready();
+          if (!sendAllowed(sid, allowSend)) throw new Error("receiver changed before native mode control");
+          applied = modeApplied(await nativeCall(() => session.rpc.mode.set({ mode: plan.mode })));
+        } catch (error) {
+          note(`original mode control outcome unknown: ${errorText(error)}; no retry`);
+        }
+        await disposition(
+          applied ? "completed" : "unknown",
+          applied ? "mode_change_completed" : "mode_change_unknown",
+          applied ? "Original native mode change confirmed."
+            : "Native mode control may have started; no automatic replay is authorized.",
+        );
         return;
       }
       if (header.type === "control:replay-history") {
@@ -790,7 +835,9 @@ export function createRetainedInbox({
     }
     const startup = /^startup:prompt:[1-9]\d*$/.test(msg.kind || "");
     if (!positive(msg.id) || !nonblank(msg.handoff_id) || !STAGES.has(msg.handoff_stage)
-        || typeof msg.body !== "string" || !["steer", "queue"].includes(msg.delivery)
+        || typeof msg.body !== "string"
+        || !(nativeConsumptionInbox ? ["steer", "queue", "interrupt"] : ["steer", "queue"])
+          .includes(msg.delivery)
         || String(msg.kind || "").startsWith("control:")
         || (String(msg.kind || "").startsWith("startup:") && !startup)) {
       throw new Error("unsupported retained message; no SDK or control effect");
@@ -799,6 +846,10 @@ export function createRetainedInbox({
     // a failed send keeps it unresolved and blocks the resume prompt.
     if (episode && episode.id === idleAt && episode.awaiting.size > 0) episode.awaiting.add(msg.id);
     const reattempting = msg.handoff_stage !== "offered";
+    if (reattempting && msg.delivery === "interrupt") {
+      note(`original interrupt ${msg.id}/${msg.handoff_id} may have aborted; no re-attempt`);
+      return;
+    }
     if (reattempting && !(managed && canReattempt && idleAt !== null
         && verified.get(msg.id) === idleAt && positive(msg.attempt) && msg.consumer)) {
       note(`original handoff ${msg.id}/${msg.handoff_id} remains ${msg.handoff_stage}; awaiting idle verification`);
@@ -873,6 +924,13 @@ export function createRetainedInbox({
       await nativeContext(sid);
       await readiness();
       if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed after final admission");
+      const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
+      if (plan.abortFirst) {
+        await nativeCall(() => session.abort());
+        await nativeContext(sid);
+        await readiness();
+        if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed after native abort");
+      }
       await nativeCall(async () => {
         if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed at SDK invocation");
         if (alreadyInput()) {
