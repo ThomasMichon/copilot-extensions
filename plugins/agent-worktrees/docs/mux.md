@@ -145,21 +145,23 @@ PSMux can run registration cleanup on startup even for nominal reads such as
 or subsequent orphan reaping. A successful but incomplete listing is another
 failure class ([psmux/psmux#809](https://github.com/psmux/psmux/issues/809)).
 
-The resident Worktrees mux enumeration and batched status reads therefore do
-not execute PSMux. They use the existing Driver owner's
-[finite native observation](../../../libs/copilot-driver-core/README.md#finite-psmux-observation),
-as do creation/check-or-join and Manager discovery/client refresh. Fresh
-authenticated session/pane replies establish presence and actual client rows
-supply counts. Missing rendezvous needs complete native server coverage to establish absence;
-partial, stale, refused or timed-out queries remain unknown, not an empty
-catalog. Independent worktree, Git and process facts can still publish.
-Authoritative batched status raises when any native row is unobserved, so
-reclaim cannot interpret an unavailable row's default `exists=False` as death.
-The separate display API preserves available rows alongside unknown ones.
+Worktrees activity and batched status cross-reference exact session names from
+the selected client's bounded `list-sessions` response. On Windows, the reader
+first uses the Driver's passive file-version check to select a PSMux 3.4.0 or
+newer client. It never executes a legacy or unknown client to qualify it.
+Blank rows (including a trailing empty row), malformed counts, duplicate
+sessions, diagnostics and failed queries remain unknown. Only the qualified
+client's explicit no-server response confirms an empty Windows catalog.
+This name-based observation does not require coverage of unrelated server
+processes and does not prove that a checkout is safe to remove.
+
+Creation/check-or-join, resident mux enumeration and Manager discovery/client
+refresh retain the Driver owner's
+[finite native observation](../../../libs/copilot-driver-core/README.md#finite-psmux-observation).
+Their missing-rendezvous and process-custody guards remain independent.
 Last-known mux presence retains its original timestamp when fresh observation
-fails; it is not refreshed into current proof. TMux retains bounded CLI
-observations, but malformed rows, duplicate sessions, diagnostics and failed
-fallback probes cannot establish absence.
+fails; it is not refreshed into current proof. Independent worktree, Git and
+process facts can still publish.
 
 Open can reattach to an observed live session without creating or reseeding
 it, and cold Open uses the same Driver check/create lease. Unknown presence

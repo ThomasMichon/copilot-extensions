@@ -14,6 +14,12 @@ consume (``__main__._build_active_paths`` unioning a FRESH cached hint additivel
 """
 
 from __future__ import annotations
+from agent_worktrees.sessions import SessionContext
+
+
+from collections.abc import Iterable
+from pathlib import Path
+
 
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -23,7 +29,7 @@ from agent_worktrees import tracking
 from agent_worktrees.picker_support import data_local
 
 
-def _rec(wt_id="aaaa", *, path="/tmp/wt", bound_live=None, bound_live_at=None):
+def _rec(wt_id: str="aaaa", *, path: str="/tmp/wt", bound_live: bool | None=None, bound_live_at: str | None=None) -> tracking.WorktreeRecord:
     return tracking.WorktreeRecord(
         worktree_id=wt_id,
         branch=f"worktree/{wt_id}",
@@ -47,7 +53,7 @@ def _rec(wt_id="aaaa", *, path="/tmp/wt", bound_live=None, bound_live_at=None):
 
 # ── Round-trip: bound_live / bound_live_at survive save+load, absent by default ──
 
-def test_bound_live_absent_by_default_roundtrips_clean(tmp_path):
+def test_bound_live_absent_by_default_roundtrips_clean(tmp_path: Path) -> None:
     rec = _rec()
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(rec, p)
@@ -57,7 +63,7 @@ def test_bound_live_absent_by_default_roundtrips_clean(tmp_path):
     assert back.bound_live is None and back.bound_live_at is None
 
 
-def test_bound_live_stamp_roundtrips(tmp_path):
+def test_bound_live_stamp_roundtrips(tmp_path: Path) -> None:
     rec = _rec(bound_live=True, bound_live_at="2026-08-03T20:00:00")
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(rec, p)
@@ -68,7 +74,7 @@ def test_bound_live_stamp_roundtrips(tmp_path):
     assert back.bound_live is True and back.bound_live_at == "2026-08-03T20:00:00"
 
 
-def test_bound_live_false_roundtrips(tmp_path):
+def test_bound_live_false_roundtrips(tmp_path: Path) -> None:
     rec = _rec(bound_live=False, bound_live_at="2026-08-03T20:00:00")
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(rec, p)
@@ -76,7 +82,7 @@ def test_bound_live_false_roundtrips(tmp_path):
     assert tracking.load_record(p).bound_live is False
 
 
-def test_bound_live_independent_of_mux_live(tmp_path):
+def test_bound_live_independent_of_mux_live(tmp_path: Path) -> None:
     """The two cached signals are orthogonal: a bare (un-muxed) bound session is
     bound_live=True with NO mux_live -- folding it into mux_live would corrupt
     Open/Resume/Stop gating."""
@@ -90,7 +96,7 @@ def test_bound_live_independent_of_mux_live(tmp_path):
 
 # ── stamp_bound_live: writes, no-ops on absent record, refresh/throttle/change ──
 
-def test_stamp_bound_live_writes(tmp_path):
+def test_stamp_bound_live_writes(tmp_path: Path) -> None:
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
@@ -99,13 +105,13 @@ def test_stamp_bound_live_writes(tmp_path):
     assert back.bound_live is True and back.bound_live_at
 
 
-def test_stamp_bound_live_noop_when_record_absent(tmp_path):
+def test_stamp_bound_live_noop_when_record_absent(tmp_path: Path) -> None:
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
         tracking.stamp_bound_live("ghost", True)  # must not raise
     assert not (tmp_path / "ghost.yaml").exists()
 
 
-def test_stamp_bound_live_does_not_touch_mux_live(tmp_path):
+def test_stamp_bound_live_does_not_touch_mux_live(tmp_path: Path) -> None:
     """A mux_live stamp already present round-trips untouched when bound_live is
     stamped -- the shared RMW helper never crosses the two fields."""
     p = tmp_path / "aaaa.yaml"
@@ -120,7 +126,7 @@ def test_stamp_bound_live_does_not_touch_mux_live(tmp_path):
     assert back.mux_live is True and back.mux_live_at == "2026-08-03T19:00:00"
 
 
-def test_stamp_bound_refresh_renews_aged_timestamp(tmp_path):
+def test_stamp_bound_refresh_renews_aged_timestamp(tmp_path: Path) -> None:
     old = (datetime.now() - timedelta(seconds=300)).isoformat()
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(bound_live=True, bound_live_at=old), p)
@@ -129,7 +135,7 @@ def test_stamp_bound_refresh_renews_aged_timestamp(tmp_path):
     assert tracking.load_record(p).bound_live_at != old
 
 
-def test_stamp_bound_refresh_throttled_within_window(tmp_path):
+def test_stamp_bound_refresh_throttled_within_window(tmp_path: Path) -> None:
     recent = (datetime.now() - timedelta(seconds=5)).isoformat()
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(bound_live=True, bound_live_at=recent), p)
@@ -138,7 +144,7 @@ def test_stamp_bound_refresh_throttled_within_window(tmp_path):
     assert tracking.load_record(p).bound_live_at == recent
 
 
-def test_stamp_bound_value_change_always_writes(tmp_path):
+def test_stamp_bound_value_change_always_writes(tmp_path: Path) -> None:
     recent = (datetime.now() - timedelta(seconds=5)).isoformat()
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(bound_live=True, bound_live_at=recent), p)
@@ -150,7 +156,7 @@ def test_stamp_bound_value_change_always_writes(tmp_path):
 
 # ── reconcile_bound_live: minimal-churn tri-state off-hot-path reconciler ──
 
-def _reconcile_with(records, bound_ids, tmp_path):
+def _reconcile_with(records: list[tracking.WorktreeRecord], bound_ids: Iterable[str], tmp_path: Path) -> int:
     """Run reconcile_bound_live with a stubbed scan + real YAML store."""
     for rec in records:
         tracking.save_record(rec, tmp_path / f"{rec.worktree_id}.yaml")
@@ -165,7 +171,7 @@ def _reconcile_with(records, bound_ids, tmp_path):
     return changed
 
 
-def test_reconcile_stamps_live_worktree_true(tmp_path):
+def test_reconcile_stamps_live_worktree_true(tmp_path: Path) -> None:
     (tmp_path / "wt-a").mkdir()
     rec = _rec("aaaa", path=str(tmp_path / "wt-a"))
     changed = _reconcile_with([rec], {"aaaa"}, tmp_path)
@@ -173,7 +179,7 @@ def test_reconcile_stamps_live_worktree_true(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").bound_live is True
 
 
-def test_reconcile_leaves_never_bound_untouched(tmp_path):
+def test_reconcile_leaves_never_bound_untouched(tmp_path: Path) -> None:
     """A never-bound idle worktree (bound_live None) is NOT stamped False -- no
     fleet-wide YAML churn; Unknown is never persisted."""
     (tmp_path / "wt-a").mkdir()
@@ -185,7 +191,7 @@ def test_reconcile_leaves_never_bound_untouched(tmp_path):
     assert "bound_live" not in (tmp_path / "aaaa.yaml").read_text(encoding="utf-8")
 
 
-def test_reconcile_clears_true_to_false_on_transition(tmp_path):
+def test_reconcile_clears_true_to_false_on_transition(tmp_path: Path) -> None:
     """A worktree that WAS bound_live=True but is no longer bound is stamped
     False (the session-ended transition), and counts as changed."""
     (tmp_path / "wt-a").mkdir()
@@ -196,7 +202,7 @@ def test_reconcile_clears_true_to_false_on_transition(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").bound_live is False
 
 
-def test_reconcile_no_change_when_already_true(tmp_path):
+def test_reconcile_no_change_when_already_true(tmp_path: Path) -> None:
     """A steadily-live worktree already stamped True is not a transition (changed
     stays 0, so no needless re-render), though its freshness is renewed."""
     (tmp_path / "wt-a").mkdir()
@@ -209,7 +215,7 @@ def test_reconcile_no_change_when_already_true(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").bound_live_at != old
 
 
-def test_reconcile_stale_true_live_counts_as_changed(tmp_path):
+def test_reconcile_stale_true_live_counts_as_changed(tmp_path: Path) -> None:
     """A still-live worktree whose True hint had aged PAST the populate TTL is
     consumer-invisible (populate ignores it), so renewing it back to fresh must
     count as changed -- otherwise the picker leaves it non-ACTIVE until the poll
@@ -225,7 +231,7 @@ def test_reconcile_stale_true_live_counts_as_changed(tmp_path):
     assert back.bound_live is True and back.bound_live_at != stale
 
 
-def test_reconcile_unresolved_binding_suppresses_negative(tmp_path):
+def test_reconcile_unresolved_binding_suppresses_negative(tmp_path: Path) -> None:
     """A live bound Copilot the scan could not attribute to a worktree
     (worktree_id None) is a transient attribution miss, not proof of death: it
     must NOT flap a previously-True worktree to False this pass (the positive
@@ -246,7 +252,7 @@ def test_reconcile_unresolved_binding_suppresses_negative(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").bound_live is True
 
 
-def test_reconcile_scan_failure_persists_nothing(tmp_path):
+def test_reconcile_scan_failure_persists_nothing(tmp_path: Path) -> None:
     """When the authoritative scan raises (Unknown), nothing is stamped."""
     (tmp_path / "wt-a").mkdir()
     rec = _rec("aaaa", path=str(tmp_path / "wt-a"))
@@ -264,43 +270,43 @@ def test_reconcile_scan_failure_persists_nothing(tmp_path):
 
 # ── Populate consume: fresh bound hint unions ADDITIVELY into active paths ──
 
-def _fresh():
+def _fresh() -> str:
     return datetime.now().isoformat()
 
 
-def _stale():
+def _stale() -> str:
     secs = cli._BOUND_LIVE_HINT_TTL_SECS + 60
     return (datetime.now() - timedelta(seconds=secs)).isoformat()
 
 
-def _empty_ctx():
-    import types
-    return types.SimpleNamespace(active_sessions={})
+def _empty_ctx() -> SessionContext:
+    return SessionContext()
 
 
-def test_fresh_bound_hint_marks_active_when_no_mux(tmp_path):
-    """Bare-resume core case: no mux batch, no mux hint, no lock -- but a FRESH
-    bound_live=True hint surfaces the worktree ACTIVE."""
+def test_fresh_bound_hint_protects_checkout_without_qualifying_activity(tmp_path: Path) -> None:
+    """A legacy positive hint protects cleanup, not matching-CWD activity."""
     rec = _rec("aaaa", path="/tmp/a", bound_live=True, bound_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False):
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
 
 
-def test_fresh_bound_hint_is_additive_even_with_mux_batch(tmp_path):
+def test_fresh_bound_hint_is_additive_for_checkout_protection(tmp_path: Path) -> None:
     """The bound hint is unioned REGARDLESS of the mux batch (not a
     batch-unavailable fallback) -- it catches what the mux/lock scans structurally
     miss, so it must apply on the batch-present path too."""
     rec = _rec("aaaa", path="/tmp/a", bound_live=True, bound_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value={}), \
          patch("agent_worktrees.sessions.has_mux_session") as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
     m_has.assert_not_called()  # batch present -> no per-worktree mux probe
 
 
-def test_stale_bound_hint_does_not_mark_active(tmp_path):
+def test_stale_bound_hint_does_not_mark_active(tmp_path: Path) -> None:
     rec = _rec("aaaa", path="/tmp/a", bound_live=True, bound_live_at=_stale())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value={}), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False):
@@ -308,7 +314,7 @@ def test_stale_bound_hint_does_not_mark_active(tmp_path):
     assert active == set()
 
 
-def test_false_bound_hint_does_not_mark_active(tmp_path):
+def test_false_bound_hint_does_not_mark_active(tmp_path: Path) -> None:
     rec = _rec("aaaa", path="/tmp/a", bound_live=False, bound_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value={}), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False):
@@ -316,7 +322,7 @@ def test_false_bound_hint_does_not_mark_active(tmp_path):
     assert active == set()
 
 
-def test_no_bound_hint_is_noop(tmp_path):
+def test_no_bound_hint_is_noop(tmp_path: Path) -> None:
     rec = _rec("aaaa", path="/tmp/a")  # never reconciled
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value={}), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False):
@@ -326,13 +332,13 @@ def test_no_bound_hint_is_noop(tmp_path):
 
 # ── _worktree_to_dict surfaces the fresh hint for the fast (Phase-1) pass ──
 
-def test_worktree_to_dict_emits_session_bound_live_when_fresh(tmp_path):
+def test_worktree_to_dict_emits_session_bound_live_when_fresh(tmp_path: Path) -> None:
     rec = _rec("aaaa", path=str(tmp_path), bound_live=True, bound_live_at=_fresh())
     d = cli._worktree_to_dict(rec)
     assert d.get("session_bound_live") is True
 
 
-def test_worktree_to_dict_omits_session_bound_live_when_stale(tmp_path):
+def test_worktree_to_dict_omits_session_bound_live_when_stale(tmp_path: Path) -> None:
     rec = _rec("aaaa", path=str(tmp_path), bound_live=True, bound_live_at=_stale())
     d = cli._worktree_to_dict(rec)
     assert "session_bound_live" not in d
@@ -340,14 +346,14 @@ def test_worktree_to_dict_omits_session_bound_live_when_stale(tmp_path):
 
 # ── #3307 Phase 3: last_resumed_at feeds the Picker's Recent-section sort ──
 
-def test_worktree_to_dict_emits_last_resumed_at_when_set(tmp_path):
+def test_worktree_to_dict_emits_last_resumed_at_when_set(tmp_path: Path) -> None:
     rec = _rec("aaaa", path=str(tmp_path))
     rec.last_resumed_at = "2026-06-27T16:30:00"
     d = cli._worktree_to_dict(rec)
     assert d.get("last_resumed_at") == "2026-06-27T16:30:00"
 
 
-def test_worktree_to_dict_omits_last_resumed_at_when_never_resumed(tmp_path):
+def test_worktree_to_dict_omits_last_resumed_at_when_never_resumed(tmp_path: Path) -> None:
     rec = _rec("aaaa", path=str(tmp_path))
     rec.last_resumed_at = ""
     d = cli._worktree_to_dict(rec)

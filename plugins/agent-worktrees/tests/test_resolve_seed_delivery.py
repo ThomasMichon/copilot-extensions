@@ -747,6 +747,7 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
 
 @pytest.mark.parametrize("verdict", [
     LiveVerdict(active=True, mux_live=True, live_session_ids=["s1"]),
+    LiveVerdict(active=False, mux_live=True),
     LiveVerdict(active=True, live_session_ids=["bare-s1"], bare=True),
     LiveVerdict(probes_ok=False, mux_probe_ok=False),
     LiveVerdict(probes_ok=False, mux_probe_ok=True),
@@ -919,6 +920,7 @@ def test_planning_never_claims_staged_seed_or_guesses_configured_argv(
 @pytest.mark.parametrize("verdict", [
     LiveVerdict(),
     LiveVerdict(active=True, mux_live=True, live_session_ids=["s1"]),
+    LiveVerdict(active=False, mux_live=True),
     LiveVerdict(active=True, live_session_ids=["bare-s1"], bare=True),
     LiveVerdict(probes_ok=False),
     None,
@@ -970,7 +972,7 @@ def test_non_json_resume_seed_is_cold_start_only(
 
     rc = rlc._resolve_resume_context(context)
 
-    cold = verdict is not None and verdict.probes_ok and not verdict.active
+    cold = verdict is not None and verdict.probes_ok and not verdict.active and not verdict.mux_live
     assert rc == (0 if cold else 3)
     if cold:
         assert "--resume=history-s1" in plans[-1]["cmd"]
@@ -989,6 +991,8 @@ def test_non_json_resume_seed_is_cold_start_only(
 @pytest.mark.parametrize("verdict", [
     LiveVerdict(active=True, mux_live=True, probes_ok=False),
     LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
+    LiveVerdict(active=False, mux_live=True),
+    LiveVerdict(active=False, mux_live=True, probes_ok=False),
 ])
 def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], verdict: LiveVerdict,
@@ -1239,6 +1243,8 @@ def test_preservation_selector_rejects_restore_before_process_recovery(
 @pytest.mark.parametrize("verdict", [
     LiveVerdict(active=True, mux_live=True),
     LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
+    pytest.param(LiveVerdict(active=False, mux_live=True), id="mux_only"),
+    pytest.param(LiveVerdict(active=False, mux_live=True, probes_ok=False), id="mux_only_partial"),
 ])
 def test_preserved_open_reattaches_when_target_becomes_live_between_resolves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, verdict: LiveVerdict,

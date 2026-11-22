@@ -244,7 +244,7 @@ def _revalidate_cleanup_safety(
         from .execution_spaces import require_cleanup_identity
         require_cleanup_identity(latest, repo.anchor)
         session_ctx = sessions.scan_sessions_fast([latest])
-        active_paths = _build_active_paths([latest], session_ctx)
+        active_paths = _build_active_paths([latest], session_ctx, copilot_only=False)
         if latest.worktree_path and Path(latest.worktree_path).exists():
             fresh_info = git_ops.classify_worktree(
                 latest.worktree_path,
@@ -425,7 +425,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
     # Scan for live Copilot sessions and mux sessions
     session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = _build_active_paths(records, session_ctx)
+    active_paths = _build_active_paths(records, session_ctx, copilot_only=False)
 
     # Optional: heal stale tracked PR state from the provider (network) so a
     # PR merged externally (local record still "open") is recognized as landed.

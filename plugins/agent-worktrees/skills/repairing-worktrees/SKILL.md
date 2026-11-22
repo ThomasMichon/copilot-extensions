@@ -496,18 +496,15 @@ grep hits before spending the sweep.
 
 ## Liveness trumps git state — never reap a live worktree
 
-A worktree's **liveness** — a live `wt-<id>` mux session **or** a live Copilot
-session lock (`inuse.<pid>.lock`) — is authoritative and **trumps git/record
-state, always.** A worktree that is `finalized` / merged / clean is **still
-active** if it is sitting in a live mux or holds a live lock (e.g. resumed by a
-psmux startup-restore). *"Active" means "intentionally in a mux."* Never reap,
-clean, or GC such a worktree out from under its live session — a merged/clean git
-state is **not** license to reap.
+Worktree ACTIVE means a live Copilot `inuse.<pid>.lock` with a matching session
+CWD. Mux occupancy is independent. A mux-only worktree is not ACTIVE and may be
+logically finalized. Finalization does not authorize removal of an occupied
+checkout: a live mux, shell, Copilot or retained-data obligation still protects
+physical reclamation, regardless of merged or finalized status.
 
-- `gc` / `cleanup` already consult liveness: their `active` prune-bucket spares a
-  worktree whose path is in the live-session set (`_build_active_paths` = the live
-  mux batch + the cached `mux_live` / `bound_live` hints + the registered-session
-  lock scan). Prefer these commands to hand-reaping.
+- `gc` / `cleanup` consult their broader checkout-in-use observations separately
+  from the Copilot-only ACTIVE classification. Prefer these commands to
+  hand-reaping.
 - **But the cached signal can lag.** Historically `mux_live` was only stamped at
   launch / Stop / teardown and **never refreshed**, so a mux created *after* that
   stamp (a startup-restore landing minutes after resume) persisted a stale

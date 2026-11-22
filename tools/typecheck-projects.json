@@ -812,9 +812,10 @@
         "libs/installer-engine",
         "libs/versioned-runtime",
         "worktree-manager/tests",
+        "worktree-manager/tests/production_picker",
         "worktree-manager/tests/native"
       ],
-      "requirements": "tools/typecheck-build-requirements.txt"
+      "requirements": "tools/typecheck-manager-requirements.txt"
     }
   ]
 }

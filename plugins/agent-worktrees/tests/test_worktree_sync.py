@@ -1,8 +1,17 @@
 """Paired Sync advances both checkouts before changing their plugin setup."""
 
 from __future__ import annotations
+from typing import Any, cast, Protocol, TYPE_CHECKING
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 
 import argparse
+import os
+import threading
+from types import TracebackType
+
+if TYPE_CHECKING:
+    from typing_extensions import Buffer
 import json
 import shutil
 from pathlib import Path
@@ -11,8 +20,29 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import config as cfg, git_ops, knowledge_plugins, local_cache_refresh
-from agent_worktrees import state_root, tracking, worktree_ops_cli, worktree_sync
-from test_squash_abort import _git, _make_repo
+from agent_worktrees import sessions, state_root, tracking, worktree_ops_cli, worktree_sync
+from test_squash_abort import _git as _legacy_git, _make_repo as _legacy_make_repo
+
+_git = cast(Callable[..., str], _legacy_git)
+_make_repo = cast(Callable[[Path], Path], _legacy_make_repo)
+
+
+
+class _Progress(Protocol):
+    _thread: threading.Thread | None
+
+    def __enter__(self) -> _Progress: ...
+    def __exit__(self, kind: type[BaseException] | None, error: BaseException | None,
+                 traceback: TracebackType | None) -> None: ...
+    def stage(self, message: str) -> None: ...
+    def finish(self, result: dict[str, Any]) -> int: ...
+    def _write(self, frame: dict[str, Any]) -> None: ...
+
+
+def _progress() -> _Progress:
+    from agent_worktrees.sync_progress import SyncProgress
+
+    return cast(Callable[[], _Progress], SyncProgress)()
 
 
 def _head(path: Path) -> str:
@@ -24,8 +54,12 @@ def _head(path: Path) -> str:
     return head
 
 
-def _pair(tmp_path, monkeypatch):
-    configs, records, paths, targets = {}, {}, {}, {}
+def _pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, tracking.WorktreeRecord], dict[str, Path], dict[str, str], Path, list[str]]:
+    monkeypatch.setattr("socket.gethostname", lambda: "test")
+    configs: dict[str, cfg.Config] = {}
+    records: dict[str, tracking.WorktreeRecord] = {}
+    paths: dict[str, Path] = {}
+    targets: dict[str, str] = {}
     template = _make_repo(tmp_path)
     for role in ("harness", "knowledge"):
         parent = tmp_path / role
@@ -43,17 +77,17 @@ def _pair(tmp_path, monkeypatch):
         paths[role] = path
         records[role] = tracking.WorktreeRecord(
             worktree_id=role, branch=f"worktree/{role}", worktree_path=str(path),
-            repo=role, machine="test", platform=cfg.detect_platform(),
-            started_at="2026-01-01T00:00:00", last_resumed_at=None, resume_count=0,
+            repo=role, machine="test", platform=cast(Callable[[], str], getattr(cfg, "detect_platform"))(),
+            started_at="2026-01-01T00:00:00", last_resumed_at="", resume_count=0,
             title=None, status="active", completed_at=None, pair_id="pair",
             pair_role=role, pair_kind="worktree",
-            pair_ref=tracking.format_claim_ref(
+            pair_ref=cast(Callable[[str, str, str], str], getattr(tracking, "format_claim_ref"))(
                 "test", "knowledge" if role == "harness" else "harness",
                 "knowledge" if role == "harness" else "harness",
             ),
         )
         configs[role] = cfg.Config(
-            srcroot=str(tmp_path), machine="test", platform=cfg.detect_platform(),
+            srcroot=str(tmp_path), machine="test", platform=cast(Callable[[], str], getattr(cfg, "detect_platform"))(),
             repo_name=role, knowledge_repo="knowledge",
             repos={role: cfg.RepoConfig(
                 anchor=str(path), worktree_root=str(parent), remote="origin", default_branch="base",
@@ -71,19 +105,19 @@ def _pair(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "load_config", lambda: configs["harness"])
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "harness")
     monkeypatch.setattr(cfg, "project_dir",
-                        lambda name=None: tmp_path / "tracking" / (name or cfg.active_project()))
+                        lambda name=None: tmp_path / "tracking" / cast(str, name or cfg.active_project()))
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir(name) / "worktrees")
     monkeypatch.setattr(state_root, "resolve_pair", lambda *args, **kwargs: pair)
     monkeypatch.setattr("agent_worktrees.execution_spaces.require_record_mutation", lambda *args: None)
-    monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args: set())
+    monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args, **kwargs: set())
     monkeypatch.setattr(worktree_ops_cli, "_apply_tracking_override", lambda record, info: info)
-    monkeypatch.setattr(worktree_sync.sessions, "scan_sessions_fast", lambda *args: None)
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *args: None)
     overlay = paths["harness"] / "settings.local.json"
     (paths["harness"] / ".git" / "info" / "exclude").write_text("settings.local.json\n")
     overlay.write_text("existing setup")
     calls = []
 
-    def compose(**kwargs):
+    def compose(**kwargs: Any) -> dict[str, Any]:
         assert cfg.active_project() == "harness"
         assert all(_head(path) == targets[role] for role, path in paths.items())
         calls.append("compose")
@@ -91,7 +125,7 @@ def _pair(tmp_path, monkeypatch):
         return {"action": "composed", "paired": True}
 
     monkeypatch.setattr(knowledge_plugins, "compose_from_pair", compose)
-    def prepare(*args, **kwargs):
+    def prepare(*args: Any, **kwargs: Any) -> SimpleNamespace:
         assert cfg.active_project() == "harness"
         calls.append("instructions")
         return SimpleNamespace(status="ready")
@@ -100,13 +134,13 @@ def _pair(tmp_path, monkeypatch):
     return records, paths, targets, overlay, calls
 
 
-def test_sync_advances_both_repos_before_preparing_plugins(tmp_path, monkeypatch, capfd):
+def test_sync_advances_both_repos_before_preparing_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
     from agent_worktrees import worktree_identity
     import json
 
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         worktree_id="harness", json=True, paired=True,
     )) == 0
     result = json.loads(capfd.readouterr().out)
@@ -122,7 +156,7 @@ def test_sync_advances_both_repos_before_preparing_plugins(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("deleted", [False, True])
-def test_sync_fetches_the_selected_target_despite_a_narrow_refspec(tmp_path, monkeypatch, deleted):
+def test_sync_fetches_the_selected_target_despite_a_narrow_refspec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deleted: bool) -> None:
     records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
     heads = {role: _head(path) for role, path in paths.items()}
     for role, path in paths.items():
@@ -142,13 +176,13 @@ def test_sync_fetches_the_selected_target_despite_a_narrow_refspec(tmp_path, mon
         assert calls == ["compose", "instructions"]
 
 
-def test_legacy_sync_still_changes_only_the_selected_repo(tmp_path, monkeypatch):
+def test_legacy_sync_still_changes_only_the_selected_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import worktree_identity
 
     _records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
     original_knowledge = _head(paths["knowledge"])
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         worktree_id="harness", json=True, paired=False,
     )) == 0
     assert _head(paths["harness"]) == targets["harness"]
@@ -156,8 +190,29 @@ def test_legacy_sync_still_changes_only_the_selected_repo(tmp_path, monkeypatch)
     assert overlay.read_text() == "existing setup" and calls == []
 
 
+@pytest.mark.parametrize("paired", [False, True])
+def test_unknown_session_ownership_blocks_sync_without_advancing_either_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], paired: bool,
+) -> None:
+    from agent_worktrees import worktree_identity
+
+    _records, paths, _targets, overlay, calls = _pair(tmp_path, monkeypatch)
+    heads = {role: _head(path) for role, path in paths.items()}
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *_a: sessions.SessionContext(
+        unavailable_paths={sessions._normalize_path(str(paths["harness"]))},
+    ))
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
+        worktree_id="harness", json=True, paired=paired,
+    )) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert result["ok"] is False and result["reason"] == "session-observation-unavailable"
+    assert all(_head(path) == heads[role] for role, path in paths.items())
+    assert overlay.read_text() == "existing setup" and calls == []
+
+
 @pytest.mark.parametrize("missing", ["pair_id", "pair_ref"])
-def test_incomplete_pair_cannot_fall_back_to_single_repository_sync(tmp_path, monkeypatch, capfd, missing):
+def test_incomplete_pair_cannot_fall_back_to_single_repository_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], missing: str) -> None:
     from agent_worktrees import worktree_identity
     import json
     import yaml
@@ -171,7 +226,7 @@ def test_incomplete_pair_cannot_fall_back_to_single_repository_sync(tmp_path, mo
     document[missing] = None
     record_path.write_text(yaml.safe_dump(document))
     heads = {role: _head(path) for role, path in paths.items()}
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         worktree_id="harness", json=True, paired=True,
     )) != 0
     result = json.loads(capfd.readouterr().out)
@@ -181,7 +236,7 @@ def test_incomplete_pair_cannot_fall_back_to_single_repository_sync(tmp_path, mo
 
 
 @pytest.mark.parametrize("blocker", ["dirty", "ahead", "fetch", "active", "missing-remote"])
-def test_blocked_member_preserves_both_heads_and_plugin_setup(tmp_path, monkeypatch, blocker):
+def test_blocked_member_preserves_both_heads_and_plugin_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocker: str) -> None:
     records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
     if blocker == "dirty":
         (paths["knowledge"] / "f.txt").write_text("local edits\n")
@@ -191,11 +246,11 @@ def test_blocked_member_preserves_both_heads_and_plugin_setup(tmp_path, monkeypa
         _git(paths["knowledge"], "commit", "-qm", "preserved local work")
     elif blocker == "fetch":
         monkeypatch.setattr(git_ops, "has_remote", lambda *args, **kwargs: True)
-        def fetch(*args, **kwargs):
+        def fetch(*args: Any, **kwargs: Any) -> None:
             raise git_ops.GitError(["git", "fetch"], 1, "unreachable")
         monkeypatch.setattr(git_ops, "fetch", fetch)
     elif blocker == "active":
-        monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args: {
+        monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args, **kwargs: {
             str(paths["knowledge"]), str(paths["knowledge"]).replace("\\", "/"),
         })
     else:
@@ -209,7 +264,7 @@ def test_blocked_member_preserves_both_heads_and_plugin_setup(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("state", [git_ops.WorktreeState.UNKNOWN, git_ops.WorktreeState.ORPHAN])
-def test_tracking_completion_cannot_mask_raw_git_failure(tmp_path, monkeypatch, state):
+def test_tracking_completion_cannot_mask_raw_git_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: git_ops.WorktreeState) -> None:
     from agent_worktrees import worktree_git_facts
 
     records, paths, _targets, overlay, calls = _pair(tmp_path, monkeypatch)
@@ -220,10 +275,10 @@ def test_tracking_completion_cannot_mask_raw_git_failure(tmp_path, monkeypatch, 
                         worktree_git_facts.apply_tracking_override)
     original = git_ops.classify_worktree
 
-    def classify(path, *args, **kwargs):
+    def classify(path: str | Path, *args: Any, **kwargs: Any) -> git_ops.WorktreeStateInfo:
         if str(path) == str(paths["knowledge"]):
             return git_ops.WorktreeStateInfo(state, current_branch=records["knowledge"].branch)
-        return original(path, *args, **kwargs)
+        return original(str(path), *args, **kwargs)
 
     monkeypatch.setattr(git_ops, "classify_worktree", classify)
     heads = {role: _head(path) for role, path in paths.items()}
@@ -233,13 +288,13 @@ def test_tracking_completion_cannot_mask_raw_git_failure(tmp_path, monkeypatch, 
     assert all(_head(path) == heads[role] for role, path in paths.items())
 
 
-def test_knowledge_side_sync_resolves_real_pair_in_harness_context(tmp_path, monkeypatch):
+def test_knowledge_side_sync_resolves_real_pair_in_harness_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resolve_pair = state_root.resolve_pair
     records, paths, _targets, _overlay, calls = _pair(tmp_path, monkeypatch)
     monkeypatch.setattr(state_root, "resolve_pair", resolve_pair)
     compose = knowledge_plugins.compose_from_pair
 
-    def compose_checked(*, cwd, config):
+    def compose_checked(*, cwd: str, config: cfg.Config) -> dict[str, Any]:
         pair = knowledge_plugins.resolve_pair(cwd=cwd, config=config)
         assert pair.harness_path == paths["harness"].resolve()
         assert pair.knowledge_path == paths["knowledge"].resolve()
@@ -248,13 +303,13 @@ def test_knowledge_side_sync_resolves_real_pair_in_harness_context(tmp_path, mon
     monkeypatch.setattr(knowledge_plugins, "compose_from_pair", compose_checked)
     cfg.set_active_project("knowledge")
     result = worktree_sync.sync_pair(records["knowledge"])
-    assert result["ok"], result
+    assert result["ok"], result.get("detail", result)
     assert cfg.active_project() == "knowledge"
     assert calls == ["compose", "instructions"]
 
 
 @pytest.mark.parametrize("policy", ["disabled", "different-knowledge"])
-def test_knowledge_side_sync_reloads_fetched_policy_before_writing(tmp_path, monkeypatch, policy):
+def test_knowledge_side_sync_reloads_fetched_policy_before_writing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str) -> None:
     from dataclasses import replace
     import yaml
 
@@ -276,7 +331,7 @@ def test_knowledge_side_sync_reloads_fetched_policy_before_writing(tmp_path, mon
     _git(path, "checkout", "-q", records["harness"].branch)
     assert _head(path) == old
 
-    def load(name):
+    def load(name: str) -> cfg.Config:
         config = load_project(name)
         if name != "harness" or not policy_path.exists():
             return config
@@ -289,17 +344,17 @@ def test_knowledge_side_sync_reloads_fetched_policy_before_writing(tmp_path, mon
         )
 
     monkeypatch.setattr(cfg, "load_project_config",
-                        lambda name: cfg.memoize_in_scope(load, name))
+                        lambda name: cast(Callable[..., cfg.Config], getattr(cfg, "memoize_in_scope"))(load, name))
     monkeypatch.setattr(knowledge_plugins, "resolve_pair", resolve_pair)
 
-    def compose(*, cwd, config):
+    def compose(*, cwd: str, config: cfg.Config) -> dict[str, Any]:
         assert not config.default_repo.compose_knowledge_plugins
         calls.append("disabled")
         return {"action": "disabled", "paired": True}
 
     monkeypatch.setattr(knowledge_plugins, "compose_from_pair", compose)
     cfg.set_active_project("knowledge")
-    with cfg.cached_load_config_scope():
+    with cast(Callable[[], AbstractContextManager[None]], getattr(cfg, "cached_load_config_scope"))():
         assert cfg.load_project_config("harness") is original_config
         result = worktree_sync.sync_pair(records["knowledge"])
         assert cfg.load_project_config("harness") is not original_config
@@ -314,10 +369,10 @@ def test_knowledge_side_sync_reloads_fetched_policy_before_writing(tmp_path, mon
         assert calls == []
 
 
-def test_late_fast_forward_failure_never_recomposes_plugins(tmp_path, monkeypatch):
+def test_late_fast_forward_failure_never_recomposes_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     records, paths, _targets, overlay, calls = _pair(tmp_path, monkeypatch)
     original = git_ops.fast_forward_worktree
-    def advance(path, **kwargs):
+    def advance(path: str | Path, **kwargs: Any) -> git_ops.FastForwardResult:
         if str(path) == str(paths["knowledge"]):
             return git_ops.FastForwardResult(False, "ff-failed")
         return original(path, **kwargs)
@@ -330,7 +385,7 @@ def test_late_fast_forward_failure_never_recomposes_plugins(tmp_path, monkeypatc
 @pytest.mark.parametrize("role,target", [
     ("harness", "default_branch"), ("knowledge", "default_branch"), ("knowledge", "remote"),
 ])
-def test_incoming_sync_target_change_requires_retry_before_plugin_writes(tmp_path, monkeypatch, role, target):
+def test_incoming_sync_target_change_requires_retry_before_plugin_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str, target: str) -> None:
     from dataclasses import replace
 
     records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
@@ -343,14 +398,14 @@ def test_incoming_sync_target_change_requires_retry_before_plugin_writes(tmp_pat
     targets[role] = _head(path)
     _git(path, "checkout", "-q", records[role].branch)
 
-    def load(name):
+    def load(name: str) -> cfg.Config:
         config = load_project(name)
         if name == role and (path / "sync-target.txt").exists():
-            return replace(config, repos={name: replace(config.default_repo, **{target: "new-target"})})
+            return replace(config, repos={name: replace(config.default_repo, **cast(dict[str, Any], {target: "new-target"}))})
         return config
 
-    monkeypatch.setattr(cfg, "load_project_config", lambda name: cfg.memoize_in_scope(load, name))
-    with cfg.cached_load_config_scope():
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: cast(Callable[..., cfg.Config], getattr(cfg, "memoize_in_scope"))(load, name))
+    with cast(Callable[[], AbstractContextManager[None]], getattr(cfg, "cached_load_config_scope"))():
         for name in paths:
             cfg.load_project_config(name)
         result = worktree_sync.sync_pair(records["knowledge"])
@@ -361,7 +416,7 @@ def test_incoming_sync_target_change_requires_retry_before_plugin_writes(tmp_pat
     assert overlay.read_text() == "existing setup" and calls == []
 
 
-def test_pair_sync_cannot_race_a_member_launch(tmp_path, monkeypatch):
+def test_pair_sync_cannot_race_a_member_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import launch_admission
 
     records, paths, _targets, overlay, calls = _pair(tmp_path, monkeypatch)
@@ -374,7 +429,7 @@ def test_pair_sync_cannot_race_a_member_launch(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("failure", ["composition", "instructions"])
-def test_local_preparation_failure_is_not_reported_as_success_or_skipped(tmp_path, monkeypatch, failure):
+def test_local_preparation_failure_is_not_reported_as_success_or_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     records, paths, targets, _overlay, calls = _pair(tmp_path, monkeypatch)
     if failure == "composition":
         monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **kwargs: {
@@ -391,8 +446,8 @@ def test_local_preparation_failure_is_not_reported_as_success_or_skipped(tmp_pat
 
 @pytest.mark.parametrize("blocked", [False, True])
 def test_streamed_sync_retains_complete_pair_result_and_reports_before_fetch(
-    tmp_path, monkeypatch, capfd, blocked,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], blocked: bool,
+) -> None:
     from agent_worktrees import worktree_identity
 
     _records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
@@ -403,16 +458,16 @@ def test_streamed_sync_retains_complete_pair_result_and_reports_before_fetch(
                             ))
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
     fetch = git_ops.fetch
-    before_fetch = []
+    before_fetch: list[dict[str, Any]] = []
 
-    def observe_fetch(*args, **kwargs):
+    def observe_fetch(*args: Any, **kwargs: Any) -> None:
         before_fetch.extend(json.loads(line) for line in capfd.readouterr().out.splitlines())
         assert any(frame.get("type") == "progress" for frame in before_fetch)
         assert not any(frame.get("type") in {"done", "error"} for frame in before_fetch)
         return fetch(*args, **kwargs)
 
     monkeypatch.setattr(git_ops, "fetch", observe_fetch)
-    result_code = worktree_ops_cli.cmd_sync(SimpleNamespace(
+    result_code = worktree_ops_cli.cmd_sync(argparse.Namespace(
         worktree_id="harness", json=True, paired=True, stream=True,
     ))
     frames = before_fetch + [json.loads(line) for line in capfd.readouterr().out.splitlines()]
@@ -433,17 +488,17 @@ def test_streamed_sync_retains_complete_pair_result_and_reports_before_fetch(
     assert calls == (["compose"] if blocked else ["compose", "instructions"])
 
 
-def test_sync_stream_requires_json_before_loading_configuration(monkeypatch, capfd):
-    def unexpected():
+def test_sync_stream_requires_json_before_loading_configuration(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+    def unexpected() -> None:
         pytest.fail("invalid progress syntax must fail before loading configuration")
 
     monkeypatch.setattr(cfg, "load_config", unexpected)
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(stream=True, json=False)) == 2
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(stream=True, json=False)) == 2
     output = capfd.readouterr()
     assert output.out == "" and "--stream requires --json" in output.err
 
 
-def test_sync_stream_parser_remains_strict():
+def test_sync_stream_parser_remains_strict() -> None:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
     args = parser.parse_args(["sync", "--stream", "--json", "--worktree-id", "example"])
@@ -454,27 +509,27 @@ def test_sync_stream_parser_remains_strict():
         assert failure.value.code == 2
 
 
-def test_sync_stream_matches_the_complete_baseline_json_envelope(tmp_path, monkeypatch, capfd):
+def test_sync_stream_matches_the_complete_baseline_json_envelope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         stream=False, json=True, worktree_id="missing",
     )) == 1
     baseline = json.loads(capfd.readouterr().out)
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         stream=True, json=True, worktree_id="missing",
     )) == 1
     frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
     assert frames[-1]["type"] == "error"
     assert frames[-1]["result"] == baseline
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         stream=False, json=False, worktree_id="missing",
     )) == 1
     assert capfd.readouterr().out == "missing: not-found\n"
 
 
 @pytest.mark.parametrize("blocked", [False, True])
-def test_real_cli_pair_stream_matches_the_entire_ordinary_result(tmp_path, blocked):
+def test_real_cli_pair_stream_matches_the_entire_ordinary_result(tmp_path: Path, blocked: bool) -> None:
     import sys
     import textwrap
 
@@ -550,11 +605,11 @@ def test_real_cli_pair_stream_matches_the_entire_ordinary_result(tmp_path, block
         assert native["plugins"] == "ready" and evidence["heads"] == evidence["targets"]
 
 
-def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path, monkeypatch, capfd):
+def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     (tmp_path / "selected.yaml").write_text("[]")
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         stream=True, json=True, worktree_id="selected",
     )) == 1
     frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
@@ -563,14 +618,14 @@ def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path, monkeypa
     assert "YAML mapping" in frames[-1]["result"]["detail"]
 
 
-def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatch):
+def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import io
     import sys
 
     class Output(io.StringIO):
         terminal_attempts = 0
 
-        def write(self, text):
+        def write(self, text: str) -> int:
             if '"type": "error"' in text:
                 self.terminal_attempts += 1
                 raise OSError("fixture stdout write is unconfirmed")
@@ -582,40 +637,39 @@ def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatc
     monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     with pytest.raises(OSError, match="stdout write is unconfirmed"):
-        worktree_ops_cli.cmd_sync(SimpleNamespace(
+        worktree_ops_cli.cmd_sync(argparse.Namespace(
             stream=True, json=True, worktree_id="missing",
         ))
     assert output.terminal_attempts == 1
 
 
-def test_sync_stream_shutdown_flush_never_replays_a_failed_frame(monkeypatch):
+def test_sync_stream_shutdown_flush_never_replays_a_failed_frame(monkeypatch: pytest.MonkeyPatch) -> None:
     import io
     import sys
 
-    from agent_worktrees import output, sync_progress
 
     class Raw(io.RawIOBase):
         failing = True
 
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
-            self.attempts = []
+            self.attempts: list[bytes] = []
 
-        def writable(self):
+        def writable(self) -> bool:
             return True
 
-        def write(self, data):
+        def write(self, data: Buffer) -> int:
             self.attempts.append(bytes(data))
             if self.failing:
                 raise OSError("fixture buffered flush failed")
-            return len(data)
+            return len(bytes(data))
 
     raw = Raw()
     stream = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8")
     native_attempts = []
-    native_write = output.os.write
+    native_write = os.write
 
-    def fail_native_stdout(fd, payload):
+    def fail_native_stdout(fd: int, payload: bytes) -> int:
         if fd == 1:
             native_attempts.append(payload)
             raise OSError("fixture unbuffered write failed")
@@ -626,8 +680,8 @@ def test_sync_stream_shutdown_flush_never_replays_a_failed_frame(monkeypatch):
         with monkeypatch.context() as patch:
             patch.setattr(sys, "stdout", stream)
             patch.setattr(sys, "__stdout__", stream)
-            patch.setattr(output.os, "write", fail_native_stdout)
-            progress = sync_progress.SyncProgress()
+            patch.setattr(os, "write", fail_native_stdout)
+            progress = _progress()
             with pytest.raises((OSError, SystemExit)):
                 progress._write(frame)
             raw.failing = False
@@ -643,12 +697,12 @@ def test_sync_stream_shutdown_flush_never_replays_a_failed_frame(monkeypatch):
 
 
 @pytest.mark.parametrize("selector", ["tail", "../invalid"])
-def test_streamed_sync_selector_refusal_is_a_terminal_result(tmp_path, monkeypatch, capfd, selector):
+def test_streamed_sync_selector_refusal_is_a_terminal_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], selector: str) -> None:
     monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     for name in ("first-tail", "second-tail"):
         (tmp_path / f"{name}.yaml").write_text("{}")
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         stream=True, json=True, worktree_id=selector,
     )) == 1
     frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
@@ -660,7 +714,7 @@ def test_streamed_sync_selector_refusal_is_a_terminal_result(tmp_path, monkeypat
     assert result["outcome"] == "not-started"
 
 
-def test_streamed_sync_batch_exception_retains_completed_results(tmp_path, monkeypatch, capfd):
+def test_streamed_sync_batch_exception_retains_completed_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     records = []
     for name in ("first", "interrupted", "unstarted"):
         path = tmp_path / name
@@ -675,19 +729,19 @@ def test_streamed_sync_batch_exception_retains_completed_results(tmp_path, monke
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(tracking, "list_records", lambda *args, **kwargs: records)
     monkeypatch.setattr(git_ops, "has_remote", lambda *args, **kwargs: False)
-    monkeypatch.setattr(worktree_sync.sessions, "scan_sessions_fast", lambda *args: None)
-    monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args: set())
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *args: None)
+    monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args, **kwargs: set())
     completed = {"worktree_id": "first", "updated": True, "reason": "updated", "behind": 1}
     calls = []
 
-    def synchronize(record, *_args):
+    def synchronize(record: tracking.WorktreeRecord, *_args: Any) -> dict[str, Any]:
         calls.append(record.worktree_id)
         if record.worktree_id != "first":
             raise OSError("fixture checkout disappeared")
         return completed
 
     monkeypatch.setattr(worktree_ops_cli._core(), "_sync_one_record", synchronize)
-    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
         stream=True, json=True, worktree_id=None,
     )) == 1
     frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
@@ -701,7 +755,7 @@ def test_streamed_sync_batch_exception_retains_completed_results(tmp_path, monke
     assert calls == ["first", "interrupted"]
 
 
-def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
+def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     import io
     import sys
     import threading
@@ -711,7 +765,7 @@ def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
     received = threading.Event()
 
     class Output(io.StringIO):
-        def write(self, text):
+        def write(self, text: str) -> int:
             written = super().write(text)
             if "Waiting: fixture fetch" in text:
                 received.set()
@@ -721,7 +775,7 @@ def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
     monkeypatch.setattr(sys, "stdout", output)
     monkeypatch.setattr(sys, "__stdout__", output)
     monkeypatch.setattr(sync_progress, "HEARTBEAT_SECONDS", 0.01)
-    with sync_progress.SyncProgress() as progress:
+    with _progress() as progress:
         progress.stage("fixture fetch")
         try:
             assert received.wait(2), "the operation owner must report its current wait"
@@ -733,7 +787,7 @@ def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
     assert progress._thread is not None and not progress._thread.is_alive()
 
 
-def test_sync_stream_real_parser_process_retains_pair_result(tmp_path):
+def test_sync_stream_real_parser_process_retains_pair_result(tmp_path: Path) -> None:
     import sys
     import textwrap
 

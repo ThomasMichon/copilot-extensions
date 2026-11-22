@@ -1,8 +1,14 @@
 """Reap / cleanup-support CLI surfaces extracted from ``__main__``."""
 
 from __future__ import annotations
+from typing import cast
 
+from typing import Any
+from collections.abc import Callable
+from types import ModuleType
 import argparse
+
+
 import os
 import time
 from contextlib import ExitStack
@@ -15,35 +21,35 @@ from . import config as cfg
 from . import managed_worktree_guard, terminal_pair_progress
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[..., Any]) -> Callable[..., Any]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[..., Any], candidate)
     return local
 
 REAP_SHELL_GRACE_SECS = 3600
 _NO_AUTO_CLEAN_ENV = "AGENT_WORKTREES_NO_AUTO_CLEAN"
 _AUTO_CLEAN_GRACE_ENV = "AGENT_WORKTREES_AUTO_CLEAN_GRACE_SECS"
 
-def _enumerate_launcher_shells(): return _core()._enumerate_launcher_shells()
-def _apply_tracking_override(*args, **kwargs): return _core()._apply_tracking_override(*args, **kwargs)
-def _build_active_paths(*args, **kwargs): return _core()._build_active_paths(*args, **kwargs)
-def _iso_epoch(*args, **kwargs): return _core()._iso_epoch(*args, **kwargs)
-def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
-def _revalidate_cleanup_safety(*args, **kwargs):
+def _enumerate_launcher_shells() -> list[dict[str, Any]] | None: return cast(list[dict[str, Any]] | None, _core()._enumerate_launcher_shells())
+def _apply_tracking_override(*args: Any, **kwargs: Any) -> git_ops.WorktreeStateInfo: return cast(git_ops.WorktreeStateInfo, _core()._apply_tracking_override(*args, **kwargs))
+def _build_active_paths(*args: Any, **kwargs: Any) -> set[str]: return cast(set[str], _core()._build_active_paths(*args, **kwargs))
+def _iso_epoch(*args: Any, **kwargs: Any) -> float | None: return cast(float | None, _core()._iso_epoch(*args, **kwargs))
+def _reap_worktree(*args: Any, **kwargs: Any) -> Any: return _core()._reap_worktree(*args, **kwargs)
+def _revalidate_cleanup_safety(*args: Any, **kwargs: Any) -> Any:
     from . import cleanup_gc_cli
 
     return cleanup_gc_cli._revalidate_cleanup_safety(*args, **kwargs)
-def reap_orphan_mux_sessions(*args, **kwargs): return _core().reap_orphan_mux_sessions(*args, **kwargs)
-def select_orphan_launcher_shells(*args, **kwargs): return _core().select_orphan_launcher_shells(*args, **kwargs)
+def reap_orphan_mux_sessions(*args: Any, **kwargs: Any) -> Any: return _core().reap_orphan_mux_sessions(*args, **kwargs)
+def select_orphan_launcher_shells(*args: Any, **kwargs: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]: return cast(tuple[list[dict[str, Any]], list[dict[str, Any]]], _core().select_orphan_launcher_shells(*args, **kwargs))
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser("reap-sessions", help="Reap leaked tmux/psmux sessions whose worktree is finalized, gone, or untracked AND has been idle past the grace window (never touches attached, active, or busy sessions)")
     p.add_argument("--dry-run", action="store_true", help="Report what would be reaped without killing anything")
     p.add_argument("--id", default=None, help="Target a single worktree id; same spare-attached/active/busy predicate as the full sweep")
@@ -56,18 +62,18 @@ def add_parsers(sub) -> None:
     p.add_argument("--grace-hours", type=float, default=None, help="Minimum age before an orphaned shell is eligible (default 1h)")
     p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
 
-def _enumerate_launcher_shells_posix() -> list[dict] | None:
+def _enumerate_launcher_shells_posix() -> list[dict[str, Any]] | None:
     proc = Path("/proc")
     try:
         entries = [e for e in proc.iterdir() if e.name.isdigit()]
     except OSError:
         return None
     try:
-        clk = os.sysconf("SC_CLK_TCK")
+        clk = getattr(os, "sysconf")("SC_CLK_TCK")
     except (ValueError, OSError):
         clk = 100
     boot = _proc_boot_time()
-    procs: list[dict] = []
+    procs: list[dict[str, Any]] = []
     for entry in entries:
         pid = int(entry.name)
         try:
@@ -129,8 +135,8 @@ def reap_orphan_launcher_shells(
     dry_run: bool = True,
     idle_grace_secs: float = REAP_SHELL_GRACE_SECS,
     now: float | None = None,
-    processes: list[dict] | None = None,
-) -> dict:
+    processes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Reap orphaned agent-worktrees launcher shells (pwsh/python).
 
     Conservative and dry-run by default: only shells that pass every safety
@@ -165,7 +171,7 @@ def reap_orphan_launcher_shells(
         pid_alive=None if injected else locks.pid_alive,
     )
     reaped: list[int] = []
-    errors: list[dict] = []
+    errors: list[dict[str, Any]] = []
     for p in reap:
         pid = int(p["pid"])
         if dry_run:
@@ -194,7 +200,7 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
     Reports candidates by default; requires ``--yes`` to actually terminate.
     """
     grace_hours = getattr(args, "grace_hours", None)
-    kwargs: dict = {"dry_run": not getattr(args, "yes", False)}
+    kwargs: dict[str, Any] = {"dry_run": not getattr(args, "yes", False)}
     if grace_hours is not None:
         kwargs["idle_grace_secs"] = float(grace_hours) * 3600
     payload = _core_helper("reap_orphan_launcher_shells", reap_orphan_launcher_shells)(**kwargs)
@@ -219,12 +225,12 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
 
 # Moved to tracking.py (module-size split); re-exported here for existing
 # unqualified call sites and back-compat test access.
-_repo_for_record = tracking._repo_for_record
+_repo_for_record: Callable[[cfg.Config, tracking.WorktreeRecord], cfg.RepoConfig | None] = tracking._repo_for_record
 
 
 def _remove_managed_worktree(
-    rec,
-    repo,
+    rec: tracking.WorktreeRecord,
+    repo: cfg.RepoConfig,
     tracking_path: Path,
     *,
     force: bool = False,
@@ -404,10 +410,10 @@ def sweep_managed_worktrees(
     dry_run: bool = False,
     min_idle_secs: float | None = None,
     now: float | None = None,
-    config=None,
+    config: cfg.Config | None=None,
     tracking_path: Path | None = None,
     worktree_ids: set[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """GC leaked **system/bridge** worktrees (the daemon-owned kinds routine
     cleanup skips -- issue #1069).
 
@@ -431,7 +437,7 @@ def sweep_managed_worktrees(
     if worktree_ids is not None:
         managed = [r for r in managed if r.worktree_id in worktree_ids]
 
-    result: dict = {"removed": [], "skipped": []}
+    result: dict[str, Any] = {"removed": [], "skipped": []}
     if not managed:
         return result
 
@@ -443,7 +449,7 @@ def sweep_managed_worktrees(
         return result
     activity_by_name = sessions._mux_session_activity()
     session_ctx = sessions.scan_sessions_fast(managed)
-    active_paths = _build_active_paths(managed, session_ctx)
+    active_paths = _build_active_paths(managed, session_ctx, copilot_only=False)
 
     for rec in managed:
         if reason := terminal_pair_progress.gc_preservation_reason(
@@ -477,7 +483,7 @@ def sweep_managed_worktrees(
         else:
             git_state = "gone"
 
-        last_active = activity_by_name.get(name)
+        last_active: float | None = activity_by_name.get(name)
         if last_active is None:
             last_active = _iso_epoch(rec.last_resumed_at) or _iso_epoch(rec.started_at)
         idle_secs = None if last_active is None else (now - last_active)
@@ -485,7 +491,7 @@ def sweep_managed_worktrees(
         verdict = gc_mod.classify_managed_worktree(
             worktree_id=rec.worktree_id,
             kind=rec.kind,
-            follow_up=bool(tracking.effective_open_follow_up_count(rec)),
+            follow_up=bool(cast(Callable[[tracking.WorktreeRecord], int], getattr(tracking, "effective_open_follow_up_count"))(rec)),
             status=rec.status,
             git_state=git_state,
             has_live_mux=has_live_mux,
@@ -533,7 +539,7 @@ def sweep_managed_worktrees(
                 {"id": rec.worktree_id, "reason": f"would remove ({verdict.reason})"}
             )
             continue
-        lifecycle_lock = fin.FinalizeLock(
+        lifecycle_lock = getattr(fin, "FinalizeLock")(
             Path(repo.worktree_root) / ".finalize.lock",
             timeout=3,
             stale_after=3600,
@@ -576,7 +582,7 @@ def sweep_managed_worktrees(
                 continue
             fresh_name = sessions.mux_session_name(current.worktree_id)
             fresh_ctx = sessions.scan_sessions_fast([current])
-            fresh_active_paths = _build_active_paths([current], fresh_ctx)
+            fresh_active_paths = _build_active_paths([current], fresh_ctx, copilot_only=False)
             fresh_norm = sessions._normalize_path(current.worktree_path) if current.worktree_path else ""
             if current.worktree_path and Path(current.worktree_path).exists():
                 if (
@@ -603,7 +609,7 @@ def sweep_managed_worktrees(
                 fresh_git_state = "completed"
             else:
                 fresh_git_state = "gone"
-            fresh_activity = sessions._mux_session_activity().get(fresh_name)
+            fresh_activity: float | None = sessions._mux_session_activity().get(fresh_name)
             if fresh_activity is None:
                 fresh_activity = _iso_epoch(current.last_resumed_at) or _iso_epoch(
                     current.started_at
@@ -612,7 +618,7 @@ def sweep_managed_worktrees(
             fresh_verdict = gc_mod.classify_managed_worktree(
                 worktree_id=current.worktree_id,
                 kind=current.kind,
-                follow_up=bool(tracking.effective_open_follow_up_count(current)),
+                follow_up=bool(cast(Callable[[tracking.WorktreeRecord], int], getattr(tracking, "effective_open_follow_up_count"))(current)),
                 status=current.status,
                 git_state=fresh_git_state,
                 has_live_mux=fresh_name in fresh_mux,
@@ -749,7 +755,7 @@ def _needs_session_cleanup(record: tracking.WorktreeRecord) -> bool:
 
 def sweep_finished_session_worktrees(
     *, dry_run: bool = False, min_idle_secs: float | None = None, now: float | None = None
-) -> dict:
+) -> dict[str, Any]:
     """GC provably-safe **finished session** worktrees on the no-daemon cadence.
 
     The companion to :func:`sweep_managed_worktrees`: where that reaps leaked
@@ -784,7 +790,7 @@ def sweep_finished_session_worktrees(
     (:func:`auto_clean_enabled`) is checked by the cadence callers, not here, so
     this stays directly testable.
     """
-    result: dict = {"removed": [], "skipped": []}
+    result: dict[str, Any] = {"removed": [], "skipped": []}
     now = time.time() if now is None else now
     grace = _auto_clean_grace_secs() if min_idle_secs is None else min_idle_secs
 
@@ -796,7 +802,7 @@ def sweep_finished_session_worktrees(
         return result
 
     session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = _build_active_paths(records, session_ctx)
+    active_paths = _build_active_paths(records, session_ctx, copilot_only=False)
     activity_by_name = sessions._mux_session_activity()
     mux = sessions._list_mux_sessions()
     if mux is None:
@@ -837,7 +843,7 @@ def sweep_finished_session_worktrees(
 
         # Idle-grace gate: the worktree must have been quiet past the window. Use
         # the freshest of the mux activity, last resume, completion, or creation.
-        last_active = activity_by_name.get(name)
+        last_active: float | None = activity_by_name.get(name)
         if last_active is None:
             last_active = (
                 _iso_epoch(rec.last_resumed_at)
@@ -885,7 +891,7 @@ def sweep_finished_session_worktrees(
     # Pass 2: reap under the shared finalization lock. A short, non-blocking-ish
     # timeout keeps the cadence from wedging behind a concurrent finalize -- skip
     # this pass and let the next boundary retry rather than delay startup/exit.
-    lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock", timeout=3)
+    lock = getattr(fin, "FinalizeLock")(Path(repo.worktree_root) / ".finalize.lock", timeout=3)
     try:
         lock.acquire()
     except TimeoutError:
@@ -898,7 +904,7 @@ def sweep_finished_session_worktrees(
             # when no session remains live at this final check.
             name = sessions.mux_session_name(rec.worktree_id)
             fresh_activity = sessions._mux_session_activity()
-            fresh_last_active = fresh_activity.get(name)
+            fresh_last_active: float | None = fresh_activity.get(name)
             if fresh_last_active is None:
                 fresh_yaml = tracking_path / f"{rec.worktree_id}.yaml"
                 fresh_rec = tracking.load_record(fresh_yaml) if fresh_yaml.exists() else rec
