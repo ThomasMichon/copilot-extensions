@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 from types import ModuleType
+from machine_transport import (local_execution_platform, machine_name, merge_machines_yaml,
+                               parse_machines_yaml, resolve_local_execution_context)
 
 from . import bootstrap_harness as boot
 from . import bootstrap_pairing, harness_state, registered_suite, runtime_identity, runtime_source_repository
@@ -113,6 +115,21 @@ def compose_checkout(harness: Path, companion: Path, *, enabled: bool = True) ->
             overlay.retire_composed_locked(output)
 
 
+def target_machines(anchor: Path, project_config: Path) -> tuple[str, ...]:
+    tables = []
+    for path in (anchor / "machines.yaml", anchor / ".agent-worktrees/machines.yaml"):
+        runtime_source_repository._ordinary(path)
+        tables.append(parse_machines_yaml(harness_state._read_yaml(path, strict=True)))
+    entries = merge_machines_yaml(tables[0], tables[1])
+    runtime_source_repository._ordinary(project_config)
+    configured = harness_state._read_yaml(project_config, strict=True).get("machine")
+    context = resolve_local_execution_context(entries, hostname=platform.node(), environment=local_execution_platform(),
+                                              configured_machine=configured)
+    entry = entries.get(context.customization_key) if context.customization_key else None
+    selected = machine_name(entry) if entry and not configured and context.environment != "wsl" else context.execution_machine
+    return tuple(dict.fromkeys((selected, context.execution_machine, context.machine)))
+
+
 def install_prepared(command: list[str]) -> int:
     setup_env = {k: v for k, v in os.environ.items()
                  if k.upper() not in {"GH_TOKEN", "GITHUB_TOKEN", "ARTIFACT_VERIFY_TOKEN"}}
@@ -203,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
             companion = companions.get(project)
             dirs = (anchor, companion) if companion else (anchor,)
             gate = tuple(d / filename for d in dirs if d for filename in ("services.yaml", "external-repos.yaml"))
-            target = platform.node().lower()
+            machines = target_machines(anchor, root / "repos" / project / "config.yaml")
+            target = machines[0]
             fleet = companion / ".copilot-extensions/fleet-manager/config.json" if companion else None
             def activation(app: str) -> str:
                 if (project, app) in roles:
@@ -218,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError(f"{app} activation policy could not be resolved")
                 roles[project, app] = result.stdout.strip()
                 return roles[project, app]
-            return registered_suite.HarnessPolicy(gate, (target,), fleet_config=fleet if fleet and fleet.exists() else None,
+            return registered_suite.HarnessPolicy(gate, machines, fleet_config=fleet if fleet and fleet.exists() else None,
                                                   fleet_target=target if fleet and fleet.exists() else None, activation=activation)
 
         market = workspace / "marketplace"

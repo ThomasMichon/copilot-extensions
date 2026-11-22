@@ -5,6 +5,19 @@ import pytest
 
 from worktree_manager import bootstrap_harness as boot
 from worktree_manager import registered_suite, runtime_source_repository, source_config
+from worktree_manager.harness_onboarding import target_machines
+
+
+def test_target_gate_includes_alias_and_physical_host(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  fixture-host:\n    hostname: fixture-host\n    alias: local-alias\n",
+        encoding="utf-8",
+    )
+    with patch("platform.node", return_value="fixture-host"):
+        machines = target_machines(tmp_path, config)
+    assert machines[0] == "local-alias"
+    assert "fixture-host" in machines and "foreign-host" not in machines
 
 
 def test_inherited_git_selectors_do_not_redirect_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
