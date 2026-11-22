@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import engine_client
 
@@ -42,7 +42,7 @@ def require_attempt_target(
         raise engine_client.EngineError("invalid launch attempt identity")
 
 
-def require_attempt_plan(plan: dict, attempt_id: str | None) -> None:
+def require_attempt_plan(plan: dict[str, Any], attempt_id: str | None) -> None:
     if attempt_id is None:
         return
     receipt = plan.get("launch_attempt_receipt")
@@ -80,7 +80,7 @@ def require_attempt_plan(plan: dict, attempt_id: str | None) -> None:
 
 
 def require_remote_seed_plan(
-    plan: dict, *, new: bool, worktree_id: str | None, attempt_id: str | None,
+    plan: dict[str, Any], *, new: bool, worktree_id: str | None, attempt_id: str | None,
 ) -> None:
     if (
         plan.get("action") != "remote" or type(plan.get("launch_request_version")) is not int
@@ -98,6 +98,21 @@ def require_remote_seed_plan(
         raise engine_client.EngineFeatureUnavailable(
             "the engine omitted negotiated remote prompt ownership or attempt correlation; "
             "inspect the target admission before resubmitting"
+        )
+
+
+def require_terminal_handoff_plan(plan: dict[str, Any], *, worktree_id: str | None) -> None:
+    if (
+        plan.get("action") != "remote"
+        or type(plan.get("remote_terminal_handoff_version")) is not int
+        or plan["remote_terminal_handoff_version"] != 1
+        or not isinstance(plan.get("ssh_alias"), str) or not plan["ssh_alias"]
+        or not isinstance(plan.get("remote_command"), str) or not plan["remote_command"]
+        or plan.get("worktree_id") != worktree_id
+        or plan.get("launch_request_id") is not None or plan.get("seed_id") is not None
+    ):
+        raise engine_client.EngineFeatureUnavailable(
+            "the engine omitted an SSH-first terminal handoff; no target launch was started"
         )
 
 

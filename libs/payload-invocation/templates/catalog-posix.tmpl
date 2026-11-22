@@ -11,7 +11,7 @@ command_path="$self_root/@@OUTPUT_DIR@@/@@COMMAND@@"
 installer_path="$self_root/scripts/@@INSTALLER@@.sh"
 availability="unavailable"
 [ -x "$command_path" ] && [ -f "$installer_path" ] && availability="ready"
-py="$(command -v python3 || command -v python || true)"
+@@CATALOG_PYTHON_POSIX@@
 [ -n "$py" ] || {
     printf '%s\n' '{}'
     exit 0

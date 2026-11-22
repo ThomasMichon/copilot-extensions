@@ -49,6 +49,19 @@ try {
                 $bootstrapOptions.InstallationRequest = $Request
             }
             $Python = Resolve-PayloadBootstrapPython @bootstrapOptions
+        } elseif (Test-Path -LiteralPath (Join-Path $payloadScripts 'bootstrap-python-launcher.txt')) {
+            $selector = Join-Path $payloadScripts '_bootstrap_python\select.ps1'
+            if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
+                throw 'Declared command bootstrap selector is unavailable; update the owning plugin.'
+            }
+            Assert-CallerDeadline
+            $bootstrapOptions = @{}
+            if ($TimeoutSeconds -gt 0) {
+                $bootstrapOptions.TimeoutMilliseconds = [int][Math]::Min(
+                    30000, $TimeoutSeconds * 1000.0 - $clock.ElapsedMilliseconds
+                )
+            }
+            $Python = & $selector @bootstrapOptions
         } else {
             try {
                 $Python = @(Get-Command -Name python -CommandType Application -ErrorAction Stop)[0].Path

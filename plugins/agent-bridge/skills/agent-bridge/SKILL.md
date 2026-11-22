@@ -318,6 +318,17 @@ configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 
 ### Checking What's Running
 
+Use `list` for the caller's project bridges, including dormant worktree
+conversations, or `list --all-projects` only when a fleet-wide project view is
+intended. Select each remote Bridge with repeatable `--host`.
+`live-sessions list --all-sources --host HOST --json` includes managed and
+standalone conversations as well as native registrations. The legacy
+`--json live-sessions list` remains registration-only. Check `complete` and
+per-host source evidence; a listed conversation may have unavailable control.
+These new reads never ensure a service. See
+[conversation inventory](../../docs/target-inventory.md#conversation-inventory)
+for the versioned envelope and supported rollback.
+
 ```bash
 # See all active sessions (CONTEXT column shows usage %)
 <agent-bridge catalog argv[0]> sessions

@@ -33,6 +33,65 @@ This lets the first `create <project>` proceed when the other sources are also
 complete and no target matches. If the directory already exists, startup does
 not replace a missing or invalid index. Listing targets never repairs it.
 
+## Conversation inventory
+
+The optional `bridge_inventory: 1` health capability adds
+`GET /api/v1/bridges` and `BridgeClient.list_bridges(...)`.
+The new `list` command selects this version-1 response with `bridges`, `sources`
+and `complete`. It requires the caller's project, explicit `--project REPO`, or
+explicit `--all-projects`. `--machine`, `--namespace`, `--status` and `--live`
+filter the same projection. It does not ensure the Bridge service.
+
+The projection includes session-backed dormant worktrees, managed conversations,
+extension registrations and standalone Hosts observed by the existing inventory.
+Empty worktrees remain potential targets, not conversations. Dormant anchors
+stay out of this default view. Assignment, liveness and control remain separate:
+a running workspace can have `control: unavailable`, and an unavailable source
+does not become a complete empty result. Conflicting native identities make
+control unavailable rather than selecting a head by arrival order.
+Title, disposition and creator/controller fields use cached owner metadata.
+Listing never reads each conversation's transcript or imports native history.
+An observed workspace supplies its owning project, even when the native
+registration names a member repository. Explicitly conflicting owners remain
+separate. Missing liveness, hosting and transport evidence remains unknown.
+
+Select remote Bridge hosts explicitly with repeatable `--host`:
+
+```text
+agent-bridge --project example --json list --host host-a --host host-b
+agent-bridge live-sessions list --all-sources --host host-a --host host-b --json
+```
+
+The latter selects only observed live conversations across all projects,
+including managed ACP conversations and standalone Hosts. Existing
+`live-sessions list` output and its registration-only JSON array are unchanged.
+`--all` and `--supervisor` retain their registration-only meaning and cannot
+be combined with the new source-union selection.
+
+Host selection is bounded to 16 entries, with at most four concurrent reads and
+a 15-second deadline per host. The remote `bridge.inventory` carrier operation
+requests only that host's local contribution; it never recursively enumerates
+the fleet. Every result has a host-qualified `route`; repeated observations of
+the same scoped conversation retain alternate `routes`. The response preserves
+each selected host's source evidence. An old carrier, an old daemon, a timeout
+or unavailable metadata sets `complete: false` without dropping other hosts'
+positive observations. No host names are inferred from personal conventions.
+
+This is an additive discovery contract, not selector or lifecycle migration.
+Existing `sessions`, `targets` and registration APIs retain their shapes and
+effects. New clients require the executing daemon's `bridge_inventory: 1`
+capability. Unsupported new reads refuse explicitly; rollback leaves existing
+commands available. A supported carrier that lacks `bridge.inventory` reports
+an unsupported operation for that host. There is no fallback to process
+launch, receiver enrollment, service recovery or message submission.
+
+The [contained source runner](../../../TESTING.md) can select
+`tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and
+`tests/test_bridge_fleet_inventory.py` with `--allow-explicit-tiers`.
+The packet uses synthetic five-host observations and private registry fixtures.
+It exercises the actual CLI/client/API serialization and unsupported-capability
+refusal without native execution. It does not certify installed fleet adoption.
+
 ## Metadata only
 
 The separately negotiated `worktree_metadata_hydration: 1` capability adds

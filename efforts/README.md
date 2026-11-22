@@ -37,6 +37,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [SSH-First Terminal Launch](active/ssh-first-terminal-launch/README.md) | Draft; terminal handoff and completion-wait replacement before implementation | #14047, #14049, #14048; preserves #6057 parity and #8375 audit owners |
 | [Origin-Scoped Telemetry Routing](active/origin-scoped-telemetry-routing/README.md) | Draft; configure-once sink policy, knowledge/machine usage and inherited driving-origin architecture before implementation | #14021; preserves #13545 predecessor and #7935/#5900/#10873, update and configuration owners; no activation or rollout |
 | [Unified Bridge Inventory and Lifecycle](active/unified-bridge-inventory-and-lifecycle/README.md) | Draft; reviewed vision and inception before implementation | #13811; compose #13797 registration/catalog work and existing workspace/Driver/venue owners; no live rollout |
 | [Worktree Dehydration](active/worktree-dehydration/README.md) | Draft; external agenda placement/doctor, reversible checkout storage and automatic entry proposal | #13781; #13790 -> #13783 -> #13784 -> #13785; preserves existing data, lifecycle and roster owners; no implementation or rollout |

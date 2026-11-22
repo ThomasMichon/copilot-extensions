@@ -8,6 +8,11 @@ classification on *this* machine. Slice 1 of the port covers the local machine
 only; remote machines arrive via an SSH source + async loader in a later slice.
 """
 from __future__ import annotations
+from collections.abc import Callable
+from typing import cast
+
+from typing import Any
+
 
 import datetime as _dt
 import socket
@@ -28,7 +33,7 @@ _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 
 def _local_identity() -> tuple[str, str]:
     host = socket.gethostname().split(".")[0]
-    plat = cfg.detect_platform()
+    plat = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
     return host, _ENV_LABEL.get(plat, plat.title())
 
 
@@ -54,7 +59,7 @@ def _project_repo() -> tuple[str, str]:
         return "", ""
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> str:
     global _REPO_BRANCH
     if name in ("REPO", "BRANCH"):
         if _REPO_BRANCH is None:
@@ -63,7 +68,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def machines():
+def machines() -> list[tuple[str, str, str, bool]]:
     """Machine-tab descriptors. Slice 1: the local machine only."""
     m, e = LOCAL
     return [(f"{m} {e}", m, e, True)]
@@ -88,7 +93,7 @@ def reconcile_prs() -> int:
     try:
         config = cfg.load_config()
         tracking_path = cfg.tracking_dir()
-        plat = cfg.detect_platform()
+        plat = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
         records = tracking.list_records(tracking_path, platform_filter=plat)
     except Exception:
         return 0
@@ -148,7 +153,7 @@ def reconcile_bound_live() -> int:
     """
     try:
         tracking_path = cfg.tracking_dir()
-        plat = cfg.detect_platform()
+        plat = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
         records = tracking.list_records(tracking_path, platform_filter=plat)
     except Exception:
         return 0
@@ -223,7 +228,7 @@ def reconcile_bound_live() -> int:
     return changed
 
 
-def _overlay_cached_state(raw: dict, rec) -> None:
+def _overlay_cached_state(raw: dict[str, Any], rec: tracking.WorktreeRecord) -> None:
     """Overlay a worktree's cached session-render state onto its cache-only row.
 
     picker-cache-first-paint (dotfiles#948): the first-paint pass reads no
@@ -245,11 +250,14 @@ def _overlay_cached_state(raw: dict, rec) -> None:
     ``session_turns`` and ``git_state`` absent) renders **Unknown** -- a Refresh
     or the follow-up populate fills it.
     """
+    lock_live: bool | None
     try:
-        lock_live, stale_pids = sessions.worktree_session_lock_state(rec)
+        lock_live, stale_pids = sessions.worktree_session_lock_state(rec, strict=True)
     except Exception:
-        lock_live, stale_pids = False, []
-    live = lock_live or (raw.get("session_bound_live") is True)
+        lock_live, stale_pids = None, []
+    live = lock_live is True
+    raw["session_lock_live"] = lock_live
+    raw["session_lock_observation_unavailable"] = lock_live is None
 
     if rec.session_turns is not None:
         raw["turn_count"] = rec.session_turns
@@ -258,7 +266,10 @@ def _overlay_cached_state(raw: dict, rec) -> None:
     if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
         raw["title"] = rec.session_summary
 
-    if live:
+    if lock_live is None:
+        raw["state"] = "unknown"
+        raw["ff_eligible"] = False
+    elif live:
         # A live bound Copilot -> ACTIVE, authoritative in the fast pass (wins
         # over a cached terminal/unknown state). Keep a registered lock distinct
         # from the broader cached bound-process hint.
@@ -277,10 +288,10 @@ def load(
     env: str | None = None,
     *,
     classify: bool = True,
-    source_kind=source_identity.MACHINE_SSH_KIND,
-    source_id=None,
-    source_label=None,
-):
+    source_kind: str=source_identity.MACHINE_SSH_KIND,
+    source_id: str | None=None,
+    source_label: str | None=None,
+) -> list[dict[str, Any]]:
     """Normalized records for this machine's worktrees (tracking + classify).
 
     *machine*/*env* default to this host's identity (``LOCAL``). The SSH source
@@ -306,7 +317,7 @@ def load(
 
     derive.NOW = _dt.datetime.now()
     tracking_path = cfg.tracking_dir()
-    plat = cfg.detect_platform()
+    plat = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
     records = tracking.list_records(tracking_path, platform_filter=plat)
     records = [
         r for r in records
@@ -318,7 +329,7 @@ def load(
         return []
     machine = machine if machine is not None else LOCAL[0]
     env = env if env is not None else LOCAL[1]
-    norm_source = {
+    norm_source: dict[str, Any] = {
         "source_kind": source_kind,
         "source_id": source_id,
         "source_label": source_label,
@@ -372,7 +383,7 @@ def load(
     return out
 
 
-def _stamp_from_raw(rec, raw: dict, session_ctx) -> None:
+def _stamp_from_raw(rec: tracking.WorktreeRecord, raw: dict[str, Any], session_ctx: sessions.SessionContext) -> None:
     """Write the session-render cache back from a freshly gathered ``raw`` row.
 
     picker-cache-first-paint (dotfiles#948): shared by the classify populate and
@@ -393,7 +404,7 @@ def _stamp_from_raw(rec, raw: dict, session_ctx) -> None:
 
 
 def refresh_one(worktree_id: str, machine: str | None = None,
-                env: str | None = None):
+                env: str | None = None) -> dict[str, Any] | None:
     """Live-gather + write-back for ONE worktree -- the picker's per-row Refresh.
 
     picker-cache-first-paint (dotfiles#948): runs the same authoritative gather

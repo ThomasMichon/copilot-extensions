@@ -14,6 +14,24 @@ additional authority.
 
 > "resuming worktrees routes to the previous session in that worktree". Creating a new worktree should create a new session within it.
 
+**Current ordered assignment:** first reproduce and fix queued Bridge messages
+that are not submitted when the target becomes idle, using a real sender and
+target to distinguish idle detection from submission failure. Then continue the
+unified inventory slice with fleet-wide discovery across the five selected
+hosts, including remote registrations, managed ACP conversations and standalone
+hosts, with host-qualified routes. This priority amendment preserves the root
+outcome rather than replacing it with one intermediate fix.
+
+- **Kind:** completion
+- **Now:** a real queued notification reached the owned model after idle, while
+  its original receipt remained at SDK acceptance. The executing extension
+  reports a retained native-call timeout. Relevant history-isolation and live
+  consumption fixes are already merged and present on the release branch,
+  but absent from the observed installed extension. Preserve that adoption
+  boundary; continue fleet inventory without duplicating the existing fixes.
+- **Return:** after the queued-delivery fix clears its source gates, resume
+  fleet-wide inventory and the remaining lifecycle Plan below.
+
 **Acceptance:** every applicable Plan and Validation Plan item is resolved or
 explicitly transferred to a named tracked objective; source changes are reviewed,
 merged and verified in the normal release; the public docs and guidance describe
@@ -23,7 +41,7 @@ the new contract. Source delivery does not require or authorize a live rollout.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed worktrees, one dependent delivery slice at a time
 - **Created:** 2026-11-21
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Bridge inventory](../../../visions/plugins/agent-bridge/README.md#listing-defaults-to-registered-excludes-archived), [potential targets](../../../visions/plugins/agent-bridge/README.md#potential-target-discovery), [creation](../../../visions/plugins/agent-bridge/README.md#deliberate-creation-prefer-owned)
 - **Umbrella issue:** #13811
 
@@ -43,7 +61,7 @@ another authoritative registry or make listing trigger execution.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Normalization author | Owns reviewed intent, implementation, qualification and source PRs | #13811 and its managed source branches |
-| Registration recovery author | Owns the independently open registration and complete-session-listing correction | #13797 |
+| Registration recovery author | Provided the merged registration and passive-catalog prerequisite | #13797 |
 | Existing workspace, Driver and venue owners | Retain their allocation, hosting, policy and resource boundaries | Their existing source contracts and linked efforts |
 
 ## Coordination
@@ -53,9 +71,9 @@ another authoritative registry or make listing trigger execution.
 - **Delegates:** none assigned by this plan.
 - **Handoff:** retain this canonical effort, exact current slice, review state
   and original limits; a source PR does not transfer deployment custody.
-- Preserve #13797 rather than opening a replacement. Compose its registration
-  and passive local catalog results when available. Resolve actual content
-  overlap through its author before implementation touches that boundary.
+- Reuse merged #13797 rather than opening a replacement. Its registration
+  and passive local catalog owners retain their boundaries; resolve actual
+  content overlap through the original author.
 - Preserve the separate freshness work in #11298 and namespace latency work in
   #5761. Unavailable observations do not authorize repairing their services.
 
@@ -95,15 +113,61 @@ conversation replacement, unrelated source repair or fleet rollout. Preserve
 existing installer, registration, receiving and resource owners. A reviewed
 plan, a released package or a process observation is not new effect authority.
 
+The later ordered assignment permits a bounded real sender/target reproduction
+of queued delivery. It does not authorize replay of previously uncertain
+messages, receiver enrollment, conversation replacement or deployment.
+Copilot Driver core code remains with its existing owner and must not be edited
+by this effort. Keep test packets bounded on a busy host. The fleet scope uses
+the configured five-host selection, not committed personal machine names.
+
+For the initial inventory slice only, the operator approved one local
+backup-preserving history normalization before publication: soft-reset to the
+branch's merge base, then make one commit with an identical tree, public commit
+identity and both required attribution trailers. This avoids an installed
+publisher's title-only multi-commit squash. It permits no hard reset, other
+branch rewrite, runtime change or gate bypass. The normal managed PR flow
+continues afterward; this is not standing rewrite authority.
+
+### Native validation prerequisite
+
+The operator approved a bounded test-harness correction after the inventory
+branch's Linux native telemetry check read records but lacked the receiver's
+final cost report. The approval question, verbatim:
+
+> The required PR checks are green, but an additional Linux Bridge telemetry test fails: it reads records, then closes the receiver before the receiver writes its final cost report. This test is outside the inventory change, and I found no tracked flake exception. May I make a bounded test-harness fix through the normal source PR gates? This excludes runtime changes and any weakening of the assertions.
+
+Response: **true**. This permits qualifying and correcting that fixture's
+completion protocol through normal review and CI. It does not authorize
+runtime changes, weaker assertions, installation or deployment. The suspected
+close-versus-settlement race still requires source and consumer evidence; the
+approval itself is not a diagnosis.
+
 ## Plan
 
 ### Phase 1 - Review the contract and capture the inception
 
 - [x] Claim #13811 and identify #13797 as an independent prerequisite and owner.
-- [ ] Reconcile the driving worktree's charter and earlier unfinished objectives.
-- [ ] Publish and merge this effort and the revised Bridge vision before implementation.
-- [ ] Inventory affected CLI/API consumers and declare the supported transition,
+- [x] Reconcile the driving worktree's charter and earlier unfinished objectives.
+- [x] Publish and merge this effort and the revised Bridge vision before implementation.
+- [x] Inventory affected CLI/API consumers and declare the supported transition,
   compatibility aliases, capability selection and rollback behavior.
+  The first slice adds `list`, `/bridges` and an opt-in source-union
+  `live-sessions list`; existing `sessions`, `targets`, registration JSON and
+  mutation selectors retain their meaning. See the
+  [conversation contract](../../../plugins/agent-bridge/docs/target-inventory.md#conversation-inventory).
+
+### Priority 1 - Attribute and fix queued idle delivery
+
+- [x] Reconcile the current Bridge source and existing queue/extension owners
+  before a bounded real sender/target reproduction.
+- [ ] Capture original enqueue, idle transition, submission and consumption
+  evidence separately; identify which side fails without replaying unknown effects.
+- [ ] Fix any remaining Bridge-owned failure with focused regression tests and
+  the normal source review, CI and merge gates, without editing Driver core.
+  Account for the independently merged #13862 and #13883 without treating them
+  as proof that every queued-input stall is resolved.
+- [ ] Repeat the real consumer flow through an authorized validation lane and
+  record any installed-adoption boundary separately from source completion.
 
 ### Phase 2 - Prove one truthful bridge inventory
 
@@ -115,6 +179,9 @@ plan, a released package or a process observation is not new effect authority.
   title/disposition/activity, hosting/transport, location and creator/controller.
 - [ ] Retain independent source completeness, freshness, liveness and control
   evidence; missing metadata and failed registration must not disappear as zero.
+- [ ] Compose remote registries, managed ACP conversations and standalone hosts
+  across the configured five-host fleet, retaining host-qualified routes and
+  explicit unavailable-source evidence.
 - [ ] Prove the source CLI against a mixed isolated consumer fixture before
   promoting this slice through its required checks and source PR.
 
@@ -157,6 +224,11 @@ plan, a released package or a process observation is not new effect authority.
 
 ## Validation Plan
 
+- [ ] A real sender and target prove queue admission, target idle observation,
+  exact submission and eventual model-facing consumption without fresh-key replay.
+- [ ] All configured five hosts contribute their independently observed registry,
+  managed and standalone-host sources or an explicit source failure; remote routes
+  name the owning host and never masquerade as local handles.
 - [ ] Mixed owner evidence produces one bridge per workspace conversation,
   including running headed hosts with missing registration, dormant worktrees,
   live anchors, independent ACP/HTTP/WebSocket endpoints and unavailable sources.
@@ -198,3 +270,76 @@ not another permanent public discovery path.
 - Captured the approved request and explicit new/resume correction.
 - Claimed #13811 and identified the independent #13797 owner.
 - No implementation, deployment or original-message delivery is claimed.
+
+### 2026-11-22 - Ordered delivery and fleet-discovery amendment
+
+- Reviewed intent merged in #13813 after exact-source approval and required CI.
+- Preserved the two staged inventory/listing tests; the interrupted runner has
+  no recorded result and is not reported as passing.
+- Adopted queued idle-delivery reproduction and correction as first priority,
+  followed by five-host inventory. Driver core remains outside this author's scope.
+- The exact current steer is retained in the driving owner's checkpoint;
+  personal routing details are not copied into this public effort.
+- A real CLI sender and the owned native target proved queue admission, SDK
+  acceptance and model-facing delivery after turn completion. Original receipt
+  readback still lacked consumption; a second existing target was waiting on an
+  operator question and was not interrupted or answered for the experiment.
+- The source confirms that the legacy live-session endpoint reads one local
+  registration table. The first implementation slice composes the existing
+  target inventory instead of changing Driver ownership or introducing a
+  competing registry. Explicit host reads use the existing authenticated carrier
+  and preserve host-qualified routes and unavailable-source evidence.
+- The new CLI/API boundary is additive and capability-gated. Legacy discovery
+  and mutation consumers remain unchanged; common selector and lifecycle
+  migration stay in their later Plan phases.
+- The contained source packet passes 46 focused controls, including the real
+  parser/client/API roundtrip, five-host composition, unsupported peers,
+  registration-only compatibility, project aliases, unknown metadata and
+  process-versus-mux liveness. It performs no native conversation execution.
+- Focused lint, owned-file formatting and the install-contract guard pass.
+  An already-installed x64 interpreter avoids the selected ARM interpreter's
+  `cryptography` source-build prerequisite. No global default, package manifest,
+  runtime installation or rollout is changed.
+- A larger local packet exhausted its wall budget and is not reported as
+  passing. The strict whole-file checker environment was prepared, but its
+  actual MyPy run exhausted the fixed 120-second limit before diagnostics.
+  Required CI and source review remain open; neither limit is waived.
+- Fresh private registry state and mixed source fixtures exercise first-read
+  behavior. Full-machine provisioning and live fleet adoption are not run:
+  this slice changes discovery, not installation, and grants no rollout.
+- Read-only attribution found an outstanding native-call fence in the running
+  extension. #13862 already isolates read-only history from fresh delivery, and
+  #13883 already reconciles original receipts from live native input. Both are
+  merged and their relevant source behaviors are present on `main`; the
+  observed installed copy lacks both. This is not qualification of new code.
+- Source work was synchronized through the normal owner after committing the
+  interrupted inventory tests. No original unknown message was replayed, no
+  Driver-core code was edited, and no deployment or reload was performed.
+- A later operator-relayed observation identifies a separate possible boundary:
+  unsubmitted text in a native input buffer may leave scheduled or queued input
+  pending while the model is idle; submitting the buffered text resumes work.
+  Treat this as a hypothesis to qualify through the existing input owner, not
+  permission to inject keys into another active conversation or alter Driver core.
+- Review qualification uses owner-produced registrations, attached clients and
+  parser/serializer observations. It distinguishes Host control handles from
+  native identities, retains native-backed managed worktrees during discovery
+  failure, and checks known-empty versus unavailable repository catalogs.
+  Unknown observations cannot join conflicting project or conversation scopes.
+- The native telemetry lane exposed a separate fixture completion gap: producer
+  pipe writes could finish before receiver fsync and final reporting. Under the
+  bounded approval above, the reading fixture now settles its actual accepted
+  record count before cleanup. Real processes, overflow accounting, failure
+  modes and fsync assertions remain; no runtime behavior or timeout is widened.
+- The combined private-state consumer packet passes 97 cases, including all
+  native performance modes and legacy target-identity controls. Live source CI,
+  review, release and the remaining lifecycle phases still require their own
+  evidence; no installed runtime or retained conversation was changed.
+- Native Linux and Windows acceptance passed for the finite-receiver revision.
+  Further owner-shape controls distinguish process/lock observations from the
+  legacy running/idle display hint. Fresh, complete omission excludes retained
+  history only after matching its configured owner, project and transport;
+  stale, incomplete and unrelated observations preserve the fallback.
+- All 18 new or changed owner controls pass in a serial bounded packet. A larger
+  concurrent packet exhausted its wall budget, and a later typing pre-check was
+  stopped after prolonged local inventory work; neither is a passing result.
+  Exact-source typing, native acceptance and review remain required in CI.

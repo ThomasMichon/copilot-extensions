@@ -1,8 +1,14 @@
 """System-menu helpers used by the legacy ``resolve`` picker fallback."""
 
 from __future__ import annotations
+from typing import cast
 
+from typing import Any
+from collections.abc import Callable
+from types import ModuleType
 import argparse
+
+
 from pathlib import Path
 
 from . import git_ops, sessions, tracking
@@ -10,41 +16,41 @@ from . import config as cfg
 from .picker import ItemKind, MenuItem, pick
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[..., Any]) -> Callable[..., Any]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[..., Any], candidate)
     return local
 
 
-def _apply_tracking_override(*args, **kwargs):
-    return _core()._apply_tracking_override(*args, **kwargs)
+def _apply_tracking_override(*args: Any, **kwargs: Any) -> git_ops.WorktreeStateInfo:
+    return cast(git_ops.WorktreeStateInfo, _core()._apply_tracking_override(*args, **kwargs))
 
 
-def _build_active_paths(*args, **kwargs):
-    return _core()._build_active_paths(*args, **kwargs)
+def _build_active_paths(*args: Any, **kwargs: Any) -> set[str]:
+    return cast(set[str], _core()._build_active_paths(*args, **kwargs))
 
 
-def _age_str(*args, **kwargs):
-    return _core()._age_str(*args, **kwargs)
+def _age_str(*args: Any, **kwargs: Any) -> str:
+    return str(_core()._age_str(*args, **kwargs))
 
 
-def _run_machine_menu(*args, **kwargs):
+def _run_machine_menu(*args: Any, **kwargs: Any) -> Any:
     return _core()._run_machine_menu(*args, **kwargs)
 
 
-def cmd_cleanup(*args, **kwargs):
-    return _core().cmd_cleanup(*args, **kwargs)
+def cmd_cleanup(*args: Any, **kwargs: Any) -> int:
+    return int(_core().cmd_cleanup(*args, **kwargs))
 
 
-def cmd_remove_system(*args, **kwargs):
-    return _core().cmd_remove_system(*args, **kwargs)
+def cmd_remove_system(*args: Any, **kwargs: Any) -> int:
+    return int(_core().cmd_remove_system(*args, **kwargs))
 
 
 def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None:
@@ -77,13 +83,13 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
         return None
 
     if action == "cleanup":
-        return _core_helper("_system_cleanup", _system_cleanup)(config)
+        return cast(int | None, _core_helper("_system_cleanup", _system_cleanup)(config))
     if action == "update":
-        return _core_helper("_system_update", _system_update)(config)
+        return cast(int | None, _core_helper("_system_update", _system_update)(config))
     if action == "status":
-        return _core_helper("_system_status", _system_status)(config)
+        return cast(int | None, _core_helper("_system_status", _system_status)(config))
     if action == "system-worktrees":
-        return _core_helper("_system_worktrees_browse", _system_worktrees_browse)(config)
+        return cast(int | None, _core_helper("_system_worktrees_browse", _system_worktrees_browse)(config))
     return None
 
 
@@ -104,7 +110,7 @@ def _system_cleanup(config: cfg.Config) -> int | None:
 
     git_ops.fetch(repo.remote, cwd=repo.anchor)
     upstream = f"{repo.remote}/{repo.default_branch}"
-    active_paths = _build_active_paths(records)
+    active_paths = _build_active_paths(records, copilot_only=False)
 
     cleanable: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
     unused: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
@@ -200,7 +206,7 @@ def _system_update(config: cfg.Config) -> int | None:
     records = tracking.list_records(
         tracking_path,
         status_filter="active",
-        platform_filter=cfg.detect_platform(),
+        platform_filter=cast(Callable[[], str], getattr(cfg, "detect_platform"))(),
     )
     records = [record for record in records if record.worktree_path and Path(record.worktree_path).exists()]
     records = [record for record in records if record.kind not in tracking.MANAGED_KINDS]
@@ -215,7 +221,7 @@ def _system_update(config: cfg.Config) -> int | None:
         except Exception:
             pass
 
-    active_paths = _build_active_paths(records)
+    active_paths = _build_active_paths(records, copilot_only=False)
     eligible: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
     for record in records:
         info = git_ops.classify_worktree(
@@ -275,7 +281,7 @@ def _system_update(config: cfg.Config) -> int | None:
         if choice == "all":
             targets = list(eligible)
         else:
-            targets = [index_map[choice]]  # type: ignore[index]
+            targets = [index_map[cast(int, choice)]]
 
         updated = 0
         skipped = 0
@@ -394,7 +400,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
         _system_pause("No system worktrees.")
         return None
 
-    active_paths = _build_active_paths(records)
+    active_paths = _build_active_paths(records, copilot_only=False)
 
     while True:
         records = [

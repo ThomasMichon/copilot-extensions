@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from ssh_manager import (
     CarrierLease,
@@ -253,6 +253,7 @@ class CarrierRequestRouter:
             "session.events",
             "session.events.ack",
             "host.status",
+            "bridge.inventory",
         }
     )
 
@@ -416,7 +417,16 @@ class CarrierRequestRouter:
             operation, payload = self._validate_request(envelope)
             if operation == "host.status":
                 from .status_carrier import prepare_stream
-                return await prepare_stream(envelope, self._client())
+                prepare = cast(
+                    Callable[[Envelope, BridgeClient], Awaitable[Envelope | AsyncIterator[Envelope]]],
+                    prepare_stream,
+                )
+                return await prepare(envelope, self._client())
+            if operation == "bridge.inventory":
+                result = await asyncio.to_thread(
+                    self._client().list_bridges, all_projects=True, local_only=True,
+                )
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "session.create":
                 client = self._client()
                 return Envelope(
@@ -689,7 +699,7 @@ class CarrierRequestRouter:
                     if item is _EOF:
                         client.refresh_endpoint()
                         break
-                    event = item
+                    event = cast(dict[str, Any], item)
                     event_name = str(event.get("event") or "")
                     if event_name == "bridge_control":
                         control = event.get("data")
@@ -736,14 +746,14 @@ class CarrierRequestRouter:
                     )
                     if event_id is not None:
                         resume_after = event_id
-            except RemoteBridgeError as error:
+            except RemoteBridgeError as remote_error:
                 yield Envelope(
                     EnvelopeType.ERROR,
                     payload={
-                        "code": error.code,
-                        "message": str(error),
-                        "status": error.status,
-                        "details": error.details,
+                        "code": remote_error.code,
+                        "message": str(remote_error),
+                        "status": remote_error.status,
+                        "details": remote_error.details,
                     },
                 )
                 return
@@ -954,6 +964,12 @@ class RemoteOperationService:
                     ) from exc
         finally:
             await lease.release()
+
+    async def bridge_inventory(self, host: str) -> dict[str, Any]:
+        from .bridge_fleet_inventory import validate_report
+
+        response = await self._request(host, {"operation": "bridge.inventory"}, timeout=15.0)
+        return validate_report(response.get("result"))
 
     async def session_status(
         self, host: str, session_id: str, caller_id: str

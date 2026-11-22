@@ -1,0 +1,2 @@
+-r typecheck-build-requirements.txt
+rich==14.2.0

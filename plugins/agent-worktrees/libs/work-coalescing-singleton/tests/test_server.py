@@ -82,6 +82,24 @@ def test_distinct_keys_never_coalesced() -> None:
         server.close()
 
 
+def test_completion_wait_preserves_result_errors_and_admission_closure() -> None:
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("fail"):
+            raise ValueError("actual operation failure")
+        return {"created": True}
+
+    server = CoalescingServer(compute)
+    try:
+        assert server.handle_request("write", "one", {}, None) == {"created": True}
+        with pytest.raises(ValueError, match="actual operation failure"):
+            server.handle_request("write", "two", {"fail": True}, None)
+        server.close_admission("retiring")
+        with pytest.raises(Unavailable):
+            server.handle_request("write", "three", {}, None)
+    finally:
+        server.close()
+
+
 def test_expired_deadline_raises_unavailable_without_blocking_owner() -> None:
     gate = threading.Event()
 

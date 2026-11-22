@@ -618,19 +618,17 @@ def _hosted_session_blocks_cleanup(record: tracking.WorktreeRecord) -> bool:
 def _build_active_paths(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
+    *, copilot_only: bool = True,
 ) -> set[str]:
-    """Build normalized paths owned by live sessions or guidance workers.
-
-    The mux check is **batched**: a single ``list-sessions`` snapshot
-    (:func:`sessions._list_mux_sessions`) is diffed against the records instead
-    of one ``has-session`` subprocess *per worktree*. On the picker-populate hot
-    path that collapses N mux spawns (each up to a 5 s timeout) into one, which
-    is the dominant Active-section cost; per-worktree probes are only a fallback.
-    """
+    """Build Copilot-active paths; cleanup can request the broader in-use set."""
     from . import local_cache_worker
     if session_ctx is None:
         session_ctx = sessions.scan_sessions_fast(records)
     active = {sessions._normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
+    if copilot_only:
+        return active
+    # Unknown ownership blocks mutation without being reported as ACTIVE.
+    active.update(session_ctx.unavailable_paths)
     for rec in records:
         if rec.worktree_path and (_hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)):
             active.add(sessions._normalize_path(rec.worktree_path))
@@ -642,8 +640,7 @@ def _build_active_paths(
                 active.add(sessions._normalize_path(rec.worktree_path))
     else:
         # Unknown presence is not activity; cleanup has its own refusal gates.
-        # Only TMux may use per-session fallback; passive PSMux CLI execution
-        # can reap live servers during startup.
+        # Cleanup retains positive occupancy hints when listing is unavailable.
         for rec in records:
             if not rec.worktree_path:
                 continue
@@ -661,13 +658,9 @@ def _build_active_paths(
     # ADDITIVE (only ever ADDS a worktree to the active set), so a stale/false
     # bound hint can never hide a live mux/lock the checks above found, and a
     # never-reconciled record (hint None) is a no-op.
-    # Bound/bridge signals name no exact owning session, so the finalize
-    # lease latch cannot prove them expired: they always keep the path live.
-    unleased: set[str] = set()
     for rec in records:
         if rec.worktree_path and _fresh_bound_live_hint(rec) is True:
             active.add(sessions._normalize_path(rec.worktree_path))
-            unleased.add(rec.worktree_id)
     # #4272 bridge-lock layer: a bridge-owned Copilot writes a provable-liveness
     # ``bridge.lock`` carrying its worktree id, so union in every worktree with a
     # live one -- the cheap, cwd-independent, file-first successor to the
@@ -681,11 +674,6 @@ def _build_active_paths(
         for rec in records:
             if rec.worktree_path and rec.worktree_id in bridge_live:
                 active.add(sessions._normalize_path(rec.worktree_path))
-                unleased.add(rec.worktree_id)
-    from . import session_lease
-    session_lease.drop_expired_finalized(records, session_ctx.active_sessions, active, keep=lambda rec: (
-        rec.worktree_id in unleased
-        or _hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)))
     return active
 
 
@@ -1503,12 +1491,16 @@ def _worktree_to_dict(
         # ``inuse.<pid>.lock`` (a bound Copilot process -- mux OR bare), and the
         # current durable head for this worktree. The Picker shows the head id
         # (so the operator can ``/resume`` it manually) and gates the Reclaim
-        # action on a live lock. Both stay off the dict when absent to keep it
-        # lean.
+        # action on a live lock. The explicit Boolean also qualifies a negative
+        # observation; live IDs remain omitted when absent.
         _live_ids = session_ctx.active_sessions.get(norm) or []
+        lock_unavailable = norm in session_ctx.unavailable_paths
+        d["session_lock_live"] = True if _live_ids else None if lock_unavailable else False
+        if lock_unavailable:
+            d["session_lock_observation_unavailable"] = True
+            d["ff_eligible"] = False
         if _live_ids:
             d["live_session_ids"] = list(_live_ids)
-            d["session_lock_live"] = True
         # Stale-lock residue: ``inuse.<pid>.lock`` file(s) whose pid is no longer
         # a live Copilot (crashed/killed without cleanup). Surfaced so the Picker
         # can offer Reclaim (file-only cleanup) for a worktree with no mux and no

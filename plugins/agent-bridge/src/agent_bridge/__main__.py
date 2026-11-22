@@ -220,7 +220,7 @@ def _set_project_override(project: str | None) -> None:
 
 
 _PROJECT_CONSUMING_VERBS = frozenset({
-    "agents", "agent-show", "create", "machines", "send",
+    "agents", "agent-show", "create", "machines", "send", "list",
     "observe-session", "session-observation-history", "observe-owner",
 })
 
@@ -551,6 +551,8 @@ def build_parser() -> argparse.ArgumentParser:
     register_venue_commands(sub)
     register_service_control_commands(sub)
     register_inventory_commands(sub)
+    from .bridge_listing_cli import register as register_bridge_listing
+    register_bridge_listing(sub)
     register_session_maintenance_commands(sub)
     register_session_targeting_commands(sub)
     register_session_streaming_commands(sub)

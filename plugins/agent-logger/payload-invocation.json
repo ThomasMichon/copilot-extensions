@@ -4,6 +4,8 @@
   "plugin": "agent-logger",
   "legacyRuntimeRoot": ".agent-logger",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
+  "bootstrapLauncher": "uv",
   "installerLifecycle": true,
   "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_LOGGER_NO_SELFPROVISION",
