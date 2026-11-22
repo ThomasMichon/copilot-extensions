@@ -6027,6 +6027,40 @@ new mock, preload, guard exception, data, production, routing or cleanup change
 is introduced. This selection does not settle any separate native-load/thread
 refusal or parent completion and makes no whole-flow savings claim.
 
+### November 22 original reconciliation early returns
+
+The adapter exports the complete original
+`test_implicit_contained_reconciliation_never_invokes_a_shell` and
+`test_missing_runtime_scope_never_invokes_a_shell`. It preserves the
+existing environment/subprocess monkeypatches, temporary-path and capture
+fixtures, return-value assertions and finite deferral diagnostic.
+Only the Python adapter's early returns are selected; no shell, native
+wrapper, registry, runtime, daemon or cleanup operation is invoked.
+
+Complete collection verifies all 66 original cases and exactly two adapter
+cases with original function-object identity. Initial unchanged effect/source
+auditing passes both in 0.968 seconds, with zero prohibited effects and three
+bound canonical Python reads. Actual owner call-phase lines are 16, 17 and
+20 for contained execution, and 16, 21, 22 and 23 for missing runtime scope.
+Neither test reaches the later wrapper/registry/subprocess branch.
+
+Two Python bindings are added for the adapter and original test module, plus
+the already hash-bound owner as a coverage target. All 8,905 prior nodes retain
+relative order; all 1,263 current source hashes, 464 prior targets,
+89 helper decisions and the 300-second bound remain intact. Compact-v2 and
+flat-v1 logical identity agree; the candidate contains 8,907 nodes,
+1,265 sources and 465 targets in 998,922 bytes. Exact-head review and complete
+fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, data admission,
+guard exception, workflow, runtime or cleanup change is introduced.
+Fresh-install/native lanes are not applicable because installation and
+runtime behavior do not change; normal fresh source CI supplies the external
+Linux consumer proof. These Python-only early-return controls are not native
+reconciliation qualification. This selection neither replays nor settles any
+refused candidate, completes the parent or demonstrates comparable whole-flow
+savings.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original
@@ -6058,6 +6092,30 @@ runtime behavior do not change; normal fresh source CI supplies the external
 Linux consumer proof. This distinct selection does not replay or settle
 any refused candidate, complete the parent or demonstrate comparable
 whole-flow savings.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013148681` names exact head
+`0c124e10e3d21d1b733979a9a661fbb9424ee660`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45040880973`, unit job `137264831751`, executes all 8,905
+cases with 43 deselections in 155.82 pytest / 176.070 packet seconds.
+It reports `mode=executed`, origin run `45040880973` attempt one,
+execution identity
+`146c2f26d010b387f6b6da3caea59d1ad8d4ced9ac4f8093c136e7334a14d596`
+and packet digest
+`33b0776217d27f1faad79adaeb9553355e533677c33600be89e5d0b8dd672742`.
+Guards, required aggregate `137266089291` and trusted metadata pass.
+Seven fresh required-check verifier reads and final head/hold/parent-reference
+fences precede the normal managed merge.
+
+Source #14102 merges at `2026-11-22T16:02:02Z` as
+`e28321eb6c31746423a2546c571fdffdd332c907`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The complete reviewed/merged-tree comparison is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this three-case leaf. Separate native-load/thread/data refusals, release,
+owner, custody and completion gates remain open.
 
 ### November 22 original historical-argv inspection
 
