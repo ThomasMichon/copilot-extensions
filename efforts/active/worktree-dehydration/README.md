@@ -5,8 +5,8 @@
 Deliver the assigned agenda-storage prerequisite so finalized-checkout cleanup
 cannot erase agenda history and the Agendas tool uses the expected external
 storage home. Preserve the larger dehydration effort and its remaining gates.
-Fix the blocking checker stub pin with a seasoned version from the configured
-feed, without weakening dependency seasoning.
+Resolve blocked checker preparation with compatible dependencies from the
+configured feeds, without weakening dependency seasoning.
 
 Current operator assignment:
 
@@ -22,10 +22,19 @@ Additional operator direction (private feed name generalized for publication):
 
 > Fix the stub package version to fit within the seasoning; it should be something provided via [configured feed]
 
-The configured feed reports all available stub wheels as younger than the
-seven-day cutoff. Older pins do not fix preparation. Keep the existing pin,
-cutoff and feed; do not substitute a public package source. Local checker
-preparation remains an external-feed blocker, not a passed check.
+Latest dependency assignment (private feed name generalized for publication):
+
+> Since this machine has to pull packages from the [configured feeds], help update the dependencies to use a set that can resolve from this machine
+
+> This just means we have to work around with different dependencies.
+
+Earlier inspection found the selected stub wheels younger than the seven-day
+cutoff, and older pins did not fix preparation. The latest assignment permits
+replacement of the dependency that requires those stubs, with the directly
+dependent consumer changes needed to preserve behavior and type checking.
+Preserve the configured feeds, seasoning and integrity checks; do not substitute
+a public package source. Prove the selected set through the normal local checker
+consumer, not only an isolated or range-only resolver result.
 
 - **Slug:** `worktree-dehydration`
 - **Repo:** copilot-extensions
@@ -50,6 +59,7 @@ Disk reclamation must not require pretending that unfinished work is complete.
 |-------------|---------------------|-------------|
 | design-driver | Owns the initial vision, architecture proposal, tracking and design PR | This effort and #13781 |
 | agenda-storage-driver | Owns #13790 source changes, consumer alignment, tests and PR delivery | This effort and #13790 |
+| checker-dependency-driver | Owns the assigned configured-feed checker dependency follow-up | This effort's dependency follow-up |
 | dehydration-owner (unassigned) | Future reversible checkout storage, automatic entry and Manager delivery | Assign through the remaining linked issues |
 
 ## Coordination
@@ -125,6 +135,13 @@ provenance destinations. No public artifact links back to private material.
   #13790 implementation, relevant tests and normal PR delivery after the
   reviewed design. It does not assign automatic dehydration, a live operator
   agenda migration, installation or fleet rollout.
+- **Checker dependency follow-up:** select a compatible dependency set that
+  resolves through the configured feeds, with relevant local preparation,
+  checks, directly dependent behavior-preserving consumer changes and normal
+  source PR delivery. This includes replacing a dependency rather than only
+  changing its version. It supersedes retaining the earlier failing stub pin,
+  not the feed, seasoning or integrity requirements. It does not authorize an
+  agenda migration, doctor workaround or fleet rollout.
 
 ## Plan
 
@@ -142,6 +159,12 @@ provenance destinations. No public artifact links back to private material.
 - [x] Provide report-first doctor inspection and explicit lossless repair/migration for existing checkout-local lanes.
 - [x] Prove history and store identity, single-writer relocation, target/locator conflicts and interrupted recovery before source retirement.
 - [x] Align the Agendas tool with the same owner-published external placement and prove agenda retention across finalized-checkout cleanup.
+
+### Checker dependency follow-up (assigned)
+
+- [x] Select a compatible checker dependency set from the configured feeds without weakening seasoning or hash checks.
+- [x] Prove the selected set with normal local checker preparation and the relevant dependency consumer checks.
+- [ ] Deliver the bounded dependency change through the repository's normal review and CI gates.
 
 ### Phase 3 - Prove reversible storage (#13783; execution not assigned)
 
@@ -259,3 +282,24 @@ kickoff; the full capability remains future work under #13781.
   recovery keeps the exact verified export and paths. Both refusal/recovery
   regressions pass in the 32-test efforts packet (2 skipped), without deleting
   partial evidence or allocating a second store.
+- The assigned dependency follow-up used the canonical retained resolver to
+  examine the complete compatible CommonMark-stub range, including the oldest
+  available releases. Exact candidates still fail the seven-day cutoff because
+  the configured registry dates their artifacts to 18 November 2026. A final
+  full-graph resolution finds no eligible `types-commonmark>=0.9.0,<0.10`.
+  The original pin and hashes remain unchanged; a range-only resolution is not
+  accepted as proof that an exact locked set can be installed.
+- The operator clarified that the follow-up should use different dependencies.
+  Replaced the Python CommonMark dependency and its separate stub package with
+  Marko 2.2.5, preserving source-comment grammar, literal examples and refusal
+  behavior. The exact full checker graph resolves through the configured feeds,
+  and normal SHA256-locked checker preparation succeeds. Other locked versions
+  and hashes are unchanged.
+- The focused GitHub/Gitea metadata and runtime-dependency packet passes all
+  121 tests. An earlier parallel run timed out in the unchanged native Manager
+  handoff guard; the complete serial rerun passes with the original limits.
+  Whole-file strict checking passes both Linux and Windows targets. The Python
+  declaration-age audit reports 772 declarations and zero violations; the
+  13-plugin install contract, touched-Python lint and whitespace checks pass.
+  These are source/test-environment results, not an installed runtime rollout
+  or a repair of the separate agenda-doctor qualification blocker.

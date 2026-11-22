@@ -1,0 +1,9 @@
+{
+  "comment": "Use the annotated Marko parser for source attribution without a separate CommonMark stub dependency.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

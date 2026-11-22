@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 import re
 
 from ..codename import is_valid_handle
@@ -11,30 +12,44 @@ _SOURCE = "agent-worktrees:source"
 _MARKER = re.compile(r"<!--\s*agent-worktrees:source\s+([^\r\n]*?)\s*-->")
 
 
+def _html_literals(body: str) -> Iterator[tuple[str, bool]]:
+    from marko.block import HTMLBlock, Quote
+    from marko.element import Element
+    from marko.inline import InlineHTML
+    from marko.parser import Parser
+
+    document = Parser().parse(body)
+    pending: list[tuple[Element, bool]] = [
+        (node, True) for node in reversed(document.children)
+    ]
+    while pending:
+        node, standalone = pending.pop()
+        if isinstance(node, Quote):
+            continue
+        if isinstance(node, HTMLBlock):
+            yield node.body, standalone
+        elif isinstance(node, InlineHTML):
+            if not isinstance(node.children, str):
+                raise ValueError("Source attribution HTML literal is unavailable")
+            yield node.children, False
+        else:
+            children: object = getattr(node, "children", ())
+            if isinstance(children, (list, tuple)):
+                pending.extend(
+                    (child, False) for child in reversed(children)
+                    if isinstance(child, Element)
+                )
+
+
 def published_marker(body: str) -> str | None:
     """Select one standalone source comment, excluding Markdown examples."""
-    from commonmark import Parser
-
     markers: list[str] = []
-    for node, entering in Parser().parse(body).walker():
-        if not entering or node.t not in ("html_block", "html_inline"):
-            continue
-        literal = node.literal or ""
+    for literal, standalone in _html_literals(body):
         if _SOURCE not in literal:
-            continue
-        parent = node.parent
-        quoted = False
-        while parent is not None:
-            quoted |= parent.t == "block_quote"
-            parent = parent.parent
-        if quoted:
             continue
         marker = literal.strip()
         match = _MARKER.fullmatch(marker)
-        if (
-            node.t != "html_block" or node.parent is None
-            or node.parent.t != "document" or match is None
-        ):
+        if not standalone or match is None:
             raise ValueError("Source attribution is not a standalone supported comment")
         fields: dict[str, str] = {}
         for token in match[1].split():
