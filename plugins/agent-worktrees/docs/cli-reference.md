@@ -46,6 +46,11 @@ descendant, with platform-appropriate path normalization. Mux occupancy is a
 separate fact: the selected `psmux` or `tmux` session listing is matched by exact
 session name. An unrelated mux server process does not invalidate that listing.
 Failed or malformed listing evidence remains unknown, not confirmed absence.
+When registered Copilot ownership cannot be observed, rows publish
+`session_lock_live: null` with `session_lock_observation_unavailable: true`,
+not a confirmed negative. Known-positive sessions remain visible. Pickers do
+not revive older activity hints, and Sync refuses unknown ownership before
+advancing a checkout.
 A mux-only worktree is not ACTIVE and may be logically finalized. Physical
 removal still checks mux/process occupancy and retained data independently.
 `finalize --retain-checkout` does not require mux absence; its source and

@@ -204,6 +204,8 @@ def build_tasks(op: str, items: list[dict[str, Any]], src: Any, *, project: str 
 def _finalize_blocker(row: dict[str, Any]) -> str | None:
     if row.get("managed_child"):
         return "controller-owned workspace: return to its controller"
+    if row.get("session_lock_observation_unavailable"):
+        return "Copilot observation unavailable: refresh qualified status before finalizing"
     if row.get("mux_observation_unknown"):
         return "mux observation unavailable: refresh qualified status before finalizing"
     lock_observed = "session_lock_live" in (row.get("raw") or row)

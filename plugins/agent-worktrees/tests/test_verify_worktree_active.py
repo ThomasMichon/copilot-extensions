@@ -202,3 +202,31 @@ def test_windows_session_cwd_normalizes_case_separators_and_parent_parts(monkeyp
     assert reclaim._cwd_under("C:/SOURCE/owned/child", r"c:\source\owned")
     assert not reclaim._cwd_under(r"C:\source\owned-sibling", r"c:\source\owned")
     assert not reclaim._cwd_under(r"C:\source\owned\..\other", r"c:\source\owned")
+
+
+def test_fleet_discovery_ignores_unrelated_missing_cwd_but_scoped_binding_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    from agent_worktrees import reclaim
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    for sid in ("a-unrelated", "b-owned"):
+        entry = tmp_path / sid
+        entry.mkdir()
+        (entry / "inuse.123.lock").touch()
+    (tmp_path / "b-owned" / "workspace.yaml").write_text(
+        json.dumps({"cwd": "/tmp/wt"}), encoding="utf-8",
+    )
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(sessions, "_is_process_alive", lambda _pid: True)
+    monkeypatch.setattr(sessions, "_is_copilot_process", lambda _pid: True)
+    monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd", lambda _cwd: "aaaa")
+    monkeypatch.setattr(reclaim, "homing_of", lambda *_a: "mux")
+    monkeypatch.setattr(locks, "process_start_time", lambda _pid: "123")
+    found = reclaim.resolve_bound_copilots(worktree_id="aaaa", worktree_path="/tmp/wt", table={})
+    assert [binding["session_id"] for binding in found] == ["b-owned"]
+    with pytest.raises(ObservationUnavailable):
+        reclaim.resolve_bound_copilots(
+            worktree_id="aaaa", worktree_path="/tmp/wt", session_ids=["a-unrelated"], table={},
+        )

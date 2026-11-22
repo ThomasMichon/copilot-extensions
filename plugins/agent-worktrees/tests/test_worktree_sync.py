@@ -190,6 +190,27 @@ def test_legacy_sync_still_changes_only_the_selected_repo(tmp_path: Path, monkey
     assert overlay.read_text() == "existing setup" and calls == []
 
 
+@pytest.mark.parametrize("paired", [False, True])
+def test_unknown_session_ownership_blocks_sync_without_advancing_either_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], paired: bool,
+) -> None:
+    from agent_worktrees import worktree_identity
+
+    _records, paths, _targets, overlay, calls = _pair(tmp_path, monkeypatch)
+    heads = {role: _head(path) for role, path in paths.items()}
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *_a: sessions.SessionContext(
+        unavailable_paths={sessions._normalize_path(str(paths["harness"]))},
+    ))
+    assert worktree_ops_cli.cmd_sync(argparse.Namespace(
+        worktree_id="harness", json=True, paired=paired,
+    )) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert result["ok"] is False and result["reason"] == "session-observation-unavailable"
+    assert all(_head(path) == heads[role] for role, path in paths.items())
+    assert overlay.read_text() == "existing setup" and calls == []
+
+
 @pytest.mark.parametrize("missing", ["pair_id", "pair_ref"])
 def test_incomplete_pair_cannot_fall_back_to_single_repository_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], missing: str) -> None:
     from agent_worktrees import worktree_identity

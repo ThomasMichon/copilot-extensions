@@ -2211,6 +2211,22 @@ def test_session_state_sweep_confined_to_backfill() -> None:
                 if (isinstance(sub, ast.Call)
                         and isinstance(sub.func, ast.Attribute)
                         and sub.func.attr in sweep_attrs):
+                    if (node.name == "_session_entry_lock_state"
+                            and sub.func.attr == "scandir" and len(sub.args) == 1
+                            and isinstance(sub.args[0], ast.Name) and sub.args[0].id == "sdir"):
+                        bindings = [
+                            child for child in ast.walk(node) if isinstance(child, ast.Assign)
+                            and any(isinstance(target, ast.Name) and target.id == "sdir" for target in child.targets)
+                        ]
+                        stores = [
+                            child for child in ast.walk(node) if isinstance(child, ast.Name)
+                            and child.id == "sdir" and isinstance(child.ctx, ast.Store)
+                        ]
+                        assert len(bindings) == len(stores) == 1
+                        assert ast.dump(bindings[0].value) == ast.dump(ast.parse(
+                            "state_dir / session_id", mode="eval",
+                        ).body)
+                        continue
                     offenders.append(f"{node.name}:{sub.func.attr}")
     assert not offenders, (
         "session-state sweep found outside backfill_sessions -- resolve by "

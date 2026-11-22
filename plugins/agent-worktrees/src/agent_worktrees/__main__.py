@@ -627,6 +627,8 @@ def _build_active_paths(
     active = {sessions._normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
     if copilot_only:
         return active
+    # Unknown ownership blocks mutation without being reported as ACTIVE.
+    active.update(session_ctx.unavailable_paths)
     for rec in records:
         if rec.worktree_path and (_hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)):
             active.add(sessions._normalize_path(rec.worktree_path))
@@ -1492,7 +1494,11 @@ def _worktree_to_dict(
         # action on a live lock. The explicit Boolean also qualifies a negative
         # observation; live IDs remain omitted when absent.
         _live_ids = session_ctx.active_sessions.get(norm) or []
-        d["session_lock_live"] = bool(_live_ids)
+        lock_unavailable = norm in session_ctx.unavailable_paths
+        d["session_lock_live"] = True if _live_ids else None if lock_unavailable else False
+        if lock_unavailable:
+            d["session_lock_observation_unavailable"] = True
+            d["ff_eligible"] = False
         if _live_ids:
             d["live_session_ids"] = list(_live_ids)
         # Stale-lock residue: ``inuse.<pid>.lock`` file(s) whose pid is no longer

@@ -159,6 +159,8 @@ def _state(w: dict[str, Any]) -> str:
             or w.get("execution_leg_live")
             or w.get("session_bare_orphan"))):
         return "ACTIVE"
+    if w.get("session_lock_observation_unavailable"):
+        return "UNKNOWN"
     st = (w.get("state") or "").lower()
     if st:
         if st == "active" and lock_observed:
@@ -284,6 +286,8 @@ def _ff_from_raw(w: dict[str, Any]) -> bool:
     ``git_ops.can_fast_forward`` (clean, no local commits ahead, strictly
     behind) plus "no live session".
     """
+    if w.get("session_lock_observation_unavailable"):
+        return False
     if "ff_eligible" in w:
         return bool(w["ff_eligible"])
     return (
@@ -514,6 +518,7 @@ def norm(
         "session_head_mismatch": bool(w.get("session_head_mismatch")),
         "session_head_mismatch_scanned_id": w.get("session_head_mismatch_scanned_id"),
         "session_lock_live": bool(w.get("session_lock_live")),
+        "session_lock_observation_unavailable": bool(w.get("session_lock_observation_unavailable")),
         # Stale-lock residue: an ``inuse.<pid>.lock`` file whose pid is no longer
         # a live Copilot (crashed/killed without cleanup). NOT a live binding, so
         # it never reads ACTIVE -- but it gates Reclaim (file-only cleanup) so a

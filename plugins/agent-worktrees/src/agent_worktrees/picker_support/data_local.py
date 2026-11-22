@@ -250,12 +250,14 @@ def _overlay_cached_state(raw: dict[str, Any], rec: tracking.WorktreeRecord) -> 
     ``session_turns`` and ``git_state`` absent) renders **Unknown** -- a Refresh
     or the follow-up populate fills it.
     """
+    lock_live: bool | None
     try:
-        lock_live, stale_pids = sessions.worktree_session_lock_state(rec)
+        lock_live, stale_pids = sessions.worktree_session_lock_state(rec, strict=True)
     except Exception:
-        lock_live, stale_pids = False, []
-    live = lock_live
+        lock_live, stale_pids = None, []
+    live = lock_live is True
     raw["session_lock_live"] = lock_live
+    raw["session_lock_observation_unavailable"] = lock_live is None
 
     if rec.session_turns is not None:
         raw["turn_count"] = rec.session_turns
@@ -264,7 +266,10 @@ def _overlay_cached_state(raw: dict[str, Any], rec: tracking.WorktreeRecord) -> 
     if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
         raw["title"] = rec.session_summary
 
-    if live:
+    if lock_live is None:
+        raw["state"] = "unknown"
+        raw["ff_eligible"] = False
+    elif live:
         # A live bound Copilot -> ACTIVE, authoritative in the fast pass (wins
         # over a cached terminal/unknown state). Keep a registered lock distinct
         # from the broader cached bound-process hint.

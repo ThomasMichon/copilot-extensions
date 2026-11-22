@@ -10,6 +10,10 @@ unavailable (mux missing/blocked). See __main__._build_active_paths.
 from __future__ import annotations
 from agent_worktrees.sessions import SessionContext
 
+import builtins
+import json
+from pathlib import Path
+from typing import Any
 
 from agent_worktrees import tracking
 
@@ -129,3 +133,95 @@ def test_legacy_picker_keeps_independent_host_liveness_when_mux_is_unknown(signa
     from agent_worktrees.picker_support import derive
 
     assert derive._sess({"mux_observation_unavailable": True, signal: True}) == "HOST(?)"
+
+
+@pytest.mark.parametrize("metadata", ["missing", "malformed", "unreadable"])
+@pytest.mark.parametrize("other_live", [False, True])
+def test_unknown_registered_cwd_is_not_confirmed_inactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: str, other_live: bool,
+) -> None:
+    from agent_worktrees import sessions
+    from agent_worktrees.picker_support import data_local, derive
+
+    record = _rec("aaaa", path=str(tmp_path / "worktree"))
+    record.sessions = [tracking.SessionEntry(session_id="unknown", started_at="")]
+    record.git_state = "wip"
+    entry = tmp_path / "unknown"
+    entry.mkdir()
+    (entry / "inuse.123.lock").touch()
+    workspace = entry / "workspace.yaml"
+    if metadata != "missing":
+        workspace.write_text("cwd: [" if metadata == "malformed" else json.dumps(
+            {"cwd": record.worktree_path},
+        ), encoding="utf-8")
+    if metadata == "unreadable":
+        original = builtins.open
+
+        def open_file(file: Any, *args: Any, **kwargs: Any) -> Any:
+            if file == workspace:
+                raise PermissionError("fixture")
+            return original(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", open_file)
+    if other_live:
+        peer = tmp_path / "live"
+        peer.mkdir()
+        (peer / "inuse.456.lock").touch()
+        (peer / "workspace.yaml").write_text(json.dumps({"cwd": record.worktree_path}), encoding="utf-8")
+        record.sessions.append(tracking.SessionEntry(session_id="live", started_at=""))
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(sessions, "_is_copilot_process", lambda _pid: True)
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: {})
+    ctx = sessions.scan_sessions_fast([record])
+    norm = sessions._normalize_path(record.worktree_path)
+    assert ctx.unavailable_paths == {norm}
+    assert cli._build_active_paths([record], ctx) == ({norm} if other_live else set())
+    assert cli._build_active_paths([record], ctx, copilot_only=False) == {norm}
+    published = cli._worktree_to_dict(record, session_ctx=ctx)
+    assert published["session_lock_live"] is (True if other_live else None)
+    assert published["session_lock_observation_unavailable"] is True
+    assert published["ff_eligible"] is False
+    cached: dict[str, Any] = {"id": "aaaa", "session_bound_live": True, "ff_eligible": True}
+    data_local._overlay_cached_state(cached, record)
+    assert cached["session_lock_live"] is (True if other_live else None)
+    assert derive._state(cached) == ("ACTIVE" if other_live else "UNKNOWN")
+    if not other_live:
+        assert derive._ff_from_raw(cached) is False
+
+
+@pytest.mark.parametrize("observed", [None, False, True])
+def test_native_process_probe_availability_is_preserved_in_scoped_activity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observed: bool | None,
+) -> None:
+    from agent_worktrees import session_liveness, sessions
+    from agent_worktrees.picker_support import data_local
+
+    record = _rec("aaaa", path=str(tmp_path / "worktree"))
+    record.sessions = [tracking.SessionEntry(session_id="registered", started_at="")]
+    entry = tmp_path / "registered"
+    entry.mkdir()
+    (entry / "inuse.123.lock").touch()
+    (entry / "workspace.yaml").write_text(json.dumps({"cwd": record.worktree_path}), encoding="utf-8")
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(sessions, "_is_copilot_process", lambda _pid: False)
+    monkeypatch.setattr(session_liveness, "copilot_pid_state", lambda _pid: observed)
+    ctx = sessions.scan_sessions_fast([record])
+    norm = sessions._normalize_path(record.worktree_path)
+    assert ctx.unavailable_paths == ({norm} if observed is None else set())
+    assert ctx.active_sessions == ({norm: ["registered"]} if observed else {})
+    cached: dict[str, Any] = {}
+    data_local._overlay_cached_state(cached, record)
+    assert cached["session_lock_live"] is observed
+
+
+@pytest.mark.parametrize("session_id", ["", "..", "../other", r"..\other"])
+def test_scoped_lock_observation_never_enumerates_a_root_or_foreign_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_id: str,
+) -> None:
+    from agent_worktrees import sessions
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr("os.scandir", lambda *_a: pytest.fail("invalid identity reached directory enumeration"))
+        with pytest.raises(ObservationUnavailable, match="Invalid registered session identity"):
+            sessions._session_entry_lock_state(tmp_path, session_id, str(tmp_path), strict_cwd=True)

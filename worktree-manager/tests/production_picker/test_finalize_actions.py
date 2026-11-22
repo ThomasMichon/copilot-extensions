@@ -38,6 +38,7 @@ def test_finalize_is_discoverable_outside_the_empty_worktree_buckets(values: dic
 @pytest.mark.parametrize("values", [
     {"managed_child": True},
     {"session_lock_live": True},
+    {"session_lock_observation_unavailable": True},
     {"mux_observation_unknown": True},
     {"session_bound_live": True},
     {"session_ahp_live": True},
@@ -87,6 +88,17 @@ def test_mux_occupancy_and_current_lock_control_distinct_picker_actions(
         assert result == {"success": False, "reason": "physical checkout is occupied"}
     raw["state"] = "active"
     assert derive.norm(raw, "fixture", "Win")["state"] == ("ACTIVE" if copilot_live else "UNKNOWN")
+
+
+def test_unknown_copilot_ownership_is_visible_without_reviving_old_activity_hints() -> None:
+    raw: dict[str, Any] = {
+        "id": "fixture-wt", "state": "wip", "session_lock_live": None,
+        "session_lock_observation_unavailable": True, "session_bound_live": True, "ff_eligible": True,
+    }
+    row = derive.norm(raw, "fixture", "Win")
+    assert row["state"] == "UNKNOWN" and not row["ff_eligible"]
+    assert row["session_lock_observation_unavailable"] is True
+    assert maintenance._finalize_blocker(row) == "Copilot observation unavailable: refresh qualified status before finalizing"
 
 
 @pytest.mark.parametrize("remote", [False, True])
@@ -202,6 +214,7 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch: pyte
             assert "fixture-child-0" in result and "fixture-child-79" in result
             viewer = app.screen.query_one("VerticalScroll")
             viewer.focus()
+            await pilot.pause()
             await pilot.press("end")
             await pilot.pause()
             assert viewer.scroll_y > 0

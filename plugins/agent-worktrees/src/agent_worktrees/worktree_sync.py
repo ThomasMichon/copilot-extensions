@@ -66,7 +66,10 @@ def sync_pair(
         for member, owner in zip(records, configs, strict=True):
             require_record_mutation(member, owner)
         report("Observing paired worktree sessions")
-        active = _build_active_paths(records, sessions.scan_sessions_fast(records), copilot_only=False)
+        session_ctx = sessions.scan_sessions_fast(records)
+        if getattr(session_ctx, "unavailable_paths", set()):
+            return failed("session-observation-unavailable", "registered Copilot ownership could not be verified")
+        active = _build_active_paths(records, session_ctx, copilot_only=False)
         # Fetch and inspect both members before advancing either branch.
         for member, owner in zip(records, configs, strict=True):
             repo = owner.default_repo
@@ -251,7 +254,12 @@ def _cmd_sync(args: argparse.Namespace, *, progress: _SyncProgress | None=None) 
     results = []
     for rec in records:
         try:
-            if getattr(args, "paired", False) and (rec.pair_id or rec.pair_ref):
+            if sessions._normalize_path(rec.worktree_path) in getattr(session_ctx, "unavailable_paths", set()):
+                result = {
+                    "worktree_id": rec.worktree_id, "ok": False, "updated": False,
+                    "reason": "session-observation-unavailable",
+                }
+            elif getattr(args, "paired", False) and (rec.pair_id or rec.pair_ref):
                 result = sync_pair(
                     rec, **({"on_progress": progress.stage} if progress is not None else {}),
                 )

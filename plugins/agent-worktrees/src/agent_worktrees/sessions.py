@@ -45,6 +45,9 @@ class SessionContext:
     active_sessions: dict[str, list[str]] = field(default_factory=dict)
     """normalized_path → list of session_ids with live Copilot processes"""
 
+    unavailable_paths: set[str] = field(default_factory=set)
+    """Worktrees with registered sessions whose ownership could not be observed."""
+
     stale_locks: dict[str, list[int]] = field(default_factory=dict)
     """normalized_path → pids from ``inuse.<pid>.lock`` files whose process is
     NOT a live Copilot (a crashed/killed session that never cleaned up its
@@ -456,33 +459,65 @@ def _session_entry_lock_state(
     state_dir: Path, session_id: str, worktree_path: str | None = None, *, strict_cwd: bool = False,
 ) -> tuple[int | None, list[int]]:
     """Return matching-CWD live and stale lock PIDs; strict CWD failures raise."""
+    from .push_timeout import ObservationUnavailable
+
+    if strict_cwd:
+        from .session_projection import _valid_session_id
+
+        if not _valid_session_id(session_id):
+            raise ObservationUnavailable("Invalid registered session identity")
     sdir = state_dir / session_id
-    if not sdir.is_dir():
+    if not strict_cwd and not sdir.is_dir():
         return None, []
     # Detached parent-continuation runs reuse a foreign cwd -- never a live
     # signal for THIS worktree (mirrors _enrich_session_dir).
     if _is_detached_session(sdir):
         return None, []
     try:
-        lock_files = list(sdir.glob("inuse.*.lock"))
-    except OSError:
+        if strict_cwd:
+            with os.scandir(sdir) as entries:
+                lock_files = [Path(entry.path) for entry in entries
+                              if entry.name.startswith("inuse.") and entry.name.endswith(".lock")]
+        else:
+            lock_files = list(sdir.glob("inuse.*.lock"))
+    except FileNotFoundError:
+        return None, []
+    except OSError as error:
+        if strict_cwd:
+            raise ObservationUnavailable("Registered session locks could not be observed") from error
         return None, []
     stale_pids: list[int] = []
     for lock_file in lock_files:
         parts = lock_file.stem.split(".")
-        if len(parts) < 2:
+        if len(parts) < 2 or (strict_cwd and len(parts) != 2):
+            if strict_cwd:
+                raise ObservationUnavailable("Registered session has an unrecognized lock")
             continue
         try:
             pid = int(parts[1])
         except ValueError:
+            if strict_cwd:
+                raise ObservationUnavailable("Registered session has an unrecognized lock")
             continue
+        if strict_cwd and pid <= 0:
+            raise ObservationUnavailable("Registered session has an unrecognized lock")
         # _is_copilot_process is alive-AND-copilot in one call (OpenProcess
         # fails for a dead pid), so a stale lock from a crashed session does
         # not count.
-        if _is_copilot_process(pid):
+        live = _is_copilot_process(pid)
+        if strict_cwd and not live:
+            from . import session_liveness
+
+            try:
+                state = session_liveness.copilot_pid_state(pid)
+            except Exception as error:
+                raise ObservationUnavailable("Registered session process observation is unavailable") from error
+            if state is None:
+                raise ObservationUnavailable("Registered session process observation is unavailable")
+            live = state
+        if live:
             if worktree_path is not None:
                 from . import reclaim
-                from .push_timeout import ObservationUnavailable
 
                 cwd = reclaim._session_cwd(sdir)
                 if strict_cwd and (not cwd or not worktree_path):
@@ -494,12 +529,14 @@ def _session_entry_lock_state(
     return None, stale_pids
 
 
-def worktree_session_lock_state(rec: tracking.WorktreeRecord) -> tuple[bool, list[int]]:
+def worktree_session_lock_state(rec: tracking.WorktreeRecord, *, strict: bool = False) -> tuple[bool, list[int]]:
     """Read registered PID locks and CWDs without conversation/process sweeps.
     Only live matching-CWD Copilots count; other PIDs are stale lock residue.
     Best-effort: an unindexed worktree returns ``(False, [])``.
     Explicit registry repair supplies missing session identities.
     """
+    from .push_timeout import ObservationUnavailable
+
     sessions_list = getattr(rec, "sessions", None)
     if not sessions_list:
         return False, []
@@ -507,14 +544,23 @@ def worktree_session_lock_state(rec: tracking.WorktreeRecord) -> tuple[bool, lis
     if not state_dir.exists():
         return False, []
     stale_pids: list[int] = []
+    unavailable = False
     for entry in sessions_list:
         sid = getattr(entry, "session_id", None)
         if not sid:
             continue
-        pid, stale = _session_entry_lock_state(state_dir, sid, getattr(rec, "worktree_path", "") or "")
+        try:
+            pid, stale = _session_entry_lock_state(
+                state_dir, sid, getattr(rec, "worktree_path", "") or "", strict_cwd=strict,
+            )
+        except ObservationUnavailable:
+            unavailable = True
+            continue
         if pid is not None:
             return True, stale_pids
         stale_pids.extend(stale)
+    if unavailable:
+        raise ObservationUnavailable("Registered session working directory is unavailable")
     return False, stale_pids
 
 
@@ -560,6 +606,7 @@ def _enrich_session_dir(
     if _is_detached_session(entry):
         return
     from . import reclaim
+    from .push_timeout import ObservationUnavailable
 
     cwd_matches = reclaim._cwd_under(reclaim._session_cwd(entry), worktree_path)
 
@@ -613,27 +660,15 @@ def _enrich_session_dir(
     # Session count
     ctx.session_count[norm_path] = ctx.session_count.get(norm_path, 0) + 1
 
-    # Liveness check via lock files
-    if not cwd_matches:
+    try:
+        pid, stale = _session_entry_lock_state(session_dir, session_id, worktree_path, strict_cwd=True)
+    except ObservationUnavailable:
+        ctx.unavailable_paths.add(norm_path)
         return
-    for lock_file in entry.glob("inuse.*.lock"):
-        parts = lock_file.stem.split(".")
-        if len(parts) >= 2:
-            try:
-                lock_pid = int(parts[1])
-            except ValueError:
-                continue
-            if _is_copilot_process(lock_pid):
-                if norm_path not in ctx.active_sessions:
-                    ctx.active_sessions[norm_path] = []
-                ctx.active_sessions[norm_path].append(session_id)
-                break
-            else:
-                # A lock file whose pid is no longer a live Copilot -- residue
-                # from a crashed/killed session. Record it so the Picker can
-                # offer Reclaim (file-only cleanup) instead of stranding the row
-                # or falsely reading it ACTIVE.
-                ctx.stale_locks.setdefault(norm_path, []).append(lock_pid)
+    if pid is not None:
+        ctx.active_sessions.setdefault(norm_path, []).append(session_id)
+    elif cwd_matches and stale:
+        ctx.stale_locks.setdefault(norm_path, []).extend(stale)
 
 
 def scan_sessions_fast(
@@ -641,24 +676,10 @@ def scan_sessions_fast(
 ) -> SessionContext:
     """Targeted session scan using the per-worktree session registry.
 
-    Instead of walking all of ``~/.copilot/session-state/``, reads
-    session IDs from each record's ``sessions`` list and random-accesses only
-    those specific directories.
-
-    **Invariant (GH #198):** a routine, looped read path (the ``list`` command a
-    poller drives) must never sweep the whole session-state folder -- only
-    random-access known session ids. A record whose ``sessions`` registry is
-    empty/None (pre-registry, or the register-session hook never fired) is left
-    un-enriched here; its registry is repaired only by an **explicit** backfill
-    (``agent-worktrees backfill-sessions`` / ``doctor``), never by an
-    on-every-list sweep. The prior full-scan fallback made this an
-    O(worktrees x sessions) ``yaml.safe_load`` walk that pinned a CPU core.
-
-    Args:
-        records: List of WorktreeRecord objects (with sessions field).
-
-    Returns:
-        SessionContext with active sessions and latest summaries.
+    Routine reads random-access only registered session IDs (GH #198).
+    Empty/pre-registry records remain un-enriched; explicit backfill or doctor
+    owns registry repair, never an on-every-list session-state sweep.
+    Unavailable ownership stays distinct from a confirmed inactive worktree.
     """
     ctx = SessionContext()
     session_dir = _session_state_dir()
@@ -670,15 +691,6 @@ def scan_sessions_fast(
         if not rec.worktree_path:
             continue
 
-        # sessions=None means pre-registry; an empty list means the registry is
-        # active but no session was recorded for this worktree (e.g. the
-        # register-session hook never fired). Either way there is no
-        # random-access target -- and, per the invariant (GH #198), a routine
-        # read must NOT sweep all of session-state to recover one. The record is
-        # left un-enriched here; an explicit backfill
-        # (``agent-worktrees backfill-sessions`` / ``doctor``) repairs the
-        # registry off the hot path. The prior full-scan fallback made this an
-        # O(worktrees x sessions) yaml.safe_load walk that pinned a CPU core.
         sessions = getattr(rec, "sessions", None)
         if not sessions:
             continue
