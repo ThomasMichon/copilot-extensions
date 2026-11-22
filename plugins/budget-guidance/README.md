@@ -45,6 +45,12 @@ PowerShell, including the managed-Python request and native bootstrap provider.
 It needs neither Python nor uv and refuses missing, linked or escaping plan
 inputs before publishing snapshot redirects. Provision remains a separate,
 explicit operation.
+The source closure also bundles the shared installation driver's independent
+native foundation through the optional `bootstrap` dependency. The default CLI
+dependency remains `agent-procutil`; bundling these inputs does not enroll a
+worker or migrate the session bootstrap. Raw snapshots rewrite both direct
+source references locally and retain the same canonical dependency closure
+after the checkout is removed.
 Retained completed environments are not relabeled or deleted by this launch
 change. Startup/publication and posture-guidance helper migration remain
 separate from these command/setup and removal boundaries.

@@ -846,6 +846,29 @@ def _raw_budget_checkout(tmp_path: Path) -> tuple[Path, Path]:
     return checkout, checkout / "plugins/budget-guidance"
 
 
+def _assert_stamped_installation_foundation(snapshot: Path) -> None:
+    manifest = tomllib.loads((snapshot / "pyproject.toml").read_text(encoding="utf-8"))
+    assert manifest["tool"]["uv"]["sources"]["agent-update-driver"]["path"] == "libs/update-driver"
+    driver = snapshot / "libs/update-driver"
+    for suffix in ("sh", "ps1"):
+        assert "# Installation driver lifecycle contract: budget-install-v1" in (
+            driver / "scripts" / f"first-use.{suffix}"
+        ).read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "_budget_stamped_foundation_inputs", driver / "src/update_driver/foundation_inputs.py",
+    )
+    assert spec and spec.loader
+    reader = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = reader
+    try:
+        spec.loader.exec_module(reader)
+        inputs = reader.inspect(driver)
+        assert inputs.files and len(inputs.packages) == 4
+        assert all(path.is_relative_to(snapshot) for path in inputs.files)
+    finally:
+        sys.modules.pop(spec.name, None)
+
+
 @pytest.mark.parametrize("engine", ["pwsh", "powershell"])
 @pytest.mark.parametrize("operation", ["stamp", "missing-source", "linked-parent", "invalid-plan"])
 def test_powershell_raw_checkout_stamped_closure(
@@ -915,6 +938,7 @@ def test_powershell_raw_checkout_stamped_closure(
         checkout / "libs/installer-engine/installer_pip_index.py"
     ).read_bytes()
     shutil.rmtree(checkout)
+    _assert_stamped_installation_foundation(snapshot)
     repeated = subprocess.run(
         [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
          str(snapshot / "scripts/install.ps1"), "stamp"],
@@ -927,7 +951,7 @@ def test_powershell_raw_checkout_stamped_closure(
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX checkout reference coverage")
 @pytest.mark.parametrize("operation", [
     "install", "stamp", "stamp-artifacts", "stamp-linked-file", "stamp-linked-parent",
-    "stamp-missing-source", "missing-reader",
+    "stamp-missing-source", "stamp-invalid-plan", "missing-reader",
 ])
 def test_posix_checkout_reader_reference_and_stamped_closure(
     tmp_path: Path, operation: str,
@@ -1013,6 +1037,9 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
         source.symlink_to(target, target_is_directory=True)
     elif operation == "stamp-missing-source":
         (checkout / "libs/agent-procutil/src/agent_procutil/__init__.py").unlink()
+    elif operation == "stamp-invalid-plan":
+        with (payload / "scripts/installer-source-assets.tsv").open("a", encoding="utf-8") as stream:
+            stream.write("copy\tlibs/agent-procutil/pyproject.toml\tscripts/../../escaped\n")
     if operation == "stamp":
         for name in ("cp", "mkdir", "dirname"):
             executable = shutil.which(name)
@@ -1028,12 +1055,13 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
         [BASH, str(payload / "scripts/install.sh"), "stamp" if is_stamp else "install"],
         cwd=tmp_path, env=stamp_env, capture_output=True, text=True, timeout=120,
     )
-    if operation.startswith("stamp-linked-") or operation == "stamp-missing-source":
+    if operation.startswith("stamp-linked-") or operation in ("stamp-missing-source", "stamp-invalid-plan"):
         assert result.returncode != 0
         if operation.startswith("stamp-linked-"):
             assert "Linked source snapshot asset refused" in result.stdout + result.stderr
         assert not (root / "payload-dir").exists()
         assert not (root / "current-version").exists()
+        assert not (checkout / "escaped").exists()
         assert not list((root / "snapshots").glob("*.tmp-*"))
         repeated = subprocess.run(
             [BASH, str(payload / "scripts/install.sh"), "stamp"], cwd=tmp_path, env=stamp_env,
@@ -1099,6 +1127,7 @@ def test_posix_checkout_reader_reference_and_stamped_closure(
             checkout / "libs/installer-engine/installer_dependency_config.py"
         ).read_bytes()
         shutil.rmtree(checkout)
+        _assert_stamped_installation_foundation(snapshot)
         provisioned = subprocess.run(
             [BASH, str(snapshot / "scripts/install.sh"), "provision"],
             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
