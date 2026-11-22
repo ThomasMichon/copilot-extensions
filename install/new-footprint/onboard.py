@@ -83,7 +83,9 @@ def main() -> None:
     # the same verified local wheel set the incoming application will use.
     executor = args.workspace / "executor"
     shutil.copytree(footprint / "apps" / "worktree-manager", executor)
-    env = {**os.environ, "UV_OFFLINE": "1", "UV_PYTHON_DOWNLOADS": "never"}
+    env = {k: v for k, v in os.environ.items()
+           if k.upper() not in {"GH_TOKEN", "GITHUB_TOKEN", "ARTIFACT_VERIFY_TOKEN"}}
+    env.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never")
     subprocess.run([uv, "sync", "--project", str(executor), "--locked", "--no-dev", "--no-build",
                     "--no-editable", "--python", sys.executable], env=env, check=True, timeout=180)
     python = executor / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
