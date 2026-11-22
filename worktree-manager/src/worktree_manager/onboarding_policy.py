@@ -44,7 +44,8 @@ def observe(app: str, root: Path, project: str, anchor: Path, companion: Path | 
         if not machine_path.is_absolute():
             raise ValueError("Index machine configuration path must be absolute")
         result = owner("agent_index.configuration_layers").explicit_repository_layers(
-            anchor, context, local, machine_path, parser=native._parse_yaml_for_layers)
+            anchor, context, local, machine_path, parser=native._parse_yaml_for_layers,
+            marketplace=index_config._repo_marketplace_overlay_path(anchor))
         if result["layers"] == ["defaults"]:
             return "unconfigured"
         machines = {x["machine"].casefold() for x in native._validate_config(result["values"])["indexers"]}

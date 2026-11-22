@@ -28,6 +28,7 @@ class InstalledPolicyTest(unittest.TestCase):
                     [sys.executable, "-I", "-B", "-c", probe, app, temp, "control",
                      str(anchor), str(companion) if bound else "", "worktrees-alias"], capture_output=True, text=True,
                     env={**os.environ, "AGENT_INDEX_MACHINE": index_machine,
+                         "COPILOT_EXTENSIONS_CONTEXT": '{"marketplaceId":"fixture-market"}',
                          "AGENT_INDEX_CONFIG": str(root / "machine-index.yaml"),
                          "AGENT_VAULT_CONFIG": str(root / "machine-vault.json")}, timeout=30,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -71,6 +72,11 @@ class InstalledPolicyTest(unittest.TestCase):
             observe("agent-index", None)
             base_index.write_text("indexer:\n  machine: fixture\n", encoding="utf-8")
             observe("agent-index", "host", bound=False)
+            overlay = anchor / ".copilot-extensions/agent-index/marketplaces/fixture-market/config.yaml"
+            overlay.parent.mkdir(parents=True)
+            overlay.write_text("indexer:\n  machine: other-host\n", encoding="utf-8")
+            observe("agent-index", "client", bound=False)
+            overlay.unlink()
             base_index.unlink()
             observe("agent-index", None, bound=False)
             vault.write_text('{"enabled":"false"}', encoding="utf-8")
