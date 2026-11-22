@@ -23,7 +23,7 @@ def repo_config_for(
     if loaded_config is None:
         return None
     try:
-        repo_config = getattr(loaded_config, "repos", {}).get(repo_name)
+        repo_config = loaded_config.repos.get(repo_name) if hasattr(loaded_config, "repos") else None
         if repo_config is not None:
             return repo_config
         return loaded_config.default_repo

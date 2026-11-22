@@ -80,7 +80,7 @@ def _read_repo_settings_strict(
 ) -> RepoPluginSettings:
     """Read all settings tiers without hiding malformed or unreadable sources."""
     enabled: dict[str, bool] = {}
-    marketplaces: dict[str, dict] = {}
+    marketplaces: dict[str, dict[str, Any]] = {}
     ignored_marketplaces = ignored_native_marketplaces or set()
     ignored_enabled = ignored_native_enabled or set()
     for rel in SETTINGS_RELS:
@@ -176,7 +176,7 @@ def _ensure_distinct_checkouts(harness: Path, knowledge: Path) -> None:
 
 
 def _validate_marketplace_source(
-    definition: dict,
+    definition: dict[str, Any],
     *,
     marketplace: object,
     source_name: str,
@@ -204,7 +204,7 @@ def _validate_marketplace_source(
             )
 
 
-def _is_local_marketplace(definition: dict) -> bool:
+def _is_local_marketplace(definition: dict[str, Any]) -> bool:
     source = definition.get("source")
     return bool(
         isinstance(source, dict)
@@ -213,7 +213,7 @@ def _is_local_marketplace(definition: dict) -> bool:
     )
 
 
-def _localized_marketplace(definition: dict, knowledge_path: Path) -> dict:
+def _localized_marketplace(definition: dict[str, Any], knowledge_path: Path) -> dict[str, Any]:
     """Copy a local marketplace definition and absolutize its directory path."""
     source = definition.get("source")
     assert isinstance(source, dict)
@@ -241,7 +241,7 @@ def _dict_setting(data: dict[str, Any], key: str, path: Path) -> dict[str, Any]:
 
 
 def _managed_marker(
-    existing: dict[str, Any], path: Path, *, validate_tool: Callable[[dict, Path], object] | None = None,
+    existing: dict[str, Any], path: Path, *, validate_tool: Callable[[dict[str, Any], Path], object] | None = None,
 ) -> dict[str, Any] | None:
     """Return a validated ownership marker, or ``None`` when none exists."""
     if KEY in existing:
@@ -279,10 +279,10 @@ def same_json_value(left: Any, right: Any) -> bool:
         return left.keys() == right.keys() and all(same_json_value(left[key], right[key]) for key in left)
     if isinstance(left, list):
         return len(left) == len(right) and all(same_json_value(a, b) for a, b in zip(left, right))
-    return left == right
+    return bool(left == right)
 
 
-def _retire_previous(current: dict, previous: dict) -> None:
+def _retire_previous(current: dict[str, Any], previous: dict[str, Any]) -> None:
     """Drop a previously managed value only when it remains unmodified."""
     for key, prior_value in previous.items():
         if key in current and same_json_value(current[key], prior_value):
@@ -349,9 +349,9 @@ def _overlay_lock_target(path: Path) -> Path:
 def _legacy_local_marketplaces(
     *,
     existing: dict[str, Any],
-    definitions: dict[str, dict],
+    definitions: dict[str, dict[str, Any]],
     knowledge_path: Path,
-    legacy_definitions: dict[str, dict],
+    legacy_definitions: dict[str, dict[str, Any]],
     legacy_knowledge_path: Path | None,
 ) -> set[str]:
     """Identify markerless marketplaces that exactly match old assembler output."""
@@ -375,7 +375,7 @@ def _compose_locked(
     harness_path: str | Path,
     knowledge_path: str | Path,
     *,
-    validate_tool: Callable[[dict, Path], object] | None = None,
+    validate_tool: Callable[[dict[str, Any], Path], object] | None = None,
     pair_id: str | None = None,
     pair_kind: str | None = None,
     legacy_knowledge_path: str | Path | None = None,
@@ -422,8 +422,8 @@ def _compose_locked(
     _retire_previous(enabled, previous_enabled)
 
     local_names: set[str] = set()
-    local_definitions: dict[str, dict] = {}
-    desired_marketplaces: dict[str, dict] = {}
+    local_definitions: dict[str, dict[str, Any]] = {}
+    desired_marketplaces: dict[str, dict[str, Any]] = {}
     for name, definition in knowledge_settings.marketplaces.items():
         if _is_local_marketplace(definition):
             local_names.add(name)
@@ -437,7 +437,7 @@ def _compose_locked(
         for source, on in knowledge_settings.enabled.items()
         if on and split_source(source)[1] in local_names
     }
-    legacy_local_definitions: dict[str, dict] = {}
+    legacy_local_definitions: dict[str, dict[str, Any]] = {}
     if (
         markerless_legacy
         and legacy_knowledge is not None
@@ -480,7 +480,7 @@ def _compose_locked(
         ignored_native_enabled=proven_legacy_enabled,
     )
 
-    candidates: dict[str, dict] = {}
+    candidates: dict[str, dict[str, Any]] = {}
     conflicting_marketplaces: list[str] = []
     harness_owned_marketplaces: set[str] = set()
     harness_committed_marketplaces = (
@@ -510,7 +510,7 @@ def _compose_locked(
                 # The generic harness base remains authoritative on name collision.
                 conflicting_marketplaces.append(name)
 
-    managed_marketplaces: dict[str, dict] = {}
+    managed_marketplaces: dict[str, dict[str, Any]] = {}
     for name, definition in candidates.items():
         if name in proven_legacy_names:
             # Exact old-assembler output is safe to adopt and, for a paired
@@ -621,7 +621,7 @@ def _compose_locked(
     }
 
 
-def preserve_guard(result: dict) -> None:
+def preserve_guard(result: dict[str, Any]) -> None:
     """Older personal owners must refuse mixed contributor documents."""
 
     if KEY in result:
@@ -633,8 +633,8 @@ def preserve_guard(result: dict) -> None:
         result[_OVERLAY_KEY]["version"] = 1
 
 
-def protect_tool_receipts(existing: dict, result: dict, personal: dict,
-                          marketplace_conflicts: list, enabled_conflicts: list) -> None:
+def protect_tool_receipts(existing: dict[str, Any], result: dict[str, Any], personal: dict[str, Any],
+                          marketplace_conflicts: list[str], enabled_conflicts: list[str]) -> None:
     """A missing live tool value does not transfer its receipt to personal input."""
     tool = existing.get(KEY)
     if tool is None:
@@ -675,7 +675,7 @@ def protect_tool_receipts(existing: dict, result: dict, personal: dict,
         result.pop("enabledPlugins", None)
 
 
-def validate_personal_version(marker: dict, path: Path, existing: dict) -> None:
+def validate_personal_version(marker: dict[str, Any], path: Path, existing: dict[str, Any]) -> None:
 
     if marker.get("version") not in (1, 2) or (marker.get("version") == 2 and KEY not in existing):
         raise KnowledgePluginError(

@@ -10,7 +10,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .copilot_plugin_profile import _Family
 
 
 from . import config as cfg
@@ -176,7 +179,7 @@ def _retire_invalid_pair_overlay(
         )
 
 
-def _managed_marker(existing: dict[str, Any], path: Path, *, tool_family=None) -> dict[str, Any] | None:
+def _managed_marker(existing: dict[str, Any], path: Path, *, tool_family: _Family | None = None) -> dict[str, Any] | None:
     from .copilot_plugin_profile import validate_marker
 
     return overlay._managed_marker(existing, path, validate_tool=lambda data, target: validate_marker(data, target, family=tool_family))
