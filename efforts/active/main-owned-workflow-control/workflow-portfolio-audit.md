@@ -4375,6 +4375,33 @@ installation or runtime behavior changes. This is not a reuse hit,
 controlled whole-flow saving, real publication or acceptance of any broader
 owner or parent gate.
 
+### November 22 original runtime-profile refusal and worker-limit qualification
+
+The original runtime-profile class adapter preserves all 53 collected class,
+method and parameter identities. Initial qualification selects exactly the
+52 non-subprocess cases, but its first case calls `socket.gethostname`
+through dependency-marker evaluation and `platform.uname()`. The unchanged
+effect auditor refuses that host query. None of the 52 cases is admitted;
+the failed helper, candidate, selector inventory and exact adapter remain
+retained. No preload, test substitution, effect exception or retry is used.
+
+A distinct adapter exports the unchanged original bounded-hash worker-limit
+refusal function and all three parameters (`0`, `5`, `True`). Complete
+collection maps those three cases out of the five-case original module,
+leaving both threaded hashing witnesses unchanged outside the packet.
+Fresh qualification passes in 1.579 seconds with zero prohibited effects,
+25 bound Python reads and positive actual call-phase owner lines for every
+case. No source/data admission rule or auditor changes.
+
+The resulting candidate contains 8,240 nodes, 1,183 bound sources, 448 targets
+and 931,948 compact-v2 bytes. Only the new adapter and original hashing test
+module add source bindings. All 8,237 preceding nodes and 1,181 hashes retain
+their order and values; targets, 89 helper decisions, compact/flat-v1 identity
+and the 300-second bound remain unchanged. Complete fresh Linux packet CI
+and normal current-head review remain required. This is not qualification
+of the refused runtime-profile cohort, native threading, fresh installation,
+real builds or the broader owner and parent gates.
+
 ### November 22 original subject-verifier retry qualification
 
 A new adapter exports all six original subject-attestation verifier retry
@@ -4448,9 +4475,29 @@ The reduced packet contains 8,237 nodes, 1,181 bound sources, 448 targets and
 original standalone fixture module and runtime-profile fixture module add
 bindings. All 8,214 preceding nodes and 1,177 existing source hashes remain,
 with unchanged targets, 89 helper decisions, compact/flat-v1 identity, byte
-cap and 300-second bound. Normal strict typing, current-head review and
-complete fresh Linux CI remain required; initial-head green is not current
-qualification and does not settle the undeclared-data finding.
+cap and 300-second bound. The reduced adapter passes fatal Ruff and strict
+Python 3.10/Linux and Windows typing; documentation consistency and diff
+checks pass. Copilot approval `6011165641` covers exact head
+`9566469b96c784506b65c15bd32e44d62058ea42`, with the deferred-data thread
+resolved and no active findings.
+
+Source CI `45001118735`, unit job `137142645852`, freshly passes all 8,237
+cases with 39 deselections, 188.19 pytest seconds and 209.997 packet seconds.
+A description update's later automatic CI `45001151013`, unit job
+`137143734081`, also freshly passes all 8,237: 184.56 pytest seconds,
+207.404 packet seconds, `mode=executed`, origin run `45001151013` attempt one
+and digest `43205f1ff1f0d2b9fa36389a3b0ffad64e6209e80a87c0cb264afa469ad395ee`.
+The first managed merge refuses while that later series still expects its
+required aggregate; no CI is bypassed. After current aggregate `137144814342`,
+guards and trusted metadata pass, seven fresh verifier reads and a final
+head/hold/review fence precede the normal managed merge.
+
+Source #14058 merges at `2026-11-22T08:16:08Z` as
+`39433b011c1decd03f4681455df3c41a44df5a55`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the 23-case leaf. Initial
+29-case green does not settle the undeclared-data gap; all six cases remain
+deferred without changed inputs, assertions or data admission.
 Fresh-install/native/installed lanes are not exercised because no installation
 or runtime behavior changes. This is not a reuse hit, controlled whole-flow
 saving, real build/publication, resolution of either deferred witness or

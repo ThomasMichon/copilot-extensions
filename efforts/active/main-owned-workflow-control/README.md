@@ -1343,7 +1343,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   closure. Withdraw the entire original function without changing its inputs
   or assertions; a green Python-read effect audit does not bind that TOML.
   Do not widen the data allowlist to admit this cohort.
-- [ ] Qualify the other 23 synthetic cases from twelve original core-artifact
+- [x] Qualify the other 23 synthetic cases from twelve original core-artifact
   functions, preserving their exact functions, fixture helpers, build
   callbacks, parameters and assertions. Keep the original isolated builder
   CLI smoke with its existing integration owner. Require closed reads,
@@ -1352,6 +1352,33 @@ authorizes critical main-path acceptance or a bounded administrative change.
   compact/flat-v1 identity and the 300-second bound. Require normal strict
   typing, current-head review and complete fresh Linux CI; native, installed,
   real builds and broader parent gates remain separate.
+  #14058 merges at `39433b011c1decd03f4681455df3c41a44df5a55` after
+  exact-head Copilot approval and complete required Linux CI with all 8,237
+  units freshly executed. The six undeclared-data cases, original isolated
+  CLI smoke and broader parent gates remain open.
+- [ ] Qualify the 52 synthetic cases from thirteen original runtime-profile
+  class methods, preserving the exact original class, methods, parameters,
+  helpers and assertions. Admit only those positive selectors; keep the
+  original real fresh-process smoke unchanged with its integration owner.
+  Require complete original/adapter collection identity, closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; native, installed,
+  data-admission and broader parent gates remain separate.
+  Initial qualification preserves all 53 original/adapter class, method and
+  parameter identities but stops on the first selected case: dependency-marker
+  evaluation reaches `platform.uname()` and `socket.gethostname`, refused by the
+  unchanged effect auditor. None of the 52 cases is admitted. Retain the
+  candidate and failed helper; do not preload host state or retry variants.
+- [ ] Qualify the three original bounded-hash worker-count refusal cases,
+  preserving their exact function, parameters and assertions. Keep the two
+  original threaded hashing witnesses unchanged with their integration owner.
+  Require closed reads, positive per-case actual owner calls and zero
+  prohibited effects before admission. Preserve preceding nodes and hashes,
+  targets, helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI; the refused runtime-profile class and broader parent gates remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
