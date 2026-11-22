@@ -3,6 +3,38 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_coverage_correlation.py",
+      [
+        "TestCorrelation::test_baseline_path_on_main_is_one_file_per_plugin",
+        "TestCorrelation::test_require_measured_commit_returns_the_sha_when_present",
+        "TestCorrelation::test_require_measured_commit_rejects_a_missing_sha",
+        "TestCorrelation::test_require_measured_commit_rejects_an_absent_key",
+        "TestCorrelation::test_release_tag_for_uses_the_full_measured_commit_not_a_prefix",
+        "TestCorrelation::test_release_tag_for_is_stable_for_the_same_commit",
+        "TestCorrelation::test_asset_name_for_matches_the_collection_step_artifact_name",
+        "TestCorrelation::test_build_pointer_embeds_the_release_tag_and_asset_name",
+        "TestFetchBaselineAsset::test_rejects_a_pointer_missing_release_tag_or_asset",
+        "TestFetchBaselineAsset::test_rejects_a_pointer_missing_plugin_or_measured_commit",
+        "TestFetchBaselineAsset::test_rejects_a_pointer_with_non_string_fields",
+        "TestFetchBaselineAsset::test_downloads_and_parses_the_asset",
+        "TestFetchBaselineAsset::test_raises_on_a_failed_download",
+        "TestFetchBaselineAsset::test_raises_when_gh_is_not_launchable",
+        "TestFetchBaselineAsset::test_raises_on_a_timed_out_download",
+        "TestFetchBaselineAsset::test_raises_on_malformed_json",
+        "TestFetchBaselineAsset::test_raises_on_non_utf8_content",
+        "TestFetchBaselineAsset::test_raises_when_downloaded_json_is_not_an_object",
+        "TestFetchBaselineAsset::test_raises_when_generated_at_is_missing",
+        "TestFetchBaselineAsset::test_raises_when_generated_at_is_not_a_parseable_timestamp",
+        "TestFetchBaselineAsset::test_raises_when_generated_at_is_timezone_naive",
+        "TestFetchBaselineAsset::test_raises_when_coverage_or_tests_is_not_a_mapping",
+        "TestFetchBaselineAsset::test_raises_when_a_coverage_entrys_per_line_value_is_not_a_mapping",
+        "TestFetchBaselineAsset::test_raises_when_a_coverage_lines_test_list_is_malformed",
+        "TestFetchBaselineAsset::test_raises_when_a_tests_record_is_not_a_mapping",
+        "TestFetchBaselineAsset::test_raises_when_downloaded_plugin_does_not_match_the_pointer",
+        "TestFetchBaselineAsset::test_raises_when_downloaded_measured_commit_does_not_match_the_pointer"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_coverage_policy.py",
       [
         "TestSelectTests::test_selects_exact_covering_tests_for_a_changed_line",
@@ -10245,6 +10277,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_coverage_correlation.py": "dd03755187c43035bf20211e3ea1c10bac6cdaf802a8c8ee2b0b8011eab19323",
     "tools/promotion_unit_tests/test_original_coverage_policy.py": "007f28af1e4a1bcc560b1f8a63fb040d400951a30e26ed77408eb99612d6e899",
     "tools/test_coverage_guided_selection.py": "5a906e5b6ff4cdb877fa328a6cda5578c5968ac85651a0a0f53016c8ef745ddc",
     "tools/coverage_guided_selection/baseline.py": "218df21cb37575062e4a7534697b949b1b8f4243bff75be0af16ec2be3013929",
