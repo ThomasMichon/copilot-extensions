@@ -4189,11 +4189,53 @@ compact-v2 bytes, preserving all preceding 8,016 nodes and hashes, 89 helper
 decisions, compact/flat-v1 identity and the 300-second bound. Ruff and
 whole-file strict Python 3.10/Linux and Windows typing pass.
 
-Current-head review and complete fresh Linux source CI remain required
-before this finite leaf is complete. Fresh-install/native/installed external
-lanes are not exercised because no installation or runtime behavior changes.
+Current-head review and complete fresh Linux source CI complete for this
+finite cohort. Copilot approval `6010756687` covers exact head
+`85758ca9f959836e4b4f8d7cb00bb4474c9bc823`, without active findings.
+CI `44993423256`, unit job `137119246214`, freshly passes all 8,049 cases
+with 39 deselections, 153.49 pytest seconds and 174.602 packet seconds.
+Evidence reports `mode=executed`, origin run `44993423256` attempt one and
+digest `85ca92a3dc798ce471ac97ed1e72733cb4fb82f44d28e41445639deae81c84a0`.
+Required aggregate `137120422558`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+
+Source #14043 merges at `2026-11-22T06:30:07Z` as
+`a73ea800609c804721d48f48a015405983d24dce`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the 33-case leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit or a
+controlled whole-flow saving.
 Full-census, every-release, comparable whole-flow, owner, native, installed
 and retained-custody gates remain open.
+
+### November 22 original artifact-schema and wheel qualification
+
+The existing bundle adapter additionally exports five exact original
+functions as 39 cases: declared vendored-library acceptance, twenty complete
+provenance/computed-identity controls, forged content-address refusal, sixteen
+real wheel metadata/member controls, and structured encoded-metadata refusal.
+All original parameters, assertions, callbacks and the autouse identity fixture
+remain unchanged. The symlink wheel member is synthetic ZIP metadata, not a
+native filesystem link.
+
+The 200-case original collection matches all 72 adapter selections and their
+exact objects and parameter identities. A fresh guarded process passes all 72,
+including the preceding 33, in 6.047 seconds with zero prohibited effects,
+38 bound Python reads and positive actual call-phase artifact-owner lines for
+every case. Only the existing adapter's binding changes. The candidate has
+8,088 nodes, 1,173 sources, 448 targets and 915,940 compact-v2 bytes. The 39
+new nodes follow the existing group's 33 without a duplicate file group; all
+preceding 8,049 nodes retain relative order, every unrelated source hash and
+coverage target is preserved, and all 89 helper decisions, compact/flat-v1
+identity and the 300-second bound remain enforced.
+
+Current-head review and complete fresh Linux source CI remain required before
+this finite leaf can close. Fresh-install/native/installed external lanes are
+not exercised because no installation or runtime behavior changes. This is
+development qualification, not a full-packet result, reuse hit, controlled
+whole-flow saving or acceptance of any broader owner or parent gate.
 
 ### November 20 path-gated audit-guard native boundary
 
