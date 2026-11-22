@@ -317,6 +317,60 @@ def test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_w
     assert client.post(PREFIX + "/begin", json=attempt(first, offered)).status_code == 409
 
 
+def test_idle_successor_reattempts_unsubmitted_original_until_bounded_failure(serving: Serving) -> None:
+    _, client, db, consumer = serving
+    consumer = replace(consumer, message_base=1)
+    first = native_enroll(client, consumer)
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "retained", time.time())
+    offered = poll(client, first)
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).json() == {"begin": True}
+    assert client.post(PREFIX + "/outcome", json=report(first, offered, "unknown")).json() == {
+        "stage": "unknown",
+    }
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    assert client.post(PREFIX + "/poll", json=current(successor)).json()["messages"] == []
+    listed = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    row, = listed.json()["messages"]
+    assert (row["id"], row["handoff_id"], row["body"]) == (message_id, offered["handoff_id"], "retained")
+    assert row["consumer"] == offered["consumer"] and row["attempt"] == 1
+    assert row["handoff_stage"] == "unknown"
+    assert row["message_contract"]["receiver_incarnation"] == "reloaded"
+
+    again = {**attempt(successor, row), "attempt": 1}
+    assert client.post(PREFIX + "/begin", json=again).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json=again).json() == {"begin": False}
+    assert client.post(PREFIX + "/begin", json=attempt(first, row)).status_code == 409
+    ledger = db.execute_read("SELECT message_id,attempt,incarnation FROM live_message_attempts")
+    assert [tuple(entry) for entry in ledger] == [(message_id, 2, "reloaded")]
+    assert client.get(PREFIX + f"/recovery/{message_id}").json()["stage"] == "sending"
+
+    assert client.post(PREFIX + "/begin", json={**again, "attempt": 2}).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json={**again, "attempt": 3}).json() == {"begin": False}
+    stored, = db.execute_read("SELECT disposition_json,handoff_json FROM live_messages WHERE id=?", (message_id,))
+    disposition = json.loads(stored["disposition_json"])
+    assert (disposition["state"], disposition["code"], disposition["attempts"]) == (
+        "failed", "delivery_attempts_exhausted", 3,
+    )
+    assert json.loads(stored["handoff_json"])["id"] == offered["handoff_id"]
+    exhausted = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    assert exhausted.json()["messages"] == []
+    assert client.post(PREFIX + "/begin", json={**again, "attempt": 3}).status_code == 409
+
+
+def test_reattempt_requires_a_message_base_receiver(serving: Serving) -> None:
+    _, client, db, consumer = serving
+    first = native_enroll(client, consumer)
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "retained", time.time())
+    offered = poll(client, first)
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).json() == {"begin": True}
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    listed = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    assert listed.json()["messages"] == []
+    regrant = {**attempt(successor, offered), "attempt": 1}
+    assert client.post(PREFIX + "/begin", json=regrant).json() == {"begin": False}
+    assert db.execute_read("SELECT * FROM live_message_attempts") == []
+
+
 @pytest.mark.parametrize("change", ["no-auth", "proxy", "dormant", "wrong-session", "read-only"])
 def test_native_inbox_preserves_real_target_and_ingress_boundaries(serving: Serving, change: str) -> None:
     app, client, db, consumer = serving

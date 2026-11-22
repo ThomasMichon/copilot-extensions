@@ -11,6 +11,7 @@ import uuid
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .inbox_custody import InboxConsumer, handoff_stage, observed_time, original_handoff
 from .live_message_schema import PREDICATE, require_schema
+from . import retained_attempts
 from .runtime_custody import RuntimeCustodyError, encode
 
 if TYPE_CHECKING:
@@ -203,7 +204,7 @@ def require_supported(conn: sqlite3.Connection, row: sqlite3.Row, now: float) ->
 
 def poll(
     db: Database, consumer: InboxConsumer, *, now: float, limit: int | None,
-    native_only: bool = False,
+    native_only: bool = False, reattempt: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
@@ -212,16 +213,32 @@ def poll(
         from .message_contracts import envelope, pending_controls
 
         controls = pending_controls(conn, consumer, limit or 100, now=now)
+        # An idle current receiver may re-attempt a started original that was
+        # never marked submitted, in original order and through begin's bound.
+        if consumer.message_base != 1 or not retained_attempts.available(conn):
+            reattempt = None
         rows = conn.execute(
             "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
             "AND kind NOT LIKE 'control:%' AND delivered_at IS NULL "
-            "AND handoff_started_at IS NULL AND outcome IS NOT 'unknown' "
-            "AND disposition_json IS NULL "
-            "AND (claimed_at IS NULL OR handoff_json IS NOT NULL) "
-            "ORDER BY id LIMIT ?", (consumer.session_id, limit or 100),
+            "AND disposition_json IS NULL AND (("
+            "handoff_started_at IS NULL AND outcome IS NOT 'unknown' "
+            "AND (claimed_at IS NULL OR handoff_json IS NOT NULL)) "
+            "OR (handoff_started_at IS NOT NULL AND handoff_json IS NOT NULL "
+            "AND id IN (SELECT value FROM json_each(?)))) "
+            "ORDER BY id LIMIT ?",
+            (consumer.session_id, encode(sorted(set(reattempt or []))), limit or 100),
         ).fetchall()
         result = []
         for row in rows:
+            if row["handoff_started_at"] is not None:
+                retained = original_handoff(row)
+                result.append({
+                    **dict(row), "handoff": retained, "consumer": retained["consumer"],
+                    "handoff_stage": handoff_stage(row),
+                    "attempt": retained_attempts.count(conn, row["id"]),
+                    "message_contract": envelope(conn, row, consumer),
+                })
+                continue
             if consumer.message_base is None:
                 from .message_contracts import dispose, require_supported as require_contract
 
@@ -256,7 +273,7 @@ def poll(
 
 def begin(
     db: Database, consumer: InboxConsumer, message_id: int, handoff_id: str, *, now: float,
-    native_only: bool = False,
+    native_only: bool = False, attempt: int | None = None,
 ) -> bool:
     observed_time(now)
     with db._runtime_transaction(write=True) as conn:
@@ -277,10 +294,16 @@ def begin(
         require_supported(conn, row, now)
         from .message_contracts import envelope, require_supported as require_contract
 
-        require_contract(envelope(conn, row, consumer), row["kind"])
+        header = envelope(conn, row, consumer)
+        require_contract(header, row["kind"])
         if row["disposition_json"] is not None:
             raise RuntimeCustodyError("Original message already has a disposition")
-        if handoff_stage(row) != "offered":
+        stage = handoff_stage(row)
+        if stage in ("sending", "unknown") and attempt is not None and consumer.message_base == 1:
+            return retained_attempts.regrant(
+                conn, row, consumer.document(), header, attempt, now=now,
+            )
+        if stage != "offered":
             return False
         conn.execute("UPDATE live_messages SET handoff_started_at=? WHERE id=?", (now, message_id))
         return True

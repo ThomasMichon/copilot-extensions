@@ -2,7 +2,9 @@
 // module owns only the one SDK invocation authorized by a true /begin reply.
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { buildDeliveredSendOptions, deliveryPlan, escAttr, isSubAgentEvent } from "./delivery.mjs";
+import {
+  DELIVERY_SOURCE, buildDeliveredSendOptions, deliveryPlan, escAttr, isSubAgentEvent,
+} from "./delivery.mjs";
 import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
 
 const CONTRACT = "retained-inbox-v1";
@@ -10,7 +12,14 @@ const PROTOCOL = 50;
 const RECHECK_MS = 30_000;
 const NATIVE_INPUT_LIMIT = 1_000;
 const NATIVE_HEADER_LIMIT = 4_096;
+// Bounded recent-first history: user.message pages only, a few per read.
+const HISTORY_PAGE = 100;
+const HISTORY_PAGES = 8;
+const HISTORY_SEEN_LIMIT = 50_000;
+const HISTORY_SLACK_S = 60;
+export const RESUME_NUDGE = "All queued agent-bridge messages were already delivered; resume.";
 const STAGES = new Set(["offered", "sending", "unknown", "sdk_accepted", "consumed", "rejected"]);
+const TERMINAL = new Set(["sdk_accepted", "consumed", "rejected"]);
 const nonblank = (value) => typeof value === "string" && value.trim().length > 0;
 const positive = (value) => Number.isSafeInteger(value) && value > 0;
 const time = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -81,6 +90,34 @@ export function retainedConsumption(event, receipt, sourceAllowed) {
   return retainedConsumptionReason(event, receipt, sourceAllowed) === "matched";
 }
 
+// Reduce a root retained input to its header so buffered observations never
+// retain large message bodies.
+function compactRetainedInput(sid, event, acceptsSource) {
+  if (event?.type !== "user.message" || isSubAgentEvent(event)
+      || (event.sessionId !== undefined && event.sessionId !== sid)
+      || !acceptsSource(event?.data?.source)) return null;
+  const content = event?.data?.transformedContent ?? event?.data?.content;
+  if (typeof content !== "string") return null;
+  const start = RUNTIME_DATETIME_PREFIX.exec(content)?.[0].length ?? 0;
+  if (!content.startsWith(`<agent-message retained-session="${escAttr(sid)}" `, start)) return null;
+  const candidate = content.slice(start, start + NATIVE_HEADER_LIMIT + 1);
+  const end = candidate.indexOf(">");
+  if (end < 0 || end >= NATIVE_HEADER_LIMIT) return null;
+  const id = headerMessageId(candidate.slice(0, end));
+  if (id === null) return null;
+  // Copy UTF-16 code units: V8 slices can retain the entire original body.
+  const header = Buffer.from(candidate.slice(0, end + 1), "utf16le").toString("utf16le");
+  return { id, header, event: {
+    type: "user.message", sessionId: sid,
+    data: { source: event.data.source, turnId: event.data.turnId, transformedContent: header },
+  } };
+}
+
+const eventSeconds = (event) => {
+  const parsed = typeof event?.timestamp === "string" ? Date.parse(event.timestamp) : NaN;
+  return Number.isFinite(parsed) ? parsed / 1000 : null;
+};
+
 export function createRetainedInbox({
   session, request, processIdentity, cwd, isCurrent = () => true, canSend = () => true,
   log = () => {}, now = Date.now, incarnation = randomUUID, nativeTimeoutMs = 10_000,
@@ -115,6 +152,20 @@ export function createRetainedInbox({
   const nativeInputs = new Map();
   let nativeInputOverflow = false;
   const acceptsSource = sourceAllowed ?? ((source) => source === "agent-bridge");
+  // Managed mode: the live main-turn tracker tells us when the session is idle,
+  // so every unsubmitted original can be (re)submitted then instead of lingering.
+  const managed = compatible && mainTurn != null;
+  const idleEpisode = () => (managed && !mainTurn.running ? mainTurn.episode : null);
+  let reattemptSupported = false;
+  let episode = null;
+  let submittedEpisode = null;
+  const verified = new Map();
+  const fullHistoryRead = new Set();
+  let historyCache = null;
+  const consumed = (sid, id) => {
+    if (episode && episode.id === idleEpisode() && episode.awaiting.has(id)) episode.redundant.add(id);
+    onConsumed(sid, id);
+  };
   let lastLog = "";
   let lastLogAt = 0;
   const note = (message) => {
@@ -227,6 +278,151 @@ export function createRetainedInbox({
     }
   }
 
+  // Bounded history: read recent root user.message pages newest-first, keep only
+  // compact retained headers, and remember how far back the contiguous scan
+  // reached so later checks only page through newer events.
+  async function readRecentHistory(sid, rows) {
+    const log = session.rpc.eventLog;
+    if (historyCache?.sid !== sid) {
+      historyCache = { sid, seen: new Set(), inputs: [], cursor: null, reached: Infinity, done: false };
+    }
+    const cache = historyCache;
+    const reset = () => {
+      Object.assign(cache, { seen: new Set(), cursor: null, reached: Infinity, done: false });
+    };
+    const page = async (cursor) => {
+      const result = await nativeCall(() => log.read({
+        ...(cursor ? { cursor } : {}), direction: "backward", max: HISTORY_PAGE,
+        types: ["user.message"], agentScope: "primary", includeEphemeral: false,
+      }), { history: true });
+      if (result?.cursorStatus !== "ok" || !Array.isArray(result.events)
+          || typeof result.hasMore !== "boolean"
+          || (result.hasMore && typeof result.cursor !== "string")) {
+        throw new Error("bounded SDK history page unavailable or expired");
+      }
+      return result;
+    };
+    const remember = (event) => {
+      if (typeof event?.id === "string") {
+        if (cache.seen.has(event.id)) return false;
+        if (cache.seen.size >= HISTORY_SEEN_LIMIT) {
+          reset();
+          cache.inputs = [];
+          throw new Error("bounded SDK history cache overflow; rescanning later");
+        }
+        cache.seen.add(event.id);
+      }
+      const input = compactRetainedInput(sid, event, acceptsSource);
+      if (input) cache.inputs.push(input.event);
+      return true;
+    };
+    let pages = 0;
+    try {
+      const fresh = cache.cursor === null && !cache.done;
+      let cursor = null;
+      let reached = Infinity;
+      let connected = false;
+      let done = false;
+      while (pages < HISTORY_PAGES) {
+        const result = await page(cursor);
+        pages++;
+        for (const event of result.events) {
+          if (!remember(event)) { connected = true; continue; }
+          const at = eventSeconds(event);
+          if (at !== null) reached = Math.min(reached, at);
+        }
+        cursor = result.cursor ?? null;
+        if (!result.hasMore) { done = true; break; }
+        if (connected && !fresh) break;
+      }
+      if (done) Object.assign(cache, { cursor: null, reached, done: true });
+      else if (fresh || !connected) Object.assign(cache, { cursor, reached, done: false });
+      const floor = Math.min(...rows.map((row) => row.handoff_started_at)) - HISTORY_SLACK_S;
+      while (!cache.done && cache.reached > floor && pages < HISTORY_PAGES && cache.cursor) {
+        const result = await page(cache.cursor);
+        pages++;
+        for (const event of result.events) {
+          remember(event);
+          const at = eventSeconds(event);
+          if (at !== null) cache.reached = Math.min(cache.reached, at);
+        }
+        cache.cursor = result.cursor ?? null;
+        if (!result.hasMore) cache.done = true;
+      }
+    } catch (error) {
+      reset();
+      throw error;
+    }
+    return {
+      events: cache.inputs,
+      covered: new Set(rows.filter((row) => cache.done
+        || cache.reached <= row.handoff_started_at - HISTORY_SLACK_S).map((row) => row.message_id)),
+    };
+  }
+
+  // Without a bounded history API, read the full log at most once per started
+  // original attempt in this process; never sweep it again for the same record.
+  async function readHistory(sid, rows) {
+    if (typeof session.rpc?.eventLog?.read === "function") return readRecentHistory(sid, rows);
+    const key = (row) => `${row.message_id}:${row.handoff_id}`;
+    if (rows.every((row) => fullHistoryRead.has(key(row)))) {
+      return { events: [], covered: new Set(rows.map((row) => row.message_id)) };
+    }
+    const events = await nativeCall(() => session.getEvents(), { history: true });
+    if (!Array.isArray(events)) throw new Error("durable SDK history unavailable");
+    for (const row of rows) fullHistoryRead.add(key(row));
+    return { events, covered: new Set(rows.map((row) => row.message_id)) };
+  }
+
+  // Managed recovery never leaves a started original ambiguous: while idle it
+  // proves each unsubmitted original absent from bounded history (or settles it
+  // as consumed) so drain may submit it again through a recorded attempt.
+  async function recoverManaged(sid, response, attempts) {
+    const unsubmitted = attempts.filter((row) => row.stage !== "sdk_accepted");
+    // Before negotiation the message base is unknown; keep the notice until it is.
+    const canReattempt = reattemptSupported
+      && (negotiation === null || context?.consumer?.message_base === 1);
+    if (canReattempt) {
+      onPending(sid, unsubmitted.map((row) => ({ id: row.message_id })));
+    } else {
+      // Without bridge re-attempt support these cannot be submitted again here.
+      for (const row of unsubmitted) onSubmitted(sid, row.message_id);
+    }
+    const idleAt = idleEpisode();
+    // Submitted originals still seek consumption evidence, as before, but a
+    // full-log fallback never sweeps the same handoff twice.
+    const bounded = typeof session.rpc?.eventLog?.read === "function";
+    const accepted = attempts.filter((row) => row.stage === "sdk_accepted"
+      && (bounded || !fullHistoryRead.has(`${row.message_id}:${row.handoff_id}`)));
+    const candidates = [...(idleAt === null ? []
+      : unsubmitted.filter((row) => verified.get(row.message_id) !== idleAt)), ...accepted];
+    if (candidates.length) {
+      // A page skipped during cooldown has not been reconciled; keep its cursor.
+      if (now() < historyAt) return false;
+      historyAt = now() + RECHECK_MS;
+      let history;
+      try {
+        history = await readHistory(sid, candidates);
+      } catch (error) {
+        note(`durable SDK history unavailable: ${errorText(error)}; rechecking when idle`);
+        return false;
+      }
+      await nativeContext(sid);
+      for (const receipt of candidates) {
+        if (history.events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
+          consumed(sid, receipt.message_id);
+          await report(receipt, "consumed");
+        } else if (history.covered.has(receipt.message_id)) {
+          verified.set(receipt.message_id, idleAt);
+        } else {
+          note(`original handoff ${receipt.message_id}/${receipt.handoff_id} beyond bounded history scan; rechecking`);
+        }
+      }
+    }
+    after = response.next_after ?? 0;
+    return response.next_after !== null;
+  }
+
   async function recover(sid) {
     const response = await request("GET", `${base(sid)}/recovery?limit=100&after=${after}`);
     if (!Array.isArray(response?.messages) || response.messages.length > 100
@@ -238,6 +434,14 @@ export function createRetainedInbox({
       throw new Error("malformed original handoff recovery response");
     }
     const receipts = response.messages;
+    const idleAt = idleEpisode();
+    if (idleAt !== null && idleAt > 0 && after === 0 && episode?.id !== idleAt) {
+      // Snapshot what was queued when this idle episode began, for the nudge.
+      episode = {
+        id: idleAt, nudged: false, redundant: new Set(),
+        awaiting: new Set(receipts.filter((row) => !TERMINAL.has(row.stage)).map((row) => row.message_id)),
+      };
+    }
     if (nativeInputOverflow) {
       note("native input observation overflow; original receipts remain uncertain");
       nativeInputOverflow = false;
@@ -249,7 +453,7 @@ export function createRetainedInbox({
       } else if ([...nativeInputs.values()].some((input) => input.sid === sid
           && input.id === receipt.message_id && retainedConsumption(input.event, receipt, sourceAllowed))) {
         await nativeContext(sid);
-        onConsumed(sid, receipt.message_id);
+        consumed(sid, receipt.message_id);
         await report(receipt, "consumed");
         observed.add(receipt.message_id);
       } else if (receipt.handoff_started_at !== null) {
@@ -282,6 +486,7 @@ export function createRetainedInbox({
         onSubmitted(sid, receipt.message_id);
       }
     }
+    if (managed) return recoverManaged(sid, response, attempts);
     onPending(sid, attempts.filter((row) => row.stage !== "sdk_accepted")
       .map((row) => ({ id: row.message_id })));
     let events = [];
@@ -343,6 +548,7 @@ export function createRetainedInbox({
         throw new Error("portable inbox and readonly plugin controls are required; legacy downgrade refused");
       }
       healthUntil = now() + RECHECK_MS;
+      reattemptSupported = health?.capabilities?.retained_delivery_reattempt === 1;
     }
     await retryReport();
     const workingDirectory = await nativeContext(sid);
@@ -364,6 +570,11 @@ export function createRetainedInbox({
       frontendStale = false;
       after = 0;
       historyAt = 0;
+      verified.clear();
+      fullHistoryRead.clear();
+      historyCache = null;
+      episode = null;
+      submittedEpisode = null;
     }
     if (!sendAllowed(sid, allowSend)) {
       await recover(sid);
@@ -416,8 +627,14 @@ export function createRetainedInbox({
     if (await recover(sid) || !sendAllowed(sid, allowSend)) return;
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
+    const idleAt = idleEpisode();
+    // Re-attempts are granted only to a message-base consumer (new attempt identity).
+    const canReattempt = reattemptSupported && context.consumer.message_base === 1;
+    const reattempt = idleAt === null || !canReattempt ? []
+      : [...verified].filter(([, at]) => at === idleAt).map(([id]) => id).slice(0, 100);
     const poll = await currentRequest(sid, "poll", {
       ...owner, binding: negotiation.binding, limit: 1,
+      ...(reattempt.length ? { reattempt } : {}),
     });
     if (poll?.contract !== CONTRACT || !sameBinding(poll.binding, negotiation.binding)
         || !sameConsumer(poll.consumer, context.consumer)
@@ -425,7 +642,10 @@ export function createRetainedInbox({
       throw new Error("retained poll observations changed");
     }
     const [msg] = poll.messages;
-    if (!msg) return;
+    if (!msg) {
+      await nudge(sid, allowSend);
+      return;
+    }
     if (context.consumer.message_base === 1) {
       if (!positive(msg.id)) throw new Error("message correlation unavailable; no effects");
       const disposition = (state, code, reason) => currentRequest(sid, "disposition", {
@@ -484,8 +704,10 @@ export function createRetainedInbox({
         || (String(msg.kind || "").startsWith("startup:") && !startup)) {
       throw new Error("unsupported retained message; no SDK or control effect");
     }
-    if (msg.handoff_stage !== "offered") {
-      note(`original handoff ${msg.id}/${msg.handoff_id} remains ${msg.handoff_stage}; no resend`);
+    const reattempting = msg.handoff_stage !== "offered";
+    if (reattempting && !(managed && canReattempt && idleAt !== null
+        && verified.get(msg.id) === idleAt && positive(msg.attempt) && msg.consumer)) {
+      note(`original handoff ${msg.id}/${msg.handoff_id} remains ${msg.handoff_stage}; awaiting idle verification`);
       return;
     }
     onPending(sid, [msg]);
@@ -495,6 +717,16 @@ export function createRetainedInbox({
     };
     if (!consumerValid(receipt.consumer, sid, compatible)) {
       throw new Error("original handoff receiver unavailable");
+    }
+    if (reattempting && [...nativeInputs.values()].some((input) => input.sid === sid
+        && input.id === msg.id
+        && input.event.data.transformedContent.startsWith(retainedHeader(receipt)))) {
+      // Already present in this session's own input: delivered, never resent.
+      verified.delete(msg.id);
+      await nativeContext(sid);
+      consumed(sid, msg.id);
+      await report(receipt, "consumed");
+      return;
     }
     const readiness = async () => {
       if (validateSendContext) await nativeCall(validateSendContext);
@@ -516,8 +748,17 @@ export function createRetainedInbox({
     const grant = await currentRequest(sid, "begin", {
       ...owner, consumer: context.consumer.message_base === 1 ? context.consumer : receipt.consumer,
       binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
+      ...(reattempting ? { attempt: msg.attempt } : {}),
     });
+    if (reattempting) verified.delete(msg.id);
     if (grant?.begin !== true) {
+      if (reattempting) {
+        // The bridge either raced another attempt or terminally failed the
+        // original once its attempts were exhausted; recovery re-reports it.
+        onSubmitted(sid, msg.id);
+        note(`original handoff ${msg.id}/${msg.handoff_id} attempt ${msg.attempt + 1} not granted`);
+        return;
+      }
       note(`original handoff ${msg.id}/${msg.handoff_id} has no final grant; no send`);
       return;
     }
@@ -533,6 +774,7 @@ export function createRetainedInbox({
         if (mode !== undefined) options.mode = mode;
         const messageId = await session.send(options);
         if (!nonblank(messageId)) throw new Error("SDK acceptance reply unavailable");
+        if (idleAt !== null) submittedEpisode = idleAt;
         // A late reply still settles submission attention, not the original receipt.
         onSubmitted(sid, msg.id);
       });
@@ -544,31 +786,34 @@ export function createRetainedInbox({
     await report(receipt, "sdk_accepted");
   }
 
+  // One plain resume prompt, only when this idle episode began with queued
+  // originals and every one of them proved already delivered (none submitted).
+  async function nudge(sid, allowSend) {
+    const idleAt = idleEpisode();
+    if (!episode || episode.nudged || episode.id !== idleAt || idleAt === 0
+        || submittedEpisode === idleAt || episode.awaiting.size === 0
+        || [...episode.awaiting].some((id) => !episode.redundant.has(id))) return;
+    episode.nudged = true;
+    await nativeContext(sid);
+    if (!sendAllowed(sid, allowSend) || mainTurn.running) return;
+    try {
+      await nativeCall(() => session.send({ prompt: RESUME_NUDGE, source: DELIVERY_SOURCE, mode: "enqueue" }));
+    } catch (error) {
+      note(`resume prompt not confirmed: ${errorText(error)}; not repeated`);
+    }
+  }
+
   return {
     observe(sid, event) {
-      if (!current(sid) || event?.type !== "user.message" || isSubAgentEvent(event)
-          || (event.sessionId !== undefined && event.sessionId !== sid)
-          || !acceptsSource(event?.data?.source) || !nonblank(event?.data?.turnId)) return;
-      const content = event?.data?.transformedContent ?? event?.data?.content;
-      if (typeof content !== "string") return;
-      const start = RUNTIME_DATETIME_PREFIX.exec(content)?.[0].length ?? 0;
-      if (!content.startsWith(`<agent-message retained-session="${escAttr(sid)}" `, start)) return;
-      const candidate = content.slice(start, start + NATIVE_HEADER_LIMIT + 1);
-      const end = candidate.indexOf(">");
-      if (end < 0 || end >= NATIVE_HEADER_LIMIT) return;
-      const id = headerMessageId(candidate.slice(0, end));
-      if (id === null) return;
-      // Copy UTF-16 code units: V8 slices can retain the entire original body.
-      const header = Buffer.from(candidate.slice(0, end + 1), "utf16le").toString("utf16le");
-      const key = `${sid}:${id}:${header}`;
+      if (!current(sid) || !nonblank(event?.data?.turnId)) return;
+      const input = compactRetainedInput(sid, event, acceptsSource);
+      if (!input) return;
+      const key = `${sid}:${input.id}:${input.header}`;
       if (!nativeInputs.has(key) && nativeInputs.size >= NATIVE_INPUT_LIMIT) {
         nativeInputs.delete(nativeInputs.keys().next().value);
         nativeInputOverflow = true;
       }
-      nativeInputs.set(key, { sid, id, event: {
-        type: "user.message", sessionId: sid,
-        data: { source: event.data.source, turnId: event.data.turnId, transformedContent: header },
-      } });
+      nativeInputs.set(key, { sid, id: input.id, event: input.event });
     },
     consumerIncarnation(sid) {
       return current(sid) && context?.sid === sid ? context.consumer.incarnation : null;

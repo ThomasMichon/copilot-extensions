@@ -347,6 +347,9 @@ class _InboxCustodyMixin(DatabaseOperations):
             )
             if row["handoff_started_at"] is None:
                 raise RuntimeCustodyError("Inbox handoff never reached final admission")
+            if row["disposition_json"] is not None:
+                # A terminal disposition (for example exhausted re-attempts) is final.
+                return handoff_stage(row)
             if outcome == "sdk_accepted" and row["delivered_at"] is None:
                 conn.execute("UPDATE live_messages SET delivered_at=? WHERE id=?", (now, message_id))
             elif outcome == "consumed" and row["consumed_at"] is None:

@@ -89,7 +89,10 @@ recent output separately:
   [delegation contract](../../../docs/delegation-contract.md#exact-live-cli-inbox-admission-and-observation)).
   A binding conflict on a retry or receipt read means the caller's binding
   differs from the original, not that delivery failed; never resend under a
-  new key to work around it.
+  new key to work around it. A capable receiver submits its own queued,
+  not-yet-submitted messages when its session goes idle. Before submitting,
+  it checks the msg-id against its own input, so a sender never needs to
+  replay a message to get it delivered.
 - `--kind` sets intent: `--notify` (informational, no answer expected) or
   `--status-check` (asks the receiver for a terse status ack, not new work), vs
   the default `prompt` (a work directive). Prefer readback for observation rather
