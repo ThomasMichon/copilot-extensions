@@ -834,7 +834,7 @@ Maintenance view has been folded into those actions).
 |-------------|---------|------------------|
 | **SAFE** | `clean` (landed on default branch) | Auto-prunable — `cleanup --clean` removes it. |
 | **REVIEW** | `unused`, `conversation`, `follow-up`, `closed-unmerged`, `gone` | Cleanable but **confirmed first** (the flag/opt-in gate) — never silently purged. |
-| **UNSAFE** | `dirty`, `wip`, `unmerged`, `orphan`, `active` | **Never** auto-pruned — it holds un-landed work or is in use. |
+| **UNSAFE** | `dirty`, `wip`, `unmerged`, `orphan`, `active`, `dehydrated` | **Never** auto-pruned — it holds un-landed work, is in use, or is a [dehydrated checkout](checkout-hydration.md) whose branch and agency are stored. |
 | neutral | `open-pr` (healthy, in review), `unknown` (remote too old to classify) | No chip; not offered for cleanup. |
 
 Two things move a worktree *out* of SAFE even when git says it's clean: an
@@ -908,6 +908,7 @@ why running it after resolving follow-ups only removes what genuinely landed.
 | Inspect | `status` | `pr-status` |
 | Clean up | `finalize` → `cleanup` / `gc` if retained | Same, after source reconciliation |
 | Reap residue | `reap-sessions` (mux) · `reap-shells` (launchers) · `remove-system <id>` (system worktree) | same |
+| Store checkout (manual) | `dehydrate <id>` → `rehydrate <id>`; see [checkout dehydration](checkout-hydration.md) | same |
 
 ## See also
 

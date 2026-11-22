@@ -9,7 +9,9 @@ import subprocess
 def classify(go, worktree_path, branch, *, fetch, remote, default_branch, active_paths):
     path = Path(worktree_path)
     if not path.exists() or not (path / ".git").exists():
-        return go.WorktreeStateInfo(state=go.WorktreeState.GONE)
+        from .checkout_hydration_catalog import is_dehydrated_checkout
+        held = is_dehydrated_checkout(path)
+        return go.WorktreeStateInfo(state=go.WorktreeState.DEHYDRATED if held else go.WorktreeState.GONE)
     actual = go._get_current_branch_safe(path)
     drift = bool(actual and actual != branch)
     norm = worktree_path.rstrip("/\\")

@@ -352,12 +352,11 @@ def classify_worktree(
             default_branch=default_branch, active_paths=active_paths,
         )
     path = Path(worktree_path)
-    if not path.exists():
-        return WorktreeStateInfo(state=WorktreeState.GONE)
-
-    # A directory without .git is an incomplete/removed checkout.
-    if not (path / ".git").exists():
-        return WorktreeStateInfo(state=WorktreeState.GONE)
+    if not path.exists() or not (path / ".git").exists():
+        # A missing checkout (or one without .git) is GONE unless dehydrated.
+        from .checkout_hydration_catalog import is_dehydrated_checkout
+        held = is_dehydrated_checkout(path)
+        return WorktreeStateInfo(state=WorktreeState.DEHYDRATED if held else WorktreeState.GONE)
 
     deadline = _observation_deadline(observation_deadline)
     norm = worktree_path.rstrip("/\\")

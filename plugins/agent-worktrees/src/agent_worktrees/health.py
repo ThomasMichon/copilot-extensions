@@ -443,6 +443,10 @@ def find_stale_active_records(
     for r in records:
         if r.status != "active" or not r.worktree_path:
             continue
+        from .checkout_hydration_catalog import is_dehydrated
+
+        if is_dehydrated(r):  # a stored checkout is held, not finished
+            continue
         info = git_ops.classify_worktree(
             r.worktree_path,
             r.branch,

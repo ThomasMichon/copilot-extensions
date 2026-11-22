@@ -101,6 +101,10 @@ def blockers_for(rec, repo) -> list[str]:
     still exists, so the merge check below runs unconditionally.
     """
     blockers: list[str] = []
+    from .checkout_hydration_catalog import is_dehydrated
+
+    if is_dehydrated(rec):
+        blockers.append("checkout is dehydrated -- rehydrate it before discarding")
     checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
     if checkout_exists:
         info = git_ops.classify_worktree(

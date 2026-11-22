@@ -19,6 +19,7 @@ from . import output
 from . import claimant as claimant_mod
 from . import config as cfg
 from . import managed_worktree_guard, terminal_pair_progress
+from .checkout_hydration_catalog import is_dehydrated
 
 
 def _core() -> ModuleType:
@@ -478,6 +479,8 @@ def sweep_managed_worktrees(
                 active_paths=active_paths,
             )
             git_state = info.state.value
+        elif is_dehydrated(rec):
+            git_state = "dehydrated"
         elif rec.status in ("finalized", "complete", "completed"):
             git_state = "completed"
         else:
@@ -605,6 +608,8 @@ def sweep_managed_worktrees(
                     active_paths=fresh_active_paths,
                 )
                 fresh_git_state = fresh_info.state.value
+            elif is_dehydrated(current):
+                fresh_git_state = "dehydrated"
             elif current.status in ("finalized", "complete", "completed"):
                 fresh_git_state = "completed"
             else:
@@ -836,6 +841,9 @@ def sweep_finished_session_worktrees(
                 active_paths=active_paths,
             )
             info = _apply_tracking_override(rec, info)
+        elif is_dehydrated(rec):
+            result["skipped"].append({"id": rec.worktree_id, "reason": "checkout dehydrated"})
+            continue
         elif rec.status == "finalized":
             info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
         else:

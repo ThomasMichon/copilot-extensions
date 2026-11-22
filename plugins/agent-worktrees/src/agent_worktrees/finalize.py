@@ -1584,6 +1584,12 @@ def validate_and_finalize(
             if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
+        from .checkout_hydration_catalog import is_dehydrated, is_dehydrated_checkout
+
+        if (record is not None and is_dehydrated(record)) or is_dehydrated_checkout(worktree_path):
+            output.err(f"Worktree {worktree_id} is dehydrated; rehydrate it before finalizing.")
+            _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+            return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = False if retain_checkout or inside_worktree else _has_live_session(record)
         from . import prune

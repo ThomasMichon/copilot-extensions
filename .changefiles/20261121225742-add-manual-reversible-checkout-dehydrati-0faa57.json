@@ -1,0 +1,9 @@
+{
+  "comment": "Add manual reversible checkout dehydration: dehydrate/rehydrate/hydration commands with an owner-mediated .dehydrated catalog, interrupted-operation reconcile and lost-tracking recovery; dehydrated worktrees are never reported GONE, pruned, GC'd or branch-deleted.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

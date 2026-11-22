@@ -43,6 +43,7 @@ class WorktreeState(str, Enum):
     CONVO = "convo"
     COMPLETED = "completed"
     GONE = "gone"
+    DEHYDRATED = "dehydrated"  # checkout reversibly removed; see checkout_hydration_catalog
     ORPHAN = "orphan"
     UNKNOWN = "unknown"
 

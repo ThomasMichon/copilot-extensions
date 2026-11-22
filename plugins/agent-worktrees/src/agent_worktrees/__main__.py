@@ -416,6 +416,7 @@ if TYPE_CHECKING:
         ) -> ClosureDescriptor: ...
 
 
+from . import checkout_hydration_catalog as hydration_catalog
 from . import claimant as claimant_mod
 from . import config as cfg
 _cfg = cfg
@@ -4582,10 +4583,11 @@ def reap_one(
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
-    elif rec.status == "finalized":
+    elif rec.status == "finalized" and not hydration_catalog.is_dehydrated(rec):
         info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
-    else:
-        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+    else:  # revalidation refuses a dehydrated checkout even with force
+        held = hydration_catalog.is_dehydrated(rec)
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DEHYDRATED if held else git_ops.WorktreeState.GONE)
 
     # An active session is never reaped, even with force.
     if info.state == git_ops.WorktreeState.ACTIVE:
@@ -5265,9 +5267,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
-    from . import agenda_cli, handoff_head_observation, owner_observation_cli, record_cli, worktree_data_cli
+    from . import agenda_cli, checkout_hydration_cli, handoff_head_observation, owner_observation_cli, record_cli, worktree_data_cli
 
     agenda_cli.add_parsers(sub)
+    checkout_hydration_cli.add_parsers(sub)
     owner_observation_cli.add_parsers(sub)
     handoff_head_observation.add_parsers(sub)
     worktree_data_cli.add_parsers(sub)
@@ -5474,6 +5477,8 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'agenda-publish': ('agenda_cli', 'cmd_agenda'),
     'agenda-read': ('agenda_cli', 'cmd_agenda'),
     'agenda-feed': ('agenda_cli', 'cmd_agenda'),
+    'dehydrate': ('checkout_hydration_cli', 'cmd_hydration'), 'rehydrate': ('checkout_hydration_cli', 'cmd_hydration'),
+    'hydration': ('checkout_hydration_cli', 'cmd_hydration'),
     'launch-attempts': ('launch_attempt_inspection', 'cmd_launch_attempts'),
     'dev-status': ('installation_cli', 'cmd_dev_status'),
     'dev-release': ('installation_cli', 'cmd_dev_release'),
@@ -6001,8 +6006,9 @@ def _load_full_command_surface() -> None:
     from . import update_launch_cli
 
     from .session_observations_cli import cmd_session_attention, cmd_session_observations
-    from . import agenda_cli, handoff_head_observation, owner_observation_cli, worktree_data_cli
+    from . import agenda_cli, checkout_hydration_cli, handoff_head_observation, owner_observation_cli, worktree_data_cli
     COMMAND_MAP = {
+        **dict.fromkeys(("dehydrate", "rehydrate", "hydration"), checkout_hydration_cli.cmd_hydration),
         "worktree-data-read": worktree_data_cli.cmd_worktree_data,
         "worktree-data-allocate": worktree_data_cli.cmd_worktree_data,
         "worktree-observations": owner_observation_cli.cmd_observations,

@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .checkout_data import preservation_reason
+from .checkout_hydration_catalog import CATALOG_DIRNAME
 
 # Directory names whose contents are disposable build/test caches -- a leftover
 # containing only these is still "effectively empty" for GC purposes.
@@ -89,7 +90,7 @@ def find_orphans(repo, registered_paths, tracked_paths) -> list[Path]:
         except OSError:
             continue
         for child in children:
-            if not child.is_dir():
+            if not child.is_dir() or child.name == CATALOG_DIRNAME:  # dehydration catalog
                 continue
             key = _norm(child)
             if key in reg or key in trk:
@@ -205,6 +206,8 @@ def classify_managed_worktree(
     """
     if kind not in MANAGED_KINDS:
         return ManagedVerdict(worktree_id, "skip", "not-managed")
+    if git_state == "dehydrated":
+        return ManagedVerdict(worktree_id, "skip", "dehydrated")
     if follow_up:
         return ManagedVerdict(worktree_id, "skip", "follow-up")
     if held_claims:
