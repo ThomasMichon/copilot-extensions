@@ -29,7 +29,7 @@ async function load(selected, version = 50, {
   historyResponse = { replay_accepted: true, ingested: 1 },
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
   tokenInitiallyMissing = false,
-  retainedReceipts, legacyAck, legacyPoll,
+  retainedReceipts, legacyAck, legacyPoll, legacyControls = [], modeSet,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const deferred = [];
@@ -53,7 +53,8 @@ async function load(selected, version = 50, {
     send: async (options) => { sends.push(options); return send ? send(options) : "sdk-message-a"; },
     getEvents: async () => [],
     close() { assert.fail("Closing the Bridge client must not close native"); },
-    rpc: { metadata: { snapshot: snapshot || (async () => ({
+    rpc: { mode: { set: modeSet || (async () => ({ modeApplied: true })) },
+      metadata: { snapshot: snapshot || (async () => ({
       sessionId: nativeId, workingDirectory: process.cwd(),
     })) } },
   };
@@ -127,7 +128,7 @@ async function load(selected, version = 50, {
         }
       }
     }
-    else if (route.endsWith("/controls")) result = { messages: [] };
+    else if (route.endsWith("/controls")) result = { messages: legacyControls.splice(0) };
     if (route.includes("/messages?") && legacyPoll) result = await legacyPoll(result);
     return { ok: true, status: 200, json: async () => result };
   };
@@ -545,6 +546,36 @@ test("retained selection cannot overtake an awaited legacy inbox read", async ()
   await f.runDeferred();
   assert.equal(f.sends.length, 1);
   assert.doesNotMatch(f.sends[0].prompt, /retained-handoff=/);
+});
+
+test("retained selection waits for an in-flight legacy mode RPC", async () => {
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const modes = [];
+  const f = await load(undefined, 52, {
+    compatible: false, inboxMessages: [],
+    legacyControls: [{ id: 10, kind: "control:set-mode", body: "autopilot" }],
+    modeSet: async ({ mode }) => {
+      modes.push(mode);
+      await pending;
+      return { modeApplied: true };
+    },
+  });
+  assert.deepEqual(modes, ["autopilot"]);
+  try {
+    f.publishRetained();
+    f.poll.fn();
+    await settle();
+    assert.equal(f.calls.some((call) => call.route.includes("/retained-inbox")), false);
+  } finally {
+    release();
+    await settle();
+  }
+  f.poll.fn();
+  await settle();
+  const acknowledged = f.calls.findIndex((call) => call.route.endsWith("/controls/ack"));
+  const negotiated = f.calls.findIndex((call) => call.route.endsWith("/negotiate"));
+  assert.ok(acknowledged >= 0 && negotiated > acknowledged);
 });
 
 test("capable default selection retains an ambiguous SDK effect instead of legacy redelivery", async () => {

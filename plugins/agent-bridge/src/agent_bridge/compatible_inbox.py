@@ -127,7 +127,10 @@ def require_control_admission(
 
 def retain_message(conn: sqlite3.Connection, message_id: int) -> None:
     row = conn.execute("SELECT * FROM live_messages WHERE id=?", (message_id,)).fetchone()
-    if row is None or row["handoff_json"] is not None:
+    if (
+        row is None or row["handoff_json"] is not None
+        or row["kind"].casefold().startswith("control:")
+    ):
         return
     consumer = conn.execute(
         "SELECT consumer_json FROM bridge_inbox_consumers "

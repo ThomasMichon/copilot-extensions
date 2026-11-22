@@ -142,6 +142,52 @@ def test_native_control_cannot_start_after_installation_admission_closes(
     assert retained["handoff_started_at"] is None and retained["disposition_json"] is None
 
 
+@pytest.mark.parametrize("outcome,applied,state", [
+    ("unknown", None, "in_flight"), ("completed", True, "applied"), ("rejected", False, "rejected"),
+])
+def test_retained_mode_result_preserves_the_original_control_outcome(
+    serving: Serving, outcome: str, applied: bool | None, state: str,
+) -> None:
+    _, client, db, consumer = serving
+    enroll(client, consumer)
+    owner = native_enroll(client, replace(consumer, incarnation="native-mode-result", message_base=1))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(client.post, "/api/v1/live-sessions/native-a/mode", json={
+            "mode": "plan", "wait_timeout": 1,
+        })
+        deadline = time.monotonic() + 5
+        rows: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            response = client.post(PREFIX + "/poll", json=current(owner))
+            assert response.status_code == 200, response.text
+            rows = response.json()["messages"]
+            if rows:
+                break
+            if result.done():
+                early = result.result()
+                assert early.status_code == 200, early.text
+            time.sleep(.01)
+        assert len(rows) == 1
+        message_id = rows[0]["id"]
+        disposition = {
+            **current(owner), "message_id": message_id, "state": "started",
+            "code": "mode_change_started", "reason": "Original mode control started.",
+        }
+        if outcome != "rejected":
+            assert client.post(PREFIX + "/disposition", json=disposition).status_code == 200
+        disposition.update(
+            state=outcome, code="mode_change_" + outcome,
+            reason="Original retained mode outcome.",
+        )
+        response = client.post(PREFIX + "/disposition", json=disposition)
+        assert response.status_code == 200, response.text
+        response = result.result(timeout=5)
+    assert response.status_code == 200, response.text
+    assert (response.json()["applied"], response.json()["state"]) == (applied, state)
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None and receipt["disposition"]["state"] == outcome
+
+
 @pytest.mark.parametrize("expired,empty", [(False, False), (False, True), (True, False)])
 def test_history_replay_api_acknowledges_acceptance_not_event_count(
     serving: Serving, expired: bool, empty: bool,

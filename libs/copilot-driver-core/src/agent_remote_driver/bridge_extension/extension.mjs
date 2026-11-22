@@ -176,6 +176,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   let retainedInbox = null;
   let inboxSelection = null;
   let inboxHealthUntil = 0;
+  let legacyControlsActive = false;
 
   function ensureBridgeEndpoint() {
     endpoint ??= makeBridgeEndpoint({
@@ -218,8 +219,8 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
 
   async function selectInbox(fromInbox = false) {
     if (RETAINED_INBOX || Date.now() < inboxHealthUntil) return true;
-    if (state.delivering && !fromInbox) return true;
     if (inboxSelection) return inboxSelection;
+    if (legacyControlsActive || state.delivering && !fromInbox) return true;
     inboxSelection = (async () => {
       const health = await bridgeGetJson("/health");
       if (!Number.isSafeInteger(health?.protocol_version)) return false;
@@ -227,7 +228,8 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
           && health.capabilities?.native_consumption_inbox === 1) {
         // Keep legacy settlement running until the provider confirms its ACKs.
         // Local consumption alone does not release the original server input.
-        if (state.inFlight.pending.size || state.inFlight.unacknowledgedConsumed.size) return true;
+        if (legacyControlsActive || state.inFlight.pending.size
+            || state.inFlight.unacknowledgedConsumed.size) return true;
         RETAINED_INBOX = true;
         extLog("provider selected retained native inbox; legacy ACKs and control effects disabled");
       }
@@ -444,12 +446,14 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     const sid = state.sessionId;
     try {
       if (!await selectInbox()) return;
+      legacyControlsActive = !RETAINED_INBOX;
       await drainControls(sid, {
         getJson: bridgeGetJson, post: bridgeFetch, session, replayHistory, log: extLog,
         isCurrent: () => state.registered && state.sessionId === sid,
         readinessTasks: state.readinessTasks, readinessOnly: RETAINED_INBOX,
       });
     } finally {
+      legacyControlsActive = false;
       state.controlling = false;
     }
   }
