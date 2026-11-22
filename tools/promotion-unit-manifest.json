@@ -3,6 +3,42 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_control_manifest_units.py",
+      [
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files0]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files1]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files2]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files3]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files4]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files5]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files6]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files7]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files8]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files9]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files10]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files11]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files12]",
+        "test_manifest_rejects_nonportable_or_noncontrol_paths[files13]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[\\xff]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[[]]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{\"schema\": \"copilot-extensions.promotion-control\", \"version\": true, \"files\": [\".github/workflows/control-test.yml\"]}]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{\"schema\": \"copilot-extensions.promotion-control\", \"version\": 2, \"files\": [\".github/workflows/control-test.yml\"]}]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{\"schema\": \"other\", \"version\": 1, \"files\": [\".github/workflows/control-test.yml\"]}]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{\"schema\": \"copilot-extensions.promotion-control\", \"version\": 1, \"files\": [\".github/workflows/control-test.yml\"], \"extra\": \"unreviewed\"}]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{\"schema\": \"copilot-extensions.promotion-control\", \"version\": 1, \"files\": \"not-list\"}]",
+        "test_manifest_rejects_malformed_or_ambiguous_schema[{\"schema\":\"a\",\"schema\":\"b\",\"version\":1,\"files\":[]}]"
+      ]
+    ],
+    [
+      "tools/promotion_unit_tests/test_original_lifecycle_cli_units.py",
+      [
+        "test_cli_status_blocks_dispatch_without_claiming_a_completed_promotion",
+        "test_cli_existing_pr_opening_is_idempotent_but_never_makes_dispatch_idle",
+        "test_cli_transport_failure_is_visible_and_writes_no_success_output"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_dispatch_cli_units.py",
       [
         "test_cli_exposes_only_a_validated_source_and_active_pr_still_prevents_recovery_dispatch",
@@ -11058,6 +11094,9 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_control_manifest_units.py": "56fc3a56edbdf11678ac4c21f6090074b288d7a27d38289fd3d0fe2fd2d25c87",
+    "tools/test_promotion_control.py": "ace80617f9d6a55fde718d5ace0118434863b5ec4135a3d80d06cee5dfe05e4c",
+    "tools/promotion_unit_tests/test_original_lifecycle_cli_units.py": "d5961b427d81cf26d49ba39608758dcf9fea47b470b0032bfc4ab4cbaaa7a095",
     "tools/promotion_unit_tests/test_original_dispatch_cli_units.py": "459322b4c8fa0a36713a54b69465ea58ddc321c8eeafe067c961a076c949d867",
     "tools/promotion_unit_tests/test_original_lifecycle_admission_units.py": "8d8de6b7067d0d0fd8afab0998e05c9ed9df9296c6b8618f151015b5241257d5",
     "tools/test_promotion_lifecycle.py": "73227135f3fde8133cabe1c643835e84e2f601b54f8a281e3805f8afb83dd3cc",
