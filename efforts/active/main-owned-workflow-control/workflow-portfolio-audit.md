@@ -4747,10 +4747,64 @@ targets in 951,244 bytes. All 8,435 preceding nodes and their order, all
 1,208 current source hashes, every preceding target, 89 helper decisions
 and the 300-second bound remain intact. Only the adapter is newly
 hash-bound; the already-bound CLI module becomes a coverage target.
-Normal strict typing, current-head review and complete fresh Linux CI
-remain required before closing this leaf. This is synthetic orchestration
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation
+consistency and diff checks pass. Copilot approval `6011732638` covers exact
+head `716fc6aeeb8332cea19e4ee24442c6bf72a3a775` with no active findings.
+Source CI `45012479634`, unit job `137177613127`, freshly passes all 8,449
+cases with 43 deselections, 138.45 pytest seconds and 159.303 packet seconds.
+It reports `mode=executed`, origin run `45012479634` attempt one, execution
+identity `56a3b653df81256c5a47201e26b39b0ee5b8b1d56683ffae34ebbed0503294af`
+and packet digest
+`15a1ba0910fc5a1b31293ba359f4d2d7ef44ae7186e1f3b646e6b182bcf0f3e9`.
+Required aggregate `137178504949`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14069 merges at `2026-11-22T10:32:22Z` as
+`e6f58dd9792676c21f2813b8aa19ef374c332f44`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the fourteen-case leaf.
+This is synthetic orchestration
 and summary coverage, not native/process/concurrency/Git qualification,
 portfolio activation or resolution of retained owner/refusal boundaries.
+Fresh-install/native lanes are not exercised because no installation,
+runtime, workflow or original-test behavior changes.
+
+### November 22 selected-execution refusal and pure telemetry qualification
+
+The original selected-execution adapter preserves nine function/parameter
+identities out of sixty original cases: three existing stubbed CLI contracts
+and six auditability-declaration refusals. Its import inventory binds the
+explicit Python closure before the first guarded attempt. The unchanged
+guard refuses during collection with
+`collected unit nodes differ from the exact admitted inventory`; no test
+executes and none of these nine cases is admitted. The underlying collection
+cause is not exposed by that inventory error and is not inferred.
+The failed adapter, helper, candidate and node inventory remain retained,
+without replay, preload, loader exception or policy change.
+Host-profile-dependent auditability tests were excluded before the attempt.
+
+A separate adapter exports eleven unchanged original pure telemetry
+functions and their exact module fixture. Complete collection verifies
+twelve original cases and eleven adapter cases; the persistence test
+remains unchanged outside the packet. Synthetic records, helpers,
+aggregation/reporting assertions and fixture-driven owner imports are
+preserved. No API/fetch, database, actual process or thread path is selected.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer. All eleven pass in 1.171 seconds, with zero
+prohibited effects, four bound Python reads and positive actual
+telemetry-owner call-phase lines for every selected case.
+The compact-v2 candidate contains 8,460 nodes, 1,213 sources and 455 targets
+in 952,681 bytes. All 8,449 preceding nodes and their order, all 1,209 current
+source hashes, every preceding target, 89 helper decisions and the
+300-second bound remain intact. The four new bindings are the adapter,
+original tests, telemetry owner and its unchanged failure-signature owner;
+only telemetry becomes a coverage target. No refused-candidate source
+binding or node is admitted.
+
+Normal strict typing, current-head review and complete fresh Linux CI remain
+required before closing the telemetry leaf. This does not qualify actual
+API/database execution or resolve any retained refusal/owner seam.
 Fresh-install/native lanes are not exercised because no installation,
 runtime, workflow or original-test behavior changes.
 
