@@ -1,0 +1,9 @@
+{
+  "comment": "Admit fifty unchanged original synthetic CI watchdog cases to the exact unit packet",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
