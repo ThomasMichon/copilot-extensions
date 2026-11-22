@@ -5013,11 +5013,71 @@ test module and its imported finalizer test module; importing that module does
 not execute its native tests. The already-bound installer-contract checker
 becomes one new target; policy and engine-reference owners were already targets.
 
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6012068090` covers exact head
+`4956f0f7ece46ceb01161e1b7ae0cc6b334753a7` with no active findings.
+Source CI `45019234874`, unit job `137198228494`, freshly passes all 8,767
+cases with 43 deselections, 120.16 pytest seconds and 138.510 packet seconds.
+It reports `mode=executed`, origin run `45019234874` attempt one, execution
+identity `75cf6e3cce152d31566c00e6ee9fd073c544c48d1b7368e25e8c0b5fc19e5ab7`
+and packet digest
+`4471e54155fee9b08fb6d3fb29d7beecc8d62f60c44a44eb65f201e6a06ca260`.
+Required aggregate `137199487795`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14078 merges at `2026-11-22T11:57:05Z` as
+`e25c69750ab737de649b7f4357eb65a40ce4e62b`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 95-case leaf.
 No new mock, preload, wrapper, effect exception, data allowlist, installer/native
-execution, workflow, runtime or cleanup change is introduced. Complete fresh
-Linux CI, current-head review and normal required merge checks remain necessary.
+execution, workflow, runtime or cleanup change is introduced.
 This synthetic parser qualification does not settle retained runtime-profile,
 native, data-admission or owner-seam gaps. Fresh-install/native lanes are not
+applicable because installation, runtime, workflow and original-test behavior
+do not change.
+
+### November 22 original machine-gate mutation-source failure
+
+The adapter preserves four original synthetic contract functions and parameter
+values. Complete collection verifies 336 original cases and exactly 21 selected
+cases. Initial unchanged-guard execution stops after nine passes at
+`test_machine_gate_contract_rejects_actual_source_regressions[update_gate.py-return machine in allowed-return True]`.
+The original `assert before in text` fails because that mutation source text
+is absent from the current `update_gate.py`; the contract check for that row
+has not run. Static inspection also finds the separate original
+`or physical_machine in allowed` mutation text absent. That row is not executed.
+
+No complete observation report is written and none of the 21 cases is admitted.
+The adapter is retained byte-for-byte outside the source tree, with its helper,
+candidate and selector inventory. The live packet remains 8,767 nodes, 1,227
+sources and 460 targets. No original assertion, mutation row, guard, loader,
+provider or policy is changed; there is no replay or subset admission.
+The nine preceding passes do not settle this leaf or any retained refusal.
+
+### November 22 original strict-checker inventory and matrix qualification
+
+The adapter exports eight original functions for inventory ownership,
+component-prefix boundaries, response-file injection refusals, manifest
+validation and in-process version/platform matrix custody. Complete
+original/adapter collection verifies 236 original and exactly twenty selected
+cases in original order, retaining exact function objects, both original
+autouse fixtures, every selected parameter value, helpers and assertions.
+The other 216 cases remain unchanged outside this slice, including actual
+Git/MyPy/frontdoor/native execution and repository-data cases.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+twenty in 1.906 seconds, with zero prohibited effects, only bound Python reads
+and actual checker-owner call-phase lines per case. The compact-v2 candidate
+contains 8,787 nodes, 1,228 sources and 460 targets in 982,976 bytes. All 8,767
+preceding nodes/order, 1,227 current source hashes, targets, 89 helper decisions
+and the 300-second bound remain intact. Only the adapter becomes a new source
+binding; all production owners were already targets.
+
+No new mock, preload, wrapper, effect exception, data allowlist, workflow,
+runtime or cleanup change is introduced. Complete fresh Linux CI, current-head
+review and normal required merge checks remain necessary. This finite
+qualification does not settle the distinct 21-case mutation-source failure or
+other retained refusals and owner seams. Fresh-install/native lanes are not
 applicable because installation, runtime, workflow and original-test behavior
 do not change.
 
