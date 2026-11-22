@@ -1507,7 +1507,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   executed. The merged base also carries #14059's independently owned
   additional node and five refreshed hashes, yielding 8,425 current nodes.
   Only this eleven-case leaf is complete; broader parent gates remain open.
-- [ ] Qualify the two original synthetic sandbox/diagnostic functions and
+- [x] Qualify the two original synthetic sandbox/diagnostic functions and
   eight non-integration `TestBaselineCollectionErrorContract` cases.
   Preserve the exact function/class/method and parameter objects, fixtures,
   helpers, existing collaborator stubs and assertions. The class's opt-in
@@ -1528,8 +1528,34 @@ authorizes critical main-path acceptance or a bounded administrative change.
   baseline-owner call-phase lines per case. The real-process case is
   deselected, never executed or counted as a skipped unit. Only the adapter
   needs a new source binding; no coverage target changes. The compact-v2
-  candidate contains 8,435 nodes, 1,208 sources and 453 targets. Current-head
-  review and complete fresh Linux CI remain required before this leaf closes.
+  candidate contains 8,435 nodes, 1,208 sources and 453 targets. #14068
+  merges at `d29e522962d577f539d44b98859546b5003fffb4` after exact-head
+  Copilot approval and complete required Linux CI with all 8,435 selected
+  units freshly executed. Only this ten-case leaf is complete; broader
+  parent gates remain open.
+- [ ] Qualify thirteen original synthetic chunk-control cases and the pure
+  original CLI-summary case. Preserve the four original imported function
+  objects, class/method and parameter objects, fixtures, helpers, existing
+  collaborator stubs and assertions. Keep actual concurrency/process cases,
+  workflow inspection and the three real-Git CLI methods unchanged outside
+  the exact manifest; the whole CLI class is not unit-qualified.
+  Require complete original/adapter collection identity, explicit fourteen-case
+  selection, closed source reads, positive per-case actual owner calls and
+  zero prohibited effects before admission. Preserve preceding nodes,
+  current-base hashes, targets, helper decisions, compact/flat-v1 identity
+  and the 300-second bound. Require normal strict typing, current-head review
+  and complete fresh Linux CI; no new mocks, preloads, process/thread
+  execution, network access, workflow, runtime or native contract changes.
+  Complete collection verifies all 157 original cases, seventeen adapter
+  cases and the exact fourteen-case selection, including original parameter
+  objects. Initial unchanged-guard qualification passes all fourteen in
+  2.188 seconds, with zero prohibited effects, 23 bound Python reads and
+  actual baseline/chunk/summary-owner call-phase lines per case. The three
+  real-Git CLI cases are deselected, never executed or counted as skipped
+  units. Only the adapter needs a new source binding; the already-bound CLI
+  module becomes a coverage target. The compact-v2 candidate contains 8,449
+  nodes, 1,209 sources and 454 targets. Current-head review and complete fresh
+  Linux CI remain required before this leaf closes.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
