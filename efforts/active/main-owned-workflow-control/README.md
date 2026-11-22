@@ -1872,7 +1872,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   observation report or admission follows. Both remain outside the packet,
   with exact adapter, candidate and helper retained without replay, subset
   admission, preloading, test changes or guard exceptions.
-- [ ] Qualify the original in-process checker procutil-provider control:
+- [x] Qualify the original in-process checker procutil-provider control:
   candidate-local precedence, foreign winning provider refusal and package,
   module and distribution-stub refusal. Preserve the complete original
   function and assertions, with both unchanged autouse fixtures. Qualify all
@@ -1891,8 +1891,34 @@ authorizes critical main-path acceptance or a bounded administrative change.
   of the same checker group; all 8,877 prior nodes retain relative order.
   Only the existing adapter hash changes, preserving the other 1,245 source
   hashes. The compact-v2 candidate contains 8,878 nodes, 1,246 sources and
-  460 targets. Normal review and complete fresh Linux CI remain pending;
-  this leaf is not complete.
+  460 targets. #14085 merges at
+  `1cd4836f9a0c18106aee8db6507df205ba72f47e` after exact-head Copilot approval
+  and complete required Linux CI with all 8,878 selected units freshly
+  executed. Only this provider-control leaf is complete; broader gates remain open.
+- [ ] Qualify the three original optional H1 validator malformed-shape
+  controls from one complete original function. Preserve exact original
+  function, parameter values and assertions; call only `validate_packets`
+  with synthetic malformed fixture declarations and verify deferral to the
+  existing registry owner. Exclude every vector-read, asynchronous observation,
+  host/client, packet-capture and historical-record case. Require complete
+  original/adapter collection identity, unchanged effect auditing, closed
+  canonical Python reads and actual validator calls before admission.
+  Bind only the new adapter/original/validator/imported-publication Python
+  sources and the actual validator target; preserve all prior nodes and hashes,
+  helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI. No capture, listener, native process, publication, cleanup, new mock,
+  preload, guard exception, data, workflow, runtime or routing change.
+  Complete collection verifies all 14 original cases and the three selected
+  adapter cases, exact original function identity and every parameter object.
+  Initial unchanged auditing passes all three in 1.032 seconds, with zero
+  prohibited effects, seven bound Python reads and actual validator call-phase
+  lines per case. Only the adapter, original, validator and imported-publication
+  source bindings and validator target are added; all 8,878 prior nodes,
+  1,246 hashes, 460 targets, 89 helper decisions and the 300-second bound
+  remain intact. The compact-v2 candidate contains 8,881 nodes, 1,250 sources
+  and 461 targets in 993,848 bytes. Normal review and complete fresh CI remain
+  required; malformed-shape deferral is not full H1 owner validation.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

@@ -3,6 +3,14 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_h1_optional_shape_units.py",
+      [
+        "test_h1_optional_validator_defers_malformed_shape_to_registry_owner[None]",
+        "test_h1_optional_validator_defers_malformed_shape_to_registry_owner[fixtures1]",
+        "test_h1_optional_validator_defers_malformed_shape_to_registry_owner[fixtures2]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py",
       [
         "test_harness_emitted_procutil_provider_is_candidate_local_and_unambiguous",
@@ -10812,6 +10820,10 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_h1_optional_shape_units.py": "7b7fceccbed57982b788ab2bfb8665d1dc7f358ae2449621486601094e2afc2f",
+    "tools/test_capture_bridge_host_inspection.py": "f5fe8932100c639efcd0f9455e08ef4b2dac2a83f12af1db8d83607fc46267a1",
+    "tools/capture_bridge_host_inspection.py": "6f79738c1527fa3ac021e082ab60e686d7a5bf79cb11cf36fda36e78cfb45c11",
+    "tools/agent_bridge_contract_publication.py": "4d3c2800a01305d22b9a0fbdc8f16d675892088c5fa1b54f6d58844efaa141c0",
     "tools/promotion_unit_tests/test_original_typecheck_manifest_units.py": "ce79172a7bf7519b50bd10e58a5eeaf877fd156533d8c47d6d6c6732872e8726",
     "tools/promotion_unit_tests/test_original_installer_guard_units.py": "07ad74dea05179c41390934e2e61ce06815190ad3dd9d02c333e056ed2972ccc",
     "tools/test_check_install_contract.py": "048688b68f424c34214539c1a1f62c1eaa4c0ee9d92df4f7149c733ce887e650",
@@ -12060,6 +12072,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/capture_bridge_host_inspection.py",
     "tools/check-install-contract.py",
     "tools/module-health-watchdog.py",
     "tools/ci_plugin_partitions.py",
