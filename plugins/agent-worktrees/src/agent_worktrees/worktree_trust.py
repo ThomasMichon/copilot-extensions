@@ -2,12 +2,37 @@
 
 from __future__ import annotations
 
-from . import config as cfg, config_authority, permissions, tracking
+import os
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import cast
+
+from . import config as cfg, config_authority, permissions, tracking, tracking_claims
 from .config import Config
 from .execution_spaces import ExecutionSpaceError, require_owner_identity, require_record_mutation
 
 
-def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None = None) -> bool:
+def _launch_home(environment: Mapping[str, str], work_dir: str) -> Path:
+    home = environment.get("COPILOT_HOME", os.environ.get("COPILOT_HOME"))
+    account_home = environment.get("USERPROFILE" if os.name == "nt" else "HOME")
+    if home:
+        root = Path(home)
+    elif account_home:
+        root = Path(account_home) / ".copilot"
+    else:
+        root = permissions._copilot_dir()
+    return root if root.is_absolute() else Path(work_dir) / root
+
+
+def launch_environment(environment: Mapping[str, str], work_dir: str) -> dict[str, str]:
+    """Forward one explicit home so a retained mux cannot supply a different one."""
+    return {**environment, "COPILOT_HOME": str(_launch_home(environment, work_dir))}
+
+
+def ensure_record_trusted(
+    record: tracking.WorktreeRecord, config: Config | None = None,
+    *, environment: Mapping[str, str] | None = None,
+) -> bool:
     """Trust only an admitted native checkout, never a path being inspected."""
     if config is None:
         config = config_authority.registration_record_config(record)
@@ -19,9 +44,17 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
         raise permissions.FolderTrustError("Refusing folder trust for a terminal managed worktree")
     from . import retained_checkout
 
+    if environment is not None:
+        home = _launch_home(environment, record.worktree_path)
+        if home.resolve() != permissions._copilot_dir().resolve():
+            raise permissions.FolderTrustError(
+                "Cold embodiment folder trust currently requires the default Copilot home; "
+                "non-default COPILOT_HOME support requires matching finalization cleanup"
+            )
+
     if retained_checkout.is_local(record, config):
         return permissions.ensure_trusted_folder(record.worktree_path)
-    actual = cfg.detect_platform()
+    actual = cast(Callable[[], str], getattr(cfg, "detect_platform"))()
     if record.platform != actual or config.platform != actual:
         raise ExecutionSpaceError("Folder trust requires the current native execution platform")
     try:
@@ -33,9 +66,9 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
     if not local:
         from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
-        ref = tracking.parse_claim_ref(
-            tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
-        )
+        parse_ref = cast(Callable[[str], tracking_claims.ClaimRef | None], getattr(tracking, "parse_claim_ref"))
+        format_ref = cast(Callable[[str, str, str], str], getattr(tracking, "format_claim_ref"))
+        ref = parse_ref(format_ref(record.execution_machine, record.repo, record.worktree_id))
         if ref is None:
             raise ExecutionSpaceError("Folder trust requires a valid local claim identity")
         if resolve_legacy_wsl_owner_ref(ref, config) is None:

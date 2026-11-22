@@ -1,0 +1,9 @@
+{
+  "comment": "Ensure admitted cold embodiment persists native folder trust before launching Copilot.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
