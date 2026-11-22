@@ -29,7 +29,7 @@ from ..session_manager import (
 )
 from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 from .worktree_entry import WorktreeEntry as _WorktreeEntry
-from .worktree_reporting import reported_machine
+from .worktree_entry import parse_worktree_list as _parse_worktree_list
 from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, inventory_window, is_option_unsupported, worktree_sources
 from .worktree_refresh import is_classify_unsupported as _is_classify_unsupported
 from .worktree_probe import (
@@ -610,64 +610,6 @@ def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
         proc.kill()
     except (ProcessLookupError, OSError):
         pass
-
-
-def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
-    """Parse agent-worktrees JSON output into WorktreeEntry objects."""
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        log.error("Invalid JSON from worktree list for %s: %s", agent_name, raw[:200])
-        return []
-
-    # Handle enveloped ({"version":1,"worktrees":[...]}) or flat list
-    items = data.get("worktrees", data) if isinstance(data, dict) else data
-    if not isinstance(items, list):
-        return []
-
-    try:
-        reporter = reported_machine(data)
-    except ValueError as exc:
-        raise DiscoveryReadError("source-reporting-malformed") from exc
-    entries: list[_WorktreeEntry] = []
-    for w in items:
-        if not isinstance(w, dict):
-            log.warning("Invalid worktree row from %s", agent_name)
-            continue
-        wt_id = w.get("id") or w.get("name", "")
-        if not isinstance(wt_id, str) or not wt_id:
-            continue
-        entries.append(_WorktreeEntry(
-            id=wt_id,
-            agent_name=agent_name,
-            machine=reporter if reporter is not None else w.get("machine", agent_name),
-            path=w.get("path", ""),
-            branch=w.get("branch", ""),
-            status=w.get("status", "active" if w.get("active") else "ended"),
-            title=w.get("title"),
-            started_at=w.get("started_at"),
-            resume_count=w.get("resume_count", 0),
-            session_count=w.get("session_count", 0),
-            turn_count=w.get("turn_count", 0),
-            mux_session=bool(w.get("mux_session", False)),
-            mux_clients=w.get("mux_clients"),
-            mux_attached=w.get("mux_attached"),
-            # #2668: taxonomy marks (absent on older agent-worktrees -> None/shown).
-            interface=w.get("interface"),
-            origin=w.get("origin"),
-            picker_hidden=bool(w.get("picker_hidden", False)),
-            # #2956: status core -- disposition + derived live pulse.
-            follow_up=bool(w.get("follow_up", False)),
-            summary=w.get("summary"),
-            status_note_at=w.get("status_note_at"),
-            live_intent=w.get("live_intent"),
-            live_intent_at=w.get("live_intent_at"),
-            live_intent_idle=bool(w.get("live_intent_idle", False)),
-            # Phase 5: raw/opaque passthrough, absent unless --classify ran.
-            closure=w.get("closure") if isinstance(w.get("closure"), dict) else None,
-            bound_agent=w.get("bound_agent") or None,
-        ))
-    return entries
 
 
 # -- Singleton cache (initialized via app lifespan) ---------------------------

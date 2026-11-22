@@ -2,6 +2,13 @@
 
 [Configuration reference](docs/configuration.md)
 
+`list` provides a project-scoped conversation inventory, including dormant
+session-backed worktrees. Use repeatable `--host` selectors for fleet discovery;
+`live-sessions list --all-sources --host HOST --json` includes managed and
+standalone conversations without changing the legacy registration-only JSON.
+Both preserve source failures and host-qualified routes and never ensure the
+service. See [conversation inventory](docs/target-inventory.md#conversation-inventory).
+
 `sessions` lists the union of managed sessions, extension registrations,
 Session Hosts and workspaces, including local registered repositories that do
 not expose an agent. `--json sessions` preserves the legacy managed-record array;

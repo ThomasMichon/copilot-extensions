@@ -49,6 +49,27 @@ async def list_targets(request: Request, refresh: bool = False) -> dict[str, Any
     return await inventory(request, refresh=refresh)
 
 
+@router.get("/api/v1/bridges")
+async def list_bridges(
+    request: Request, project: str | None = None, machine: str | None = None,
+    namespace: str | None = None, status: str | None = None, live: bool = False,
+    hosts: str | None = None, local_only: bool = False,
+) -> dict[str, Any]:
+    from .bridge_inventory import inventory
+    from .bridge_fleet_inventory import fleet_inventory
+    from .remote_errors import RemoteBridgeError
+
+    scope = dict(project=project, machine=machine, namespace=namespace, status=status, live=live)
+    if hosts is not None:
+        if local_only:
+            raise HTTPException(400, detail="local_only cannot select remote hosts")
+        try:
+            return await fleet_inventory(request, hosts.split(","), **scope)
+        except (ValueError, RemoteBridgeError) as error:
+            raise HTTPException(400, detail=str(error)) from error
+    return await inventory(request, local_only=local_only, **scope)
+
+
 @router.post("/api/v1/worktrees/{worktree_id}/metadata", response_model=SessionInfo)
 async def hydrate_worktree(worktree_id: str, request: Request) -> JSONResponse:
     """Resolve and hydrate the authoritative head without resuming it."""

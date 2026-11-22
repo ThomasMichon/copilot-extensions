@@ -1,0 +1,9 @@
+{
+  "comment": "Add project-scoped and explicit-host conversation inventory while preserving legacy registration listings.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

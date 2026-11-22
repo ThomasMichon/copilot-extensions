@@ -7,10 +7,11 @@ import json
 import subprocess
 import sys
 import time
-from typing import Any
+from types import ModuleType
+from typing import Any, TextIO, cast
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
@@ -61,14 +62,14 @@ def _cmd_agent_show(args: argparse.Namespace) -> None:
         _print_remote_binding(agent)
 
 
-def _print_remote_binding(agent: dict) -> None:
+def _print_remote_binding(agent: dict[str, Any]) -> None:
     if agent.get("target_type") == "remote-acp":
         print(f"  State:    {agent.get('state', 'unavailable')}")
         if agent.get("unavailable_reason"):
             print(f"  Binding:  {agent['unavailable_reason']}")
 
 
-def _in_listing_project(agent: dict, project: str) -> bool:
+def _in_listing_project(agent: dict[str, Any], project: str) -> bool:
     if agent.get("target_type") == "remote-acp":
         return bool(
             agent.get("global_scope")
@@ -95,7 +96,7 @@ def _listing_project(args: argparse.Namespace) -> str | None:
         return None
     if args.json and not core._PROJECT_OVERRIDE:
         return None
-    return core._sender_repo()
+    return cast(str | None, core._sender_repo())
 
 
 def _cmd_agents(args: argparse.Namespace) -> None:
@@ -152,7 +153,7 @@ def _cmd_agents(args: argparse.Namespace) -> None:
 
 def _fetch_agent_rows(
     args: argparse.Namespace, *, force_refresh: bool = False, require_complete: bool = False,
-) -> tuple[list[dict], list[str], bool]:
+) -> tuple[list[dict[str, Any]], list[str], bool]:
     """Fetch + project-filter the agent roster -- the same selection logic
     as the plain ``agents`` path above, factored out so the ``--stream``/
     ``--subscribe`` loop can call it repeatedly from inside one long-lived
@@ -195,7 +196,7 @@ def _fetch_agent_rows(
     return agents, incomplete_namespaces, capability_known
 
 
-def _emit_frame(obj: dict, out) -> bool:
+def _emit_frame(obj: dict[str, Any], out: TextIO) -> bool:
     """Write one NDJSON frame, flushing immediately so the Picker paints
     progressively. Returns False (never raises) once the reader has closed
     the pipe, so the caller can stop cleanly instead of crashing on a broken
@@ -210,8 +211,8 @@ def _emit_frame(obj: dict, out) -> bool:
 
 
 def _diff_agent_rows(
-    prev: list[dict], curr: list[dict], *, id_key: str = "name"
-) -> tuple[list[dict], list[str]]:
+    prev: list[dict[str, Any]], curr: list[dict[str, Any]], *, id_key: str = "name"
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Diff two agent-roster snapshots by ``id_key`` (the pivot manifest's
     ``entry.id`` is ``name``) for a ``--subscribe`` re-scan. Returns
     ``(deltas, removed_ids)`` -- whole-row ``delta`` entries for ids that are
@@ -227,9 +228,9 @@ def _diff_agent_rows(
 
 
 def _suppress_incomplete_removals(
-    removed: list[str], curr: list[dict], prev: list[dict],
+    removed: list[str], curr: list[dict[str, Any]], prev: list[dict[str, Any]],
     *, incomplete: list[str], capability_known: bool,
-) -> tuple[list[str], list[dict]]:
+) -> tuple[list[str], list[dict[str, Any]]]:
     """Filter ``removed`` down to ids this tick's scan can actually confirm
     gone, carrying forward any suppressed id's last-known row into ``curr``
     so neither this tick nor a later comparison treats it as removed on a
@@ -281,7 +282,7 @@ INITIAL_SCAN_MAX_RETRIES = 3
 INITIAL_SCAN_RETRY_BACKOFF_SECS = 0.5
 
 
-def _fetch_complete_initial_rows(args: argparse.Namespace) -> list[dict]:
+def _fetch_complete_initial_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
     """The initial-scan fetch with bounded retry-until-complete (or
     retries-exhausted) -- see :data:`INITIAL_SCAN_MAX_RETRIES`. Raises
     whatever :func:`_fetch_agent_rows` raises on the final attempt.
@@ -337,7 +338,9 @@ def _run_agents_stream(args: argparse.Namespace) -> int:
     :func:`_fetch_complete_initial_rows` -- since a fresh process (first
     launch or a reconnect) has no prior snapshot the subscribe loop's own
     removal-suppression could otherwise fall back on."""
-    out = sys.__stdout__
+    out = sys.__stdout__ or sys.stdout
+    if out is None:
+        return 1
     try:
         rows = _fetch_complete_initial_rows(args)
     except Exception as exc:
@@ -536,8 +539,19 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
     core = _core()
-    client = core._get_client()
     action = getattr(args, "live_action", None)
+    if action in {None, "list"} and (
+        getattr(args, "all_sources", False) or getattr(args, "hosts", None)
+    ):
+        from .bridge_listing_cli import command
+
+        if getattr(args, "include_dead", False) or getattr(args, "supervisor", None):
+            raise SystemExit("--all and --supervisor apply to registered-only listings")
+        args.all_projects = True
+        args.live = True
+        command(args)
+        return
+    client = core._get_client()
     if action == "resolve":
         try:
             session = client.resolve_live_session(args.handle)
@@ -638,7 +652,7 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
             try:
                 outcome = _launch_cli_mode_session(
                     client,
-                    worktree_id,
+                    cast(str, worktree_id),
                     ttl_seconds=getattr(args, "ttl_seconds", 300.0),
                     driver=getattr(args, "driver", None) or "cli-mode",
                     seed=getattr(args, "seed", None),
@@ -730,7 +744,7 @@ def _cmd_machines(args: argparse.Namespace) -> None:
     _report_topology_errors(topology_errors)
 
 
-def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
+def register_inventory_commands(sub: argparse._SubParsersAction[Any]) -> None:
     agent_show_p = sub.add_parser(
         "agent-show",
         help="Show one registered agent by name (fast path -- static/topology lookup only, never enumerates namespace/CodeSpace/container providers)",
@@ -770,6 +784,12 @@ def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
     live_list_p.add_argument("--worktree-id", help="Filter by worktree id")
     live_list_p.add_argument("--supervisor", help="Only venue sessions supervised by this worktree ref (machine/project/worktree_id)")
     live_list_p.add_argument("--all", dest="include_dead", action="store_true", help="include dead (expired / taken-over) rows, normally hidden")
+    live_list_p.add_argument(
+        "--all-sources", action="store_true",
+        help="List managed, registered and standalone conversations in the versioned Bridge envelope",
+    )
+    live_list_p.add_argument("--host", dest="hosts", action="append", help="Read this configured Bridge host (repeatable)")
+    live_list_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     live_list_p.set_defaults(func=_cmd_live_sessions)
     live_resolve_p = live_sub.add_parser("resolve", help="Resolve a session id OR worktree handle to its live session")
     live_resolve_p.add_argument("--handle", required=True, help="Exact session id OR worktree handle")
