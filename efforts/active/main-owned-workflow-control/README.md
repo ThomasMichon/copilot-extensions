@@ -1164,7 +1164,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   #14019 merges at `82860fb482d13b402050f1d572a3c56bad1aafef` after
   exact-head Copilot approval and complete required Linux CI with all 7,995
   units freshly executed. Broader parent gates stay open.
-- [ ] Qualify and land all five original validation-override cases through
+- [x] Qualify and land all five original validation-override cases through
   three exact unchanged functions. Preserve list-clearing versus omission,
   empty-map inheritance, empty-path replacement and machine-precedence
   witnesses using the original source-level merge/parser helper, without
@@ -1174,6 +1174,32 @@ authorizes critical main-path acceptance or a bounded administrative change.
   identity, the 300-second bound, strict typing, current-head review and
   complete Linux source CI. The withdrawn Darwin candidate is not admitted
   or counted as completed coverage; native, installed and parent gates remain.
+  #14026 merges at `a0601af38db4fb964ec5781cbe3228d91a75014c` after
+  exact-head Copilot approval and complete required Linux CI with all 8,000
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify both original project/resource-overlap cases for normal and
+  editable installs, retaining the complete admitted parent project when a
+  package resource names its descendant. Preserve the original synthetic
+  resolver projection and real fixture copies/hashes without running UV or
+  touching operational resources. Require exact original objects and parameter
+  identities, closed reads, positive per-case actual policy-owner calls, zero
+  prohibited effects, unchanged preceding nodes and target-branch hashes,
+  targets/helper decisions, compact/flat-v1 identity, the 300-second bound,
+  strict typing, current-head review and complete Linux source CI. Native,
+  installed and parent gates remain. Fresh guarded qualification refuses the
+  first case on Windows at the original private-root `advapi32` load
+  (`ctypes.dlopen`); neither case is admitted. No preload, fixture change or
+  guard exception substitutes for that missing qualification.
+- [ ] Qualify and land both original bundled-wheel release-age cases using
+  the exact unchanged function and the already hash-bound canonical wheel.
+  Preserve the aged-versus-young canonical-release checks, corrupt-wheel
+  refusal and controlled metadata acquisition without installation or network
+  access. Require closed reads, positive per-case actual dependency-age owner
+  calls, zero prohibited effects, unchanged preceding nodes and target-branch
+  hashes, targets/helper decisions, compact/flat-v1 identity, the 300-second
+  bound, strict typing, current-head review and complete Linux source CI.
+  Keep the separate executable-discovery and resource-retention native
+  boundaries unadmitted; native, installed and parent gates remain.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

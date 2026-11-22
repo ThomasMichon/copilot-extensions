@@ -3971,6 +3971,71 @@ execution or change to the original Darwin tests accompanies the replacement.
 Their broader census/native qualification remains open; this refusal is not
 counted as delivered consolidation.
 
+### November 22 original validation-override qualification
+
+The adapter exports all three exact original functions as five cases,
+preserving their source-level merge/parser helper and assertions. List
+clearing, omission, empty-map inheritance, empty-path replacement and machine
+precedence use admitted production source without importing or starting the
+managed runtime. The guarded development slice passes all five in 1.344 seconds
+with zero prohibited effects, three bound Python reads and actual
+configuration-owner calls for every case.
+
+The 8,000-node packet retains the preceding 7,995 nodes, the target branch's
+current source hashes, all 447 targets, 89 helper decisions, compact/flat-v1
+identity and the 300-second bound. Its 1,164 sources occupy 906,494 compact-v2
+bytes. Ruff, whole-file strict typing on Python 3.10/Linux and Windows, and
+packaged `worktree-manager` changefile verification against the committed
+contribution diff pass.
+
+Copilot approval `6010392256` covers exact head
+`8ae79d63b82750c084e44aafa6d06e6af31ea26b`, without active findings.
+CI `44986047120`, unit job `137096730693`, freshly passes all 8,000 cases
+with 39 deselections, 145.69 pytest seconds and 165.496 packet seconds.
+Evidence reports `mode=executed`, origin run `44986047120` attempt one and
+digest `f7910324b0d2b5b3b74e43b0884fdc08c8080d6133e5600103ecae7bb7762169`.
+Required aggregate `137097685973`, guards and trusted lockdown/attribution pass.
+Complete review/comment/thread pagination, seven fresh verifier reads and
+final head/hold/closing-reference checks precede the managed merge.
+
+Source #14026 merges at `2026-11-22T04:47:55Z` as
+`a0601af38db4fb964ec5781cbe3228d91a75014c`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan and Validation
+Plan are reread before resolving only this leaf. Fresh-install/native/installed
+external lanes are not exercised because no installation or runtime behavior
+changes. Full-census, every-release, comparable whole-flow, native, installed
+and retained-custody gates remain open.
+
+### November 22 bundled-wheel release-age development qualification
+
+The adapter exports the exact original
+`test_bundled_dbus_next_still_requires_canonical_release_age` function as its
+two original corruption parameter cases. Both retain the original
+aged-versus-young metadata loop, canonical-wheel bytes, corrupt-wheel refusal
+and controlled fetch callback. The original source, canonical wheel and actual
+dependency-age owner are already hash-bound inputs; only the adapter is new.
+No install, resolver, external network call, fixture rewrite or additional
+mocking is introduced.
+
+A fresh guarded process passes both cases in 1.891 seconds, with zero
+prohibited effects, fourteen bound Python reads and positive actual
+dependency-age owner calls for each case. The candidate contains 8,002 nodes,
+1,165 sources and 906,889 compact-v2 bytes, retaining all preceding 8,000 nodes,
+the target branch's current source hashes, all 447 targets, 89 helper decisions,
+compact/flat-v1 identity and the 300-second deadline. Full current-head Linux
+source CI and review remain required before this finite slice can land.
+
+Two other development proposals remain unadmitted. The original
+project/resource-overlap cases reach Windows private-root initialization and
+the first case is refused at `WinDLL("advapi32")` by `ctypes.dlopen`.
+The original resolver-argument group reaches Windows executable discovery
+before source validation and the first case is refused at
+`WinDLL("kernel32")` by the same guard. Both prototype adapters are withdrawn;
+the original tests and retained lanes remain unchanged. No native loader
+preload, guard exception, clock, assertion or callback-body replacement
+converts either refusal into a passing witness. These boundaries do not
+authorize another native run.
+
 ### November 20 path-gated audit-guard native boundary
 
 The newer `unit-effect-guard-native.yml` is not the ordinary unit packet or a

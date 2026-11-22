@@ -3,6 +3,13 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_bundled_release_age.py",
+      [
+        "test_bundled_dbus_next_still_requires_canonical_release_age[False]",
+        "test_bundled_dbus_next_still_requires_canonical_release_age[True]"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_validation_overrides.py",
       [
         "test_platform_lists_clear_but_omission_and_empty_map_inherit[override0-False]",
@@ -10977,7 +10984,8 @@
     "plugins/agent-mcp/scripts/uninstall-profile.json": "9ff021414ea0105bb605cc8ecd0e19a86f595582cf9c018088db19587d3e147a",
     "tools/fixtures/installed-footprint-v2.json": "0f43ea6327b532bc26c7ceff6db71e6c7cd876d6168be31616005885557fc66f",
     "tools/promotion_unit_tests/test_original_validation_overrides.py": "6ea4c619368b9860baeab8cd9ce2d55a37c57c54f4238b1046b0b478bdf27d5a",
-    "tools/test_validation_config_overrides.py": "e84fc742fc42edd8946988462f7847550bcb81a34dca3d710ae983b7f0bb067e"
+    "tools/test_validation_config_overrides.py": "e84fc742fc42edd8946988462f7847550bcb81a34dca3d710ae983b7f0bb067e",
+    "tools/promotion_unit_tests/test_original_bundled_release_age.py": "80c2f5771b46486a3fff87261729990ac1da15f94eac0b0b14ac4622a12939cc"
   },
   "coverage_targets": [
     "libs/installer-engine/installer_engine_commands.py",
