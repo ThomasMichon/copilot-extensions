@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
+from typing import cast
+from . import tracking
+
+
 import os
 
 from .sessions import LiveVerdict
@@ -15,7 +20,7 @@ RETAINED_HANDOFF_WARNING = (
 )
 
 
-def preserve_unconfirmed_seed(args, seed: launch_seed_state.LaunchSeed | None) -> bool:
+def preserve_unconfirmed_seed(args: argparse.Namespace, seed: launch_seed_state.LaunchSeed | None) -> bool:
     return bool(
         seed is not None
         and (
@@ -28,7 +33,7 @@ def preserve_unconfirmed_seed(args, seed: launch_seed_state.LaunchSeed | None) -
     )
 
 
-def preserved_seed_selection_error(args) -> str | None:
+def preserved_seed_selection_error(args: argparse.Namespace) -> str | None:
     selected = getattr(args, "preserve_seed_id", None)
     if selected is None:
         return None
@@ -47,7 +52,7 @@ def preserved_seed_selection_error(args) -> str | None:
 
 
 def seed_for_attempt(
-    path: Path, record, args, *, verdict: LiveVerdict | None = None,
+    path: Path, record: tracking.WorktreeRecord, args: argparse.Namespace, *, verdict: LiveVerdict | None = None,
 ) -> launch_seed_state.LaunchSeed | None:
     if plain_live_open(args, verdict):
         return None
@@ -76,7 +81,7 @@ def seed_for_attempt(
     if getattr(record, "pending_seed", None):
         if getattr(args, "dry_run", False):
             if seed is None:
-                seed = launch_seed_state.LaunchSeed("preview", "new", record.pending_seed, 0)
+                seed = launch_seed_state.LaunchSeed("preview", "new", cast(str, record.pending_seed), 0)
         else:
             seed = launch_seed_state.stage(path)
     if expected_id and (seed is None or seed.seed_id != expected_id):
@@ -84,27 +89,28 @@ def seed_for_attempt(
     return seed
 
 
-def plain_live_open(args, verdict: LiveVerdict | None) -> bool:
+def plain_live_open(args: argparse.Namespace, verdict: LiveVerdict | None) -> bool:
     return bool(
         not getattr(args, "seed", None) and not getattr(args, "seed_id", None)
+        and not getattr(args, "stage_launch_seed", False)
         and getattr(args, "preserve_seed_id", None) is None
-        and verdict is not None and verdict.active
+        and verdict is not None and (verdict.active or verdict.mux_live)
     )
 
 
 def cold_start_error(
     verdict: LiveVerdict | None, kind: str = "resume", *, preserving: bool = False,
 ) -> str | None:
-    if preserving and verdict is not None and verdict.active:
+    if preserving and verdict is not None and (verdict.active or verdict.mux_live):
         return None
     if verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok:
         return (
             f"{kind.title()} prompt requires a confirmed stopped session; liveness "
             "could not be verified. Refresh and retry. The seed remains staged."
         )
-    if verdict.active:
+    if verdict.active or verdict.mux_live:
         return (
-            f"{kind.title()} prompt is cold-start-only; this worktree already has a live "
+            f"{kind.title()} prompt is cold-start-only; this worktree already has a Copilot or mux "
             "session. Use Open instead. The seed remains staged."
         )
     return None

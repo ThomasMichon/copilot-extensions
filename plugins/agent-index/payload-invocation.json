@@ -5,6 +5,8 @@
   "module": "agent_index",
   "legacyRuntimeRoot": ".agent-index",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
+  "bootstrapLauncher": "uv",
   "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION",
   "purpose": "Search and operate the semantic index",

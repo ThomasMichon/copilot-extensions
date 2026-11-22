@@ -9,7 +9,7 @@ self_root="$(cd "$script_dir/.." && pwd -P)"
 
 installer_path="$self_root/scripts/@@INSTALLER@@.sh"
 command_specs='@@CATALOG_SPECS_JSON@@'
-py="$(command -v python3 || command -v python || true)"
+@@CATALOG_PYTHON_POSIX@@
 [ -n "$py" ] || {
     printf '%s\n' '{}'
     exit 0

@@ -1247,7 +1247,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,016
   units freshly executed. The withdrawn lookup cohort and threaded readiness
   proposal remain unadmitted; broader parent gates stay open.
-- [ ] Qualify and land all 33 cases from six original synthetic bundle
+- [x] Qualify and land all 33 cases from six original synthetic bundle
   functions: transfer roundtrip, structured wheel-read failures, output
   directory handling, deterministic bytes and archive-corruption refusal.
   Preserve every original parameter, fixture, callback, clock witness and
@@ -1258,6 +1258,491 @@ authorizes critical main-path acceptance or a bounded administrative change.
   current-head review and complete fresh Linux CI remain required. Actual
   hosted publication, threaded readback, native/installed and parent gates
   remain separate.
+  #14043 merges at `a73ea800609c804721d48f48a015405983d24dce` after
+  exact-head Copilot approval and complete required Linux CI with all 8,049
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify all 39 cases from five adjacent original artifact-schema and
+  wheel-validation functions: declared vendored-library acceptance, complete
+  provenance and computed identity, forged content-address refusal, real
+  wheel metadata/member validation, and structured encoded-metadata refusal.
+  Extend the existing bundle adapter with exact original objects and retain
+  its autouse fixture, every parameter, callback and assertion. Require
+  closed reads, positive per-case actual owner calls and zero prohibited
+  effects before admission, without replacing an original witness. Preserve
+  preceding node order, unrelated hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Normal strict typing,
+  current-head review and complete fresh Linux CI remain required; native,
+  installed, hosted publication and parent gates stay separate.
+  #14046 merges at `65421209a6a23b5a3ca79d5c7632f7d94744c302` after
+  exact-head Copilot approval and complete required Linux CI with all 8,088
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify all 33 cases from eight adjacent original digest, transfer,
+  unsafe-wheel, declared-source-path and signer-policy functions. Preserve
+  exact original functions, parameters, callbacks, assertions and the autouse
+  identity fixture in the existing adapter. Guard every adapter case with
+  closed reads, positive per-case actual owner calls and zero prohibited
+  effects before admission. Preserve preceding node order and unrelated
+  source hashes, targets, helper decisions, compact/flat-v1 identity and the
+  300-second bound. Require normal strict typing, current-head review and
+  complete fresh Linux CI; native, installed, real publication and broader
+  parent gates remain separate.
+  #14050 merges at `fbe2276af774d799e5eddf9cd282f09c7736d6fe` after
+  exact-head Copilot approval and complete required Linux CI with all 8,121
+  units freshly executed. Broader parent gates stay open.
+- [ ] Resolve the original successful bundle-attestation control's thread-start
+  refusal through its existing integration owner. The 54-case development
+  prototype passes the preceding 105 adapter cases but refuses
+  `test_attestation_checks_exact_workflow_ref_and_digests` at the production
+  verifier's thread-pool submission. It is withdrawn from the adapter and is
+  not admitted; the original function, guard and threading boundary remain
+  unchanged. Do not substitute a serial pool or weaker witness.
+- [x] Qualify the other 53 cases from fourteen original attestation-failure,
+  publication, explicit-404, tag-resolution and candidate-source controls. Preserve exact
+  original functions, callbacks, parameters, assertions and autouse fixture,
+  including synthetic command and token-isolation witnesses. Require closed
+  reads, positive per-case actual owner calls and zero prohibited effects
+  before admission. Preserve preceding node order and unrelated source hashes,
+  coverage targets, helper decisions, compact/flat-v1 identity and the
+  300-second bound. Normal strict typing, current-head review and complete
+  fresh Linux CI remain required; real publication, credentials, native,
+  installed and broader parent gates remain separate.
+  #14055 merges at `d7e8fe3c9d7ef7582aada56b3537a0b3571450fc` after
+  exact-head Copilot approval and complete required Linux CI with all 8,174
+  units freshly executed. The distinct successful-attestation thread refusal
+  and broader parent gates stay open.
+- [x] Qualify all thirteen cases from five original candidate-retry clock,
+  environment, exact remote identity and CLI output functions. Export exact
+  original functions and the identity fixture, preserving every parameter,
+  callback, clock witness and assertion. Keep the three native Git cases with
+  their existing owner, unchanged. Require closed reads, positive per-case
+  actual owner calls and zero prohibited effects before admission. Preserve
+  all preceding nodes and hashes, targets, helper decisions, compact/flat-v1
+  identity and the 300-second bound. Require normal strict typing, current-head
+  review and complete fresh Linux CI; native, installed, publication and
+  broader parent gates remain separate.
+  #14056 merges at `447c6d4e6f6d1554894f6e36bf79d4a204c77a4d` after
+  exact-head Copilot approval and complete required Linux CI with all 8,187
+  units freshly executed. Broader parent gates stay open.
+- [x] Qualify all 27 cases from six original subject-attestation verifier
+  retry functions, preserving the original subject fixture, mock callbacks,
+  parameter identities, monotonic deadline witnesses and assertions. This
+  independent subject-verifier cohort is not a replay or replacement of
+  the refused threaded bundle-attestation witness. Require closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; native, installed,
+  publication and broader parent gates remain separate.
+  #14057 merges at `eddb35122c52195acbd12bba835d8d53d090854c` after
+  exact-head Copilot approval and complete required Linux CI with all 8,214
+  units freshly executed. The distinct threaded witness and broader parent
+  gates remain open.
+- [ ] Resolve the six original core manager-wheel exception cases' undeclared
+  build-data input with the existing data-admission owner. Review of #14058
+  identifies `worktree-manager/pyproject.toml` outside the admitted source/data
+  closure. Withdraw the entire original function without changing its inputs
+  or assertions; a green Python-read effect audit does not bind that TOML.
+  Do not widen the data allowlist to admit this cohort.
+- [x] Qualify the other 23 synthetic cases from twelve original core-artifact
+  functions, preserving their exact functions, fixture helpers, build
+  callbacks, parameters and assertions. Keep the original isolated builder
+  CLI smoke with its existing integration owner. Require closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; native, installed,
+  real builds and broader parent gates remain separate.
+  #14058 merges at `39433b011c1decd03f4681455df3c41a44df5a55` after
+  exact-head Copilot approval and complete required Linux CI with all 8,237
+  units freshly executed. The six undeclared-data cases, original isolated
+  CLI smoke and broader parent gates remain open.
+- [ ] Qualify the 52 synthetic cases from thirteen original runtime-profile
+  class methods, preserving the exact original class, methods, parameters,
+  helpers and assertions. Admit only those positive selectors; keep the
+  original real fresh-process smoke unchanged with its integration owner.
+  Require complete original/adapter collection identity, closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; native, installed,
+  data-admission and broader parent gates remain separate.
+  Initial qualification preserves all 53 original/adapter class, method and
+  parameter identities but stops on the first selected case: dependency-marker
+  evaluation reaches `platform.uname()` and `socket.gethostname`, refused by the
+  unchanged effect auditor. None of the 52 cases is admitted. Retain the
+  candidate and failed helper; do not preload host state or retry variants.
+- [x] Qualify the three original bounded-hash worker-count refusal cases,
+  preserving their exact function, parameters and assertions. Keep the two
+  original threaded hashing witnesses unchanged with their integration owner.
+  Require closed reads, positive per-case actual owner calls and zero
+  prohibited effects before admission. Preserve preceding nodes and hashes,
+  targets, helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI; the refused runtime-profile class and broader parent gates remain open.
+  #14061 merges at `55479aa6685d8536b530a4e132de09aa11bfe7be` after
+  exact-head Copilot approval and complete required Linux CI with all 8,240
+  units freshly executed. Both threaded witnesses, the 52-case host-query
+  refusal and broader parent gates remain open.
+- [x] Qualify seven original deterministic Windows-rotation selector cases,
+  preserving their exact functions, fixed dates, CLI arguments and assertions.
+  Keep the original tier-disjointness assertion outside this call-coverage
+  admission without reclassifying it or inventing an owner call.
+  Require complete original/adapter collection identity, closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no actual Windows
+  workflow, platform qualification, runtime or native contract changes.
+  #14062 merges at `0a27a31e0369c47c87c6db1277fde61e788cf22f` after
+  exact-head Copilot approval and complete required Linux CI with all 8,247
+  units freshly executed. The original tier-disjointness assertion and
+  broader Windows, scheduled-integration and parent gates remain open.
+- [x] Qualify all 104 original fallback-equivalence cases, preserving all three
+  original functions, the greedy reference implementation, all 100 seeds,
+  nine budgets per seed, parameters and assertions without reducing the matrix.
+  Require complete original/adapter collection identity, closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI. This exercises the
+  existing pure algorithm, not portfolio routing, baseline adoption, workflow
+  policy or activation; all such owners and broader parent gates remain separate.
+  Complete collection preserves all 104 original selectors, original function
+  objects and parameter objects. Fresh guarded qualification passes all 104
+  in 2.562 seconds with zero prohibited effects, four bound Python reads and
+  positive actual call-phase algorithm-owner lines per case. The compact-v2
+  candidate contains 8,351 nodes, 1,189 sources and 450 targets; all 8,247
+  preceding nodes, source hashes and 89 helper decisions remain intact.
+  #14063 merges at `d56f481a236cacf0ed4090401e50ff8b125fce1f` after
+  exact-head Copilot approval and complete required Linux CI with all 8,351
+  units freshly executed. Only this finite leaf is complete; portfolio
+  activation, shared-owner seams and broader parent gates remain open.
+- [x] Qualify the 20 original pure coverage-policy methods in the complete
+  `TestSelectTests`, `TestComputeFallbackSet` and
+  `TestDefaultTierEligibleTests` classes. Preserve the exact class and method
+  objects, shared synthetic baseline, class helpers and assertions.
+  Keep all other original-module methods and real integration witnesses
+  unchanged with their existing owners. Require complete selected
+  original/adapter collection identity, a closed source-read import closure,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no portfolio
+  activation, baseline adoption, workflow or native contract changes.
+  Complete collection maps all 20 exact class/method objects from 157 original
+  cases. Fresh guarded qualification passes all 20 in 1.500 seconds, with zero
+  prohibited effects, 23 bound Python reads and positive actual call-phase
+  owner lines per case. Nine bindings close the original module's import
+  closure; no target or admission-policy change is needed. The compact-v2
+  candidate contains 8,371 nodes, 1,198 sources and the existing 450 targets.
+  #14064 merges at `2d4fa14c7fc471e1638c0704a1cc1381c7365762` after
+  exact-head Copilot approval and complete required Linux CI with all 8,371
+  units freshly executed. Only this finite leaf is complete; other original
+  cases and all broader parent gates remain open.
+- [x] Qualify the 27 original methods in the complete `TestCorrelation`
+  and `TestFetchBaselineAsset` classes, retaining exact class/method objects,
+  helpers, synthetic payloads, existing subprocess stubs and assertions.
+  Do not add mocks, replace witnesses, download assets or execute native
+  processes. Keep other original-module cases unchanged and separately owned.
+  Require complete selected original/adapter collection identity, closed
+  source reads, positive per-case actual owner calls and zero prohibited
+  effects before admission. Preserve preceding nodes and hashes, targets,
+  helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI; no baseline publication/adoption, workflow, runtime or native contract
+  changes.
+  Complete collection maps all 27 exact class/method objects from 157 original
+  cases. Initial guarded qualification passes all 27 in 1.328 seconds, with
+  zero prohibited effects, 23 bound Python reads and actual correlation-owner
+  call-phase lines per case. Only the adapter needs a new source binding;
+  original helpers, payloads, subprocess stubs and assertions are unchanged.
+  The compact-v2 candidate contains 8,398 nodes, 1,199 sources and the existing
+  450 targets. #14065 merges at
+  `bbd747b48cbab03f82c117a253d0d1c1a4a79c62` after exact-head Copilot approval
+  and complete required Linux CI with all 8,398 units freshly executed.
+  Only this finite leaf is complete; all broader parent gates remain open.
+- [x] Qualify the complete original `TestPlanChunks` and
+  `TestMergeChunkResults` classes, retaining every class/method object,
+  parameter, temporary-file fixture, existing subprocess stub and assertion.
+  Do not add mocks, preloads, real process/thread execution or network access.
+  Require complete selected original/adapter collection and parameter identity,
+  closed source reads, positive per-case actual owner calls and zero prohibited
+  effects before admission. Preserve preceding nodes and hashes, helper
+  decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI; no baseline publication/adoption, workflow, runtime or native contract
+  changes.
+  Complete collection maps all 15 expanded cases with exact class/method and
+  parameter objects. Initial guarded qualification passes all 15 in 2.453
+  seconds, with zero prohibited effects, 23 bound Python reads and actual
+  baseline-owner call-phase lines per case. Only the adapter needs a new source
+  binding; baseline and chunk-scheduler modules become coverage targets.
+  The compact-v2 candidate contains 8,413 nodes, 1,200 sources and 452 targets.
+  #14066 merges at `8b999f63eb36bbb5ab0a20cd4ab9be02cd71c878` after
+  exact-head Copilot approval and complete required Linux CI with all 8,413
+  units freshly executed. Only this finite leaf is complete; all broader
+  parent gates remain open.
+- [x] Qualify all eleven original `TestDecide` methods, retaining the exact
+  class/method objects, helper baselines, original collaborator stubs and
+  assertions. Keep actual Git debt/ancestry, asset-fetch and integration cases
+  unchanged with their existing owners. Do not add mocks, preloads, real
+  process/thread execution or network access. Require complete selected
+  original/adapter collection identity, closed source reads, positive per-case
+  actual decision-owner calls and zero prohibited effects before admission.
+  Preserve preceding nodes, hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no portfolio
+  activation, workflow, runtime or native contract changes.
+  Complete collection maps all eleven exact class/method objects from 157
+  original cases. Initial guarded qualification passes all eleven in 1.515
+  seconds, with zero prohibited effects, 23 bound Python reads and actual
+  decision-owner call-phase lines per case. Only the adapter needs a new source
+  binding; the already-bound decision module becomes a coverage target.
+  The current base includes #14054's six independently owned bootstrap
+  bindings and sixteen refreshed hashes; these are preserved, not reauthored
+  or attributed to this slice. The compact-v2 candidate contains 8,424 nodes,
+  1,207 sources and 453 targets. #14067 merges at
+  `2966cd1a1688c49756e51439f9d3dd2adc56cef2` after exact-head Copilot approval
+  and complete required Linux CI with all 8,424 selected units freshly
+  executed. The merged base also carries #14059's independently owned
+  additional node and five refreshed hashes, yielding 8,425 current nodes.
+  Only this eleven-case leaf is complete; broader parent gates remain open.
+- [x] Qualify the two original synthetic sandbox/diagnostic functions and
+  eight non-integration `TestBaselineCollectionErrorContract` cases.
+  Preserve the exact function/class/method and parameter objects, fixtures,
+  helpers, existing collaborator stubs and assertions. The class's opt-in
+  `test_real_collection_error_is_not_hidden_by_coverage_warning` remains
+  unchanged and outside the exact manifest; the whole nine-case class is
+  not unit-qualified. Require complete original/adapter collection identity,
+  explicit ten-case selection, closed source reads, positive per-case actual
+  owner calls and zero prohibited effects before admission.
+  Preserve preceding nodes, current-base hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; no new mocks,
+  preloads, process/thread execution, network access, workflow, runtime or
+  native contract changes.
+  Complete collection verifies all 157 original cases, eleven adapter cases
+  and the exact ten-case selection, including original parameter-object
+  identity. Initial unchanged-guard qualification passes all ten in 2.281
+  seconds, with zero prohibited effects, 23 bound Python reads and actual
+  baseline-owner call-phase lines per case. The real-process case is
+  deselected, never executed or counted as a skipped unit. Only the adapter
+  needs a new source binding; no coverage target changes. The compact-v2
+  candidate contains 8,435 nodes, 1,208 sources and 453 targets. #14068
+  merges at `d29e522962d577f539d44b98859546b5003fffb4` after exact-head
+  Copilot approval and complete required Linux CI with all 8,435 selected
+  units freshly executed. Only this ten-case leaf is complete; broader
+  parent gates remain open.
+- [x] Qualify thirteen original synthetic chunk-control cases and the pure
+  original CLI-summary case. Preserve the four original imported function
+  objects, class/method and parameter objects, fixtures, helpers, existing
+  collaborator stubs and assertions. Keep actual concurrency/process cases,
+  workflow inspection and the three real-Git CLI methods unchanged outside
+  the exact manifest; the whole CLI class is not unit-qualified.
+  Require complete original/adapter collection identity, explicit fourteen-case
+  selection, closed source reads, positive per-case actual owner calls and
+  zero prohibited effects before admission. Preserve preceding nodes,
+  current-base hashes, targets, helper decisions, compact/flat-v1 identity
+  and the 300-second bound. Require normal strict typing, current-head review
+  and complete fresh Linux CI; no new mocks, preloads, process/thread
+  execution, network access, workflow, runtime or native contract changes.
+  Complete collection verifies all 157 original cases, seventeen adapter
+  cases and the exact fourteen-case selection, including original parameter
+  objects. Initial unchanged-guard qualification passes all fourteen in
+  2.188 seconds, with zero prohibited effects, 23 bound Python reads and
+  actual baseline/chunk/summary-owner call-phase lines per case. The three
+  real-Git CLI cases are deselected, never executed or counted as skipped
+  units. Only the adapter needs a new source binding; the already-bound CLI
+  module becomes a coverage target. The compact-v2 candidate contains 8,449
+  nodes, 1,209 sources and 454 targets. #14069 merges at
+  `e6f58dd9792676c21f2813b8aa19ef374c332f44` after exact-head Copilot approval
+  and complete required Linux CI with all 8,449 selected units freshly
+  executed. Only this fourteen-case leaf is complete; broader parent gates
+  remain open.
+- [ ] Qualify the six original auditability-declaration refusal cases and
+  three existing stubbed selected-execution CLI cases. Preserve original
+  function/parameter objects, fixtures, helpers, collaborator stubs and
+  assertions. Keep actual Git/process execution, workflow inspection and
+  host-profile-dependent auditability cases unchanged outside the packet.
+  Require complete original/adapter collection identity, closed source reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes, current-base hashes, targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require normal
+  strict typing, current-head review and complete fresh Linux CI; no new
+  mocks, preloads, process/thread execution, network access, workflow, runtime
+  or native contract changes.
+  Complete collection verifies all sixty original cases and nine exact
+  adapter cases, including original parameter objects and the explicit Python
+  import closure. Initial unchanged-guard qualification refuses during
+  collection because collected nodes differ from the exact admitted
+  inventory. No tests execute and no case is admitted. The underlying
+  collection cause is not exposed by that inventory refusal; it remains
+  unknown. Retain the failed adapter and candidate without replay, preload,
+  loader exception or guard change. This leaf remains open.
+- [x] Qualify the eleven original pure CI-telemetry cases, preserving exact
+  function and module-fixture objects, synthetic records, helpers and
+  assertions. Keep the original persistence test and all API/fetch paths
+  unchanged outside the packet. Require complete original/adapter collection
+  identity, closed source reads, positive per-case actual telemetry-owner
+  calls and zero prohibited effects before admission. Preserve preceding
+  nodes, current-base hashes, targets, helper decisions, compact/flat-v1
+  identity and the 300-second bound. Require normal strict typing,
+  current-head review and complete fresh Linux CI; no new mocks, preloads,
+  process/thread execution, network access, workflow, runtime or native
+  contract changes.
+  Complete collection verifies twelve original cases and eleven exact
+  adapter cases, including the unchanged module fixture. Initial unchanged
+  guard qualification passes all eleven in 1.171 seconds, with zero
+  prohibited effects, four bound Python reads and actual telemetry-owner
+  call-phase lines per case. The compact-v2 candidate contains 8,460 nodes,
+  1,213 sources and 455 targets. #14071 merges at
+  `de9a977f150f983f64615c4dcf4144bcdec135b4` after exact-head Copilot approval
+  and complete required Linux CI with all 8,460 selected units freshly
+  executed. Only this eleven-case leaf is complete; the refused nine-case
+  candidate contributes no nodes or source bindings and broader gates remain
+  open.
+- [x] Qualify the complete original CI-failure-watchdog test module:
+  47 original functions and fifty expanded cases, including its unchanged
+  watchdog fixture, synthetic logs, helpers, existing subprocess/API stubs,
+  parameter objects, temporary output files and assertions. No actual GitHub,
+  subprocess, thread or network execution is selected.
+  Require complete original/adapter collection identity, closed source reads,
+  positive per-case actual watchdog-owner calls and zero prohibited effects
+  before admission. Preserve preceding nodes, current-base hashes, targets,
+  helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux
+  CI; no new mocks, preloads, wrappers, effect exceptions, workflow, runtime
+  or native contract changes.
+  Complete collection verifies all fifty original and adapter cases, exact
+  function/fixture identity and the original four parameter objects.
+  Initial unchanged-guard qualification passes all fifty in 1.984 seconds,
+  with zero prohibited effects, three bound Python reads and actual
+  watchdog-owner call-phase lines per case. The compact-v2 candidate contains
+  8,510 nodes, 1,215 sources and 456 targets. #14072 merges at
+  `62aac085ea9728ed4b29111214c62d7a858427a6` after exact-head Copilot approval
+  and complete required Linux CI with all 8,510 selected units freshly
+  executed. Only this fifty-case leaf is complete; broader gates remain open.
+- [x] Qualify the fifty original pure CI-job-admission cases: seven original
+  functions covering path selection, unknown-input widening, non-PR full
+  coverage, path validation, union/empty diff and incomplete-commit refusal.
+  Preserve original function and parameter objects, helpers and assertions.
+  Leave actual Git/CLI, workflow inspection and aggregate subprocess cases
+  unchanged outside the packet. Require complete original/adapter collection,
+  closed source reads, positive per-case actual admission-owner calls and zero
+  prohibited effects before admission. Preserve preceding nodes, current-base
+  hashes, targets, helper decisions, compact/flat-v1 identity and the 300-second
+  bound. Require normal strict typing, current-head review and complete fresh
+  Linux CI; no new mocks, preloads, wrappers, effect exceptions, workflow,
+  routing, runtime or native contract changes.
+  Complete collection verifies all 67 original cases and fifty exact adapter
+  cases, preserving original parameter-row objects. Initial unchanged-guard
+  qualification passes all fifty in 2.750 seconds, with zero prohibited
+  effects, three bound Python reads and actual admission-owner call-phase
+  lines per case. The compact-v2 candidate contains 8,560 nodes, 1,218 sources
+  and 457 targets. #14073 merges at
+  `9a6a8f56bf3c972b1fb9012c60fa854a98cc47b5` after exact-head Copilot approval
+  and complete required Linux CI with all 8,560 selected units freshly
+  executed. Only this fifty-case leaf is complete; broader gates remain open.
+- [x] Qualify 109 original pure CI-partition matrix/backend-decision cases:
+  four matrix functions and all sixteen backend functions, preserving exact
+  original functions, parameter rows, both backend fixtures, helpers and
+  assertions. Keep actual CLI, Git, workflow/generated-checkout and real
+  repository-inventory cases unchanged outside the packet.
+  Require complete original/adapter collection, closed Python reads, positive
+  actual owner calls per case and zero prohibited effects before admission.
+  Preserve preceding nodes/order, current-base hashes, targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require normal
+  strict typing, current-head review and complete fresh Linux CI. No new
+  mocks, preloads, wrappers, effect exceptions, data admission, workflow,
+  routing, runtime, native reserve proof or runner allocation is authorized.
+  Complete collection verifies all 124 original cases and exactly 109 selected
+  cases across twenty unchanged original function objects, both fixture
+  objects and every selected parameter value. Initial unchanged-guard
+  qualification passes all 109 in 3.219 seconds, with zero prohibited effects,
+  closed Python reads and actual partition-owner call-phase lines per case.
+  The compact-v2 candidate contains 8,669 nodes, 1,221 sources and 458 targets.
+  #14074 merges at `dc8ca620e2b007fcd75dc388b5203e7edf5b8e95` after
+  exact-head Copilot approval and complete required Linux CI with all 8,669
+  selected units freshly executed. Only this 109-case leaf is complete;
+  broader gates remain open.
+- [x] Qualify the three original module-health lookup-outcome cases, retaining
+  exact original function objects, their existing subprocess stubs, helpers
+  and assertions. Keep all seven actual Git, CLI and main-entrypoint cases
+  unchanged outside the packet. Require complete original/adapter collection,
+  closed Python reads, positive actual owner calls per case and zero prohibited
+  effects before admission. Preserve preceding nodes/order, current-base hashes,
+  targets, helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux CI.
+  No new mock, preload, wrapper, effect exception, data admission, workflow,
+  runtime, actual GitHub lookup or issue filing is authorized.
+  Complete collection verifies ten original and three selected function
+  objects in original order. Initial unchanged-guard qualification passes all
+  three in 1.375 seconds, with zero prohibited effects, three bound Python
+  reads and actual watchdog-owner call-phase lines per case. The compact-v2
+  candidate contains 8,672 nodes, 1,224 sources and 459 targets. #14076 merges
+  at `e2cdc012fdd91f9a0d96f5434d6a56092eb0984e` after exact-head Copilot approval
+  and complete required Linux CI with all 8,672 selected units freshly
+  executed. Only this three-case leaf is complete; broader gates remain open.
+- [x] Qualify 95 original installer-guard cases across seventeen original
+  functions: engine/policy call parsing, temporary plugin scope validation,
+  temporary stderr-redirection scanning and completion-marker status parsing.
+  Preserve original function and parameter objects, helpers and assertions.
+  Keep actual native execution, repository scans, imported runtime/profile
+  suites and the constant/AST-only scope comparison outside the selection.
+  Require complete original/adapter collection, closed Python reads, positive
+  actual owner calls per case and zero prohibited effects before admission.
+  Preserve preceding nodes/order, current-base hashes, targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require normal
+  strict typing, current-head review and complete fresh Linux CI. No new mock,
+  preload, wrapper, effect exception, data admission, installer/native
+  execution, workflow, runtime or cleanup action is authorized.
+  Complete collection verifies all 336 original cases and exactly 95 selected
+  cases across seventeen unchanged original functions and original parameter
+  values. Initial unchanged-guard qualification passes all 95 in 4.047 seconds,
+  with zero prohibited effects, closed Python reads and actual guard-owner
+  call-phase lines per case. The compact-v2 candidate contains 8,767 nodes,
+  1,227 sources and 460 targets. #14078 merges at
+  `e25c69750ab737de649b7f4357eb65a40ce4e62b` after exact-head Copilot approval
+  and complete required Linux CI with all 8,767 selected units freshly
+  executed. Only this 95-case leaf is complete; broader gates remain open.
+- [ ] Qualify 21 original synthetic machine-gate contract cases across four
+  original functions: actual source conformance, source mutations, planner
+  bypasses and missing-source refusals. Preserve the original source-copy
+  helper, private synthetic package, AST function extraction, doubles,
+  parameter objects and assertions. No original contract mechanism is replaced.
+  Require complete original/adapter collection, closed Python reads, positive
+  actual owner calls per case and zero prohibited effects before admission.
+  Preserve preceding nodes/order, current-base hashes, targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require normal
+  strict typing, current-head review and complete fresh Linux CI. No installer,
+  native process, installed metadata probe, policy/routing change, new mock,
+  preload, wrapper, effect exception, data admission or cleanup is authorized.
+  Complete collection verifies 336 original cases and exactly 21 selected
+  cases with original function/parameter identity. Initial unchanged-guard
+  execution stops after nine passes at the original mutation
+  `update_gate.py: return machine in allowed -> return True`: the mutation
+  source text is absent, so the original `assert before in text` fails before
+  that contract check. No complete observation report or admission follows.
+  All 21 remain unadmitted; the exact adapter, candidate, selector inventory
+  and helper are retained without replay or assertion changes.
+- [ ] Qualify twenty original strict-checker inventory/manifest/matrix controls
+  across eight original functions. Preserve original functions, parameter
+  values, both autouse fixtures, helpers, source-custody controls and assertions.
+  Keep actual Git/MyPy/frontdoor/native execution and repository-data cases
+  unchanged outside this slice. Require complete original/adapter collection,
+  closed Python reads, positive actual owner calls per case and zero prohibited
+  effects before admission. Preserve preceding nodes/order, current-base hashes,
+  targets, helper decisions, compact/flat-v1 identity and the 300-second bound.
+  Require normal strict typing, current-head review and complete fresh Linux CI.
+  No new mock, preload, wrapper, effect exception, data admission, workflow,
+  runtime or cleanup action is authorized.
+  Complete collection verifies 236 original cases and exactly twenty selected
+  cases across eight original functions, both autouse fixtures and every
+  selected parameter value. Initial unchanged-guard qualification passes all
+  twenty in 1.906 seconds, with zero prohibited effects, closed Python reads
+  and actual checker-owner call-phase lines per case. The compact-v2 candidate
+  contains 8,787 nodes, 1,228 sources and 460 targets. Current-head review and
+  complete fresh Linux CI remain required before this finite leaf closes.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

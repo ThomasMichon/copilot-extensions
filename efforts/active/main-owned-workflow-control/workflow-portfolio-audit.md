@@ -4189,11 +4189,1042 @@ compact-v2 bytes, preserving all preceding 8,016 nodes and hashes, 89 helper
 decisions, compact/flat-v1 identity and the 300-second bound. Ruff and
 whole-file strict Python 3.10/Linux and Windows typing pass.
 
-Current-head review and complete fresh Linux source CI remain required
-before this finite leaf is complete. Fresh-install/native/installed external
-lanes are not exercised because no installation or runtime behavior changes.
+Current-head review and complete fresh Linux source CI complete for this
+finite cohort. Copilot approval `6010756687` covers exact head
+`85758ca9f959836e4b4f8d7cb00bb4474c9bc823`, without active findings.
+CI `44993423256`, unit job `137119246214`, freshly passes all 8,049 cases
+with 39 deselections, 153.49 pytest seconds and 174.602 packet seconds.
+Evidence reports `mode=executed`, origin run `44993423256` attempt one and
+digest `85ca92a3dc798ce471ac97ed1e72733cb4fb82f44d28e41445639deae81c84a0`.
+Required aggregate `137120422558`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+
+Source #14043 merges at `2026-11-22T06:30:07Z` as
+`a73ea800609c804721d48f48a015405983d24dce`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the 33-case leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit or a
+controlled whole-flow saving.
 Full-census, every-release, comparable whole-flow, owner, native, installed
 and retained-custody gates remain open.
+
+### November 22 original artifact-schema and wheel qualification
+
+The existing bundle adapter additionally exports five exact original
+functions as 39 cases: declared vendored-library acceptance, twenty complete
+provenance/computed-identity controls, forged content-address refusal, sixteen
+real wheel metadata/member controls, and structured encoded-metadata refusal.
+All original parameters, assertions, callbacks and the autouse identity fixture
+remain unchanged. The symlink wheel member is synthetic ZIP metadata, not a
+native filesystem link.
+
+The 200-case original collection matches all 72 adapter selections and their
+exact objects and parameter identities. A fresh guarded process passes all 72,
+including the preceding 33, in 6.047 seconds with zero prohibited effects,
+38 bound Python reads and positive actual call-phase artifact-owner lines for
+every case. Only the existing adapter's binding changes. The candidate has
+8,088 nodes, 1,173 sources, 448 targets and 915,940 compact-v2 bytes. The 39
+new nodes follow the existing group's 33 without a duplicate file group; all
+preceding 8,049 nodes retain relative order, every unrelated source hash and
+coverage target is preserved, and all 89 helper decisions, compact/flat-v1
+identity and the 300-second bound remain enforced.
+
+Current-head review and complete fresh Linux source CI complete for this
+finite cohort. Copilot approval `6010846752` covers exact head
+`cda62819fd785c445d5785dda2e0ec8833fb8ed0`, without active findings.
+CI `44995153755`, unit job `137124480732`, freshly passes all 8,088 cases
+with 39 deselections, 145.21 pytest seconds and 163.752 packet seconds.
+Evidence reports `mode=executed`, origin run `44995153755` attempt one and
+digest `9a52b40673a9bd15b06ed2f94f60f34cb0c90288002c8073aba90cd0ccd1ee6f`.
+Required aggregate `137125462688`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+
+Source #14046 merges at `2026-11-22T06:51:52Z` as
+`65421209a6a23b5a3ca79d5c7632f7d94744c302`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the 39-case leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
+whole-flow saving or acceptance of any broader owner or parent gate.
+
+### November 22 original digest, transfer and signer qualification
+
+The existing adapter additionally exports eight exact original functions as
+33 cases: empty/multichunk SHA-256, three composition mismatches, twelve
+transfer-corruption mutations, five unsafe-wheel refusals, declared primary
+source preservation, unsafe or mismatching source paths, and configured
+signer policy/shared-lock controls. Every original parameter, callback,
+assertion and the autouse identity fixture remains unchanged.
+
+The 200-case original collection matches all 105 adapter selections and their
+exact objects and parameter identities. A fresh guarded process passes all 105
+in 6.203 seconds with zero prohibited effects, 38 bound Python reads and
+positive actual call-phase artifact-owner lines for every case. Only the
+existing adapter's source binding changes. The candidate has 8,121 nodes,
+1,173 sources, 448 targets and 918,154 compact-v2 bytes. All preceding 8,088
+nodes retain relative order; the 33 new cases append to the existing group
+without duplicating it. Every unrelated source hash and coverage target,
+89 helper decisions, compact/flat-v1 identity and the 300-second bound remain
+enforced.
+
+Current-head review and complete fresh Linux source CI complete for this
+finite cohort. Copilot approval `6010946130` covers exact head
+`d0d32b0277d8c4df8529911e1b67be8493b2a763`, without active findings.
+CI `44996014016`, unit job `137127093280`, freshly passes all 8,121 cases
+with 39 deselections, 142.63 pytest seconds and 161.578 packet seconds.
+Evidence reports `mode=executed`, origin run `44996014016` attempt one and
+digest `389758f785eb2f94a0570bdae013255eded57eb14c1ebb01eea1ef055ebe2cef`.
+Required aggregate `137128223962`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+
+Source #14050 merges at `2026-11-22T07:04:52Z` as
+`fbe2276af774d799e5eddf9cd282f09c7736d6fe`. Independent readback confirms merged
+state and open parent #6237. The actual parent Goal, current Plan, own leaf
+and Validation Plan are reread before resolving only the 33-case leaf.
+Fresh-install/native/installed external lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
+whole-flow saving or acceptance of any broader owner or parent gate.
+
+### November 22 original serial publication qualification
+
+The initial 54-case development prototype retains all original objects,
+parameters and the autouse identity fixture. Its guarded execution passes
+the preceding 105 adapter cases, then refuses
+`test_attestation_checks_exact_workflow_ref_and_digests` when the production
+attestation verifier submits a thread. That successful bundle-verification
+case is withdrawn from the adapter and remains unadmitted. Neither the
+original function nor its pool, mocks or effect guard changes; its existing
+integration owner retains the threaded witness.
+
+A distinct remainder contains all 53 cases from the other fourteen complete
+functions: attestation failure and invalid-subject refusal, synthetic
+verification-token isolation, immutable publication, explicit HTTP-404
+classification, bounded tag resolution and payload binding, tag-creation
+races, actual merge/source/bundle mismatch refusal and trusted builder
+namespace preservation. The original 200-case collection matches all 158
+adapter selections with exact function and autouse fixture objects and
+parameter identities. A fresh guarded process passes all 158 in 7.875
+seconds, with zero prohibited effects, 40 bound Python reads and positive
+actual call-phase artifact-owner lines for every case.
+
+The candidate has 8,174 nodes, 1,173 bound sources, 448 targets and 923,376
+compact-v2 bytes. Only the existing adapter hash changes. The 53 new nodes
+append to its existing 105-case group without duplicating that group;
+all preceding 8,121 nodes retain relative order. Every unrelated source
+hash and target, 89 helper decisions, compact/flat-v1 identity and the
+300-second bound remain enforced.
+
+Copilot approval `6011027058` covers exact head
+`3fd591c9f14431a2e06c563cbc655c0a11271625` without active findings.
+CI `44997595782`, unit job `137131887865`, freshly passes all 8,174 cases
+with 39 deselections, 127.40 pytest seconds and 146.443 packet seconds.
+The evidence reports `mode=executed`, origin run `44997595782` attempt one
+and digest `8bafbc22e609ade3a5102ab615db5dccbc2da078c18363aaaefb2afff4e726c4`.
+Required aggregate `137132657712`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+Source #14055 merges at `2026-11-22T07:23:46Z` as
+`d7e8fe3c9d7ef7582aada56b3537a0b3571450fc`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the 53-case leaf. The
+successful-attestation thread refusal remains open. Fresh-install/native/
+installed lanes are not exercised because no installation or runtime
+behavior changes. This is not a reuse hit, controlled whole-flow saving,
+real publication or acceptance of any broader owner or parent gate.
+
+### November 22 original candidate-retry qualification
+
+A new adapter exports five exact original candidate-retry functions as
+thirteen cases: four invalid/noncanonical clocks, immutable parent
+environment and Git identity, five exact remote commit/ref responses,
+trusted candidate CLI output despite injected human-log text, and two
+no-op/paused output controls. The original autouse identity fixture,
+parameters, callbacks, fixed clock and assertions remain unchanged. The
+three real Git sibling cases remain unadmitted with their existing owner.
+
+The original sixteen-case collection matches all thirteen adapter selections
+and exact original objects and parameter identities. A fresh guarded process
+passes all thirteen in 1.218 seconds with zero prohibited effects, seven
+bound Python reads and positive actual call-phase candidate/promoter-owner
+lines per case. Only the new adapter and original test file require new
+source bindings; both production targets are already admitted. The candidate
+contains 8,187 nodes, 1,175 bound sources, 448 targets and 924,843 compact-v2
+bytes. Every preceding node retains relative order and its source hashes;
+coverage targets, 89 helper decisions, compact/flat-v1 identity and the
+300-second bound remain enforced.
+
+Copilot approval `6011055322` covers exact head
+`677426ffa75e235c2b365ddfcea61e59a5f01423` without active findings.
+CI `44998324135`, unit job `137134116058`, freshly passes all 8,187 cases
+with 39 deselections, 188.13 pytest seconds and 210.602 packet seconds.
+The evidence reports `mode=executed`, origin run `44998324135` attempt one
+and digest `26891f91c71e5ac92b2a446abc20190de902fee61c456e86813fe5f1e4211126`.
+Required aggregate `137135150106`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+Source #14056 merges at `2026-11-22T07:34:23Z` as
+`447c6d4e6f6d1554894f6e36bf79d4a204c77a4d`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the thirteen-case leaf.
+Fresh-install/native/installed lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit,
+controlled whole-flow saving, real publication or acceptance of any broader
+owner or parent gate.
+
+### November 22 original deterministic rotation qualification
+
+A new adapter exports seven unchanged functions from the eight-case original
+Windows-rotation selector module: five fixed-date algorithm controls and both
+in-process CLI output formats. It retains the original arguments, date
+fixtures and assertions without substituting functions or adding restoration
+fixtures. The original tier-disjointness assertion remains outside this
+call-coverage admission because it executes no production owner function;
+that does not reclassify it or make the unit census complete.
+
+Complete collection preserves every selected original function identity.
+Fresh qualification passes all seven in 1.469 seconds under the unchanged
+auditor, with zero prohibited effects, exactly three bound Python reads and
+positive actual call-phase selector-owner lines for every case.
+
+The candidate contains 8,247 nodes, 1,186 bound sources, 449 targets and
+932,816 compact-v2 bytes. Only the adapter, original test module and unchanged
+selector owner add bindings; the selector is the sole additional target.
+All 8,240 preceding nodes, 1,183 existing source hashes, 448 preceding targets
+and 89 helper decisions remain unchanged, as do compact/flat-v1 identity,
+byte cap and the 300-second bound. Fatal Ruff, strict Python 3.10/Linux
+and Windows typing, documentation consistency and diff checks pass.
+Copilot approval `6011362966` covers exact head
+`fd2e3d832c65bc0913637bf3f28ebbcfd246657e`, with no active findings.
+
+Source CI `45004250357`, unit job `137152202459`, freshly passes all 8,247
+cases with 39 deselections, 191.97 pytest seconds and 214.364 packet seconds.
+It reports `mode=executed`, origin run `45004250357` attempt one, execution
+identity `f156d97e8c9a9a051f4e322bc1322ae9f939ae6fe1374d66a4e8b1af8c99d51b`
+and packet digest
+`34f5d8c3b89a7d4b9d1213fcd7ff6544f1a77ac08e469c9056bcd1686c388d01`.
+Required aggregate `137153696264`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14062 merges at `2026-11-22T08:53:38Z` as
+`0a27a31e0369c47c87c6db1277fde61e788cf22f`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the seven-case leaf.
+
+This tests deterministic selector logic, not the Windows workflow, platform
+support, native execution or actual scheduled-suite completeness. Those
+contracts and the host-query, undeclared-data and broader parent gates remain
+separate. Fresh-install and installed/native lanes are not exercised because
+no runtime, installation, workflow or scheduling behavior changes.
+
+### November 22 original fallback-equivalence qualification
+
+A new adapter exports all three exact functions from the original
+fallback-equivalence module, without new decorators, fixtures, wrappers or a
+copied reference algorithm. All 104 original selectors and parameter objects
+are preserved: three unusable-budget cases, the free/zero/infinite-budget
+control, and all 100 seeded greedy-reference cases. Every seed still exercises
+all nine original budgets, including negative, zero, NaN and infinity.
+
+Complete original/adapter collection identity passes. Fresh guarded execution
+passes all 104 cases in 2.562 seconds with zero prohibited effects, four bound
+Python reads and positive actual call-phase algorithm-owner lines per case.
+The execution auditor, source/data policy and helper contract are unchanged.
+
+The compact-v2 candidate contains 8,351 nodes, 1,189 bound sources, 450
+targets and 939,448 bytes. Only the adapter, original test module and
+unchanged fallback implementation add source bindings; the implementation is
+the sole new target. All 8,247 preceding nodes retain relative order, all
+1,186 source hashes and 449 targets remain intact, and all 89 helper
+decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
+enforced. Fatal Ruff, strict Python 3.10/Linux and Windows typing,
+documentation consistency and diff checks pass.
+
+Copilot approval `6011423452` covers exact head
+`da647ecf38d9f496ae1de08551e9338a80e69a33`, with no active findings.
+Source CI `45005613085`, unit job `137156421764`, freshly passes all 8,351
+cases with 39 deselections, 153.49 pytest seconds and 174.167 packet seconds.
+It reports `mode=executed`, origin run `45005613085` attempt one, execution
+identity `21745c59bb15e3dd07da718a3ec1d8f685ec65ede4ee658d418fa2cc3536fab1`
+and packet digest
+`0beb9119fd3a8c658d4b4d73559a18963e4d1d100dafe1c3b6e1ed59d200d03b`.
+Required aggregate `137157407607`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14063 merges at `2026-11-22T09:09:07Z` as
+`d56f481a236cacf0ed4090401e50ff8b125fce1f`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 104-case leaf.
+
+This exercises the existing pure algorithm, not portfolio routing, baseline
+adoption, workflow policy, installed behavior or activation. No runtime or
+installation change requires a fresh-install or native lane. The host-query
+and undeclared-data refusals, shared-owner seams and broader parent gates
+remain open. This is not a reuse hit or a measured whole-flow saving.
+
+### November 22 original coverage-policy class qualification
+
+A new adapter exports the complete original `TestSelectTests`,
+`TestComputeFallbackSet` and `TestDefaultTierEligibleTests` classes without
+reconstructing classes or replacing methods. Their 20 original selectors,
+class/method objects, shared synthetic baseline, class helpers and assertions
+are preserved. The other 137 collected original-module cases, including real
+integration witnesses, remain unchanged and outside this admission.
+
+Complete collection identity passes. Fresh guarded execution passes all 20
+cases in 1.500 seconds with zero prohibited effects, 23 bound Python reads
+and positive actual call-phase selection/fallback-owner lines per case.
+Only the adapter, original test module and seven imported Python modules
+require new bindings; this closes reads of the original module's unchanged
+import closure rather than executing its integration tests or changing
+source/data policy.
+
+The compact-v2 candidate contains 8,371 nodes, 1,198 bound sources, the
+existing 450 targets and 942,466 bytes. All 8,351 preceding nodes retain
+relative order and all 1,189 preceding source hashes remain intact. Coverage
+targets, 89 helper decisions, compact/flat-v1 identity, byte cap and the
+300-second bound remain enforced. Fatal Ruff, strict Python 3.10/Linux and
+Windows typing, documentation consistency and diff checks pass.
+
+Copilot approval `6011461690` covers exact head
+`fbb34f40f582b02854ac7f4b4a04faaa799c508f`, with no active findings.
+Source CI `45006600070`, unit job `137159482550`, freshly passes all 8,371
+cases with 39 deselections, 149.07 pytest seconds and 169.980 packet seconds.
+It reports `mode=executed`, origin run `45006600070` attempt one, execution
+identity `8c4c66ed2b6b3f64d2d80c27778ad49ffe53920834298633c394cba741b16e38`
+and packet digest
+`0eb6494df85f05e277c6cc7c6968a00f4d36febef62adcbc348950d1f3a4fc02`.
+Required aggregate `137160676327`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14064 merges at `2026-11-22T09:21:57Z` as
+`2d4fa14c7fc471e1638c0704a1cc1381c7365762`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 20-case leaf.
+
+No original test, production implementation, workflow, runtime or effect
+auditor changes. This is pure algorithm-policy coverage, not portfolio
+activation, baseline adoption, real Git, installed execution or scheduled
+integration qualification. Fresh-install/native lanes are not exercised
+because installation/runtime behavior is unchanged. All retained refusals,
+shared-owner seams and broader parent gates remain open.
+
+### November 22 exact-original correlation and synthetic-fetch census
+
+The adapter exports the complete original `TestCorrelation` and
+`TestFetchBaselineAsset` classes from `tools/test_coverage_guided_selection.py`.
+Complete collection preserves the same 27 class/method objects and relative
+order among 157 original-module cases. Original helpers, synthetic payloads,
+subprocess stubs and assertions remain unchanged. Other original-module cases
+remain outside this adapter; twenty are already admitted through the policy
+adapter, and importing the module does not execute its integration cases.
+
+Initial guarded qualification passes all 27 in 1.328 seconds with zero
+prohibited effects, 23 bound Python reads and actual correlation-owner
+call-phase lines for every case. Only the adapter requires a new binding;
+the original module and correlation target are already bound. The existing
+fetch tests stub subprocess execution themselves; no new mocks, preloads,
+native execution or network access are added.
+
+The compact-v2 candidate contains 8,398 nodes, 1,199 bound sources, the
+existing 450 targets and 944,957 bytes. All 8,371 preceding nodes retain
+relative order and all 1,198 preceding source hashes remain intact. Coverage
+targets, 89 helper decisions, compact/flat-v1 identity, byte cap and the
+300-second bound remain enforced. Fatal Ruff, strict Python 3.10/Linux and
+Windows typing, documentation consistency and diff checks pass.
+
+Copilot approval `6011511430` covers exact head
+`a50136ec70a923fd91e498cb93e777c30818f497`, with no active findings.
+Source CI `45007888447`, unit job `137163462816`, freshly passes all 8,398
+cases with 39 deselections, 152.41 pytest seconds and 172.384 packet seconds.
+It reports `mode=executed`, origin run `45007888447` attempt one, execution
+identity `867da2f3c37e7a5bd41bef5b7f904b80d89963fcae346aaa80c356e0a941524a`
+and packet digest
+`2f1e356b795675fcf5148027a8db2f00c501fc10b0e9edc3101d9d6a3ed60f70`.
+Required aggregate `137164400676`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14065 merges at `2026-11-22T09:36:17Z` as
+`bbd747b48cbab03f82c117a253d0d1c1a4a79c62`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 27-case leaf.
+
+No original test, production implementation, workflow, runtime, source/data
+policy or effect-auditor changes. This is synthetic correlation/fetch coverage,
+not baseline publication/adoption, real fetching or integration qualification.
+Fresh-install/native lanes are not exercised because installation/runtime
+behavior is unchanged. All retained refusals, shared-owner seams and broader
+parent gates remain open.
+
+### November 22 exact-original chunk-planning and result-merging census
+
+The adapter exports the complete original `TestPlanChunks` and
+`TestMergeChunkResults` classes from `tools/test_coverage_guided_selection.py`.
+Complete collection preserves all 15 expanded cases, their original
+class/method and parameter objects, and relative order among 157 original-module
+cases. Original temporary-file fixtures, subprocess stubs and assertions remain
+unchanged. Other original-module cases remain outside this adapter; 47 are
+already admitted through the policy and correlation adapters. Importing the
+module does not execute its integration cases.
+
+Initial guarded qualification passes all 15 in 2.453 seconds with zero
+prohibited effects, 23 bound Python reads and actual baseline-owner call-phase
+lines for every case. Only the adapter requires a new binding. Already-bound
+baseline and chunk-scheduler modules become coverage targets. The existing
+tests stub subprocess execution themselves; no new mocks, preloads, native or
+thread execution, or network access are added.
+
+The compact-v2 candidate contains 8,413 nodes, 1,200 bound sources, 452 targets
+and 946,612 bytes. All 8,398 preceding nodes retain relative order and all
+1,199 preceding source hashes remain intact. Existing targets, 89 helper
+decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
+enforced. Fatal Ruff, strict Python 3.10/Linux and Windows typing,
+documentation consistency and diff checks pass.
+
+Copilot approval `6011550770` covers exact head
+`bb4cd49d4a53bcb3cd1bc178caaf7350baaa0774`, with no active findings.
+Source CI `45008854170`, unit job `137166421278`, freshly passes all 8,413
+cases with 39 deselections, 145.15 pytest seconds and 163.717 packet seconds.
+It reports `mode=executed`, origin run `45008854170` attempt one, execution
+identity `7d13188cc5eaf7a7dcf295630b2d53ba429d6540c68de9fedc4f576beb8ba345`
+and packet digest
+`c201edf113d197b52267ecc905555d698d6299760fbc71c1fb2a2fc700596dbf`.
+Required aggregate `137167328776`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14066 merges at `2026-11-22T09:48:09Z` as
+`8b999f63eb36bbb5ab0a20cd4ab9be02cd71c878`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 15-case leaf.
+
+No original test, production implementation, workflow, runtime, source/data
+policy or effect-auditor changes. This is synthetic chunk-planning/merging
+coverage, not real collection, baseline publication/adoption or threaded
+integration qualification. Fresh-install/native lanes are not exercised because
+installation/runtime behavior is unchanged. All retained refusals, shared-owner
+seams and broader parent gates remain open.
+
+### November 22 exact-original decision-orchestration census
+
+The adapter exports the complete original `TestDecide` class from
+`tools/test_coverage_guided_selection.py`. Complete collection preserves all
+eleven class/method objects and their relative order among 157 original-module
+cases. Original helper baselines, collaborator stubs and assertions remain
+unchanged. Other original-module cases remain outside this adapter; 62 are
+already admitted through the policy, correlation and chunk adapters. Importing
+the module does not execute its integration cases.
+
+The synchronized base includes the independent #14054 merge
+`c5d79da7e4f39862ca0623f42e86a962c0aa7892`: six bootstrap data bindings and
+sixteen refreshed source hashes, with unchanged nodes, targets and deadline.
+The source inventory is therefore 1,206, not the 1,200 bindings at #14066's
+qualified PR head. Collection stops on that stale-count assertion before any
+test execution; binding the current base resolves the inventory discrepancy
+without changing a test, source policy or auditor. Those peer-owned changes
+are preserved and are not this slice's work or evidence for any prior refusal.
+
+Initial guarded qualification passes all eleven in 1.515 seconds with zero
+prohibited effects, 23 bound Python reads and actual decision-owner call-phase
+lines for every case. Only the adapter requires a new binding; the already-bound
+decision module becomes a coverage target. No new mocks, preloads, real Git,
+native/thread execution or network access are added.
+
+The compact-v2 candidate contains 8,424 nodes, 1,207 bound sources, 453 targets
+and 948,538 bytes. All 8,413 preceding nodes retain relative order and all
+1,206 current-base source hashes remain intact. Existing targets, 89 helper
+decisions, compact/flat-v1 identity, byte cap and the 300-second bound remain
+enforced. Fatal Ruff, strict Python 3.10/Linux and Windows typing,
+documentation consistency and diff checks pass.
+
+Copilot approval `6011594629` covers exact head
+`35df8c11418d9cac6160f39117bc44390ccd617f`, with no active findings.
+Source CI `45009822778`, unit job `137169453906`, freshly passes all 8,424
+cases with 39 deselections, 192.78 pytest seconds and 214.513 packet seconds.
+It reports `mode=executed`, origin run `45009822778` attempt one, execution
+identity `d110db32f88d81873a5a08ba5d3ddaee605ef3304b0233ceb1107e55d17ce64b`
+and packet digest
+`b09489083244a5fccca66e286045298bfcf75ee8ed976a8ed784d64161f8f2ab`.
+Required aggregate `137170754707`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14067 merges at `2026-11-22T10:01:50Z` as
+`2966cd1a1688c49756e51439f9d3dd2adc56cef2`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the eleven-case leaf.
+The merged base also includes independent #14059
+`f60677377a`: one additional launch-composition node and five refreshed
+source hashes, with unchanged source count, targets, deadline and execution
+guards. Its 8,425-node census is not the 8,424-node qualified PR head and
+does not enlarge this leaf's eleven-case result.
+
+No original test, production implementation, workflow, runtime, source/data
+policy or effect-auditor changes. This is decision-orchestration coverage, not
+real Git debt/ancestry, asset fetching, portfolio activation or integration
+qualification. Fresh-install/native lanes are not exercised because
+installation/runtime behavior is unchanged. All retained refusals, shared-owner
+seams and broader parent gates remain open.
+
+### November 22 original synthetic collection-error qualification
+
+The adapter exports the two unchanged original synthetic sandbox/diagnostic
+functions followed by the exact `TestBaselineCollectionErrorContract` class,
+preserving original relative order, method/parameter objects, fixtures,
+helpers, existing collaborator stubs and assertions. Complete collection
+checks 157 original cases and eleven adapter cases. The manifest selects
+exactly ten: the two functions and eight synthetic class cases. The class's
+opt-in real-process error case remains unchanged outside the packet; the
+whole nine-case class is not claimed as unit-qualified.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer, selecting the ten cases explicitly at the pytest
+consumer. It passes in 2.281 seconds with zero prohibited effects, 23 bound
+Python reads and positive actual baseline-owner call-phase lines for every
+selected case. The real-process case is deselected, not executed or counted
+as a skipped unit. No mock, preload, wrapper or effect exception is added;
+the sandbox-retention witness raises the original synthetic error and
+removes only its own newly created temporary sandbox.
+
+The compact-v2 candidate contains 8,435 nodes, 1,208 bound sources and 453
+targets in 949,924 bytes. All 8,425 preceding nodes and their order, all
+1,207 current source hashes, every target, 89 helper decisions and the
+300-second bound remain intact. Only the adapter is newly hash-bound;
+both baseline owners are already targets. Fatal Ruff, strict Python
+3.10/Linux and Windows typing, documentation consistency and diff checks pass.
+Copilot approval `6011664545` covers exact head
+`69796aacf199e7f11a82a59feded32394e0ac2d5` with no active findings.
+Source CI `45011565131`, unit job `137174808574`, freshly passes all 8,435
+cases with 40 deselections, 157.63 pytest seconds and 177.995 packet seconds.
+It reports `mode=executed`, origin run `45011565131` attempt one, execution
+identity `d16bd624c0d0cf6ed58ffe51d01236b6a9dd4887c5979f82f9c23f514ea416f8`
+and packet digest
+`47cc73ba0ca47ee8cae3280f01385d7fc31dd29738943526f3ffa80fb89af57b`.
+Required aggregate `137175781004`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14068 merges at `2026-11-22T10:21:45Z` as
+`d29e522962d577f539d44b98859546b5003fffb4`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the ten-case leaf.
+This is synthetic error-contract coverage, not native/process qualification,
+portfolio activation or resolution of retained owner/refusal boundaries.
+Fresh-install/native lanes are not exercised because no installation,
+runtime, workflow or original-test behavior changes.
+
+### November 22 original synthetic chunk-control qualification
+
+The adapter exports the four unchanged original imported chunk-control
+functions followed by the exact `TestCoverageGuidedSelectionCli` class,
+preserving original relative order, method/parameter objects, fixtures,
+helpers, existing collaborator stubs and assertions. Complete collection
+checks 157 original cases and seventeen adapter cases. The manifest selects
+exactly fourteen: four chunk-error cases, two collector-isolation cases,
+five invalid-worker cases, two shared-containment-budget cases and the
+pure CLI-summary method. The class's three real-Git methods remain unchanged
+outside the packet; the whole four-case class is not unit-qualified.
+Actual threaded/process witnesses and workflow inspection remain outside
+this leaf.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer, selecting the fourteen cases explicitly at the
+pytest consumer. It passes in 2.188 seconds with zero prohibited effects,
+23 bound Python reads and positive actual baseline/chunk/summary-owner
+call-phase lines for every selected case. The three real-Git CLI cases
+are deselected, never executed or counted as skipped units. No mock,
+preload, wrapper or effect exception is added; original collaborator stubs
+remain unchanged.
+
+The compact-v2 candidate contains 8,449 nodes, 1,209 bound sources and 454
+targets in 951,244 bytes. All 8,435 preceding nodes and their order, all
+1,208 current source hashes, every preceding target, 89 helper decisions
+and the 300-second bound remain intact. Only the adapter is newly
+hash-bound; the already-bound CLI module becomes a coverage target.
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation
+consistency and diff checks pass. Copilot approval `6011732638` covers exact
+head `716fc6aeeb8332cea19e4ee24442c6bf72a3a775` with no active findings.
+Source CI `45012479634`, unit job `137177613127`, freshly passes all 8,449
+cases with 43 deselections, 138.45 pytest seconds and 159.303 packet seconds.
+It reports `mode=executed`, origin run `45012479634` attempt one, execution
+identity `56a3b653df81256c5a47201e26b39b0ee5b8b1d56683ffae34ebbed0503294af`
+and packet digest
+`15a1ba0910fc5a1b31293ba359f4d2d7ef44ae7186e1f3b646e6b182bcf0f3e9`.
+Required aggregate `137178504949`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14069 merges at `2026-11-22T10:32:22Z` as
+`e6f58dd9792676c21f2813b8aa19ef374c332f44`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the fourteen-case leaf.
+This is synthetic orchestration
+and summary coverage, not native/process/concurrency/Git qualification,
+portfolio activation or resolution of retained owner/refusal boundaries.
+Fresh-install/native lanes are not exercised because no installation,
+runtime, workflow or original-test behavior changes.
+
+### November 22 selected-execution refusal and pure telemetry qualification
+
+The original selected-execution adapter preserves nine function/parameter
+identities out of sixty original cases: three existing stubbed CLI contracts
+and six auditability-declaration refusals. Its import inventory binds the
+explicit Python closure before the first guarded attempt. The unchanged
+guard refuses during collection with
+`collected unit nodes differ from the exact admitted inventory`; no test
+executes and none of these nine cases is admitted. The underlying collection
+cause is not exposed by that inventory error and is not inferred.
+The failed adapter, helper, candidate and node inventory remain retained,
+without replay, preload, loader exception or policy change.
+Host-profile-dependent auditability tests were excluded before the attempt.
+
+A separate adapter exports eleven unchanged original pure telemetry
+functions and their exact module fixture. Complete collection verifies
+twelve original cases and eleven adapter cases; the persistence test
+remains unchanged outside the packet. Synthetic records, helpers,
+aggregation/reporting assertions and fixture-driven owner imports are
+preserved. No API/fetch, database, actual process or thread path is selected.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer. All eleven pass in 1.171 seconds, with zero
+prohibited effects, four bound Python reads and positive actual
+telemetry-owner call-phase lines for every selected case.
+The compact-v2 candidate contains 8,460 nodes, 1,213 sources and 455 targets
+in 952,681 bytes. All 8,449 preceding nodes and their order, all 1,209 current
+source hashes, every preceding target, 89 helper decisions and the
+300-second bound remain intact. The four new bindings are the adapter,
+original tests, telemetry owner and its unchanged failure-signature owner;
+only telemetry becomes a coverage target. No refused-candidate source
+binding or node is admitted.
+
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation
+consistency and diff checks pass. Copilot approval `6011825471` covers exact
+head `210fbb21f511320c4f5018e52be4ae399e1d9435` with no active findings.
+Source CI `45013773355`, unit job `137181576952`, freshly passes all 8,460
+cases with 43 deselections, 147.54 pytest seconds and 166.746 packet seconds.
+It reports `mode=executed`, origin run `45013773355` attempt one, execution
+identity `0d30a66006a961fe8187a15edaf6cca4290c77c97a503f83b1059123336721b8`
+and packet digest
+`0bf45b36663f9beb2f1c4f706a78c7664c34b8675e4bcfad45541d452468fd43`.
+Required aggregate `137182932572`, guards and trusted metadata pass.
+The guard job completes in 5 minutes 34 seconds; the unit packet's
+independently enforced 300-second bound remains unchanged.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14071 merges at `2026-11-22T10:50:36Z` as
+`de9a977f150f983f64615c4dcf4144bcdec135b4`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the eleven-case leaf.
+This does not qualify actual
+API/database execution or resolve any retained refusal/owner seam.
+Fresh-install/native lanes are not exercised because no installation,
+runtime, workflow or original-test behavior changes.
+
+### November 22 original CI-failure-watchdog qualification
+
+The adapter exports all 47 unchanged original watchdog test functions and
+their exact module fixture. Complete original/adapter collection agrees on
+fifty expanded cases, including all four original promotion-job parameters.
+Synthetic logs, helper/load behavior, existing subprocess/API stubs,
+temporary `GITHUB_OUTPUT` files and assertions remain unchanged. The
+selected calls do not execute actual GitHub, subprocess, thread or network
+operations; no new mock, preload, wrapper or effect exception is introduced.
+
+Initial development qualification uses the unchanged effect auditor and
+coverage-context observer. All fifty pass in 1.984 seconds with zero
+prohibited effects, three bound Python reads and positive actual
+watchdog-owner call-phase lines for every selected case. The compact-v2
+candidate contains 8,510 nodes, 1,215 sources and 456 targets in 956,675
+bytes. All 8,460 preceding nodes and their order, all 1,213 current source
+hashes, every preceding target, 89 helper decisions and the 300-second
+bound remain intact. Only the adapter and original tests are new source
+bindings; the already bound watchdog owner becomes one new coverage target.
+
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6011892513` covers exact head
+`98fc1ac776777520d8be786a8b5b8f1899208edd` with no active findings.
+Source CI `45015101983`, unit job `137185651794`, freshly passes all 8,510
+cases with 43 deselections, 118.09 pytest seconds and 132.350 packet seconds.
+It reports `mode=executed`, origin run `45015101983` attempt one, execution
+identity `027da91dadde36db4b958241a33a90a5330a92ea537158148368aadfcff38382`
+and packet digest
+`0c424720e32db692a8dca39ab8b993d38b583bd87ceeabb6892d853384b82903`.
+Required aggregate `137186638754`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14072 merges at `2026-11-22T11:05:48Z` as
+`62aac085ea9728ed4b29111214c62d7a858427a6`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the fifty-case leaf.
+This is a finite source admission, not
+native/API qualification, portfolio activation, a measured saving or
+settlement of retained refusals and owner seams. Fresh-install/native lanes
+are not applicable because installation, runtime, workflow and original
+test behavior do not change.
+
+### November 22 original pure CI-job-admission qualification
+
+The adapter exports seven unchanged original functions: path/dependency
+selection, non-PR full coverage, path validation before widening, union and
+empty diff, and incomplete-commit refusal. Complete original/adapter
+collection verifies 67 original cases and fifty selected cases, including
+identity against each original parameter row for stacked parametrization.
+The seventeen actual Git/CLI, workflow-inspection and aggregate-subprocess
+cases remain unchanged outside the packet. Selected incomplete commit IDs
+are rejected before environment acquisition or process creation.
+
+The initial unchanged effect auditor and coverage-context observer pass
+all fifty in 2.750 seconds, with zero prohibited effects, three bound Python
+reads and actual admission-owner call-phase lines per case. The compact-v2
+candidate contains 8,560 nodes, 1,218 sources and 457 targets in 961,353
+bytes. All 8,510 preceding nodes/order, 1,215 current source hashes, prior
+targets, 89 helper decisions and the 300-second bound remain intact.
+New bindings are the adapter, original test module and unchanged admission
+owner; only that owner becomes a new target.
+
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6011940251` covers exact head
+`af6bff29d7104f9262550b2087d8cc48ba75c9c6` with no active findings.
+Source CI `45016172973`, unit job `137188838839`, freshly passes all 8,560
+cases with 43 deselections, 194.65 pytest seconds and 217.492 packet seconds.
+It reports `mode=executed`, origin run `45016172973` attempt one, execution
+identity `306e03e415eaf8a1b2f56f0ee24ad9e4b5b1e3c13222e236adb97bb695094c2c`
+and packet digest
+`251a5a244a906aa144f6752844d3355b03ee544b9528f74f7f43fc4f8492e993`.
+Required aggregate `137189974539`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14073 merges at `2026-11-22T11:18:55Z` as
+`9a6a8f56bf3c972b1fb9012c60fa854a98cc47b5`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the fifty-case leaf.
+No new mock, preload, wrapper, effect exception, data allowlist or workflow/
+routing/runtime change is introduced. This finite
+qualification does not accept a shared-owner seam or settle retained
+refusals. Fresh-install/native lanes are not applicable because installation,
+runtime, workflow and original-test behavior do not change.
+
+### November 22 original pure matrix and backend-decision qualification
+
+The adapter exports four original matrix functions and all sixteen backend
+decision functions, retaining both original backend fixtures, helper calls,
+assertions and parameter values. Complete original/adapter collection verifies
+124 original cases and exactly 109 selected cases in original order, including
+tuple-named parameters, stacked parametrization and the original overflow-clock
+ParameterSet. The fifteen actual CLI, Git, workflow/generated-checkout and
+repository-inventory cases remain unchanged outside the packet; the entire
+invalid-or-empty-partition function is excluded before qualification.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+109 cases in 3.219 seconds, with zero prohibited effects, only bound Python
+reads and actual partition-owner call-phase lines for every case. The compact-v2
+candidate contains 8,669 nodes, 1,221 sources and 458 targets in 970,483 bytes.
+All 8,560 preceding nodes/order, 1,218 current source hashes, prior targets,
+89 helper decisions and the 300-second bound remain intact. New bindings are
+the adapter, original test module and unchanged partition owner; only that
+owner becomes a new target.
+
+This is synthetic pure-decision coverage, not private-backend activation,
+runner allocation, native reserve proof, measured execution saving or owner-seam
+acceptance. No mock, preload, wrapper, effect exception, data allowlist,
+workflow, routing or runtime change is introduced.
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6011989194` covers exact head
+`a1659f70a630c96dc36fde03cf3b678154536982` with no active findings.
+Source CI `45017488836`, unit job `137192848167`, freshly passes all 8,669
+cases with 43 deselections, 119.09 pytest seconds and 133.676 packet seconds.
+It reports `mode=executed`, origin run `45017488836` attempt one, execution
+identity `7ea9e4905d3ed52526b3f0ac62e878c270d91746dce354030199b35795d009c0`
+and packet digest
+`4d398ab7dd70feb9271c76746edbcec5155cb9c2181526862ff2c30e495db40e`.
+Required aggregate `137193928443`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14074 merges at `2026-11-22T11:34:25Z` as
+`dc8ca620e2b007fcd75dc388b5203e7edf5b8e95`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 109-case leaf.
+Fresh-install/native lanes are not applicable because installation, runtime,
+workflow and original-test behavior do not change.
+
+### November 22 original module-health lookup-outcome qualification
+
+The adapter exports the three original existing-issue lookup functions,
+preserving their subprocess stubs, helpers and assertions for failed search,
+confirmed absence and a matching issue number. Complete original/adapter
+collection verifies ten original and three selected function objects in
+original order. The seven actual Git, CLI and main-entrypoint cases remain
+unchanged outside the packet.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+three in 1.375 seconds, with zero prohibited effects, three bound Python reads
+and actual watchdog-owner call-phase lines per case. The compact-v2 candidate
+contains 8,672 nodes, 1,224 sources and 459 targets in 971,201 bytes. All 8,669
+preceding nodes/order, 1,221 current source hashes, prior targets, 89 helper
+decisions and the 300-second bound remain intact. New bindings are the adapter,
+original test module and unchanged watchdog owner; only that owner becomes
+a new target.
+
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6012029478` covers exact head
+`bd47c2143d3ce315ccc21f18011b42a2774a799e` with no active findings.
+Source CI `45018397861`, unit job `137195638154`, freshly passes all 8,672
+cases with 43 deselections, 152.96 pytest seconds and 173.632 packet seconds.
+It reports `mode=executed`, origin run `45018397861` attempt one, execution
+identity `036195e75e889befa856d5e4765458acc7dca66dcba836d4ce4e48f351640010`
+and packet digest
+`10bc468f695fe469843013bc819355d1439c83f52aa384500a8061d469e61da4`.
+Required aggregate `137196594362`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14076 merges at `2026-11-22T11:45:00Z` as
+`e2cdc012fdd91f9a0d96f5434d6a56092eb0984e`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the three-case leaf.
+No new mock, preload, wrapper, effect exception, data allowlist, actual GitHub
+lookup, issue filing, workflow or runtime change is introduced.
+This finite qualification does not settle retained refusals or owner
+seams. Fresh-install/native lanes are not applicable because installation,
+runtime, workflow and original-test behavior do not change.
+
+### November 22 original installer parser and temporary-file qualification
+
+The adapter exports seventeen original functions covering engine/policy call
+parsing, temporary plugin scope validation, temporary stderr-redirection
+scanning and completion-marker status parsing. Complete original/adapter
+collection verifies 336 original cases and exactly 95 selected cases in
+original order, retaining every original function, parameter value, helper and
+assertion. The other 241 cases remain unchanged outside this selection,
+including native execution, actual repository scans, imported runtime/profile
+suites and a constant/AST-only scope comparison with no production call.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+95 in 4.047 seconds, with zero prohibited effects, only bound Python reads and
+actual guard-owner call-phase lines per case. The compact-v2 candidate contains
+8,767 nodes, 1,227 sources and 460 targets in 981,165 bytes. All 8,672 preceding
+nodes/order, 1,224 current source hashes, prior targets, 89 helper decisions and
+the 300-second bound remain intact. New bindings are the adapter, original
+test module and its imported finalizer test module; importing that module does
+not execute its native tests. The already-bound installer-contract checker
+becomes one new target; policy and engine-reference owners were already targets.
+
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6012068090` covers exact head
+`4956f0f7ece46ceb01161e1b7ae0cc6b334753a7` with no active findings.
+Source CI `45019234874`, unit job `137198228494`, freshly passes all 8,767
+cases with 43 deselections, 120.16 pytest seconds and 138.510 packet seconds.
+It reports `mode=executed`, origin run `45019234874` attempt one, execution
+identity `75cf6e3cce152d31566c00e6ee9fd073c544c48d1b7368e25e8c0b5fc19e5ab7`
+and packet digest
+`4471e54155fee9b08fb6d3fb29d7beecc8d62f60c44a44eb65f201e6a06ca260`.
+Required aggregate `137199487795`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14078 merges at `2026-11-22T11:57:05Z` as
+`e25c69750ab737de649b7f4357eb65a40ce4e62b`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 95-case leaf.
+No new mock, preload, wrapper, effect exception, data allowlist, installer/native
+execution, workflow, runtime or cleanup change is introduced.
+This synthetic parser qualification does not settle retained runtime-profile,
+native, data-admission or owner-seam gaps. Fresh-install/native lanes are not
+applicable because installation, runtime, workflow and original-test behavior
+do not change.
+
+### November 22 original machine-gate mutation-source failure
+
+The adapter preserves four original synthetic contract functions and parameter
+values. Complete collection verifies 336 original cases and exactly 21 selected
+cases. Initial unchanged-guard execution stops after nine passes at
+`test_machine_gate_contract_rejects_actual_source_regressions[update_gate.py-return machine in allowed-return True]`.
+The original `assert before in text` fails because that mutation source text
+is absent from the current `update_gate.py`; the contract check for that row
+has not run. Static inspection also finds the separate original
+`or physical_machine in allowed` mutation text absent. That row is not executed.
+
+No complete observation report is written and none of the 21 cases is admitted.
+The adapter is retained byte-for-byte outside the source tree, with its helper,
+candidate and selector inventory. The live packet remains 8,767 nodes, 1,227
+sources and 460 targets. No original assertion, mutation row, guard, loader,
+provider or policy is changed; there is no replay or subset admission.
+The nine preceding passes do not settle this leaf or any retained refusal.
+
+### November 22 original strict-checker inventory and matrix qualification
+
+The adapter exports eight original functions for inventory ownership,
+component-prefix boundaries, response-file injection refusals, manifest
+validation and in-process version/platform matrix custody. Complete
+original/adapter collection verifies 236 original and exactly twenty selected
+cases in original order, retaining exact function objects, both original
+autouse fixtures, every selected parameter value, helpers and assertions.
+The other 216 cases remain unchanged outside this slice, including actual
+Git/MyPy/frontdoor/native execution and repository-data cases.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+twenty in 1.906 seconds, with zero prohibited effects, only bound Python reads
+and actual checker-owner call-phase lines per case. The compact-v2 candidate
+contains 8,787 nodes, 1,228 sources and 460 targets in 982,976 bytes. All 8,767
+preceding nodes/order, 1,227 current source hashes, targets, 89 helper decisions
+and the 300-second bound remain intact. Only the adapter becomes a new source
+binding; all production owners were already targets.
+
+No new mock, preload, wrapper, effect exception, data allowlist, workflow,
+runtime or cleanup change is introduced. Complete fresh Linux CI, current-head
+review and normal required merge checks remain necessary. This finite
+qualification does not settle the distinct 21-case mutation-source failure or
+other retained refusals and owner seams. Fresh-install/native lanes are not
+applicable because installation, runtime, workflow and original-test behavior
+do not change.
+
+### November 22 original runtime-profile refusal and worker-limit qualification
+
+The original runtime-profile class adapter preserves all 53 collected class,
+method and parameter identities. Initial qualification selects exactly the
+52 non-subprocess cases, but its first case calls `socket.gethostname`
+through dependency-marker evaluation and `platform.uname()`. The unchanged
+effect auditor refuses that host query. None of the 52 cases is admitted;
+the failed helper, candidate, selector inventory and exact adapter remain
+retained. No preload, test substitution, effect exception or retry is used.
+
+A distinct adapter exports the unchanged original bounded-hash worker-limit
+refusal function and all three parameters (`0`, `5`, `True`). Complete
+collection maps those three cases out of the five-case original module,
+leaving both threaded hashing witnesses unchanged outside the packet.
+Fresh qualification passes in 1.579 seconds with zero prohibited effects,
+25 bound Python reads and positive actual call-phase owner lines for every
+case. No source/data admission rule or auditor changes.
+
+The resulting candidate contains 8,240 nodes, 1,183 bound sources, 448 targets
+and 931,948 compact-v2 bytes. Only the new adapter and original hashing test
+module add source bindings. All 8,237 preceding nodes and 1,181 hashes retain
+their order and values; targets, 89 helper decisions, compact/flat-v1 identity
+and the 300-second bound remain unchanged. Fatal Ruff, strict Python
+3.10/Linux and Windows typing, documentation consistency and diff checks pass.
+Copilot approval `6011267593` covers exact head
+`de7fd2730af28cf0aacc7ed58428357eee41ac4e`, with no active findings.
+
+Source CI `45003249669`, unit job `137149162624`, freshly passes all 8,240
+cases with 39 deselections, 114.58 pytest seconds and 128.313 packet seconds.
+It reports `mode=executed`, origin run `45003249669` attempt one, execution
+identity `c85c243735ca05146cca6c31689c4cbed62b08550880f086a138608a6615c344`
+and packet digest
+`7df773d3102119a09ff39044b61ba2c44ffea79362e1df61c7e65e7d75e9d9ac`.
+Required aggregate `137150171239`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14061 merges at `2026-11-22T08:39:29Z` as
+`55479aa6685d8536b530a4e132de09aa11bfe7be`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the three-case leaf.
+This is not qualification of the refused runtime-profile cohort, native
+threading, fresh installation, real builds or the broader owner and parent gates.
+
+### November 22 original subject-verifier retry qualification
+
+A new adapter exports all six original subject-attestation verifier retry
+functions as 27 cases: four initialization-failure retries, thirteen other
+fatal failures, three fatal second attempts, four exhausted-deadline controls,
+one single-call success and two subprocess timeouts. The exact original
+subject fixture, functions, mock callbacks, monotonic deadline witnesses,
+parameter identities and assertions remain unchanged. This cohort does not
+replay or replace the separate successful bundle-attestation control whose
+production thread-pool submission the unit auditor refused.
+
+The complete original collection matches all 27 adapter selections and exact
+original function/fixture objects. A fresh guarded process passes all 27 in
+1.484 seconds, with zero prohibited effects, sixteen bound Python reads and
+positive call-phase coverage in the real verifier for every case. Only the
+adapter and original test suite add source bindings; the publisher and
+attestation targets are already admitted. No production, original test,
+effect guard or helper-decision code changes.
+
+Positive admission contains 8,214 nodes, 1,177 bound sources, 448 targets and
+928,919 compact-v2 bytes. All preceding 8,187 nodes retain relative order and
+all 1,175 existing source hashes remain unchanged. Coverage targets, 89 helper
+decisions, compact/flat-v1 identity and the 300-second bound remain enforced.
+The adapter passes fatal Ruff and whole-file strict typing on Python
+3.10/Linux and Windows; documentation consistency and diff checks pass.
+Copilot approval `6011102958` covers exact head
+`c3ffd6f5bafbb900113e130166c199d2bc88206f` without active findings.
+CI `44999573197`, unit job `137137917716`, freshly passes all 8,214 cases
+with 39 deselections, 106.02 pytest seconds and 120.798 packet seconds.
+The evidence reports `mode=executed`, origin run `44999573197` attempt one
+and digest `e580ccf1eccb79a2439d897bfc678a96cd0ce70c96cab6f278142cda8955d37f`.
+Required aggregate `137138770956`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+Source #14057 merges at `2026-11-22T07:50:28Z` as
+`eddb35122c52195acbd12bba835d8d53d090854c`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the 27-case leaf.
+Fresh-install/native/installed lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
+whole-flow saving, real publication, resolution of the threaded witness or
+acceptance of any broader owner or parent gate.
+
+### November 22 original synthetic core-artifact qualification
+
+A new adapter initially exports thirteen original core-artifact test functions
+as 29 cases. Review identifies six manager-wheel exception cases reading
+`worktree-manager/pyproject.toml` outside the source/build-data admission.
+The initial zero-effect result does not bind that TOML. Withdraw the complete
+original function from the adapter and defer all six cases with their data
+admission owner; preserve the original test, inputs and assertions and do not
+widen the data allowlist.
+
+The remaining twelve exact original functions cover 23 cases: canonical project
+composition, conditional dependencies and extras, shared toolchain, malformed
+selection/manifest refusals, CLI argument forwarding and complete release
+profile binding. Original synthetic build callbacks, fixture helpers,
+parameters and assertions remain unchanged. The original isolated
+builder-help subprocess smoke stays outside this unit packet.
+
+The initial 29-case guarded development execution takes 7.875 seconds, with
+zero prohibited effects and positive call-phase owner lines; that incomplete
+input binding is not full qualification. The reduced collection matches all
+23 selected parameter identities and twelve exact original functions against
+the thirty-case original. A fresh process passes all 23 through the unchanged
+auditor in 7.969 seconds, with zero prohibited effects, 49 bound Python reads
+and positive actual call-phase owner lines for every case.
+
+The reduced packet contains 8,237 nodes, 1,181 bound sources, 448 targets and
+931,359 compact-v2 bytes. Only the adapter, original core test module,
+original standalone fixture module and runtime-profile fixture module add
+bindings. All 8,214 preceding nodes and 1,177 existing source hashes remain,
+with unchanged targets, 89 helper decisions, compact/flat-v1 identity, byte
+cap and 300-second bound. The reduced adapter passes fatal Ruff and strict
+Python 3.10/Linux and Windows typing; documentation consistency and diff
+checks pass. Copilot approval `6011165641` covers exact head
+`9566469b96c784506b65c15bd32e44d62058ea42`, with the deferred-data thread
+resolved and no active findings.
+
+Source CI `45001118735`, unit job `137142645852`, freshly passes all 8,237
+cases with 39 deselections, 188.19 pytest seconds and 209.997 packet seconds.
+A description update's later automatic CI `45001151013`, unit job
+`137143734081`, also freshly passes all 8,237: 184.56 pytest seconds,
+207.404 packet seconds, `mode=executed`, origin run `45001151013` attempt one
+and digest `43205f1ff1f0d2b9fa36389a3b0ffad64e6209e80a87c0cb264afa469ad395ee`.
+The first managed merge refuses while that later series still expects its
+required aggregate; no CI is bypassed. After current aggregate `137144814342`,
+guards and trusted metadata pass, seven fresh verifier reads and a final
+head/hold/review fence precede the normal managed merge.
+
+Source #14058 merges at `2026-11-22T08:16:08Z` as
+`39433b011c1decd03f4681455df3c41a44df5a55`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the 23-case leaf. Initial
+29-case green does not settle the undeclared-data gap; all six cases remain
+deferred without changed inputs, assertions or data admission.
+Fresh-install/native/installed lanes are not exercised because no installation
+or runtime behavior changes. This is not a reuse hit, controlled whole-flow
+saving, real build/publication, resolution of either deferred witness or
+acceptance of any broader owner or parent gate.
 
 ### November 20 path-gated audit-guard native boundary
 

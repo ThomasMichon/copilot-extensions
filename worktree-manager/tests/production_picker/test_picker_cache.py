@@ -6,11 +6,19 @@ uses (cache-only list, classified list, and per-row refresh).
 from __future__ import annotations
 
 import types
+import json
+from pathlib import Path
+from typing import Any, cast
 
+import pytest
+
+from agent_worktrees.tracking import WorktreeRecord
+from worktree_manager import engine_client
+from worktree_manager.production_picker import context, engine_group_c
 from worktree_manager.production_picker.picker_tui import data_local, derive
 
 
-def _rec(**kw):
+def _rec(**kw: Any) -> Any:
     base = dict(session_turns=None, git_state=None, session_summary=None,
                 sessions=None)
     base.update(kw)
@@ -18,75 +26,75 @@ def _rec(**kw):
 
 
 class TestOverlayCachedState:
-    def test_never_populated_is_unknown(self):
-        raw: dict = {}
+    def test_never_populated_is_unknown(self) -> None:
+        raw: dict[str, Any] = {}
         data_local._overlay_cached_state(raw, _rec())
         assert raw["state"] == "unknown"
         # Unknown must render as "?" through the display mapping.
         assert derive._state(raw) == "?"
 
-    def test_cached_turns_and_state_render(self):
-        raw = {"status": "active"}
+    def test_cached_turns_and_state_render(self) -> None:
+        raw: dict[str, Any] = {"status": "active"}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=12, git_state="wip"))
         assert raw["turn_count"] == 12
         assert raw["state"] == "wip"
         assert derive._state(raw) == "WIP"
 
-    def test_zero_turns_is_populated_not_unknown(self):
+    def test_zero_turns_is_populated_not_unknown(self) -> None:
         # 0 turns with a cached state is UNUSED, NOT Unknown.
-        raw: dict = {}
+        raw: dict[str, Any] = {}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=0, git_state="unused"))
         assert raw["state"] == "unused"
         assert derive._state(raw) == "UNUSED"
 
-    def test_cached_summary_fills_untitled(self):
-        raw = {"title": "null"}
+    def test_cached_summary_fills_untitled(self) -> None:
+        raw: dict[str, Any] = {"title": "null"}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=3, git_state="wip",
                       session_summary="Fix the widget"))
         assert raw["title"] == "Fix the widget"
 
-    def test_fresh_bound_hint_beats_stale_terminal(self):
+    def test_fresh_bound_hint_beats_stale_terminal(self) -> None:
         # A live bound Copilot (cache-only #1416 hint) wins over a now-stale
         # cached terminal state -> ACTIVE.
-        raw = {"session_bound_live": True}
+        raw: dict[str, Any] = {"session_bound_live": True}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=5, git_state="completed"))
         assert raw["state"] == "active"
         assert derive._state(raw) == "ACTIVE"
 
-    def test_bound_live_always_means_active(self):
+    def test_bound_live_always_means_active(self) -> None:
         # A live bound Copilot is ACTIVE regardless of the cached state -- WIP is
         # a lower (session-ended) state, so liveness overrides it (dotfiles#948
         # follow-up: ACTIVE must be surfaced in the first paint).
-        raw = {"session_bound_live": True}
+        raw: dict[str, Any] = {"session_bound_live": True}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=5, git_state="wip"))
         assert raw["state"] == "active"
 
-    def test_live_lock_forces_active_even_when_unknown(self, monkeypatch):
-        raw: dict = {"session_lock_live": True}
+    def test_live_lock_forces_active_even_when_unknown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        raw: dict[str, Any] = {"session_lock_live": True}
         data_local._overlay_cached_state(raw, _rec())  # no cache at all
         assert raw["state"] == "active"
         assert raw["session_lock_live"] is True
         assert derive._state(raw) == "ACTIVE"
 
-    def test_live_lock_beats_cached_terminal(self):
-        raw: dict = {"session_lock_live": True}
+    def test_live_lock_beats_cached_terminal(self) -> None:
+        raw: dict[str, Any] = {"session_lock_live": True}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=9, git_state="completed"))
         assert raw["state"] == "active"
 
-    def test_no_live_signal_keeps_cached_state(self):
-        raw: dict = {}
+    def test_no_live_signal_keeps_cached_state(self) -> None:
+        raw: dict[str, Any] = {}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=2, git_state="wip"))
         assert raw["state"] == "wip"
 
-    def test_stale_lock_is_visible_without_forcing_active(self):
-        raw: dict = {
+    def test_stale_lock_is_visible_without_forcing_active(self) -> None:
+        raw: dict[str, Any] = {
             "id": "stale-lock",
             "session_lock_stale": True,
             "stale_lock_pids": [999],
@@ -104,30 +112,37 @@ class TestOverlayCachedState:
         assert normalized["sess"] == "LOCK"
 class TestRefreshOneGuard:
 
-    def test_missing_record_returns_none(self, monkeypatch):
+    def test_missing_record_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            data_local.engine_client,
+            engine_client,
             "list_worktree_rows",
             lambda *_args, **_kwargs: [],
         )
-        monkeypatch.setattr(data_local.context, "project", lambda: "example")
+        monkeypatch.setattr(context, "project", lambda: "example")
         assert data_local.refresh_one("no-such-wt") is None
 
 
-def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
-    calls = []
-    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Any] = []
+
+    def batch(project: str, **_kwargs: Any) -> types.SimpleNamespace:
+        calls.append(("batch", project))
+        return types.SimpleNamespace(rows=[], summary={})
+
+    def list_rows(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        calls.append(("list", args, kwargs))
+        return [{"id": "wt-a"}]
+
+    monkeypatch.setattr(context, "project", lambda: "example")
     monkeypatch.setattr(
-        data_local.engine_group_c,
+        engine_group_c,
         "picker_reconcile_local",
-        lambda project, **_kwargs: calls.append(("batch", project)) or types.SimpleNamespace(
-            rows=[], summary={}
-        ),
+        batch,
     )
     monkeypatch.setattr(
-        data_local.engine_client,
+        engine_client,
         "list_worktree_rows",
-        lambda *args, **kwargs: calls.append(("list", args, kwargs)) or [{"id": "wt-a"}],
+        list_rows,
     )
 
     fast = data_local.load("machine", "Win", classify=False)
@@ -151,23 +166,28 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
     ]
 
 
-def test_local_classify_load_cannot_overlay_group_c_batch(monkeypatch):
-    calls = []
+def test_local_classify_load_cannot_overlay_group_c_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Any] = []
     runner = object()
-    monkeypatch.setattr(data_local.context, "project", lambda: "example")
-    monkeypatch.setattr(
-        data_local.engine_client,
-        "list_worktree_rows",
-        lambda *_args, **kwargs: (
-            calls.append(("list", kwargs.get("runner")))
-            or [
+
+    def list_rows(*_args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        calls.append(("list", kwargs.get("runner")))
+        return [
             {"id": "wt-a", "state": "wip"},
             {"id": "wt-b", "state": "completed"},
             {"id": "wt-c", "state": "unknown"},
-        ]),
+        ]
+
+    monkeypatch.setattr(context, "project", lambda: "example")
+    monkeypatch.setattr(
+        engine_client,
+        "list_worktree_rows",
+        list_rows,
     )
 
-    def fake_batch(project, *, worktree_ids=None, timeout=None, runner=None):
+    def fake_batch(
+        project: str, *, worktree_ids: list[str] | None = None, timeout: float | None = None, runner: Any = None,
+    ) -> Any:
         calls.append((project, tuple(worktree_ids or ()), runner))
         return type(
             "Batch",
@@ -182,7 +202,7 @@ def test_local_classify_load_cannot_overlay_group_c_batch(monkeypatch):
             },
         )()
 
-    monkeypatch.setattr(data_local.engine_group_c, "picker_reconcile_local", fake_batch)
+    monkeypatch.setattr(engine_group_c, "picker_reconcile_local", fake_batch)
 
     rows = data_local.load("machine", "Win", classify=True, runner=runner)
 
@@ -193,10 +213,10 @@ def test_local_classify_load_cannot_overlay_group_c_batch(monkeypatch):
     assert rows[2]["session_lock_stale"] is False
 
 
-def test_group_c_reconcile_preserves_existing_mux_fields_when_scan_unknown(monkeypatch):
-    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+def test_group_c_reconcile_preserves_existing_mux_fields_when_scan_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(context, "project", lambda: "example")
     monkeypatch.setattr(
-        data_local.engine_client,
+        engine_client,
         "list_worktree_rows",
         lambda *_args, **_kwargs: [
             {
@@ -209,7 +229,7 @@ def test_group_c_reconcile_preserves_existing_mux_fields_when_scan_unknown(monke
         ],
     )
     monkeypatch.setattr(
-        data_local.engine_group_c,
+        engine_group_c,
         "picker_reconcile_local",
         lambda *_args, **_kwargs: type(
             "Batch",
@@ -231,29 +251,31 @@ class TestWorktreeHasLiveSession:
     """``sessions.worktree_has_live_session`` -- the cheap, registry-targeted
     lock-file ACTIVE probe used by the cache-only first paint."""
 
-    def _rec_with_sessions(self, *session_ids):
+    def _rec_with_sessions(self, *session_ids: str, worktree_path: str = "/example/worktree") -> WorktreeRecord:
         sess = [types.SimpleNamespace(session_id=s) for s in session_ids]
-        return types.SimpleNamespace(sessions=sess)
+        return cast(WorktreeRecord, types.SimpleNamespace(sessions=sess, worktree_path=worktree_path))
 
-    def test_no_sessions_is_false(self, tmp_path, monkeypatch):
+    def test_no_sessions_is_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import sessions
         monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
         assert sessions.worktree_has_live_session(
-            types.SimpleNamespace(sessions=None)) is False
+            cast(WorktreeRecord, types.SimpleNamespace(sessions=None))) is False
         assert sessions.worktree_has_live_session(
-            types.SimpleNamespace(sessions=[])) is False
+            cast(WorktreeRecord, types.SimpleNamespace(sessions=[]))) is False
 
-    def test_live_lock_detected(self, tmp_path, monkeypatch):
+    def test_live_lock_detected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import sessions
         monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
         monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: pid == 4242)
         sdir = tmp_path / "sess-A"
         sdir.mkdir()
         (sdir / "inuse.4242.lock").write_text("")
+        worktree_path = str(tmp_path / "worktree")
+        (sdir / "workspace.yaml").write_text(json.dumps({"cwd": worktree_path}), encoding="utf-8")
         assert sessions.worktree_has_live_session(
-            self._rec_with_sessions("sess-A")) is True
+            self._rec_with_sessions("sess-A", worktree_path=worktree_path)) is True
 
-    def test_dead_lock_not_detected(self, tmp_path, monkeypatch):
+    def test_dead_lock_not_detected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import sessions
         monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
         monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: False)
@@ -265,7 +287,7 @@ class TestWorktreeHasLiveSession:
         assert sessions.worktree_session_lock_state(
             self._rec_with_sessions("sess-B")) == (False, [999])
 
-    def test_detached_session_skipped(self, tmp_path, monkeypatch):
+    def test_detached_session_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import sessions
         monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
         monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: True)
@@ -276,7 +298,7 @@ class TestWorktreeHasLiveSession:
         assert sessions.worktree_has_live_session(
             self._rec_with_sessions("sess-C")) is False
 
-    def test_no_lock_file_is_false(self, tmp_path, monkeypatch):
+    def test_no_lock_file_is_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import sessions
         monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
         sdir = tmp_path / "sess-D"
@@ -285,7 +307,7 @@ class TestWorktreeHasLiveSession:
             self._rec_with_sessions("sess-D")) is False
 
 
-def test_live_process_signals_override_explicit_wip_or_final_state():
+def test_live_process_signals_override_explicit_wip_or_final_state() -> None:
     for signal in (
         "session_lock_live",
         "session_bound_live",
@@ -305,11 +327,11 @@ def test_live_process_signals_override_explicit_wip_or_final_state():
 class TestIncrementalTurnCount:
     """``sessions._count_user_turns`` -- size-keyed incremental turn count."""
 
-    def _write_events(self, entry, lines):
+    def _write_events(self, entry: Path, lines: list[str]) -> None:
         (entry / "events.jsonl").write_text(
             "".join(l + "\n" for l in lines), encoding="utf-8")
 
-    def test_counts_user_messages(self, tmp_path):
+    def test_counts_user_messages(self, tmp_path: Path) -> None:
         from agent_worktrees import sessions
         self._write_events(tmp_path, [
             '{"type":"user.message"}',
@@ -320,7 +342,7 @@ class TestIncrementalTurnCount:
         # A sidecar is written keyed by size.
         assert (tmp_path / sessions._TURNS_SIDECAR).exists()
 
-    def test_incremental_append_only_reads_tail(self, tmp_path):
+    def test_incremental_append_only_reads_tail(self, tmp_path: Path) -> None:
         from agent_worktrees import sessions
         self._write_events(tmp_path, ['{"type":"user.message"}'])
         assert sessions._count_user_turns(tmp_path) == 1
@@ -331,7 +353,7 @@ class TestIncrementalTurnCount:
             f.write('{"type":"user.message"}\n')
         assert sessions._count_user_turns(tmp_path) == 3
 
-    def test_unchanged_file_hits_sidecar(self, tmp_path, monkeypatch):
+    def test_unchanged_file_hits_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import sessions
         self._write_events(tmp_path, ['{"type":"user.message"}'] * 4)
         assert sessions._count_user_turns(tmp_path) == 4
@@ -339,7 +361,7 @@ class TestIncrementalTurnCount:
         import builtins
         real_open = builtins.open
 
-        def _boom(path, *a, **k):
+        def _boom(path: Any, *a: Any, **k: Any) -> Any:
             if str(path).endswith("events.jsonl"):
                 raise AssertionError("events.jsonl re-read despite sidecar hit")
             return real_open(path, *a, **k)
@@ -347,7 +369,7 @@ class TestIncrementalTurnCount:
         monkeypatch.setattr(builtins, "open", _boom)
         assert sessions._count_user_turns(tmp_path) == 4
 
-    def test_missing_events_is_zero(self, tmp_path):
+    def test_missing_events_is_zero(self, tmp_path: Path) -> None:
         from agent_worktrees import sessions
         assert sessions._count_user_turns(tmp_path) == 0
 
@@ -355,7 +377,7 @@ class TestIncrementalTurnCount:
 class TestCacheOnlySshArgs:
     """The remote fast-phase --cache-only argv plumbing (dotfiles#948)."""
 
-    def test_add_and_drop_bash(self):
+    def test_add_and_drop_bash(self) -> None:
         from worktree_manager.production_picker.picker_tui import data_ssh as ds
         argv = ["ssh", "host", "bash -lc 'proj list --json --mux-details'"]
         added = ds._add_cache_only_arg(argv)
@@ -365,7 +387,7 @@ class TestCacheOnlySshArgs:
         # Round-trips back out.
         assert "--cache-only" not in ds._drop_cache_only_arg(added)[2]
 
-    def test_add_and_drop_pwsh_encoded(self):
+    def test_add_and_drop_pwsh_encoded(self) -> None:
         import base64
 
         from worktree_manager.production_picker.picker_tui import data_ssh as ds
@@ -378,7 +400,7 @@ class TestCacheOnlySshArgs:
         enc2 = dropped[2].rsplit("-EncodedCommand ", 1)[1]
         assert "--cache-only" not in base64.b64decode(enc2).decode("utf-16-le")
 
-    def test_unsupported_detection(self):
+    def test_unsupported_detection(self) -> None:
         from worktree_manager.production_picker.picker_tui import data_ssh as ds
         assert ds._is_cache_only_unsupported(
             "error: unrecognized arguments: --cache-only")

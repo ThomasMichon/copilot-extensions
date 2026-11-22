@@ -40,7 +40,17 @@ RECEIVER = r'''
 import json, os, sys, time
 from pathlib import Path
 mode = sys.argv[1]
-expected = int(sys.argv[2]) if len(sys.argv) > 2 else None
+finite = len(sys.argv) > 2 and sys.argv[2] == "--expected-file"
+if finite:
+    target = Path("expected-records.json")
+    deadline = time.monotonic() + 3
+    while not target.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("fixture record count unavailable")
+        time.sleep(.005)
+    expected = json.loads(target.read_text(encoding="utf-8"))["records"]
+else:
+    expected = int(sys.argv[2]) if len(sys.argv) > 2 else None
 if mode == "failed":
     raise SystemExit(7)
 if mode == "nonreading":
@@ -70,9 +80,13 @@ with Path("readback.jsonl").open("wb") as output:
             witness = Path("settled.pending")
             witness.write_text(json.dumps({"records": count, "fsync_per_record": True}), encoding="utf-8")
             os.replace(witness, "settled.json")
-Path("receiver-cost.json").write_text(json.dumps({
+            if finite:
+                break
+cost = Path("receiver-cost.pending")
+cost.write_text(json.dumps({
     "records": count, "cpu_ns": time.process_time_ns() - cpu,
     "wall_ns": time.perf_counter_ns() - wall,
     "fsync_per_record": True
 }), encoding="utf-8")
+os.replace(cost, "receiver-cost.json")
 '''

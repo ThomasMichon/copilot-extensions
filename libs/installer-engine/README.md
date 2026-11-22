@@ -68,9 +68,11 @@ step. Raw developer copies can still be stale; do not make a failing copied
 consumer pass by substituting a canonical dependency. Qualify its real composed
 payload instead. Materialization does not install or update a running runtime.
 
-`bootstrap-uv.ps1` is a separately delivered provider for Worktrees' future
-pre-lifecycle adoption, not a change to the discovery-only
-`bootstrap-python.ps1` evaluator. `Resolve-UvBootstrapPython` reads the exact
+`bootstrap-uv.ps1` supplies managed pre-runtime selection. Invocation's
+`bootstrapLauncher: "uv"` packages this provider and the native Windows capture
+owner for agent command ingress. The `bootstrap-python.ps1` evaluator consumes
+that generated selector when adoption is declared; unmigrated consumers retain
+their discovery-only behavior. `Resolve-UvBootstrapPython` reads the exact
 Invocation-produced `bootstrap-python-version.txt` request (one LF or CRLF
 terminator) without Python or TOML, qualifies the first PATH `uv` application
 (0.8.0+), and asks uv for that managed-only version without project discovery or
@@ -84,8 +86,9 @@ The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
 isolation. Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
-Bridge also adopts the Windows provider for its declared bootstrap helpers;
-Worktrees' future pre-lifecycle adoption remains separate.
+Bridge retains its specialized Windows resolver for declared bootstrap helpers.
+Shared command-bootstrap adoption does not replace that resolver or claim that
+every standalone service or installer child has migrated.
 
 The required `InvokeCaptured` callback accepts `FilePath` and `ArgList` and
 returns exactly one object with integer `ExitCode` and string `Stdout` and

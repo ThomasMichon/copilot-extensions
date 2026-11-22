@@ -1585,7 +1585,7 @@ def validate_and_finalize(
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
-        has_live_session = _has_live_session(record)
+        has_live_session = False if retain_checkout or inside_worktree else _has_live_session(record)
         from . import prune
         paired_pending = bool(
             record is not None and record.is_paired

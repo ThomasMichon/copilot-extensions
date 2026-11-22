@@ -160,15 +160,20 @@ class _Handler(socketserver.StreamRequestHandler):
             kind = str(envelope.get("kind") or "")
             key = str(envelope.get("key") or "")
             payload = envelope.get("payload")
-            deadline = float(envelope.get("deadline") or 0)
+            deadline = (
+                None if "deadline" in envelope and envelope["deadline"] is None
+                else float(envelope.get("deadline") or 0)
+            )
             if not isinstance(payload, dict):
                 payload = {}
             if client_id:
                 # A fire-and-forget requester (no explicit subscribe) still
                 # counts as a live subscriber while its request is in flight.
                 owner.touch(client_id)
-            if deadline <= time.time():
+            if deadline is not None and deadline <= time.time():
                 raise Unavailable
+            if deadline is None:
+                self.request.settimeout(None)
             result = owner.handle_request(kind, key, payload, deadline)
             if not isinstance(result, dict):
                 result = {}
@@ -195,6 +200,8 @@ class CoalescingServer:
     the server ensures only one execution is in flight per ``(kind, key)`` at
     a time, joining late callers onto it rather than starting a second one.
     """
+
+    completion_wait_version = 1
 
     def __init__(
         self,
@@ -519,7 +526,7 @@ class CoalescingServer:
     # -- coalesced requests ------------------------------------------------
 
     def handle_request(
-        self, kind: str, key: str, payload: dict[str, Any], deadline: float,
+        self, kind: str, key: str, payload: dict[str, Any], deadline: float | None,
     ) -> dict[str, Any]:
         """Run (or join) the coalesced execution for ``(kind, key)``.
 
@@ -558,11 +565,11 @@ class CoalescingServer:
             # `_InFlight` regardless, so a joiner with a longer deadline
             # still gets the real result -- only this owner's own return
             # path is late.
-            if deadline <= time.time():
+            if deadline is not None and deadline <= time.time():
                 raise Unavailable
         else:
-            remaining = deadline - time.time()
-            if remaining <= 0 or not inflight.event.wait(timeout=remaining):
+            remaining = deadline - time.time() if deadline is not None else None
+            if (remaining is not None and remaining <= 0) or not inflight.event.wait(timeout=remaining):
                 raise Unavailable
 
         if inflight.error is not None:

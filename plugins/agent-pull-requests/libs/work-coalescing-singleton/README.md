@@ -72,6 +72,15 @@ own discovery/boot logic (each plugin already has one).
   sending and all response fragments, without the ordinary one-second
   server-deadline grace. A late complete response is still unavailable.
   Omission preserves the existing ordinary request behavior.
+- The server additionally accepts an explicit JSON `deadline: null` for a
+  completion-wait request. `CoalescingServer.completion_wait_version == 1`
+  identifies receiver support; consumers advertise it through their existing
+  rendezvous before using it. Missing deadlines still refuse as expired.
+  Completion waiting removes elapsed execution expiry, not admission closure,
+  exceptions or disconnect uncertainty. The ordinary client helpers above
+  retain their bounded defaults; a mutation-specific client may bound connect
+  separately and wait without a socket completion timeout. Never send this
+  form to an unqualified older receiver or replay an uncertain write.
 - `call_with_fallback(...)` -- the full boot-wait + request + inline-fallback
   sequence in one call: dial an existing daemon, else invoke the caller's
   `boot` and re-poll `dial` up to `boot_wait_s`, else run the caller's

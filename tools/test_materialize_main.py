@@ -42,6 +42,13 @@ def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:
         repo / "libs/payload-invocation", canonical / "libs/payload-invocation",
         ignore=shutil.ignore_patterns("tests", "__pycache__"),
     )
+    installer = canonical / "libs/installer-engine"
+    installer.mkdir()
+    for name in ("bootstrap-uv.ps1", "bootstrap-uv.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(repo / "libs/installer-engine" / name, installer / name)
+    runtime = canonical / "libs/versioned-runtime"
+    runtime.mkdir()
+    shutil.copyfile(repo / "libs/versioned-runtime/versioned_runtime_native.ps1", runtime / "versioned_runtime_native.ps1")
     tools = canonical / "tools"
     tools.mkdir()
     entries = (
@@ -74,7 +81,10 @@ def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:
     plugin = canonical / "plugins/agent-worktrees"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copyfile(repo / "plugins/agent-worktrees/payload-invocation.json", plugin / "payload-invocation.json")
+    manifest = json.loads((repo / "plugins/agent-worktrees/payload-invocation.json").read_text())
+    manifest.pop("bootstrapPython", None)
+    manifest.pop("bootstrapLauncher", None)
+    (plugin / "payload-invocation.json").write_text(json.dumps(manifest))
     for name in ("install.sh", "install.ps1", "resolve-runtime.sh", "resolve-runtime.ps1"):
         (scripts / name).write_text("# owned fixture\n")
     for name in ("invoke-payload-runtime.sh", "invoke-payload-runtime.ps1"):

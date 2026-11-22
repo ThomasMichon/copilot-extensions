@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
+
 import os
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from conftest import make_session_dir
 
+from agent_worktrees.pane_seed import mux_seed_pane
 from agent_worktrees.sessions import (
     _normalize_path,
     backfill_sessions,
@@ -17,7 +22,6 @@ from agent_worktrees.sessions import (
     mux_binding_for_session,
     mux_copilot_pane,
     mux_focus_pane,
-    mux_seed_pane,
     mux_session_index,
     mux_session_name,
     recent_worktree_messages,
@@ -36,7 +40,7 @@ from agent_worktrees.tracking import (
 )
 
 
-def _make_mux_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+def _make_mux_record(wt_id: str, wt_path: str, sessions: list[SessionEntry] | None=None) -> WorktreeRecord:
     return WorktreeRecord(
         worktree_id=wt_id,
         branch=f"worktree/{wt_id}",
@@ -56,8 +60,8 @@ def _make_mux_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
 
 class TestMuxCopilotPane:
     def test_returns_recorded_live_head_pane(
-        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
-    ):
+        self, tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         rec = _make_mux_record(
             "wt-pane",
             "/tmp/src/wt-pane",
@@ -77,8 +81,8 @@ class TestMuxCopilotPane:
         assert mux_copilot_pane("wt-pane", mux="tmux") == "%42"
 
     def test_returns_recorded_live_requested_session_pane(
-        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
-    ):
+        self, tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         rec = _make_mux_record(
             "wt-pane",
             "/tmp/src/wt-pane",
@@ -101,8 +105,8 @@ class TestMuxCopilotPane:
         assert mux_copilot_pane("wt-pane", session_id="sess-other", mux="tmux") == "%2"
 
     def test_falls_back_to_active_when_recorded_pane_dead(
-        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
-    ):
+        self, tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         rec = _make_mux_record(
             "wt-dead",
             "/tmp/src/wt-dead",
@@ -121,8 +125,8 @@ class TestMuxCopilotPane:
         assert mux_copilot_pane("wt-dead", mux="tmux") == "%active"
 
     def test_falls_back_to_active_when_pane_unset(
-        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
-    ):
+        self, tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         rec = _make_mux_record(
             "wt-unset",
             "/tmp/src/wt-unset",
@@ -148,8 +152,8 @@ class TestMuxBindingForSession:
         (True, "#{session_id}:#{session_created}"),
     ])
     def test_resolves_worktree_and_pane_from_lock_process_ancestry(
-        self, tmp_path: Path, monkeypatch, include_incarnation, incarnation
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, include_incarnation: bool, incarnation: str
+    ) -> None:
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
             "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
@@ -189,9 +193,12 @@ class TestMuxBindingForSession:
             stdout += "\n"
 
         seen = []
-        monkeypatch.setattr(
-            "subprocess.run", lambda argv, **kwargs: seen.append(argv) or _Result()
-        )
+
+        def capture(argv: list[str], **kwargs: Any) -> _Result:
+            seen.append(argv)
+            return _Result()
+
+        monkeypatch.setattr("subprocess.run", capture)
 
         expected = {
             "worktree_id": "wt-a",
@@ -214,8 +221,8 @@ class TestMuxBindingForSession:
         assert observed == expected
 
     def test_resolves_expected_non_worktree_mux_session(
-        self, tmp_path: Path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
             "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
@@ -270,8 +277,8 @@ class TestMuxBindingForSession:
         }
 
     def test_ambiguous_pane_ancestry_fails_closed(
-        self, tmp_path: Path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
             "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
@@ -310,8 +317,8 @@ class TestMuxBindingForSession:
         assert mux_binding_for_session("sess-a", mux="psmux") is None
 
     def test_reused_windows_parent_pid_is_rejected(
-        self, tmp_path: Path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
             "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
@@ -351,8 +358,8 @@ class TestMuxBindingForSession:
         assert mux_binding_for_session("sess-a", mux="psmux") is None
 
     def test_missing_live_lock_does_not_query_mux(
-        self, tmp_path: Path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
             "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
@@ -371,8 +378,8 @@ class TestMuxBindingForSession:
         assert mux_binding_for_session("sess-a", mux="psmux") is None
 
     def test_reused_lock_pid_during_validation_does_not_query_mux(
-        self, tmp_path: Path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
             "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
@@ -395,16 +402,16 @@ class TestMuxBindingForSession:
 
 class TestMuxFocusPane:
     def test_selects_the_window_containing_the_target_pane(
-        self, monkeypatch
-    ):
-        calls: list[tuple[list[str], dict]] = []
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[list[str], dict[str, Any]]] = []
 
         class _Result:
-            def __init__(self, *, returncode=0, stdout=""):
+            def __init__(self, *, returncode: int=0, stdout: str="") -> None:
                 self.returncode = returncode
                 self.stdout = stdout
 
-        def _run(argv, **kwargs):
+        def _run(argv: list[str], **kwargs: Any) -> _Result:
             calls.append((list(argv), dict(kwargs)))
             if argv[1] == "list-panes":
                 assert argv == [
@@ -437,7 +444,7 @@ class TestMuxFocusPane:
         assert calls[2][1]["capture_output"] is True
         assert calls[2][1]["timeout"] == 5
 
-    def test_refuses_to_focus_a_pane_from_another_session(self, monkeypatch):
+    def test_refuses_to_focus_a_pane_from_another_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class _Result:
             returncode = 0
             # %9 genuinely exists, but in a DIFFERENT session -- the
@@ -456,13 +463,13 @@ class TestMuxFocusPane:
 # ---------------------------------------------------------------------------
 
 class TestNormalizePath:
-    def test_strips_trailing_slash(self):
+    def test_strips_trailing_slash(self) -> None:
         assert _normalize_path("/home/user/src/") == "/home/user/src"
 
-    def test_strips_trailing_backslash(self):
+    def test_strips_trailing_backslash(self) -> None:
         assert _normalize_path("C:\\Users\\test\\") == "C:\\Users\\test"
 
-    def test_no_trailing_sep(self):
+    def test_no_trailing_sep(self) -> None:
         assert _normalize_path("/home/user/src") == "/home/user/src"
 
 
@@ -473,7 +480,7 @@ class TestNormalizePath:
 class TestScanSessionsFast:
     """Test registry-accelerated scanning."""
 
-    def _make_record(self, wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+    def _make_record(self, wt_id: str, wt_path: str, sessions: list[SessionEntry] | None=None) -> WorktreeRecord:
         return WorktreeRecord(
             worktree_id=wt_id,
             branch=f"worktree/{wt_id}",
@@ -490,7 +497,7 @@ class TestScanSessionsFast:
             sessions=sessions,
         )
 
-    def test_fast_path_reads_known_sessions(self, tmp_session_state_dir: Path):
+    def test_fast_path_reads_known_sessions(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-fast"
         make_session_dir(
             tmp_session_state_dir, "known-sess", wt_path,
@@ -513,7 +520,7 @@ class TestScanSessionsFast:
         assert ctx.turn_count[norm] == 1
         assert "Fast session" in ctx.latest_summary[norm]
 
-    def test_fast_path_skips_missing_session_dirs(self, tmp_session_state_dir: Path):
+    def test_fast_path_skips_missing_session_dirs(self, tmp_session_state_dir: Path) -> None:
         """Session ID in registry but dir doesn't exist — skip gracefully."""
         rec = self._make_record("orphan-wt", "/tmp/orphan", sessions=[
             SessionEntry("nonexistent-sess", "2026-06-01T10:00:00"),
@@ -527,7 +534,7 @@ class TestScanSessionsFast:
 
         assert ctx.session_count == {}
 
-    def test_unindexed_records_are_not_swept(self, tmp_session_state_dir: Path):
+    def test_unindexed_records_are_not_swept(self, tmp_session_state_dir: Path) -> None:
         """Invariant (GH #198): sessions=None must NOT trigger a full-scan of
         session-state on a routine read -- the record is left un-enriched until
         an explicit backfill populates its registry."""
@@ -549,7 +556,7 @@ class TestScanSessionsFast:
         assert norm not in ctx.session_count
         assert norm not in ctx.latest_summary
 
-    def test_mixed_indexed_and_unindexed(self, tmp_session_state_dir: Path):
+    def test_mixed_indexed_and_unindexed(self, tmp_session_state_dir: Path) -> None:
         """Only the registry-indexed record is enriched (random-access); the
         unindexed record is NOT swept (invariant GH #198)."""
         wt_fast = "/tmp/wt-fast-mix"
@@ -575,7 +582,7 @@ class TestScanSessionsFast:
         # Invariant: the unindexed record is not swept -> no enrichment.
         assert _normalize_path(wt_legacy) not in ctx.session_count
 
-    def test_empty_sessions_list(self, tmp_session_state_dir: Path):
+    def test_empty_sessions_list(self, tmp_session_state_dir: Path) -> None:
         """sessions=[] with nothing on disk -> empty context (via fallback)."""
         rec = self._make_record("empty-wt", "/tmp/empty", sessions=[])
 
@@ -589,7 +596,7 @@ class TestScanSessionsFast:
 
     def test_empty_sessions_are_not_swept(
         self, tmp_session_state_dir: Path,
-    ):
+    ) -> None:
         """Invariant (GH #198): sessions=[] (registry active but the hook never
         recorded a session) must NOT fall back to a full session-state sweep on
         a routine read. The worktree is left un-enriched until an explicit
@@ -619,7 +626,7 @@ class TestScanSessionsFast:
 class TestFindLatestSessionIdFast:
     """Test registry-accelerated latest session finder."""
 
-    def test_fast_finds_most_recent(self, tmp_session_state_dir: Path):
+    def test_fast_finds_most_recent(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-fast-latest"
         make_session_dir(
             tmp_session_state_dir, "old-sess", wt_path,
@@ -643,7 +650,7 @@ class TestFindLatestSessionIdFast:
 
         assert result == "new-sess"
 
-    def test_fast_skips_stale_stubs(self, tmp_session_state_dir: Path):
+    def test_fast_skips_stale_stubs(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-fast-stubs"
         make_session_dir(
             tmp_session_state_dir, "stub-sess", wt_path,
@@ -660,7 +667,7 @@ class TestFindLatestSessionIdFast:
 
         assert result is None
 
-    def test_fast_none_returns_none_no_sweep(self, tmp_session_state_dir: Path):
+    def test_fast_none_returns_none_no_sweep(self, tmp_session_state_dir: Path) -> None:
         """Invariant (GH #198): sessions=None returns None -- never a full-scan
         sweep. A launch/auto-resume lookup is not severe enough to sweep."""
         wt_path = "/tmp/wt-fallback"
@@ -679,7 +686,7 @@ class TestFindLatestSessionIdFast:
 
     def test_fast_empty_sessions_returns_none_no_sweep(
         self, tmp_session_state_dir: Path,
-    ):
+    ) -> None:
         """Invariant (GH #198): sessions=[] returns None without sweeping."""
         wt_path = "/tmp/wt-empty-fallback"
         make_session_dir(
@@ -695,7 +702,7 @@ class TestFindLatestSessionIdFast:
 
         assert result is None
 
-    def test_fast_skips_missing_dirs(self, tmp_session_state_dir: Path):
+    def test_fast_skips_missing_dirs(self, tmp_session_state_dir: Path) -> None:
         sessions = [SessionEntry("gone-sess", "2026-06-01T10:00:00")]
 
         with patch(
@@ -716,7 +723,7 @@ def _mark_detached(session_dir: Path) -> None:
     (session_dir / ".detached").write_text("")
 
 
-def _make_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+def _make_record(wt_id: str, wt_path: str, sessions: list[SessionEntry] | None=None) -> WorktreeRecord:
     return WorktreeRecord(
         worktree_id=wt_id,
         branch=f"worktree/{wt_id}",
@@ -739,7 +746,7 @@ class TestSessionIdIsLive:
     scoped to exactly one ``session_id``, unlike
     :func:`worktree_has_live_session` (any session on the record)."""
 
-    def test_true_when_that_session_has_a_live_lock(self, tmp_session_state_dir: Path):
+    def test_true_when_that_session_has_a_live_lock(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-sid-live"
         make_session_dir(
             tmp_session_state_dir, "sess-live", wt_path, lock_pid=4242,
@@ -759,7 +766,7 @@ class TestSessionIdIsLive:
             assert live is True
             assert worktree_has_live_session(rec) is True
 
-    def test_false_when_that_sessions_lock_is_stale(self, tmp_session_state_dir: Path):
+    def test_false_when_that_sessions_lock_is_stale(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-sid-dead"
         make_session_dir(
             tmp_session_state_dir, "sess-dead", wt_path, lock_pid=9999,
@@ -780,7 +787,7 @@ class TestSessionIdIsLive:
 
     def test_false_for_an_unrelated_session_id_even_when_others_are_live(
         self, tmp_session_state_dir: Path,
-    ):
+    ) -> None:
         """A DIFFERENT session being live on the same worktree must not make
         an unrelated ``session_id`` (e.g. one already retired/released)
         report live -- the whole point of scoping past
@@ -803,7 +810,7 @@ class TestSessionIdIsLive:
             # But the worktree-wide check still sees the OTHER session live.
             assert worktree_has_live_session(rec) is True
 
-    def test_false_when_no_sessions_on_record(self, tmp_session_state_dir: Path):
+    def test_false_when_no_sessions_on_record(self, tmp_session_state_dir: Path) -> None:
         rec = _make_record("wt-sid-empty", "/tmp/wt-sid-empty", sessions=None)
         with patch(
             "agent_worktrees.sessions._session_state_dir",
@@ -823,7 +830,7 @@ class TestDetachedSessionsExcluded:
     don't re-activate finalized worktrees or pollute their summaries.
     """
 
-    def test_scan_fast_skips_detached(self, tmp_session_state_dir: Path):
+    def test_scan_fast_skips_detached(self, tmp_session_state_dir: Path) -> None:
         """Registry fast-path enrichment must skip detached sessions."""
         wt_path = "/tmp/wt-fast-detached"
         sdir = make_session_dir(
@@ -851,7 +858,7 @@ class TestDetachedSessionsExcluded:
         assert norm not in ctx.session_count
 
     @pytest.mark.parametrize("strict", [False, True])
-    def test_backfill_skips_detached(self, tmp_session_state_dir: Path, strict):
+    def test_backfill_skips_detached(self, tmp_session_state_dir: Path, strict: bool) -> None:
         """Backfill must not register a detached session against a worktree."""
         wt_path = "/tmp/wt-backfill-detached"
         make_session_dir(
@@ -885,8 +892,8 @@ class TestDetachedSessionsExcluded:
     ("/work/Task", "/work/Task-other", False),
 ])
 def test_backfill_matches_workspace_path_semantics(
-    tmp_session_state_dir: Path, strict, worktree, cwd, matches,
-):
+    tmp_session_state_dir: Path, strict: bool, worktree: str, cwd: str, matches: bool,
+) -> None:
     make_session_dir(tmp_session_state_dir, "legacy-path", cwd)
     record = _make_record("backfill-wt", worktree, sessions=None)
     with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
@@ -899,8 +906,8 @@ def test_backfill_matches_workspace_path_semantics(
     "complete", "missing", "malformed", "relative", "record-missing", "record-relative",
 ])
 def test_strict_backfill_requires_complete_attributable_workspace_data(
-    tmp_session_state_dir: Path, workspace,
-):
+    tmp_session_state_dir: Path, workspace: str,
+) -> None:
     from agent_worktrees.push_timeout import ObservationUnavailable
 
     wt_path = "/tmp/wt-strict-backfill"
@@ -943,28 +950,30 @@ class TestMuxSpawnFailureDegrades:
 
     _BLOCKED = OSError(4551, "An Application Control policy has blocked this file")
 
-    def test_has_mux_session_survives_oserror(self):
+    def test_has_mux_session_survives_oserror(self) -> None:
         from agent_worktrees.sessions import has_mux_session
 
-        with patch("subprocess.run", side_effect=self._BLOCKED):
+        with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
+             patch("subprocess.run", side_effect=self._BLOCKED):
             assert has_mux_session("anything") is False
 
-    def test_list_mux_sessions_survives_oserror(self):
+    def test_list_mux_sessions_survives_oserror(self) -> None:
         from agent_worktrees.sessions import _list_mux_sessions
 
         with patch("subprocess.run", side_effect=self._BLOCKED):
             assert _list_mux_sessions() is None
 
-    def test_kill_mux_session_survives_oserror(self):
+    def test_kill_mux_session_survives_oserror(self) -> None:
         from agent_worktrees.sessions import kill_tmux_session
 
         with patch("subprocess.run", side_effect=self._BLOCKED):
             assert kill_tmux_session("anything") is False
 
-    def test_has_mux_session_still_handles_missing_binary(self):
+    def test_has_mux_session_still_handles_missing_binary(self) -> None:
         from agent_worktrees.sessions import has_mux_session
 
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
+        with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
+             patch("subprocess.run", side_effect=FileNotFoundError()):
             assert has_mux_session("anything") is False
 
 
@@ -975,7 +984,7 @@ class TestMuxSpawnFailureDegrades:
 class TestContextEnrichment:
     """last_activity and context_pct derived from session-state."""
 
-    def test_newest_session_wins_for_context(self, tmp_session_state_dir: Path):
+    def test_newest_session_wins_for_context(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-ctx2"
         make_session_dir(
             tmp_session_state_dir, "old", wt_path,
@@ -1000,7 +1009,7 @@ class TestContextEnrichment:
         assert "12:00:00" in ctx.last_activity[norm]
         assert ctx.context_pct[norm] == 70
 
-    def test_fast_path_populates_context(self, tmp_session_state_dir: Path):
+    def test_fast_path_populates_context(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-fast-ctx"
         make_session_dir(
             tmp_session_state_dir, "fast-ctx", wt_path,
@@ -1027,7 +1036,7 @@ class TestContextEnrichment:
 # ---------------------------------------------------------------------------
 
 class TestValidateSessionId:
-    def test_returns_id_for_valid_session(self, tmp_session_state_dir: Path):
+    def test_returns_id_for_valid_session(self, tmp_session_state_dir: Path) -> None:
         make_session_dir(tmp_session_state_dir, "good-sess", "/tmp/wt",
                          summary="work")
         with patch(
@@ -1036,14 +1045,14 @@ class TestValidateSessionId:
         ):
             assert validate_session_id("good-sess") == "good-sess"
 
-    def test_none_for_missing_dir(self, tmp_session_state_dir: Path):
+    def test_none_for_missing_dir(self, tmp_session_state_dir: Path) -> None:
         with patch(
             "agent_worktrees.sessions._session_state_dir",
             return_value=tmp_session_state_dir,
         ):
             assert validate_session_id("nope") is None
 
-    def test_none_for_stub_without_conversation(self, tmp_session_state_dir: Path):
+    def test_none_for_stub_without_conversation(self, tmp_session_state_dir: Path) -> None:
         # A dir with no session.db / events.jsonl is a stale stub, not resumable.
         (tmp_session_state_dir / "stub").mkdir()
         with patch(
@@ -1052,11 +1061,11 @@ class TestValidateSessionId:
         ):
             assert validate_session_id("stub") is None
 
-    def test_none_for_empty_input(self):
+    def test_none_for_empty_input(self) -> None:
         assert validate_session_id(None) is None
         assert validate_session_id("") is None
 
-    def test_none_for_path_traversal_input(self, tmp_session_state_dir: Path):
+    def test_none_for_path_traversal_input(self, tmp_session_state_dir: Path) -> None:
         with patch(
             "agent_worktrees.sessions._session_state_dir",
             return_value=tmp_session_state_dir,
@@ -1097,7 +1106,7 @@ def _tool_start_event(turn_id: str, tool: str, ts: str) -> str:
 class TestRecentWorktreeMessages:
     """The last-N conversation-turn derivation behind the Picker viewer."""
 
-    def test_returns_last_n_newest_last(self, tmp_session_state_dir: Path):
+    def test_returns_last_n_newest_last(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-recent"
         make_session_dir(
             tmp_session_state_dir, "sess-recent", wt_path,
@@ -1124,7 +1133,7 @@ class TestRecentWorktreeMessages:
         assert [m["role"] for m in out["messages"]] == [
             "user", "assistant", "user"]
 
-    def test_skips_tool_only_assistant_turns(self, tmp_session_state_dir: Path):
+    def test_skips_tool_only_assistant_turns(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-toolonly"
         make_session_dir(
             tmp_session_state_dir, "sess-tool", wt_path,
@@ -1144,7 +1153,7 @@ class TestRecentWorktreeMessages:
             out = recent_worktree_messages(rec, limit=5)
         assert [m["text"] for m in out["messages"]] == ["do the thing", "done"]
 
-    def test_picks_newest_session(self, tmp_session_state_dir: Path):
+    def test_picks_newest_session(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-multi"
         make_session_dir(
             tmp_session_state_dir, "sess-old", wt_path,
@@ -1168,7 +1177,7 @@ class TestRecentWorktreeMessages:
         assert out["session_id"] == "sess-new"
         assert [m["text"] for m in out["messages"]] == ["new work"]
 
-    def test_empty_when_no_session(self, tmp_session_state_dir: Path):
+    def test_empty_when_no_session(self, tmp_session_state_dir: Path) -> None:
         rec = _make_record("wt-none", "/tmp/wt-none", sessions=[])
         with patch(
             "agent_worktrees.sessions._session_state_dir",
@@ -1181,7 +1190,7 @@ class TestRecentWorktreeMessages:
         assert out["ending"]["cut_off_mid_turn"] is False
         assert out["ending"]["ended_on_unanswered_offer"] is False
 
-    def test_carries_tool_names_and_mid_turn_signal(self, tmp_session_state_dir: Path):
+    def test_carries_tool_names_and_mid_turn_signal(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-tail"
         make_session_dir(
             tmp_session_state_dir, "sess-tail", wt_path,
@@ -1212,7 +1221,7 @@ class TestRecentWorktreeMessages:
 
 
 class TestSessionMessageTail:
-    def test_returns_last_n_turns_with_tool_names(self, tmp_session_state_dir: Path):
+    def test_returns_last_n_turns_with_tool_names(self, tmp_session_state_dir: Path) -> None:
         make_session_dir(
             tmp_session_state_dir, "sess-turns", "/tmp/wt-turns",
             events_lines=[
@@ -1248,7 +1257,7 @@ class TestSessionMessageTail:
         assert out["turns"][-1]["tool_names"] == ["bash"]
         assert out["ending"]["state"] == "complete"
 
-    def test_flags_clean_unanswered_offer(self, tmp_session_state_dir: Path):
+    def test_flags_clean_unanswered_offer(self, tmp_session_state_dir: Path) -> None:
         make_session_dir(
             tmp_session_state_dir, "sess-offer", "/tmp/wt-offer",
             events_lines=[
@@ -1272,7 +1281,7 @@ class TestSessionMessageTail:
         assert out["ending"]["state"] == "assistant_offer_pending"
         assert out["ending"]["ended_on_unanswered_offer"] is True
 
-    def test_handles_no_id_assistant_events_as_one_turn(self, tmp_session_state_dir: Path):
+    def test_handles_no_id_assistant_events_as_one_turn(self, tmp_session_state_dir: Path) -> None:
         make_session_dir(
             tmp_session_state_dir, "sess-noid", "/tmp/wt-noid",
             events_lines=[
@@ -1310,13 +1319,13 @@ class _SeedDriver:
     lists yield ``""``. Every send-keys is recorded.
     """
 
-    def __init__(self, ready_caps, echo_caps):
+    def __init__(self, ready_caps: list[str], echo_caps: list[str]) -> None:
         self.ready_caps = list(ready_caps)
         self.echo_caps = list(echo_caps)
         self.typed = False
-        self.sends = []  # each == the args after ``-t <pane>``
+        self.sends: list[list[str]] = []  # each == the args after ``-t <pane>``
 
-    def run(self, argv, **kw):
+    def run(self, argv: list[str], **kw: Any) -> SimpleNamespace:
         from types import SimpleNamespace
 
         verb = argv[1]
@@ -1331,22 +1340,22 @@ class _SeedDriver:
             return SimpleNamespace(returncode=0)
         return SimpleNamespace(stdout="", returncode=0)
 
-    def enter_sent(self):
+    def enter_sent(self) -> bool:
         return any(s == ["Enter"] for s in self.sends)
 
 
 class _Clock:
-    def __init__(self, step=10.0):
+    def __init__(self, step: float=10.0) -> None:
         self.t = 0.0
         self.step = step
 
-    def __call__(self):
+    def __call__(self) -> float:
         v = self.t
         self.t += self.step
         return v
 
 
-def _run_seed(driver, seed="Continue: build multi-account effort"):
+def _run_seed(driver: _SeedDriver, seed: str="Continue: build multi-account effort") -> dict[str, Any]:
     with patch("subprocess.run", side_effect=driver.run), \
          patch("time.sleep"), \
          patch("time.monotonic", side_effect=_Clock()), \
@@ -1358,7 +1367,7 @@ def _run_seed(driver, seed="Continue: build multi-account effort"):
         )
 
 
-def test_seed_targets_the_pane_inside_its_own_session_only():
+def test_seed_targets_the_pane_inside_its_own_session_only() -> None:
     """psmux numbers ``%N`` per session: a bare ``-t %1`` typed one worktree's
     seed into another worktree's live Copilot. Every capture/keystroke must use
     the session-qualified target, and an unresolvable pane is never typed into."""
@@ -1366,7 +1375,7 @@ def test_seed_targets_the_pane_inside_its_own_session_only():
     ready = "press esc to interrupt"
     driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[f"❯ Continue: build\n{ready}"])
 
-    def _run(argv, **kw):
+    def _run(argv: list[str], **kw: Any) -> SimpleNamespace:
         seen.append((argv[1], argv[argv.index("-t") + 1]))
         return driver.run(argv, **kw)
 
@@ -1386,7 +1395,7 @@ def test_seed_targets_the_pane_inside_its_own_session_only():
     assert len(seen) == len([s for s in seen if s[1] == "wt-new:0.%1"])  # nothing sent for wt-other
 
 
-def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
+def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait() -> None:
     """``session:window.pane`` is a position: when the pane moves mid-wait,
     readiness seen at the old position doesn't count, and every capture and
     keystroke goes to where the pane is now (bound to its id there), never to
@@ -1396,10 +1405,10 @@ def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
     seen: list[tuple[str, str]] = []
     typed = {"done": False}
 
-    def locate(pane, mux, session_name=None):
+    def locate(pane: str, mux: str, session_name: str | None=None) -> str:
         return next(where, "=wt-x:1.0")
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> SimpleNamespace:
         from types import SimpleNamespace
 
         at = argv[argv.index("-t") + 1]
@@ -1426,7 +1435,7 @@ def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
     assert caps.index("=wt-x:1.%9") >= 1 and caps[caps.index("=wt-x:1.%9") + 1] == "=wt-x:1.%9"
 
 
-def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_lookup():
+def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_lookup() -> None:
     """The pane moves to another window after the lookup but before the
     keystroke: the mux server refuses ``session:window.%id`` (the pane isn't
     in that window any more) instead of typing into whatever now sits at the
@@ -1437,10 +1446,10 @@ def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_l
     state = {"moved": False, "typed": False}
     sends: list[tuple[str, list[str], int]] = []
 
-    def locate(pane, mux, session_name=None):
+    def locate(pane: str, mux: str, session_name: str | None=None) -> str:
         return "=wt-x:1.0" if state["moved"] else "=wt-x:0.0"
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> SimpleNamespace:
         at = argv[argv.index("-t") + 1]
         if argv[1] == "send-keys" and "-l" in argv and not state["moved"]:
             state["moved"] = True  # a layout change lands between lookup and keystroke
@@ -1466,7 +1475,7 @@ def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_l
     assert out["submitted"] is True
 
 
-def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous():
+def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous() -> None:
     """A send that failed for any reason but the server's own target refusal
     may have left a partial draft: it is a ``send-failed`` -- never retried,
     even where the pane went, and never ``pane-target-lost`` (which callers
@@ -1478,10 +1487,10 @@ def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous():
         state = {"sent": False}
         sends: list[str] = []
 
-        def locate(pane, mux, session_name=None, after=after, state=state):
+        def locate(pane: str, mux: str, session_name: str | None=None, after: str | None=after, state: dict[str, Any]=state) -> str | None:
             return after if state["sent"] else "=wt-x:0.0"
 
-        def run(argv, state=state, sends=sends, **kw):
+        def run(argv: list[str], state: dict[str, Any]=state, sends: list[str]=sends, **kw: Any) -> SimpleNamespace:
             if argv[1] == "send-keys":
                 state["sent"] = True
                 sends.append(argv[3])
@@ -1499,7 +1508,7 @@ def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous():
         assert sends == ["=wt-x:0.%9"], after  # one attempt: never resent
 
 
-def test_a_send_refused_wherever_the_pane_is_typed_nothing():
+def test_a_send_refused_wherever_the_pane_is_typed_nothing() -> None:
     """Every attempt was the server's own target refusal -- at the same place twice,
     or at the old and the new place -- so no key landed: it reports the no-typing
     outcome (``pane-target-lost``), letting a caller restore the pending seed."""
@@ -1509,10 +1518,10 @@ def test_a_send_refused_wherever_the_pane_is_typed_nothing():
     for moves in (False, True):
         state = {"sends": 0}
 
-        def locate(pane, mux, session_name=None, moves=moves, state=state):
+        def locate(pane: str, mux: str, session_name: str | None=None, moves: bool=moves, state: dict[str, Any]=state) -> str:
             return "=wt-x:1.0" if moves and state["sends"] else "=wt-x:0.0"
 
-        def run(argv, state=state, **kw):
+        def run(argv: list[str], state: dict[str, Any]=state, **kw: Any) -> SimpleNamespace:
             if argv[1] == "send-keys":
                 state["sends"] += 1
                 return SimpleNamespace(stdout="", stderr="psmux: can't find pane: %9", returncode=1)
@@ -1529,7 +1538,7 @@ def test_a_send_refused_wherever_the_pane_is_typed_nothing():
         assert state["sends"] == (2 if moves else 1), moves
 
 
-def test_seed_fails_closed_when_its_pane_disappears():
+def test_seed_fails_closed_when_its_pane_disappears() -> None:
     ready = "press esc to interrupt"
     where = iter(["=wt-x:0.0", "=wt-x:0.0"])
     driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[])
@@ -1544,7 +1553,7 @@ def test_seed_fails_closed_when_its_pane_disappears():
     assert driver.sends == []
 
 
-def test_seed_pane_not_ready_never_submits():
+def test_seed_pane_not_ready_never_submits() -> None:
     # Copilot never shows a cue -> we must NOT type or press Enter (no blind
     # submit into a half-loaded TUI / fallback shell).
     driver = _SeedDriver(ready_caps=[], echo_caps=[])
@@ -1556,7 +1565,7 @@ def test_seed_pane_not_ready_never_submits():
     assert driver.sends == []  # nothing typed, Enter never pressed
 
 
-def test_seed_pane_requires_two_consecutive_cues():
+def test_seed_pane_requires_two_consecutive_cues() -> None:
     # A single transient caret frame (then gone) is NOT enough; a flapping cue
     # keeps stability from reaching 2, so seeding still degrades to not-ready.
     cue = "press esc to interrupt"
@@ -1566,7 +1575,7 @@ def test_seed_pane_requires_two_consecutive_cues():
     assert driver.sends == []
 
 
-def test_seed_pane_happy_path_submits():
+def test_seed_pane_happy_path_submits() -> None:
     # Stable live input footer (2 in a row) -> type -> echo shows seed head -> Enter.
     seed = "Continue: build multi-account effort"
     driver = _SeedDriver(
@@ -1581,7 +1590,7 @@ def test_seed_pane_happy_path_submits():
     assert driver.enter_sent() is True
 
 
-def test_seed_pane_footer_cue_also_ready():
+def test_seed_pane_footer_cue_also_ready() -> None:
     # The "esc … interrupt" footer is a valid Copilot cue (no caret needed).
     seed = "Continue: do the thing"
     driver = _SeedDriver(
@@ -1602,7 +1611,7 @@ _BOXED_INPUT = (
 )
 
 
-def test_seed_pane_boxed_input_is_ready():
+def test_seed_pane_boxed_input_is_ready() -> None:
     # CLI >= 1.0.89 draws a boxed input with no caret and no interrupt footer.
     seed = "Continue: do the thing"
     driver = _SeedDriver(
@@ -1614,7 +1623,7 @@ def test_seed_pane_boxed_input_is_ready():
     assert result["submitted"] is True
 
 
-def test_seed_pane_waits_through_resuming_transcript_then_seeds():
+def test_seed_pane_waits_through_resuming_transcript_then_seeds() -> None:
     # A resumed session redraws transcript history that can contain old caret
     # glyphs. The live footer is still busy, so readiness must wait until a real
     # input box appears at the bottom.
@@ -1635,7 +1644,7 @@ def test_seed_pane_waits_through_resuming_transcript_then_seeds():
     assert result["submitted"] is True
 
 
-def test_seed_pane_resuming_transcript_history_is_not_ready():
+def test_seed_pane_resuming_transcript_history_is_not_ready() -> None:
     cap = (
         " ❯ Thought\n"
         " ● old transcript output\n"
@@ -1648,7 +1657,7 @@ def test_seed_pane_resuming_transcript_history_is_not_ready():
     assert driver.sends == []
 
 
-def test_seed_pane_bare_shell_prompt_is_not_ready():
+def test_seed_pane_bare_shell_prompt_is_not_ready() -> None:
     # A shell theme can use the same caret glyph as Copilot's old prompt.
     driver = _SeedDriver(ready_caps=["/tmp\n❯"] * 6, echo_caps=[])
     result = _run_seed(driver)
@@ -1656,7 +1665,7 @@ def test_seed_pane_bare_shell_prompt_is_not_ready():
     assert driver.sends == []
 
 
-def test_seed_pane_never_types_into_a_selection_dialog():
+def test_seed_pane_never_types_into_a_selection_dialog() -> None:
     # A trust / extension-permission prompt shows its own "❯ 1. Yes" caret;
     # typing the seed there would pick options, so it is never "ready".
     dialog = (
@@ -1671,10 +1680,10 @@ def test_seed_pane_never_types_into_a_selection_dialog():
     assert driver.sends == []
 
 
-def test_seed_pane_undecodable_capture_is_not_a_crash():
+def test_seed_pane_undecodable_capture_is_not_a_crash() -> None:
     # An undecodable capture (stdout None) reads as "no cue yet", never a crash.
     class _NoneCap(_SeedDriver):
-        def run(self, argv, **kw):
+        def run(self, argv: list[str], **kw: Any) -> SimpleNamespace:
             from types import SimpleNamespace
 
             if argv[1] == "capture-pane":
@@ -1688,7 +1697,7 @@ def test_seed_pane_undecodable_capture_is_not_a_crash():
     assert driver.sends == []
 
 
-def test_seed_pane_not_echoed_skips_enter():
+def test_seed_pane_not_echoed_skips_enter() -> None:
     # Ready + typed, but the seed never echoes back -> do NOT press Enter, so a
     # partially-eaten seed is never submitted as a bogus turn.
     seed = "Continue: build multi-account effort"
@@ -1708,7 +1717,7 @@ _STALE_PROMPT = " ❯ Continue: do the thing from yesterday\n ● old transcript
 
 
 @pytest.mark.parametrize("layout", ["boxed", "legacy"])
-def test_seed_pane_echo_ignores_a_stale_prompt_in_the_transcript(layout):
+def test_seed_pane_echo_ignores_a_stale_prompt_in_the_transcript(layout: str) -> None:
     """A resumed transcript can show an earlier prompt with the seed's head;
     with the seed dropped (the input still empty), that is no echo: Enter is
     never pressed on an unverified draft."""
@@ -1721,7 +1730,7 @@ def test_seed_pane_echo_ignores_a_stale_prompt_in_the_transcript(layout):
     assert driver.enter_sent() is False
 
 
-def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
+def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text() -> None:
     """Legacy layout: the input prompt stays empty while a transcript line
     above it changes to contain the seed's words -- not an echo: no Enter."""
     seed = "Continue: do the thing"
@@ -1735,7 +1744,7 @@ def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
 
 @pytest.mark.parametrize("wrap", ["/src/main.py", "./scripts/run.sh", "(and the tests)", "- then the docs",
                                   "→ then fix the tests", "✅ and confirm", "> quoted context"])
-def test_seed_pane_echo_keeps_a_wrapped_input_line_whatever_it_starts_with(wrap):
+def test_seed_pane_echo_keeps_a_wrapped_input_line_whatever_it_starts_with(wrap: bool) -> None:
     """Legacy layout: a wrapped input line can start with anything -- punctuation,
     a glyph, even a caret. The input is identified by content (the caret line and
     everything down to the footer reads as the seed), so a fully echoed seed submits."""
@@ -1749,7 +1758,7 @@ def test_seed_pane_echo_keeps_a_wrapped_input_line_whatever_it_starts_with(wrap)
     assert _run_seed(driver, seed=seed)["submitted"] is True
 
 
-def test_seed_pane_echo_ignores_a_stale_box_left_above_a_shell_prompt():
+def test_seed_pane_echo_ignores_a_stale_box_left_above_a_shell_prompt() -> None:
     """Copilot exited after the seed was typed: its box, still holding the seed,
     sits above a shell prompt. That's no echo, so Enter never reaches the shell."""
     from agent_worktrees import pane_readiness
@@ -1765,7 +1774,7 @@ def test_seed_pane_echo_ignores_a_stale_box_left_above_a_shell_prompt():
 
 
 @pytest.mark.parametrize("rows", [9, 14])
-def test_seed_pane_echo_finds_the_caret_of_a_long_wrapped_legacy_input(rows):
+def test_seed_pane_echo_finds_the_caret_of_a_long_wrapped_legacy_input(rows: int) -> None:
     """Legacy layout: an input wrapped onto many rows keeps its caret far above
     the footer -- still the input, so a fully echoed seed submits."""
     seed = "Continue: " + " ".join(f"step{n} of the long relay brief" for n in range(rows))
@@ -1777,7 +1786,7 @@ def test_seed_pane_echo_finds_the_caret_of_a_long_wrapped_legacy_input(rows):
     assert _run_seed(driver, seed=seed)["submitted"] is True
 
 
-def test_a_legacy_stale_prompt_or_partial_input_is_never_the_echo():
+def test_a_legacy_stale_prompt_or_partial_input_is_never_the_echo() -> None:
     """Content identification is exact: a stale prompt in the transcript has
     transcript lines between it and the footer, and a half-typed seed isn't the seed."""
     from agent_worktrees import pane_readiness
@@ -1790,7 +1799,7 @@ def test_a_legacy_stale_prompt_or_partial_input_is_never_the_echo():
 
 
 @pytest.mark.parametrize("seed", ["Diagnose the ╻▄ input border", "Diagnose the ╹▀ input border"])
-def test_seed_pane_echo_keeps_rail_glyphs_typed_in_the_input(seed):
+def test_seed_pane_echo_keeps_rail_glyphs_typed_in_the_input(seed: str) -> None:
     """Only a line that *starts* with a rail is the frame: a seed naming the
     rail glyphs echoes inside the box and submits."""
     driver = _SeedDriver(ready_caps=[_BOXED_INPUT, _BOXED_INPUT],
@@ -1798,7 +1807,7 @@ def test_seed_pane_echo_keeps_rail_glyphs_typed_in_the_input(seed):
     assert _run_seed(driver, seed=seed)["submitted"] is True
 
 
-def test_seed_pane_echo_in_the_box_still_submits_under_a_stale_prompt():
+def test_seed_pane_echo_in_the_box_still_submits_under_a_stale_prompt() -> None:
     seed = "Continue: do the thing"
     pane = _STALE_PROMPT + _BOXED_INPUT
     driver = _SeedDriver(ready_caps=[pane, pane],
@@ -1807,7 +1816,7 @@ def test_seed_pane_echo_in_the_box_still_submits_under_a_stale_prompt():
     assert result["submitted"] is True
 
 
-def test_seed_pane_echo_keeps_box_and_block_glyphs_typed_in_the_input():
+def test_seed_pane_echo_keeps_box_and_block_glyphs_typed_in_the_input() -> None:
     """Only the frame's left border is dropped: box/block characters in the
     seed itself are its text, so a fully echoed seed still submits."""
     seed = "█Use ░ and ┃ here"
@@ -1826,7 +1835,7 @@ _DESKTOP_APP_NUDGE = (
 )
 
 
-def test_seed_pane_dismisses_desktop_app_nudge_then_seeds():
+def test_seed_pane_dismisses_desktop_app_nudge_then_seeds() -> None:
     # A live-confirmed blocker: Copilot's first-run desktop-app nudge waits for
     # a selection a detached launch can never make. One Escape dismisses it and
     # the real ready cue then follows -- confirmed live against a real
@@ -1842,7 +1851,7 @@ def test_seed_pane_dismisses_desktop_app_nudge_then_seeds():
     assert ["Escape"] in driver.sends
 
 
-def test_seed_pane_dismisses_nudge_at_most_once():
+def test_seed_pane_dismisses_nudge_at_most_once() -> None:
     # If the nudge (implausibly) keeps reappearing, this never loops on it
     # forever -- Escape is sent once, then a persisting non-ready state is
     # just an ordinary timeout like any other stuck pane.
@@ -1852,7 +1861,7 @@ def test_seed_pane_dismisses_nudge_at_most_once():
     assert driver.sends.count(["Escape"]) == 1
 
 
-def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left():
+def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left() -> None:
     """The Escape goes to a position: when the pane moves between capturing the
     nudge and dismissing it, the captured nudge is discarded (never an Escape
     into whatever now sits at the old position) and the pane is captured anew."""
@@ -1863,7 +1872,7 @@ def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left():
     state = {"dismissed": False, "typed": False}
     seen: list[tuple[str, str, list[str]]] = []
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: Any) -> SimpleNamespace:
         at = argv[argv.index("-t") + 1]
         seen.append((argv[1], at, argv[4:]))
         if argv[1] == "capture-pane":
@@ -1895,7 +1904,7 @@ class TestListWorktreeSessionsLifecycle:
     current" (agent-fabric single-current-session-per-worktree, Phase 4).
     """
 
-    def test_stamps_state_and_is_head(self, tmp_session_state_dir: Path):
+    def test_stamps_state_and_is_head(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-life"
         for sid, ts in (("s1", "2026-06-01T10:00:00Z"),
                         ("s2", "2026-06-01T10:00:01Z"),
@@ -1923,7 +1932,7 @@ class TestListWorktreeSessionsLifecycle:
         assert by_id["s3"]["state"] == "active"
         assert by_id["s3"]["is_head"] is False
 
-    def test_legacy_record_derives_newest_head(self, tmp_session_state_dir: Path):
+    def test_legacy_record_derives_newest_head(self, tmp_session_state_dir: Path) -> None:
         # No head_session stamped, no per-session state -> derived head is the
         # newest non-concluded session; every entry defaults to ``active``.
         wt_path = "/tmp/wt-legacy"
@@ -1946,7 +1955,7 @@ class TestListWorktreeSessionsLifecycle:
         assert by_id["a"]["is_head"] is False
         assert all(s["state"] == "active" for s in out)
 
-    def test_all_concluded_has_no_head(self, tmp_session_state_dir: Path):
+    def test_all_concluded_has_no_head(self, tmp_session_state_dir: Path) -> None:
         wt_path = "/tmp/wt-done"
         for sid in ("x", "y"):
             make_session_dir(
@@ -1979,7 +1988,7 @@ from agent_worktrees.sessions import (  # noqa: E402
 
 
 class TestSessionHasConversationData:
-    def test_true_with_events_jsonl(self, tmp_session_state_dir: Path):
+    def test_true_with_events_jsonl(self, tmp_session_state_dir: Path) -> None:
         make_session_dir(tmp_session_state_dir, "s-ok", "/tmp/w",
                          events_lines=[_conv_event("user.message", "hi",
                                                    "2026-06-01T10:00:00Z")])
@@ -1988,7 +1997,7 @@ class TestSessionHasConversationData:
             assert session_has_conversation_data("s-ok") is True
 
     def test_false_for_stub_dir_without_conversation_data(
-            self, tmp_session_state_dir: Path):
+            self, tmp_session_state_dir: Path) -> None:
         # workspace.yaml only -- the stale stub Copilot rejects with
         # "No session matched".
         make_session_dir(tmp_session_state_dir, "s-stub", "/tmp/w",
@@ -1998,7 +2007,7 @@ class TestSessionHasConversationData:
             assert session_has_conversation_data("s-stub") is False
 
     def test_false_for_missing_dir_and_empty_id(
-            self, tmp_session_state_dir: Path):
+            self, tmp_session_state_dir: Path) -> None:
         with patch("agent_worktrees.sessions._session_state_dir",
                    return_value=tmp_session_state_dir):
             assert session_has_conversation_data("nope") is False
@@ -2008,7 +2017,7 @@ class TestSessionHasConversationData:
 
 class TestResolveResumeTarget:
     def test_prefers_asserted_head_over_newer_latest(
-            self, tmp_session_state_dir: Path):
+            self, tmp_session_state_dir: Path) -> None:
         wt = "/tmp/wt-head"
         make_session_dir(tmp_session_state_dir, "old", wt,
                          updated_at="2026-06-01T10:00:00Z",
@@ -2028,7 +2037,7 @@ class TestResolveResumeTarget:
             assert resolve_resume_target(rec) == "old"
 
     def test_falls_back_to_latest_when_head_is_a_stub(
-            self, tmp_session_state_dir: Path):
+            self, tmp_session_state_dir: Path) -> None:
         wt = "/tmp/wt-stubhead"
         # Head 'h' is a stub (no conversation data) -> rejected; fall through
         # to the filesystem-latest valid session 'v'.
@@ -2045,7 +2054,7 @@ class TestResolveResumeTarget:
                    return_value=tmp_session_state_dir):
             assert resolve_resume_target(rec) == "v"
 
-    def test_none_when_nothing_resumable(self, tmp_session_state_dir: Path):
+    def test_none_when_nothing_resumable(self, tmp_session_state_dir: Path) -> None:
         wt = "/tmp/wt-empty"
         make_session_dir(tmp_session_state_dir, "stub", wt,
                          has_events_file=False)
@@ -2063,7 +2072,7 @@ class TestLastSessionId:
     worktree (GH #198; docs/patterns/session-state-access.md).
     """
 
-    def _make_record(self, wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
+    def _make_record(self, wt_id: str, wt_path: str, sessions: list[SessionEntry] | None=None) -> WorktreeRecord:
         return WorktreeRecord(
             worktree_id=wt_id,
             branch=f"worktree/{wt_id}",
@@ -2080,7 +2089,7 @@ class TestLastSessionId:
             sessions=sessions,
         )
 
-    def test_records_newest_via_registry(self, tmp_session_state_dir: Path):
+    def test_records_newest_via_registry(self, tmp_session_state_dir: Path) -> None:
         wt = "/tmp/wt-lsid"
         make_session_dir(
             tmp_session_state_dir, "old", wt,
@@ -2102,7 +2111,7 @@ class TestLastSessionId:
         norm = _normalize_path(wt)
         assert ctx.last_session_id[norm] == "new"
 
-    def test_newer_stub_does_not_override_older_valid(self, tmp_session_state_dir: Path):
+    def test_newer_stub_does_not_override_older_valid(self, tmp_session_state_dir: Path) -> None:
         """A newer stale stub (workspace.yaml only, no events/db) must NOT
         become the resume target; the older session carrying conversation data
         wins. Guards the ordering fix: last_session_id is tracked independently
@@ -2131,7 +2140,7 @@ class TestLastSessionId:
         norm = _normalize_path(wt)
         assert ctx.last_session_id[norm] == "real-old"
 
-    def test_fast_path_records_newest(self, tmp_session_state_dir: Path):
+    def test_fast_path_records_newest(self, tmp_session_state_dir: Path) -> None:
         wt = "/tmp/wt-lsid-fast"
         make_session_dir(
             tmp_session_state_dir, "s-old", wt,
@@ -2155,7 +2164,7 @@ class TestLastSessionId:
         assert ctx.last_session_id[norm] == "s-new"
         assert ctx.last_session_id[norm] == parity
 
-    def test_no_qualifying_session(self, tmp_session_state_dir: Path):
+    def test_no_qualifying_session(self, tmp_session_state_dir: Path) -> None:
         wt = "/tmp/wt-lsid-none"
         make_session_dir(
             tmp_session_state_dir, "stub-only", wt,
@@ -2177,7 +2186,7 @@ class TestLastSessionId:
 # (docs/patterns/session-state-access.md)
 # ---------------------------------------------------------------------------
 
-def test_session_state_sweep_confined_to_backfill():
+def test_session_state_sweep_confined_to_backfill() -> None:
     """Within the session-discovery module, iteration over the session-state
     ROOT (``iterdir``/``scandir``/``listdir``) may live ONLY in the sanctioned
     ``backfill_sessions`` sweep. Any other function enumerating the root would
@@ -2192,7 +2201,7 @@ def test_session_state_sweep_confined_to_backfill():
     sweep_attrs = {"iterdir", "scandir", "listdir"}
     offenders: list[str] = []
     for module in (sessions_mod, backfill_mod):
-        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        tree = ast.parse(Path(cast(str, module.__file__)).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -2202,6 +2211,22 @@ def test_session_state_sweep_confined_to_backfill():
                 if (isinstance(sub, ast.Call)
                         and isinstance(sub.func, ast.Attribute)
                         and sub.func.attr in sweep_attrs):
+                    if (node.name == "_session_entry_lock_state"
+                            and sub.func.attr == "scandir" and len(sub.args) == 1
+                            and isinstance(sub.args[0], ast.Name) and sub.args[0].id == "sdir"):
+                        bindings = [
+                            child for child in ast.walk(node) if isinstance(child, ast.Assign)
+                            and any(isinstance(target, ast.Name) and target.id == "sdir" for target in child.targets)
+                        ]
+                        stores = [
+                            child for child in ast.walk(node) if isinstance(child, ast.Name)
+                            and child.id == "sdir" and isinstance(child.ctx, ast.Store)
+                        ]
+                        assert len(bindings) == len(stores) == 1
+                        assert ast.dump(bindings[0].value) == ast.dump(ast.parse(
+                            "state_dir / session_id", mode="eval",
+                        ).body)
+                        continue
                     offenders.append(f"{node.name}:{sub.func.attr}")
     assert not offenders, (
         "session-state sweep found outside backfill_sessions -- resolve by "
@@ -2225,26 +2250,26 @@ class TestMuxSessionName:
     creating it.
     """
 
-    def test_dots_are_replaced(self):
+    def test_dots_are_replaced(self) -> None:
         assert (
             mux_session_name("host.local-linux-20260828-113232-c3c7")
             == "wt-host_local-linux-20260828-113232-c3c7"
         )
 
-    def test_every_dot_is_replaced(self):
+    def test_every_dot_is_replaced(self) -> None:
         assert mux_session_name("a.b.c") == "wt-a_b_c"
 
-    def test_dot_free_ids_are_untouched(self):
+    def test_dot_free_ids_are_untouched(self) -> None:
         # Must stay a no-op or it orphans already-running sessions.
         assert (
             mux_session_name("host-linux-20260828-113232-c3c7")
             == "wt-host-linux-20260828-113232-c3c7"
         )
 
-    def test_empty_id_falls_back_to_base(self):
+    def test_empty_id_falls_back_to_base(self) -> None:
         assert mux_session_name("") == "wt-base"
 
-    def test_result_is_addressable_as_a_target(self):
+    def test_result_is_addressable_as_a_target(self) -> None:
         # tmux splits a target on ':' (window) then '.' (pane); the session
         # portion must survive that split intact.
         name = mux_session_name("host.local-linux-20260828-113232-c3c7")
@@ -2258,23 +2283,23 @@ class TestWorktreeIdFromMuxSession:
     "untracked", which makes a live tracked session eligible for reaping.
     """
 
-    def test_recovers_a_dotted_id_from_known_ids(self):
+    def test_recovers_a_dotted_id_from_known_ids(self) -> None:
         wt_id = "host.local-linux-20260828-113232-c3c7"
         assert (
             worktree_id_from_mux_session(mux_session_name(wt_id), [wt_id]) == wt_id
         )
 
-    def test_dot_free_id_round_trips_without_known_ids(self):
+    def test_dot_free_id_round_trips_without_known_ids(self) -> None:
         wt_id = "host-linux-20260828-113232-c3c7"
         assert worktree_id_from_mux_session(mux_session_name(wt_id)) == wt_id
 
-    def test_unknown_session_falls_back_to_the_stripped_name(self):
+    def test_unknown_session_falls_back_to_the_stripped_name(self) -> None:
         assert worktree_id_from_mux_session("wt-someone-else") == "someone-else"
 
-    def test_non_wt_session_is_rejected(self):
+    def test_non_wt_session_is_rejected(self) -> None:
         assert worktree_id_from_mux_session("scratch") == ""
 
-    def test_round_trip_holds_for_every_known_id(self):
+    def test_round_trip_holds_for_every_known_id(self) -> None:
         ids = [
             "host.local-linux-1-a",
             "host-linux-2-b",
@@ -2289,14 +2314,14 @@ class TestWorktreeIdFromMuxSession:
 class TestMuxSessionIndex:
     """The reap sweep resolves many sessions, so it builds the map once."""
 
-    def test_index_maps_session_name_to_id(self):
+    def test_index_maps_session_name_to_id(self) -> None:
         ids = ["host.local-linux-1-a", "host-linux-2-b"]
         assert mux_session_index(ids) == {
             "wt-host_local-linux-1-a": "host.local-linux-1-a",
             "wt-host-linux-2-b": "host-linux-2-b",
         }
 
-    def test_index_and_known_ids_agree(self):
+    def test_index_and_known_ids_agree(self) -> None:
         ids = ["host.local-linux-1-a", "host-linux-2-b"]
         index = mux_session_index(ids)
         for wt_id in ids:
@@ -2304,12 +2329,12 @@ class TestMuxSessionIndex:
             assert worktree_id_from_mux_session(name, index=index) == wt_id
             assert worktree_id_from_mux_session(name, ids) == wt_id
 
-    def test_index_miss_still_falls_back(self):
+    def test_index_miss_still_falls_back(self) -> None:
         index = mux_session_index(["host-linux-1-a"])
         assert worktree_id_from_mux_session("wt-other", index=index) == "other"
 
 
-def test_boxed_input_is_ready_despite_busy_words_in_banner_or_transcript():
+def test_boxed_input_is_ready_despite_busy_words_in_banner_or_transcript() -> None:
     from agent_worktrees import pane_readiness
 
     banner = _BOXED_INPUT.replace(" ~/repo ", " ~/loading-service ")
@@ -2320,7 +2345,7 @@ def test_boxed_input_is_ready_despite_busy_words_in_banner_or_transcript():
     assert pane_readiness.ready_signature(" ◐ Loading environment\n" + _BOXED_INPUT) is None
 
 
-def test_a_stale_box_above_a_shell_prompt_is_not_ready():
+def test_a_stale_box_above_a_shell_prompt_is_not_ready() -> None:
     from agent_worktrees import pane_readiness
 
     assert pane_readiness.ready_signature(_BOXED_INPUT + "Copilot exited\n/tmp\n❯\n") is None
@@ -2349,14 +2374,14 @@ _STATUS_BOXED_INPUT = (
     " ← open sidebar · Autopilot · / commands\n",
     " / commands · ? help            1.5M context\n",
 ])
-def test_boxed_input_with_mode_labels_and_status_column_is_ready(footer):
+def test_boxed_input_with_mode_labels_and_status_column_is_ready(footer: str) -> None:
     from agent_worktrees import pane_readiness
 
     capture = _STATUS_BOXED_INPUT.replace(_STATUS_FOOTER, footer)
     assert pane_readiness.ready_signature(capture) == "boxed-input"
 
 
-def test_seed_pane_status_footer_input_is_ready_and_submits():
+def test_seed_pane_status_footer_input_is_ready_and_submits() -> None:
     seed = "Continue: do the thing"
     driver = _SeedDriver(
         ready_caps=[_STATUS_BOXED_INPUT, _STATUS_BOXED_INPUT],
@@ -2380,14 +2405,14 @@ def test_seed_pane_status_footer_input_is_ready_and_submits():
     " ← open sidebar · Connection closed; press Enter to reconnect\n",
     " ← open sidebar · / commands\nuser@host:/tmp$ \n",
 ])
-def test_status_footer_grammar_still_rejects_non_footer_tails(tail):
+def test_status_footer_grammar_still_rejects_non_footer_tails(tail: str) -> None:
     from agent_worktrees import pane_readiness
 
     capture = _STATUS_BOXED_INPUT.replace(_STATUS_FOOTER, tail)
     assert pane_readiness.ready_signature(capture) is None
 
 
-def test_a_stale_interrupt_footer_above_a_shell_is_not_ready():
+def test_a_stale_interrupt_footer_above_a_shell_is_not_ready() -> None:
     from agent_worktrees import pane_readiness
 
     assert pane_readiness.ready_signature("press esc to interrupt\nCopilot exited\n/tmp\n❯\n") is None
@@ -2396,7 +2421,7 @@ def test_a_stale_interrupt_footer_above_a_shell_is_not_ready():
 
 
 @pytest.mark.parametrize("prompt", ["$", "#", "%", "❯"])
-def test_a_bare_shell_prompt_holding_the_footer_words_is_not_ready(prompt):
+def test_a_bare_shell_prompt_holding_the_footer_words_is_not_ready(prompt: str) -> None:
     """``$ press esc to interrupt`` typed at a bare prompt is a shell line, not
     Copilot's footer: seeding it would run the seed as a shell command."""
     from agent_worktrees import pane_readiness
@@ -2412,7 +2437,7 @@ def test_a_bare_shell_prompt_holding_the_footer_words_is_not_ready(prompt):
     "press esc to interrupt now please",
     "echo press esc to interrupt",
 ])
-def test_only_the_footer_grammar_is_ready_never_a_prompt_with_typed_text(line):
+def test_only_the_footer_grammar_is_ready_never_a_prompt_with_typed_text(line: str) -> None:
     from agent_worktrees import pane_readiness
 
     assert pane_readiness.ready_signature(line + "\n") is None
@@ -2424,13 +2449,13 @@ def test_only_the_footer_grammar_is_ready_never_a_prompt_with_typed_text(line):
     "◐ press esc to interrupt",
     "esc to interrupt · ctrl+c exit",
 ])
-def test_copilots_own_footer_rows_are_ready(line):
+def test_copilots_own_footer_rows_are_ready(line: str) -> None:
     from agent_worktrees import pane_readiness
 
     assert pane_readiness.ready_signature(line + "\n") == "interrupt-footer"
 
 
-def test_ordinary_output_under_a_stale_prompt_is_not_ready():
+def test_ordinary_output_under_a_stale_prompt_is_not_ready() -> None:
     """Only Copilot's own footer rows may sit under the box, and the legacy cue
     must be the live bottom line -- not merely free of shell-like tails."""
     from agent_worktrees import pane_readiness
@@ -2440,7 +2465,7 @@ def test_ordinary_output_under_a_stale_prompt_is_not_ready():
     assert pane_readiness.ready_signature(_BOXED_INPUT) == "boxed-input"
 
 
-def test_output_with_generic_key_words_under_a_box_is_not_ready():
+def test_output_with_generic_key_words_under_a_box_is_not_ready() -> None:
     """A footer row is a run of complete key-hint segments; ordinary output
     that merely mentions Enter or help is not one."""
     from agent_worktrees import pane_readiness
@@ -2451,7 +2476,7 @@ def test_output_with_generic_key_words_under_a_box_is_not_ready():
     assert pane_readiness.ready_signature(two_rows) == "boxed-input"
 
 
-def test_a_root_prompt_with_typed_text_under_a_stale_box_is_not_ready():
+def test_a_root_prompt_with_typed_text_under_a_stale_box_is_not_ready() -> None:
     """``# echo ready`` reads like a "#" key hint, but it is a root shell prompt
     with typed text: a stale box above it is scrollback, not live input."""
     from agent_worktrees import pane_readiness
@@ -2460,7 +2485,7 @@ def test_a_root_prompt_with_typed_text_under_a_stale_box_is_not_ready():
         assert pane_readiness.ready_signature(_BOXED_INPUT + prompt + "\n") is None, prompt
 
 
-def test_an_attached_powershell_or_cmd_prompt_is_not_ready():
+def test_an_attached_powershell_or_cmd_prompt_is_not_ready() -> None:
     from agent_worktrees import pane_readiness
 
     for prompt in ("PS C:\\repo>", "PS C:\\repo> ", "C:\\repo>", "PS /home/u>"):
@@ -2471,7 +2496,7 @@ def test_an_attached_powershell_or_cmd_prompt_is_not_ready():
     assert pane_readiness.ready_signature("press esc to interrupt\n") == "interrupt-footer"
 
 
-def test_a_shell_prompt_containing_the_footer_words_is_not_ready():
+def test_a_shell_prompt_containing_the_footer_words_is_not_ready() -> None:
     """A shell prompt whose path happens to contain "esc" and "interrupt" is not
     Copilot's footer: typing the seed there would run it in the shell."""
     from agent_worktrees import pane_readiness
@@ -2489,7 +2514,7 @@ def test_a_shell_prompt_containing_the_footer_words_is_not_ready():
     assert pane_readiness.ready_signature("press esc to interrupt\n") == "interrupt-footer"
 
 
-def test_seed_readiness_never_outlasts_the_hard_cap():
+def test_seed_readiness_never_outlasts_the_hard_cap() -> None:
     busy = [f" /work/repo   Session\n ◉ Resuming session... {i}\n" for i in range(500)]
     driver = _SeedDriver(ready_caps=busy, echo_caps=[])
     with patch("subprocess.run", side_effect=driver.run), \

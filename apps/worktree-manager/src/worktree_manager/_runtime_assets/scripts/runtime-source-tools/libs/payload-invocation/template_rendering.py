@@ -101,9 +101,43 @@ def template_values(uv: bool) -> dict[str, str]:
     return values
 
 
-def render(template: str, values: dict[str, str], uv: bool) -> str:
+def bootstrap_values(uv: bool, catalog_gate: str) -> dict[str, str]:
+    """Return native bootstrap selection substitutions for command catalogs."""
+    return {
+        "CATALOG_PYTHON_POSIX": (
+            'py="$(bash "$self_root/scripts/_bootstrap_python/select.sh")" || {\n'
+            "    printf '%s\\n' '{}'\n"
+            "    exit 0\n"
+            "}\n"
+            if uv else 'py="$(command -v python3 || command -v python || true)"\n'
+        ),
+        "CATALOG_GATE_POWERSHELL": (
+            "$catalogGate = Join-Path $selfRoot "
+            f"'{catalog_gate.replace('/', chr(92))}'\n"
+            + (
+                "$python = & (Join-Path $selfRoot 'scripts\\_bootstrap_python\\select.ps1')\n"
+                if uv else (
+                    "$python = Get-Command python -ErrorAction SilentlyContinue\n"
+                    "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
+                    "$python = if ($python) { $python.Source } else { $null }\n"
+                )
+            )
+            + "if (-not $python) { Write-Output '{}'; exit 0 }\n"
+            "& $python -B -E -X utf8 $catalogGate --check "
+            "--cwd (Get-Location).Path *> $null\n"
+            "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
+            if catalog_gate else ""
+        ),
+    }
+
+
+def render(
+    template: str, values: dict[str, str], uv: bool, *,
+    bootstrap_uv: bool = False, catalog_gate: str = "",
+) -> str:
     """Expand the closed token table and seal an in-process catalog digest."""
     values.update(template_values(uv))
+    values.update(bootstrap_values(bootstrap_uv, catalog_gate))
     rendered = template
     for key, value in values.items():
         rendered = rendered.replace(f"@@{key}@@", value)

@@ -23,6 +23,9 @@ import os
 import re
 import subprocess
 import threading
+from collections.abc import Callable
+from functools import partial
+from typing import Any, cast
 
 from agent_procutil import no_window_flags
 
@@ -31,13 +34,20 @@ from ...engine_progress import failed_json_result
 from .. import context
 from .source_identity import local_key
 
+TaskKey = str | None
+Result = dict[str, Any]
+Task = Callable[[], Result]
+_failed_json_result = cast(Callable[..., Result], failed_json_result)
+
 # Per-item lifecycle states (mirror the progress sub-dialog glyphs).
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
 
-def _ssh_json(argv, timeout=120, *, preserve_failure_detail=False):
+def _ssh_json(
+    argv: list[str], timeout: float = 120, *, preserve_failure_detail: bool = False,
+) -> dict[str, Any]:
     """Run a remote op over SSH and parse its single JSON result object."""
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
         # Detach from the console stdin so the remote ``ssh`` op can't read the
@@ -54,7 +64,7 @@ def _ssh_json(argv, timeout=120, *, preserve_failure_detail=False):
     i = out.find("{")
     if i < 0:
         if preserve_failure_detail:
-            return failed_json_result(out, proc.stderr, reason="remote command returned no JSON")
+            return _failed_json_result(out, proc.stderr, reason="remote command returned no JSON")
         err = (proc.stderr or out or "").strip().splitlines()
         return {"ok": False, "reason": err[-1] if err else f"exit {proc.returncode}"}
     try:
@@ -64,14 +74,14 @@ def _ssh_json(argv, timeout=120, *, preserve_failure_detail=False):
             obj["detail"] = "\n".join(
                 str(part) for part in (obj.get("detail"), proc.stderr.strip()) if part
             )
-        return obj
+        return cast(dict[str, Any], obj)
     except ValueError:
         if preserve_failure_detail:
-            return failed_json_result(out, proc.stderr, reason="unparseable remote result")
+            return _failed_json_result(out, proc.stderr, reason="unparseable remote result")
         return {"ok": False, "reason": "unparseable remote result"}
 
 
-def _result_ok(op, res):
+def _result_ok(op: str, res: dict[str, Any]) -> bool:
     """Map a per-item result dict onto DONE/FAILED for the progress glyph."""
     if op == "cleanup":
         return bool(res.get("removed")) and bool(res.get("ok", True))
@@ -94,15 +104,15 @@ def _result_ok(op, res):
     # sync: a no-op that was already current is success; a real skip is not.
     from ...engine_sync import result_ok
 
-    return result_ok(res)
+    return cast(Callable[[Result], bool], result_ok)(res)
 
 
-def sync_diagnostics(result):
+def sync_diagnostics(result: object) -> list[str]:
     """Keep the cause and any earlier paired progress visible in the dialog."""
     if not isinstance(result, dict):
         return []
 
-    def compact(value, limit=160):
+    def compact(value: object, limit: int = 160) -> str:
         text = " ".join(str(value or "").split())
         return text if len(text) <= limit else "..." + text[-(limit - 3):]
 
@@ -129,7 +139,7 @@ def sync_diagnostics(result):
     return lines
 
 
-def finalize_diagnostics(result):
+def finalize_diagnostics(result: object) -> list[str]:
     """Keep the first actual refusal, not the tail of a long claim ledger."""
     if not isinstance(result, dict):
         return []
@@ -147,10 +157,11 @@ def finalize_diagnostics(result):
     return [text if len(text) <= 160 else text[:157] + "..."] if text else []
 
 
-def build_tasks(op, items, src, *, project=None, include_unused=False,
-                include_conversations=False,
+def build_tasks(op: str, items: list[dict[str, Any]], src: Any, *, project: str | None = None, include_unused: bool = False,
+                include_conversations: bool = False,
                 local: tuple[str | None, str | None] | None = None,
-                on_progress=None, cancelled=None):
+                on_progress: Callable[[TaskKey, Result], None] | None = None, cancelled: threading.Event | None = None,
+                ) -> list[tuple[TaskKey, Task]]:
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
     *items* are engine record dicts (collision-safe ``selection_id`` +
@@ -184,30 +195,33 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
             include_unused=include_unused,
             include_conversations=include_conversations,
             refusal=refusal,
-            report=(lambda update, key=key: on_progress(key, update)) if on_progress else None,
+            report=partial(on_progress, key) if on_progress else None,
             cancelled=cancelled,
         )))
     return tasks
 
 
-def _finalize_blocker(row):
+def _finalize_blocker(row: dict[str, Any]) -> str | None:
     if row.get("managed_child"):
         return "controller-owned workspace: return to its controller"
+    if row.get("session_lock_observation_unavailable"):
+        return "Copilot observation unavailable: refresh qualified status before finalizing"
     if row.get("mux_observation_unknown"):
         return "mux observation unavailable: refresh qualified status before finalizing"
-    if any(row.get(field) for field in (
-        "mux_live", "session_bare_orphan", "session_lock_live",
-        "session_bound_live", "session_bridge_live", "session_lock_stale",
+    lock_observed = "session_lock_live" in (row.get("raw") or row)
+    if row.get("session_lock_live") or row.get("session_lock_stale") or not lock_observed and any(row.get(field) for field in (
+        "session_bare_orphan", "session_bound_live", "session_bridge_live",
         "session_ahp_live", "execution_leg_live",
     )):
         return "live session or lock residue: resolve its lifecycle before finalizing"
     return None
 
 
-def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
-               include_unused=False, include_conversations=False, refusal=None, report=None,
-               cancelled=None):
-    def _run():
+def _make_task(op: str, wt_id: str | None, machine: str | None, env: str | None, is_local: bool, *, project: str, source_id: str | None = None,
+               include_unused: bool = False, include_conversations: bool = False, refusal: str | None = None,
+               report: Callable[[dict[str, Any]], None] | None = None,
+               cancelled: threading.Event | None = None) -> Callable[[], dict[str, Any]]:
+    def _run() -> dict[str, Any]:
         if refusal:
             return {"success": False, "reason": refusal}
         if not wt_id:
@@ -216,7 +230,7 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
             if op == "sync":
                 from ... import engine_sync
 
-                return engine_sync.run(
+                return cast(Callable[..., Result], engine_sync.run)(
                     project, wt_id, **({"report": report} if report is not None else {}),
                     **({"cancelled": cancelled} if cancelled is not None else {}),
                 )
@@ -237,12 +251,13 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
                 args = ["finalize", wt_id, "--json"]
             else:
                 args = ["sync", "--paired", "--worktree-id", wt_id, "--json"]
+            failure_options: dict[str, Any] = {"preserve_failure_detail": True} if op == "finalize" else {}
             return engine_client.run_json(
                 project, args, timeout=120, allow_nonzero=True,
-                **({"preserve_failure_detail": True} if op == "finalize" else {}),
+                **failure_options,
             )
         from . import data_ssh
-        argv = data_ssh.remote_op_argv(
+        argv = cast(Callable[..., list[str] | None], data_ssh.remote_op_argv)(
             machine, env, op, wt_id,
             source_id=source_id,
             include_unused=include_unused,
@@ -254,7 +269,7 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
                 "reason": f"source does not support {op}: {source_id or f'{machine} {env}'}",
             }
         return _ssh_json(argv, preserve_failure_detail=True) if op == "finalize" else _ssh_json(argv)
-    _run._owned_local_sync = op == "sync" and is_local
+    setattr(_run, "_owned_local_sync", op == "sync" and is_local)
     return _run
 
 
@@ -266,27 +281,29 @@ class MaintenanceExecutor:
     crashes the UI.
     """
 
-    def __init__(self, op, tasks, *, cancelled=None):
+    def __init__(
+        self, op: str, tasks: list[tuple[TaskKey, Task]], *, cancelled: threading.Event | None = None,
+    ) -> None:
         self.op = op
         self._tasks = list(tasks)
         self._lock = threading.Lock()
         self._state = {k: PENDING for k, _ in self._tasks}
-        self._result = {}
-        self._progress = {}
-        self._cleanup_errors = {}
+        self._result: dict[TaskKey, Result] = {}
+        self._progress: dict[TaskKey, Result] = {}
+        self._cleanup_errors: dict[TaskKey, engine_client.EngineCleanupError] = {}
         self._done = False
         self._cancelled = cancelled if cancelled is not None else threading.Event()
-        self._thread = None
-        self._active_owned_sync = None
+        self._thread: threading.Thread | None = None
+        self._active_owned_sync: bool | None = None
 
-    def start(self):
+    def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="maint-exec", daemon=True)
         self._thread.start()
 
-    def request_stop(self):
+    def request_stop(self) -> None:
         self._cancelled.set()
 
-    def close(self):
+    def close(self) -> None:
         """Stop queued work; settle local Sync without adopting a remote lifetime."""
         self.request_stop()
         with self._lock:
@@ -296,14 +313,14 @@ class MaintenanceExecutor:
             self._thread.join(15)
             if self._thread.is_alive():
                 error = engine_client.EngineCleanupError("Sync worker settlement is unconfirmed")
-                error.executor = self
-                error.thread = self._thread
+                setattr(error, "executor", self)
+                setattr(error, "thread", self._thread)
                 raise error
         with self._lock:
             if self._cleanup_errors:
                 raise next(iter(self._cleanup_errors.values()))
 
-    def _run(self):
+    def _run(self) -> None:
         for key, fn in self._tasks:
             with self._lock:
                 if self._cancelled.is_set():
@@ -332,31 +349,31 @@ class MaintenanceExecutor:
         with self._lock:
             self._done = True
 
-    def state(self, key):
+    def state(self, key: TaskKey) -> str:
         with self._lock:
             return self._state.get(key, PENDING)
 
-    def result(self, key):
+    def result(self, key: TaskKey) -> Result | None:
         with self._lock:
             return self._result.get(key)
 
-    def report(self, key, update):
+    def report(self, key: TaskKey, update: Result) -> None:
         with self._lock:
             self._progress[key] = dict(update)
 
-    def progress(self, key):
+    def progress(self, key: TaskKey) -> Result:
         with self._lock:
             return dict(self._progress.get(key, {}))
 
-    def cleanup_pending(self):
+    def cleanup_pending(self) -> bool:
         with self._lock:
             return bool(self._cleanup_errors)
 
-    def is_done(self):
+    def is_done(self) -> bool:
         with self._lock:
             return self._done
 
-    def counts(self):
+    def counts(self) -> tuple[int, int, int]:
         """(done, failed, remaining) across all tasks."""
         with self._lock:
             vals = list(self._state.values())

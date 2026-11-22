@@ -83,6 +83,30 @@ existing application/profile admission owners (`runtime_profile.py` and
 `runtime_source_lock.py`); publishing this scalar does not admit an application
 or bypass those checks.
 
+`bootstrapLauncher: "uv"` adopts that declaration for pre-runtime command
+helpers. Invocation packages the existing Installer Engine uv selector and
+Windows native capture owner under `scripts/_bootstrap_python/`. The
+PowerShell adapter on POSIX reuses Versioned Runtime's bounded capture owner.
+The
+`bootstrap-python-launcher.txt` sidecar distinguishes adoption from an inert
+version declaration. The installation-context transport and evaluator reuse
+that selector, including Worktrees first-use installer admission; generated
+Python-backed catalogs use it directly. CMD entries
+continue to delegate to their PowerShell entry. The application generation
+resolver, Bridge's specialized bootstrap resolver, and explicit setup-provided
+Python paths retain their existing ownership.
+
+Ordinary selection uses PATH uv, the declared managed interpreter and
+`--no-python-downloads`. Missing uv or an unprepared interpreter stops with a
+setup diagnostic, never PATH Python. Explicit prerequisite preparation can run
+`scripts\_bootstrap_python\select.ps1 -Operation Prepare` on Windows, or
+`bash scripts/_bootstrap_python/select.sh Prepare` on POSIX, after the existing
+prerequisite owner makes uv available. These entries reuse that owner's
+Inspect/Prepare contract; ordinary commands do not acquire prerequisites.
+Removing adoption requires explicit removal of its old sidecar before
+generation. This migration covers pre-runtime ingress, not every service,
+installer child or legacy direct-runtime launcher tracked by #13775.
+
 `pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
 the default remains `direct` for consumers not yet migrated. Adoption requires
 the helper declaration and refuses custom dispatchers. The existing resolver

@@ -6,12 +6,33 @@ import subprocess
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from agent_worktrees import git_acquisition_budget, git_fetch, git_ops, git_push_transport, pr_publish
 from agent_worktrees.config import RepoConfig
 from agent_worktrees.tracking import PRRecord
+
+
+@pytest.mark.parametrize("requested,expected", [(None, None), (300, 300), (5, 5)])
+def test_foreground_creation_fetch_has_no_default_completion_deadline(
+    monkeypatch: pytest.MonkeyPatch, requested: float | None, expected: float | None,
+) -> None:
+    from agent_worktrees import tracking_write
+
+    calls: list[tuple[float | None, float | None]] = []
+
+    def run(*args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((kwargs["timeout"], git_acquisition_budget.remaining_timeout(None)))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(git_ops, "_auth_config_args", lambda *a, **k: [])
+    monkeypatch.setattr(git_ops, "git", run)
+    with tracking_write.foreground_completion():
+        git_ops.fetch("origin", cwd=".", timeout=requested)
+    assert calls[0][0] == expected
+    assert (calls[0][1] is None) is (expected is None)
 
 
 def test_unpinned_head_probe_uses_soft_and_hard_deadlines(monkeypatch: pytest.MonkeyPatch) -> None:

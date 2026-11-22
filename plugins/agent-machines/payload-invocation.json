@@ -5,6 +5,8 @@
   "module": "agent_machines",
   "legacyRuntimeRoot": ".agent-machines",
   "installationContext": "required",
+  "bootstrapPython": "3.11.18",
+  "bootstrapLauncher": "uv",
   "installerLifecycle": true,
   "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_MACHINES_NO_SELFPROVISION",

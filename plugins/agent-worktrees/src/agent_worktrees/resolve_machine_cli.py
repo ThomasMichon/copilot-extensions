@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+from machine_transport import MachineEntry, SSHEnvironment
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
 from machine_transport import find_machine_entry
 from machine_transport import normalize_environment, resolve_machine_selection
@@ -61,14 +62,14 @@ def remote_selector_args(state: ResolveCommandState) -> list[str]:
     return args
 
 
-def _core():
+def _core() -> Any:
     from . import __main__ as core
 
     return core
 
 
-def _emit_plan(*args, **kwargs):
-    return _core()._emit_plan(*args, **kwargs)
+def _emit_plan(*args: Any, **kwargs: Any) -> None:
+    return cast(None, _core()._emit_plan(*args, **kwargs))
 
 
 # Picker env labels (engine: "Win" | "WSL" | "Linux") -> machines.yaml ssh
@@ -77,14 +78,14 @@ _ENV_LABEL_TO_NAME = {"win": "windows", "wsl": "wsl", "linux": "linux"}
 
 
 def _entry_for_environment(
-    entries: dict[str, cfg.MachineEntry], name: str, environment: str | None = None,
-) -> cfg.MachineEntry | None:
+    entries: dict[str, MachineEntry], name: str, environment: str | None = None,
+) -> MachineEntry | None:
     return resolve_machine_selection(entries, name, environment, allow_physical_context=True).entry
 
 
 def _load_remote_machines(
     config: cfg.Config,
-) -> list[tuple[cfg.MachineEntry, list[cfg.SSHEnvironment]]]:
+) -> list[tuple[MachineEntry, list[SSHEnvironment]]]:
     """Load machines/environments reachable via SSH from the picker.
 
     Returns a list of (machine, ssh_environments) tuples. For remote
@@ -105,8 +106,8 @@ def _load_remote_machines(
     if _in_ssh_session():
         return []
 
-    current_platform = cfg.detect_platform()
-    result: list[tuple[cfg.MachineEntry, list[cfg.SSHEnvironment]]] = []
+    current_platform = getattr(cfg, "detect_platform")()
+    result: list[tuple[MachineEntry, list[SSHEnvironment]]] = []
 
     for key, entry in machines.items():
         if not entry.ssh_ready or not entry.ssh_environments or not entry.copilot:
@@ -197,7 +198,7 @@ def _new_picker_blocked_by_ssh() -> bool:
     we fall back to the legacy ANSI picker, whose ``msvcrt`` input works over
     the ConPTY (it's what the fleet has used over SSH all along).
     """
-    return _in_ssh_session() and cfg.detect_platform() == "windows"
+    return _in_ssh_session() and cast(str, getattr(cfg, "detect_platform")()) == "windows"
 
 
 def _in_ssh_session() -> bool:
@@ -222,6 +223,7 @@ def _emit_remote_plan_for_env(
     remote_args: list[str] | None = None,
     *,
     seed: str | None = None,
+    terminal_handoff: bool = False,
 ) -> int | None:
     """Emit a remote SSH handoff plan for a specific machine and env."""
     repo = config.default_repo
@@ -258,6 +260,16 @@ def _emit_remote_plan_for_env(
         ssh_alias, shell = _resolve_ssh_target(entry)
 
     project = cfg.project_name()
+    if terminal_handoff:
+        from .remote_terminal_launch import plan as terminal_plan
+
+        try:
+            plan = terminal_plan(project, ssh_alias, shell, remote_args or [], seed=seed)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=2)
+        plan.update(machine=entry.key, display_name=f"{entry.display_name} {env_label}".strip())
+        _emit_plan(plan)
+        return 0
     if seed:
         from .remote_seed_launch import prepare
 
@@ -285,7 +297,7 @@ def _emit_remote_plan_for_env(
     return 0
 
 
-def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
+def _resolve_ssh_alias(entry: MachineEntry) -> str:
     """Pick the best SSH alias for a remote machine."""
     return _resolve_ssh_target(entry)[0]
 

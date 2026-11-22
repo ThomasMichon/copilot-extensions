@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import builtins
+from typing import Any, cast
+from collections.abc import Callable
+
+
 import os
 import time
 import types
 from pathlib import Path
-from collections.abc import Callable
-from typing import cast
 
 import pytest
 
@@ -173,16 +176,56 @@ def test_session_claim_live_process_with_fresh_or_missing_lease_is_not_gone(
         assert sweep.session_claim_gone(claim, config) is False
 
 
-def _scan(rec: tracking.WorktreeRecord, monkeypatch: pytest.MonkeyPatch, bridge: set[str]) -> set[str]:
+@pytest.mark.parametrize("workspace", ["missing", "malformed", "unreadable", "foreign", "matching"])
+@pytest.mark.parametrize("live", [False, True])
+def test_session_claim_preserves_unknown_live_cwd(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace: str, live: bool,
+) -> None:
+    rec = types.SimpleNamespace(
+        sessions=[tracking.SessionEntry(session_id="sess-1", started_at="")],
+        worktree_path=str(tmp_path / "worktree"), status="active",
+    )
+    entry = state_dir / "sess-1"
+    entry.mkdir()
+    (entry / "inuse.123.lock").touch()
+    path = entry / "workspace.yaml"
+    if workspace != "missing":
+        path.write_text(
+            "cwd: [" if workspace == "malformed" else
+            f"cwd: {tmp_path.as_posix()}/{'other' if workspace == 'foreign' else 'worktree'}\n",
+            encoding="utf-8",
+        )
+    if workspace == "unreadable":
+        original = builtins.open
+
+        def open_file(file: Any, *args: Any, **kwargs: Any) -> Any:
+            if file == path:
+                raise PermissionError("fixture")
+            return original(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", open_file)
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda *_a: (rec, True))
+    monkeypatch.setattr(sessions, "_is_copilot_process", lambda _pid: live)
+    monkeypatch.setattr(session_lease, "lease_expired", lambda *_a: False)
+    config = cast(cfg.Config, types.SimpleNamespace())
+    expected = True if not live or workspace == "foreign" else False if workspace == "matching" else None
+    assert sweep.session_claim_gone(_claim(), config) is expected
+    assert sweep.claim_safe(_claim(), config) is expected
+
+
+def _scan(
+    rec: tracking.WorktreeRecord, monkeypatch: pytest.MonkeyPatch, bridge: set[str],
+    *, copilot_live: bool = True,
+) -> set[str]:
     monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: set())
     monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: bridge)
     monkeypatch.setattr(local_cache_worker, "is_active", lambda path: False)
-    ctx = sessions.SessionContext(active_sessions={
-        sessions._normalize_path(rec.worktree_path): ["sess-1"]})
+    ctx = sessions.SessionContext(active_sessions=({
+        sessions._normalize_path(rec.worktree_path): ["sess-1"]} if copilot_live else {}))
     return m._build_active_paths([rec], ctx)
 
 
-def test_unregistered_bridge_session_keeps_finalized_active_despite_expired_lease(
+def test_live_copilot_keeps_activity_despite_expired_lease_or_bridge_state(
     state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rec = _finalized_self(tmp_path / "wt")
@@ -190,16 +233,16 @@ def test_unregistered_bridge_session_keeps_finalized_active_despite_expired_leas
     _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
     _touch(state_dir, "bridge-sess", 5)
     assert _scan(rec, monkeypatch, {"wt"}) == {norm}
-    assert _scan(rec, monkeypatch, set()) == set()
+    assert _scan(rec, monkeypatch, set()) == {norm}
 
 
-def test_fresh_bound_live_hint_keeps_finalized_active_despite_expired_lease(
+def test_cached_bound_hint_cannot_mark_activity_without_a_matching_copilot(
     state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rec = _finalized_self(tmp_path / "wt")
     _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
     monkeypatch.setattr(m, "_fresh_bound_live_hint", lambda r: True)
-    assert _scan(rec, monkeypatch, set()) == {sessions._normalize_path(rec.worktree_path)}
+    assert _scan(rec, monkeypatch, set(), copilot_live=False) == set()
 
 
 def test_expired_self_claim_is_admitted_only_on_positive_expiry(
@@ -443,16 +486,16 @@ def _revalidate(
         rec.worktree_id, repo=repo, tracking_path=tdir, reap=_reap)
 
 
-def test_revalidation_accepts_expired_lease_with_idle_pane_like_prelock_scan(
+def test_revalidation_preserves_open_copilot_even_when_its_idle_lease_expired(
     state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rec, tdir, reaped = _revalidation_env(state_dir, tmp_path, monkeypatch, pane=True)
     _touch(state_dir, "sess-1", session_lease.FINALIZED_AT_REST_GRACE_S + 60)
     ctx = sessions.scan_sessions_fast([rec])
-    assert m._build_active_paths([rec], ctx) == set()
+    assert m._build_active_paths([rec], ctx) == {sessions._normalize_path(rec.worktree_path)}
     result = _revalidate(rec, tdir, reaped)
-    assert result.cleanable, result.reason
-    assert reaped == ["wt"]
+    assert not result.cleanable
+    assert reaped == []
 
 
 @pytest.mark.parametrize("pane", [True, False], ids=["pane", "no-pane"])
