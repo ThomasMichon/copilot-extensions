@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -1198,3 +1199,40 @@ def test_guarded_branch_writes_ignore_an_inherited_git_dir(
     assert "doomed" not in _git(env.anchor, "branch", "--list", "doomed")
     assert _git(env.anchor, "rev-parse", "moved") == env.head
     assert _git(other, "rev-parse", "doomed") == other_tip == _git(other, "rev-parse", "moved")
+
+
+@pytest.mark.parametrize("key", ["http.https://example.invalid/.extraHeader", "credential.helper"])
+def test_credential_config_refuses_without_values(env: SimpleNamespace, key: str) -> None:
+    secret = "AUTHORIZATION: bearer s3cr3t-value"
+    _git(env.anchor, "config", "extensions.worktreeConfig", "true")
+    _git(env.checkout, "config", "--worktree", key, secret)
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    report = caught.value.to_dict()
+    assert caught.value.code == "credential-config"
+    assert [k.lower() for k in report["keys"]] == [key.lower()]
+    assert "s3cr3t" not in json.dumps(report) and "s3cr3t" not in str(caught.value)
+    assert env.checkout.exists() and _registered(env) and not env.entry.exists()
+
+
+def test_credential_config_added_before_removal_refuses(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    _git(env.anchor, "config", "extensions.worktreeConfig", "true")
+    real = catalog.register_root
+
+    def register(repo: str, root: Any) -> None:
+        real(repo, root)
+        _git(env.checkout, "config", "--worktree", "gitlab.accessToken", "s3cr3t-value")
+
+    monkeypatch.setattr(catalog, "register_root", register)
+    with pytest.raises(hydration.HydrationRefused) as caught:
+        hydration.dehydrate(WT_ID, env.config)
+    assert caught.value.code == "credential-config" and caught.value.to_dict()["keys"] == ["gitlab.accesstoken"]
+    assert env.checkout.exists() and _registered(env) and not env.entry.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+def test_catalog_and_registry_are_owner_only(env: SimpleNamespace) -> None:
+    hydration.dehydrate(WT_ID, env.config)
+    assert env.entry.stat().st_mode & 0o777 == 0o600
+    assert env.entry.parent.stat().st_mode & 0o777 == 0o700
+    assert catalog._roots_file("sample").stat().st_mode & 0o777 == 0o600

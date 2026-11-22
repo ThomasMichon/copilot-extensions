@@ -41,7 +41,8 @@ lookup use this registry, so they find an entry after a root change even when
 the tracking record is lost. An unreadable registry holds every branch of the
 repository. The entry is written atomically (temporary
 file, `fsync`, replace) **before** removal, and is retired only after a
-verified rehydration. Schema `agent-worktrees.checkout-dehydration` version 1:
+verified rehydration. On POSIX the entry and the registry are created
+owner-only (`0o600`), and a new `.dehydrated` directory is `0o700`. Schema `agent-worktrees.checkout-dehydration` version 1:
 
 - **identity**: repo, worktree ID, creation nonce, checkout path, anchor.
 - **git**: expected local branch, exact HEAD, and the exact per-worktree
@@ -86,6 +87,13 @@ Dehydrate refuses, without writing a catalog entry, unless all hold:
    otherwise be lost. This is checked again just before removal.
 7. Strict session liveness proves no live registered session, and no process
    uses the checkout. Unknown liveness refuses.
+8. The per-worktree config has no credential-bearing key (code
+   `credential-config`). Parsed key names are matched case-insensitively:
+   `http.extraheader` and `http.<url>.extraheader`, every `credential.*` and
+   `credential.<url>.*` key, `http.cookiefile`, `http.sslkey`, `http.sslcert`,
+   `http.sslcertpasswordprotected`, and any key whose last component ends in
+   `password`, `token` or `secret`. The refusal names the keys, never their
+   values. This is checked again just before removal.
 
 Dehydrate, rehydrate, reconcile and release-recovery-hold apply the
 receiving-side `execution_spaces.require_record_mutation` admission under the

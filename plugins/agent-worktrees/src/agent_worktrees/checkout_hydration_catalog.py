@@ -22,7 +22,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 SCHEMA = "agent-worktrees.checkout-dehydration"
 SCHEMA_VERSION = 1
@@ -144,6 +144,11 @@ def read_entry(path: Path) -> dict[str, Any] | None:
     return validate(data)
 
 
+def _private_open(path: Path) -> IO[str]:
+    """Create ``path`` exclusively with owner-only permissions (0o600 on POSIX)."""
+    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8")
+
+
 def write_entry(path: Path, data: dict[str, Any]) -> None:
     """Atomically publish ``data`` (temp + fsync + replace + directory barrier)."""
     from . import checkout_durability
@@ -151,11 +156,13 @@ def write_entry(path: Path, data: dict[str, Any]) -> None:
     validate(data)
     if not path.parent.is_dir():
         path.parent.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            path.parent.chmod(0o700)
         # The new directory entry itself must be durable before any removal.
         checkout_durability.directory(path.parent.parent)
     staging = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     try:
-        with staging.open("w", encoding="utf-8") as stream:
+        with _private_open(staging) as stream:
             json.dump(data, stream, indent=2, sort_keys=True)
             stream.write("\n")
             stream.flush()
@@ -233,7 +240,7 @@ def register_root(repo_name: str, worktree_root: str | os.PathLike[str]) -> None
                    "roots": [str(r) for r in roots] + [os.path.abspath(str(worktree_root))]}
         staging = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
         try:
-            with staging.open("w", encoding="utf-8") as stream:
+            with _private_open(staging) as stream:
                 json.dump(payload, stream, indent=2)
                 stream.write("\n")
                 stream.flush()

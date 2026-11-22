@@ -227,6 +227,36 @@ def _worktree_config(checkout: Path) -> dict[str, Any] | None:
     }
 
 
+_CREDENTIAL_HTTP_KEYS = frozenset({"extraheader", "cookiefile", "sslkey", "sslcert", "sslcertpasswordprotected"})
+_CREDENTIAL_SUFFIXES = ("password", "token", "secret")
+
+
+def _is_credential_key(key: str) -> bool:
+    lowered = key.lower()
+    section, _, rest = lowered.partition(".")
+    final = lowered.rsplit(".", 1)[-1]
+    if section == "credential" and rest:
+        return True
+    if section == "http" and final in _CREDENTIAL_HTTP_KEYS:
+        return True
+    return final.endswith(_CREDENTIAL_SUFFIXES)
+
+
+def _require_no_credential_config(checkout: Path) -> None:
+    """Refuse when config.worktree holds credential-bearing keys (names only; values are never read)."""
+    path = _worktree_config_file(checkout)
+    if not path.exists():
+        return
+    names = _git(checkout, "config", "--file", str(path), "--null", "--list", "--name-only", check=False)
+    if names.returncode != 0:
+        raise HydrationRefused("worktree-config-unreadable", "per-worktree config could not be listed")
+    offending = sorted({key for key in names.stdout.split("\0") if key and _is_credential_key(key)})
+    if offending:
+        raise HydrationRefused(
+            "credential-config", "per-worktree config contains credential-bearing keys", keys=offending,
+        )
+
+
 def _restore_worktree_config(checkout: Path, snapshot: object) -> None:
     """Rewrite the recorded per-worktree config; idempotent and retry-safe."""
     from . import checkout_durability
@@ -286,6 +316,7 @@ def _inspect(record: Any, checkout: Path, anchor: Path) -> dict[str, Any]:
     if hold:
         raise HydrationRefused("retained-data", hold)
     _require_clean(checkout)
+    _require_no_credential_config(checkout)
     verdict = sessions.verify_worktree_active(record, strict=True)
     if not verdict.probes_ok or verdict.active:
         raise HydrationRefused("live-session", "dehydration requires confirmed inactive sessions")
@@ -393,6 +424,7 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
                 hold = checkout_data.preservation_hint(checkout)
                 if hold:
                     raise HydrationRefused("retained-data", hold)
+                _require_no_credential_config(checkout)
             except HydrationRefused:
                 catalog.delete_entry(entry_path)
                 raise
