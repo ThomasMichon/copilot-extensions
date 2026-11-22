@@ -4970,12 +4970,56 @@ decisions and the 300-second bound remain intact. New bindings are the adapter,
 original test module and unchanged watchdog owner; only that owner becomes
 a new target.
 
+Fatal Ruff, strict Python 3.10/Linux and Windows typing, documentation and
+diff checks pass. Copilot approval `6012029478` covers exact head
+`bd47c2143d3ce315ccc21f18011b42a2774a799e` with no active findings.
+Source CI `45018397861`, unit job `137195638154`, freshly passes all 8,672
+cases with 43 deselections, 152.96 pytest seconds and 173.632 packet seconds.
+It reports `mode=executed`, origin run `45018397861` attempt one, execution
+identity `036195e75e889befa856d5e4765458acc7dca66dcba836d4ce4e48f351640010`
+and packet digest
+`10bc468f695fe469843013bc819355d1439c83f52aa384500a8061d469e61da4`.
+Required aggregate `137196594362`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+Source #14076 merges at `2026-11-22T11:45:00Z` as
+`e2cdc012fdd91f9a0d96f5434d6a56092eb0984e`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the three-case leaf.
 No new mock, preload, wrapper, effect exception, data allowlist, actual GitHub
-lookup, issue filing, workflow or runtime change is introduced. Complete fresh
-Linux CI, current-head review and normal required merge checks remain
-necessary. This finite qualification does not settle retained refusals or owner
+lookup, issue filing, workflow or runtime change is introduced.
+This finite qualification does not settle retained refusals or owner
 seams. Fresh-install/native lanes are not applicable because installation,
 runtime, workflow and original-test behavior do not change.
+
+### November 22 original installer parser and temporary-file qualification
+
+The adapter exports seventeen original functions covering engine/policy call
+parsing, temporary plugin scope validation, temporary stderr-redirection
+scanning and completion-marker status parsing. Complete original/adapter
+collection verifies 336 original cases and exactly 95 selected cases in
+original order, retaining every original function, parameter value, helper and
+assertion. The other 241 cases remain unchanged outside this selection,
+including native execution, actual repository scans, imported runtime/profile
+suites and a constant/AST-only scope comparison with no production call.
+
+The initial unchanged effect auditor and coverage-context observer pass all
+95 in 4.047 seconds, with zero prohibited effects, only bound Python reads and
+actual guard-owner call-phase lines per case. The compact-v2 candidate contains
+8,767 nodes, 1,227 sources and 460 targets in 981,165 bytes. All 8,672 preceding
+nodes/order, 1,224 current source hashes, prior targets, 89 helper decisions and
+the 300-second bound remain intact. New bindings are the adapter, original
+test module and its imported finalizer test module; importing that module does
+not execute its native tests. The already-bound installer-contract checker
+becomes one new target; policy and engine-reference owners were already targets.
+
+No new mock, preload, wrapper, effect exception, data allowlist, installer/native
+execution, workflow, runtime or cleanup change is introduced. Complete fresh
+Linux CI, current-head review and normal required merge checks remain necessary.
+This synthetic parser qualification does not settle retained runtime-profile,
+native, data-admission or owner-seam gaps. Fresh-install/native lanes are not
+applicable because installation, runtime, workflow and original-test behavior
+do not change.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 

@@ -1665,7 +1665,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,669
   selected units freshly executed. Only this 109-case leaf is complete;
   broader gates remain open.
-- [ ] Qualify the three original module-health lookup-outcome cases, retaining
+- [x] Qualify the three original module-health lookup-outcome cases, retaining
   exact original function objects, their existing subprocess stubs, helpers
   and assertions. Keep all seven actual Git, CLI and main-entrypoint cases
   unchanged outside the packet. Require complete original/adapter collection,
@@ -1679,9 +1679,30 @@ authorizes critical main-path acceptance or a bounded administrative change.
   objects in original order. Initial unchanged-guard qualification passes all
   three in 1.375 seconds, with zero prohibited effects, three bound Python
   reads and actual watchdog-owner call-phase lines per case. The compact-v2
-  candidate contains 8,672 nodes, 1,224 sources and 459 targets. Current-head
-  review and complete fresh Linux CI remain required before this finite leaf
-  closes.
+  candidate contains 8,672 nodes, 1,224 sources and 459 targets. #14076 merges
+  at `e2cdc012fdd91f9a0d96f5434d6a56092eb0984e` after exact-head Copilot approval
+  and complete required Linux CI with all 8,672 selected units freshly
+  executed. Only this three-case leaf is complete; broader gates remain open.
+- [ ] Qualify 95 original installer-guard cases across seventeen original
+  functions: engine/policy call parsing, temporary plugin scope validation,
+  temporary stderr-redirection scanning and completion-marker status parsing.
+  Preserve original function and parameter objects, helpers and assertions.
+  Keep actual native execution, repository scans, imported runtime/profile
+  suites and the constant/AST-only scope comparison outside the selection.
+  Require complete original/adapter collection, closed Python reads, positive
+  actual owner calls per case and zero prohibited effects before admission.
+  Preserve preceding nodes/order, current-base hashes, targets, helper
+  decisions, compact/flat-v1 identity and the 300-second bound. Require normal
+  strict typing, current-head review and complete fresh Linux CI. No new mock,
+  preload, wrapper, effect exception, data admission, installer/native
+  execution, workflow, runtime or cleanup action is authorized.
+  Complete collection verifies all 336 original cases and exactly 95 selected
+  cases across seventeen unchanged original functions and original parameter
+  values. Initial unchanged-guard qualification passes all 95 in 4.047 seconds,
+  with zero prohibited effects, closed Python reads and actual guard-owner
+  call-phase lines per case. The compact-v2 candidate contains 8,767 nodes,
+  1,227 sources and 460 targets. Current-head review and complete fresh Linux
+  CI remain required before this finite leaf closes.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
