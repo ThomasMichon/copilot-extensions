@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 from unittest.mock import patch
@@ -25,7 +26,7 @@ def test_only_selected_private_project_is_accepted(kind: str) -> None:
         record.update(name="another", visibility="private")
     if kind == "other-org":
         record.update(url=f"https://dev.azure.com/another/_apis/projects/{PROJECT}", visibility="private")
-    with patch.object(visibility.subprocess, "run") as run:
+    with patch.object(visibility.shutil, "which", return_value="az"), patch.object(visibility.subprocess, "run") as run:
         run.return_value = subprocess.CompletedProcess([], 0, json.dumps(record))
         if kind == "unreadable":
             run.side_effect = subprocess.CalledProcessError(1, ["az"])
@@ -39,3 +40,15 @@ def test_only_selected_private_project_is_accepted(kind: str) -> None:
             "az", "devops", "project", "show", "--organization", "https://dev.azure.com/example",
             "--project", "sample",
         ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch launcher")
+def test_cli_shim_in_directory_with_spaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = tmp_path / "fixture tools"
+    directory.mkdir()
+    shim = directory / "az.cmd"
+    record = {"id": PROJECT, "name": "sample", "visibility": "private",
+              "url": f"https://dev.azure.com/example/_apis/projects/{PROJECT}"}
+    shim.write_text("@echo off\necho " + json.dumps(record) + "\n", encoding="ascii")
+    monkeypatch.setenv("PATH", str(directory))
+    visibility.require_private_project("https://dev.azure.com/example/sample/_git/notes")

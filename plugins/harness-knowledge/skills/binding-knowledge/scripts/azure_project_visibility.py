@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from urllib.parse import unquote, urlsplit
 from uuid import UUID
@@ -37,10 +38,20 @@ def require_private_project(remote: str) -> None:
         raise ValueError("Expected an Azure Repos clone URL")
     project = parts[0]
     try:
+        executable = shutil.which("az")
+        if not executable:
+            raise FileNotFoundError("Azure CLI is unavailable")
+        environment = {**os.environ, "AZURE_EXTENSION_USE_DYNAMIC_INSTALL": "no"}
+        command = [executable, "devops", "project", "show", "--organization", f"https://dev.azure.com/{org}",
+                   "--project", project, "--detect", "false", "--only-show-errors", "--output", "json"]
+        if os.name == "nt" and executable.lower().endswith((".cmd", ".bat")):
+            if any(c in executable for c in ('"', "\r", "\n", "\0")):
+                raise ValueError("Invalid Azure CLI shim path")
+            environment["CE_AZURE_CLI_SHIM"] = '"' + executable + '"'
+            command = [environment.get("COMSPEC", "cmd.exe"), "/d", "/v:off", "/s", "/c",
+                       "%CE_AZURE_CLI_SHIM%", *command[1:]]
         probe = subprocess.run(
-            ["az", "devops", "project", "show", "--organization", f"https://dev.azure.com/{org}",
-             "--project", project, "--detect", "false", "--only-show-errors", "--output", "json"],
-            env={**os.environ, "AZURE_EXTENSION_USE_DYNAMIC_INSTALL": "no"},
+            command, env=environment,
             capture_output=True, timeout=60, check=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
