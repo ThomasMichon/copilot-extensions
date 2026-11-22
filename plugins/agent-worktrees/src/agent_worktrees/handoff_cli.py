@@ -3,57 +3,205 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
+from pathlib import Path
+from types import ModuleType
+from typing import ParamSpec, TypeVar, cast
 
-from . import agent_policy, config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
-from . import launch_admission, launch_seed_state, embody_resume, embody_completion, embody_receipt
-from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime, worktree_trust
+from . import (
+    agent_policy,
+    bridge_acquisition_launch,
+    bridge_seed_delivery,
+    embody_completion,
+    embody_receipt,
+    embody_resume,
+    launch_admission,
+    launch_seed_state,
+    native_restart_launch,
+    output,
+    profile_assignment,
+    reclaim_cli,
+    resolve_launch_cli,
+    sessions,
+    status_monitor_runtime,
+    tracking,
+    tracking_write,
+    worktree_identity,
+    worktree_trust,
+)
+from . import config as cfg
+from .bridge_acquisition_launch import apply_bridge_scope as _apply_bridge_scope
 from .execution_spaces import ExecutionSpaceError
+from .launch_passthrough import add_launch_passthrough_args
+from .launch_passthrough import passthrough_error as _passthrough_error
+from .launch_preflight import LaunchPreflight
 from .permissions import FolderTrustError
 from .worktree_creation import LaunchSeedStagingFailure
-from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
-from .launch_passthrough import passthrough_error as _passthrough_error
-from .launch_passthrough import add_launch_passthrough_args
-from .bridge_acquisition_launch import apply_bridge_scope as _apply_bridge_scope
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[P, R]) -> Callable[P, R]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[P, R], candidate)
     return local
 
 
-def _apply_assignment_env(*args, **kwargs): return _core_helper("_apply_assignment_env", resolve_launch_cli._apply_assignment_env)(*args, **kwargs)
-def _build_env(*args, **kwargs): return _core()._build_env(*args, **kwargs)
-def _build_launch_cmd(*args, **kwargs): return _core()._build_launch_cmd(*args, **kwargs)
-def _create_worktree_core(*args, **kwargs): return _core()._create_worktree_core(*args, **kwargs)
-def _handoff_cutover_retire_result(*args, **kwargs): return _core()._handoff_cutover_retire_result(*args, **kwargs)
-def _handoff_cutover_retry_result(*args, **kwargs): return _core()._handoff_cutover_retry_result(*args, **kwargs)
-def _handoff_cutover_spawn_result(*args, **kwargs): return _core()._handoff_cutover_spawn_result(*args, **kwargs)
-def _launch_profile_selection(*args, **kwargs): return _core_helper("_launch_profile_selection", resolve_launch_cli._launch_profile_selection)(*args, **kwargs)
-def _perform_remux(*args, **kwargs): return _core_helper("_perform_remux", reclaim_cli._perform_remux)(*args, **kwargs)
-def _preflight_launch(*args, **kwargs): return _core()._preflight_launch(*args, **kwargs)
-def _reflect_assignment(*args, **kwargs): return _core_helper("_reflect_assignment", resolve_launch_cli._reflect_assignment)(*args, **kwargs)
-def _repo_for_record(*args, **kwargs): return _core_helper("_repo_for_record", tracking._repo_for_record)(*args, **kwargs)
-def _repo_session_env(*args, **kwargs): return _core()._repo_session_env(*args, **kwargs)
-def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hosted_launch(*args, **kwargs)
-def _pending_handoff_retire_requests(*args, **kwargs): return _core()._pending_handoff_retire_requests(*args, **kwargs)
-def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monitor_retire_handoff_predecessor(*args, **kwargs)
-def _monitor_maybe_process_handoff_record(*args, **kwargs): return _core()._monitor_maybe_process_handoff_record(*args, **kwargs)
-def _monitor_session_state_handoff_path(*args, **kwargs): return _core_helper("_monitor_session_state_handoff_path", status_monitor_runtime._monitor_session_state_handoff_path)(*args, **kwargs)
-def _monitor_read_session_state_handoff(*args, **kwargs): return _core_helper("_monitor_read_session_state_handoff", status_monitor_runtime._monitor_read_session_state_handoff)(*args, **kwargs)
-def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
+def _apply_assignment_env(
+    env: dict[str, str], selection: profile_assignment.LaunchProfileSelection,
+) -> dict[str, str]:
+    return _core_helper("_apply_assignment_env", resolve_launch_cli._apply_assignment_env)(env, selection)
 
 
-def add_parsers(sub) -> None:
+def _build_env(
+    profile: cfg.CopilotProfile | None, session_env: dict[str, str] | None = None,
+    work_dir: str | None = None, *, config: cfg.Config | None = None,
+) -> dict[str, str]:
+    build = cast(Callable[..., dict[str, str]], _core()._build_env)
+    if config is not None:
+        return build(profile, session_env, work_dir=work_dir, config=config)
+    return build(profile, session_env, work_dir=work_dir)
+
+
+def _build_launch_cmd(
+    config: cfg.Config, args: argparse.Namespace, work_dir: str,
+    profile: cfg.CopilotProfile | None = None, *, preflight: LaunchPreflight | None = None,
+    fallback_copilot_path: str | None = None,
+) -> list[str]:
+    build = cast(Callable[..., list[str]], _core()._build_launch_cmd)
+    if fallback_copilot_path is not None:
+        return build(config, args, work_dir, profile=profile, preflight=preflight,
+                     fallback_copilot_path=fallback_copilot_path)
+    return build(config, args, work_dir, profile=profile, preflight=preflight)
+
+
+def _create_worktree_core(
+    config: cfg.Config, **kwargs: object,
+) -> dict[str, object]:
+    create = cast(Callable[..., dict[str, object]], _core()._create_worktree_core)
+    return create(config, **kwargs)
+
+
+def _handoff_cutover_retire_result(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
+    retire = cast(Callable[[argparse.Namespace], tuple[int, dict[str, object]]],
+                  _core()._handoff_cutover_retire_result)
+    return retire(args)
+
+
+def _handoff_cutover_retry_result(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
+    retry = cast(Callable[[argparse.Namespace], tuple[int, dict[str, object]]],
+                 _core()._handoff_cutover_retry_result)
+    return retry(args)
+
+
+def _handoff_cutover_spawn_result(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
+    spawn = cast(Callable[[argparse.Namespace], tuple[int, dict[str, object]]],
+                 _core()._handoff_cutover_spawn_result)
+    return spawn(args)
+
+
+def _launch_profile_selection(
+    config: cfg.Config, args: argparse.Namespace, record: tracking.WorktreeRecord | None,
+    *, lane: str, generation_key: str, ordinary_profile: cfg.CopilotProfile | None = None,
+    explicit_profile: cfg.CopilotProfile | None = None, resume_session: str | None = None,
+    predecessor_session: str | None = None, allocate_new: bool = True,
+) -> profile_assignment.LaunchProfileSelection:
+    select = _core_helper("_launch_profile_selection", resolve_launch_cli._launch_profile_selection)
+    return select(
+        config, args, record, lane=lane, generation_key=generation_key,
+        ordinary_profile=ordinary_profile, explicit_profile=explicit_profile,
+        resume_session=resume_session, predecessor_session=predecessor_session,
+        allocate_new=allocate_new,
+    )
+
+
+def _perform_remux(
+    *, worktree_id: str | None, session_id: str | None, worktree_path: str | None,
+    force_sudo: bool | None, apply_windows: bool, session_ids: list[str] | None = None,
+) -> dict[str, object]:
+    remux = cast(Callable[..., dict[str, object]],
+                 _core_helper("_perform_remux", reclaim_cli._perform_remux))
+    return remux(worktree_id=worktree_id, session_id=session_id, worktree_path=worktree_path,
+                 force_sudo=force_sudo, apply_windows=apply_windows, session_ids=session_ids)
+
+
+def _preflight_launch(
+    config: cfg.Config, args: argparse.Namespace, work_dir: str,
+    *, allocation_source: str | None = None,
+) -> LaunchPreflight:
+    preflight = cast(Callable[..., LaunchPreflight], _core()._preflight_launch)
+    if allocation_source is not None:
+        return preflight(config, args, work_dir, allocation_source=allocation_source)
+    return preflight(config, args, work_dir)
+
+
+def _reflect_assignment(
+    record: tracking.WorktreeRecord, selection: profile_assignment.LaunchProfileSelection,
+) -> None:
+    _core_helper("_reflect_assignment", resolve_launch_cli._reflect_assignment)(record, selection)
+
+
+def _repo_for_record(config: cfg.Config, record: tracking.WorktreeRecord) -> cfg.RepoConfig | None:
+    lookup = cast(Callable[[cfg.Config, tracking.WorktreeRecord], cfg.RepoConfig | None],
+                  _core_helper("_repo_for_record", tracking._repo_for_record))
+    return lookup(config, record)
+
+
+def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
+    build = cast(Callable[[cfg.Config, str], dict[str, str]], _core()._repo_session_env)
+    return build(config, work_dir)
+
+
+def _unsupported_hosted_launch(record: tracking.WorktreeRecord | None, operation: str) -> str:
+    check = cast(Callable[[tracking.WorktreeRecord | None, str], str],
+                 _core()._unsupported_hosted_launch)
+    return check(record, operation)
+
+
+def _pending_handoff_retire_requests(record: tracking.WorktreeRecord) -> list[dict[str, object]]:
+    pending = cast(Callable[[tracking.WorktreeRecord], list[dict[str, object]]],
+                   _core()._pending_handoff_retire_requests)
+    return pending(record)
+
+
+def _monitor_retire_handoff_predecessor(request: dict[str, object]) -> tuple[int, dict[str, object]]:
+    retire = cast(Callable[[dict[str, object]], tuple[int, dict[str, object]]],
+                  _core()._monitor_retire_handoff_predecessor)
+    return retire(request)
+
+
+def _monitor_maybe_process_handoff_record(record: tracking.WorktreeRecord) -> None:
+    process = cast(Callable[[tracking.WorktreeRecord], None], _core()._monitor_maybe_process_handoff_record)
+    process(record)
+
+
+def _monitor_session_state_handoff_path(session_id: str | None) -> Path | None:
+    return _core_helper("_monitor_session_state_handoff_path",
+                        status_monitor_runtime._monitor_session_state_handoff_path)(session_id)
+
+
+def _monitor_read_session_state_handoff(path: str | os.PathLike[str] | None) -> dict[str, object] | None:
+    return _core_helper("_monitor_read_session_state_handoff",
+                        status_monitor_runtime._monitor_read_session_state_handoff)(path)
+
+
+def resolve_worktree_id_by_codename(codename: str) -> str | None:
+    resolve = cast(Callable[[str], str | None], _core().resolve_worktree_id_by_codename)
+    return resolve(codename)
+
+
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser("handoff-cutover", help="Live handoff: spawn a seeded successor Copilot in a new mux window (cut over to it), or retire an old pane")
     p.add_argument("--seed", default=None, help="Seed prompt for the successor's first interactive turn (copilot -i). Required in spawn mode.")
     p.add_argument("--worktree-id", dest="worktree_id", default=None, help="Target worktree (default: infer from cwd)")
@@ -115,7 +263,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--worktree-id", required=True)
 
 
-def cmd_bridge_seed_settle(args):
+def cmd_bridge_seed_settle(args: argparse.Namespace) -> int:
     return bridge_seed_delivery.settle(args)
 
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
@@ -205,7 +353,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     return embody_receipt.run(args, lambda target: _cmd_embody(args, target))
 
 
-def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
+def _cmd_embody(args: argparse.Namespace, target: dict[str, object]) -> int:
     """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
 
     The agent-facing "embodiment" verb: spawn a durable, mux-wrapped interactive
@@ -307,10 +455,11 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
             return output._json_error(str(e), exit_code=3)
         except Exception as e:
             return output._json_error(f"failed to create worktree: {e}")
-        wt_id = created["worktree"]["id"]
-        work_dir = created["worktree"]["path"]
+        created_worktree = cast(dict[str, str], created["worktree"])
+        wt_id = created_worktree["id"]
+        work_dir = created_worktree["path"]
     else:
-        wt_id = worktree_identity._resolve_worktree_id(raw_id)
+        wt_id = worktree_identity._resolve_worktree_id(raw_id or "")
         target["worktree_id"] = wt_id
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not yaml_path.exists():
@@ -408,7 +557,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
         )
         return 0
 
-    deferred = {}
+    deferred: dict[str, object] = {}
     if already:
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
@@ -506,9 +655,9 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
                 "Head changed after profile selection; refresh before resuming in a different context",
                 exit_code=3,
             )
-        refusal = embody_resume.live_head_refusal(resume_target, wt_id)
-        if refusal:
-            return output._json_error(refusal, exit_code=3)
+        head_refusal = embody_resume.live_head_refusal(resume_target, wt_id)
+        if head_refusal:
+            return output._json_error(head_refusal, exit_code=3)
         try:
             check_plugin_cancelled()
         except InterruptedError as exc:
@@ -518,9 +667,10 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
             return refusal
         if getattr(args, "bridge_seed_operation", None):
             try:
-                deferred = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
-                if not seed and deferred["deferred_creation_seed"].get("seed"):
-                    seed = deferred["deferred_creation_seed"]["seed"]["text"]
+                claimed = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
+                deferred = claimed
+                if not seed and claimed["deferred_creation_seed"].get("seed"):
+                    seed = claimed["deferred_creation_seed"]["seed"]["text"]
             except (ValueError, OSError, TimeoutError) as exc:
                 return output._json_error(str(exc), exit_code=3)
         if seed and not acquisition and not deferred:
@@ -555,8 +705,8 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
                 cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
                 native_seed_id=native_seed_id,
             )
-        if refusal := embody_resume.live_head_refusal(admitted_resume, wt_id):
-            return output._json_error(refusal, exit_code=3)
+        if head_refusal := embody_resume.live_head_refusal(admitted_resume, wt_id):
+            return output._json_error(head_refusal, exit_code=3)
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
         try:
@@ -594,7 +744,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
     )
 
 
-def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dict | None = None) -> int:
+def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dict[str, object] | None = None) -> int:
     """The ``--anchor`` half of :func:`cmd_embody`: create-or-resume a
     detached mux+Copilot session directly in the active project's anchor
     checkout, with no worktree involved at all.
@@ -633,7 +783,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dic
         return output._json_error(
             f"project {repo_name!r} has no resolved anchor path", exit_code=2,
         )
-    deferred = {}
+    deferred: dict[str, object] = {}
     wt_id = f"anchor-{repo_name}"
     target = target if target is not None else {}
     target.update(anchor=True, worktree_id=wt_id, work_dir=work_dir, session=sessions.mux_session_name(wt_id))
@@ -738,8 +888,9 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dic
     if refusal := agent_policy.json_refusal(work_dir):
         return refusal
     seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
+    seed_pane = cast(Callable[..., dict[str, object]], getattr(sessions, "mux_seed_pane"))
     seed_result = (
-        sessions.mux_seed_pane(new_pane, seed, session_name=result.get("session"),
+        seed_pane(new_pane, seed, session_name=result.get("session"),
                                ready_timeout=seed_ready_timeout)
         if (new_pane and seed)
         else {}
@@ -829,7 +980,7 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
     if check_all:
         records = tracking.list_records(cfg.tracking_dir())
     else:
-        resolved = worktree_identity._resolve_worktree_id(worktree_id)
+        resolved = worktree_identity._resolve_worktree_id(worktree_id or "")
         record_path = cfg.tracking_dir() / f"{resolved}.yaml"
         if not record_path.exists():
             return output._json_error(f"Worktree not found: {resolved}")
@@ -892,14 +1043,14 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
                 output.err(
                     f"{finding['worktree_id']}: could not retire predecessor "
                     f"{finding['predecessor_session_id']}: "
-                    f"{(finding.get('result') or {}).get('method', 'unknown')}"
+                    f"{cast(dict[str, object], finding.get('result') or {}).get('method', 'unknown')}"
                 )
     if execute and any(not f.get("retired") for f in findings):
         return 1
     return 0
 
 
-def _arm_pending_handoff_from_session_state(record) -> bool:
+def _arm_pending_handoff_from_session_state(record: tracking.WorktreeRecord) -> bool:
     """Best-effort: if a registered session's session-state
     ``handoff-request.json`` marker names an unconsumed handoff, (re-)open it
     now (``tracking.open_handoff``) with ``live_cutover=True`` -- mirroring
@@ -916,7 +1067,7 @@ def _arm_pending_handoff_from_session_state(record) -> bool:
     opened without the flag permanently unarmed. Scoped to a session
     actually tracked on THIS record. Returns whether an entry was (already,
     or newly) armed."""
-    open_handoff = tracking.open_handoff
+    open_handoff = cast(Callable[..., object], getattr(tracking, "open_handoff"))
     armed = False
     for entry in getattr(record, "sessions", None) or []:
         sid = entry.session_id
@@ -969,7 +1120,7 @@ def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
     without needing its own copy of the daemon's internal checks (which
     cannot safely be called twice -- the claim step is one-shot)."""
     worktree_id = getattr(args, "worktree_id", None)
-    resolved = worktree_identity._resolve_worktree_id(worktree_id)
+    resolved = worktree_identity._resolve_worktree_id(worktree_id or "")
     record_path = cfg.tracking_dir() / f"{resolved}.yaml"
     if not record_path.exists():
         return output._json_error(f"Worktree not found: {resolved}")

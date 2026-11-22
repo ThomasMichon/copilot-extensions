@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 from dataclasses import replace
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
+from machine_transport import detect_platform
 
 from agent_worktrees import (
     config_authority, permissions, session_binding_cli, tracking, tracking_write, worktree_trust,
+    worktree_identity,
 )
 from agent_worktrees.execution_spaces import ExecutionSpaceError
+from agent_worktrees.launch_preflight import LaunchPreflight
+
+NativeCheckout = tuple[Path, Path]
 
 
 @pytest.fixture
-def native_checkout(tmp_path, monkeypatch):
+def native_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> NativeCheckout:
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     home = tmp_path / ".copilot"
@@ -23,7 +31,7 @@ def native_checkout(tmp_path, monkeypatch):
     return checkout, home
 
 
-def test_first_trust_creates_native_config_without_tool_approvals(native_checkout):
+def test_first_trust_creates_native_config_without_tool_approvals(native_checkout: NativeCheckout) -> None:
     checkout, home = native_checkout
     assert permissions.ensure_trusted_folder(str(checkout)) is True
     config = home / "config.json"
@@ -34,7 +42,7 @@ def test_first_trust_creates_native_config_without_tool_approvals(native_checkou
     assert not (home / "permissions-config.json").exists()
 
 
-def test_ensure_preserves_header_existing_trust_and_unrelated_settings(native_checkout):
+def test_ensure_preserves_header_existing_trust_and_unrelated_settings(native_checkout: NativeCheckout) -> None:
     checkout, home = native_checkout
     home.mkdir()
     header = "// Managed settings.\n\n"
@@ -49,7 +57,7 @@ def test_ensure_preserves_header_existing_trust_and_unrelated_settings(native_ch
 
 
 @pytest.mark.parametrize("content", ['{', '[]', '{"trustedFolders": {}}', '{"trustedFolders": [3]}'])
-def test_invalid_config_is_explicit_and_preserved(native_checkout, content):
+def test_invalid_config_is_explicit_and_preserved(native_checkout: NativeCheckout, content: str) -> None:
     checkout, home = native_checkout
     home.mkdir()
     config = home / "config.json"
@@ -60,7 +68,7 @@ def test_invalid_config_is_explicit_and_preserved(native_checkout, content):
 
 
 @pytest.mark.parametrize("kind", ["relative", "missing", "file", "root"])
-def test_non_checkout_path_cannot_create_trust(native_checkout, kind):
+def test_non_checkout_path_cannot_create_trust(native_checkout: NativeCheckout, kind: str) -> None:
     checkout, home = native_checkout
     target = {
         "relative": Path("relative"),
@@ -75,7 +83,7 @@ def test_non_checkout_path_cannot_create_trust(native_checkout, kind):
     assert not home.exists()
 
 
-def test_strict_lock_failure_is_not_already_trusted(native_checkout):
+def test_strict_lock_failure_is_not_already_trusted(native_checkout: NativeCheckout) -> None:
     checkout, home = native_checkout
     home.mkdir()
     (home / "config.lock").mkdir()
@@ -84,7 +92,9 @@ def test_strict_lock_failure_is_not_already_trusted(native_checkout):
     assert not (home / "config.json").exists()
 
 
-def test_missing_lock_backend_is_explicit(native_checkout, monkeypatch):
+def test_missing_lock_backend_is_explicit(
+    native_checkout: NativeCheckout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import sys
 
     checkout, home = native_checkout
@@ -95,23 +105,25 @@ def test_missing_lock_backend_is_explicit(native_checkout, monkeypatch):
     assert not (home / "config.json").exists()
 
 
-def test_failed_atomic_replace_keeps_original(native_checkout, monkeypatch):
+def test_failed_atomic_replace_keeps_original(
+    native_checkout: NativeCheckout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     checkout, home = native_checkout
     home.mkdir()
     config = home / "config.json"
     config.write_text('{"unrelated": true}')
 
-    def refuse(*args):
+    def refuse(*args: object) -> NoReturn:
         raise OSError("fixture write refusal")
 
-    monkeypatch.setattr(permissions.os, "replace", refuse)
+    monkeypatch.setattr(os, "replace", refuse)
     with pytest.raises(permissions.FolderTrustError, match="fixture write refusal"):
         permissions.ensure_trusted_folder(str(checkout))
     assert config.read_text() == '{"unrelated": true}'
     assert not list(home.glob("*.tmp"))
 
 
-def test_removed_checkout_clears_canonical_trust_for_lexical_path(native_checkout):
+def test_removed_checkout_clears_canonical_trust_for_lexical_path(native_checkout: NativeCheckout) -> None:
     checkout, home = native_checkout
     alias = checkout / ".." / checkout.name
     assert permissions.ensure_trusted_folder(str(alias))
@@ -120,11 +132,14 @@ def test_removed_checkout_clears_canonical_trust_for_lexical_path(native_checkou
     assert json.loads((home / "config.json").read_text())["trustedFolders"] == []
 
 
-def test_refused_receiving_authority_does_not_trust(native_checkout, sample_record, monkeypatch):
+def test_refused_receiving_authority_does_not_trust(
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     checkout, home = native_checkout
     record = replace(sample_record, worktree_path=str(checkout))
 
-    def refuse(record):
+    def refuse(record: tracking.WorktreeRecord) -> NoReturn:
         raise ExecutionSpaceError("different execution space")
 
     monkeypatch.setattr(config_authority, "registration_record_config", refuse)
@@ -135,8 +150,9 @@ def test_refused_receiving_authority_does_not_trust(native_checkout, sample_reco
 
 @pytest.mark.parametrize("foreign", ["machine", "platform"])
 def test_real_execution_space_fence_precedes_trust(
-    native_checkout, sample_record, tmp_path, monkeypatch, foreign,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: str,
+) -> None:
     from agent_worktrees import config as cfg
 
     checkout, home = native_checkout
@@ -161,13 +177,13 @@ def test_real_execution_space_fence_precedes_trust(
 
 
 def test_terminal_managed_record_does_not_trust(
-    native_checkout, sample_record, monkeypatch_config,
-):
-    from agent_worktrees import config as cfg
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    monkeypatch_config: None,
+) -> None:
 
     checkout, home = native_checkout
     record = replace(
-        sample_record, worktree_path=str(checkout), platform=cfg.detect_platform(),
+        sample_record, worktree_path=str(checkout), platform=detect_platform(),
         kind="bridge", status="finalized",
     )
     with pytest.raises(permissions.FolderTrustError, match="terminal managed"):
@@ -177,17 +193,18 @@ def test_terminal_managed_record_does_not_trust(
 
 @pytest.mark.parametrize("mode", ["cold", "invalid-config", "dry-run", "live"])
 def test_embody_establishes_trust_before_spawning_copilot(
-    native_checkout, sample_record, tmp_tracking_dir, monkeypatch_config, monkeypatch, capfd, mode,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], mode: str,
+) -> None:
     import argparse
 
     from agent_worktrees import (
         __main__ as command, agent_policy, config as cfg, launch_seed_exec, sessions,
-        worktree_identity,
     )
 
     checkout, home = native_checkout
-    config = replace(cfg.load_project_config(sample_record.repo), machine=cfg.socket.gethostname())
+    config = replace(cfg.load_project_config(sample_record.repo), machine=socket.gethostname())
     config.repos[sample_record.repo] = replace(
         config.repos[sample_record.repo], worktree_root=str(checkout.parent),
     )
@@ -204,16 +221,18 @@ def test_embody_establishes_trust_before_spawning_copilot(
     monkeypatch.setattr(cfg, "load_config", lambda: config)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: record.worktree_id)
     monkeypatch.setattr(agent_policy, "require", lambda *args, **kwargs: None)
-    monkeypatch.setattr(command, "_preflight_launch", lambda *args: command.LaunchPreflight())
+    monkeypatch.setattr(command, "_preflight_launch", lambda *args: LaunchPreflight())
     monkeypatch.setattr(command, "_build_launch_cmd", lambda *args, **kwargs: ["copilot"])
     monkeypatch.setattr(command, "_build_env", lambda *args, **kwargs: {})
     monkeypatch.setattr(command, "_repo_session_env", lambda *args, **kwargs: {})
     monkeypatch.setattr(sessions, "has_mux_session", lambda value: mode == "live")
     monkeypatch.setattr(sessions, "resolve_resume_target", lambda value: None)
     monkeypatch.setattr(launch_seed_exec, "deferred_command", lambda command, *args, **kwargs: command)
-    spawned = []
+    spawned: list[str] = []
 
-    def spawn(worktree_id, work_dir, argv, environment):
+    def spawn(
+        worktree_id: str, work_dir: str, argv: list[str], environment: dict[str, str],
+    ) -> dict[str, object]:
         assert mode == "cold", "inspection or failed trust must never start Copilot"
         assert json.loads((home / "config.json").read_text()) == {
             "trustedFolders": [str(checkout.resolve())],
@@ -247,9 +266,11 @@ def test_embody_establishes_trust_before_spawning_copilot(
     ("hook:new", False, True), ("bind", False, True),
 ])
 def test_registered_entry_repairs_trust_after_admission(
-    native_checkout, sample_record, tmp_tracking_dir, monkeypatch_config, monkeypatch, source,
-    broken_config, other_active_project, capfd,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch,
+    source: str, broken_config: bool, other_active_project: bool,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     import argparse
     from agent_worktrees import config as cfg
 
@@ -269,7 +290,7 @@ def test_registered_entry_repairs_trust_after_admission(
         monkeypatch.setattr(cfg, "tracking_dir", lambda: ambient)
         monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda worktree_id: tmp_tracking_dir)
         monkeypatch.setattr(
-            session_binding_cli.worktree_identity, "_resolve_worktree_id", lambda value: value,
+            worktree_identity, "_resolve_worktree_id", lambda value: value,
         )
     monkeypatch.setattr(session_binding_cli, "_spawn_status_updater", lambda *args: None)
     monkeypatch.setattr(session_binding_cli, "_register_manager_owned_monitor_session", lambda *a, **k: True)
@@ -296,8 +317,9 @@ def test_registered_entry_repairs_trust_after_admission(
 
 
 def test_rejected_registration_does_not_trust(
-    native_checkout, sample_record, tmp_tracking_dir, monkeypatch_config, monkeypatch,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_tracking_dir: Path, monkeypatch_config: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import argparse
 
     checkout, home = native_checkout
@@ -316,12 +338,13 @@ def test_rejected_registration_does_not_trust(
 
 @pytest.mark.parametrize("mismatch", ["machine", "platform"])
 def test_legacy_record_without_topology_cannot_trust_foreign_checkout(
-    native_checkout, sample_record, tmp_path, mismatch,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_path: Path, mismatch: str,
+) -> None:
     from agent_worktrees import config as cfg
 
     checkout, home = native_checkout
-    actual = cfg.detect_platform()
+    actual = detect_platform()
     config = cfg.Config(
         srcroot=str(tmp_path), machine="local-host", platform=actual, repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
@@ -338,8 +361,8 @@ def test_legacy_record_without_topology_cannot_trust_foreign_checkout(
 
 
 def test_declared_legacy_alias_remains_local(
-    native_checkout, sample_record, tmp_path,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord, tmp_path: Path,
+) -> None:
     from agent_worktrees import config as cfg
 
     checkout, home = native_checkout
@@ -347,7 +370,7 @@ def test_declared_legacy_alias_remains_local(
         "machines:\n  local-space:\n    alias: historical-alias\n", encoding="utf-8",
     )
     config = cfg.Config(
-        srcroot=str(tmp_path), machine="local-space", platform=cfg.detect_platform(), repo_name="test-repo",
+        srcroot=str(tmp_path), machine="local-space", platform=detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
     )
     record = replace(
@@ -358,8 +381,9 @@ def test_declared_legacy_alias_remains_local(
 
 
 def test_missing_local_claim_identity_refuses_before_legacy_lookup(
-    native_checkout, sample_record, tmp_path, monkeypatch,
-):
+    native_checkout: NativeCheckout, sample_record: tracking.WorktreeRecord,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import config as cfg, legacy_wsl_record_locality
 
     checkout, home = native_checkout

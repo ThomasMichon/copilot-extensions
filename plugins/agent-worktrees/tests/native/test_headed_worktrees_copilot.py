@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 import http.server
 import json
@@ -24,6 +24,7 @@ from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees.git_repository_environment import repository_identity_env
+from agent_worktrees.permissions import _read_config_jsonc
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
 
@@ -560,8 +561,7 @@ def _qualify_native_worktrees(
                     "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
                 }) + "\n").encode())
                 while True:
-                    frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
-                    cursor, frame = await asyncio.wait_for(anext(frames()), 30)
+                    cursor, frame = await asyncio.wait_for(anext(client.frames()), 30)
                     reply = json.loads(frame)
                     await client.ack(cursor)
                     if reply.get("id") == request_id:
@@ -1342,9 +1342,8 @@ def _qualify_native_worktrees(
         ]
         assert not (home / "permissions-config.json").exists()
         if control == "embody":
-            assert str(checkout.resolve()) in json.loads(
-                (home / "config.json").read_text(encoding="utf-8"),
-            )["trustedFolders"]
+            _, trusted_config = _read_config_jsonc(home / "config.json")
+            assert str(checkout.resolve()) in trusted_config["trustedFolders"]
         if manager_picker and control == "manager-no-mux":
             commands = tmp_path / "mux-commands.txt"
             assert not commands.exists() or "new-session" not in commands.read_text(encoding="utf-8").splitlines()
