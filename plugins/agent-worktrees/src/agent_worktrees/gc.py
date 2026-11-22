@@ -31,10 +31,14 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .checkout_data import preservation_reason
 from .checkout_hydration_catalog import CATALOG_DIRNAME
+
+if TYPE_CHECKING:
+    from .config import RepoConfig
+    from .tracking import WorktreeRecord
 
 # Directory names whose contents are disposable build/test caches -- a leftover
 # containing only these is still "effectively empty" for GC purposes.
@@ -51,7 +55,7 @@ def _norm(p: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(p)))
 
 
-def candidate_roots(repo: Any) -> list[Path]:
+def candidate_roots(repo: RepoConfig) -> list[Path]:
     """Every directory that could hold *repo*'s worktrees on this machine.
 
     Covers the configured ``worktree_root`` plus both layout conventions so a
@@ -80,7 +84,9 @@ def candidate_roots(repo: Any) -> list[Path]:
     return out
 
 
-def find_orphans(repo: Any, registered_paths: Iterable[str | Path], tracked_paths: Iterable[str | Path]) -> list[Path]:
+def find_orphans(
+    repo: RepoConfig, registered_paths: Iterable[str | Path], tracked_paths: Iterable[str | Path],
+) -> list[Path]:
     """Directories under *repo*'s worktree roots that are neither a registered
     git worktree nor a tracking record -- the orphan set."""
     reg = {_norm(p) for p in registered_paths}
@@ -275,8 +281,8 @@ def remove_tree(d: Path) -> tuple[bool, str]:
 
 
 def sweep_orphans(
-    repo: Any,
-    records: Iterable[Any],
+    repo: RepoConfig,
+    records: Iterable[WorktreeRecord],
     *,
     dry_run: bool = False,
     min_settle_secs: float = _MIN_SETTLE_SECS,
@@ -310,8 +316,8 @@ def sweep_orphans(
     tracked = [r.worktree_path for r in records if getattr(r, "worktree_path", None)]
     orphans = find_orphans(repo, registered, tracked)
 
-    removed: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
+    removed: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     for d in orphans:
         verdict = classify_orphan(d, min_settle_secs=min_settle_secs)
         if verdict.action == "skip":

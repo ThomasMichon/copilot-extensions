@@ -7,7 +7,11 @@ import json
 from pathlib import Path
 import shutil
 import threading
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import replace
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import test_creation_tail_repair as fixture_source
@@ -21,8 +25,11 @@ _creation_anchor_seed = fixture_source._creation_anchor_seed
 
 
 @pytest.fixture
-def existing(tmp_path, monkeypatch, _creation_anchor_seed):
-    fixture = fixture_source._creation_fixture(tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed)
+def existing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _creation_anchor_seed: Path,
+) -> SimpleNamespace:
+    build = cast(Callable[..., SimpleNamespace], fixture_source._creation_fixture)
+    fixture = build(tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed)
     for anchor in fixture.anchors.values():
         exclude = anchor / ".git" / "info" / "exclude"
         exclude.parent.mkdir(parents=True, exist_ok=True)
@@ -36,7 +43,7 @@ def existing(tmp_path, monkeypatch, _creation_anchor_seed):
     return fixture
 
 
-def _recover(fixture, *, apply=True):
+def _recover(fixture: SimpleNamespace, *, apply: bool = True) -> tuple[int, dict[str, Any]]:
     from agent_worktrees import output
 
     with output.capture_json_output() as stream:
@@ -47,7 +54,7 @@ def _recover(fixture, *, apply=True):
     return code, json.loads(stream.getvalue())
 
 
-def _pair(fixture):
+def _pair(fixture: SimpleNamespace) -> tuple[tracking.WorktreeRecord, tracking.WorktreeRecord]:
     code, report = _recover(fixture)
     assert code == 0, json.dumps(report)
     parent = tracking.load_record(fixture.record.yaml_path)
@@ -56,7 +63,7 @@ def _pair(fixture):
     return parent, child
 
 
-def _finalized_pair(fixture):
+def _finalized_pair(fixture: SimpleNamespace) -> tuple[tracking.WorktreeRecord, tracking.WorktreeRecord]:
     parent, child = _pair(fixture)
     # Explicitly dispose only the synthetic overlay produced by this fixture.
     (Path(parent.worktree_path) / ".github" / "copilot" / "settings.local.json").unlink()
@@ -66,6 +73,7 @@ def _finalized_pair(fixture):
         git_ops.git("fetch", "origin", "main", cwd=anchor)
     child.status = "finalized"
     tracking.save_record(child)
+    assert parent.pair_ref is not None
     tracking.settle_resource_claim(parent, parent.pair_ref)
     tracking.release_resource_claim(parent, parent.pair_ref)
     parent = tracking.load_record(parent.yaml_path)
@@ -74,7 +82,9 @@ def _finalized_pair(fixture):
     return parent, child
 
 
-def _joint_cli(parent, capsys):
+def _joint_cli(
+    parent: tracking.WorktreeRecord, capsys: pytest.CaptureFixture[str],
+) -> tuple[int, dict[str, Any]]:
     from agent_worktrees import output
 
     parser = argparse.ArgumentParser()
@@ -87,7 +97,9 @@ def _joint_cli(parent, capsys):
 
 
 @pytest.mark.parametrize("seed_state", ["consumed", "absent"])
-def test_live_existing_harness_recovers_without_new_and_replays(existing, monkeypatch, seed_state):
+def test_live_existing_harness_recovers_without_new_and_replays(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, seed_state: str,
+) -> None:
     seed_path = launch_seed_state.state_path(existing.record.yaml_path)
     if seed_state == "absent":
         seed_path.unlink()
@@ -105,11 +117,12 @@ def test_live_existing_harness_recovers_without_new_and_replays(existing, monkey
     code, report = _recover(existing)
     assert code == 0 and report["action"] == "compose"
     assert tracking.load_record(child.yaml_path).creation_nonce == nonce
-    assert tracking.find_paired_record(parent).worktree_path == child.worktree_path
+    sibling = tracking.find_paired_record(parent)
+    assert sibling is not None and sibling.worktree_path == child.worktree_path
     assert (seed_path.read_bytes() if seed_path.exists() else None) == before_seed
 
 
-def test_lost_checkout_restores_original_retained_branch(existing):
+def test_lost_checkout_restores_original_retained_branch(existing: SimpleNamespace) -> None:
     parent, child = _pair(existing)
     target = Path(child.worktree_path)
     (target / "retained.txt").write_text("retained branch content", encoding="utf-8")
@@ -126,10 +139,42 @@ def test_lost_checkout_restores_original_retained_branch(existing):
     assert (target / "retained.txt").read_text(encoding="utf-8") == "retained branch content"
     assert git_ops.git("rev-parse", "HEAD", cwd=target).stdout.strip() == original
     assert tracking.load_record(child.yaml_path).creation_nonce == child.creation_nonce
-    assert tracking.find_paired_record(parent).worktree_path == str(target)
+    sibling = tracking.find_paired_record(parent)
+    assert sibling is not None and sibling.worktree_path == str(target)
 
 
-def test_late_binding_reserves_the_receivers_current_allocation_root(existing):
+@pytest.mark.parametrize("operation", ["recover", "cleanup"])
+def test_pair_operations_exclude_inherited_foreign_git_identity(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], operation: str,
+) -> None:
+    parent, child = _pair(existing) if operation == "recover" else _finalized_pair(existing)
+    original = git_ops.git("rev-parse", "HEAD", cwd=child.worktree_path).stdout.strip()
+    foreign = existing.anchors["harness"].parent / "foreign"
+    foreign.mkdir()
+    git_ops.git("init", "--template=", "-b", "main", cwd=foreign)
+    git_ops.git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "foreign", cwd=foreign,
+    )
+    git_ops.git("checkout", "-b", parent.branch, cwd=foreign)
+    git_ops.git("branch", child.branch, cwd=foreign)
+    foreign_tip = git_ops.git("rev-parse", "HEAD", cwd=foreign).stdout.strip()
+    if operation == "recover":
+        shutil.rmtree(child.worktree_path)
+    with monkeypatch.context() as environment:
+        environment.setenv("GIT_DIR", str(foreign / ".git"))
+        environment.setenv("GIT_WORK_TREE", str(foreign))
+        code, report = _recover(existing) if operation == "recover" else _joint_cli(parent, capsys)
+    assert code == 0, json.dumps(report)
+    if operation == "recover":
+        assert git_ops.git("rev-parse", "HEAD", cwd=child.worktree_path).stdout.strip() == original
+    else:
+        assert not Path(parent.worktree_path).exists() and not Path(child.worktree_path).exists()
+    assert git_ops.git("rev-parse", child.branch, cwd=foreign).stdout.strip() == foreign_tip
+
+
+def test_late_binding_reserves_the_receivers_current_allocation_root(existing: SimpleNamespace) -> None:
     receiving = existing.configs["knowledge"]
     target_root = existing.anchors["knowledge"].parent / "independent-knowledge-root"
     existing.configs["knowledge"] = replace(receiving, repos={
@@ -140,7 +185,9 @@ def test_late_binding_reserves_the_receivers_current_allocation_root(existing):
     assert existing.record.yaml_path.with_suffix(".paired-allocation.json").is_file()
 
 
-def test_partial_pair_publication_reuses_original_child(existing, monkeypatch):
+def test_partial_pair_publication_reuses_original_child(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = worktree_creation._stamp_and_compose_paired_knowledge
     monkeypatch.setattr(
         worktree_creation, "_stamp_and_compose_paired_knowledge",
@@ -161,7 +208,9 @@ def test_partial_pair_publication_reuses_original_child(existing, monkeypatch):
 
 
 @pytest.mark.parametrize("kind", ["dirty", "missing-record", "live", "unknown", "lost-branch"])
-def test_retained_companion_conflicts_preserve_evidence(existing, monkeypatch, kind):
+def test_retained_companion_conflicts_preserve_evidence(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     _, child = _pair(existing)
     target = Path(child.worktree_path)
     if kind == "dirty":
@@ -185,14 +234,16 @@ def test_retained_companion_conflicts_preserve_evidence(existing, monkeypatch, k
 
 
 @pytest.mark.parametrize("lease", [launch_admission.guard, worktree_lifecycle.guard])
-def test_restore_obeys_native_launch_and_lifecycle_admission(existing, lease):
+def test_restore_obeys_native_launch_and_lifecycle_admission(
+    existing: SimpleNamespace, lease: Callable[[Path], AbstractContextManager[None]],
+) -> None:
     with lease(existing.record.yaml_path):
         code, report = _recover(existing)
     assert code == 1 and report["error"]
     assert not (existing.roots["knowledge"] / f"{existing.record.worktree_id}-k").exists()
 
 
-def test_companion_only_cleanup_and_orphan_gc_refuse(existing):
+def test_companion_only_cleanup_and_orphan_gc_refuse(existing: SimpleNamespace) -> None:
     _, child = _finalized_pair(existing)
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
     failures, warnings = cleanup_reap.reap_worktree(
@@ -204,7 +255,10 @@ def test_companion_only_cleanup_and_orphan_gc_refuse(existing):
 
 
 @pytest.mark.parametrize("signal", ["mux", "lock", "unknown", "process"])
-def test_finalized_live_harness_vetoes_joint_removal(existing, monkeypatch, capsys, signal):
+def test_finalized_live_harness_vetoes_joint_removal(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], signal: str,
+) -> None:
     parent, child = _finalized_pair(existing)
     if signal == "process":
         monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: "fixture process uses checkout")
@@ -224,7 +278,9 @@ def test_finalized_live_harness_vetoes_joint_removal(existing, monkeypatch, caps
     assert Path(parent.worktree_path).exists() and Path(child.worktree_path).exists()
 
 
-def test_joint_cleanup_admits_both_members_and_removes_together(existing, capsys):
+def test_joint_cleanup_admits_both_members_and_removes_together(
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     code, report = _joint_cli(parent, capsys)
     assert code == 0, json.dumps(report)
@@ -236,11 +292,13 @@ def test_joint_cleanup_admits_both_members_and_removes_together(existing, capsys
         assert retained.reaped_at and retained.creation_nonce == member.creation_nonce
 
 
-def test_interrupted_joint_cleanup_preserves_records_and_can_retry(existing, monkeypatch, capsys):
+def test_interrupted_joint_cleanup_preserves_records_and_can_retry(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     remove = git_ops.remove_worktree
 
-    def fail_second(anchor, path):
+    def fail_second(anchor: str | Path, path: str) -> bool:
         if path == child.worktree_path:
             raise OSError("fixture second-half failure")
         return remove(anchor, path)
@@ -257,14 +315,16 @@ def test_interrupted_joint_cleanup_preserves_records_and_can_retry(existing, mon
     assert code == 0, json.dumps(report)
 
 
-def test_joint_removal_holds_both_record_fences(existing, monkeypatch, capsys):
+def test_joint_removal_holds_both_record_fences(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     remove = git_ops.remove_worktree
     observed = []
 
-    def remove_under_fence(anchor, path):
+    def remove_under_fence(anchor: str | Path, path: str) -> bool:
         for member in (parent, child):
-            def attempt_write():
+            def attempt_write() -> None:
                 try:
                     with tracking._RecordLock(member.yaml_path, timeout=0.05, require_sidecar=True):
                         observed.append("unfenced")
@@ -282,7 +342,9 @@ def test_joint_removal_holds_both_record_fences(existing, monkeypatch, capsys):
     assert observed == ["fenced"] * 4
 
 
-def test_companion_ignored_data_is_admitted_before_either_removal(existing, capsys):
+def test_companion_ignored_data_is_admitted_before_either_removal(
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     with (existing.anchors["knowledge"] / ".git" / "info" / "exclude").open("a") as stream:
         stream.write("\nretained.bin\n")
@@ -295,7 +357,9 @@ def test_companion_ignored_data_is_admitted_before_either_removal(existing, caps
     assert not paired_cleanup.journal_path(parent).exists()
 
 
-def test_missing_parent_without_joint_receipt_does_not_authorize_child_removal(existing, capsys):
+def test_missing_parent_without_joint_receipt_does_not_authorize_child_removal(
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     shutil.rmtree(parent.worktree_path)
     code, report = _joint_cli(parent, capsys)
@@ -305,7 +369,10 @@ def test_missing_parent_without_joint_receipt_does_not_authorize_child_removal(e
 
 
 @pytest.mark.parametrize("lease", [launch_admission.guard, worktree_lifecycle.guard])
-def test_joint_cleanup_cannot_race_harness_launch(existing, lease, capsys):
+def test_joint_cleanup_cannot_race_harness_launch(
+    existing: SimpleNamespace, lease: Callable[[Path], AbstractContextManager[None]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     with lease(parent.yaml_path):
         code, report = _joint_cli(parent, capsys)
@@ -314,11 +381,13 @@ def test_joint_cleanup_cannot_race_harness_launch(existing, lease, capsys):
     assert Path(parent.worktree_path).exists() and Path(child.worktree_path).exists()
 
 
-def test_new_companion_obligation_at_joint_admission_preserves_both(existing, monkeypatch, capsys):
+def test_new_companion_obligation_at_joint_admission_preserves_both(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     parent, child = _finalized_pair(existing)
     original = cleanup_gc_cli._revalidate_cleanup_safety
 
-    def race(worktree_id, **kwargs):
+    def race(worktree_id: str, **kwargs: Any) -> cleanup_gc_cli.RevalidationResult:
         if worktree_id == child.worktree_id:
             current = tracking.load_record(child.yaml_path)
             current.follow_up = True

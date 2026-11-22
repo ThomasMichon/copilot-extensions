@@ -6,12 +6,13 @@ from contextlib import ExitStack
 from contextvars import ContextVar
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 
 from . import config as cfg, finalize_lock, launch_admission, paired_claims
 from . import git_ops, procs, sessions, terminal_pair_progress, tracking
 from .creation_tail_repair import _REPAIR_ERRORS
 from .checkout_data import preservation_reason
+from .git_repository_environment import repository_identity_scope
 
 _admitted: ContextVar[frozenset[tuple[str | None, ...]]] = ContextVar(
     "paired_cleanup_admission", default=frozenset(),
@@ -58,8 +59,11 @@ def require_joint(record: tracking.WorktreeRecord) -> None:
 
 
 def _subject(record: tracking.WorktreeRecord) -> dict[str, Any]:
+    primary_identity = cast(
+        Callable[[tracking.WorktreeRecord], dict[str, Any]], terminal_pair_progress.primary_identity,
+    )
     return {
-        **terminal_pair_progress.primary_identity(record),
+        **primary_identity(record),
         "creation_nonce": record.creation_nonce,
         "owner_ref": record.owner_ref,
     }
@@ -77,6 +81,7 @@ def _inactive(record: tracking.WorktreeRecord) -> None:
         raise ValueError(f"{record.worktree_id}: {reason}")
 
 
+@repository_identity_scope()
 def reap_pair(
     worktree_id: str, *, include_unused: bool = False, include_conversations: bool = False,
 ) -> dict[str, Any]:

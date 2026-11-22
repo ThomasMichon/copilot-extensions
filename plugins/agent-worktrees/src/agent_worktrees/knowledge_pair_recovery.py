@@ -13,6 +13,7 @@ from . import creation_tail_repair as creation, execution_spaces, finalize_lock
 from . import git_ops, launch_admission, paired_allocation_location
 from . import paired_claims, procs, repos, sessions, state_root, tracking, worktree_creation
 from . import worktree_lifecycle
+from .git_repository_environment import repository_identity_scope
 
 
 def _subject(config: cfg.Config, worktree_id: str) -> tuple[Path, tracking.WorktreeRecord]:
@@ -95,6 +96,7 @@ def _plan(
     return root, allocation, child, target, action
 
 
+@repository_identity_scope()
 def recover(
     worktree_id: str, *, apply: bool = False, creation_nonce: str | None = None,
 ) -> dict[str, Any]:
@@ -179,11 +181,14 @@ def recover(
                     # A single --force permits reusing a missing registration,
                     # but never overrides a locked worktree or an existing path.
                     git_ops.git("worktree", "add", "--force", str(target), child.branch, cwd=root.path)
+                child_ref = child.pair_claim_ref
+                if child_ref is None:
+                    raise ValueError("retained companion has no qualified harness reference")
                 stamp = {
                     "pair_id": child.pair_id, "pair_role": "harness",
                     "pair_kind": "worktree",
                     "pair_ref": tracking.format_claim_ref(
-                        child.pair_claim_ref.machine, child.repo, child.worktree_id,
+                        child_ref.machine, child.repo, child.worktree_id,
                     ),
                 }
             creation._prepare_permissions(root.path, str(target))
