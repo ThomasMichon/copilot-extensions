@@ -1,0 +1,9 @@
+{
+  "comment": "Admit 27 unchanged original correlation and synthetic-fetch cases",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -4488,9 +4488,25 @@ The compact-v2 candidate contains 8,371 nodes, 1,198 bound sources, the
 existing 450 targets and 942,466 bytes. All 8,351 preceding nodes retain
 relative order and all 1,189 preceding source hashes remain intact. Coverage
 targets, 89 helper decisions, compact/flat-v1 identity, byte cap and the
-300-second bound remain enforced. Current-head review and complete fresh
-required Linux CI remain pending; the subset is development evidence, not a
-full-packet result.
+300-second bound remain enforced. Fatal Ruff, strict Python 3.10/Linux and
+Windows typing, documentation consistency and diff checks pass.
+
+Copilot approval `6011461690` covers exact head
+`fbb34f40f582b02854ac7f4b4a04faaa799c508f`, with no active findings.
+Source CI `45006600070`, unit job `137159482550`, freshly passes all 8,371
+cases with 39 deselections, 149.07 pytest seconds and 169.980 packet seconds.
+It reports `mode=executed`, origin run `45006600070` attempt one, execution
+identity `8c4c66ed2b6b3f64d2d80c27778ad49ffe53920834298633c394cba741b16e38`
+and packet digest
+`0eb6494df85f05e277c6cc7c6968a00f4d36febef62adcbc348950d1f3a4fc02`.
+Required aggregate `137160676327`, guards and trusted metadata pass.
+Complete current review/comment/thread pagination, seven fresh verifier
+reads and final head/hold/parent-reference checks precede the managed merge.
+
+Source #14064 merges at `2026-11-22T09:21:57Z` as
+`2d4fa14c7fc471e1638c0704a1cc1381c7365762`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, own Plan leaf and
+Validation Plan are reread before resolving only the 20-case leaf.
 
 No original test, production implementation, workflow, runtime or effect
 auditor changes. This is pure algorithm-policy coverage, not portfolio
@@ -4498,6 +4514,37 @@ activation, baseline adoption, real Git, installed execution or scheduled
 integration qualification. Fresh-install/native lanes are not exercised
 because installation/runtime behavior is unchanged. All retained refusals,
 shared-owner seams and broader parent gates remain open.
+
+### November 22 exact-original correlation and synthetic-fetch census
+
+The adapter exports the complete original `TestCorrelation` and
+`TestFetchBaselineAsset` classes from `tools/test_coverage_guided_selection.py`.
+Complete collection preserves the same 27 class/method objects and relative
+order among 157 original-module cases. Original helpers, synthetic payloads,
+subprocess stubs and assertions remain unchanged. Other original-module cases
+remain outside this adapter; twenty are already admitted through the policy
+adapter, and importing the module does not execute its integration cases.
+
+Initial guarded qualification passes all 27 in 1.328 seconds with zero
+prohibited effects, 23 bound Python reads and actual correlation-owner
+call-phase lines for every case. Only the adapter requires a new binding;
+the original module and correlation target are already bound. The existing
+fetch tests stub subprocess execution themselves; no new mocks, preloads,
+native execution or network access are added.
+
+The compact-v2 candidate contains 8,398 nodes, 1,199 bound sources, the
+existing 450 targets and 944,957 bytes. All 8,371 preceding nodes retain
+relative order and all 1,198 preceding source hashes remain intact. Coverage
+targets, 89 helper decisions, compact/flat-v1 identity, byte cap and the
+300-second bound remain enforced. Current-head review and complete fresh
+Linux CI remain required before normal merge.
+
+No original test, production implementation, workflow, runtime, source/data
+policy or effect-auditor changes. This is synthetic correlation/fetch coverage,
+not baseline publication/adoption, real fetching or integration qualification.
+Fresh-install/native lanes are not exercised because installation/runtime
+behavior is unchanged. All retained refusals, shared-owner seams and broader
+parent gates remain open.
 
 ### November 22 original runtime-profile refusal and worker-limit qualification
 
