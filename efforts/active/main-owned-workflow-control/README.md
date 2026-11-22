@@ -1310,7 +1310,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   exact-head Copilot approval and complete required Linux CI with all 8,174
   units freshly executed. The distinct successful-attestation thread refusal
   and broader parent gates stay open.
-- [ ] Qualify all thirteen cases from five original candidate-retry clock,
+- [x] Qualify all thirteen cases from five original candidate-retry clock,
   environment, exact remote identity and CLI output functions. Export exact
   original functions and the identity fixture, preserving every parameter,
   callback, clock witness and assertion. Keep the three native Git cases with
@@ -1320,6 +1320,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
   identity and the 300-second bound. Require normal strict typing, current-head
   review and complete fresh Linux CI; native, installed, publication and
   broader parent gates remain separate.
+  #14056 merges at `447c6d4e6f6d1554894f6e36bf79d4a204c77a4d` after
+  exact-head Copilot approval and complete required Linux CI with all 8,187
+  units freshly executed. Broader parent gates stay open.
+- [ ] Qualify all 27 cases from six original subject-attestation verifier
+  retry functions, preserving the original subject fixture, mock callbacks,
+  parameter identities, monotonic deadline witnesses and assertions. This
+  independent subject-verifier cohort is not a replay or replacement of
+  the refused threaded bundle-attestation witness. Require closed reads,
+  positive per-case actual owner calls and zero prohibited effects before
+  admission. Preserve preceding nodes and hashes, targets, helper decisions,
+  compact/flat-v1 identity and the 300-second bound. Require normal strict
+  typing, current-head review and complete fresh Linux CI; native, installed,
+  publication and broader parent gates remain separate.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

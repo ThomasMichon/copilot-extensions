@@ -4351,10 +4351,58 @@ and exact original objects and parameter identities. A fresh guarded process
 passes all thirteen in 1.218 seconds with zero prohibited effects, seven
 bound Python reads and positive actual call-phase candidate/promoter-owner
 lines per case. Only the new adapter and original test file require new
-source bindings; both production targets are already admitted. Current-head
-review and complete fresh Linux CI remain required. This is development
-qualification, not a full-packet result, reuse hit, native/installed proof,
-release operation or acceptance of any broader parent or owner gate.
+source bindings; both production targets are already admitted. The candidate
+contains 8,187 nodes, 1,175 bound sources, 448 targets and 924,843 compact-v2
+bytes. Every preceding node retains relative order and its source hashes;
+coverage targets, 89 helper decisions, compact/flat-v1 identity and the
+300-second bound remain enforced.
+
+Copilot approval `6011055322` covers exact head
+`677426ffa75e235c2b365ddfcea61e59a5f01423` without active findings.
+CI `44998324135`, unit job `137134116058`, freshly passes all 8,187 cases
+with 39 deselections, 188.13 pytest seconds and 210.602 packet seconds.
+The evidence reports `mode=executed`, origin run `44998324135` attempt one
+and digest `26891f91c71e5ac92b2a446abc20190de902fee61c456e86813fe5f1e4211126`.
+Required aggregate `137135150106`, guards and trusted lockdown/attribution
+pass. Complete review/comment/thread pagination, seven fresh verifier reads
+and final head/hold/closing-reference checks precede the managed merge.
+Source #14056 merges at `2026-11-22T07:34:23Z` as
+`447c6d4e6f6d1554894f6e36bf79d4a204c77a4d`; independent readback confirms merged
+state and open parent #6237. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only the thirteen-case leaf.
+Fresh-install/native/installed lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit,
+controlled whole-flow saving, real publication or acceptance of any broader
+owner or parent gate.
+
+### November 22 original subject-verifier retry qualification
+
+A new adapter exports all six original subject-attestation verifier retry
+functions as 27 cases: four initialization-failure retries, thirteen other
+fatal failures, three fatal second attempts, four exhausted-deadline controls,
+one single-call success and two subprocess timeouts. The exact original
+subject fixture, functions, mock callbacks, monotonic deadline witnesses,
+parameter identities and assertions remain unchanged. This cohort does not
+replay or replace the separate successful bundle-attestation control whose
+production thread-pool submission the unit auditor refused.
+
+The complete original collection matches all 27 adapter selections and exact
+original function/fixture objects. A fresh guarded process passes all 27 in
+1.484 seconds, with zero prohibited effects, sixteen bound Python reads and
+positive call-phase coverage in the real verifier for every case. Only the
+adapter and original test suite add source bindings; the publisher and
+attestation targets are already admitted. No production, original test,
+effect guard or helper-decision code changes.
+
+Positive admission contains 8,214 nodes, 1,177 bound sources, 448 targets and
+928,919 compact-v2 bytes. All preceding 8,187 nodes retain relative order and
+all 1,175 existing source hashes remain unchanged. Coverage targets, 89 helper
+decisions, compact/flat-v1 identity and the 300-second bound remain enforced.
+Normal strict typing, current-head review and complete fresh Linux CI remain
+required. Fresh-install/native/installed lanes are not exercised because no
+installation or runtime behavior changes. This is not a reuse hit, controlled
+whole-flow saving, real publication, resolution of the threaded witness or
+acceptance of any broader owner or parent gate.
 
 ### November 20 path-gated audit-guard native boundary
 
