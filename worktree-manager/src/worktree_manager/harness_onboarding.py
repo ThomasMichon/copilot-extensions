@@ -80,13 +80,37 @@ def bind_companion(root: Path, project: str, remote: str, checkout: Path, writer
     return registered_checkout()
 
 
-def compose_checkout(harness: Path, companion: Path) -> None:
+def composition_enabled(harness: Path, machine_config: Path, project: str) -> bool:
+    def read(path: Path) -> dict[str, object]:
+        runtime_source_repository._ordinary(path)
+        return harness_state._read_yaml(path, strict=True)
+
+    setting: object = True
+    for name in (".copilot-extensions/agent-worktrees/config.yaml", ".agent-worktrees/config.yaml", ".agent-worktrees.yaml"):
+        path = harness / name
+        runtime_source_repository._ordinary(path)
+        if path.exists():
+            setting = read(path).get("compose_knowledge_plugins", True)
+            break
+    repos = read(machine_config).get("repos", {})
+    if not isinstance(repos, dict) or not isinstance(repos.get(project, {}), dict):
+        raise ValueError("Invalid machine-local harness settings")
+    setting = repos.get(project, {}).get("compose_knowledge_plugins", setting)
+    if not isinstance(setting, bool):
+        raise ValueError("compose_knowledge_plugins must be a boolean")
+    return setting
+
+
+def compose_checkout(harness: Path, companion: Path, *, enabled: bool = True) -> None:
     overlay = import_module("._runtime_assets.scripts.runtime-source-tools.knowledge_composition.knowledge_overlay", __package__)
     output = harness.resolve() / ".github" / "copilot" / "settings.local.json"
     runtime_source_repository._ordinary(output)
     lock = overlay._overlay_lock_target(output).with_suffix(".lock")
     with retained_sidecar_lock(lock, timeout=30):
-        overlay._compose_locked(harness, companion)
+        if enabled:
+            overlay._compose_locked(harness, companion)
+        else:
+            overlay.retire_composed_locked(output)
 
 
 def install_prepared(command: list[str]) -> int:
@@ -163,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
             companions[project] = bind_companion(root, project, remote, knowledge, writer)
         if companions:
             for project, companion in companions.items():
-                compose_checkout(anchors[project], companion)
+                compose_checkout(anchors[project], companion, enabled=composition_enabled(
+                    anchors[project], root / "repos" / project / "config.yaml", project))
                 if os.environ.get("OneDrive"):
                     bootstrap_pairing.remember_bound(
                         root / "repos" / project / "config.yaml",

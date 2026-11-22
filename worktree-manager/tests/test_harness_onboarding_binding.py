@@ -49,6 +49,18 @@ def check_registered_checkout_readback(tmp_path: Path, case: unittest.TestCase) 
     before = overlay.read_bytes(), overlay.stat().st_mtime_ns
     onboarding.compose_checkout(harness, companion)
     assert (overlay.read_bytes(), overlay.stat().st_mtime_ns) == before
+    settings = harness / ".copilot-extensions/agent-worktrees/config.yaml"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("compose_knowledge_plugins: false\n", encoding="utf-8")
+    enabled = onboarding.composition_enabled(harness, config, harness.name)
+    assert not enabled
+    current = json.loads(overlay.read_bytes())
+    current["enabledPlugins"]["operator@example"] = False
+    overlay.write_text(json.dumps(current), encoding="utf-8")
+    onboarding.compose_checkout(harness, companion, enabled=enabled)
+    assert json.loads(overlay.read_bytes())["enabledPlugins"] == {"operator@example": False}
+    assert onboarding.harness_state._read_yaml(config, strict=True)["knowledge_repo"] == companion.name
+    onboarding.compose_checkout(harness, companion)
     mixed = json.loads(overlay.read_bytes())
     mixed["_agentWorktreesToolPluginOverlay"] = {"project": "foreign"}
     overlay.write_text(json.dumps(mixed), encoding="utf-8")

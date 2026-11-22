@@ -10324,7 +10324,7 @@
     "tools/test_attestation_verifier_retry.py": "6470fed334e64d92d876510d36ff08bd6582726f54ee933b7d4556de90adb65d",
     "tools/promotion_unit_tests/test_original_candidate_retry.py": "1e91d9bbdc9ce4602eb4c79630dbdb047180c07422d98992377122acae3649c0",
     "tools/test_promotion_candidate_retry.py": "066ce0676dfd074bcd0c74f037ab1ebe46b7e7dd64ddc8aba5c2b7c1b5b3639c",
-    "plugins/agent-worktrees/src/agent_worktrees/knowledge_overlay.py": "505d32dbd881cdfc7ef01a4a8371221690bde2624bb97c19e99888e5afb27598",
+    "plugins/agent-worktrees/src/agent_worktrees/knowledge_overlay.py": "428766892064ad3c784dbc2dde1b759d28614302c9ba0c28313efdc4c24c4c15",
     "plugins/agent-worktrees/src/agent_worktrees/knowledge_plugin_committed.py": "1dda8c6d9586055840bbf6584ecf2db6cef19cd1f9a6022bb5d581b6b275962d",
     "plugins/harness-knowledge/skills/binding-knowledge/scripts/binding_yaml.py": "68a48c895b0cba6cfb51eb0ab83d7e428a805498a0c387d5a3d27beb9c1d46de",
     "tools/bootstrap_manager_release.py": "5dd2aaa720cbc0c8078566ad685ceb254e3425cc6858e0e93ac2289da9d66c2f",

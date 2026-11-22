@@ -289,6 +289,24 @@ def _retire_previous(current: dict[str, Any], previous: dict[str, Any]) -> None:
             del current[key]
 
 
+def retire_composed_locked(path: Path) -> bool:
+    """Withdraw exactly the unchanged settings covered by the knowledge receipt."""
+    existing = _load_json_object(path)
+    marker = _managed_marker(existing, path)
+    if marker is None:
+        return False
+    result = dict(existing)
+    for field, receipt in (("enabledPlugins", "enabledPlugins"), ("extraKnownMarketplaces", "marketplaces")):
+        values = _dict_setting(existing, field, path)
+        _retire_previous(values, marker[receipt])
+        if values:
+            result[field] = values
+        else:
+            result.pop(field, None)
+    result.pop(_OVERLAY_KEY, None)
+    return _write_overlay(path, result)
+
+
 def _write_overlay(path: Path, result: dict[str, Any]) -> bool:
     """Atomically write or safely remove a native local settings overlay."""
     try:
