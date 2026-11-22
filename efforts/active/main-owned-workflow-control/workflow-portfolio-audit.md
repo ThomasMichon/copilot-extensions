@@ -6264,6 +6264,71 @@ Fresh-install/native/installed lanes are not exercised because no installation
 or runtime behavior changes. Separate retained refusals, owner, release,
 custody, every-release, full-census and whole-flow gates remain open.
 
+Fatal Ruff, whole-file strict Python 3.10/Linux and Windows typing,
+documentation consistency, committed changefile presence and diff checks pass.
+Approval `6013421147` names exact head
+`f64783b64dd32906829ff3284ce3de0369f8be16`, with no active review findings,
+comments or unresolved threads and complete review pagination.
+Fresh Linux CI `45047136071`, unit job `137284089653`, executes all 8,934
+cases with 48 deselections in 126.10 pytest / 141.097 packet seconds.
+It reports `mode=executed`, origin run `45047136071` attempt one,
+execution identity
+`dc91e002b9ebcb1487a63fc0953be85766b7fd5d8b0952e1fbd11d258cdd3d2c`
+and packet digest
+`09f6c4a7798cf20fd66778af7d8d74c5be751cb011d87993b1742587a4000dcc`.
+Guards and required aggregate `137285325184` pass.
+
+The required-check verifier initially refuses the separate stale direct
+source-attribution check `137285083973`. A factual PR-body update triggers
+normal metadata workflow `45047754856`; its jobs pass, but the distinct
+direct result still blocks, so no merge is attempted. The operator explicitly
+authorizes one run of the existing Main metadata workflow with only
+`pull_request_number=14107`, excluding promotion inputs, rollout and bypass.
+Run `45051600426`, refresh job `137297715008`, reconciles only the selected
+Dev PR's owned metadata checks. That grant is consumed. Seven fresh verifier
+reads and final head/hold/parent-reference fences pass before normal merge.
+
+Source #14107 merges at `2026-11-22T17:52:19Z` as
+`63923a0cebe59c4b0c2c4b6fcc19268dc994d2cd`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+Three intervening independently merged changes advance the base. The adapter,
+ordered node additions and own release/documentation files match the reviewed
+head; six existing source hashes reflect those accepted base changes, not
+replay of an old manifest. The complete reviewed and merged trees therefore
+are not claimed identical. The actual parent Goal, Plan, own leaf and
+Validation Plan are reread before resolving only this 19-case leaf.
+Separate data/native-load/thread refusals, release, owner, custody and parent
+completion gates remain open.
+
+### November 22 original artifact-admission integrity controls
+
+The adapter exports two complete original parameterized functions: six
+timestamp, workflow, attempt, duplicate and upload-evidence mutations, plus
+three foreign-branch/workflow/legacy-step ownership decisions. Every original
+parameter, in-memory backend/request callback, mutation branch and assertion
+is preserved. No fixture, OS skip or original test body is changed.
+
+Complete collection verifies all 102 original cases and exactly nine adapter
+cases with original function-object and own-parametrization object identity,
+plus matching values and types against the independently collected module.
+Initial unchanged auditing passes all nine in 1.437 seconds with zero
+prohibited effects, six bound canonical Python reads and actual admission-owner
+call-phase coverage per case. No actual backend, Main, workflow or artifact
+operation is performed.
+
+Only the adapter source binding is added. All 8,934 prior nodes retain relative
+order; all 1,271 current source hashes, 467 targets, 89 helper decisions and
+the 300-second bound remain intact. Compact-v2 and flat-v1 logical identity
+agree; the candidate contains 8,943 nodes and 1,272 sources in 1,003,943
+bytes. Exact-head review and complete fresh Linux source CI remain required.
+
+No original test, production behavior, new mock, preload, guard, workflow,
+runtime, native, data-admission or cleanup change is introduced.
+Fresh-install/native/installed lanes are not exercised because no installation
+or runtime behavior changes. Separate retained refusals, owner, release,
+custody, every-release, full-census and whole-flow gates remain open.
+The prior one-PR metadata-refresh authorization is consumed, not reused here.
+
 ### November 22 original vault cache-policy inspection
 
 The adapter exports the complete original
