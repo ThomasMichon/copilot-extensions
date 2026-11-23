@@ -6671,6 +6671,45 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original injected runtime-origin caller controls
+
+The adapter selects four complete original functions as ten cases: fixed
+finite isolated command construction, seven failed-observation refusals,
+custody loss and runtime-root replacement. The original caller fixture
+creates only a private temporary directory; runtime identity is injected
+from its lstat, and the original fake callbacks replace every process call.
+Function and fixture objects, own parameter rows, IDs and assertions remain
+unchanged. Complete collection compares 36 originals with ten adapter cases
+and equal cross-module parameter values/types. Eight other functions /
+26 cases remain excluded before execution, including the complete symlink
+matrix, all six probe functions and the event-loop case.
+
+Initial unchanged effect/source guarding passes all ten in 0.75 pytest /
+1.453 observation seconds with zero prohibited effects, eighteen bound
+canonical Python reads, all thirty phase reports and actual guest-origins-owner
+call-phase coverage per case. Only the adapter adds a source binding; the
+already-bound guest_origins production module adds the coverage target.
+The packet has 9,481 nodes, 1,326 sources and 478 targets in 1,008,480
+one-space v2 bytes. All preceding entries/order/hashes/targets, including the
+concurrent installer binding, 89 helpers, 1 MiB cap and 300-second bound
+remain intact.
+
+Normal pull-forward incorporates independent #14163 without changing any
+of the eighteen sources in this slice's observed closure. Its six additional
+nodes, five new source bindings, seven rebindings and four targets are
+preserved alongside every preceding node/target order. The composed packet
+has 9,487 nodes, 1,331 sources and 482 targets in 1,009,900 bytes. All source
+bindings and 89 helper decisions verify; fresh full CI remains necessary.
+The first normal strict comparison had selected the inverse upstream Vault
+delta before pull-forward and reported its unprepared environment. The exact
+authored strict check and normal post-sync origin/dev comparison both pass;
+no unrelated environment is prepared and no test observation is replayed.
+
+Strict checks, committed release intent, exact-head review and complete fresh
+Linux CI remain required. This is source-only admission, not actual installed
+or guest observation, native qualification, a refusal replay, rollout,
+controlled whole-flow saving, custody settlement or broader parent completion.
+
 ### November 23 original synthetic runtime-origin probe controls
 
 The adapter selects six complete original functions as nineteen cases:
@@ -6699,6 +6738,38 @@ Strict checks, committed release intent, exact-head review and complete fresh
 Linux CI remain required. This is source-only admission, not a held refusal
 replay, actual installed/guest/host inspection, native qualification, rollout,
 controlled whole-flow saving or broader parent completion.
+
+Exact-head approval `6016374571` names
+`b6b6741c9d52557f14a47889dac284b0b289e06c`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45108435152`, attempt one, unit job `137475005028`, executes all
+9,471 cases with 55 deselections in 159.96 pytest / 180.030 packet seconds.
+It reports `mode=executed`, origin run `45108435152`, attempt one, execution
+identity `0e3ee3d660f97a185ca85192906900127c8fbc0a0974cba7e0ab5b7ca75b674c`
+and packet digest
+`ac1dbc71ebdeffdb098f971e47626801a3d014633008799aa9688c1be50d3ff9`.
+Three-file artifact `14788262836`, guards `137475004750`, required aggregate
+`137476306604` and trusted metadata pass. Seven fresh verifier reads and
+complete final review/thread/head/hold/parent fences precede normal managed
+merge. No retry, metadata edit, manual workflow or deadline waiver is used.
+
+Source #14172 merges at `2026-11-23T03:58:47Z` as
+`1c62b7dbb11043e7a67e5860201c1379810e863d`. Independent readback confirms merged
+state and open parent #6237; managed source pull-forward succeeds.
+Independent #14170 advances Dev while this PR is open. The entire merged-tree
+composition is checked against the peer parent and reviewed head: all five
+authored paths match the reviewed head except the manifest's single inherited
+installer source binding;
+every other path matches the independent peer parent. All nodes, coverage
+targets, helper decisions and eighteen opened observation sources remain
+unchanged. Current source bindings verify, but earlier head CI is not execution
+evidence for the later peer installer delta. The next ordinary functional
+slice retains that binding and needs its own fresh complete CI; no validation-
+only replay is requested.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this nineteen-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain.
 
 ### November 23 original injected operation-custody controls
 
