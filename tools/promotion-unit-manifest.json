@@ -3,6 +3,18 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_cache_path_spelling_units.py",
+   [
+    "test_private_fixture_preserves_unc_and_native_root_spelling[\\\\\\\\server\\\\share\\\\cache]",
+    "test_private_fixture_preserves_unc_and_native_root_spelling[\\\\\\\\?\\\\C:\\\\cache]",
+    "test_private_fixture_preserves_unc_and_native_root_spelling[\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\cache]",
+    "test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix[C:\\\\cache\\\\example-\\\\\\\\?\\\\C:\\\\cache\\\\example]",
+    "test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix[\\\\\\\\server\\\\share\\\\cache-\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\cache]",
+    "test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix[\\\\\\\\?\\\\C:\\\\cache\\\\example-\\\\\\\\?\\\\C:\\\\cache\\\\example]",
+    "test_non_windows_cache_spelling_is_unchanged"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py",
    [
     "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:/tests/test_sample.py]",
@@ -11910,6 +11922,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_cache_path_spelling_units.py": "a657db57795814817357ae482337006e86c4b62de044039f86154b085c108c64",
   "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py": "4400061512e79217c4cd944021871f3b2b73ac2673793c0ff2ef4d58efd1bbb8",
   "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py": "b11b9b80ec2287ca7a21206db538f5d20ec9b7422e3c9930eb7e1cde28acae85",
   "tools/pytest_test_selection.py": "8c90e056d2f477fa0761c93f19b749e8cd8aebbee14d4d1104bc32677a23ec59",

@@ -1,0 +1,9 @@
+{
+  "comment": "Include original pure cache path spelling controls in the bounded promotion unit packet",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
