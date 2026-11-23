@@ -268,7 +268,7 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==202;
+          assert len(cases)==218;
           assert sum(c.find('skipped') is None for c in cases)==182;
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Qualify raw and packaged effective UV index context

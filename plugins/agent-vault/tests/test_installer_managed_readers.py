@@ -25,16 +25,16 @@ _isolated_install_env = cast(
 )
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows installer readers")
-@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-@pytest.mark.parametrize("function", ["Get-BootstrapPython", "Resolve-PythonCommand"])
-@pytest.mark.parametrize("scenario", ["managed", "unprepared", "wheel", "profile"])
-def test_powershell_setup_readers_ignore_ambient_python(
-    tmp_path: Path, shell: str, function: str, scenario: str,
-) -> None:
-    host, uv = shutil.which(shell), shutil.which("uv")
-    if not host or not uv:
-        pytest.skip("This control requires uv and the addressed native shell")
+@pytest.fixture(scope="module")
+def powershell_reader_payload(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return _stage_payload(tmp_path_factory.mktemp("powershell-reader-payload"))
+
+
+@pytest.fixture(scope="module")
+def prepared_native_bootstrap() -> tuple[Path, Path, Path]:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("This control requires uv")
     selected = subprocess.run(
         [uv, "python", "find", "--no-project", "--system", "--managed-python",
          "--no-python-downloads", "cpython@3.11.18"],
@@ -45,7 +45,22 @@ def test_powershell_setup_readers_ignore_ambient_python(
     managed_root = subprocess.check_output(
         [uv, "python", "dir"], text=True, timeout=15, **no_window_kwargs(),
     ).strip()
-    payload = _stage_payload(tmp_path / "composed")
+    return Path(uv), Path(selected.stdout.strip()).resolve(), Path(managed_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows installer readers")
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+@pytest.mark.parametrize("function", ["Get-BootstrapPython", "Resolve-PythonCommand"])
+@pytest.mark.parametrize("scenario", ["managed", "unprepared", "wheel", "profile"])
+def test_powershell_setup_readers_ignore_ambient_python(
+    tmp_path: Path, shell: str, function: str, scenario: str,
+    powershell_reader_payload: Path, prepared_native_bootstrap: tuple[Path, Path, Path],
+) -> None:
+    host = shutil.which(shell)
+    if not host:
+        pytest.skip("This control requires the addressed native shell")
+    uv, selected, managed_root = prepared_native_bootstrap
+    payload = powershell_reader_payload
     env = _isolated_install_env(tmp_path / "home")
     commands = tmp_path / "poisoned-path"
     commands.mkdir()
@@ -60,7 +75,7 @@ def test_powershell_setup_readers_ignore_ambient_python(
     empty_root.mkdir()
     env.update(
         PATH=str(commands), AMBIENT_MARKER=str(marker), UV_OFFLINE="1",
-        UV_PYTHON_INSTALL_DIR=str(empty_root) if scenario == "unprepared" else managed_root,
+        UV_PYTHON_INSTALL_DIR=str(empty_root if scenario == "unprepared" else managed_root),
     )
     runner = tmp_path / "reader.ps1"
     runner.write_text(
@@ -100,7 +115,7 @@ def test_powershell_setup_readers_ignore_ambient_python(
         assert result.returncode == 0, result.stdout + result.stderr
         expected = (
             "explicit-" + scenario if scenario in {"wheel", "profile"}
-            else str(Path(selected.stdout.strip()).resolve())
+            else str(selected)
         )
         assert json.loads(result.stdout) == expected
     assert not runtime.exists()
