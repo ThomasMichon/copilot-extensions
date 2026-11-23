@@ -3,6 +3,54 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_reproducer_mount_posture_units.py",
+      [
+        "test_effective_mounts_are_evidence_not_experiment_admission",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/ ro,relatime-/ rw,relatime]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/ ro,relatime-/ ro,rw]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp rw,nodev]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp rw,nosuid]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp ro,nosuid,nodev]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[- tmpfs tmpfs-- ext4 tmpfs]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[0:2 / /tmp-0:2 /subpath /tmp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[0:2 / /tmp-0:3 / /tmp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[0:2 / /tmp-0:1 / /tmp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[2 1 0:2-1 1 0:2]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp rw,nosuid,nodev,nodev]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp rw,nosuid,nodev,suid]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp rw,nosuid,nodev,dev]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp rw,nosuid,nodev-/tmp rw,,nosuid,nodev]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp-/tmp/../tmp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp-/./tmp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp-//tmp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[/tmp-/t\\\\777mp]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[2 1 0:2-2 x 0:2]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[2 1 0:2-2 1 bad]",
+        "test_unsafe_missing_or_ambiguous_mount_posture_refuses[ - tmpfs- tmpfs]",
+        "test_shadowed_or_nested_mounts_refuse[2 1 0:2 / /tmp rw,nosuid,nodev - tmpfs tmpfs rw\\n]",
+        "test_shadowed_or_nested_mounts_refuse[4 2 0:4 / /tmp/nested rw - tmpfs tmpfs rw\\n]",
+        "test_shadowed_or_nested_mounts_refuse[4 3 0:4 / /run/nested rw - tmpfs tmpfs rw\\n]",
+        "test_exact_record_ceiling_and_escaped_unrelated_path",
+        "test_wire_observation_requires_complete_nonroot_fields[uid-0]",
+        "test_wire_observation_requires_complete_nonroot_fields[gid-0]",
+        "test_wire_observation_requires_complete_nonroot_fields[uid-True]",
+        "test_wire_observation_requires_complete_nonroot_fields[roots-value3]",
+        "test_wire_observation_requires_complete_nonroot_fields[mountinfo-None]",
+        "test_actual_volatile_root_fields_are_checked[path-/foreign]",
+        "test_actual_volatile_root_fields_are_checked[uid-0]",
+        "test_actual_volatile_root_fields_are_checked[gid-0]",
+        "test_actual_volatile_root_fields_are_checked[mode-511]",
+        "test_actual_volatile_root_fields_are_checked[bytes-True]",
+        "test_actual_volatile_root_fields_are_checked[bytes-0]",
+        "test_actual_volatile_root_fields_are_checked[device-0:99]",
+        "test_actual_volatile_root_fields_are_checked[readonly-True]",
+        "test_actual_volatile_root_fields_are_checked[readonly-0]",
+        "test_actual_capacity_must_exactly_match_not_round_past_declaration[-1]",
+        "test_actual_capacity_must_exactly_match_not_round_past_declaration[1]",
+        "test_duplicate_roots_and_extra_fields_refuse"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_reproducer_storage_monitor_units.py",
       [
         "test_monitor_requires_measurement_again_on_resume",
@@ -11406,6 +11454,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_reproducer_mount_posture_units.py": "1e1dd09c1a1135ecbc870b466fe8b0b7c96b7084a07138af05d8d2cd97ec6dd0",
+    "tools/test_reproducer_lab_mounts.py": "d7363125848e868545d4563c8a971a0c12f11dcbe591435c29b9bf611bd33e8f",
     "tools/promotion_unit_tests/test_original_reproducer_storage_monitor_units.py": "841d8167a3bdf3de7752f3f2d4148547e87a77feb4d2df4b23c7f68be26ce829",
     "tools/promotion_unit_tests/test_original_reproducer_network_inventory_units.py": "22dd6ddb568b4fe4c80fb9d1854a888d1b985a2c0a5c088c8291d81f4f4e945b",
     "tools/test_reproducer_lab_network.py": "cde3c08216e41557ca4066e393238b1b001d26fe043e20ba5c981c3ff53bf029",
@@ -12712,6 +12762,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/reproducer-lab/mounts.py",
     "tools/reproducer-lab/storage.py",
     "tools/reproducer-lab/network.py",
     "tools/reproducer-lab/boundary.py",

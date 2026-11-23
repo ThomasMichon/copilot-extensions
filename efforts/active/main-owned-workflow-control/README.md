@@ -2604,7 +2604,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   seconds within the unchanged bound. Reviewed and merged trees match.
   Only this 43-case leaf is complete; the parent, separate refusals and
   native qualifications remain open.
-- [ ] Qualify five complete original in-memory storage-monitor functions:
+- [x] Qualify five complete original in-memory storage-monitor functions:
   resume freshness, exact thresholds, cadence/lifetime/loss, invalid
   measurement invalidation and finite bounded policy. Compare all 64 original
   cases with the expected 19 selected cases, retaining original functions,
@@ -2626,6 +2626,39 @@ authorizes critical main-path acceptance or a bounded administrative change.
   storage-owner call-phase coverage per case; all 57 phase reports pass.
   One adapter binding and one already-bound production coverage target are
   added. Compact-v2 contains 9,347 nodes and 1,304 sources in 1,040,977 bytes,
+  preserving prior node/target order, every current hash, all 89 helper
+  decisions and the 300-second bound. Fatal Ruff, whole-file strict Linux/Win32
+  typing and documentation consistency pass. #14136 merges at
+  `66c6a452e4ede024aea4df5be24458f0188bd046` after exact-head approval and
+  complete fresh Linux CI executes all 9,347 selected units in 144.159 packet
+  seconds within the unchanged bound. Reviewed and merged trees match.
+  Only this 19-case leaf is complete; the parent, separate refusals and
+  native qualifications remain open.
+- [ ] Qualify eight complete original pure mount-posture functions:
+  effective evidence, unsafe/ambiguous posture, shadowed/nested mounts,
+  exact record ceilings, wire/root fields, exact capacities and duplicate
+  roots/extra fields. Compare all 60 original cases with the expected 43
+  selected cases, retaining function/parameter-row identity, helpers,
+  synthetic tables, loops and assertions. Exclude all reader/guest/native
+  cases and the complete four-case long-table function before execution;
+  its unchanged case identifiers do not fit the remaining manifest bound.
+  Never truncate or relabel its rows. Require initial unchanged effect/source
+  auditing and actual mounts-owner call-phase coverage per selected case.
+  Add only adapter/original-test bindings and the already-bound production
+  mounts module as a coverage target; preserve all 9,347 nodes, 1,304 current
+  hashes, 472 targets, 89 helper decisions, the 300-second deadline and the
+  existing manifest byte bound. Require strict checks, committed release
+  intent, exact-head review and complete fresh Linux CI. Supplied mount
+  tables and dictionaries are not real mount, quota, custody or capacity
+  proof; no native lane, held refusal, guard exception or consumed retry
+  is replayed.
+  Complete collection confirms all 60 original cases, exactly 43 adapter
+  cases, original function/parameter-row identity and equal cross-module
+  parameter values/types. Initial unchanged auditing passes all 43 in 1.422
+  seconds with zero prohibited effects, thirteen bound canonical Python
+  reads and actual mounts-owner call-phase coverage per case; all 129
+  phase reports pass. Two source bindings and one production target are
+  added. Compact-v2 contains 9,390 nodes and 1,306 sources in 1,044,996 bytes,
   preserving prior node/target order, every current hash, all 89 helper
   decisions and the 300-second bound. Fatal Ruff, whole-file strict Linux/Win32
   typing and documentation consistency pass. Normal review and complete fresh

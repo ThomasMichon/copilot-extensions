@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original pure mount posture unit controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
