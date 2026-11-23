@@ -141,12 +141,14 @@ excluded. Installed acceptance still requires actual serving-state evidence.
 
 ### Phase 3 - Delivery and completion
 
-- [ ] Restore backward-compatible launch with older selected engines without
+- [x] Restore backward-compatible launch with older selected engines without
   reviving remote precreation or replaying an effectful operation.
 - [x] Complete source validation and normal required review/CI, then merge
   the implementation and reconcile this effort.
 - [x] Repair tracked release-qualification blockers preventing promotion,
   starting with #14053; preserve private fixture namespaces and required gates.
+- [ ] Repair the observed atomic-bytecode admission race tracked by #14202,
+  retaining strict source/path-hook checks and normal rollout readiness.
 - [ ] Verify promotion, authorized installation and ordinary terminal launch
   behavior; record actual evidence separately from source tests.
 - [ ] Resolve all owned PR/resource obligations, close the tracking issues,
@@ -210,6 +212,37 @@ Do not globally unbound passive reads or unrelated background operations.
   now uses the selected cell registry, with conflicting-legacy and missing-scoped
   controls. The revised focused packet passed 248 cases with one native-Bash
   skip; whole-file strict checks passed for Linux and Windows.
+- #14193 merged as `3ed1d6ffcae7a1c1eee9ed8ba0864cf625ebd254` after
+  current-head Copilot approval and required green CI. The addressed supplier
+  thread is resolved. Managed completion reconciled the two local commits past
+  the verified squash result without losing content.
+- Next: verify promotion and authorized installed terminal behavior, resolve
+  the retained rollout failure through its owning path, then complete tracking
+  and resource close-out. The source correction does not close these gates.
+- Claimed #14202 for the observed immutable-runtime admission race during
+  rollout. A deterministic real-filesystem rename reproduces the same
+  `FileNotFoundError` before the correction; five negative controls already pass.
+  Keep this repair separate from the merged Manager compatibility correction.
+- The race repair and existing immutable-environment packet passed 125 cases
+  with four platform-specific skips under the supervisor and actual timeout
+  plugin. Only disappearing numeric CPython temporaries in `__pycache__` are
+  tolerated; missing source/metadata and retained unsafe entries still refuse.
+- The module cap required extracting static environment qualification from
+  construction into the existing retained identity component. The public API
+  and retained-resource inventory are unchanged; no new component or protocol
+  argument is introduced. Post-extraction Linux validation passed 150 cases
+  with five platform-specific skips, including the retained guardian's
+  source-replacement controls, under a 2-GiB/360-second cgroup.
+- The same combined selection on Windows passed the 125 environment cases but
+  hit 26 guardian-fixture failures before entering the validator: its inert
+  `ctypes` double rejects the Windows lease module's import. Linux exercises
+  that unit control; this is not a Windows guardian or installed-TTY pass.
+  The existing installed Windows qualification gate remains open.
+- Whole-file strict typing passed for 81 physical files across 17 projects,
+  including materialized installer consumers on Linux and Windows. The module,
+  install-contract and documentation guards passed. Removed only this
+  contributor's generated scratch copies from the development source layout;
+  no installer contract or runtime resource inventory changed.
 
 ### 2026-11-22 - Implementation merged; installed acceptance next
 
