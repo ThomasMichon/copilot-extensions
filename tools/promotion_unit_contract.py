@@ -313,7 +313,8 @@ def verify_observations(
     expected: list[str], collected: list[str], reports: list[dict[str, Any]],
     effects: list[str], elapsed: float, maximum: int,
 ) -> None:
-    if len(collected) != len(set(collected)) or set(collected) != set(expected):
+    expected_nodes = set(expected)
+    if len(collected) != len(set(collected)) or set(collected) != expected_nodes:
         raise UnitEvidenceError("collected unit nodes differ from the exact admitted inventory")
     observed: dict[tuple[str, str], str] = {}
     for report in reports:
@@ -322,7 +323,7 @@ def verify_observations(
         if any(not isinstance(report[field], str) for field in ("node", "phase", "outcome")):
             raise UnitEvidenceError("unit phase fields must be strings")
         key = (report["node"], report["phase"])
-        if key in observed or key[0] not in expected or key[1] not in ("setup", "call", "teardown"):
+        if key in observed or key[0] not in expected_nodes or key[1] not in ("setup", "call", "teardown"):
             raise UnitEvidenceError("duplicate or unexpected unit phase")
         observed[key] = report["outcome"]
     required = {(node, phase) for node in expected for phase in ("setup", "call", "teardown")}

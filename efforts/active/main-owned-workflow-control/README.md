@@ -486,6 +486,24 @@ schema/profile, every value and ordered witness, logical identity, proof
 checks, 1 MiB cap, deadlines and all operational holds. This is not a new
 profile, phase contract, writer activation, native grant or rollout.
 
+**2026-11-23 - Pure packet-processing CPU correction (operator-selected behavior):**
+
+After #14241's exact-head CI expires before upload, the operator selects:
+
+> optimize pure packet-processing CPU in this PR, then review/test a new
+> head, preserving all guards, witnesses, contracts and limits.
+
+Keep the failed attempt intact; do not blindly retry it or bypass CI.
+An independent owner is landing a ten-minute outer unit-job envelope through
+normal review, retaining the packet's 300-second bound. Rebase onto that
+change after it merges rather than duplicating it or changing a workflow here.
+This decision authorizes pure packet-CPU source work and fresh qualification
+of a corrected head in #14241, not a phase/profile/schema change, witness
+reduction, native action, rollout or transfer of the independent owner's work.
+After the correction passes local validation, the operator clarifies: do not
+wait for that unpublished envelope PR; publish the corrected head now through
+normal gates and rebase if the independent envelope change later lands.
+
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).
 The campaign driver owns implementation/review; the repository owner alone
 authorizes critical main-path acceptance or a bounded administrative change.
@@ -3448,7 +3466,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `3159e63925b4be7131461268d21e67ef5f6ecc6f`; the entire reviewed and merged
   trees are equal. Actual parent Goal, Plan, own leaf and Validation Plan
   are reread before resolving only this seven-case source leaf.
-- [ ] Qualify seven complete original command-safety classification functions,
+- [x] Qualify seven complete original command-safety classification functions,
   provisionally 21 cases: bounded inspection, NUL refusal, redirected-home
   nonqualification, runner-bound namespaces, Windows private-name freshness,
   POSIX private sockets and child-argument namespace refusal. Select only
@@ -3470,8 +3488,80 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and 1,040,021 one-space v2 bytes. Preserve all prior entries/order/hashes,
   89 helpers, 1 MiB cap and 300-second bound. Ruff and normal changed-code
   Linux/Windows strict checks pass; a worktree-manager patch changefile
-  records release intent. Exact-head review, fresh full CI, normal merge
-  and actual parent readback remain outstanding.
+  records release intent. #14237 receives exact-head approval; fresh
+  attempt-one CI executes all 9,729 cases in 193.019 packet seconds,
+  completes the three-file upload and passes the required aggregate.
+  Normal managed merge yields `a539a408ff81469583784d539ac7860212fff156`.
+  The independent Driver change #14224 advances Dev during review: all
+  five owned blobs and the exact manifest equal the reviewed head, but the
+  entire merged tree differs by that peer change. Source CI qualifies the
+  reviewed head, not an asserted combined-tree execution. Managed
+  pull-forward succeeds after a verified concurrent-fetch ref race; no
+  ref deletion, reset, stash or repair is used. All three observed inputs
+  and complete source/helper bindings verify. Actual parent Goal, Plan,
+  own leaf and Validation Plan are reread before resolving only this leaf.
+- [ ] Qualify six complete original shell/environment policy functions as
+  provisionally 35 cases: environment mutation and split-string handling,
+  GNU split-extension refusal, shell-state invalidation, explicit private
+  transport and namespace expansion. Preserve the original module-local
+  POSIX policy patches, functions/assertions/fixture names and recursive
+  parameter values/types, marks and full IDs. Original callback cases
+  collect `addaudithook` into a list and directly invoke that callback;
+  no actual hook activation, audit event, native parser or backend operation
+  is selected. Require exact collection, unchanged positive observation,
+  real helper calls, normal strict checks, release intent, exact-head review,
+  fresh complete CI, normal merge and actual parent readback.
+  Exact collection verifies 43 functions / 272 originals against six
+  functions / 35 adapter cases; 37 functions / 237 cases are excluded
+  before execution. Original function identities, fixture names, recursive
+  parameter values/types, own marks and complete IDs match. Unchanged
+  observation passes 35 in 1.38 pytest / 2.109 observation seconds, with
+  zero prohibited effects, three bound Python reads, all 105 phase reports
+  and real command-safety call lines per case. Native parser/Windows token
+  body lines are absent. Add only the adapter binding: 9,764 nodes, 1,374
+  sources and the same 494 targets in 1,043,839 one-space v2 bytes. Preserve
+  all prior entries/order/hashes, 89 helpers, 1 MiB cap and 300-second bound.
+  Ruff and normal changed-code Linux/Windows strict checks pass; a
+  worktree-manager patch changefile records release intent. Exact-head
+  review, fresh full CI, normal merge and actual parent readback remain.
+  #14241 receives exact-head approval `6021004306`, but fresh attempt-one
+  CI `45166572452` is cancelled at the unchanged five-minute job limit.
+  Unit job `137664941138` records all 9,764 cases passing in 224.64 pytest /
+  250.609 packet seconds and computes executed-packet metadata, but the
+  qualification step is cancelled before artifact upload. The provider
+  explicitly reports exceeding `5m0s`; artifact inventory is empty.
+  Guards pass, required aggregate `137667524743` fails and the PR remains
+  unmerged. This is not a qualified packet or a known-flake waiver.
+  No retry, deadline increase, evidence substitution, reduced selection or
+  automatic CPU-optimization assignment follows from the failure.
+- [ ] Complete the separately selected pure packet-CPU correction in #14241.
+  Replace phase-proof validation's per-report full inventory scan with one
+  local membership set, retaining every collection, report shape/type,
+  duplicate/unexpected phase, positive-outcome, effect and elapsed-bound check.
+  A focused comparison-work regression fails on the original code and passes
+  after correction; all 166 phase/packet acceptance and refusal cases pass.
+  At the unchanged 9,764-node / 29,292-report synthetic workload, three-trial
+  median validation time changes from 1.545238 to 0.080254 seconds. This is
+  pure function CPU measurement, not full packet or CI timing.
+  Unchanged guarded observation of all 166 cases passes in 3.77 pytest /
+  4.500 observation seconds with zero prohibited effects, four bound Python
+  reads, all 498 reports and actual owner calls. Add one regression witness
+  and refresh only the two changed source bindings; preserve all 9,764 prior
+  witnesses/order, source keys, 494 targets, 89 helpers, 1 MiB cap and
+  300-second bound. Candidate totals are 9,765 / 1,374 / 494 / 1,043,986 bytes.
+  Ruff and normal changed-code Linux/Windows strict checks pass.
+  The operator subsequently directs publication now without waiting for the
+  unpublished independent envelope PR, with managed rebase if it later lands.
+  Corrected-head review and complete fresh CI, normal merge and actual
+  parent readback remain.
+  Corrected publication `84890980dc5051988e6daddcd1b2bb84026e9340` then
+  reports a Dev-base conflict before ordinary unit CI starts. A retained
+  backup precedes managed sync and its safe abort; the understood manual
+  rebase keeps both independent manifest groups. The combined inventory
+  preserves every node and relative order from both branches, all peer
+  bindings/targets and our three unchanged Python blobs: 9,786 cases,
+  1,377 sources, 495 targets and 1,046,031 bytes, still with 89 helpers,
+  the 1 MiB cap and 300 seconds. This reconciliation is not new-head CI.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
