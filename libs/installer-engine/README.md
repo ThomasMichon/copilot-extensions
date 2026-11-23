@@ -172,6 +172,11 @@ The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
 isolation. Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
+Isolated selection suppresses UV configuration discovery and clears an explicit
+`UV_CONFIG_FILE` in the child, so relative or malformed project configuration
+cannot veto the prepared interpreter lookup. The caller retains its original
+configuration for subsequent dependency-policy reads and construction; the
+shared construction environment helper is unchanged.
 
 The POSIX installer instance-reconciliation adapter is a prepared-only managed
 consumer of that selector, with its own exact version request. Selection and

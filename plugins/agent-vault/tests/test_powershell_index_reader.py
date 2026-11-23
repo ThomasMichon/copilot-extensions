@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from importlib import import_module
 import base64
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from collections.abc import Callable
+from importlib import import_module
+from pathlib import Path
 from typing import cast
 
-from agent_procutil import no_window_kwargs
 import pytest
+from agent_procutil import no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
@@ -50,7 +50,7 @@ def test_powershell_index_uses_managed_policy_and_construction_context(
     for name in (
         "UV_DEFAULT_INDEX", "UV_INDEX_URL", "PIP_INDEX_URL", "PIP_CONFIG_FILE",
         "UV_PROJECT", "UV_CONFIG_FILE", "UV_WORKING_DIR", "UV_WORKING_DIRECTORY",
-        "UV_ISOLATED", "UV_NO_CONFIG", "CONDA_PREFIX",
+        "UV_ISOLATED", "CONDA_PREFIX",
     ):
         env.pop(name, None)
     commands = tmp_path / "poisoned-path"
@@ -68,7 +68,7 @@ def test_powershell_index_uses_managed_policy_and_construction_context(
     empty_root.mkdir()
     env.update(
         PATH=str(commands), AMBIENT_MARKER=str(marker), UV_NO_SYSTEM_CONFIG="1",
-        UV_OFFLINE="1",
+        UV_OFFLINE="1", UV_NO_CONFIG="false",
         UV_PYTHON_INSTALL_DIR=str(empty_root if setting == "unprepared" else managed_root),
     )
     location = tmp_path / "provider caf\u00e9"
@@ -130,22 +130,29 @@ def test_powershell_index_uses_managed_policy_and_construction_context(
         "if ($errors.Count) { throw 'Installer parse failed' }\n"
         "foreach ($name in @('Get-BootstrapPython','Ensure-UvIndex')) {\n"
         "  $definition = $ast.Find({param($node) $node -is "
-        "[Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)\n"
+        "[Management.Automation.Language.FunctionDefinitionAst] "
+        "-and $node.Name -eq $name},$true)\n"
         "  . ([scriptblock]::Create($definition.Extent.Text))\n}\n"
         "$InstallDir = $Root; $Action = 'provision'\n"
         "$WheelProfile = ''; $script:RuntimeProfilePython = ''\n"
         "function Write-Step { param($Message) }\n"
         "$nativeDirectory = [Environment]::CurrentDirectory\n"
         "Set-Location -LiteralPath $Location\n"
+        "$configuration = $env:UV_CONFIG_FILE; $workingDirectory = $env:UV_WORKING_DIR\n"
         "Ensure-UvIndex -UvCommand $Uv\n"
-        "if ([Environment]::CurrentDirectory -cne $nativeDirectory) { throw 'Caller cwd changed' }\n"
+        "if ([Environment]::CurrentDirectory -cne $nativeDirectory) "
+        "{ throw 'Caller cwd changed' }\n"
+        "if ($env:UV_CONFIG_FILE -cne $configuration "
+        "-or $env:UV_WORKING_DIR -cne $workingDirectory "
+        "-or $env:UV_NO_CONFIG -cne 'false') { throw 'Caller configuration changed' }\n"
         "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$env:UV_DEFAULT_INDEX))\n",
         encoding="utf-8",
     )
     runtime = tmp_path / "runtime"
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - addressed shell and owned fixture paths
         [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-         "-File", str(runner), str(payload), str(engine), str(runtime), str(addressed_uv), str(location)],
+         "-File", str(runner), str(payload), str(engine), str(runtime),
+         str(addressed_uv), str(location)],
         env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )

@@ -301,6 +301,9 @@ files in pip order, then an explicit `PIP_CONFIG_FILE`; an existing explicit
 file suppresses user files. Explicit UV settings still win. The reader runs
 through construction's native capture owner, retaining PowerShell's filesystem
 provider location and effective UV working/project/configuration context.
+The preceding managed interpreter lookup isolates UV configuration in its
+child only; the reader still receives the caller's original configuration,
+including an explicit path relative to `UV_WORKING_DIR`.
 
 ### Activation performance
 
