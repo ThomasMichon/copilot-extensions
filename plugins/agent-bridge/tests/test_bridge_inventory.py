@@ -487,11 +487,12 @@ def test_common_selector_preserves_partial_positive_and_dormant_assignment() -> 
     assert selected["sources"] == evidence
 
 
-def test_common_selector_does_not_substring_match_a_malformed_alias_collection() -> None:
+@pytest.mark.parametrize("key", ["observed_session_ids", "identity_aliases"])
+def test_common_selector_does_not_substring_match_a_malformed_alias_collection(key: str) -> None:
     from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
 
     report = project_bridges([workspace()], sources(), project="demo")
-    report["bridges"][0]["observed_session_ids"] = "native-a"
+    report["bridges"][0][key] = "native-a"
     with pytest.raises(BridgeSelectionError) as refused:
         select_bridge(report, "native")
     assert refused.value.status == 404

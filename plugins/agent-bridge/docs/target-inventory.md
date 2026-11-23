@@ -95,6 +95,10 @@ potential-placement matching. Project/CWD scope and explicit `--all-projects`,
 `--machine`, `--namespace` and repeatable `--host` selectors have the same meaning
 as `list`.
 
+Fleet reconciliation retains `identity_aliases` for managed and registration
+IDs whose observed native session matches the selected head. Routes retained
+from an older head are not identity aliases.
+
 The version-1 JSON response contains `bridge`, `sources` and `complete`.
 Multiple matching conversations or conflicting observed native identities
 refuse with `ambiguous_bridge_selector` (409). A missing match is

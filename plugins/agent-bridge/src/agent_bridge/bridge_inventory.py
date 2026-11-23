@@ -35,13 +35,14 @@ def select_bridge(report: dict[str, Any], handle: str) -> dict[str, Any]:
         row
         for row in report["bridges"]
         if any(row.get(key) == handle for key in keys)
-        or (
-            isinstance(row.get("observed_session_ids"), list)
-            and handle in row["observed_session_ids"]
+        or any(
+            isinstance(row.get(key), list) and handle in row[key]
+            for key in ("observed_session_ids", "identity_aliases")
         )
     ]
     if len(matches) > 1 or any(
-        row.get("control_reason") == "identity_ambiguous" for row in matches
+        row.get("control_reason") in ("identity_ambiguous", "retained_head_unknown")
+        for row in matches
     ):
         raise BridgeSelectionError(409, "ambiguous_bridge_selector")
     if not matches:

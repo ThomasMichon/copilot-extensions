@@ -309,6 +309,19 @@ not another permanent public discovery path.
   inspection, and the current assignment does not authorize installed rollout,
   protected receiver changes or native conversation execution. This does not
   resolve the separate installed-delivery gate.
+- The first review exposed two mixed-host identity defects: reconciliation
+  dropped managed aliases when preferring a registration, and the selector
+  accepted conflicting dormant heads. Both new regressions failed before the
+  correction. Reconciliation now retains only aliases tied to the selected
+  native head, and conflicting retained heads refuse inspection with 409.
+- The corrected packet passes 22 cases, including active and retained managed
+  aliases, reversed host order, exclusion of previous-head routes, malformed
+  alias collections and the real CLI/client/API negotiation controls. Separate
+  environment preparation was necessary after one preparation-heavy run used
+  its aggregate budget; that incomplete run is not counted as a pass.
+- Strict whole-file typing passes for all eight changed Python files on the
+  Python 3.10 Linux and Windows targets after the corrections. Focused lint,
+  install-contract and documentation-consistency checks pass.
 
 ### 2026-11-22 - Inventory slice merged; selector work continues
 

@@ -74,6 +74,19 @@ def merge_rows(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
             dict.fromkeys(source for row in ordered for source in row.get("sources", []))
         ),
         observed_session_ids=sorted(current_ids if active else retained_ids),
+        identity_aliases=sorted(
+            {
+                value
+                for row in ordered
+                if native and not conflict and row.get("session_id") == native
+                for key in (
+                    "managed_session_id",
+                    "registered_session_id",
+                    "retained_managed_session_id",
+                )
+                if isinstance(value := row.get(key), str) and value
+            }
+        ),
     )
     routes = []
     for row in ordered:
