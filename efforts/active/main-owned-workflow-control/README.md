@@ -3043,7 +3043,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   observed sources remain unchanged. Earlier-head CI is not evidence for
   that later peer delta. Only this ten-case source leaf is complete;
   the next normal functional slice needs fresh full-packet CI.
-- [ ] Qualify four complete original explicit-file selection functions as
+- [x] Qualify four complete original explicit-file selection functions as
   eleven cases: sorted/deduplicated selections, invalid relative paths,
   absolute paths and invalid CLI target combinations rejected before
   preparation. Preserve original functions, autouse scratch fixture,
@@ -3060,6 +3060,32 @@ authorizes critical main-path acceptance or a bounded administrative change.
   committed release intent, exact-head review and fresh full-packet CI.
   Selection and early CLI refusal do not qualify preparation, execution,
   threads/processes, native behavior, installation, release or custody.
+  #14191 receives exact-head approval; fresh attempt-one CI executes all
+  9,554 cases in 191.546 packet seconds, completes the three-file upload
+  and passes the required aggregate. Normal managed merge yields
+  `0dd3ada551cfbb7e9c4b06f1aca63b1f19c4cf95`. Whole-tree composition
+  preserves concurrent #14189 and #14187, including six existing source
+  rebindings; counts and bytes stay unchanged. All 48 initially observed
+  sources remain unchanged. Earlier-head CI is not evidence for those
+  later peer deltas. Only this eleven-case source leaf is complete;
+  the next normal functional slice needs fresh full-packet CI.
+- [ ] Qualify four complete original independent-file grouping functions
+  as five cases: declared Bridge groups, filtered/unfiltered preservation,
+  missing independent-file refusal and explicit selection without unrelated
+  native files. Preserve original functions, autouse scratch fixture,
+  parameter rows, IDs and assertions. Collection compares 267 originals
+  with five adapter cases, exact function/fixture/own-mark-row objects
+  and equal cross-module parameter values/types. The other 103 functions /
+  262 cases remain excluded before execution. Initial unchanged guarding
+  passes all five in 1.85 pytest / 2.469 observation seconds with zero
+  prohibited effects, 48 bound reads, all fifteen phase reports and actual
+  grouping-owner call-phase coverage. Add only one adapter binding,
+  yielding 9,559 nodes, 1,350 sources and unchanged 486 targets in
+  1,020,604 one-space v2 bytes. Preserve preceding entries/order/hashes,
+  89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
+  committed release intent, exact-head review and fresh full-packet CI.
+  Source fixture filenames do not qualify native execution, preparation,
+  process/thread cleanup, installation, release or custody.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

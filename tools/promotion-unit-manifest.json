@@ -3,6 +3,16 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_independent_selection_units.py",
+   [
+    "test_bridge_native_and_performance_files_have_independent_groups",
+    "test_independent_native_groups_preserve_every_collected_file[False]",
+    "test_independent_native_groups_preserve_every_collected_file[True]",
+    "test_missing_independent_native_group_fails_explicitly",
+    "test_explicit_collection_does_not_require_unselected_independent_files"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_explicit_selection_units.py",
    [
     "test_explicit_file_selection_avoids_unrelated_collection",
@@ -11696,6 +11706,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_independent_selection_units.py": "a6f493b99a9b2464895cc2ab3ae2c1b3f474e4137ecedb49bdd9d08fcc44870f",
   "tools/promotion_unit_tests/test_original_runner_explicit_selection_units.py": "11329efc56424d63a05f19c36aeafa49f9bf6d54754cd511000a3d5fee93d529",
   "tools/promotion_unit_tests/test_original_runner_file_selection_units.py": "e7b03cc29960003eb34d2fae984424b37ad38cb5dc07cef499d5d75ab4ed2a08",
   "tools/promotion_unit_tests/test_original_capture_cohort_selection_units.py": "e7490844522f4c23bb428b5147a2a7d81da6813670c8e86db13a204bb50a3f3d",
