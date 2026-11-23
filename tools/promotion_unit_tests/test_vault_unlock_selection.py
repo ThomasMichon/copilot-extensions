@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+import ast
+import math
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -21,6 +23,53 @@ caller = importlib.import_module(f"{PACKAGE}.unlock_client")
 qualification = importlib.import_module(f"{PACKAGE}.cache_warm_client")
 transport = importlib.import_module(f"{PACKAGE}.command_transport")
 selection = importlib.import_module(f"{PACKAGE}.cache_warm_selection")
+
+
+def test_core_retained_sender_pins_resolved_endpoint_token_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    core = importlib.import_module(f"{PACKAGE}.coredelegation")
+    source = ROOT / "plugins/agent-vault/src/agent_vault/core_ext.py"
+    tree = ast.parse(source.read_bytes(), filename=str(source))
+    body: list[ast.stmt] = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.FunctionDef) and node.name in ("_core_timeout", "bind_core_transport")
+    ]
+    assert len(body) == 3
+    environment = {"endpoint": "tcp:127.0.0.1:19071", "token": "fixture-original", "timeout": "12"}
+    endpoints = [core.Endpoint("tcp", "127.0.0.1:19071"), core.Endpoint("tcp", "127.0.0.1:19072")]
+    discoveries: list[str] = []
+    calls: list[tuple[object, dict[str, Any], float | None]] = []
+
+    def discover(_directory: Path, *, override: str, probe: object) -> Any:
+        discoveries.append(override)
+        return endpoints[0] if override.endswith("19071") else endpoints[1]
+
+    def dial(endpoint: object, payload: dict[str, Any], timeout: float | None) -> dict[str, Any]:
+        calls.append((endpoint, payload, timeout))
+        return {"ok": True}
+
+    monkeypatch.setattr(core, "_dial", dial)
+    namespace: dict[str, Any] = {
+        "os": SimpleNamespace(environ=environment), "math": math,
+        "CORE_ENDPOINT_ENV": "endpoint", "CORE_TOKEN_ENV": "token", "CORE_TIMEOUT_ENV": "timeout",
+        "DEFAULT_CORE_TIMEOUT": 30.0, "core_runtime_dir": lambda: ROOT,
+        "resolve": discover, "connect_probe": core.connect_probe,
+        "default_accept": core.default_accept, "EndpointUnavailable": core.EndpointUnavailable,
+        "delegate": core.delegate,
+    }
+    exec(compile(ast.Module(body=body, type_ignores=[]), str(source), "exec"), namespace)
+    sender = namespace["bind_core_transport"](SimpleNamespace())
+    assert sender is not None
+    assert sender({"action": "ping"}, None, SimpleNamespace())["ok"]
+    environment.update(endpoint="tcp:127.0.0.1:19072", token="fixture-replacement", timeout="99")
+    assert sender({"action": "unlock", "password": "fixture-master"}, 20.0, SimpleNamespace())["ok"]
+    assert discoveries == ["tcp:127.0.0.1:19071"]
+    assert [endpoint for endpoint, _, _ in calls] == [endpoints[0], endpoints[0]]
+    assert [payload[core.TOKEN_KEY] for _, payload, _ in calls] == ["fixture-original"] * 2
+    assert [timeout for _, _, timeout in calls] == [12.0, 12.0]
+    assert calls[-1][1]["password"] == "fixture-master"
 
 
 def test_unlock_capability_requires_a_ready_actual_peer_and_integer_generation() -> None:
@@ -59,7 +108,10 @@ def test_unlock_sender_keeps_context_and_only_projects_negotiated_selection() ->
 
 
 def test_uncertain_unlock_calls_its_retained_sender_once_without_replay() -> None:
-    outcomes: tuple[object, ...] = (None, [], OSError("private transport diagnostic"))
+    outcomes: tuple[object, ...] = (
+        None, [], {}, {"needs_unlock": True}, {"ok": None}, {"ok": 0}, {"ok": "false"},
+        OSError("private transport diagnostic"),
+    )
     for outcome in outcomes:
         calls: list[str] = []
 
@@ -116,7 +168,9 @@ def test_readonly_status_never_reuses_old_or_rolled_back_resident_progress(
     monkeypatch.setattr(package, "cli", SimpleNamespace(
         _ready_for_work=lambda reply: isinstance(reply, dict) and reply.get("ok") is True,
     ), raising=False)
-    for mode in ("current", "old", "rollback", "lost", "dropped", "boolean-receipt"):
+    for mode in (
+        "current", "old", "rollback", "lost", "dropped", "boolean-receipt", "transition",
+    ):
         calls: list[dict[str, Any]] = []
         health: dict[str, Any] = {
             "ok": True, "accepting_work": True,
@@ -125,6 +179,7 @@ def test_readonly_status_never_reuses_old_or_rolled_back_resident_progress(
         }
         response: dict[str, Any] = {
             **health, "cache_warm_selection_versions": [] if mode == "rollback" else [1],
+            "accepting_work": mode != "transition",
             "cache_warm": {
                 **health["cache_warm"],
                 **({selection.RECEIPT_FIELD: True if mode == "boolean-receipt" else 1}

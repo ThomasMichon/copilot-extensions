@@ -155,7 +155,8 @@ and its legacy warming policy remains. No new field is sent without capability
 support. An older reader ignoring unknown JSON is not negotiation.
 
 A known provider-only `needs_unlock` response can continue the existing prompt
-flow on the retained connector. A lost or malformed unlock reply stops with
+flow on the retained connector only after an actual boolean `ok` outcome.
+A lost or malformed unlock reply stops with
 unknown outcome: no fallback prompt, transport reselection or automatic replay.
 A successful unlock remains exit zero even when its warming receipt is missing,
 disabled or refused; a fixed, credential-free warning separates that failure
@@ -170,13 +171,38 @@ the current source's status over the retained connector. This adds one ping for
 a capable peer, not an unlock or a new connection-selection attempt. Old,
 unacknowledged, malformed or rolled-back peers render warming as `unknown`, never as a successful
 resident-source batch for the caller. Other service/lifetime fields retain their
-existing rendering.
+existing rendering. A reachable non-accepting service remains visible with
+warming unknown; unlock still requires readiness. A transition observed by the
+second ping does not turn a successful liveness response into `not running`.
 
 This migration covers explicit unlock and its associated read-only status.
 Implicit provider-triggered reads and other callers retain their baseline until
 their own conditional migration; they are not claimed as cross-source acceptance.
 Provider rollback retains ordinary unlock support with the unsupported warning,
 not a claim that the requested source was warmed. No old form is retired here.
+
+### Transport owner binding
+
+A transport callback can rediscover its peer on every invocation, so retaining
+the callback alone does not pin the endpoint that answered qualification.
+Extension owners provide `register_transport(..., bind=binder)`: the read-only
+`binder(ctx)` resolves and captures the connector and returns the transport to
+use for that operation, or `None` when it does not apply. The returned callable
+must not select another peer. A callback already bound to a fixed connector can
+return itself from the binder.
+
+The shipped `core_ext.bind_core_transport` captures the selected core endpoint,
+token and finite timeout cap before ping. Later sends reuse that endpoint through
+the existing delegation override, not environment or rendezvous rediscovery.
+No second credential/delegation engine or vendored-library patch is involved.
+Preferred/fallback ordering and ordinary one-shot transport calls are unchanged.
+
+Without a binder, a successful health response can still serve read-only status,
+but warming is unknown. An ordinary already-unlocked command can remain a no-op;
+otherwise explicit unlock refuses before reading or sending a password because
+its selected endpoint cannot be retained. Create-only attachment mutations
+additionally retain their separate `single_attempt=True` requirement. Neither
+registration option grants access or waives service-side admission.
 
 Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_cache_warm.py`, `tests/test_cache_warm_contention.py` and

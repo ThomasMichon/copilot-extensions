@@ -55,17 +55,18 @@ def selected_service() -> Iterator[SelectedService | None]:
         context = config.resolve_context(strict=True)
         route = CommandRoute()
         health = cli.send_command({"action": "ping"}, timeout=5.0, _context=context, _route=route)
-        if not cli._ready_for_work(health) or route.sender is None:
+        if health is None or health.get("ok") is not True:
             yield None
             return
         assert health is not None
-        yield SelectedService(cli.send_command, context, route, selection, health, supported(health))
+        yield SelectedService(
+            cli.send_command, context, route, selection, health,
+            supported(health) and route.sender is not None,
+        )
 
 
 def scoped_status() -> Reply:
     """Never render resident-source progress as the selected caller's warming."""
-    from . import cli
-
     with selected_service() as selected:
         if selected is None:
             return None
@@ -75,13 +76,14 @@ def scoped_status() -> Reply:
                 {"action": "ping", FIELD: selected.selection.describe()}, 5.0,
                 _context=selected.context, _route=selected.route,
             )
-            if not cli._ready_for_work(response):
+            if response is None or response.get("ok") is not True:
                 return None
         assert response is not None
         response = dict(response)
         warm = response.get("cache_warm")
         if (
-            not supported(response) or not acknowledged(warm) or not isinstance(warm, dict)
+            not selected.source_supported or not supported(response)
+            or not acknowledged(warm) or not isinstance(warm, dict)
             or warm.get("target_policy") != CACHE_TARGET_CAPABILITY
         ):
             response["cache_warm"] = None

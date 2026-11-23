@@ -173,7 +173,7 @@ def test_retained_extension_failure_never_reenters_transport_selection(
 
     instance = SimpleNamespace(
         _transports_before=[
-            SimpleNamespace(name="selected", fn=selected),
+            SimpleNamespace(name="selected", fn=selected, bind=lambda _ctx: selected),
             SimpleNamespace(name="unqualified", fn=other),
         ],
         _transports_after=[],
@@ -212,7 +212,7 @@ def test_qualification_logging_is_sanitized_without_changing_legacy_selection(
 
     ranked = [
         SimpleNamespace(name="private-transport-name", fn=broken),
-        SimpleNamespace(name="available", fn=available),
+        SimpleNamespace(name="available", fn=available, bind=lambda _ctx: available),
     ]
     instance = SimpleNamespace(
         _transports_before=ranked if before_builtin else [],

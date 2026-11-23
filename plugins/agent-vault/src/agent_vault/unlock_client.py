@@ -48,7 +48,7 @@ class UnlockSession:
             )
         except Exception:
             raise UnlockOutcomeUnknown from None
-        if not isinstance(response, dict):
+        if not isinstance(response, dict) or type(response.get("ok")) is not bool:
             raise UnlockOutcomeUnknown
         self.last_reply = response
         if (
@@ -93,6 +93,18 @@ def command(args: Any) -> int:
         with selected_service() as selected:
             if selected is None:
                 print("Error: selected vault service is unavailable; no unlock attempted", file=sys.stderr)
+                return 1
+            if not cli._ready_for_work(selected.health):
+                print("Error: selected service is not accepting unlock work", file=sys.stderr)
+                return 1
+            if selected.route.sender is None:
+                if not terminal and cli._current_vault_unlocked(selected.health, selected.context):
+                    print("Vault available")
+                    print("Automatic cache warming not confirmed: transport cannot retain its endpoint",
+                          file=sys.stderr)
+                    return 0
+                print("Error: selected transport cannot retain a qualified endpoint; no unlock attempted",
+                      file=sys.stderr)
                 return 1
             session = UnlockSession(
                 selected.sender, selected.context, selected.route,

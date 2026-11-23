@@ -27,6 +27,8 @@ class Peer:
     password_reads: list[str] = field(default_factory=list)
     resolutions: int = 0
     provenance: list[bool] = field(default_factory=list)
+    accepting_work: bool = True
+    unlock_reply: dict[str, Any] | None = None
 
     def _warming_reply(self, request: dict[str, Any]) -> object:
         if not isinstance(self.warming, dict):
@@ -44,7 +46,9 @@ class Peer:
             if self.mode == "unavailable" or self.mode == "status-lost" and FIELD in request:
                 return None
             return {
-                "ok": True, "accepting_work": True,
+                "ok": True,
+                "accepting_work": self.accepting_work
+                and not (self.mode == "status-transition" and FIELD in request),
                 "pid": 123, "cached": 0, "ttl": 30, "cache_warm": self._warming_reply(request),
                 "unlocked_vaults": [self.context.kpdb] if self.unlocked else [],
                 "cli": "unlocked" if self.unlocked else "locked",
@@ -53,6 +57,8 @@ class Peer:
                    and not (self.mode == "status-rollback" and FIELD in request) else {}),
             }
         assert request["action"] == "unlock"
+        if self.unlock_reply is not None:
+            return dict(self.unlock_reply)
         if self.mode == "lost":
             return None
         if self.mode == "raised":
@@ -179,6 +185,55 @@ def test_uncertain_or_refused_unlock_never_falls_through_to_another_prompt(
     assert ("unknown" if mode != "refused" else "refused") in output.err
 
 
+@pytest.mark.parametrize("reply", [{}, {"needs_unlock": True}, {"ok": 0}, {"ok": "false"}])
+@pytest.mark.parametrize("terminal", [False, True])
+def test_non_boolean_unlock_outcome_never_succeeds_or_starts_another_prompt(
+    peer: Peer, capsys: pytest.CaptureFixture[str], reply: dict[str, Any], terminal: bool,
+) -> None:
+    peer.unlock_reply = reply
+    assert cli.cmd_unlock(SimpleNamespace(terminal=terminal)) == 1
+    output = capsys.readouterr()
+    assert output.out == "" and "unlock outcome is unknown" in output.err
+    assert len(peer.requests) == 2
+    assert len(peer.password_reads) == (1 if terminal else 0)
+
+
+def test_reachable_nonaccepting_service_remains_visible_but_cannot_unlock(
+    peer: Peer, capsys: pytest.CaptureFixture[str],
+) -> None:
+    peer.accepting_work = False
+    assert cli.cmd_ping(None) == 0
+    output = capsys.readouterr()
+    assert "cache warm=unknown" in output.out and "not running" not in output.out
+    assert cli.cmd_unlock(SimpleNamespace()) == 1
+    assert "not accepting unlock work" in capsys.readouterr().err
+    assert all(request["action"] == "ping" for request in peer.requests)
+    assert not peer.password_reads
+
+
+@pytest.mark.parametrize("unlocked", [False, True])
+def test_unbound_extension_keeps_readonly_status_without_sending_credentials(
+    peer: Peer, capsys: pytest.CaptureFixture[str], unlocked: bool,
+) -> None:
+    peer.unlocked = unlocked
+    peer.warming = {
+        **WarmState("complete", selected=1, cached=1).describe(), RECEIPT_FIELD: 1,
+    }
+
+    def unbound(
+        request: dict[str, Any], timeout: float | None, _context: object,
+    ) -> dict[str, Any] | None:
+        return peer.send(request, "fixture", 19371, timeout)
+
+    extensions.get_registry().register_transport(unbound, before_builtin=True)
+    assert cli.cmd_ping(None) == 0
+    assert "cache warm=unknown" in capsys.readouterr().out
+    assert cli.cmd_unlock(SimpleNamespace()) == (0 if unlocked else 1)
+    assert "cannot retain" in capsys.readouterr().err
+    assert all(request["action"] == "ping" for request in peer.requests)
+    assert not peer.password_reads
+
+
 def test_explicit_terminal_with_unavailable_service_never_reads_a_password_or_starts_it(
     peer: Peer, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -244,7 +299,9 @@ def test_ping_projects_current_source_or_reports_unknown_instead_of_resident_pro
     assert peer.resolutions == 1 and not peer.password_reads
 
 
-@pytest.mark.parametrize("mode", ["status-lost", "status-rollback", "status-dropped"])
+@pytest.mark.parametrize("mode", [
+    "status-lost", "status-rollback", "status-dropped", "status-transition",
+])
 def test_ping_never_retries_or_reuses_resident_progress_after_peer_loss_or_rollback(
     peer: Peer, capsys: pytest.CaptureFixture[str], mode: str,
 ) -> None:
