@@ -3230,7 +3230,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   the complete reviewed and merged trees are equal. Actual parent Goal,
   Plan and Validation Plan are reread before resolving only this thirteen-
   case source leaf. The parent remains open.
-- [ ] Qualify one complete original mocked preparation-argv function as two
+- [x] Qualify one complete original mocked preparation-argv function as two
   cases: separate and equals-form profile flags are removed together with
   test-file flags from preparation arguments, without mutating caller input.
   Preserve the original function, assertions, autouse scratch fixture,
@@ -3249,8 +3249,37 @@ authorizes critical main-path acceptance or a bounded administrative change.
   binding and that established production target: 9,634 nodes, 1,360
   sources and 489 targets in 1,029,513 one-space v2 bytes. Preserve preceding
   order/hashes, 89 helpers, 1 MiB cap and 300-second bound. Ruff and normal
-  Linux/Windows strict checks pass; release intent is recorded. Exact-head
-  review and fresh full CI remain required; leaf and parent remain open.
+  Linux/Windows strict checks pass; release intent is recorded. #14218
+  receives exact-head approval; fresh attempt-one CI executes all 9,634
+  cases in 142.529 packet seconds, completes the three-file upload and
+  passes the required aggregate. Normal managed merge yields
+  `111165accb659ca344b182f947c6084d2f93c10b`; the complete reviewed and
+  merged trees are equal. Actual parent Goal, Plan and Validation Plan
+  are reread before resolving only this two-case source leaf.
+- [ ] Qualify three complete original preflight/preparation early-return
+  functions, expected as four cases: unsafe child cleanup refuses before
+  preparation/collection, preflight consumes the original plugin budget,
+  and mocked prepare-only never invokes pytest. Preserve original
+  functions, assertions, the autouse scratch fixture and parameter rows.
+  Require exact collection, unchanged effect/source observation and actual
+  runner calls, strict checks, release intent, exact-head review and fresh
+  full CI. These paths stop before the unmocked cleanup thread pool.
+  Keep positive run/partition/profile tests that submit real cleanup work
+  separate; a mocked contained runner does not remove that thread effect.
+  Exact collection compares 267 originals with four adapter cases,
+  preserving function/fixture identity, parameter values/types, own marks
+  and complete IDs; 104 functions / 263 cases are excluded before execution.
+  Initial unchanged guarding passes all four in 2.10 pytest / 2.953
+  observation seconds with zero prohibited effects, 48 bound Python reads,
+  all twelve phase reports and actual runner calls in every case. The
+  canonical fake `alpha` plugin is absent; the prepare-only lookup does not
+  open a real plugin's configuration. Add only the adapter binding: 9,638
+  nodes, 1,361 sources and the same 489 targets in 1,030,063 one-space v2
+  bytes. Preserve preceding order/hashes, 89 helpers, 1 MiB cap and
+  300-second bound. Ruff and normal changed-code Linux/Windows strict checks
+  pass; a worktree-manager patch changefile records release intent.
+  Exact-head review and fresh complete CI remain required before resolving
+  this leaf.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
