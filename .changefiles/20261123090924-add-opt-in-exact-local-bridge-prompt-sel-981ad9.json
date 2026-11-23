@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in exact local bridge prompt selection through existing admission owners.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

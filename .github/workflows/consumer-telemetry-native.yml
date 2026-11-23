@@ -13,6 +13,8 @@ on:
       - "libs/agent-procutil/tests/test_command_pipe.py"
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
+      - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
+      - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_lifetimes.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_performance.py"
@@ -50,6 +52,8 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) { throw "Native checkout differs from its immutable dispatch" }
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_worktree_inventory_posix.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
@@ -113,6 +117,8 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) { throw "Native checkout differs from its immutable dispatch" }
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
             --test-file tests/test_consumer_telemetry_performance.py `

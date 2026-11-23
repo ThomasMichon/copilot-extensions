@@ -34,6 +34,120 @@ def package(monkeypatch: pytest.MonkeyPatch, name: str) -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize("represented", [False, True])
+def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
+    monkeypatch: pytest.MonkeyPatch, represented: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    calls: list[tuple[Any, ...]] = []
+    row = {
+        "status": "running", "session_id": "native",
+        "managed_session_id": None if represented else "managed",
+        "registered_session_id": "native" if represented else None,
+    }
+
+    def resolve(handle: str, **scope: Any) -> dict[str, Any]:
+        calls.append(("resolve", handle, scope))
+        return {"bridge": row}
+
+    client = SimpleNamespace(resolve_bridge=resolve)
+
+    def get_client(**options: Any) -> Any:
+        assert options == {"ensure": False}
+        return client
+
+    core = SimpleNamespace(
+        _get_client=get_client, _caller_id_for=lambda _args: "caller",
+        _submit_and_stream=lambda *args, **kwargs: calls.append(("managed", args, kwargs)),
+        _deliver_to_live_session=lambda *args: calls.append(("registered", args)),
+    )
+    for name, value in {
+        "__main__": core,
+        "client": SimpleNamespace(BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError),
+        "bridge_listing_cli": SimpleNamespace(_scope=lambda _args: {"project": "demo"}),
+        "client_protocol_floor": SimpleNamespace(hold_protocol_floor=lambda *_args: None),
+        "hosting_admission_cli": SimpleNamespace(configure_client=lambda *_args: None),
+        "session_targeting_cli": SimpleNamespace(
+            _resolve_prompt=lambda *_args, **_kw: "work",
+            _submit_and_stream=core._submit_and_stream,
+            _deliver_to_live_session=core._deliver_to_live_session,
+        ),
+    }.items():
+        monkeypatch.setitem(sys.modules, "_send_bridge." + name, value)
+    args = argparse.Namespace(target="workspace", bridge=True, idempotency_key="original")
+    adapter.send(args)
+    assert calls[0] == ("resolve", "workspace", {"local_only": True, "project": "demo"})
+    assert len(calls) == 2
+    actual = calls[1][1]
+    bound = actual[1]
+    assert actual[0] is client and actual[2:] == (
+        "native" if represented else "managed", "work",
+    )
+    assert bound is not args and bound.idempotency_key == "original"
+    if represented:
+        assert bound.expected_session_id == "native" and bound.exact_session
+    else:
+        assert bound.expected_native_session_id == "native" and bound.no_resume
+        assert calls[1][2] == {"caller_id": "caller"}
+    assert not hasattr(args, "expected_session_id")
+    assert not hasattr(args, "expected_native_session_id")
+
+
+@pytest.mark.parametrize("option", [
+    "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
+    "native_invocation_file", "settle_native_send", "expected_session_id",
+    "expected_native_session_id", "plugin_context_stdin", "startup_process_timeout",
+])
+def test_bridge_send_rejects_mixed_modes_before_client_or_prompt(
+    monkeypatch: pytest.MonkeyPatch, option: str,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    outcome = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    for name in (
+        "__main__", "bridge_listing_cli", "client_protocol_floor", "client",
+        "hosting_admission_cli", "session_targeting_cli",
+    ):
+        monkeypatch.setitem(sys.modules, "_send_bridge." + name, SimpleNamespace(
+            _scope=None, hold_protocol_floor=None, configure_client=None, _resolve_prompt=None,
+            _submit_and_stream=None, _deliver_to_live_session=None,
+            BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+        ))
+    with pytest.raises(outcome.SendRefused) as exc:
+        adapter.send(argparse.Namespace(target="workspace", **{option: True}))
+    assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
+
+
+@pytest.mark.parametrize("option", [
+    "native_invocation_file", "expected_native_session_id", "expected_session_id", "idempotency_key",
+])
+def test_bridge_send_never_ignores_empty_special_option(
+    monkeypatch: pytest.MonkeyPatch, option: str,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    outcome = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    for name in (
+        "__main__", "bridge_listing_cli", "client_protocol_floor", "client",
+        "hosting_admission_cli", "session_targeting_cli",
+    ):
+        monkeypatch.setitem(sys.modules, "_send_bridge." + name, SimpleNamespace(
+            _scope=None, hold_protocol_floor=None, configure_client=None, _resolve_prompt=None,
+            _submit_and_stream=None, _deliver_to_live_session=None,
+            BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+        ))
+    with pytest.raises(outcome.SendRefused) as exc:
+        adapter.send(argparse.Namespace(target="workspace", **{option: ""}))
+    assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
+
+
 @pytest.mark.parametrize("native", [False, True])
 def test_owned_snapshot_request_preserves_legacy_and_qualifies_native_attempt(
     monkeypatch: pytest.MonkeyPatch, native: bool,

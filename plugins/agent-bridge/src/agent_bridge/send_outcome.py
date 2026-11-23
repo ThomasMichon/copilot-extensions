@@ -170,10 +170,13 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
                 "elapsed_s": round(exc.elapsed, 3),
             }
             if (
-                getattr(args, "expected_native_session_id", None) is not None
+                (getattr(args, "expected_native_session_id", None) is not None
+                 or getattr(args, "_bridge_send_identity", None) is not None)
                 and getattr(args, "idempotency_key", None) is not None
             ):
                 payload["idempotency_key"] = args.idempotency_key
+            if getattr(args, "_bridge_send_identity", None) is not None:
+                payload["bridge"] = args._bridge_send_identity
             emit(payload)
         sys.exit(70)
     except SendRefused as refused:

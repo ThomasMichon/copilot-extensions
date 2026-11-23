@@ -788,6 +788,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         idempotency_key: str | None = None,
         expected_session_id: str | None = None,
         plugin_readiness: dict[str, Any] | None = None,
+        exact_session: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
 
@@ -809,6 +810,10 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             payload["idempotency_key"] = idempotency_key
         if expected_session_id:
             payload["expected_session_id"] = expected_session_id
+        if exact_session:
+            if not session_id or expected_session_id != session_id or plugin_readiness is not None:
+                raise BridgeClientError(422, "exact live send requires its raw expected session")
+            payload["exact_session"] = True
         request = self._request
         request_timeout = None
         if plugin_readiness is not None:
@@ -839,10 +844,33 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             request_timeout = seconds + 15.0 + (
                 float(plugin_readiness.get("timeout_seconds", 120)) if plugin_readiness is not None else 0
             )
-        return request(
-            "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
+        target = session_id
+        if exact_session:
+            from .client_protocol_floor import protocol_floored_request
+
+            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+
+            request = protocol_floored_request(
+                self, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION if wait else 1,
+                capabilities={"live_exact_send": 1},
+            )
+            target = urllib.parse.quote(session_id, safe="")
+        request_options: dict[str, Any] = {"allow_retry": False} if exact_session else {}
+        result = request(
+            "POST", f"/api/v1/live-sessions/{target}/messages", payload,
             request_timeout=request_timeout,
+            **request_options,
         ) or {}
+        if exact_session and (
+            not isinstance(result, dict)
+            or result.get("session_id") != session_id
+            or type(result.get("message_id")) is not int
+            or result["message_id"] <= 0
+        ):
+            from .startup_observation import StartupObservationError
+
+            raise StartupObservationError(None, "live-message-admission", 0.0, reason="admission_unknown")
+        return result
 
     def get_session_usage(self, session_id: str) -> dict[str, Any]:
         """GET /api/v1/sessions/{id}/usage"""

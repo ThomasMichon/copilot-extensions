@@ -26,9 +26,12 @@ outcome rather than replacing it with one intermediate fix.
 - **Now:** the scoped and explicit-host inventory slice merged in #14034.
   The Phase 3 shared exact selector and read-only `show` consumer merged in
   #14206; its source release is verified. Explicit local read/wait adoption
-  of exact identity and bounded result observations is qualified in source;
-  its review, CI and merge gates remain open. Default migration, remote
-  observation, effectful selectors and potential targets follow.
+  of exact identity and bounded result observations merged in #14227 after
+  approval and exact-source CI; source release verification remains open.
+  The opt-in exact local ordinary-send consumer is code-complete and passes
+  contained qualification; its source review, CI and merge remain open.
+  Default migration, remote observation, effectful selectors and potential
+  targets follow.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
   Queued-delivery attribution remains separately open at the installed-adoption
@@ -216,10 +219,12 @@ Installed fleet adoption is not claimed.
 
 - [x] Qualify the common exact identity selector and read-only `show` consumer
   over the negotiated provider contract before migrating effectful operations.
+- [x] Qualify opt-in exact local read/wait observations over the existing bounded
+  result owners, including native content origin and the shared deadline (#14227).
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
-  The current source slice first adds opt-in local read/wait over existing
-  bounded result owners. Legacy history, event-cursor, attention and workspace
+  Opt-in local read/wait has landed; default and remote migration remain open.
+  Legacy history, event-cursor, attention and workspace
   following remain unchanged until their replacement contracts are ready.
 - [ ] Separate potential placements from bridges, including empty worktrees,
   eligible roots, containers, CodeSpaces, configured ACP hosts and external
@@ -296,6 +301,51 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-23 - Exact local ordinary-send consumer qualified
+
+- The next Phase 3 consumer uses the common local selector for opt-in
+  `send --bridge`. It sends only ordinary prompts and refuses incompatible
+  modes, empty special-option values and metadata-only/dormant targets before
+  admission. Default selectors and remote/lifecycle migration remain open.
+- Existing native-bound turn admission checks the selected native identity and
+  no-resume rule under its lock. Registered delivery uses the existing exact
+  inbox enqueue, selected by `live_exact_send: 1` from the executing provider.
+  Automatic reply-address discovery reuses the non-ensuring client.
+- Lost or invalid admission responses retain the selected native/owner binding
+  and original key as unknown, without retry or selector fallback. Actual
+  rollover controls prove that an admitted exact input does not move to a
+  successor.
+- Focused parser/client/private-API qualification passes 139 cases. Nineteen
+  new actor-free adapter controls pass separately. Strict whole-file checking
+  passes all eight changed Python files for Python 3.10 on Linux and Windows.
+  The existing path-gated native workflow now also selects exact-send and
+  native-bound admission on both hosted platforms; CI results remain pending.
+- Validation tiers: unit and simple end-to-end checks use synthetic callers
+  and fresh private databases. No install or first-provision behavior changes.
+  Native hosted checks qualify only their contained consumers. A live retained
+  receiver exchange and installed fleet adoption remain outside this source
+  slice and are not inferred from these results. No runtime was updated.
+
+### 2026-11-23 - Exact local read/wait observations merged
+
+- Merged #14227 as `0e09902cfd05014d0e10018102e570dfc101576d` after
+  approval of exact head `39323fde95a21140665b5e617cd7ab8aa4536a95`,
+  resolution of all review threads, passing required guards/unit evidence and
+  passing Linux/Windows command-receiver jobs. Both same-head CI runs passed;
+  no failed check or review finding was bypassed.
+- The final source packet passes 148 observation/connection/protocol cases,
+  four eligible unit controls and whole-file strict typing of all 21 changed
+  Python files on both targets. All 450 unit groups, prior nodes, coverage
+  declarations and the 300-second packet budget remain intact.
+- Normal pull-forward safely aborted on the already-squashed commit sequence.
+  The published head was preserved, all 26 changed feature paths were compared
+  with the merge, and the sole manifest difference preserved every prior node
+  and changed admitted hash. Reconciliation replayed no unpublished work, then
+  native pull-forward succeeded at the merge.
+- Source release verification and the remaining Phase 3 selector/potential-target
+  work follow. Full lifecycle, installed queued-delivery acceptance and the
+  retained parent return remain open. This source merge authorizes no rollout.
 
 ### 2026-11-23 - Streaming responses cannot renew the observation budget
 
