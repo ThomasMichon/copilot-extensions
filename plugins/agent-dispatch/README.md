@@ -441,8 +441,13 @@ environment chosen by the runtime resolver, without downloads or project/config
 discovery. It then executes that interpreter in place, preserving the
 supervisor's native main-PID ownership; `uv run` would introduce another process.
 Service launch never provisions a missing runtime. Use explicit installation
-management to prepare it and the service's uv prerequisite. Ordinary cold
-non-service commands retain the first-use publication policy above.
+management to prepare it and the service's uv prerequisite. This covers `serve`,
+`supervise serve`, and the bare/option-driven legacy `supervise` loop.
+Supervisor client subcommands (`register`, `status`, `list`, `remove`,
+`daemon-status`, and `override`) retain the ordinary first-use publication
+policy above. Native uninstall recognizes both the new root-bound coordinator
+gate command and historical completed-runtime registrations; effective-unit
+ownership, drop-in and foreign-root refusal remain unchanged.
 
 PowerShell first-use callers retry native Windows sharing violations and POSIX
 `EAGAIN` while another owner holds the provisioning lock, then reuse the

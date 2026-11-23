@@ -6,15 +6,24 @@ unset PYTHONPATH PYTHONHOME
 CONFIGURATION_ONLY=0
 READINESS_PROBE=0
 SERVICE_LAUNCH=0
+SUPERVISE_COMMAND=0
 SKIP_VALUE=0
 for ARGUMENT in "$@"; do
+    if [[ "$SUPERVISE_COMMAND" == 1 ]]; then
+        case "$ARGUMENT" in
+            serve|-*) ;;
+            *) SERVICE_LAUNCH=0 ;;
+        esac
+        break
+    fi
     if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
     case "$ARGUMENT" in
         --url|--token|--control-token|--task-token|--task-token-file|--task-scope|--task-url|--task-worker) SKIP_VALUE=1 ;;
         --url=*|--token=*|--control-token=*|--task-token=*|--task-token-file=*|--task-scope=*|--task-url=*|--task-worker=*|--shared|--local) ;;
         telemetry) CONFIGURATION_ONLY=1; break ;;
         installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
-        serve|supervise) SERVICE_LAUNCH=1; break ;;
+        serve) SERVICE_LAUNCH=1; break ;;
+        supervise) SERVICE_LAUNCH=1; SUPERVISE_COMMAND=1 ;;
         *) break ;;
     esac
 done
