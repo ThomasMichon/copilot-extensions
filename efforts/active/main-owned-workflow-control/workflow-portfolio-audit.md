@@ -6783,6 +6783,128 @@ has an accepted seam. No new keyed controller receipt is available; the
 retained pre-admission terminal result is not replayed. The bounded follow-up
 schedule continues; existing control, release and custody holds remain.
 
+Exact-head approval `6017828378` names
+`aa2208e760b9a94d324dc02f944026caff98ce6e`, with no active review issues,
+discussion comments or review threads and complete pagination. Managed
+publication additionally preserves #14202's three existing source rebindings;
+all 48 initially observed sources remain unchanged. Exact published
+parent-plus-slice composition, every source binding and 89 helpers verify.
+
+Fresh Linux CI `45130827665`, attempt one, unit job `137545678690`, executes
+all 9,566 cases with 55 deselections in 206.24 pytest / 228.891 packet
+seconds. Execution reports `mode=executed`, origin run `45130827665`,
+attempt one, identity
+`57b41efc2aa9180ab45cf5539d87da969308a09fcd912f64cf56aad19b33f877`
+and packet digest
+`69df5c1c871a98b6c0c31489e765087db0c4d14703417bf522b0d4c0f02eb9d7`.
+Three-file artifact `14797304666` (3,879,578 bytes), guards `137545678961`,
+required aggregate `137547793169` and trusted metadata `45130828276` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge. No replay, retry,
+metadata refresh or deadline waiver is used.
+
+Source #14203 merges at `2026-11-23T07:34:13Z` as
+`fc17a3b3506c9b39850c06f7a94d64df3dc4682c`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this five-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
+
+The next bounded slice is five complete original admission controls:
+busy-holder refusal, serial mocked leases, unexpected-error continuation,
+guards and collect-only admission. Full source reads identify already-bound
+admission/runner owners; identifiers are absent from the current manifest.
+No new adapter or execution is implied by identifying that next slice.
+
+### November 23 original mocked admission-routing controls
+
+The adapter selects five complete original functions: busy-holder refusal,
+serial mocked environment leases, unexpected runner-error continuation,
+guards and collect-only admission. Every original function, assertion and
+the autouse scratch fixture remains unchanged. Collection compares 267
+originals with five unparametrized adapter cases, verifies exact
+function/fixture objects and excludes the other 102 functions / 262 cases
+before execution. The adjacent clock/sleep retry test is not selected.
+
+Initial unchanged effect/source observation passes all five in 5.81 pytest /
+7.297 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads and all fifteen phase reports. The busy-holder case executes
+the real admission owner with a mocked lease, and four CLI cases execute
+the real runner owner with mocked admission/runner calls. No real lease,
+lock process, native runner, service or subprocess is exercised.
+
+Only the adapter binding is added: 9,571 nodes, 1,352 sources and unchanged
+486 production targets in 1,021,859 one-space v2 bytes. All preceding
+entries/order/hashes, 89 helper decisions, 300-second bound and 1 MiB cap
+remain. Ruff and normal `origin/dev` Linux/Windows strict checks pass.
+Committed release intent, exact-head review and fresh full-packet Linux CI
+remain required. Source-level mocked dispatch is not native execution,
+installation, release, rollout, custody or whole-flow savings evidence.
+
+Exact-head approval `6018018510` names
+`1888181579f1a17c4864f2e404210941b29bdef6`, with no active review issues,
+discussion comments or review threads and complete pagination. The published
+manifest equals the initial candidate; all 48 observed sources remain
+unchanged and every binding and 89 helper decisions verify.
+
+Fresh Linux CI `45133247674`, attempt one, unit job `137553383546`, executes
+all 9,571 cases with 55 deselections in 214.89 pytest / 239.424 packet
+seconds. The first run appears after a short creation delay; no additional
+run is requested. Lookup takes 537 ms. Execution reports `mode=executed`,
+origin run `45133247674`, attempt one, identity
+`908220f20e78583b41d5c701e27ea28b15a639e486dea41ffb8d5972f4747af9`
+and packet digest
+`7b253160e5da5b480a0720469a27956f025fe7443bcc1335c815f9386190f4d6`.
+Three-file artifact `14799380749` (3,881,492 bytes), guards `137553383176`,
+required aggregate `137555404592` and trusted metadata `45133069721` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge. No replay, retry,
+metadata refresh or deadline waiver is used.
+
+Source #14205 merges at `2026-11-23T07:53:03Z` as
+`139e4a8a55c06b2211f4e3cd7dfd8923cdd6ab9a`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this five-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
+
+The next bounded slice is five complete original runner argument-control
+functions, expected as 31 cases. It verifies existing defaults/explicit
+values, positive group limits and existing profile dispatch/refusals with
+mocked admission/runner calls or argument failure before admission. It
+changes no profile, limit or native contract. The runner is already a bound
+production target; the profile-validation dependency is source-bound, not
+newly claimed as a per-node coverage target.
+
+### November 23 original runner argument controls
+
+The adapter selects five complete original functions as 31 cases: native-owner
+default/explicit values, positive file-group limits, existing functional-profile
+dispatch values, unqualified-scope/override refusal and unknown-profile refusal.
+Original functions, assertions, the autouse scratch fixture and parameter rows
+remain unchanged. Collection compares 267 originals with 31 adapter cases,
+including exact function/fixture objects, parameter values/types, IDs and
+indices. The other 102 functions / 236 cases remain excluded before execution.
+Adjacent preparation and partition-execution functions are not selected.
+
+Initial unchanged effect/source observation passes all 31 in 3.01 pytest /
+4.094 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all 93 phase reports and actual runner-owner calls in every
+case. Positive dispatch uses the original mocked admission/runner calls;
+invalid arguments stop before admission. This is argument-contract evidence,
+not actual native, profile, lease, service or subprocess execution.
+
+Only the adapter binding is added: 9,602 nodes, 1,353 sources and unchanged
+486 production targets in 1,025,149 one-space v2 bytes. The existing profile
+validator remains source-bound, not a newly claimed per-node production target.
+All preceding entries/order/hashes, 89 helper decisions, 300-second bound
+and 1 MiB cap remain. Ruff and normal `origin/dev` Linux/Windows strict checks
+pass; a worktree-manager patch changefile records release intent. Exact-head
+review and fresh full-packet Linux CI remain required. No runtime profile,
+budget, native contract, writer, Main path or rollout is changed.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

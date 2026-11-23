@@ -33,14 +33,14 @@ class UnlockSession:
     sender: ServiceSender
     context: ResolvedVault
     route: CommandRoute
-    selection: WarmSelection
+    selection: WarmSelection | None
     source_supported: bool
     last_reply: Reply = None
 
     def send(self, request: dict[str, Any], timeout: float | None = 5.0) -> Reply:
         """Stop the prompt chain when a retained connector cannot confirm an outcome."""
         outgoing = dict(request)
-        if self.source_supported:
+        if self.source_supported and self.selection is not None:
             outgoing.setdefault(FIELD, self.selection.describe())
         try:
             response = self.sender(
@@ -62,7 +62,7 @@ class UnlockSession:
 
     def report(self) -> None:
         """Report only retained acceptance; never retry warming to improve its status."""
-        if not self.source_supported:
+        if not self.source_supported or self.selection is None:
             return
         state = self.last_reply.get("cache_warm") if self.last_reply is not None else None
         formatted = (

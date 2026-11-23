@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .cache_warm_selection import READ_ACTIONS
+from .cache_warm_selection import MUTATION_ACTIONS, READ_ACTIONS
 
 if TYPE_CHECKING:
     from .config import ResolvedVault
@@ -29,6 +29,7 @@ class ReadSender(Protocol):
 
 
 _READ_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_read_sender", default=None)
+_MUTATION_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_mutation_sender", default=None)
 _SCOPED_READ_ACTIONS = READ_ACTIONS | {"ping"}
 
 
@@ -39,6 +40,15 @@ def use_read_sender(sender: ReadSender) -> Iterator[None]:
         yield
     finally:
         _READ_SENDER.reset(token)
+
+
+@contextmanager
+def use_mutation_sender(sender: ReadSender) -> Iterator[None]:
+    token = _MUTATION_SENDER.set(sender)
+    try:
+        yield
+    finally:
+        _MUTATION_SENDER.reset(token)
 
 
 @contextmanager
@@ -89,6 +99,12 @@ def send_command(
         read_sender = _READ_SENDER.get()
         if read_sender is not None:
             return read_sender(
+                request, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
+            )
+    if binding is None and _route is None and _context is None and request.get("action") in MUTATION_ACTIONS:
+        mutation_sender = _MUTATION_SENDER.get()
+        if mutation_sender is not None:
+            return mutation_sender(
                 request, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
             )
     if binding is None and _route is None and _context is None and request.get("action") == "unlock":

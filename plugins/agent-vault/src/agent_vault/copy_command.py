@@ -6,7 +6,10 @@ import argparse
 import sys
 from typing import Any
 
+from .mutation_client import ordinary_mutation
 
+
+@ordinary_mutation
 def cmd_copy(args: argparse.Namespace) -> int:
     from . import cli
 
