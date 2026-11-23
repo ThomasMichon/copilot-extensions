@@ -3,6 +3,17 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_cli_admission_selection_units.py",
+   [
+    "test_prepare_only_takes_environment_admission",
+    "test_host_state_requires_explicit_tier_opt_in",
+    "test_admission_wait_rejects_infinite_value",
+    "test_admission_wait_rejects_nan_value",
+    "test_changed_plugins_always_includes_cross_plugin_contract_testers",
+    "test_changed_plugins_empty_diff_schedules_nothing"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_profile_argument_units.py",
    [
     "test_native_owner_test_profile_is_scoped_and_explicit_limits_win[False]",
@@ -11777,6 +11788,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_cli_admission_selection_units.py": "d1abf45728e9f375c29b5425b60621c6bf12cc35f903343fd68632b6a1cf5f25",
   "tools/promotion_unit_tests/test_original_runner_profile_argument_units.py": "d76c847bb36c46380a6fb426379488365317df6f7811f0ac91d00c4832652ea2",
   "tools/promotion_unit_tests/test_original_runner_admission_routing_units.py": "b779b8337757c912857338edbbf32d5bc7d66a778681c1dfc27fe7986770b77f",
   "tools/promotion_unit_tests/test_original_runner_environment_selection_units.py": "b3ebe9e24b5f77bcf57667f597d65e03c6b8ec7d0e98dd44137132d5cfc838ff",

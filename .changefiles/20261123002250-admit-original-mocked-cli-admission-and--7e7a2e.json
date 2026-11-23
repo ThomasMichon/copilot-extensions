@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original mocked CLI admission and changed-plugin selection controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
