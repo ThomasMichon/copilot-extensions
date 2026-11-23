@@ -24,6 +24,7 @@
 # Exit 1 -> killswitch INACTIVE, or state file missing/unreadable/malformed.
 #           Fails OPEN to "inactive" deliberately (see .sh header).
 # Both early read guards are native; neither needs Python or prepared uv.
+# Bash mutations use the shared prepared uv selector; this controller stays native.
 #
 # Secondary usage -- direct operator/agent control:
 #   bootstrap-killswitch-guard.ps1 on "<reason>"

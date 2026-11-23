@@ -3,17 +3,47 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import shlex
+import shutil
+import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from worktree_manager import bootstrap_policy as policy
 from worktree_manager import maintenance_policy, manager_config, self_install
 
+CONTROLLER_FILES = (
+    "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+    "killswitch_mutation.py", "bootstrap-killswitch-json-query.awk",
+    "bootstrap-killswitch-uv.sh", "bootstrap-killswitch-python-version.txt",
+)
+
 
 @pytest.fixture
-def switch_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def switch_home(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    if os.name != "nt":
+        bash = shutil.which("bash")
+        assert bash is not None
+        directory = tmp_path_factory.mktemp("controller-uv")
+        uv = directory / "uv"
+        uv.write_text(
+            f"#!{bash}\n"
+            'case "$*" in\n'
+            '  --version) printf "uv 0.8.0\\n" ;;\n'
+            '  "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18")\n'
+            f"    printf '%s\\n' {shlex.quote(sys.executable)} ;;\n"
+            '  *) exit 97 ;;\n'
+            'esac\n',
+            encoding="utf-8",
+        )
+        uv.chmod(0o755)
+        monkeypatch.setenv("PATH", str(directory) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
@@ -43,14 +73,16 @@ def test_packaged_runtime_controller_works_without_a_legacy_payload(
     scripts = package / "_runtime_assets" / "scripts"
     scripts.mkdir(parents=True)
     canonical = Path(__file__).resolve().parents[2] / "libs" / "bootstrap-killswitch"
-    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+    for name in CONTROLLER_FILES:
         shutil.copy2(canonical / name, scripts / name)
     monkeypatch.setattr(worktree_manager, "__file__", str(package / "__init__.py"))
     monkeypatch.setattr(self_install, "running_payload_dir", lambda: switch_home / "absent-payload")
     before = {path: path.read_bytes() for path in scripts.iterdir()}
     row = policy.configuration_row()
-    assert row["bootstrap_control"], row["card"]["body"]
-    blocked = policy.set_enabled(False, expected=row["policy_revision"])
+    assert row["bootstrap_control"], row
+    revision = row["policy_revision"]
+    assert isinstance(revision, str)
+    blocked = policy.set_enabled(False, expected=revision)
     assert blocked.enabled is False
     cleared = policy.set_enabled(True, expected=blocked.revision)
     assert cleared.enabled is True and not any(path.exists() for path in cleared.paths)
@@ -87,7 +119,8 @@ def test_switch_change_never_enables_the_independent_manager_audit_veto(
     assert config.read_bytes() == baseline
     assert manager_config.load_config().maintenance.automatic is False
     assert policy.configuration_row()["activity"] == "blocked"
-    assert "maintenance.automatic" in maintenance_policy.update_refusal(["--auto"])
+    refusal = maintenance_policy.update_refusal(["--auto"])
+    assert refusal is not None and "maintenance.automatic" in refusal
 
 
 def test_explicit_override_does_not_change_default_or_legacy_switches(
@@ -180,7 +213,7 @@ def test_controller_exit_is_not_a_state_change_witness(
     import agent_procutil.owned_process
 
     calls = []
-    def controller(argv, **kwargs):
+    def controller(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs))
         if argv[-1] == "capabilities":
             return SimpleNamespace(
@@ -221,7 +254,7 @@ def test_new_audit_hold_between_ui_check_and_controller_is_never_overwritten(
     execute = agent_procutil.owned_process.run_caller_owned
     injected = []
 
-    def race(argv, **kwargs):
+    def race(argv: list[str], **kwargs: Any) -> Any:
         if argv[-1] != "capabilities" and kwargs["env"]["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(selected):
             selected.parent.mkdir(parents=True, exist_ok=True)
             selected.write_bytes(new_hold)
@@ -248,12 +281,13 @@ def test_downlevel_controller_never_receives_unconditional_mutation(
     import agent_procutil.owned_process
 
     calls = []
-    monkeypatch.setattr(
-        agent_procutil.owned_process, "run_caller_owned",
-        lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(
+    def unsupported(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        calls.append(argv)
+        return SimpleNamespace(
             returncode=0 if reply else 2, stdout=reply, stderr="unknown or unsupported command",
-        ),
-    )
+        )
+
+    monkeypatch.setattr(agent_procutil.owned_process, "run_caller_owned", unsupported)
     with pytest.raises(manager_config.ManagerConfigError, match="does not declare conditional"):
         policy.set_enabled(False, expected=policy.inspect_policy().revision)
     assert len(calls) == 1 and calls[0][-1] == "capabilities"
@@ -264,8 +298,13 @@ def test_materialized_payload_keeps_both_canonical_controllers(
     switch_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import shutil
-    import tomllib
     import worktree_manager
+    from worktree_manager.self_install_payload import _copy_payload
+
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
 
     original = Path(__file__).resolve().parents[1]
     source = tmp_path / "source"
@@ -283,14 +322,14 @@ def test_materialized_payload_keeps_both_canonical_controllers(
     canonical = original.parent / "libs/bootstrap-killswitch"
     scripts = source / "scripts"
     scripts.mkdir(exist_ok=True)
-    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+    for name in CONTROLLER_FILES:
         shutil.copy2(canonical / name, scripts / name)
     payload = tmp_path / "payload"
-    self_install._copy_payload(source, payload)
+    _copy_payload(source, payload)
     legacy_package = tmp_path / "legacy-package"
     legacy_package.mkdir()
     monkeypatch.setattr(worktree_manager, "__file__", str(legacy_package / "__init__.py"))
     monkeypatch.setattr(self_install, "running_payload_dir", lambda: payload)
-    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+    for name in CONTROLLER_FILES:
         assert (payload / "scripts" / name).read_bytes() == (canonical / name).read_bytes()
     assert Path(policy._guard_command()[-1]).parent == payload / "scripts"

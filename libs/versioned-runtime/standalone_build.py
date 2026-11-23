@@ -36,6 +36,7 @@ APPLICATION_RESOURCES = {
         "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py", "scripts/install_source.py",
         "scripts/repair_recovery.py", "scripts/update_entry.py",
         "scripts/bootstrap-killswitch-guard.*", "scripts/bootstrap-killswitch-json-query.awk",
+        "scripts/bootstrap-killswitch-uv.sh",
         "scripts/killswitch_mutation.py",
         "scripts/daemon_instances.*", "scripts/daemon_instance_runtime.pyz",
         "scripts/installer-instance-reconcile.*",
@@ -50,7 +51,9 @@ APPLICATION_RESOURCES = {
     "agent_remote_driver_app": ("plugin.json", "extensions/**/*.mjs"),
 }
 APPLICATION_METADATA_RESOURCES = {
+    "agent_worktrees": ("scripts/bootstrap-killswitch-python-version.txt",),
     "worktree_manager": (
+        "scripts/bootstrap-killswitch-python-version.txt",
         "scripts/runtime-source-tools/**/*.toml",
         "scripts/runtime-source-tools/**/*.txt",
         "scripts/runtime-source-tools/**/*.lock",

@@ -28,5 +28,5 @@ _finite_runtime_uninstall() {
     [[ -f "$helper" && ! -L "$helper" ]] || helper="$SCRIPT_DIR/../../../libs/installer-engine/installer_engine_uninstall.py"
     python="$(_uninstall_external_python "$INSTALL_DIR")" || return 1
     "$python" -I -B "$helper" --payload-root "$PLUGIN_DIR" --plugin-id budget-guidance \
-        --root "$INSTALL_DIR" --shell "$BASH" "$mode"
+        --root "$INSTALL_DIR" --shell "$BASH" --profile "$SCRIPT_DIR/uninstall-profile.json" "$mode"
 }
