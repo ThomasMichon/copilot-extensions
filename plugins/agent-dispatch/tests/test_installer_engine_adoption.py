@@ -394,11 +394,14 @@ exit $result.ExitCode
 
 def _signed_venv_block() -> str:
     text = (PLUGIN / "scripts/install.ps1").read_text(encoding="utf-8")
-    start = "    if (-not $script:RuntimeConstructionReuse) {\n    # -- venv"
+    start = "    if (-not $script:RuntimeConstructionReuse) {\n"
     block = start + text.split(start, 1)[1].split(
         "    # The selected MCP extra", 1
     )[0]
-    return f". '{PLUGIN / 'scripts' / 'base-python.ps1'}'\n" + block + "}\n"
+    return (
+        f". '{PLUGIN / 'scripts' / 'base-python.ps1'}'\n"
+        + _function("ps1", "New-DispatchRuntimeVenv") + "\n" + block + "}\n"
+    )
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
@@ -469,8 +472,12 @@ $VenvPython=Join-Path $VenvDir 'Scripts/python.exe'
 $UvCommand='{uv}'
 $script:RuntimeConstructionReuse=$false
 $pythonCmd='{tmp_path / "forbidden-python.ps1"}'
-function py {{ $global:LASTEXITCODE=0; '{signed}' }}
-function Get-AuthenticodeSignature {{ param($Path) return @{{ Status='Valid' }} }}
+function py {{ throw 'ambient launcher must not be used' }}
+function Get-InstallerManagedSignedBasePython {{
+    param($UvCommand, $PythonVersion)
+    if ($PythonVersion -ne '3.10') {{ throw 'managed runtime request changed' }}
+    return '{signed}'
+}}
 function Invoke-Hidden {{
     param($FilePath, $ArgList, [ref]$ErrorOutput)
     & $FilePath @ArgList
@@ -497,9 +504,9 @@ if ($ErrorActionPreference -ne 'Stop') {{ throw 'error preference leaked' }}
     if usable:
         assert (slot / "pyvenv.cfg").read_text() == "fixture"
         if signed_exit:
-            assert f"Signed Python exited {signed_exit}" in result.stdout
+            assert f"Selected Python exited {signed_exit}" in result.stdout
     else:
-        assert "Signed Python venv failed validation" in result.stdout + result.stderr
+        assert "Selected Python venv failed validation" in result.stdout + result.stderr
 
 
 def test_completed_construction_reuse_skips_signed_venv_mutation(tmp_path: Path) -> None:

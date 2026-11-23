@@ -1928,7 +1928,7 @@ function Test-DispatchVenv {
     if (-not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf) -or
         -not (Test-Path -LiteralPath $Python -PathType Leaf)) { return $false }
     $result = Invoke-NativeCapture {
-        & $Python -c 'import os, sys; print(os.path.normcase(os.path.abspath(sys.prefix))); print("1" if sys.prefix != sys.base_prefix else "0")'
+        & $Python -I -B -c 'import os, sys; print(os.path.normcase(os.path.abspath(sys.prefix))); print("1" if sys.prefix != sys.base_prefix else "0")'
     }
     $probe = @($result.Output -split '\r?\n')
     if ($result.ExitCode -ne 0 -or $probe.Count -lt 2 -or $probe[1].Trim() -ne '1') { return $false }
@@ -1955,6 +1955,51 @@ function Install-RetainedRuntime {
     } finally {
         [void]$mutex.ReleaseMutex()
         $mutex.Dispose()
+    }
+}
+
+function New-DispatchRuntimeVenv {
+    param([Parameter(Mandatory)][string]$UvCommand, [string]$BasePython)
+    $bootstrap = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'bootstrap-uv.ps1'
+    if (-not (Test-Path -LiteralPath $bootstrap -PathType Leaf)) {
+        throw 'Managed runtime construction requires the selected installer bootstrap assets'
+    }
+    . $bootstrap
+    $selectedUvCommand = $UvCommand
+    $childEnvironment = Get-UvBootstrapEnvironment
+    $childEnvironment.UV_CONFIG_FILE = $null
+    $childEnvironment.UV_NO_CONFIG = '1'
+    function Invoke-DispatchRuntimeUv {
+        param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments)
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $selectedUvCommand -ArgList $UvArguments `
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic)
+        $code = $LASTEXITCODE
+        if ($output) { $output }
+        if ($diagnostic) { $diagnostic }
+        $global:LASTEXITCODE = $code
+    }
+    $signedBase = $BasePython
+    if (-not $signedBase) {
+        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.10'
+    }
+    if ($signedBase) {
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $signedBase `
+            -ArgList @('-I', '-B', '-m', 'venv', '--copies', $VenvDir) `
+            -ErrorOutput ([ref]$diagnostic)
+        $code = $LASTEXITCODE
+        if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+            throw "Selected Python venv failed validation (exit $code): $output$diagnostic"
+        }
+        if ($code -ne 0) { Write-Warn "Selected Python exited $code after producing a usable venv" }
+        return
+    }
+    # The versioned construction owner retains partial-slot cleanup and receipts.
+    $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
+        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+    if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+        throw "Managed Python 3.10 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
     }
 }
 
@@ -2016,19 +2061,18 @@ function Install-Runtime {
         }
     }
 
-    # Find a Python interpreter (skip Windows Store aliases that aren't real)
     $pythonCmd = $selectedBasePython
     if (-not $pythonCmd) { $pythonCmd = Get-BootstrapPython -ExternalOnly }
     if (-not $pythonCmd) {
         Write-Fail 'No usable Python 3.11+ for source/construction helpers'
-        Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
+        Write-Host '    Prepare the declared managed installer Python through its prerequisite setup owner.' -ForegroundColor DarkGray
         exit 1
     }
     Write-Ok "Python: $pythonCmd"
 
     $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $UvCommand) {
-        Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
+        throw 'uv is required for Dispatch runtime construction and dependency installation'
     }
 
     $directories = if ($PrepareOnly) { @($InstallDir) } else { @($InstallDir, $LocalBin) }
@@ -2042,46 +2086,9 @@ function Install-Runtime {
         Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
     }
     if (-not $script:RuntimeConstructionReuse) {
-    # -- venv (SAC-trusted signed base python preferred; then uv; then venv) --
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $signedBase = $selectedBasePython
-        if (-not $signedBase -and $env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-            foreach ($v in '3.13', '3.12', '3.11') {
-                $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-                if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                    try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
-                }
-            }
-        }
-        if ($signedBase) {
-            $signedError = ''
-            $signedOutput = Invoke-Hidden -FilePath $signedBase -ArgList @('-I', '-B', '-m', 'venv', '--copies', $VenvDir) -ErrorOutput ([ref]$signedError)
-            $signedResult = @{ ExitCode = $LASTEXITCODE; Output = "$signedOutput$signedError" }
-            if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-                $ErrorActionPreference = $prevEAP
-                Write-Fail "Signed Python venv failed validation (exit $($signedResult.ExitCode)); construction aborted"
-                exit 1
-            } elseif ($signedResult.ExitCode -ne 0) {
-                Write-Warn "Signed Python exited $($signedResult.ExitCode) after producing a usable venv"
-            }
-        }
-        if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-            if ($UvCommand) {
-                Write-Step 'Creating venv via uv...'
-                Invoke-VersionedSlotClean
-                $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing', '--python', $pythonCmd) -UvCommand $UvCommand
-                if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-                    Write-Step 'uv venv failed -- falling back to python -m venv'
-                    & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-                }
-            } else {
-                Write-Step 'Creating venv via python -m venv...'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
-        }
-        $ErrorActionPreference = $prevEAP
+        Write-Step 'Creating venv with the selected base or uv-managed Python 3.10...'
+        New-DispatchRuntimeVenv -UvCommand $UvCommand -BasePython $selectedBasePython
         if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
             Write-Fail "Venv creation failed validation at $VenvDir"
             exit 1
