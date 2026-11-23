@@ -25,10 +25,7 @@ transport = importlib.import_module(f"{PACKAGE}.command_transport")
 selection = importlib.import_module(f"{PACKAGE}.cache_warm_selection")
 
 
-def test_core_retained_sender_pins_resolved_endpoint_token_and_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    core = importlib.import_module(f"{PACKAGE}.coredelegation")
+def test_core_retained_sender_pins_resolved_endpoint_token_and_timeout() -> None:
     source = ROOT / "plugins/agent-vault/src/agent_vault/core_ext.py"
     tree = ast.parse(source.read_bytes(), filename=str(source))
     body: list[ast.stmt] = [
@@ -38,7 +35,10 @@ def test_core_retained_sender_pins_resolved_endpoint_token_and_timeout(
     ]
     assert len(body) == 3
     environment = {"endpoint": "tcp:127.0.0.1:19071", "token": "fixture-original", "timeout": "12"}
-    endpoints = [core.Endpoint("tcp", "127.0.0.1:19071"), core.Endpoint("tcp", "127.0.0.1:19072")]
+    original, replacement = SimpleNamespace(), SimpleNamespace()
+    original.usable = lambda _accept: original
+    replacement.usable = lambda _accept: replacement
+    endpoints = [original, replacement]
     discoveries: list[str] = []
     calls: list[tuple[object, dict[str, Any], float | None]] = []
 
@@ -50,14 +50,39 @@ def test_core_retained_sender_pins_resolved_endpoint_token_and_timeout(
         calls.append((endpoint, payload, timeout))
         return {"ok": True}
 
-    monkeypatch.setattr(core, "_dial", dial)
+    class EndpointUnavailable(RuntimeError):
+        pass
+
+    def resolve_bound(
+        _directory: Path, *, override: object, legacy: object, probe: object,
+    ) -> object:
+        assert override is original and legacy is None and probe is None
+        return override
+
+    delegate_source = ROOT / "plugins/agent-vault/src/agent_vault/coredelegation.py"
+    delegate_tree = ast.parse(delegate_source.read_bytes(), filename=str(delegate_source))
+    delegate_body: list[ast.stmt] = [
+        node for node in delegate_tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.FunctionDef) and node.name == "delegate"
+    ]
+    assert len(delegate_body) == 2
+    delegate_namespace: dict[str, Any] = {
+        "Path": Path, "DEFAULT_TIMEOUT": 5.0, "connect_probe": object(),
+        "EndpointUnavailable": EndpointUnavailable, "resolve": resolve_bound,
+        "default_accept": lambda _transport: True, "_dial": dial, "TOKEN_KEY": "_token",
+    }
+    exec(
+        compile(ast.Module(body=delegate_body, type_ignores=[]), str(delegate_source), "exec"),
+        delegate_namespace,
+    )
     namespace: dict[str, Any] = {
         "os": SimpleNamespace(environ=environment), "math": math,
         "CORE_ENDPOINT_ENV": "endpoint", "CORE_TOKEN_ENV": "token", "CORE_TIMEOUT_ENV": "timeout",
         "DEFAULT_CORE_TIMEOUT": 30.0, "core_runtime_dir": lambda: ROOT,
-        "resolve": discover, "connect_probe": core.connect_probe,
-        "default_accept": core.default_accept, "EndpointUnavailable": core.EndpointUnavailable,
-        "delegate": core.delegate,
+        "resolve": discover, "connect_probe": delegate_namespace["connect_probe"],
+        "default_accept": delegate_namespace["default_accept"],
+        "EndpointUnavailable": EndpointUnavailable, "delegate": delegate_namespace["delegate"],
     }
     exec(compile(ast.Module(body=body, type_ignores=[]), str(source), "exec"), namespace)
     sender = namespace["bind_core_transport"](SimpleNamespace())
@@ -67,7 +92,7 @@ def test_core_retained_sender_pins_resolved_endpoint_token_and_timeout(
     assert sender({"action": "unlock", "password": "fixture-master"}, 20.0, SimpleNamespace())["ok"]
     assert discoveries == ["tcp:127.0.0.1:19071"]
     assert [endpoint for endpoint, _, _ in calls] == [endpoints[0], endpoints[0]]
-    assert [payload[core.TOKEN_KEY] for _, payload, _ in calls] == ["fixture-original"] * 2
+    assert [payload["_token"] for _, payload, _ in calls] == ["fixture-original"] * 2
     assert [timeout for _, _, timeout in calls] == [12.0, 12.0]
     assert calls[-1][1]["password"] == "fixture-master"
 

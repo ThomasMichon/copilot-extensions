@@ -12825,12 +12825,11 @@
   "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "340a3eaae0d867ec60d7a8f75e547265ac635ceecad2bf40164cb76d927afc5c",
   "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
   "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
-  "tools/promotion_unit_tests/test_vault_unlock_selection.py": "504ef4b3305b928cce17f255418c78966bf978ff4d6d0e47a8a5ef928276a56a",
+  "tools/promotion_unit_tests/test_vault_unlock_selection.py": "b295b361a7cf24b952a851daee4953595448db4e09b566d102ed2b38466fa40a",
   "plugins/agent-vault/src/agent_vault/unlock_client.py": "082d86f83d495ec920b7a307dcb212db0a63eaac9d9687878fe91a8e1da57c82",
   "plugins/agent-vault/src/agent_vault/cache_warm_client.py": "8dc041600f5066adaf1a298c1706982c75d93f4d2c66e93ec6c0b59498adfdbe",
   "plugins/agent-vault/src/agent_vault/core_ext.py": "af94f8de4e50dbef2b6e2935b0dd7babbc40d94a74237f7aa129282b6b30f918",
-  "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c",
-  "plugins/agent-vault/src/agent_vault/rendezvous.py": "c675482d03f72d9d08cdb160d842de2f4d02d5353fcd26aefcbdb454f48ff9d1"
+  "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c"
  },
  "coverage_targets": [
   "tools/reproducer-lab/offline.py",
