@@ -6671,6 +6671,43 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original pure offline inspection
+
+The adapter exports six complete original pure offline-inspection functions:
+evidence-only observation, kernel-record ceilings, loopback host routes,
+volatile counters, actual no-route results and incomplete/changed fields.
+All original functions, helpers, supplied route/namespace dictionaries,
+parameter rows, loops and assertions remain unchanged. Complete collection
+compares all 63 original cases with exactly nine adapter cases, verifies
+original function/mark-row identity and checks cross-module parameter values
+and types. Thirteen functions / 54 cases remain outside execution, including
+boundary-only, reader, guest, socket, file/snapshot and long-parameter tests.
+
+The initial unchanged effect/source guard passes all nine cases in 0.66 pytest
+/ 1.297 observation seconds with zero prohibited effects, thirteen bound
+canonical Python reads and actual production offline-owner call-phase lines
+for every case. All 27 setup/call/teardown reports pass. Only the adapter and
+original offline test add source bindings; the production owner and canonical
+import closure are already bound. One production coverage target is added.
+Compact-v2 contains 9,399 nodes and 1,308 sources in 1,046,192 bytes, below
+the unchanged 1 MiB bound. All 9,390 prior nodes and 473 targets retain order,
+all 1,306 current hashes including the independent native-daemon rebinding
+remain intact, and 89 helper decisions and the 300-second deadline are unchanged.
+
+This is below-altitude source-test selection, not a workflow, production,
+installer, service-contract or runtime change. Supplied route and namespace
+dictionaries do not prove real network state, offline isolation, sockets,
+custody or native execution. Fresh-install/native/installed lanes are not
+exercised because no installation or runtime behavior changes. Normal
+exact-head review and complete fresh Linux CI, including the peer rebinding,
+remain required. No held refusal, prior qualification, guard exception,
+manual workflow, retry or native grant is replayed; broader owner, release,
+custody and parent gates remain open.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
+documentation consistency pass before publication. A worktree-manager patch
+changefile retains release intent; it is not writer activation or rollout.
+
 ### November 22 original pure mount posture
 
 The adapter exports eight complete original pure mount-posture functions:
@@ -6710,6 +6747,49 @@ owner, release, custody and parent gates remain open.
 Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
 documentation consistency pass before publication. A worktree-manager patch
 changefile retains release intent; it is not writer activation or rollout.
+
+Approval `6015025185` names exact head
+`ef22d035ad641c4e1f00c9cc767ebc9cf534af56`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45081494828`, attempt one, unit job `137390438140`, executes all
+9,390 selected cases with 55 deselections in 134.80 pytest / 155.482 packet
+seconds. It reports `mode=executed`, origin run `45081494828`, attempt one,
+execution identity
+`1ede84e232fc59b211f5325a53c80a7c7f2f7f39b9590da7907ff909c2399c7b`
+and packet digest
+`527111a872ddde11b9d9cafc1999bb4f2c94ba4490448ab42e23badc1b9b00bc`.
+Evidence upload succeeds as artifact `14777865938`; guard job
+`137390438640` and required aggregate `137391583787` pass.
+
+An initially passing fresh verifier/fence read is followed by late direct
+source-attribution failure `137392192911`: metadata changed or could not be
+verified, so the result is superseded. Managed merge correctly refuses; the
+successful workflow job is not substituted for that direct failing check.
+The operator then explicitly authorizes exactly one metadata-only dispatch of
+`workflow-lockdown-guard.yml` on Main, with only `pull_request_number=14137`.
+Run `45086483115`, refresh job `137406180193`, passes and direct check
+`137406321617` succeeds. This specific grant is consumed; no unit retry,
+promotion, runtime change or CI waiver is involved. Seven new required-check
+verifier reads and complete final review/thread/head/hold/parent fences pass
+after the refresh.
+
+Source #14137 merges at `2026-11-23T00:05:51Z` as
+`6ef3cf8a01df7e03a3ef9e97ce4ced65d2cd8c6d`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The full tree differs from the reviewed head because independent #14035
+(`2e27870e50db81da308bb799964677f79527e2a2`) and #14044
+(`eca8baf7485cc715ffb35cdf3cf58b3e0155a1fc`) land during the operator pause.
+Their 31-file delta is separate work, not this leaf's delivery or CI proof.
+Our four non-manifest files remain identical. Every ordered node/target is
+unchanged; the manifest differs only in the peer-owned
+`libs/agent-procutil/src/agent_procutil/native_daemon.sh` rebinding. All current
+1,306 hashes verify, with 9,390 nodes, 473 targets, 89 helper decisions,
+300 seconds and 1,044,996 bytes retained. The next fresh full packet must
+include that rebinding; this source preservation check executes no native helper.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this 43-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain open.
 
 ### November 22 original pure storage monitor
 

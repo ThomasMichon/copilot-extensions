@@ -3,6 +3,20 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py",
+      [
+        "test_loopback_observation_is_evidence_not_custody_or_admission",
+        "test_exact_kernel_record_ceiling_and_unconfigured_ipv6_are_supported",
+        "test_loopback_host_route_is_supported_but_no_external_route_is_added",
+        "test_volatile_route_counters_do_not_fake_a_configuration_change",
+        "test_only_actual_no_route_results_for_both_families_are_accepted[ipv4_error-ECONNREFUSED]",
+        "test_only_actual_no_route_results_for_both_families_are_accepted[ipv6_error-EAFNOSUPPORT]",
+        "test_only_actual_no_route_results_for_both_families_are_accepted[ipv4_error-timeout]",
+        "test_only_actual_no_route_results_for_both_families_are_accepted[ipv6_error-None]",
+        "test_missing_fields_changed_namespace_and_extra_claims_refuse"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_reproducer_mount_posture_units.py",
       [
         "test_effective_mounts_are_evidence_not_experiment_admission",
@@ -11454,6 +11468,8 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py": "31c938d466c53b9ff782a4e887dd6b8e3488ad9e9db51a8727a7f9f2a1be9f3d",
+    "tools/test_reproducer_lab_offline.py": "88750487dd73d8025e4e46141f6b10b20627c2a2ffb7ca00007e40371b2e5926",
     "tools/promotion_unit_tests/test_original_reproducer_mount_posture_units.py": "1e1dd09c1a1135ecbc870b466fe8b0b7c96b7084a07138af05d8d2cd97ec6dd0",
     "tools/test_reproducer_lab_mounts.py": "d7363125848e868545d4563c8a971a0c12f11dcbe591435c29b9bf611bd33e8f",
     "tools/promotion_unit_tests/test_original_reproducer_storage_monitor_units.py": "841d8167a3bdf3de7752f3f2d4148547e87a77feb4d2df4b23c7f68be26ce829",
@@ -12762,6 +12778,7 @@
     "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
   },
   "coverage_targets": [
+    "tools/reproducer-lab/offline.py",
     "tools/reproducer-lab/mounts.py",
     "tools/reproducer-lab/storage.py",
     "tools/reproducer-lab/network.py",
