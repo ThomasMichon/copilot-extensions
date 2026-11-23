@@ -63,15 +63,13 @@ remain no-ops; no-self-provision and pinned reads explicitly defer publication.
 Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
 no-op. Activation reads use the payload's bundled configuration SDK and the
-selected completed runtime interpreter when available, retaining ambient
-Python discovery for cold payloads. Cold activation qualifies an existing
-Python 3.10+ reader rather than accepting the first unsupported PATH winner;
-Windows reuses read-only canonical native discovery and headless capture.
-This neither raises Vault's floor to the installer's 3.11 tooling floor nor
-installs Python, changes PATH or invokes an installer to select the reader.
-The canonical installation-context
-bootstrap keeps its independent platform prerequisites (currently Python
-on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
+selected completed runtime interpreter when available. Cold payloads inspect
+the declared, already prepared UV-managed bootstrap interpreter on both
+platforms, without PATH Python, launcher or system-installation fallback.
+The [activation contract](docs/configuration.md#runtime-activation) owns the
+prerequisite and refusal details. Reads neither acquire Python, change PATH nor
+invoke an installer. The canonical installation-context bootstrap retains its
+independent prerequisite contract. No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock
 legacy Bash/macOS. The independent session-guidance writer is unchanged.
 Explicit installer entry points remain separate, unadopted callers.
@@ -89,6 +87,10 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
    the runtime is missing; the stamped binstub queues full provisioning on first
    use. Neither action runs its installer in the hook/calling command. To use
    the separate explicit management entry point from a checkout:
+
+   Its bootstrap prerequisite owner must first have prepared the interpreter
+   declared by `installer-instance-python-version.txt`; activation inspection
+   will not acquire a missing interpreter.
 
    ```powershell
    pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install

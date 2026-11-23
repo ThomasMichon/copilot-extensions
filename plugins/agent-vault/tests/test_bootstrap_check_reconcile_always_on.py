@@ -90,12 +90,16 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         "versioned_runtime_native.ps1", "installer_provider_roots.py",
     ):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
+    for filename in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):
+        shutil.copyfile(
+            _PLUGIN_ROOT.parents[1] / "libs/installer-engine" / filename,
+            scripts_dir / filename,
+        )
     if os.name == "nt":
-        for filename in ("bootstrap-uv.ps1", "installer-instance-python-version.txt"):
-            shutil.copyfile(
-                _PLUGIN_ROOT.parents[1] / "libs/installer-engine" / filename,
-                scripts_dir / filename,
-            )
+        shutil.copyfile(
+            _PLUGIN_ROOT.parents[1] / "libs/installer-engine/bootstrap-uv.ps1",
+            scripts_dir / "bootstrap-uv.ps1",
+        )
     for source in (_PLUGIN_ROOT / "scripts").glob("versioned_runtime*.py"):
         shutil.copyfile(source, scripts_dir / source.name)
     shutil.copytree(
@@ -179,14 +183,19 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
     env.update(overrides)
+    if "HOME" in overrides and "COPILOT_HOME" not in overrides:
+        env["COPILOT_HOME"] = str(Path(overrides["HOME"]) / ".copilot")
     env.setdefault("AGENT_VAULT_CONFIG", str(Path(env["HOME"]) / "absent-global.json"))
     return env
 
 
 def test_clean_environment_retains_only_explicit_vault_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "foreign-profile"))
     for key in ("KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"):
         monkeypatch.setenv(key, "foreign-fixture-selection")
     environment = _clean_env({"HOME": str(tmp_path)})
+    assert environment["COPILOT_HOME"] == str(tmp_path / ".copilot")
+    assert _clean_env({"HOME": str(tmp_path), "COPILOT_HOME": "explicit-profile"})["COPILOT_HOME"] == "explicit-profile"
     assert not {"KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"} & environment.keys()
     assert _clean_env({"HOME": str(tmp_path), "KPDB": "selected-fixture.kdbx"})["KPDB"] == (
         "selected-fixture.kdbx"

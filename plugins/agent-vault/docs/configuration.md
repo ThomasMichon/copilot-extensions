@@ -249,34 +249,40 @@ database custody, activation precedence or strict owner/configuration refusals.
 The source is not an activation snapshot: a newly launched resident rechecks
 current opt-in before service admission, including revocation after its caller's
 check. Read-only ping and explicit stop/export controls retain their own gates.
-Activation accepts the selected completed runtime's interpreter and discovers
-an existing Python 3.10+ reader only for a cold payload. Windows uses the
-canonical native helper's read-only discovery, including later PATH candidates,
-non-Store launcher entries/selectors and standard installation roots. Its
-ordinary installer caller still requires 3.11; activation does not raise the
-Vault reader floor or execute an installer to select Python. POSIX qualifies
-the existing `python3`/`python` PATH candidates. Unsupported-only or absent
-Python is an explicit prerequisite refusal, never inactive readiness.
-Discovery stops at a supported PATH candidate without querying unused launchers.
-Its child processes disable Python install manager's `automatic_install`
-through `PYTHON_MANAGER_AUTOMATIC_INSTALL=false`; the parent policy is unchanged.
-Windows reader execution uses the same headless captured-process helper;
-discovery and reads neither install Python nor mutate PATH. Explicit runtime
-Python remains authoritative without rediscovery. This does not bypass the
-canonical installation-context owner's independent bootstrap prerequisites;
-its current Windows front door still requires Python on PATH before resolving
-an installation. The POSIX payload control qualifies the full no-global-Python
-path; Windows separately qualifies the activation reader with owned Python.
+Activation accepts the selected completed runtime's interpreter. For a cold
+payload, Windows and POSIX inspect the exact prepared UV-managed interpreter
+declared by the packaged `installer-instance-python-version.txt`, through the
+shared installer bootstrap selector. Neither reader searches PATH Python,
+`py` or system installation directories. The selected interpreter still
+qualifies the reader's Python 3.10+ floor; a failed UV lookup cannot use partial
+stdout as a candidate.
+
+An unmaterialized source checkout uses the support directory named by its
+installer's canonical engine reference when both local bootstrap assets are
+absent. Promotion rewrites that reference to the payload-local form; an
+incomplete shipped payload cannot borrow support from an ancestor repository.
+Partially present local support also refuses rather than mixing locations.
+
+UV and the declared interpreter must already be prepared by their explicit
+prerequisite setup owner. Missing support or an unprepared interpreter gives
+an explicit prerequisite refusal, never inactive readiness or an ordinary-read
+installation. POSIX retains activation before installer acquisition. Selector
+overrides remain child-scoped and PATH is unchanged. Windows retains its
+headless captured-process helper and UTF-8 UV output. Explicit runtime Python
+remains authoritative without rediscovery. The canonical installation-context
+owner retains its independent prerequisite and admission contract; reader
+qualification alone is not full front-door or installed-host qualification.
 
 ### Activation performance
 
 The legacy session bootstrap reads activation once on every eligible session
 start, before checking current runtime metadata; inactive scope therefore still
-needs the read. Killswitch and cell-context exits precede it. On Windows with a
-supported PATH candidate this adds one qualification subprocess to the existing
-configuration-reader subprocess. Launcher/root discovery runs only if PATH
-qualification fails. The read itself does no network, installation, repository
-history or full-tree work; optional configuration-owner composition retains its
+needs the read. Killswitch and cell-context exits precede it. Cold selection adds
+UV version qualification and prepared managed lookup before the physical-base
+probe and configuration-reader subprocess. The POSIX selector also reads its
+small request using shell utilities. An unmaterialized checkout also reads its
+own installer to locate the declared canonical support. The read itself does no network,
+installation, repository history or full-tree work; optional configuration-owner composition retains its
 existing bounded peer read. An ordinary runtime dispatcher supplies its selected
 completed interpreter, avoiding discovery. Explicit install participation also
 performs an activation read. Each call covers one selected Vault installation
@@ -297,7 +303,7 @@ samples, nearest-rank summaries and errors; two samples cannot qualify tails.
 Child CPU/spawn totals, live installed latency, first-OS-boot cache conditions,
 visible/model-ready and whole-enabled-hook-stack boundaries remain unavailable,
 not zero or passing. Instrumentation stays outside production callbacks.
-The initial local Windows/Python 3.14 samples were 9.078/5.271s for absent runtime
+Historical ambient-reader Windows/Python 3.14 samples were 9.078/5.271s for absent runtime
 and 4.620/3.654s for current metadata. These do not meet a two-second composed-hook
 target. Local source SHA and before-change delta were not captured; this is
 fixture observation, not installed performance or a regression comparison.

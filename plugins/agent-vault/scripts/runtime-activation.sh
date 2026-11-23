@@ -1,20 +1,35 @@
 #!/usr/bin/env bash
 
 vault_runtime_activation() {
-    local reader_dir python="${2:-}"
+    local reader_dir bootstrap_dir source_line python="${2:-}"
     local installed_python="$python"
     reader_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 3
     if [[ -z "$python" ]]; then
-        local candidate
-        while IFS= read -r candidate; do
-            if "$candidate" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
-                python="$candidate"
-                break
+        bootstrap_dir="$reader_dir"
+        # Promotion rewrites this canonical reference to the payload-local form.
+        # Only an unmaterialized source wrapper may read repository support files.
+        if [[ ! -e "$reader_dir/bootstrap-uv.sh" &&
+            ! -e "$reader_dir/installer-instance-python-version.txt" &&
+            -f "$reader_dir/install.sh" ]]; then
+            while IFS= read -r source_line; do
+                if [[ "$source_line" == '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' ]]; then
+                    bootstrap_dir="$reader_dir/../../../libs/installer-engine"
+                    break
+                fi
+            done < "$reader_dir/install.sh"
+        fi
+        if [[ -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
+            . "$bootstrap_dir/bootstrap-uv.sh" &&
+            python="$(resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null)"; then
+            if ! "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
+                python=""
             fi
-        done < <(type -a -p python3 python 2>/dev/null)
+        else
+            python=""
+        fi
     fi
     if [[ -z "$python" ]]; then
-        printf '%s\n' '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation requires an existing Python 3.10+ reader; no installation was attempted."}'
+        printf '%s\n' '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted."}'
         return 3
     fi
     local project="${1:-$PWD}"
