@@ -8187,6 +8187,87 @@ the final packet to current Dev plus exactly five nodes/two bindings, and
 require fresh combined-head CI rather than treating the old candidate as
 the complete final inventory.
 
+Exact-head approval `6024055181` names
+`a4e877fd6eedcd282c63414fc5c2f53269480183`, with zero active findings,
+review/discussion comments or unresolved threads and complete pagination.
+Fresh attempt-one CI `45201249013` executes all 9,842 cases with 55
+deselections in 222.77 pytest / 245.969 packet seconds. The record reports
+`mode=executed`, origin run `45201249013` / attempt one, execution identity
+`aff5ee17f21fd582069db656ed0201805fa9751a18655179a3c9227c2cff4612`
+and packet digest
+`761cf66d3d3ebf7a28e8ffaa7714532b7b0fc8327c8eb1dc61e7d239d76ca0ca`.
+Actual three-file upload finalizes artifact `14832920311` at 3,978,915 bytes;
+guards, trusted metadata and required aggregate `137788850367` pass.
+
+Seven fresh required-check reads and final head/base/hold/parent-reference
+fences precede ordinary managed merge. Source #14259 merges at
+`2026-11-23T15:14:23Z` as `483fc02d286905ba8760da75ecf2e635afc66498`.
+Independent provider readback confirms merged state and open parent #6237.
+Supported source sync succeeds, the entire reviewed and merged trees match,
+and every source binding, 89 helper decisions and ten observed inputs verify.
+Actual parent Goal, Plan/own leaf and Validation Plan are reread before
+resolving only this source leaf. No runtime, native, custody or whole-parent
+acceptance follows.
+
+The next finite candidate is the original synthetic environment-selection
+function (six prospective cases) plus original patched-OS path spelling
+(three). Their bodies use explicit fixture dictionaries or path-only inputs.
+No collection/execution is yet claimed. Preserve exact original functions,
+fixtures, parameters/types, marks and IDs; require closed unchanged-guard
+observation and production body calls. The two test-helper-only MAX_PATH
+assertions stay outside this selection rather than fabricating a production
+coverage target for them.
+
+### November 23 original synthetic environment and patched-OS path spelling
+
+The next finite leaf exports two complete original containment functions:
+`test_powershell_module_path_requires_explicit_host_state` (six cases) and
+`test_sandbox_fixture_preserves_unc_and_native_root_spelling` (three).
+The former uses an explicit synthetic PATH and optional `host-modules`
+string; its host-state parameter authorizes no actual host capture. The latter
+retains the original native-path module's OS double and pure path inputs.
+No native backend, process, registry, service or retained-resource cleanup
+is selected. The two test-helper-only MAX_PATH assertions stay outside this
+selection because they have no production-body call.
+
+The prior static module/import/decorator audit applies unchanged. Exact
+collection verifies 60 original functions / 118 cases against two unchanged
+functions / nine cases, excluding 58 functions / 109 cases before execution.
+Objects, fixture names, recursive parameter values/types, marks and full IDs
+are preserved. Fresh unchanged-guard observation passes all nine in 1.38
+pytest / 2.297 observation seconds with zero prohibited effects, ten bound
+Python reads and all 27 phase reports. Each case contributes actual
+`isolated_environment` or `native_test_path` body calls.
+
+Only the adapter source binding is new; both production targets and the
+original module are already bound. The packet contains 9,851 cases, 1,386
+sources and unchanged 497 targets, 89 helpers and 300 seconds. Compact v2
+retains zero indentation and space-free separators at 1,003,638 bytes under
+the unchanged 1 MiB cap. All previous ordered values, hashes and targets
+remain. Across both containment adapters, four original functions / fourteen
+cases are selected and 104 originals remain unselected, not deleted or
+qualified.
+
+No original, fixture, guard, preload or source/phase contract changes. This
+local result still needs normal strict checks, fresh complete Linux CI,
+exact-head review, ordinary merge and parent readback. Native, release,
+shared-owner, custody and whole-parent obligations remain open.
+
+Ruff and three reader controls pass. The initial normal changed-code strict
+selection also reaches untouched Vault files and stops for unavailable
+prepared tooling. Retain that result without preparing or editing the peer.
+Supported sync incorporates #14260 at
+`57a97c20a112018eb1f7c8ccd572bdefe7831857`; the refreshed normal
+`--new-code --base origin/dev` selection checks this adapter alone and passes
+Linux and Windows.
+
+The final packet preserves the complete peer inventory and equals current
+Dev plus only this slice's nine ordered nodes and one source binding.
+Combined totals are 9,856 cases, 1,389 sources, 500 targets and 1,004,604
+compact-v2 bytes, with 89 helpers and existing bounds retained. All ten
+observed inputs remain unchanged; no local re-execution is needed for a
+changed observed dependency, but complete combined-head CI remains required.
+
 ### November 23 retirement early-refusal input boundary
 
 Read-only tracing identifies two prospective early-refusal functions in

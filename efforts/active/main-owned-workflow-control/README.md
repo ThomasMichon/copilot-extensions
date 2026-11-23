@@ -3701,7 +3701,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   resolving only this source-only leaf. Five adapters cover 106 of 272
   original command-safety cases; 166 remain unselected, not deleted or
   qualified. No actual native/lifecycle/custody acceptance follows.
-- [ ] Assess two original portable containment functions, provisionally
+- [x] Assess two original portable containment functions, provisionally
   five cases: sandbox cleanup signature compatibility (two) and private
   PowerShell module-path identity (three). Preserve original assertions and
   fixtures; bound cleanup to the test's own temporary files. Complete the
@@ -3737,6 +3737,51 @@ authorizes critical main-path acceptance or a bounded administrative change.
   source-hash refresh, which is preserved. All ten observed inputs remain
   unchanged; the final composition must equal current Dev plus only this
   slice's five ordered nodes/two source bindings, not the pre-sync candidate.
+  #14259 receives exact-head approval `6024055181` with zero active findings,
+  comments or unresolved threads and complete pagination. Fresh attempt-one
+  CI `45201249013` executes all 9,842 cases with 55 deselections in 222.77
+  pytest / 245.969 packet seconds, finalizes the actual three-file artifact
+  `14832920311`, and passes guards and aggregate `137788850367`.
+  Seven fresh required-check reads and final head/base/hold/parent-reference
+  fences precede normal managed merge at `2026-11-23T15:14:23Z` as
+  `483fc02d286905ba8760da75ecf2e635afc66498`.
+  Independent provider readback confirms merged state and open parent;
+  supported source sync succeeds. The entire reviewed and merged trees
+  match; all bindings, 89 helpers and ten observed inputs verify unchanged.
+  The actual Goal, Plan/own leaf and Validation Plan are reread before
+  resolving only this leaf. Broader native, release, owner and custody gates
+  remain open; this is no whole-flow savings or parent-completion claim.
+- [ ] Assess the original synthetic environment-selection function (six
+  prospective cases) and patched-OS path-spelling function (three) from
+  the same containment module. Keep explicit fixture dictionaries and
+  the original per-module OS double; select no actual host-state capture,
+  backend or native lifecycle. Require exact original objects/fixtures,
+  parameters/types, marks and full IDs, closed inputs, actual production
+  body calls and unchanged positive guarding before normal gates/merge.
+  Do not select the two test-helper-only MAX_PATH assertions as production
+  call coverage or manufacture a target for them.
+  Exact collection verifies 60 original functions / 118 cases against two
+  original functions / nine adapter cases; 58 functions / 109 cases are
+  excluded before execution. Exact objects, fixture names, recursive
+  parameter values/types, marks and full IDs match. Unchanged positive
+  guarding passes all nine in 1.38 pytest / 2.297 observation seconds with
+  zero prohibited effects, ten bound Python reads and all 27 phase reports.
+  Each case contributes actual `isolated_environment` or `native_test_path`
+  body calls. Add only the adapter binding: 9,851 cases, 1,386 sources,
+  unchanged 497 targets / 89 helpers / 300 seconds, and 1,003,638 compact
+  v2 bytes under the unchanged 1 MiB cap. Four functions / fourteen cases
+  across both containment adapters are selected; 104 originals remain
+  unselected, not deleted or qualified. Normal strict, fresh full CI,
+  exact-head review, merge and parent readback remain required.
+  Ruff and three reader controls pass. An initial normal strict selection
+  also reaches untouched Vault files and stops for missing prepared tooling;
+  no preparation or peer edit is attempted. Supported sync incorporates
+  #14260 at `57a97c20a112018eb1f7c8ccd572bdefe7831857`; the refreshed
+  normal `origin/dev` check selects only the adapter and passes Linux and
+  Windows. Final composition preserves the peer inventory and equals current
+  Dev plus exactly nine ordered nodes / one binding: 9,856 cases, 1,389
+  sources, 500 targets and 1,004,604 bytes, with 89 helpers and existing
+  bounds retained. All ten observed inputs remain unchanged.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.

@@ -1,0 +1,9 @@
+{
+  "comment": "Admit nine unchanged original synthetic environment and patched-OS path-spelling controls to the portable unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
