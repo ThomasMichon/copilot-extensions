@@ -1,0 +1,17 @@
+{
+  "comment": "Reuse installed plugins when a GitHub marketplace registration differs only in owner/repo case",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
