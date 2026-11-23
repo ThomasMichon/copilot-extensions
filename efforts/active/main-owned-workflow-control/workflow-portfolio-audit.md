@@ -7098,11 +7098,73 @@ one-space v2 bytes. Preceding entries/order/hashes, 89 helper decisions,
 1 MiB cap and 300-second bound remain intact.
 
 Targeted Ruff and normal changed-code Linux/Windows strict checks pass;
-a worktree-manager patch changefile records release intent. Exact-head
-review and fresh full CI remain required. This is unchanged source-test
-selection, not real preparation, network isolation, native/runtime/install
-qualification, release, rollout, custody transfer, controlled whole-flow
-saving or parent completion.
+a worktree-manager patch changefile records release intent.
+
+Managed publication of #14218 preserves concurrent #14206's Bridge
+`client_worktrees.py` rebinding over actual parent
+`e81c69beadd8491c5a95996b6b503de4b97525b9`; all 48 observed inputs remain
+unchanged. Exact published head `175fec6d5ee8b2f2bc7d7c93429f17fb72c59697`
+receives Copilot approval `6019009209`, with its complete review, comments,
+threads and pagination read. Fresh CI `45144486421`, attempt one, executes
+all 9,634 cases in 127.98 pytest / 142.529 packet seconds, retaining the
+55 established deselections. The result is `executed`, not replay:
+origin run `45144486421`, attempt `1`, lookup 3,780 ms, identity
+`a4f0d3d49281bf3a826619b81eeae6e1e2f737d7fec4b716bf1cd9293e25b46d`
+and packet digest
+`5d86b4e8ac2172f899d4312961fda8fca32ad45bfa89537473fadcff5dc15db1`.
+Three-file artifact `14804020844` (3,902,116 bytes), guards `137590284949`,
+required aggregate `137591937699` and trusted metadata `45144487943` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge.
+
+Source #14218 merges at `2026-11-23T09:15:48Z` as
+`111165accb659ca344b182f947c6084d2f93c10b`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this two-case leaf. This is unchanged source-test selection, not real
+preparation, network isolation, native/runtime/install qualification, release,
+rollout, custody transfer, controlled whole-flow saving or parent completion.
+No retry or metadata refresh is requested.
+
+The next bounded slice is three complete original preflight/preparation
+early-return functions, expected as four cases. Keep positive profile/
+partition/environment tests separate: their original unmocked cleanup
+thread-pool submission is not eligible under the unchanged effect guard,
+even when contained execution is mocked. No selected execution or admission
+of those positive paths is attempted.
+
+### November 23 original preflight and preparation-only controls
+
+The adapter selects three complete original functions as four cases:
+unsafe child cleanup refuses before preparation or collection, source
+preflight consumes the original plugin budget, and mocked prepare-only
+never invokes pytest. Original functions, assertions, the autouse scratch
+fixture, parameter values/types, own marks and complete IDs are preserved.
+Exact collection compares 267 originals with four adapter cases; the other
+104 functions / 263 cases are excluded before execution.
+
+The real runner returns before its unmocked cleanup thread pool in every
+selected case. Prepare-only retains the original mocked venv helper. Its
+ordinary plugin-root resolution is pure path composition; the fake
+canonical `alpha` plugin is absent, so default file selection does not read
+a real plugin configuration. Positive profile/partition/environment paths
+that submit actual cleanup work remain unselected.
+
+Initial observation under the unchanged effect/source guard passes all
+four cases in 2.10 pytest / 2.953 observation seconds, with zero prohibited
+effects, 48 bound Python reads, all twelve phase reports and actual
+`run_plugin` call-phase coverage per case. Add only the adapter binding:
+9,638 cases, 1,361 sources and the existing 489 production targets in
+1,030,063 one-space v2 bytes. Preserve preceding node order and source
+hashes, the 89 helper decisions, 1 MiB cap and 300-second bound.
+
+Ruff and normal changed-code Linux/Windows strict checks pass; a
+worktree-manager patch changefile records release intent. Exact-head review
+and fresh complete CI remain required. This is source-test selection, not real preparation,
+process/thread execution, native/runtime/install qualification, release,
+rollout, custody transfer, controlled whole-flow savings or parent
+completion. No retry, metadata refresh or shared-workflow edit is requested.
 
 ### November 23 original explicit-file selection controls
 
