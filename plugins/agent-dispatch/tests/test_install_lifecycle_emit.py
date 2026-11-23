@@ -33,7 +33,7 @@ def _ps_function(text: str, name: str) -> str:
 
 def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = False,
          powershell: bool = False, discovery: str = "",
-         preserve: bool = False) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
+         preserve: bool = False) -> tuple[subprocess.CompletedProcess[str], list[dict[str, object]]]:
     shell = shutil.which("pwsh" if powershell else "bash")
     if not shell or (not powershell and os.name == "nt"):
         pytest.skip("native shell unavailable")
@@ -76,6 +76,8 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             "$PluginDir = $env:TEST_PLUGIN\n$InstallDir = $env:TEST_INSTALL_ROOT\n"
             "$VenvDir = $env:TEST_RUNTIME\n$LinkDir = $env:TEST_RUNTIME\n"
             "$SrcVersion = '1.2.3'\n$Action = $env:TEST_ACTION\n"
+            "$WheelProfile = ''; $WheelPython = ''\n"
+            "$script:DispatchBootstrapPython = $env:TEST_PYTHON\n"
             "$PreserveSupervisors = $env:TEST_PRESERVE_SUPERVISORS -eq '1'\n"
             "$global:LASTEXITCODE = 47\n"
             "$installerActionRefusal = $null\n"
@@ -88,7 +90,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             + (_ps_function(text, "Get-SignedBasePython") + "\n"
                if "function Get-SignedBasePython {" in text else "")
             + (_launcher_fixture() if discovery == "launcher" else "")
-            + ("function Get-Command { param($Name, $CommandType, $ErrorAction) }\n"
+            + ("function Get-BootstrapPython { return $null }\n"
                if discovery == "missing" else "")
             + (_store_alias_fixture() if discovery == "store-alias" else "")
             + mocks + "\n" + boundary
@@ -112,12 +114,13 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             for name in (
                 "_initialize_source_runtime", "_assert_source_runtime", "do_install",
                 "do_update", "do_start", "do_stop", "do_status", "do_stamp",
-                "do_uninstall", "_ensure_runtime",
+                "do_uninstall", "_ensure_runtime", "_runtime_admission_preflight",
             )
         )
         script = (
             "set -euo pipefail\nPLUGIN_DIR=\"$TEST_PLUGIN\"\nINSTALL_DIR=\"$TEST_INSTALL_ROOT\"\n"
             "SCRIPT_DIR=\"$PLUGIN_DIR/scripts\"\n"
+            "INSTALLER_ENGINE_DEPENDENCY_POLICY=\"$TEST_ENGINE/installer_dependency_policy.py\"\n"
             "SRC_VERSION=1.2.3\nACTION=\"$TEST_ACTION\"\nLINK_DIR=\"$TEST_RUNTIME\"\n"
             "PRESERVE_SUPERVISORS=\"$TEST_PRESERVE_SUPERVISORS\"\n"
             "_warn() { printf '%s\\n' \"$*\" >&2; }\n"
@@ -125,6 +128,8 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             + _function(support, "_require_actions") + "\n"
             + _function(support, "_maintenance_preflight") + "\n"
             + _function(text, "_bootstrap_python") + "\n"
+            + ('_bootstrap_python() { printf "%s\\n" "$TEST_PYTHON"; }\n'
+               if discovery not in {"runtime", "missing"} else "")
             + _function(text, "_lifecycle_emit") + "\n"
             + _function(text, "_lifecycle_finish") + "\n" + mocks + "\n" + boundary
         )
@@ -141,6 +146,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
         "TEST_LAUNCHER_USED": str(tmp_path / "launcher-used"),
         "TEST_RECONCILE_LOG": str(tmp_path / "instance-reconcile.log"),
         "TEST_PRESERVE_SUPERVISORS": str(int(preserve)),
+        "TEST_ENGINE": str(PLUGIN.parents[1] / "libs/installer-engine"),
     }
     if not powershell and discovery in {"runtime", "missing"}:
         minimal_path = tmp_path / "minimal-path"
@@ -152,7 +158,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
     result = subprocess.run(
         [*args, str(harness)], env=environment, capture_output=True, text=True,
         timeout=25, check=False,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     log = config / "lifecycle.log"
     events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] \
@@ -193,17 +199,17 @@ function Invoke-Hidden {
 """
 
 
-def test_runtime_only_bash_discovery_records_events(tmp_path: Path) -> None:
+def test_runtime_only_bash_discovery_does_not_borrow_the_incumbent(tmp_path: Path) -> None:
     result, events = _run(tmp_path, "update", discovery="runtime")
     assert result.returncode == 0, result.stderr
-    assert [event["outcome"] for event in events] == ["begin", "ok"]
-    assert not result.stderr
+    assert events == []
+    assert "Lifecycle record unavailable" in result.stderr
 
 
-def test_powershell_canonical_launcher_discovery_records_events(tmp_path: Path) -> None:
+def test_powershell_explicit_driver_does_not_use_launcher_discovery(tmp_path: Path) -> None:
     result, events = _run(tmp_path, "update", powershell=True, discovery="launcher")
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "launcher-used").is_file()
+    assert not (tmp_path / "launcher-used").exists()
     assert [event["outcome"] for event in events] == ["begin", "ok"]
     assert not result.stderr
 
@@ -327,6 +333,7 @@ def test_shipped_exit_traps_preserve_status_and_cleanup(tmp_path: Path, exit_cod
             "_clear_update_marker() { echo marker; }\n"
             "_exit_install_lock() { echo lock; }\n"
             + _function(text, "_bootstrap_python") + "\n"
+            + '_bootstrap_python() { printf "%s\\n" "$TEST_PYTHON"; }\n'
             + _function(text, "_lifecycle_emit") + "\n"
             + _function(text, "_lifecycle_finish") + "\n"
             + f"trap {trap} EXIT\n_lifecycle_emit begin\nexit {exit_code}\n"
@@ -334,7 +341,7 @@ def test_shipped_exit_traps_preserve_status_and_cleanup(tmp_path: Path, exit_cod
         result = subprocess.run(
             [shell, "-c", script], capture_output=True, text=True, timeout=15, check=False,
             env={**os.environ, "TEST_PLUGIN": str(PLUGIN), "TEST_CONFIG": str(root),
-                 "AGENT_DISPATCH_ROUTING_DIR": ""},
+                 "TEST_PYTHON": sys.executable, "AGENT_DISPATCH_ROUTING_DIR": ""},
         )
         assert result.returncode == exit_code, result.stderr
         assert ("marker\n" in result.stdout) == ("_clear_update_marker" in trap)

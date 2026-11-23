@@ -686,15 +686,19 @@ _versioned_gc() {
 # === end install-contract:v3 versioned-venv ===
 
 _bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
+    local bootstrap_dir python
+    bootstrap_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    bootstrap_dir="${bootstrap_dir%/*}"
+    if [[ "$bootstrap_dir" == /* && -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
+        python="$(
+            . "$bootstrap_dir/bootstrap-uv.sh" &&
+            resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null
+        )" &&
+        "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' </dev/null >/dev/null 2>&1; then
+        printf '%s\n' "$python"
+        return 0
+    fi
+    printf '%s\n' 'Agent Dispatch requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted.' >&2
     return 1
 }
 

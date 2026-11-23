@@ -657,7 +657,14 @@ explicit runtime choice, venv fallbacks carry the qualified helper base, includi
 PATH or Python. Custom runtime construction remains separate from this reader
 selection.
 
-Successful implicit selections are reused only within the current installer
+The POSIX installer uses that selected engine's declared prepared managed Python
+for source fingerprints, construction-control helpers and lifecycle recording.
+It does not borrow the active runtime or search PATH Python, and inspection
+cannot download an interpreter. Missing packaged bootstrap assets cannot fall
+back to repository files. Its separate runtime constructor and pip-index
+discovery are not migrated by this helper-reader change.
+
+On Windows, successful implicit selections are reused only within the current installer
 invocation and matching bootstrap directory, runtime root and admission mode.
 A repeated read still probes the selected interpreter; cached external/removal
 reads recheck the physical base against the runtime root. Explicit bindings and
