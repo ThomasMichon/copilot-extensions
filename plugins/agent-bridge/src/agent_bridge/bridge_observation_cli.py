@@ -87,7 +87,7 @@ def read(client: Any, args: argparse.Namespace) -> None:
         _render_result_snapshot(payload, args.session_id)
 
 
-def wait(client: Any, args: argparse.Namespace) -> None:
+def wait(args: argparse.Namespace) -> None:
     """Observe idle or terminal state without sending, resuming or following a successor."""
     from . import __main__ as core
     from .client import BridgeClientError, BridgeConnectionError
@@ -101,6 +101,8 @@ def wait(client: Any, args: argparse.Namespace) -> None:
     payload: dict[str, Any] | None = None
     with command_deadline(timeout):
         try:
+            client = core._get_client(ensure=False)
+            remaining()
             target = _resolve(client, args)
             while True:
                 remaining()

@@ -164,7 +164,8 @@ delivered or consumed. A timeout reports `settled: false`. Represented waits
 also inspect the exact registration so an expired registration with retained
 idle history is not reported as idle. Attention/position options refuse in this
 mode rather than silently weaken the existing owned attention contract.
-The command deadline starts before selection and bounds capability checks,
+The command deadline starts before client initialization and selection, including
+the initial health check. It bounds capability checks,
 HTTP reads and retry delays. An expired deadline starts no new poll. A timeout
 keeps only the last snapshot observed within the budget, or `null` if none.
 
@@ -192,7 +193,10 @@ Represented exact reads also request `native_only=true`. A represented alias can
 combine event histories from different native IDs. Such a read refuses with 409
 because the combined history has no per-event native content-origin contract,
 even when the alias existed before selection. Legacy represented reads keep
-their combined history.
+their combined history. Exact reads recheck registration and aliases after
+projection so an alias created during projection also refuses with 409.
+This adds only indexed registration/alias reads to exact represented snapshots;
+legacy snapshots do not perform the extra recheck.
 
 The [contained source runner](../../../TESTING.md) can select
 `tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and

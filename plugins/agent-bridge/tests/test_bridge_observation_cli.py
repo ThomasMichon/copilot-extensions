@@ -332,7 +332,7 @@ def test_bridge_wait_caps_backoff_and_does_not_start_another_poll(
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("phase", ["capability", "protocol", "result", "retry"])
+@pytest.mark.parametrize("phase", ["client", "capability", "protocol", "result", "retry"])
 def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -349,7 +349,14 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
     bridge = BridgeClient("http://fixture.invalid", "fixture-token")
     client, _calls = client_for(monkeypatch)
     monkeypatch.setattr(bridge, "resolve_bridge", client.resolve_bridge)
-    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: bridge)
+
+    def get_client(**kwargs: Any) -> BridgeClient:
+        assert kwargs == {"ensure": False}
+        if phase == "client":
+            bridge.assert_client_supported()
+        return bridge
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
     monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=1))
     clock = [0.0]
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
@@ -367,7 +374,9 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
         requests.append((request.full_url, timeout))
         if request.full_url.endswith("/health"):
             index = len(requests)
-            clock[0] += 1 if (phase, index) in {("capability", 1), ("protocol", 2)} else 0.2
+            clock[0] += (
+                1 if (phase, index) in {("client", 1), ("capability", 1), ("protocol", 2)} else 0.2
+            )
             return Response(
                 json.dumps(
                     {
@@ -393,7 +402,10 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
     cli.main(["wait", "workspace-a", "--bridge", "--json"])
     result = json.loads(capsys.readouterr().out)
     assert result == {"settled": False, "reason": "timeout", "snapshot": None}
-    expected = {"capability": [1.0], "protocol": [1.0, 0.8]}.get(phase, [1.0, 0.8, 0.6])
+    expected = {"client": [1.0], "capability": [1.0], "protocol": [1.0, 0.8]}.get(
+        phase,
+        [1.0, 0.8, 0.6],
+    )
     assert [timeout for _url, timeout in requests] == pytest.approx(expected)
     assert clock[0] >= 1
 

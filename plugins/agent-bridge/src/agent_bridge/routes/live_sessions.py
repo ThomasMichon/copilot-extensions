@@ -460,6 +460,7 @@ def get_live_result_snapshot(
         )
     try:
         return build_represented_result_snapshot(
+            db=db,
             registration=_to_info(row).model_dump(mode="json"),
             event_log=log,
             requested_ref=session_ref,

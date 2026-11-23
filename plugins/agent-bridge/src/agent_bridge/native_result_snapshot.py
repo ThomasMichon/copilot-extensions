@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 def build_represented_result_snapshot(
     *,
+    db: Database,
     registration: dict[str, Any],
     event_log: EventLog,
     requested_ref: str,
@@ -42,7 +43,7 @@ def build_represented_result_snapshot(
         raise ResultHistoryChangedError(
             "represented history has no native content-origin contract after aliasing",
         )
-    return legacy_represented_snapshot(
+    snapshot = legacy_represented_snapshot(
         registration=registration,
         event_log=event_log,
         requested_ref=requested_ref,
@@ -52,6 +53,17 @@ def build_represented_result_snapshot(
         retired_ids=retired_ids,
         inbox=inbox,
     )
+    if native_only:
+        current = db.get_live_session(requested_ref)
+        if (
+            current is None
+            or current["session_id"] != requested_ref
+            or db.live_session_aliases_to(requested_ref)
+        ):
+            raise ResultHistoryChangedError(
+                "represented native identity changed during result snapshot",
+            )
+    return snapshot
 
 
 def build_owned_result_snapshot(

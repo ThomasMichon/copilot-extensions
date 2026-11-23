@@ -241,7 +241,7 @@ def _cmd_wait(args: argparse.Namespace) -> None:
 
     core = _core()
     if bridge_observation_cli.selected(args):
-        bridge_observation_cli.wait(core._get_client(ensure=False), args)
+        bridge_observation_cli.wait(args)
         return
     client = core._get_client()
     caller_id = core._caller_id_for(args)

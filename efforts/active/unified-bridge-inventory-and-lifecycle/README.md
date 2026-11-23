@@ -25,7 +25,7 @@ outcome rather than replacing it with one intermediate fix.
 - **Kind:** completion
 - **Now:** the scoped and explicit-host inventory slice merged in #14034.
   The Phase 3 shared exact selector and read-only `show` consumer merged in
-  #14206; release verification remains open. Explicit local read/wait adoption
+  #14206; its source release is verified. Explicit local read/wait adoption
   of exact identity and bounded result observations is qualified in source;
   its review, CI and merge gates remain open. Default migration, remote
   observation, effectful selectors and potential targets follow.
@@ -296,6 +296,29 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-23 - Projection-time aliases and initial client checks qualified
+
+- An alias can append successor events after the native result precheck.
+  Exact represented projection now rechecks the existing registration and
+  alias owner after constructing the snapshot. A changed identity or new alias
+  refuses with 409 before content leaves the provider. Legacy reads retain
+  combined history, and the change adds no registry, lock or stored-state write.
+- Client creation performs an initial health check. It now occurs inside the
+  wait command's existing deadline, before selection, with the same
+  `ensure=False` behavior and one client instance.
+- Both focused regressions first failed: an alias during projection returned
+  200 instead of 409, and initial health used a 120-second request timeout
+  despite a one-second command budget. Both pass after correction in the
+  100-case behavior packet. The corrected alias fixture also passes separately.
+  Whole-file strict typing passes for all 20 changed Python files on the
+  Python 3.10 Linux and Windows targets.
+- The previous published source passed the full eligible-unit coverage gate
+  and both native command-receiver jobs. These are source checks, not installed
+  adoption. This revision still requires its own review and exact-head CI.
+- The earlier shared selector/inspection slice is released: all 13 affected
+  plugin files match Main `4629b46bce08ca12a691234e55d8d5c4194d356f`.
+  This verifies source publication, not runtime installation.
 
 ### 2026-11-23 - Represented content origin and observation deadlines qualified
 

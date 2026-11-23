@@ -376,18 +376,21 @@ def test_native_represented_snapshot_refuses_preselection_aliased_content(
     app.include_router(router)
     bound.db.create_cli_mode_reservation(bound.entry.id, now=time.time())
     for session_id in ("old", "new"):
-        assert bound.db.register_live_session(
-            session_id,
-            machine=bound.entry.machine,
-            cwd=bound.entry.path,
-            worktree_id=bound.entry.id,
-            repo="example-project",
-            branch=None,
-            pid=123,
-            process_started_at=100.0,
-            role=None,
-            now=time.time(),
-        ) == "live"
+        assert (
+            bound.db.register_live_session(
+                session_id,
+                machine=bound.entry.machine,
+                cwd=bound.entry.path,
+                worktree_id=bound.entry.id,
+                repo="example-project",
+                branch=None,
+                pid=123,
+                process_started_at=100.0,
+                role=None,
+                now=time.time(),
+            )
+            == "live"
+        )
         if session_id == "old" or fresh_successor_log:
             log = store.get_or_create(session_id)
             log.append("agent_message", {"text": f"{session_id}-only answer"})
@@ -407,6 +410,68 @@ def test_native_represented_snapshot_refuses_preselection_aliased_content(
             assert "content-origin" in native.text
             assert "old-only answer" not in native.text
         assert "old-only answer" in http.get("/api/v1/live-sessions/new/result").text
+
+
+def test_native_represented_snapshot_refuses_alias_during_projection(
+    metadata_boundary: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge import native_result_snapshot as native
+    from agent_bridge.live_representation import LiveEventStore
+    from agent_bridge.result_snapshot import build_represented_result_snapshot
+    from agent_bridge.routes.live_sessions import router
+
+    bound = metadata_boundary
+    store = LiveEventStore()
+    app = FastAPI()
+    app.state = bound.request.app.state
+    app.state.live_event_store = store
+    app.include_router(router)
+    bound.db.create_cli_mode_reservation(bound.entry.id, now=time.time())
+
+    def register(session_id: str) -> None:
+        assert (
+            bound.db.register_live_session(
+                session_id,
+                machine=bound.entry.machine,
+                cwd=bound.entry.path,
+                worktree_id=bound.entry.id,
+                repo="example-project",
+                branch=None,
+                pid=123,
+                process_started_at=100.0,
+                role=None,
+                now=time.time(),
+            )
+            == "live"
+        )
+        log = store.get_or_create(session_id)
+        log.append("agent_message", {"text": f"{session_id}-only answer"})
+        log.append("turn_complete", {})
+
+    register("old")
+    original = build_represented_result_snapshot
+    projections: list[str] = []
+
+    def alias_during_projection(**kwargs: Any) -> Any:
+        if not projections:
+            register("new")
+            store.alias("old", "new")
+        projections.append(kwargs["registration"]["session_id"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(native, "legacy_represented_snapshot", alias_during_projection)
+    with TestClient(app) as http:
+        response = http.get(
+            "/api/v1/live-sessions/old/result",
+            params={"native_only": "true"},
+        )
+        assert response.status_code == 409
+        assert "new-only answer" not in response.text
+        legacy = http.get("/api/v1/live-sessions/new/result")
+        assert legacy.status_code == 200
+        assert "old-only answer" in legacy.text and "new-only answer" in legacy.text
+    assert projections == ["old", "new"]
 
 
 @pytest.mark.parametrize(
