@@ -273,6 +273,13 @@ remains authoritative without rediscovery. The canonical installation-context
 owner retains its independent prerequisite and admission contract; reader
 qualification alone is not full front-door or installed-host qualification.
 
+The POSIX session bootstrap uses that same prepared selection before reading
+payload/deployment metadata or source/profile readiness. It reuses the result
+for activation and profile inspection within the call, instead of discovering
+another interpreter. Missing prerequisites refuse visibly without a driver
+handoff or installation; the hook still emits its session-start JSON. Native
+killswitch and installation-cell exits precede interpreter selection.
+
 ### Activation performance
 
 The legacy session bootstrap reads activation once on every eligible session

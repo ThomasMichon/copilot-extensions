@@ -1,32 +1,39 @@
 #!/usr/bin/env bash
 
+vault_bootstrap_python() (
+    local reader_dir bootstrap_dir source_line python
+    reader_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 3
+    bootstrap_dir="$reader_dir"
+    # Promotion rewrites this canonical reference to the payload-local form.
+    # Only an unmaterialized source wrapper may read repository support files.
+    if [[ ! -e "$reader_dir/bootstrap-uv.sh" && ! -L "$reader_dir/bootstrap-uv.sh" &&
+        ! -e "$reader_dir/installer-instance-python-version.txt" &&
+        ! -L "$reader_dir/installer-instance-python-version.txt" &&
+        -f "$reader_dir/install.sh" ]]; then
+        while IFS= read -r source_line; do
+            if [[ "$source_line" == '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' ]]; then
+                bootstrap_dir="$reader_dir/../../../libs/installer-engine"
+                break
+            fi
+        done < "$reader_dir/install.sh"
+    fi
+    if [[ -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
+        . "$bootstrap_dir/bootstrap-uv.sh" &&
+        python="$(resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null)" &&
+        "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
+        printf '%s\n' "$python"
+        return 0
+    fi
+    printf '%s\n' 'Agent Vault requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted.' >&2
+    return 3
+)
+
 vault_runtime_activation() {
-    local reader_dir bootstrap_dir source_line python="${2:-}"
+    local reader_dir python="${2:-}"
     local installed_python="$python"
     reader_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 3
     if [[ -z "$python" ]]; then
-        bootstrap_dir="$reader_dir"
-        # Promotion rewrites this canonical reference to the payload-local form.
-        # Only an unmaterialized source wrapper may read repository support files.
-        if [[ ! -e "$reader_dir/bootstrap-uv.sh" &&
-            ! -e "$reader_dir/installer-instance-python-version.txt" &&
-            -f "$reader_dir/install.sh" ]]; then
-            while IFS= read -r source_line; do
-                if [[ "$source_line" == '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' ]]; then
-                    bootstrap_dir="$reader_dir/../../../libs/installer-engine"
-                    break
-                fi
-            done < "$reader_dir/install.sh"
-        fi
-        if [[ -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
-            . "$bootstrap_dir/bootstrap-uv.sh" &&
-            python="$(resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null)"; then
-            if ! "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
-                python=""
-            fi
-        else
-            python=""
-        fi
+        python="$(vault_bootstrap_python)" || python=""
     fi
     if [[ -z "$python" ]]; then
         printf '%s\n' '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted."}'
