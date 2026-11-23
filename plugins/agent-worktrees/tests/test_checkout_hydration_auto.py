@@ -411,7 +411,7 @@ def test_reconciled_rehydrate_leaves_paired_entry_pending(env: SimpleNamespace, 
     assert report["reconciled"] == [{"worktree_id": WT_ID, "state": catalog.STATE_HYDRATED}]
     assert not env.entry.exists() and pending.exists()
     composed: list[Any] = []
-    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **k: composed.append(k) or {"action": "composed"})
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **k: (composed.append(k), {"action": "composed"})[1])
     assert auto.entry_refusal(_record(env), env.config) is None
     assert len(composed) == 1 and not pending.exists()
     hydration.dehydrate(WT_ID, env.config)
@@ -581,7 +581,7 @@ def test_anchor_paired_restore_prepares_the_pair(env: SimpleNamespace, monkeypat
 
     monkeypatch.setattr(tracking_lookup, "find_paired_record", no_sibling)
     composed: list[Any] = []
-    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **k: composed.append(k) or {"action": "composed"})
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **k: (composed.append(k), {"action": "composed"})[1])
     record = _anchor_paired(env)
     assert auto.entry_refusal(record, env.config) is None
     assert env.checkout.exists() and len(composed) == 1
