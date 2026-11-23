@@ -445,7 +445,7 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
-          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
+          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify prepared-only managed uninstall on both PowerShell engines
@@ -488,6 +488,24 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify managed Dispatch construction on PowerShell Core
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "powershell_construction and pwsh"
+          --junit-dir qualification-evidence/dispatch-powershell-construction
+      - name: Require all six PowerShell Core constructor controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-construction').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==6;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_powershell_construction_performance'];
+          assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
+          {('pwsh',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -508,7 +526,7 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
-          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18 cpython@3.10.20
+          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify Budget fixed-owner admission and managed readiness
@@ -551,24 +569,6 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==32;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify managed Dispatch construction on PowerShell Core
-        run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_runtime_construction_ps1.py --allow-explicit-tiers
-          -k pwsh
-          --junit-dir qualification-evidence/dispatch-powershell-construction
-      - name: Require all six PowerShell Core constructor controls
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-construction').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==6;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='dispatch_powershell_construction_performance'];
-          assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
-          {('pwsh',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
-          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
       - name: Require the packaged pre-interpreter host to match its reviewed source
         run: python tools/build-bootstrap-capture.py --check
       - name: Qualify original-caller bootstrap selector custody
