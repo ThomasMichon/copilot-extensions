@@ -30,10 +30,10 @@ class InventoryClientMixin:
         from .bridge_inventory import BridgeSelectionError, select_bridge
         from .client import BridgeClientError
 
-        report = InventoryClientMixin.list_bridges(
+        report = InventoryClientMixin._list_bridges(
             self,
             project=project, machine=machine, namespace=namespace,
-            all_projects=all_projects, hosts=hosts,
+            all_projects=all_projects, hosts=hosts, identity_version=2,
         )
         try:
             return select_bridge(report, handle)
@@ -46,6 +46,17 @@ class InventoryClientMixin:
         self: InventoryClient, *, project: str | None = None, machine: str | None = None,
         namespace: str | None = None, status: str | None = None, live: bool = False,
         all_projects: bool = False, hosts: list[str] | None = None, local_only: bool = False,
+    ) -> dict[str, Any]:
+        return InventoryClientMixin._list_bridges(
+            self, project=project, machine=machine, namespace=namespace, status=status,
+            live=live, all_projects=all_projects, hosts=hosts, local_only=local_only,
+        )
+
+    def _list_bridges(
+        self: InventoryClient, *, project: str | None = None, machine: str | None = None,
+        namespace: str | None = None, status: str | None = None, live: bool = False,
+        all_projects: bool = False, hosts: list[str] | None = None, local_only: bool = False,
+        identity_version: int = 1,
     ) -> dict[str, Any]:
         from .bridge_fleet_inventory import validate_report
         from .client import BridgeClientError
@@ -63,7 +74,8 @@ class InventoryClientMixin:
             }.items() if value is not None
         }
         send = protocol_floored_request(
-            self, PLUGIN_READINESS_PROTOCOL_VERSION, capabilities={"bridge_inventory": 1},
+            self, PLUGIN_READINESS_PROTOCOL_VERSION,
+            capabilities={"bridge_inventory": identity_version},
         )
         try:
             return validate_report(send(

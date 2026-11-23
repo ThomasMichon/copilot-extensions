@@ -79,7 +79,7 @@ positive observations. No host names are inferred from personal conventions.
 
 This is an additive discovery contract, not selector or lifecycle migration.
 Existing `sessions`, `targets` and registration APIs retain their shapes and
-effects. New clients require the executing daemon's `bridge_inventory: 1`
+effects. Listing clients require the executing daemon's `bridge_inventory: 1`
 capability. Unsupported new reads refuse explicitly; rollback leaves existing
 commands available. A supported carrier that lacks `bridge.inventory` reports
 an unsupported operation for that host. There is no fallback to process
@@ -97,7 +97,9 @@ as `list`.
 
 Fleet reconciliation retains `identity_aliases` for managed and registration
 IDs whose observed native session matches the selected head. Routes retained
-from an older head are not identity aliases.
+from an older head are not identity aliases. When the head itself is
+ambiguous, aliases are retained only as matching evidence for a 409 refusal;
+they never select either conflicting conversation.
 
 The version-1 JSON response contains `bridge`, `sources` and `complete`.
 Multiple matching conversations or conflicting observed native identities
@@ -108,10 +110,17 @@ retains incomplete source evidence, unknown liveness or unavailable control.
 This is inspection, not authority to execute its cached route. Effectful callers
 must still use the owning operation's current identity and admission checks.
 
-The provider expansion already supplies these identities. This first shared
-selector consumer adds no prerequisite RPC or capability beyond the negotiated
-inventory read. A provider without that capability refuses before inspection;
-legacy commands remain available on rollback. `send`, `read`, `wait`, `resume`,
+Exact inspection requires `bridge_inventory: 2` in the executing provider's
+existing handshake. Version 1 remains sufficient for `list`, but cannot
+certify alias-preserving inspection. The JSON inventory envelope remains
+version 1 and adds `identity_version: 2`. A selected remote host without that
+identity contract retains its positive rows, but makes discovery incomplete,
+with `identity_complete: false` in its source evidence. A missing alias then
+returns 503, not a false 404.
+
+No new RPC is introduced. An older executing provider refuses `show` before
+the inventory read; legacy commands remain available on rollback.
+`send`, `read`, `wait`, `resume`,
 `stop` and `end` keep their existing selectors in this slice. No previous form
 is deprecated or removed.
 

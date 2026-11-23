@@ -404,13 +404,13 @@ def test_windows_scope_join_is_lexical_and_does_not_depend_on_the_reader_os() ->
 
 @pytest.mark.parametrize(
     "selector",
-    ["workspace-a", "native-a", "control-a"],
+    ["workspace-a", "native-a", "control-a", "control-b"],
 )
 def test_common_selector_joins_workspace_native_and_managed_aliases(selector: str) -> None:
     from agent_bridge.bridge_inventory import select_bridge
 
     item = workspace()
-    managed = {
+    managed: dict[str, Any] = {
         "kind": "managed",
         "handle": "control-a",
         "session": {
@@ -423,13 +423,48 @@ def test_common_selector_joins_workspace_native_and_managed_aliases(selector: st
             "mode": "acp",
         },
     }
-    report = project_bridges([item, managed, registration(item)], sources(), project="demo")
+    other = deepcopy(managed)
+    other["handle"] = other["session"]["session_id"] = "control-b"
+    report = project_bridges([item, managed, other, registration(item)], sources(), project="demo")
     original = deepcopy(report)
     selected = select_bridge(report, selector)
     assert selected["bridge"]["session_id"] == "native-a"
     assert selected["bridge"]["worktree_id"] == "workspace-a"
     assert selected["complete"] is True
     assert report == original
+
+
+@pytest.mark.parametrize("owner_head", [None, "native-a"])
+def test_common_selector_dormant_managed_heads_require_one_assignment(
+    owner_head: str | None,
+) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    item = workspace(live=False)
+    item["worktree"]["last_session_id"] = owner_head
+    managed = [
+        {
+            "kind": "managed",
+            "handle": f"control-{suffix}",
+            "session": {
+                "session_id": f"control-{suffix}",
+                "durable_session_id": f"native-{suffix}",
+                "worktree_id": "workspace-a",
+                "project": "demo",
+                "target_dir": item["worktree"]["path"],
+                "status": "stopped",
+            },
+        }
+        for suffix in ("a", "b")
+    ]
+    report = project_bridges([item, *managed], sources(), project="demo")
+    for selector in ("workspace-a", "native-a", "control-a", "native-b", "control-b"):
+        if owner_head and selector not in ("native-b", "control-b"):
+            assert select_bridge(report, selector)["bridge"]["session_id"] == owner_head
+        else:
+            with pytest.raises(BridgeSelectionError) as refused:
+                select_bridge(report, selector)
+            assert refused.value.status == (404 if owner_head else 409)
 
 
 @pytest.mark.parametrize("selector", ["workspace-a", "native-a", "different-native"])

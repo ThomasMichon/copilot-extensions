@@ -13,7 +13,8 @@ service. See [conversation inventory](docs/target-inventory.md#conversation-inve
 workspace, native-session, registration or managed-session identity. Project,
 machine, namespace and explicit-host scope match `list`. It preserves partial
 source evidence and refuses ambiguous matches; it never creates, resumes or
-hydrates a conversation.
+hydrates a conversation. Inspection requires `bridge_inventory: 2` for
+alias-preserving identity support; version 1 remains supported for `list`.
 
 `sessions` lists the union of managed sessions, extension registrations,
 Session Hosts and workspaces, including local registered repositories that do

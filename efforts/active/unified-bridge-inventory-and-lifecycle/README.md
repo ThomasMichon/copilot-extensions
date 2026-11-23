@@ -322,6 +322,21 @@ not another permanent public discovery path.
 - Strict whole-file typing passes for all eight changed Python files on the
   Python 3.10 Linux and Windows targets after the corrections. Focused lint,
   install-contract and documentation-consistency checks pass.
+- Follow-up review found that conflicting-head managed aliases must also match
+  for refusal, and the previous version-1 provider cannot certify alias absence.
+  Inspection now requires `bridge_inventory: 2` through the existing handshake;
+  version 1 still supports listing. Older remote observations preserve positive
+  evidence but cannot produce a false complete-discovery 404.
+- The same identity rule applies before and after fleet reconciliation.
+  Compatible secondary managed aliases survive local projection and merging.
+  Conflicting dormant histories require either an authoritative last head or a
+  409 refusal; their managed aliases remain matching evidence, not execution
+  targets. No RPC is added, and no resident lifecycle or installed state changes.
+- The expanded contract packet passes 29 cases, including versions 0, 1 and 2
+  for actual CLI/client/API reads and the previous remote-provider boundary.
+  Whole-file strict typing passes for ten Python files on both targets after
+  correcting a test fixture's dictionary annotation. Install-contract and
+  documentation-consistency checks pass; source review and CI remain required.
 
 ### 2026-11-22 - Inventory slice merged; selector work continues
 

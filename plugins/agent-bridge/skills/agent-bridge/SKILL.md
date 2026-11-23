@@ -268,7 +268,9 @@ Both preserve source failures and never ensure the daemon, hydrate metadata or
 start/resume a conversation. Use `--all-projects` deliberately for cross-project
 lookup, and repeat `--host HOST` for selected remote Bridge hosts. Multiple
 matches refuse rather than guess. Inspection is not lifecycle admission; other
-commands retain their existing selectors during this transition. See the
+commands retain their existing selectors during this transition. `show` requires
+`bridge_inventory: 2`; version 1 still supports `list` but cannot confirm that a
+managed alias is absent. See the
 [inventory contract](../../docs/target-inventory.md#exact-conversation-inspection).
 
 Conversation commands connect to the local agent-bridge HTTP API; the service must be

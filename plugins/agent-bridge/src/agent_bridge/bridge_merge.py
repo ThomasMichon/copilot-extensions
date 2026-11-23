@@ -53,6 +53,7 @@ def merge_rows(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
         ),
     )
     merged = dict(primary)
+    ambiguous = conflict or (not active and len(retained_ids) > 1)
     live = (
         True
         if any(row.get("live") is True for row in ordered)
@@ -78,13 +79,21 @@ def merge_rows(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
             {
                 value
                 for row in ordered
-                if native and not conflict and row.get("session_id") == native
-                for key in (
-                    "managed_session_id",
-                    "registered_session_id",
-                    "retained_managed_session_id",
+                if (
+                    (native and not conflict and row.get("session_id") == native)
+                    or (ambiguous and row in candidates)
                 )
-                if isinstance(value := row.get(key), str) and value
+                for value in [
+                    row.get("managed_session_id"),
+                    row.get("registered_session_id"),
+                    row.get("retained_managed_session_id"),
+                    *(
+                        row["identity_aliases"]
+                        if isinstance(row.get("identity_aliases"), list)
+                        else []
+                    ),
+                ]
+                if isinstance(value, str) and value
             }
         ),
     )

@@ -184,9 +184,9 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         ]
         if value
     }
-    ambiguous = len(identities) > 1
     owner_head = _text(metadata.get("last_session_id"))
     historical = {value for item in managed_items if (value := _native(item))}
+    ambiguous = len(identities) > 1 or (not identities and not owner_head and len(historical) > 1)
     native = (
         next(iter(identities))
         if len(identities) == 1
@@ -274,7 +274,18 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         "managed_session_id": None if ambiguous else _text(current.get("session_id")),
         "registered_session_id": None if ambiguous else _text(registration.get("session_id")),
         "retained_managed_session_id": (_text(session.get("session_id")) if not current else None),
-        "observed_session_ids": sorted(identities),
+        "observed_session_ids": sorted(identities or (historical if ambiguous else set())),
+        "identity_aliases": sorted(
+            {
+                alias
+                for item in managed_items
+                if (
+                    (native and not ambiguous and _native(item) == native)
+                    or (ambiguous and (not identities or item in active_managed))
+                )
+                if (alias := _text(item["session"].get("session_id")))
+            }
+        ),
         "worktree_id": worktree_id,
         "project": project,
         "machine": machine,
@@ -431,6 +442,7 @@ def project_bridges(
         bridges.append(row)
     return {
         "version": 1,
+        "identity_version": 2,
         "bridges": bridges,
         "sources": sources,
         "complete": bool(sources)
