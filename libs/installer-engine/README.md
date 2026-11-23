@@ -155,6 +155,16 @@ The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
 isolation. Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
+
+The POSIX installer instance-reconciliation adapter is a prepared-only managed
+consumer of that selector, with its own exact version request. Selection and
+the existing scoped, nonterminating cleanup share the five-second native
+envelope; its bounded worker retains one second for descendant termination.
+Unavailable prerequisites defer optional cleanup without changing install
+success. The caller's interpreter binding and environment remain unchanged.
+The native interpreter/source custody checks still apply; managed selection
+does not authorize a group-writable interpreter or an unsafe lifecycle archive.
+
 Bridge retains its specialized Windows resolver for declared bootstrap helpers.
 Shared command-bootstrap adoption does not replace that resolver or claim that
 every standalone service or installer child has migrated.

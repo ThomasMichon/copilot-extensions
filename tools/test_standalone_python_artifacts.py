@@ -1064,6 +1064,8 @@ print("isolated-wheel-resource-materializer-ok")
     ("plugins/agent-worktrees", "agent_worktrees"),
 ])
 def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path, relative: str, package: str) -> None:
+    from materialize_main import materialize_installer_engine_ref_into
+
     project = tmp_path / "project"
     shutil.copytree(
         ROOT / relative, project,
@@ -1071,6 +1073,10 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
             "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
         ),
     )
+    changes = materialize_installer_engine_ref_into(
+        source_consumer_dir=ROOT / relative, dest_consumer_dir=project, canonical_root=ROOT,
+    )
+    assert not any(line.startswith("SKIP ") for line in changes), changes
     embedded = {}
     if package == "worktree_manager":
         helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
@@ -1106,6 +1112,12 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
         "bootstrap-killswitch-uv.sh", "bootstrap-killswitch-python-version.txt",
     ):
         assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (canonical / name).read_bytes()
+    for name in (
+        "installer-instance-reconcile.sh", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+    ):
+        assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (
+            ROOT / "libs/installer-engine" / name
+        ).read_bytes()
     expected.update({name: path.read_bytes() for name, path in embedded.items()})
     before = {path: path.read_bytes() for path in project.rglob("*.py")}
     archives = tmp_path / "archives"
