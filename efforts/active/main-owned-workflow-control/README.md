@@ -3387,7 +3387,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   trees are equal. A concurrent fetch ref race is inspected read-only before
   the supported source sync completes. Actual parent Goal, Plan, own leaf
   and Validation Plan are reread before resolving only this sixteen-case leaf.
-- [ ] Qualify one complete original nonrelative-path refusal function as six
+- [x] Qualify one complete original nonrelative-path refusal function as six
   string-only drive/UNC cases. Preserve original assertions, the exact
   selection fixture, parameter strings/types, marks and full IDs, including
   the global failing `Path.resolve` patch. The selected validator must refuse
@@ -3408,8 +3408,70 @@ authorizes critical main-path acceptance or a bounded administrative change.
   492 targets in 1,036,848 one-space v2 bytes. Preserve preceding entries/
   order/hashes, 89 helpers, 1 MiB cap and 300-second bound. Ruff and normal
   changed-code Linux/Windows strict checks pass; a worktree-manager patch
-  changefile records release intent. Exact-head review and fresh complete
-  CI remain required.
+  changefile records release intent. #14232 receives exact-head approval;
+  fresh attempt-one CI executes all 9,700 cases in 145.421 packet seconds,
+  completes the three-file upload and passes the required aggregate.
+  Normal managed merge yields `544a1e5757275ab709881cd350ce2049775a5117`;
+  the entire reviewed and merged trees are equal. Actual parent Goal, Plan,
+  own leaf and Validation Plan are reread before resolving only this six-
+  case leaf. The three selection adapters cover 37 of the 51 originals;
+  fourteen preparation/contained-execution cases remain unselected. The
+  first invokes unredirected source-bound preparation helpers despite its
+  subprocess mock; do not execute it or add an unrelated fixture workaround.
+- [x] Qualify three complete original cache path-spelling functions as seven
+  pure string/path cases: private fixture UNC/native-prefix preservation,
+  drive/UNC/existing-prefix spelling and non-Windows identity. Preserve
+  original functions, assertions, fixture names, recursive parameter values/
+  types, marks and full IDs. Only the module's OS policy attribute is mocked;
+  no actual native filesystem, cleanup or preparation action is selected.
+  Require exact collection, unchanged effect/source observation, real helper
+  calls, normal strict checks, release intent, exact-head review and fresh
+  complete CI. Keep fixture-length-only, threaded fingerprint, symlink,
+  cleanup, preparation and actual UV cases outside this slice.
+  Exact collection now preserves all three original function objects,
+  fixture names, recursive parameter values/types, own marks and complete
+  IDs: 24 functions / 51 originals versus seven adapter cases, excluding
+  21 functions / 44 cases before execution. Positive unchanged-guard
+  observation passes seven in 2.60 pytest / 3.859 observation seconds,
+  with zero prohibited effects, 49 bound Python reads, all 21 phase reports
+  and real spelling-helper call lines per case. Add only the adapter binding:
+  9,707 nodes, 1,371 sources and the same 492 targets in 1,037,881 one-space
+  v2 bytes; retain 89 helpers, 1 MiB cap and 300-second bound. Ruff and normal
+  changed-code Linux/Windows strict checks pass. A worktree-manager patch
+  changefile records release intent. Managed publication preserves the
+  independent vault change: actual parent has 9,701 cases and 493 targets;
+  final packet has 9,708 cases, 1,371 sources and 493 targets in 1,038,020
+  bytes. Exact five-file composition preserves the peer changes and all 49
+  observed inputs. #14235 receives exact-head approval; fresh attempt-one CI
+  executes all 9,708 cases in 195.386 packet seconds, completes the three-
+  file upload and passes the required aggregate. Normal managed merge yields
+  `3159e63925b4be7131461268d21e67ef5f6ecc6f`; the entire reviewed and merged
+  trees are equal. Actual parent Goal, Plan, own leaf and Validation Plan
+  are reread before resolving only this seven-case source leaf.
+- [ ] Qualify seven complete original command-safety classification functions,
+  provisionally 21 cases: bounded inspection, NUL refusal, redirected-home
+  nonqualification, runner-bound namespaces, Windows private-name freshness,
+  POSIX private sockets and child-argument namespace refusal. Select only
+  in-process classification and fixture-owned paths, not actual commands,
+  native parsing, backend control or audit-hook activation. Preserve original
+  functions/assertions/fixture names and recursive parameter values/types,
+  marks and full IDs. Exact collection, unchanged positive observation, real
+  helper calls, normal strict checks, release intent, exact-head review and
+  fresh complete CI still precede admission and source completion.
+  Exact collection now verifies 43 functions / 272 originals against
+  seven functions / 21 adapter cases; 36 functions / 251 cases are excluded
+  before execution. Original function identities, fixture names, recursive
+  parameter values/types, own marks and full IDs match. Unchanged positive
+  observation passes 21 in 1.29 pytest / 2.110 observation seconds, with
+  zero prohibited effects, three bound Python reads, all 63 phase reports
+  and real command-safety call lines per case. No native Windows parser
+  call lines occur. Add only adapter/original bindings and the existing
+  command-safety production target: 9,729 nodes, 1,373 sources, 494 targets
+  and 1,040,021 one-space v2 bytes. Preserve all prior entries/order/hashes,
+  89 helpers, 1 MiB cap and 300-second bound. Ruff and normal changed-code
+  Linux/Windows strict checks pass; a worktree-manager patch changefile
+  records release intent. Exact-head review, fresh full CI, normal merge
+  and actual parent readback remain outstanding.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
