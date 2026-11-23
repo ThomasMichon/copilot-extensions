@@ -234,6 +234,8 @@ def _guard_project_scope(parser: argparse.ArgumentParser, args: argparse.Namespa
     command = getattr(args, "command", None)
     if command in _PROJECT_CONSUMING_VERBS:
         return
+    if command in {"read", "wait"} and getattr(args, "bridge", False):
+        return
     parser.error(
         f"--project {args.project!r} is not meaningful for '{command or '(no command)'}': "
         f"it scopes only the project-addressed verbs ({'/'.join(sorted(_PROJECT_CONSUMING_VERBS))}). Remove --project, or use one of those verbs."
