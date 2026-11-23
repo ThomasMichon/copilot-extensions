@@ -1,0 +1,9 @@
+{
+  "comment": "Admit twenty-five original pure source-inventory controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
