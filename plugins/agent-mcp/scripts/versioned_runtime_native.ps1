@@ -65,7 +65,7 @@ function Get-NativeWheelConstructionOptions {
 function Test-NativeWheelRuntimeCurrent {
     param([string]$Root, [string]$Payload, [string]$Plugin)
     $python = Resolve-NativeBootstrapPython -Root $Root
-    if (-not $python) { throw 'Closed-wheel readiness requires an existing Python 3.11+ interpreter' }
+    if (-not $python) { throw 'Closed-wheel readiness requires the prepared uv-managed bootstrap Python' }
     $nativeError = ''
     [void](Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', (Join-Path $Payload 'scripts\install_source.py'),
@@ -81,6 +81,19 @@ function Resolve-NativeBootstrapPython {
         [string]$Action = 'inspect',
         [string]$Root = ''
     )
+    . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+    $selection = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $PSScriptRoot 'installer-instance-python-version.txt') `
+        -Operation Inspect -IsolateSelection -InvokeCaptured {
+            param($FilePath, $ArgList, $Environment)
+            $nativeError = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+                -Environment $Environment -ErrorOutput ([ref]$nativeError)
+            return [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $nativeError
+            }
+        }
+    if ($selection.Status -ne 'selected') { return $null }
     $probe = @'
 import json,sys
 from pathlib import Path
@@ -93,68 +106,22 @@ if sys.argv[1].lower() in {'uninstall', 'broker-remove'}:
 print(json.dumps(str(python)))
 '@
     $probe = $probe.Replace('MINIMUM_MINOR', [string]$MinimumMinor)
-    $discoveryEnvironment = @{ PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false' }
-    function Select-NativeBootstrapCandidates([string[]]$Candidates) {
-        foreach ($candidate in @($Candidates | Select-Object -Unique)) {
-            try {
-                $nativeError = ''
-                $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                    '-I', '-S', '-B', '-c', $probe, $Action, $Root
-                ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-                if ($LASTEXITCODE -eq 0) {
-                    $python = ($selected | Out-String) | ConvertFrom-Json
-                    if ($python -and [IO.File]::Exists($python)) { return $python }
-                }
-            } catch { }
-        }
-        return $null
-    }
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
-    }
-    $python = Select-NativeBootstrapCandidates $candidates
-    if ($python) { return $python }
-    $candidates = @()
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
+    $discoveryEnvironment = Get-UvBootstrapEnvironment
+    $discoveryEnvironment.PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false'
+    try {
+        $nativeError = ''
+        $selected = Invoke-Hidden -FilePath $selection.Python -ArgList @(
+            '-I', '-S', '-B', '-c', $probe, $Action, $Root
+        ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
+        if ($LASTEXITCODE -eq 0) {
+            $python = ($selected | Out-String) | ConvertFrom-Json
+            if ($python -and [IO.Path]::IsPathRooted($python) -and
+                $python -notmatch '[\\/]WindowsApps[\\/]' -and [IO.File]::Exists($python)) {
+                return $python
             }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                $selectors = @('3.13', '3.12', '3.11')
-                if ($MinimumMinor -eq 10) { $selectors += '3.10' }
-                foreach ($version in ($selectors + '3')) {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    $python = Select-NativeBootstrapCandidates $candidates
-    if ($python) { return $python }
-    $candidates = @()
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($installationRoot in $roots) {
-            if (-not $installationRoot) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $installationRoot -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
         }
-    }
-    return Select-NativeBootstrapCandidates $candidates
+    } catch { }
+    return $null
 }
 
 function Enter-NativeInstallerDriver {
@@ -184,7 +151,7 @@ function Enter-NativeInstallerDriver {
     $python = if ($WheelProfile) { $WheelPython }
         elseif ($BootstrapPython) { $BootstrapPython }
         else { Resolve-NativeBootstrapPython -Action $Action -Root $Root }
-    if (-not $python) { throw 'Native install and uninstall require an existing Python 3.11+ bootstrap interpreter; removal requires it outside the runtime' }
+    if (-not $python) { throw 'Native install and uninstall require the prepared uv-managed bootstrap Python; removal requires it outside the runtime' }
     $arguments = @('-I', '-S', '-B', '-X', 'utf8',
         (Join-Path $Payload 'scripts\installer_driver.py'),
         '--payload', $Payload, '--root', $Root,

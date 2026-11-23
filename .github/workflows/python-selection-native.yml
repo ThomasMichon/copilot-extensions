@@ -47,6 +47,7 @@ on:
       - libs/update-driver/tests/fixture_foundation_progress.ps1
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
+      - libs/versioned-runtime/tests/test_native_bootstrap_python.py
       - plugins/agent-worktrees/scripts/install.ps1
       - plugins/agent-worktrees/scripts/install.sh
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
@@ -162,6 +163,19 @@ jobs:
           native=[c for c in cases if c.find('skipped') is None];
           assert len(cases)==40 and len(native)==(24 if os.name=='nt' else 28);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
+      - name: Qualify prepared-only native readers and real managed driver admission
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/native-bootstrap-readers
+      - name: Require all native reader controls on each supported shell
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==22;
+          assert sum(c.find('skipped') is None for c in cases)==(22 if os.name=='nt' else 11);
+          assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'
         run: >-
