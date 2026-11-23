@@ -442,6 +442,7 @@ jobs:
           --test-file tests/test_default_warm.py
           --test-file tests/test_cache_warm.py
           --test-file tests/test_cache_warm_selection.py
+          --test-file tests/test_unlock_client.py
           --test-file tests/test_installer_readiness.py
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_bootstrap_check_reconcile_always_on.py

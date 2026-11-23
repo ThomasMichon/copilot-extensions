@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agent_vault import cache, cache_sources, cache_warm, cli, extensions, service, service_cache
+from agent_vault import cache, cache_sources, cache_warm, cache_warm_client, cli, extensions, service, service_cache
 from agent_vault.service_connections import VaultConnections, settle_owned
 from agent_vault.service_cache_store import ServiceCacheStore
 from agent_vault.service_runtime import serve
@@ -104,11 +104,11 @@ def test_successful_unlock_paths_warm_only_configured_targets_without_renewing_p
     assert vault._password_set_at[kpdb] == 1000.0
     assert kpdb not in json.dumps(status) and "fixture-master" not in json.dumps(status)
     monkeypatch.setattr(
-        cli,
-        "send_command",
-        lambda request: vault.handle_request(
+        cache_warm_client,
+        "scoped_status",
+        lambda: vault.handle_request(
             {
-                **request,
+                "action": "ping",
                 "group": "Allowed",
             }
         ),

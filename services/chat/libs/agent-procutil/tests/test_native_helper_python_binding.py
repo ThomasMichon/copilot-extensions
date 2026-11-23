@@ -100,6 +100,60 @@ def _materialized_engine(area: Path) -> Path:
     return candidate / "scripts"
 
 
+@pytest.mark.skipif(sys.platform != "linux" or BASH is None, reason="native Bash acquisition binding")
+@pytest.mark.parametrize("transport", ["missing", "failed", "curl", "wget"])
+def test_uv_acquisition_never_launches_ambient_python(tmp_path: Path, transport: str) -> None:
+    assert BASH is not None
+    engine = _materialized_engine(tmp_path)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("dirname", "mkdir", "rm", "uname", "sha256sum", "awk"):
+        executable = shutil.which(name)
+        if not executable:
+            pytest.skip(f"{name} is unavailable")
+        (tools / name).symlink_to(executable)
+    calls = tmp_path / "calls"
+    poison = tmp_path / "ambient-python"
+    for name in ("python", "python3", "py"):
+        launcher = tools / name
+        launcher.write_text('#!/bin/sh\nprintf invoked > "$POISON"\nexit 97\n')
+        launcher.chmod(0o700)
+    if transport != "missing":
+        for name in ("curl", "wget"):
+            launcher = tools / name
+            destination = "$4" if name == "curl" else "$2"
+            action = (
+                f'printf "not a release archive" > "{destination}"\n'
+                if transport == name else "exit 22\n"
+            )
+            launcher.write_text(f'#!/bin/sh\nprintf "{name}\\n" >> "$CALLS"\n' + action)
+            launcher.chmod(0o700)
+    root = tmp_path / "installation"
+    result = subprocess.run(
+        [BASH, "--noprofile", "--norc", "-c",
+         '. "$1"; _step() { :; }; _fail() { printf "%s\\n" "$*" >&2; }; ensure_uv "$2"',
+         "acquisition", str(engine / "installer-engine.sh"), str(root)],
+        capture_output=True, text=True, timeout=15,
+        env={**os.environ, "PATH": str(tools), "CALLS": str(calls), "POISON": str(poison)},
+    )
+    assert not poison.exists(), result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert not result.stdout
+    if transport == "missing":
+        assert not calls.exists()
+    else:
+        assert calls.read_text().splitlines() == (
+            ["curl"] if transport == "curl" else ["curl", "wget"]
+        )
+    if transport in {"curl", "wget"}:
+        assert "SHA-256 mismatch" in result.stderr
+    else:
+        assert "curl or wget" in result.stderr
+    assert not list(root.rglob(".uv-stage-*"))
+    assert not list(root.rglob("*.tar.gz"))
+    assert not (root / "tool/uv").exists()
+
+
 POLICY_MODES = ["missing-option", "invalid-option", "relative-option", "selected", "selected-equals"]
 
 

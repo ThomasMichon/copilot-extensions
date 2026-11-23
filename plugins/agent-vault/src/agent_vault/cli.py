@@ -612,13 +612,19 @@ def cmd_search(args: Any) -> int:
 
 def cmd_ping(args: Any) -> int:
     from .service_status import format_service_status
+    from .cache_warm_client import scoped_status
 
-    resp = send_command({"action": "ping"})
+    try:
+        resp = scoped_status()
+    except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError):
+        print("Error: selected vault context or status could not be qualified", file=sys.stderr)
+        return 1
     if resp and resp.get("ok"):
         status = _vault_status_label(resp["cli"])
-        transport = _TRANSPORT_LABELS.get(
-            resp.get("_transport", ""), resp.get("_transport", "unknown")
-        )
+        transport_name = resp.get("_transport", "unknown")
+        if not isinstance(transport_name, str):
+            transport_name = "unknown"
+        transport = _TRANSPORT_LABELS.get(transport_name, transport_name)
         print(format_service_status(resp, status=status, transport=transport))
         return 0
     print("Vault service not running")
@@ -707,25 +713,9 @@ def _current_vault_unlocked(resp: dict[str, Any] | None, context: ResolvedVault 
 
 
 def cmd_unlock(args: Any) -> int:
-    if getattr(args, "terminal", False) or os.environ.get("VAULT_UNLOCK_TERMINAL"):
-        if _terminal_unlock_local():
-            print("Vault unlocked (local service, via terminal)")
-            return 0
-        return 1
+    from .unlock_client import command
 
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
-
-    resp = send_command({"action": "ping"})
-    if _current_vault_unlocked(resp):
-        print("Vault available")
-        return 0
-
-    if auto_unlock():
-        print("Vault available")
-        return 0
-    return 1
+    return command(args)
 
 
 def _ensure_unlocked_service() -> bool:

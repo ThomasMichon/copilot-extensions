@@ -257,15 +257,10 @@ ensure_uv() {
     mkdir -p "$staging"
     if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$archive" 2>/dev/null && got=1; fi
     if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$archive" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$archive" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
     if [[ -z "$got" || ! -s "$archive" ]]; then
         rm -f "$archive"
         rm -rf "$staging" 2>/dev/null || true
+        _fail "Failed to download uv with curl or wget; install a working native downloader or provide uv" >&2
         return 1
     fi
 

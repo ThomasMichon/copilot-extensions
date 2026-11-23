@@ -15,7 +15,9 @@ from agent_vault import cache
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
-@pytest.mark.parametrize("population", ["get", "unlock-warm", "request-warm"])
+@pytest.mark.parametrize(
+    "population", ["get", "unlock-warm", "request-warm", "client-unlock", "client-legacy"],
+)
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     tmp_path: Path, population: str,
 ) -> None:
@@ -31,6 +33,8 @@ def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     result = subprocess.run(
         [sys.executable, "-c", """
 import asyncio
+import contextlib
+import io
 import json
 import os
 import sys
@@ -41,6 +45,7 @@ from agent_vault import cache, cache_warm, cli, config, configuration, configura
 from agent_vault.cache_dpapi import CacheDecryptionUnavailable
 from agent_vault.cache_warm_selection import CONTRACT, FIELD
 from agent_vault.extensions import ExtensionRegistry
+from agent_vault.invocation import use_configuration_root
 from agent_vault.service_connections import VaultConnections
 
 try:
@@ -61,14 +66,19 @@ vault = service.VaultService()
 vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
-if sys.argv[3] in ("unlock-warm", "request-warm"):
+if sys.argv[3] in ("unlock-warm", "request-warm", "client-unlock", "client-legacy"):
     request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
     }
-    if sys.argv[3] == "request-warm":
+    if sys.argv[3] in ("request-warm", "client-unlock", "client-legacy"):
         root = Path(sys.argv[1])
         selected, resident = root / "selected", root / "resident"
-        for directory, target in ((selected, "entry"), (resident, "WRONG")):
+        targets = (
+            ((selected, "requested-only"), (resident, "entry"))
+            if sys.argv[3] == "client-legacy"
+            else ((selected, "entry"), (resident, "WRONG"))
+        )
+        for directory, target in targets:
             directory.mkdir()
             (directory / ".agent-vault.json").write_text(json.dumps({"cache_entries": [target]}))
         configuration_scope.bind_service_configuration(str(resident))
@@ -80,6 +90,22 @@ if sys.argv[3] in ("unlock-warm", "request-warm"):
     else:
         registry.register_cache_source(lambda _machine: ["entry"])
     vault.cli.verify_password = lambda *_args: True
+    if sys.argv[3] == "client-legacy":
+        request.pop(FIELD)
+        Path(kpdb).touch()
+        vault.cli.clear_password(kpdb)
+        vault._password_set_at.pop(kpdb)
+        registry.register_unlock_provider(lambda _context: "synthetic-master")
+        generation_health = vault._generation_health
+        vault._generation_health = lambda: {
+            key: value for key, value in generation_health().items()
+            if key != "cache_warm_selection_versions"
+        }
+        dispatch = vault._dispatch_request
+        def legacy_dispatch(request: dict[str, object], peer: str, transport: str) -> dict:
+            assert FIELD not in request, "caller emitted an unnegotiated field"
+            return dispatch(request, peer, transport)
+        vault._dispatch_request = legacy_dispatch
     async def warm() -> None:
         connections = VaultConnections(vault, service.handle_client)
         listener = await asyncio.start_server(connections.callback("tcp"), "127.0.0.1", 0)
@@ -98,16 +124,56 @@ if sys.argv[3] in ("unlock-warm", "request-warm"):
                 await writer.wait_closed()
         try:
             metadata = await send({"action": "ping", "health_only": True})
-            assert metadata["cache_warm_selection_versions"] == [1]
-            accepted = await send(request)
-            assert accepted["ok"], accepted
-            if FIELD in request:
-                assert accepted["cache_warm"]["state"] == "queued", accepted
+            if sys.argv[3] == "client-legacy":
+                assert "cache_warm_selection_versions" not in metadata
+            else:
+                assert metadata["cache_warm_selection_versions"] == [1]
+            if sys.argv[3] in ("client-unlock", "client-legacy"):
+                def no_prompt(*_args: object) -> str:
+                    raise AssertionError("already unlocked client prompted")
+                def no_verify(*_args: object) -> bool:
+                    raise AssertionError("already unlocked client verified a new password")
+                config.resolve_context = lambda **_kw: config.ResolvedVault(
+                    None, kpdb, "", port, {"port": "flag"},
+                )
+                cli.ensure_service = lambda: True
+                cli._discover_endpoint = lambda *_a, **_kw: None
+                cli._read_password_from_tty = no_prompt
+                cli.prompt_password = no_prompt
+                if sys.argv[3] == "client-unlock":
+                    vault.cli.verify_password = no_verify
+                os.environ["AGENT_VAULT_HOST"] = "127.0.0.1"
+                clock[0] = 1001.0
+                output = io.StringIO()
+                errors = io.StringIO()
+                with use_configuration_root(str(selected)), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    code = await asyncio.to_thread(cli.cmd_unlock, SimpleNamespace())
+                assert code == 0 and output.getvalue() == "Vault available\\n"
+                if sys.argv[3] == "client-legacy":
+                    assert "legacy warming policy" in errors.getvalue()
+                    assert vault._password_set_at[kpdb] == 1001.0
+                else:
+                    assert errors.getvalue() == ""
+                    assert vault._password_set_at[kpdb] == 1000.0
+            else:
+                accepted = await send(request)
+                assert accepted["ok"], accepted
+                if FIELD in request:
+                    assert accepted["cache_warm"]["state"] == "queued", accepted
             runtime.tick()
             assert runtime.future is not None
             await asyncio.wait_for(asyncio.shield(runtime.future), 5)
-            status = (await send({**request, "action": "ping"}))["cache_warm"]
+            status_request = {key: value for key, value in request.items() if key != "password"}
+            status_request["action"] = "ping"
+            status = (await send(status_request))["cache_warm"]
             assert status["state"] == "complete" and status["cached"] == 1, status
+            if sys.argv[3] in ("client-unlock", "client-legacy"):
+                output = io.StringIO()
+                with use_configuration_root(str(selected)), contextlib.redirect_stdout(output):
+                    code = await asyncio.to_thread(cli.cmd_ping, SimpleNamespace())
+                assert code == 0
+                expected = "unknown" if sys.argv[3] == "client-legacy" else "complete"
+                assert "cache warm=" + expected in output.getvalue(), output.getvalue()
         finally:
             await runtime.close()
             await connections.close([listener], [], lambda: None)
