@@ -270,11 +270,19 @@ the general action list before password source projection is qualified. A
 partial/mixed advertisement cannot imply full transaction support. The existing
 readiness pings are reused; recovery/confirmation reads occur only under their
 original transaction conditions.
+The combined capability also gates source projection on those reads, so a
+partial peer cannot erase an unsupported transaction warning. A captured absent
+group remains explicit during local cache normalization, without reloading a
+new default.
 
 Unknown mutation replies leave the journal pending without replay or alternate
 transport. Malformed consumed result flags or recovery values cannot become
 confirmed local cache data. Confirmed refusal and committed-but-cache-incomplete outcomes keep
 their original rollback/exit semantics, separate from optional warming receipts.
+Consumed generations must be nonnegative exact integers, not booleans, floats
+or coerced strings. A missing mutation generation still uses the original
+authoritative confirmation; invalid metadata leaves the journal pending with
+the cache-incomplete exit.
 Unsupported peers retain the baseline with a warning; pinned contexts do not
 invent a configuration owner, and an unbound peer cannot receive an unlock
 password. Explicit contexts, retained routes and `MutationBinding` operations

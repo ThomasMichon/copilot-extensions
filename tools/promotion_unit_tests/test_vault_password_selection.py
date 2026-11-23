@@ -84,10 +84,21 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
     persistent = MemoryCache()
     state.cache = persistent
     state.reply_mode, state.read_mode = "success", "success"
+    state.read_generation, state.mutation_generation = 7, 7
     state.server_value = "fixture-old"
     state.mutation_actions = sorted(selection.MUTATION_ACTIONS | selection.PASSWORD_ACTIONS)
     state.waits = []
     state.getpass_value, state.input_prompts = "fixture-candidate", []
+    state.loaded_group, state.group_loads, state.gain_group, state.pings = "Example", 0, False, 0
+    production_functions(
+        "config", {"_nonempty", "_clean_group", "normalize_entry"}, state.config.__dict__,
+    )
+
+    def load_config() -> Any:
+        state.group_loads += 1
+        return SimpleNamespace(group=state.loaded_group)
+
+    state.config.load_config = load_config
     monkeypatch.setattr(sys.modules[f"{PACKAGE}.cache"], "get_cache", lambda: persistent)
     reads = ModuleType(f"{PACKAGE}.credential_reads")
     reads.__dict__.update(config=state.config, os=os)
@@ -106,6 +117,9 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
         action = request["action"]
         state.requests.append((port, dict(request), invocation.configuration_root()))
         if action == "ping":
+            state.pings += 1
+            if state.gain_group and state.pings == 2:
+                state.loaded_group = "Other"
             return {
                 "ok": True, "accepting_work": True,
                 "cache_warm_selection_versions": state.versions,
@@ -132,7 +146,9 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
                     return {"ok": "false", "value": "must-not-cache", "generation": 7}
                 if state.read_mode == "invalid-value":
                     return {"ok": True, "value": 7, "generation": 7}
-                response = {"ok": True, "value": state.server_value, "generation": 7}
+                response = {
+                    "ok": True, "value": state.server_value, "generation": state.read_generation,
+                }
             else:
                 assert action == "set-password"
                 if state.reply_mode not in ("refused", "pending"):
@@ -151,13 +167,13 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
                     response = {"ok": False, "cache_pending": True, "error": "fixture-pending"}
                 elif state.reply_mode == "committed":
                     response = {
-                        "ok": False, "committed": True, "generation": 7,
+                        "ok": False, "committed": True, "generation": state.mutation_generation,
                         "error": "fixture-cache-failure",
                     }
                 else:
                     response = {"ok": True, "message": "fixture-updated"}
                     if state.reply_mode != "generation-missing":
-                        response["generation"] = 7
+                        response["generation"] = state.mutation_generation
         if selection.FIELD in request and state.receipt:
             response["cache_warm"] = {
                 "state": state.warm_state,
@@ -283,6 +299,66 @@ def test_password_uncertain_and_committed_outcomes_preserve_journal_and_never_re
         assert password.cache.pending is not None and password.cache.value == "fixture-old"
 
 
+def test_password_invalid_generations_never_settle_recovery_confirmation_or_mutation(
+    password: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    malformed: tuple[object, ...] = (True, 1.5, None, "7", "invalid", -1)
+    for stage in ("recovery", "confirmation"):
+        for generation in malformed:
+            password.read_generation = generation
+            password.reply_mode = "success" if stage == "recovery" else "generation-missing"
+            password.requests.clear()
+            password.cache.events.clear()
+            password.cache.pending = {"operation": 1} if stage == "recovery" else None
+            password.cache.value = password.server_value = "fixture-old"
+            assert password.cli.cmd_set_password(arguments()) == 2
+            assert not capsys.readouterr().out
+            assert password.cache.pending is not None and password.cache.value == "fixture-old"
+            assert not any(event[0] in ("replace", "complete", "rollback") for event in password.cache.events)
+            actions = [request["action"] for _, request, _ in password.requests]
+            assert actions == (
+                ["ping", "ping", "get"] if stage == "recovery" else
+                ["ping", "ping", "set-password", "get"]
+            )
+    password.read_generation, password.reply_mode = 7, "success"
+    for generation in (True, 1.5, "7", "invalid", -1):
+        password.mutation_generation = generation
+        password.cache.pending = None
+        password.cache.value = "fixture-old"
+        password.cache.events.clear()
+        password.requests.clear()
+        assert password.cli.cmd_set_password(arguments()) == 2
+        output = capsys.readouterr()
+        assert not output.out and "offline cache" in output.err
+        assert password.cache.pending is not None and password.cache.value == "fixture-old"
+        assert [event[0] for event in password.cache.events] == ["pending", "begin"]
+        assert [request["action"] for _, request, _ in password.requests] == [
+            "ping", "ping", "set-password",
+        ]
+    password.mutation_generation = None
+    password.cache.pending = None
+    password.requests.clear()
+    assert password.cli.cmd_set_password(arguments()) == 0
+    assert capsys.readouterr().out == "fixture-updated\n"
+    assert password.cache.pending is None
+    assert [request["action"] for _, request, _ in password.requests] == [
+        "ping", "ping", "set-password", "get",
+    ]
+
+
+def test_password_captured_no_group_never_reloads_a_new_default(
+    password: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    password.context.group = password.loaded_group = None
+    password.gain_group = True
+    assert password.cli.cmd_set_password(arguments()) == 0
+    output = capsys.readouterr()
+    assert output.out == "fixture-updated\n" and not output.err
+    assert password.loaded_group == "Other" and password.group_loads == 0
+    assert all(event[1] == "direct" for event in password.cache.events)
+    assert password.cache.pending is None and password.cache.value == "fixture-candidate"
+
+
 def test_password_mixed_capabilities_pinned_and_unbound_peers_keep_explicit_baseline(
     password: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -290,10 +366,16 @@ def test_password_mixed_capabilities_pinned_and_unbound_peers_keep_explicit_base
     for actions, reads in ((["add", "get"], [1]), (["set-password"], []),
                            (["set-password"], [True]), (["set-password"], ["1"])):
         password.mutation_actions, password.read_versions = actions, reads
+        password.reply_mode = "generation-missing"
+        password.cache.pending = {"operation": 1}
+        password.requests.clear()
         assert password.cli.cmd_set_password(arguments()) == 0
         output = capsys.readouterr()
         assert output.out == "fixture-updated\n" and "unsupported" in output.err
-        assert selection.FIELD not in password.requests[-1][1]
+        assert [request["action"] for _, request, _ in password.requests] == [
+            "ping", "ping", "get", "set-password", "get",
+        ]
+        assert all(selection.FIELD not in request for _, request, _ in password.requests[2:])
     password.read_versions = [1]
     monkeypatch.setenv("VAULT_READ_TEST_PIN", "immutable-fixture-context")
     owner_reads = password.owner_reads

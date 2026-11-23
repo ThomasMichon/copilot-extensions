@@ -11968,6 +11968,8 @@
     "test_password_recovery_mutation_and_confirmation_keep_one_scope_and_cache_owner",
     "test_password_captures_vault_and_group_before_readiness_and_terminal_unlock",
     "test_password_uncertain_and_committed_outcomes_preserve_journal_and_never_replay",
+    "test_password_invalid_generations_never_settle_recovery_confirmation_or_mutation",
+    "test_password_captured_no_group_never_reloads_a_new_default",
     "test_password_mixed_capabilities_pinned_and_unbound_peers_keep_explicit_baseline",
     "test_password_optional_receipt_and_cancelled_input_restore_transaction_scope",
     "test_password_scope_excludes_explicit_bindings_and_other_action_owners"
@@ -13349,8 +13351,8 @@
   "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py": "2d4cfa78bcab58e64cff3f2f708423d17f673909134f6a7541fe63f6567a4cc9",
   "tools/promotion_unit_tests/test_vault_legacy_attachments.py": "457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6",
   "tools/promotion_unit_tests/test_installer_pip_index_windows.py": "7a43ef242d83aa220e386debffbd807ba5c683ec135824969f500dbc5c0da8af",
-  "plugins/agent-vault/src/agent_vault/password_command.py": "b1514293015ee1b1640eebe1d59d679021011134d9d588bb1b8b027dbeb7f31f",
-  "tools/promotion_unit_tests/test_vault_password_selection.py": "d7567923ca4ae3e6c437b621a5968ed9e14cd2b60df1f50375dcc30dab685e5f"
+  "plugins/agent-vault/src/agent_vault/password_command.py": "2b269df2fa8da82c96ffb70430f6d2bdd4ccdf6bdc76b036940b3a03006f70fd",
+  "tools/promotion_unit_tests/test_vault_password_selection.py": "e30913d7793a9de78973da378d6107c4b954c24b70d8058e9f5257fc425f0580"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",

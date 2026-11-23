@@ -16,12 +16,12 @@ if TYPE_CHECKING:
 
 class PasswordSession(MutationSession):
     def source_supported(self, action: str) -> bool:
-        if action not in PASSWORD_ACTIONS:
+        if action not in PASSWORD_ACTIONS and action != "get":
             return super().source_supported(action)
         actions = self.health.get("cache_warm_selection_actions") if self.health else None
         return bool(
             super().source_supported("get")
-            and isinstance(actions, list) and action in actions
+            and isinstance(actions, list) and "set-password" in actions
         )
 
     def send(
@@ -42,7 +42,9 @@ class PasswordSession(MutationSession):
         elif request.get("action") == "get":
             if not isinstance(response, dict) or type(response.get("ok")) is not bool:
                 return None
-            if response["ok"] and not isinstance(response.get("value"), str):
+            if response["ok"] and (
+                not isinstance(response.get("value"), str) or _generation(response) is None
+            ):
                 return None
         return response
 
@@ -56,6 +58,11 @@ def command(args: Any) -> int:
         return _transaction(args, session.context)
 
     return run_scoped_mutation(execute, args, session, use_password_sender)
+
+
+def _generation(response: dict[str, Any]) -> int | None:
+    generation = response.get("generation", 0)
+    return generation if type(generation) is int and generation >= 0 else None
 
 
 def _transaction(args: Any, context: ResolvedVault) -> int:
@@ -74,7 +81,7 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
             print("Error: no password provided", file=sys.stderr)
             return 1
     persistent = get_cache()
-    cache_entry = config.normalize_entry(args.entry, context.group)
+    cache_entry = config.normalize_entry(args.entry, context.group or "")
     with persistent.replacement_lock():
         legacy = legacy_cache_entry(args.entry, cache_entry)
         if legacy is not None:
@@ -84,12 +91,13 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
             recovery = cli.send_command({
                 "action": "get", "entry": args.entry, "field": "password", "refresh": True,
             }, timeout=cli.PASSWORD_MUTATION_TIMEOUT)
+            generation = _generation(recovery) if recovery else None
             if (
                 not recovery
                 or not recovery.get("ok")
+                or generation is None
                 or not persistent.replace(
-                    cache_entry, "password", recovery["value"],
-                    int(recovery.get("generation", 0)),
+                    cache_entry, "password", recovery["value"], generation,
                 )
             ):
                 print(
@@ -114,17 +122,22 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
                     authoritative = cli.send_command({
                         "action": "get", "entry": args.entry, "field": "password", "refresh": True,
                     }, timeout=cli.PASSWORD_MUTATION_TIMEOUT)
+                    confirmed_generation = _generation(authoritative) if authoritative else None
                     cache_updated = bool(
                         authoritative
                         and authoritative.get("ok")
+                        and confirmed_generation is not None
                         and persistent.replace(
-                            cache_entry, "password", authoritative["value"],
-                            int(authoritative.get("generation", 0)),
+                            cache_entry, "password", authoritative["value"], confirmed_generation,
                         )
                     )
                 else:
-                    cache_updated = persistent.complete_replace(
-                        cache_entry, "password", password, operation, int(generation),
+                    valid_generation = _generation(response)
+                    cache_updated = bool(
+                        valid_generation is not None
+                        and persistent.complete_replace(
+                            cache_entry, "password", password, operation, valid_generation,
+                        )
                     )
             if not cache_updated:
                 print(
