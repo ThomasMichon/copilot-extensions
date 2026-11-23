@@ -1,0 +1,9 @@
+{
+  "comment": "Use the canonical prepared managed index reader for POSIX setup without ambient pip commands.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
