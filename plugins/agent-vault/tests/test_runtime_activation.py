@@ -732,6 +732,80 @@ try {{
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
+@pytest.mark.parametrize("layout", ["checkout", "incomplete-payload", "partial-helper", "partial-request"])
+def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Path, layout: str) -> None:
+    import shlex
+
+    host = shutil.which("bash")
+    if host is None:
+        pytest.skip("bash unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
+    repository = tmp_path / "source tree"
+    payload = repository / "plugins" / "agent-vault"
+    shutil.copytree(PLUGIN / "scripts", payload / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    canonical = repository / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    for name in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):
+        assert not (payload / "scripts" / name).exists()
+        shutil.copyfile(PLUGIN.parents[1] / "libs" / "installer-engine" / name, canonical / name)
+    if layout == "incomplete-payload":
+        installer = payload / "scripts" / "install.sh"
+        original = installer.read_text(encoding="utf-8")
+        assert original.count('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"') == 1
+        installer.write_text(original.replace(
+            '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"',
+            '. "$SCRIPT_DIR/installer-engine.sh"',
+        ), encoding="utf-8")
+    elif layout in {"partial-helper", "partial-request"}:
+        name = "bootstrap-uv.sh" if layout == "partial-helper" else "installer-instance-python-version.txt"
+        shutil.copyfile(canonical / name, payload / "scripts" / name)
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    trace = tmp_path / "uv-calls"
+    uv = commands / "uv"
+    uv.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + shlex.quote(str(trace)) + "\n"
+        "if IFS= read -r ignored; then exit 95; fi\n"
+        'case "$1" in\n'
+        "  --version) printf 'uv 0.13.7\\n' ;;\n"
+        "  python) [ \"$2\" = find ] || exit 91; printf '%s\\n' "
+        + shlex.quote(sys.executable) + " ;;\n"
+        "  *) exit 92 ;;\nesac\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o700)
+    for name in ("dirname", "wc", "cat"):
+        executable = shutil.which(name)
+        assert executable, f"{name} unavailable"
+        (commands / name).symlink_to(executable)
+    runtime = home / ".agent-vault"
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "PATH": str(commands), "AGENT_VAULT_HOME": str(runtime),
+    })
+    result = subprocess.run(
+        [host, str(payload / "scripts" / "install.sh"), "install"],
+        cwd=home, env=env, input="preserved input\n", capture_output=True,
+        text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
+    )
+    if layout == "checkout":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "[SKIP]" in result.stdout
+        assert "configuration-empty" in result.stdout
+        assert trace.read_text().splitlines() == [
+            "--version", "python", "find", "--no-project", "--system",
+            "--managed-python", "--no-python-downloads", "cpython@3.11.18",
+        ]
+    else:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert not trace.exists()
+    assert not runtime.exists()
+    assert not (home / ".copilot-extensions").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
 @pytest.mark.parametrize("scenario", ["managed", "unprepared", "failed-lookup", "missing", "explicit"])
 def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Path, scenario: str) -> None:
     import shlex

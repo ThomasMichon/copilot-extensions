@@ -257,6 +257,12 @@ shared installer bootstrap selector. Neither reader searches PATH Python,
 qualifies the reader's Python 3.10+ floor; a failed UV lookup cannot use partial
 stdout as a candidate.
 
+An unmaterialized source checkout uses the support directory named by its
+installer's canonical engine reference when both local bootstrap assets are
+absent. Promotion rewrites that reference to the payload-local form; an
+incomplete shipped payload cannot borrow support from an ancestor repository.
+Partially present local support also refuses rather than mixing locations.
+
 UV and the declared interpreter must already be prepared by their explicit
 prerequisite setup owner. Missing support or an unprepared interpreter gives
 an explicit prerequisite refusal, never inactive readiness or an ordinary-read
@@ -274,7 +280,8 @@ start, before checking current runtime metadata; inactive scope therefore still
 needs the read. Killswitch and cell-context exits precede it. Cold selection adds
 UV version qualification and prepared managed lookup before the physical-base
 probe and configuration-reader subprocess. The POSIX selector also reads its
-small request using shell utilities. The read itself does no network,
+small request using shell utilities. An unmaterialized checkout also reads its
+own installer to locate the declared canonical support. The read itself does no network,
 installation, repository history or full-tree work; optional configuration-owner composition retains its
 existing bounded peer read. An ordinary runtime dispatcher supplies its selected
 completed interpreter, avoiding discovery. Explicit install participation also
