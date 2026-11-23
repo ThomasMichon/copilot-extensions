@@ -22,7 +22,8 @@ from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,
 )
-from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
+from .config import IS_WINDOWS as IS_WINDOWS
+from .config import SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get as cmd_get, legacy_cache_entry
 from .mutation_client import _ensure_unlocked_service as _ensure_unlocked_service, ordinary_mutation
 from .prompt import prompt_password as gui_prompt_password
@@ -983,39 +984,9 @@ def cmd_import_key(args: Any) -> int:
         print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
         return 1
 
-    import base64
+    from .legacy_attachment_cli import command_import
 
-    key_file = Path(args.key_file)
-    pub_file = key_file.with_suffix(key_file.suffix + ".pub") if key_file.suffix else Path(
-        str(key_file) + ".pub"
-    )
-    if not key_file.exists():
-        print(f"Error: key file not found: {key_file}", file=sys.stderr)
-        return 1
-    if not pub_file.exists():
-        print(f"Error: public key not found: {pub_file}", file=sys.stderr)
-        return 1
-
-    if not _ensure_unlocked_service():
-        return 1
-
-    key_data = base64.b64encode(key_file.read_bytes()).decode()
-    pub_data = base64.b64encode(pub_file.read_bytes()).decode()
-    key_name = key_file.name
-
-    resp = send_command({
-        "action": "import-key",
-        "entry": args.entry,
-        "key_name": key_name,
-        "key_data": key_data,
-        "pub_data": pub_data,
-    }, timeout=15.0)
-    if resp and resp.get("ok"):
-        print(resp.get("message", f"Imported {key_name}"))
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_import(args)
 
 
 def cmd_export_key(args: Any) -> int:
@@ -1027,38 +998,9 @@ def cmd_export_key(args: Any) -> int:
         print("Error: --require-running requires --exclusive for export-key", file=sys.stderr)
         return 1
 
-    import base64
+    from .legacy_attachment_cli import command_export
 
-    dest_dir = Path(args.dest_dir)
-    if not dest_dir.is_dir():
-        print(f"Error: destination directory not found: {dest_dir}", file=sys.stderr)
-        return 1
-
-    if not _ensure_unlocked_service():
-        return 1
-
-    resp = send_command({
-        "action": "export-key",
-        "entry": args.entry,
-        "key_name": args.key_name,
-    }, timeout=15.0)
-    if not resp or not resp.get("ok"):
-        error = resp.get("error", "unknown") if resp else "service unreachable"
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-
-    key_file = dest_dir / args.key_name
-    pub_file = dest_dir / (args.key_name + ".pub")
-
-    key_file.write_bytes(base64.b64decode(resp["key_data"]))
-    pub_file.write_bytes(base64.b64decode(resp["pub_data"]))
-
-    if not IS_WINDOWS:
-        key_file.chmod(0o600)
-        pub_file.chmod(0o644)
-
-    print(f"Exported {args.key_name} to {dest_dir}")
-    return 0
+    return command_export(args)
 
 
 def _read_seal_input(args: Any) -> bytes | None:

@@ -437,7 +437,10 @@ def test_create_only_cli_uses_additive_action_and_truthful_custody(
 def test_import_cli_preserves_ordinary_dispatch_and_requires_explicit_mode(
     owner: SimpleNamespace,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    legacy = importlib.import_module(owner.package + ".legacy_attachment_cli")
+    monkeypatch.setattr(legacy, "Path", MissingPath)
     tree = ast.parse((SOURCE / "cli.py").read_bytes())
     node = next(
         node
@@ -449,7 +452,6 @@ def test_import_cli_preserves_ordinary_dispatch_and_requires_explicit_mode(
         "__package__": owner.package,
         "Any": Any,
         "sys": sys,
-        "Path": MissingPath,
     }
     exec(
         compile(

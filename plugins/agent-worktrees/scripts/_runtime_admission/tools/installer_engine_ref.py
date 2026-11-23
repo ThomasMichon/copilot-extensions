@@ -81,6 +81,7 @@ NATIVE_SUPPORT_FILES = {
     "plugins/agent-bridge": (
         "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
     ),
+    "plugins/agent-vault": ("installer_pip_index.py",),
 }
 
 

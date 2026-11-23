@@ -308,7 +308,9 @@ def test_require_running_without_exclusive_refuses_before_ordinary_activation(
     assert consumer.route.events == []
 
 
-def test_ordinary_export_keeps_existing_activation_write_and_mode_behavior() -> None:
+def test_ordinary_export_keeps_existing_activation_write_and_mode_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[object] = []
 
     class LegacyPath:
@@ -343,11 +345,32 @@ def test_ordinary_export_keeps_existing_activation_write_and_mode_behavior() -> 
         node for node in ast.parse((SOURCE / "cli.py").read_bytes()).body
         if isinstance(node, ast.FunctionDef) and node.name == "cmd_export_key"
     )
-    namespace: dict[str, Any] = {
-        "Any": Any, "Path": LegacyPath, "IS_WINDOWS": False, "sys": sys,
-        "_ensure_unlocked_service": unlocked,
-        "send_command": send,
-    }
+    package_name = "promotion_vault_ordinary_export"
+    package = ModuleType(package_name)
+    package.__path__ = []
+    client = ModuleType(package_name + ".cli")
+    client.__package__ = package_name
+    client.__dict__.update(
+        Any=Any, sys=sys, IS_WINDOWS=False,
+        _ensure_unlocked_service=unlocked, send_command=send,
+    )
+    legacy = ModuleType(package_name + ".legacy_attachment_cli")
+    legacy.__package__ = package_name
+    legacy.__dict__.update(
+        Any=Any, Path=LegacyPath, sys=sys, base64=base64,
+        ordinary_mutation=lambda command: command,
+    )
+    for module in (package, client, legacy):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    implementation = next(
+        node for node in ast.parse((SOURCE / "legacy_attachment_cli.py").read_bytes()).body
+        if isinstance(node, ast.FunctionDef) and node.name == "command_export"
+    )
+    exec(compile(
+        ast.Module(body=[implementation], type_ignores=[]),
+        str(SOURCE / "legacy_attachment_cli.py"), "exec",
+    ), legacy.__dict__)
+    namespace = client.__dict__
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(SOURCE / "cli.py"), "exec"), namespace)
     assert namespace["cmd_export_key"](SimpleNamespace(
         entry="item", dest_dir="/legacy", key_name="example.key",

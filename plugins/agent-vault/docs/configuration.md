@@ -284,6 +284,12 @@ Explicit POSIX setup uses the same prepared managed binding for its bootstrap
 and construction readers, including dependency-profile setup. Missing UV or an
 unprepared declared interpreter refuses visibly rather than discovering Python
 on PATH. These reads do not install Python or create a candidate runtime.
+The POSIX governed-index bridge also uses that selected interpreter and the
+canonical Installer Engine data reader, never ambient `pip`/`pip3`. It preserves
+the construction caller's effective UV configuration, explicit index settings
+and selected venv/Conda site prefix; malformed configuration refuses before
+construction. Raw and composed execution use their canonical and payload-local
+engine resources respectively.
 
 ### Activation performance
 

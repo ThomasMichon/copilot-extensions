@@ -252,23 +252,23 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==182;
-          assert sum(c.find('skipped') is None for c in cases)==162;
+          assert len(cases)==202;
+          assert sum(c.find('skipped') is None for c in cases)==182;
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Qualify raw and packaged effective UV index context
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py budget-guidance
           --test-file tests/test_installers.py --allow-explicit-tiers
-          -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context"
+          -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context or (posix_installer_bootstraps_with_uv_and_no_ambient_python and (isolated-project or isolated-directory))"
           --junit-dir qualification-evidence/index-working-directory
-      - name: Require all nine actual UV context and provider controls
+      - name: Require all eleven actual UV context, provider and caller controls
         if: runner.os == 'Linux'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/index-working-directory').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==9;
+          assert len(cases)==11;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
@@ -435,18 +435,22 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Supply a real unsupported interpreter only on this disposable runner
-        id: old
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9"
-          update-environment: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
+      - name: Supply a real unsupported interpreter only on this disposable runner
+        id: old
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'old-managed-python'
+          uv python install --no-bin --no-registry cpython@3.9.25
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $oldPython = (uv python find --no-project --system --managed-python --no-python-downloads cpython@3.9.25 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $oldPython) { throw 'The real Python 3.9 qualification prerequisite is unavailable' }
+          "python-path=$oldPython" >> $env:GITHUB_OUTPUT
       - name: Bind source and actual interpreter prerequisites
         shell: pwsh
         env:
