@@ -4060,6 +4060,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [retained-inbox/foundation study](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
+  distinguishes #12998's actual bounded source merge from #1460's complete
+  inherited compatibility contract, seven owner windows and the child owner's
+  unchecked release acceptance. No issue, technical state or custody changes;
+  the latest complete whole count remains 912, 183 above fixed 729.
   The [current owner-acceptance study](journal/2026/11.22-current-owner-acceptance-boundaries.md)
   preserves all changed #12900/#12905/#13775 discussions, distinct configured
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
@@ -6442,6 +6447,10 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [whole-foundation comparison](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
+  retains all inherited #1460 clauses and #5957 compatibility windows,
+  distinguishes attributed child test claims from campaign execution and
+  records unverified release correspondence without editing another owner.
   The [current provider/Manager/ingress boundaries](journal/2026/11.22-current-owner-acceptance-boundaries.md)
   retain whole source contracts and attributed partial delivery without
   qualifying linked opaque homes, native adoption or a competing owner.

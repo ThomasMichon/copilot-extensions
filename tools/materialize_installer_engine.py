@@ -22,7 +22,10 @@ def native_snapshot_plans(repo: Path) -> dict[Path, str]:
             continue
         rows = []
         for source, target in derived_file_pairs(repo, repo, copied_consumer=(consumer, consumer)):
-            if source.suffix in {".py", ".sh", ".ps1"}:
+            if (
+                source.suffix in {".py", ".sh", ".ps1"}
+                or source.name == "installer-instance-python-version.txt"
+            ):
                 rows.append(("copy", source.relative_to(repo).as_posix(), target.relative_to(consumer).as_posix()))
         aliases = ier.NATIVE_SOURCE_ALIASES.get(consumer.relative_to(repo).as_posix(), {})
         for name, canonical_name in aliases.items():

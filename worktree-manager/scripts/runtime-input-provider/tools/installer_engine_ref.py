@@ -36,6 +36,7 @@ SUPPORT_FILES = (
     "installer_engine_commands.py", "installer_engine_stop.py",
     "installer_engine_process.py",
     "bootstrap-protected-install.sh",
+    "bootstrap-uv.sh", "installer-instance-python-version.txt",
 )
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"

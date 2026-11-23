@@ -854,6 +854,12 @@ def _assert_stamped_installation_foundation(snapshot: Path) -> None:
         assert (snapshot / "scripts" / name).read_bytes() == (
             PLUGIN.parents[1] / "libs/bootstrap-killswitch" / name
         ).read_bytes()
+    for name in (
+        "installer-instance-reconcile.sh", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+    ):
+        assert (snapshot / "scripts" / name).read_bytes() == (
+            PLUGIN.parents[1] / "libs/installer-engine" / name
+        ).read_bytes()
     manifest = tomllib.loads((snapshot / "pyproject.toml").read_text(encoding="utf-8"))
     assert manifest["tool"]["uv"]["sources"]["agent-update-driver"]["path"] == "libs/update-driver"
     driver = snapshot / "libs/update-driver"
