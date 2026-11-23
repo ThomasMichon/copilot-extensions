@@ -3,6 +3,36 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_source_inventory_units.py",
+   [
+    "test_only_regular_bounded_tree_metadata_is_accepted",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\tmodule.py]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\tmodule.py\\x00100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\tmodule.py\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[120000 blob cccccccccccccccccccccccccccccccccccccccc 7\\tlinked\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[160000 commit cccccccccccccccccccccccccccccccccccccccc -\\tsubmodule\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\t/absolute\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\t../foreign\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\t.git/config\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\ta//b\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\ta/./b\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 7\\txxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc -1\\tmodule.py\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc unknown\\tmodule.py\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob short 7\\tmodule.py\\x00]",
+    "test_unsafe_incomplete_or_unbounded_source_tree_refuses[100644 blob cccccccccccccccccccccccccccccccccccccccc 8388609\\tmodule.py\\x00]",
+    "test_source_tree_aggregate_input_ceilings",
+    "test_shared_exact_directory_prefixes_remain_supported",
+    "test_prefix_entry_and_utf8_byte_ceilings_are_enforced_before_insertion",
+    "test_deep_zero_byte_paths_cannot_expand_preflight_memory_without_bound",
+    "test_direct_tree_inspection_also_bounds_listing_bytes[64]",
+    "test_direct_tree_inspection_also_bounds_listing_bytes[1]",
+    "test_listing_limit_counts_utf8_bytes_and_accepts_the_exact_ceiling",
+    "test_exact_tree_and_blob_input_ceilings",
+    "test_git_sha256_source_tree_and_mixed_identity_refusal"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_origin_caller_units.py",
    [
     "test_caller_has_fixed_finite_isolated_commands",
@@ -11602,6 +11632,9 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_source_inventory_units.py": "57bcaafaaef371ca38210271e3410eb64c2cbe7a017ccf9e46a339255231f043",
+  "tools/test_reproducer_lab_source.py": "6531a9657d8cefcc45ec841f71c67b8248409b64c70c6e0c01727d7d5f447b37",
+  "tools/reproducer-lab/source.py": "d66cf167ab5a8e203a59f0116d24da8941875d1eb910dec71f77498938216822",
   "tools/promotion_unit_tests/test_original_reproducer_origin_caller_units.py": "93307fdb94899494f8093b79b9661e70bbf9beee1a5e378781a757cc8d721485",
   "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py": "c9c0bfab9ff6a9eea0a95ead2bb1f00cd7191cc1af568418ca3cc82c72e0546c",
   "tools/test_reproducer_lab_origins.py": "7539934baf7579174678fb32b164791fb1294d408207e15e15a8aa9c64fee455",
@@ -12936,6 +12969,7 @@
   "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6caa74315278f46223f7277296d3080c0a264c8ac9fd34a7e578b9875058d6bb"
  },
  "coverage_targets": [
+  "tools/reproducer-lab/source.py",
   "tools/reproducer-lab/guest_origins.py",
   "tools/reproducer-lab/runtime_origin_probe.py",
   "tools/reproducer-lab/guest_operation.py",
