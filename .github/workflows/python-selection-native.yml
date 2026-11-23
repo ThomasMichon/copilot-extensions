@@ -44,6 +44,7 @@ on:
       - plugins/agent-vault/tests/test_installer_managed_readers.py
       - plugins/agent-vault/scripts/bootstrap-check.sh
       - plugins/agent-vault/scripts/install.sh
+      - plugins/agent-vault/scripts/install.ps1
       - plugins/agent-vault/tests/test_identity_payload_gate.py
       - plugins/agent-vault/scripts/runtime-activation.sh
       - libs/installer-engine/bootstrap-python.ps1
@@ -134,6 +135,21 @@ jobs:
           python tools/run-plugin-tests.py agent-codespaces
           --test-file tests/test_bootstrap_python.py --allow-explicit-tiers
           --junit-dir qualification-evidence/evaluator-bootstrap
+      - name: Qualify prepared Vault setup readers without ambient Python
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_installer_managed_readers.py --allow-explicit-tiers
+          -k powershell_setup_readers
+          --junit-dir qualification-evidence/vault-setup-readers
+      - name: Require each Vault native reader and explicit-binding control
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/vault-setup-readers').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify retained Dispatch selector publication
         run: >-
           python tools/run-plugin-tests.py agent-dispatch
@@ -252,7 +268,7 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==202;
+          assert len(cases)==218;
           assert sum(c.find('skipped') is None for c in cases)==182;
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Qualify raw and packaged effective UV index context

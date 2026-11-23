@@ -645,18 +645,7 @@ function Test-VaultRuntimeProfilePresent {
 function Get-BootstrapPython {
     if ($WheelProfile) { return $WheelPython }
     if ($script:RuntimeProfilePython) { return $script:RuntimeProfilePython }
-    <# Construction supervision must run outside the candidate being built.
-       Probe a native launcher, then real PATH interpreters (not Store aliases). #>
-    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($launcher -and $launcher.Source -notmatch '\.(cmd|bat)$') {
-        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-    }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
-    }
-    return $null
+    return Resolve-NativeBootstrapPython -Action $Action -Root $InstallDir
 }
 
 function Get-VaultWheelProfile {
@@ -851,19 +840,7 @@ function Invoke-DowngradeGuard {
 }
 
 function Resolve-PythonCommand {
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($found) {
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $testOut = & $found.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { return $found.Source }
-            } catch { }
-            $ErrorActionPreference = $prevEAP
-        }
-    }
-    return $null
+    return Get-BootstrapPython
 }
 
 function Test-KeePassXCCli {
@@ -1033,7 +1010,7 @@ function Install-Runtime {
 
     $pythonCmd = if ($WheelProfile) { $WheelPython } else { Resolve-PythonCommand }
     if (-not $pythonCmd) {
-        Write-Fail 'Python not found on PATH (need 3.10+)'
+        Write-Fail 'Prepared uv-managed bootstrap Python is unavailable; run prerequisite setup'
         exit 1
     }
     Write-Ok "Python: $pythonCmd"
