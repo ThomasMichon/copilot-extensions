@@ -19,6 +19,12 @@
    ]
   ],
   [
+   "tools/promotion_unit_tests/test_contract.py",
+   [
+    "test_phase_validation_does_not_rescan_the_complete_inventory_per_report"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_command_safety_shell_policy_units.py",
    [
     "test_env_launcher_changes_the_effective_mux_environment[options0]",
@@ -12846,7 +12852,7 @@
   "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
   "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
   "tools/promotion_source_archive.py": "81d81229ea298b3cf4ca9e47740efd2c4787d8db51a71ffa08b747aff53d4d4e",
-  "tools/promotion_unit_contract.py": "e2df41a8ad73f7e4467638f6ecd0a321f3200adb4c820dd3886187175247773e",
+  "tools/promotion_unit_contract.py": "ec8d8c9749300987a6de977a95b7b42ccd570138856c2df424b860bbd6a2f3ab",
   "tools/promotion_unit_effects.py": "23418f758546ff77f8a4eee2d15887d584383266f226772ca1ba68b8bdda8a91",
   "tools/promotion_unit_packet.py": "56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
   "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
@@ -12863,7 +12869,7 @@
   "tools/promotion_unit_tests/test_complete_source_publication.py": "bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",
   "tools/promotion_unit_tests/test_config_migrate.py": "2fffbe90f4829c339f9e1905bb33c25031f9c8b8776f8661e0f3233a77c397a4",
   "tools/promotion_unit_tests/test_container_inventory.py": "de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
-  "tools/promotion_unit_tests/test_contract.py": "8d66cc29117a8609ff6da8ed9358d80a42c31e6d874fae075fcef37bc01fe5ce",
+  "tools/promotion_unit_tests/test_contract.py": "c29988c8bf0c08121205a9d79910c6169338c3be2bb7a20cd0f69669ea0a09f8",
   "tools/promotion_unit_tests/test_control_retirement.py": "b68350d5859ae1147e97c2b55594ef284ffbe11912146ff6fb9a3d4d8929ca49",
   "tools/promotion_unit_tests/test_control_transition.py": "c84dc26b1113638c6dcce05b8df7894aced38c2e321a45f425ca7fcf25aab6cc",
   "tools/promotion_unit_tests/test_creation_diagnostics.py": "d4061059850bb6d429ac7f2e221a0ea8d6715f030c5e97221d193f6463f7df27",

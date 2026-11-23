@@ -486,6 +486,21 @@ schema/profile, every value and ordered witness, logical identity, proof
 checks, 1 MiB cap, deadlines and all operational holds. This is not a new
 profile, phase contract, writer activation, native grant or rollout.
 
+**2026-11-23 - Pure packet-processing CPU correction (operator-selected behavior):**
+
+After #14241's exact-head CI expires before upload, the operator selects:
+
+> optimize pure packet-processing CPU in this PR, then review/test a new
+> head, preserving all guards, witnesses, contracts and limits.
+
+Keep the failed attempt intact; do not blindly retry it or bypass CI.
+An independent owner is landing a ten-minute outer unit-job envelope through
+normal review, retaining the packet's 300-second bound. Rebase onto that
+change after it merges rather than duplicating it or changing a workflow here.
+This decision authorizes pure packet-CPU source work and fresh qualification
+of a corrected head in #14241, not a phase/profile/schema change, witness
+reduction, native action, rollout or transfer of the independent owner's work.
+
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).
 The campaign driver owns implementation/review; the repository owner alone
 authorizes critical main-path acceptance or a bounded administrative change.
@@ -3506,6 +3521,35 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Ruff and normal changed-code Linux/Windows strict checks pass; a
   worktree-manager patch changefile records release intent. Exact-head
   review, fresh full CI, normal merge and actual parent readback remain.
+  #14241 receives exact-head approval `6021004306`, but fresh attempt-one
+  CI `45166572452` is cancelled at the unchanged five-minute job limit.
+  Unit job `137664941138` records all 9,764 cases passing in 224.64 pytest /
+  250.609 packet seconds and computes executed-packet metadata, but the
+  qualification step is cancelled before artifact upload. The provider
+  explicitly reports exceeding `5m0s`; artifact inventory is empty.
+  Guards pass, required aggregate `137667524743` fails and the PR remains
+  unmerged. This is not a qualified packet or a known-flake waiver.
+  No retry, deadline increase, evidence substitution, reduced selection or
+  automatic CPU-optimization assignment follows from the failure.
+- [ ] Complete the separately selected pure packet-CPU correction in #14241.
+  Replace phase-proof validation's per-report full inventory scan with one
+  local membership set, retaining every collection, report shape/type,
+  duplicate/unexpected phase, positive-outcome, effect and elapsed-bound check.
+  A focused comparison-work regression fails on the original code and passes
+  after correction; all 166 phase/packet acceptance and refusal cases pass.
+  At the unchanged 9,764-node / 29,292-report synthetic workload, three-trial
+  median validation time changes from 1.545238 to 0.080254 seconds. This is
+  pure function CPU measurement, not full packet or CI timing.
+  Unchanged guarded observation of all 166 cases passes in 3.77 pytest /
+  4.500 observation seconds with zero prohibited effects, four bound Python
+  reads, all 498 reports and actual owner calls. Add one regression witness
+  and refresh only the two changed source bindings; preserve all 9,764 prior
+  witnesses/order, source keys, 494 targets, 89 helpers, 1 MiB cap and
+  300-second bound. Candidate totals are 9,765 / 1,374 / 494 / 1,043,986 bytes.
+  Ruff and normal changed-code Linux/Windows strict checks pass.
+  The independent outer-envelope change still needs to merge before the
+  required managed rebase; corrected-head review and complete fresh CI,
+  normal merge and actual parent readback remain.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

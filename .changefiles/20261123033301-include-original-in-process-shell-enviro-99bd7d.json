@@ -1,5 +1,5 @@
 {
-  "comment": "Include original in-process shell environment policy controls in the bounded promotion unit packet",
+  "comment": "Avoid per-report inventory scans in unit-proof validation and include original shell environment policy controls",
   "changes": [
     {
       "plugin": "worktree-manager",

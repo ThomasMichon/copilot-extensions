@@ -7711,6 +7711,74 @@ readback remain. No native parser, real audit activation, process/backend
 operation, workflow-count saving, cleanup release or parent completion is
 claimed.
 
+Managed publication of #14241 retains actual parent
+`0c191bdebdfe5f28350a1e4aa974ed1c82e514ab`, including independent Vault
+setup-reader change #14236. Exact five-file composition preserves all
+non-manifest authored blobs, adds only 35 cases and one binding, and keeps
+all three observed inputs unchanged. Counts remain 9,764 / 1,374 / 494 /
+1,043,839 bytes; complete source bindings and 89 helpers verify.
+Exact-head approval `6021004306` names
+`b14a8a62d08d41fc6d3f639c43b8bfa9e130485c`, with no issues, comments
+or threads and complete pagination.
+
+Fresh CI `45166572452`, attempt one, is cancelled. Unit job `137664941138`
+records all 9,764 cases passing with 55 deselections in 224.64 pytest /
+250.609 packet seconds. It computes executed-packet metadata with identity
+`d28d8933fdde713f347a5f53ae32faad0c802e922d7325894117a798b3f7f669`
+and packet digest
+`5ac23098760f5de93b3fb74c56a1eccee5fe403ba9a3515c167cf5bc5c61f570`.
+Those log lines are not complete execution evidence: the qualification step
+is cancelled before upload, and the actual artifact inventory is empty.
+The provider annotation explicitly states, "The job has exceeded the maximum
+execution time of 5m0s". The unchanged job starts at `11:35:33Z` and
+completes cancelled at `11:40:37Z`; its qualification step runs from
+`11:36:00Z` through `11:40:36Z`. The separate packet bound remains
+300 seconds and is not the failed boundary. Guards pass, but required
+aggregate `137667524743` fails.
+
+The approved source head remains unmerged and this leaf remains unchecked.
+No retry, job/packet deadline change, smaller witness set, uploaded-evidence
+substitution or flaky-test classification is authorized or attempted.
+A bounded new retry or a separately selected pure packet-CPU correction
+under unchanged contracts needs an explicit next-step decision. Preserve
+the failed attempt, existing shared-owner seams and all native/custody holds.
+
+The operator subsequently selects pure packet-processing CPU optimization in
+this same PR, followed by new-head review and testing with all guards,
+witnesses, contracts and limits retained. A separate owner is landing a
+ten-minute outer job envelope while keeping the 300-second packet limit;
+rebase onto that merged change rather than duplicating it. No blind retry
+or CI bypass is selected.
+
+Direct source tracing finds a quadratic phase-proof loop: every phase report
+tests membership in the complete expected-node list. The correction creates
+one local expected-node set and reuses it for the existing collection equality
+and report-membership checks. It removes no collection, report shape/type,
+duplicate, unexpected phase, all-phases-passed, effect or elapsed-bound check.
+No effect observer, source/coverage proof, digest, schema/profile, phase
+contract, workflow, runtime or global cache is changed.
+
+The new comparison-work regression fails on the original implementation.
+After correction, all 166 phase/packet acceptance and refusal cases pass in
+2.04 seconds. A three-trial synthetic workload uses the exact unchanged
+9,764 admitted nodes and 29,292 complete phase reports: median pure validation
+time changes from 1.545238 seconds to 0.080254 seconds. This approximately
+19.25-fold local function improvement is not an end-to-end packet or CI result.
+Unchanged guarded observation also passes all 166 in 3.77 pytest / 4.500
+observation seconds, with zero prohibited effects, four bound Python reads,
+all 498 reports and actual owner call-phase coverage.
+
+The candidate retains every prior witness/order, source key, production
+target, helper and bound. It prepends one focused regression witness as
+another already-supported compact group and refreshes only the contract and
+its changed test source bindings: 9,765 nodes, 1,374 sources, 494 targets and
+1,043,986 one-space v2 bytes, with 89 helpers, 1 MiB cap and 300 seconds intact.
+Ruff and normal changed-code Linux/Windows strict checks pass. The existing
+worktree-manager patch changefile now describes both changes.
+The failed exact head remains retained. The independent envelope's merge,
+managed rebase, corrected-head review, fresh full CI and normal source
+completion remain outstanding; no new-head qualification is claimed yet.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:
