@@ -7,10 +7,15 @@ import binascii
 import json
 import os
 import time
+from argparse import Namespace
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from . import config
 from .identity_context import identity_cache_digest
+
+if TYPE_CHECKING:
+    from .service import VaultService
 
 SERVICE_FAILURE_HINTS = {
     "needs_unlock": "Unlock the selected vault or explicitly retry with --prompt.",
@@ -31,7 +36,7 @@ SERVICE_FAILURE_HINTS = {
 class IdentityKeyError(RuntimeError):
     """Sanitized, actionable identity-key failure."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
 
@@ -50,10 +55,10 @@ def validate_key(value: str) -> str:
     return value
 
 
-def source_context() -> dict:
+def source_context(context: config.ResolvedVault | None = None) -> dict[str, Any]:
     from .cache import CACHE_DIR_ENV, default_cache_dir
 
-    context = config.resolve_context(strict=True)
+    context = context if context is not None else config.resolve_context(strict=True)
     if not context.kpdb:
         raise IdentityKeyError("database_unconfigured", "Configure an existing KeePass database first.")
     database = Path(context.kpdb).expanduser().resolve()
@@ -100,7 +105,9 @@ def source_context() -> dict:
     return {"version": 1, "env": environment}
 
 
-def provision(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -> dict:
+def provision(
+    service: VaultService, kpdb: str, entry: str, initialize: bool, confirm: bool,
+) -> dict[str, Any]:
     operation_deadline = time.monotonic() + (
         100.0 if getattr(service._request_ctx, "allow_prompt", False) else 60.0
     )
@@ -140,22 +147,40 @@ def provision(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -
         service._credential_lock.release()
 
 
-def command(args) -> int:
+def command(args: Namespace) -> int:
+    from .key_client import run_key_command
+
+    if args.identity_command != "context":
+        return run_key_command(
+            args, "identity-key-setup", _command, context_error="context_invalid",
+            context_message="Configured vault context or service is unusable; repair selection and retry.",
+        )
+    try:
+        print(json.dumps(source_context(), sort_keys=True))
+        return 0
+    except IdentityKeyError as exc:
+        payload = {"version": 1, "error": exc.code, "message": str(exc)}
+    except (OSError, RuntimeError, ValueError):
+        payload = {
+            "version": 1, "error": "context_invalid",
+            "message": "Configured vault context or service is unusable; repair selection and retry.",
+        }
+    print(json.dumps(payload, sort_keys=True))
+    return 1
+
+
+def _command(args: Namespace, context: config.ResolvedVault) -> int:
     from . import cli
     from .cache import get_cache
 
-    payload = {"version": 1}
+    payload: dict[str, Any] = {"version": 1}
     succeeded = False
     stage = "context"
     try:
-        metadata = source_context()
-        if args.identity_command == "context":
-            print(json.dumps(metadata, sort_keys=True))
-            return 0
+        metadata = source_context(context)
         if args.initialize_owner != args.confirm_first_owner:
             raise IdentityKeyError("confirmation_required", "First-owner initialization requires both flags.")
-        context = config.resolve_context(strict=True)
-        entry = config.normalize_entry(args.entry, context.group)
+        entry = config.normalize_entry(args.entry, context.group or "")
         stage = "cache_read"
         cache = get_cache(metadata["env"]["AGENT_VAULT_CACHE_DIR"])
         if not cache.enabled:

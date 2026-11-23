@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from .identity_key import SERVICE_FAILURE_HINTS, IdentityKeyError
 
 if TYPE_CHECKING:
+    from .config import ResolvedVault
     from .service import VaultService
 
 FAILURE_HINTS = {
@@ -142,7 +143,7 @@ def _generate_record() -> str:
     ).decode("ascii")
 
 
-def decode_record(value: str) -> dict[str, Any]:
+def decode_record(value: object) -> dict[str, Any]:
     backend = _crypto()
 
     try:
@@ -285,12 +286,24 @@ def handle_prepare_request(
 
 
 def command(args: Namespace) -> int:
+    from .key_client import run_key_command
+
+    return run_key_command(
+        args, "ssh-key-prepare", _command, context_error="context_invalid",
+        context_message="Selected vault context is unusable; repair it without replacing the SSH key.",
+        validate=_validate_args,
+    )
+
+
+def _validate_args(args: Namespace) -> None:
+    validate_request(args.entry, args.initialize, args.confirm_initialization)
+    _crypto()
+
+
+def _command(args: Namespace, context: ResolvedVault) -> int:
     from . import cli, config
 
     try:
-        validate_request(args.entry, args.initialize, args.confirm_initialization)
-        _crypto()
-        context = config.resolve_context(strict=True)
         if not context.kpdb:
             raise IdentityKeyError("database_unconfigured", "Configure an existing KeePass database first.")
         try:
@@ -302,7 +315,7 @@ def command(args: Namespace) -> int:
                 "database_unavailable",
                 "Configured KeePass database is unavailable; restore access or synchronization without replacing it.",
             ) from None
-        entry = config.normalize_entry(args.entry, context.group)
+        entry = config.normalize_entry(args.entry, context.group or "")
         validate_request(entry, args.initialize, args.confirm_initialization)
         if args.require_running:
             running = cli.send_command({"action": "ping"}, timeout=5.0, strict_endpoint=True)

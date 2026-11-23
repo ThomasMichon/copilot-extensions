@@ -3650,7 +3650,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and Validation Plan are reread before resolving only this source leaf.
   Four command-safety adapters cover 100 of 272 originals; 172 remain
   unselected, not deleted or qualified. No whole-flow saving is inferred.
-- [ ] Assess five complete original AST-fixture control functions as six
+- [x] Assess five complete original AST-fixture control functions as six
   source-only unit candidates, preserving every assertion and original double.
   They extract selected helper bodies as AST data; never import or execute the
   native fixture module. Prove closed source binding and actual helper-body
@@ -3686,6 +3686,57 @@ authorizes critical main-path acceptance or a bounded administrative change.
   combined totals are 9,837 / 1,383 / 497 / 1,001,889 bytes, with 89 helpers
   and existing bounds retained. The prior CI is not combined-head
   qualification; fresh review and complete CI remain required.
+  New exact-head approval `6023331545` names
+  `c17638e0a49ebdd6b76d5de3b4a4faca2228c1f9`; the old approval is dismissed.
+  Fresh attempt-one CI `45193464085` executes all 9,837 cases in 237.198
+  packet seconds, completes artifact `14826523924` and passes required
+  aggregate `137760627518`. The local watcher exits on a jobs-list HTTP 500,
+  but independent job/run reads confirm success; no CI retry is triggered.
+  Normal managed merge yields `dfb7961ee2ef0a986706694e7e6c3b8e02b60105`;
+  the entire reviewed and merged trees are equal. After a safe sync abort
+  replaying the two squash-merged commits, clean-state/tree-equality checks
+  and retained backups precede empty-range local rebase and successful
+  supported sync. All bindings and four observed inputs verify. Actual
+  parent Goal, Plan, own leaf and Validation Plan are reread before
+  resolving only this source-only leaf. Five adapters cover 106 of 272
+  original command-safety cases; 166 remain unselected, not deleted or
+  qualified. No actual native/lifecycle/custody acceptance follows.
+- [ ] Assess two original portable containment functions, provisionally
+  five cases: sandbox cleanup signature compatibility (two) and private
+  PowerShell module-path identity (three). Preserve original assertions and
+  fixtures; bound cleanup to the test's own temporary files. Complete the
+  original module's top-level/import/decorator audit before collection.
+  Require closed input binding, actual helper calls and unchanged positive
+  observation before normal strict/review/CI/merge. Select no real child,
+  preparation, registry, service, native lifecycle or retained-resource cleanup.
+  Static inventory completes before collection: the original module has only
+  imports, function definitions and static parameter/platform decorators;
+  the portable containment imports defer Darwin/native binding loads.
+  Exact collection finds 60 original functions / 118 cases and two unchanged
+  adapter functions / five cases, excluding 58 functions / 113 cases before
+  execution. Function identity, fixtures, recursive parameter values/types,
+  marks and full IDs match. Unchanged positive guarding passes all five in
+  1.30 pytest / 2.375 observation seconds, with zero prohibited effects,
+  ten bound Python reads and all fifteen phase reports. Each case contributes
+  actual body-call coverage to `native_test_paths.py::_rmtree` or
+  `plugin_test_environment.py::isolated_environment`, respectively. Cleanup
+  reaches only the original fixture's own files; no TestSandbox instance,
+  retained-resource cleanup, native loader or backend is invoked.
+  Add only adapter/original bindings: 9,842 cases, 1,385 sources, unchanged
+  497 targets / 89 helpers / 300 seconds and 1,002,610 zero-indent v2 bytes
+  under the unchanged 1 MiB cap. No original, fixture, guard, preload or
+  input-contract workaround is used. Fresh full CI, exact-head review,
+  normal merge and parent readback remain required.
+  Ruff and three compact/packet reader controls pass. The first normal
+  strict check also selects an untouched Dispatch test against stale local
+  Dev and reports two errors there; the adapter itself passes both targets.
+  Preserve that result. Supported sync incorporates #14255; the refreshed
+  normal `origin/dev` check selects only this adapter and passes Linux and
+  Windows without changing any source/checker admission.
+  Final comparison identifies #14255's one existing Dispatch installer
+  source-hash refresh, which is preserved. All ten observed inputs remain
+  unchanged; the final composition must equal current Dev plus only this
+  slice's five ordered nodes/two source bindings, not the pre-sync candidate.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.
