@@ -8,6 +8,7 @@ fans this exact file out byte-identically to every adopter).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,7 +16,7 @@ GUARD = Path(__file__).resolve().parents[1] / "bootstrap-killswitch-guard.sh"
 
 
 def _run(args: list[str], state_file: Path) -> subprocess.CompletedProcess[str]:
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(state_file.parent.parent)}
+    env = {"PATH": os.environ["PATH"], "HOME": str(state_file.parent.parent)}
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(state_file)
     return subprocess.run(
         ["bash", str(GUARD), *args],
@@ -94,7 +95,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path: Path) -> None:
     proc = subprocess.Popen(["sleep", "30"])
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
-        env = {"PATH": "/usr/bin:/bin"}
+        env = {"PATH": os.environ["PATH"]}
         env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
         env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
         result = subprocess.run(
@@ -114,7 +115,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path: Path) -> None:
 def test_on_reports_no_warning_when_no_lock_present(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
     fake_home.mkdir()
-    env = {"PATH": "/usr/bin:/bin"}
+    env = {"PATH": os.environ["PATH"]}
     env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
     result = subprocess.run(
@@ -133,7 +134,7 @@ def test_on_ignores_stale_lock_with_dead_pid(tmp_path: Path) -> None:
     lock_dir.mkdir(parents=True)
     # A PID astronomically unlikely to be alive right now.
     (lock_dir / "reconcile.lock").write_text("999999999", encoding="utf-8")
-    env = {"PATH": "/usr/bin:/bin"}
+    env = {"PATH": os.environ["PATH"]}
     env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
     result = subprocess.run(

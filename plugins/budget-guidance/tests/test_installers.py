@@ -850,6 +850,10 @@ def _assert_stamped_installation_foundation(snapshot: Path) -> None:
     assert (snapshot / "scripts/bootstrap-killswitch-json-query.awk").read_bytes() == (
         PLUGIN.parents[1] / "libs/installation-context/json-query.awk"
     ).read_bytes()
+    for name in ("bootstrap-killswitch-uv.sh", "bootstrap-killswitch-python-version.txt"):
+        assert (snapshot / "scripts" / name).read_bytes() == (
+            PLUGIN.parents[1] / "libs/bootstrap-killswitch" / name
+        ).read_bytes()
     manifest = tomllib.loads((snapshot / "pyproject.toml").read_text(encoding="utf-8"))
     assert manifest["tool"]["uv"]["sources"]["agent-update-driver"]["path"] == "libs/update-driver"
     driver = snapshot / "libs/update-driver"

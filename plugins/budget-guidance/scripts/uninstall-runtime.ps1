@@ -51,7 +51,8 @@ function Invoke-FiniteRuntimeUninstall {
     $output = Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', $helper, '--payload-root', (Split-Path -Parent $PSScriptRoot),
         '--plugin-id', 'budget-guidance', '--root', $InstallRoot,
-        '--shell', (Get-Process -Id $PID).Path, $mode)
+        '--shell', (Get-Process -Id $PID).Path,
+        '--profile', (Join-Path $PSScriptRoot 'uninstall-profile.json'), $mode)
     if ($LASTEXITCODE -ne 0) { throw 'Finite runtime uninstall refused; see native diagnostic' }
     if ($output) { Write-Host $output.Trim() }
 }
