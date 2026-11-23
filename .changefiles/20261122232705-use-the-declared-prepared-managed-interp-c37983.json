@@ -1,0 +1,9 @@
+{
+  "comment": "Use the declared prepared managed interpreter for POSIX setup readers and the canonical data-only governed-index bridge.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

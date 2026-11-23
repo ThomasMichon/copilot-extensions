@@ -280,6 +280,15 @@ another interpreter. Missing prerequisites refuse visibly without a driver
 handoff or installation; the hook still emits its session-start JSON. Native
 killswitch and installation-cell exits precede interpreter selection.
 
+Explicit POSIX setup uses the same prepared managed binding for its bootstrap
+and construction readers. Its governed-index bridge reads data through the
+canonical Installer Engine index helper, never an ambient `pip` command.
+Existing UV index settings remain authoritative; pip environment/file
+precedence and an explicitly selected virtual-environment site configuration
+are handled by that helper. Invalid configuration refuses before construction.
+The helper is declared in the existing payload composer; raw checkout and
+packaged execution use their respective canonical and local engine resources.
+
 ### Activation performance
 
 The legacy session bootstrap reads activation once on every eligible session
