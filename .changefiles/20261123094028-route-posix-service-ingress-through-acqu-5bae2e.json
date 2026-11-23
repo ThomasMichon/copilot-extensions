@@ -1,0 +1,9 @@
+{
+  "comment": "Route POSIX service ingress through acquisition-free uv selection while preserving completed-runtime and native main-PID ownership.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

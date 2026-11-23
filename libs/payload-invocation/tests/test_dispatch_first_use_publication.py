@@ -26,7 +26,38 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def dispatch_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return _release_payload(tmp_path_factory.mktemp("dispatch-release"), "agent-dispatch")
+    release = _release_payload(tmp_path_factory.mktemp("dispatch-release"), "agent-dispatch")
+    if os.name == "nt" and POWERSHELL is None:
+        pytest.skip("Native PowerShell is required")
+    command = (
+        [cast(str, POWERSHELL), "-NoProfile", "-NonInteractive", "-File",
+         str(release / "scripts/_bootstrap_python/select.ps1"), "-Operation", "Prepare"]
+        if os.name == "nt" else
+        ["bash", str(release / "scripts/_bootstrap_python/select.sh"), "Prepare"]
+    )
+    prepared = subprocess.run(
+        command, env=_dispatch_bootstrap_environment(release),
+        capture_output=True, text=True, timeout=60,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    return release
+
+
+def _dispatch_bootstrap_environment(release: Path) -> dict[str, str]:
+    return {
+        **os.environ,
+        "UV_PYTHON_INSTALL_DIR": str(release.parent / "managed-python"),
+        "UV_CACHE_DIR": str(release.parent / "uv-cache"),
+    }
+
+
+def _dispatch_environment(fixture: dict[str, Any], release: Path) -> dict[str, str]:
+    environment = _adopter(fixture, "agent-dispatch", release)
+    environment["COPILOT_HOME"] = str(fixture["home"] / ".copilot")
+    prepared = _dispatch_bootstrap_environment(release)
+    environment.update({key: prepared[key] for key in ("UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR")})
+    return environment
 
 
 def _selected_cell(fixture: dict[str, Any], environment: dict[str, str]) -> tuple[Path, dict[str, Any]]:
@@ -89,7 +120,7 @@ def test_dispatch_actual_first_use_publication(
 ) -> None:
     if os.name == "nt" and POWERSHELL is None:
         pytest.skip("Native PowerShell is required")
-    environment = _adopter(binding_fixture, "agent-dispatch", dispatch_release)
+    environment = _dispatch_environment(binding_fixture, dispatch_release)
     if os.name == "nt":
         environment.pop("PSModulePath", None)
         environment["LOCALAPPDATA"] = str(binding_fixture["home"] / "AppData/Local")
