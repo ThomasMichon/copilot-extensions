@@ -3,6 +3,17 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_state_mount_units.py",
+   [
+    "test_state_mount_is_only_local_mount_evidence",
+    "test_supported_nonvolatile_filesystems[ext4]",
+    "test_supported_nonvolatile_filesystems[xfs]",
+    "test_supported_nonvolatile_filesystems[btrfs]",
+    "test_supported_nonvolatile_filesystems[zfs]",
+    "test_state_device_must_match_open_directory"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_offline_boundary_units.py",
    [
     "test_existing_v1_defaults_remain_internal_and_none_is_explicit",
@@ -11488,6 +11499,9 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_state_mount_units.py": "7bef055999c41f119dd8360f9da2a437287c659f3959fe814599bcde09aacffa",
+  "tools/test_reproducer_lab_operation.py": "f60849ece9976b9355c188f29f0de52f2896a8a0aa54d7e7be0c21d37266ad74",
+  "tools/reproducer-lab/guest_operation.py": "6f9ccd3f23e54eb4a1167689568793fae5b4c57199bbfc661f618fde54b3d59c",
   "tools/promotion_unit_tests/test_original_reproducer_offline_boundary_units.py": "cf6e5311e0c2e26d16b143d2049d3f2209eeb3a4dcd625becbf3de85f75a668f",
   "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py": "31c938d466c53b9ff782a4e887dd6b8e3488ad9e9db51a8727a7f9f2a1be9f3d",
   "tools/test_reproducer_lab_offline.py": "88750487dd73d8025e4e46141f6b10b20627c2a2ffb7ca00007e40371b2e5926",
