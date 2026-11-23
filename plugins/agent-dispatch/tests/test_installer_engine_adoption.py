@@ -113,7 +113,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
         "COPILOT_HOME": "copilot",
     }.items():
         root = tmp_path / suffix
-        root.mkdir(exist_ok=True)
+        root.mkdir(mode=0o700 if key == "XDG_RUNTIME_DIR" else 0o777, exist_ok=True)
         env[key] = str(root)
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
@@ -915,7 +915,7 @@ def test_stamp_preserves_already_materialized_policy_closure(
         (False, True, None), (True, True, None),
         (True, True, "missing-helper"), (True, True, "outside-source"),
     ],
-    ids=["checkout-fallback", "release-fallback", "checkout-uv", "release-uv",
+    ids=["checkout-missing-uv", "release-missing-uv", "checkout-uv", "release-uv",
          "missing-helper", "outside-source"],
 )
 def test_runtime_install_attributes_its_snapshot_not_the_calling_helper(
@@ -932,25 +932,7 @@ def test_runtime_install_attributes_its_snapshot_not_the_calling_helper(
     })
     uv_result = f"return '{uv}'" if acquired_uv else "return $null"
     python = Path(sys.executable)
-    if not acquired_uv:
-        # CreateProcess cannot resolve a bare uv.cmd like a real uv.exe.
-        python = tmp_path / "python-fixture.ps1"
-        python.write_text(
-            f"""
-$forward = @($args)
-for ($i = 0; $i -lt $forward.Count - 1; $i++) {{
-    if ($forward[$i] -eq '--uv' -and $forward[$i + 1] -eq 'uv') {{
-        $forward[$i + 1] = '{uv}'
-        # PowerShell consumed the script-call end-of-options marker.
-        $forward = @($forward[0..($i + 1)]) + @('--') + @($forward[($i + 2)..($forward.Count - 1)])
-        break
-    }}
-}}
-& '{sys.executable}' @forward
-exit $LASTEXITCODE
-""", encoding="utf-8",
-        )
-    failure = "package-boundary-reached"
+    failure = "package-boundary-reached" if acquired_uv else "uv is required for Dispatch runtime construction"
     mutation = ""
     if invalid == "missing-helper":
         failure = "Build snapshot dependency policy is unavailable:"
@@ -970,7 +952,18 @@ function New-PluginBuildSnapshot {
         (outside / "pyproject.toml").write_text(
             '[project]\nname = "agent-zdd"\nversion = "1.0.0"\n', encoding="utf-8",
         )
-        mutation = f"function Resolve-Zdd {{ param($LibRoot) return '{outside}' }}\n"
+        mutation = f"""
+Set-Item Function:New-RealPluginBuildSnapshot ${{function:New-PluginBuildSnapshot}}
+function New-PluginBuildSnapshot {{
+    param($PluginDir, $InstallDir, $Version, [switch]$BestEffort)
+    $snapshot = New-RealPluginBuildSnapshot @PSBoundParameters
+    $manifest = Join-Path $snapshot 'pyproject.toml'
+    $content = [IO.File]::ReadAllText($manifest)
+    $content = [regex]::Replace($content, '(?m)^agent-zdd\\s*=.*$', 'agent-zdd = {{ path = {json.dumps(str(outside))} }}')
+    [IO.File]::WriteAllText($manifest, $content)
+    return $snapshot
+}}
+"""
     script = (
         _snapshot_prelude()
         + _function("ps1", "Resolve-Zdd")
@@ -988,7 +981,8 @@ $originalPolicy=$script:InstallerDependencyPolicy
 $script:trampolinePass=0
 function Get-SourceKind {{ param($PluginPath) return 'marketplace' }}
 function Get-Command {{ return [pscustomobject]@{{ Source='{sys.executable}' }} }}
-function Write-Fail {{ param($Msg) throw "$Msg; $zddOut" }}
+function Get-BootstrapPython {{ param([switch]$ExternalOnly) return '{sys.executable}' }}
+function Write-Fail {{ param($Msg) throw "$Msg; $($mcpResult.Output)" }}
 function Ensure-Uv {{ param($InstallRoot) {uv_result} }}
 function Invoke-VersionedSlotClean {{ }}
 function Test-DispatchVenv {{ param($Dir, $Python) return $true }}
@@ -1010,26 +1004,17 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
     )
     result = _run("ps1", script, tmp_path, env)
     assert result.returncode == 0, result.stdout + result.stderr
-    if invalid:
+    if invalid or not acquired_uv:
         assert not Path(env["TEST_UV_LOG"]).exists()
         return
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
-    libraries = [
-        str(snapshot / "libs" / lib)
-        for lib in (
-            "zdd", "dropin-registry", "plugin-resolve",
-            "single-instance-lease", "agent-procutil", "update-driver", "worktree-identity",
-            "process-telemetry", "plugin-activation",
-        )
-    ]
-    package_calls = 1 if acquired_uv else 2
-    assert len(calls) == len(libraries) + package_calls
+    assert len(calls) == 1
     expected_sources = set(json.loads(env["TEST_UV_EXPECTED_SOURCES"]).values()) | {f"{snapshot}[mcp]"}
     sources = [
         next(arg for arg in call if arg in expected_sources)
         for call in calls
     ]
-    assert sources == [*libraries, *([f"{snapshot}[mcp]"] * package_calls)]
+    assert sources == [f"{snapshot}[mcp]"]
     for call in calls:
         assert "--exclude-newer" in call
         cutoff = datetime.fromisoformat(call[call.index("--exclude-newer") + 1].replace("Z", "+00:00"))

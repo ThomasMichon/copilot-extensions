@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import importlib
 import json
 import os
 from pathlib import Path
@@ -10,16 +11,27 @@ import shutil
 import subprocess
 import sys
 import threading
+from typing import Protocol, cast
 
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+HEADLESS = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+class _VisibilityProbe(Protocol):
+    available: bool
+    owned: set[int]
+    console_windows: set[int]
+    surfaced: object
+    focus: object
+
+    def sample(self) -> None: ...
 
 
 @pytest.fixture(params=["pwsh", "powershell"])
 def shell(request: pytest.FixtureRequest) -> str:
-    executable = shutil.which(request.param)
+    executable = shutil.which(str(request.param))
     if os.name != "nt" or executable is None:
         pytest.skip("native Windows PowerShell required")
     return executable
@@ -200,7 +212,7 @@ if ([IO.File]::ReadAllText($candidate) -cne 'immutable-candidate') { throw 'cand
 
 @pytest.mark.parametrize("expected_kind", ["ordinary", "extended", "different", "missing"])
 def test_candidate_file_identity(tmp_path: Path, shell: str, expected_kind: str) -> None:
-    base = str(Path(sys._base_executable).resolve())
+    base = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     extended = "\\\\?\\UNC\\" + base[2:] if base.startswith("\\\\") else "\\\\?\\" + base
     candidate = tmp_path / "candidate"
     created = subprocess.run(
@@ -281,7 +293,7 @@ def test_linked_preference_is_not_read_or_written(tmp_path: Path, shell: str) ->
     try:
         (root / "base-python.json").symlink_to(target)
     except OSError as error:
-        if error.winerror == 1314:
+        if getattr(error, "winerror", None) == 1314:
             pytest.skip("Windows does not permit unprivileged symbolic links")
         raise
     result = native(tmp_path, shell, """
@@ -305,6 +317,8 @@ def test_runtime_publication_gates_preference(
     installer = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     runtime = re.search(r"(?ms)^function Install-Runtime \{.*?^\}", installer)
     assert runtime
+    constructor = re.search(r"(?ms)^function New-DispatchRuntimeVenv \{.*?^\}", installer)
+    assert constructor
     action_guard = re.search(r"(?ms)^function Assert-DispatchActions \{.*?^\}", installer)
     assert action_guard
     fixture_python = tmp_path / "fixture-python.ps1"
@@ -314,7 +328,7 @@ def test_runtime_publication_gates_preference(
         + "}\nexit 0\n",
         encoding="utf-8",
     )
-    body = action_guard.group(0) + "\n" + runtime.group(0) + f"""
+    body = action_guard.group(0) + "\n" + constructor.group(0) + "\n" + runtime.group(0) + f"""
 $env:AGENT_DISPATCH_BASE_PYTHON = $base
 $SrcVersion = '1.2.3'
 $VersionedRuntime = $true
@@ -325,7 +339,8 @@ $LocalBin = $InstallDir
 $LinkPython = '{fixture_python}'
 $VenvPython = $LinkPython
 $VenvDir = Join-Path $InstallDir 'candidate'
-$script:InstallerDependencyPolicy = 'original-policy'
+$originalPolicy = '{SCRIPTS.parents[2] / "libs/installer-engine/installer_dependency_policy.py"}'
+$script:InstallerDependencyPolicy = $originalPolicy
 $script:SourceRuntimeIdentity = $null
 $script:GlobalActivationLockTimeoutSeconds = 5
 $script:RuntimeConstructionReuse = ${'false' if outcome in {'dependencies', 'constructed'} else 'true'}
@@ -435,7 +450,7 @@ if ('{outcome}' -in @('dependencies','health','activation','base-mismatch')) {{
         throw 'failure changed previously selected runtime'
     }}
 }}
-if ($script:InstallerDependencyPolicy -cne 'original-policy') {{ throw 'policy not restored' }}
+if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'policy not restored' }}
 """
     result = native(tmp_path, shell, body)
     assert result.returncode == (1 if outcome == "activation" else 0), result.stdout + result.stderr
@@ -454,7 +469,8 @@ def test_real_signed_base_and_candidate(
     import ctypes
     from ctypes import wintypes
 
-    from .test_windows_durable_launch_lifetime import DesktopProbe
+    visibility = importlib.import_module("tests.test_windows_durable_launch_lifetime")
+    native_ctypes = importlib.import_module("ctypes")
 
     selected = os.environ.get("AGENT_DISPATCH_TEST_SIGNED_BASE")
     if not selected:
@@ -497,7 +513,7 @@ def test_real_signed_base_and_candidate(
         "Write-Output 'real-signed-base-and-candidate'\n",
         encoding="utf-8",
     )
-    desktop = DesktopProbe()
+    desktop = cast(_VisibilityProbe, visibility.DesktopProbe())
     record_property("interactive_desktop_observation", desktop.available)
     if not desktop.available:
         pytest.skip("interactive desktop required for the opt-in visibility proof")
@@ -515,7 +531,7 @@ def test_real_signed_base_and_candidate(
             ("flags", wintypes.DWORD), ("name", wintypes.WCHAR * 260),
         ]
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = native_ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
     kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     for name in ("Process32FirstW", "Process32NextW"):
@@ -525,7 +541,7 @@ def test_real_signed_base_and_candidate(
     def parents() -> dict[int, tuple[int, str]]:
         snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
         if snapshot == ctypes.c_void_p(-1).value:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise native_ctypes.WinError(native_ctypes.get_last_error())
         try:
             entry = Entry()
             entry.size = ctypes.sizeof(entry)
@@ -534,8 +550,8 @@ def test_real_signed_base_and_candidate(
             while present:
                 result[entry.pid] = (entry.parent, entry.name.lower())
                 present = kernel.Process32NextW(snapshot, ctypes.byref(entry))
-            if ctypes.get_last_error() != 18:
-                raise ctypes.WinError(ctypes.get_last_error())
+            if native_ctypes.get_last_error() != 18:
+                raise native_ctypes.WinError(native_ctypes.get_last_error())
             return result
         finally:
             kernel.CloseHandle(snapshot)
