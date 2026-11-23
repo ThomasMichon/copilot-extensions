@@ -8,7 +8,14 @@ import os
 from pathlib import Path
 import stat
 import sys
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+if TYPE_CHECKING:
+    from plugin_test_job_observation import ENVIRONMENT as JOB_OBSERVATION_ENV
+elif __package__:
+    from .plugin_test_job_observation import ENVIRONMENT as JOB_OBSERVATION_ENV
+else:
+    from plugin_test_job_observation import ENVIRONMENT as JOB_OBSERVATION_ENV
 
 
 class _PinnedProcess(Protocol):
@@ -164,6 +171,17 @@ def run_contained(
     # Keep the original owner's native operations and instrumentation seams.
     if type(native_application) is not bool:
         raise ValueError("native application testing must be explicitly selected")
+    observation = getattr(owner.os, "environ", {}).get(JOB_OBSERVATION_ENV) == "1"
+    if observation and (
+        owner.os.name != "nt" or qualification is not None
+        or owner.os.environ.get("GITHUB_ACTIONS") != "true"
+        or owner.os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+        or owner.os.environ.get(owner.CONTAINED_ENV) == "1"
+    ):
+        raise owner.ContainmentError("CI Job observation requires its disposable hosted Windows owner.")
+    if observation:
+        env = dict(env)
+        env.pop(JOB_OBSERVATION_ENV, None)
     if native_application:
         temporary = owner.os.environ.get("RUNNER_TEMP")
         if (
@@ -218,6 +236,7 @@ def run_contained(
                         **({"qualification": qualification} if qualification is not None else {}),
                         **({"native_application": True} if native_application else {}),
                         **({"native_observer": pins.observe} if pins is not None else {}),
+                        **({"job_observation": True} if observation else {}),
                     )
                 except BaseException as error:
                     controller_error = error
@@ -266,4 +285,4 @@ def run_contained(
     if qualification is not None:
         qualification.registry_unchanged = True
         qualification.require_settled(owner.time.monotonic)
-    return result
+    return 1 if observation and result == 0 else result

@@ -94,6 +94,13 @@ qualification additionally identifies fresh execution or verified prior
 execution, the producing run/attempt and the canonical packet digest.
 Job success alone is not unit-execution evidence.
 
+The source CI unit job has a ten-minute enclosing deadline for checkout,
+tooling, qualification, evidence upload and cleanup. The admitted unit packet
+retains its 300-second execution budget; the extra job envelope does not extend
+unit computation or the below-five-minute pull-request CI performance target.
+Evidence publication must finish successfully before the aggregate can pass.
+Native, per-test and promotion execution budgets are unchanged.
+
 For repeated PR inputs, `tools/ci_pr_unit_reuse.py` may reuse a successful
 packet only for the exact repository/PR, source/merge/base, workflow, manifest,
 hosted image, interpreter, installed dependency bytes and sealed child

@@ -64,9 +64,10 @@ def test_python_hook_runners_recover_from_invalid_windows_cwd() -> None:
         if event == "preToolUse":
             assert "pre-tool-hook.ps1" in command
             command += (_SCRIPTS / "pre-tool-hook.ps1").read_text("utf-8")
-        assert "Set-Location -LiteralPath $env:USERPROFILE" in command
+        assert ".Path.SetLocation(" in command
+        assert "[System.Management.Automation.WildcardPattern]::Escape($env:USERPROFILE)" in command
+        assert "[IO.Directory]::SetCurrentDirectory($ExecutionContext.SessionState.Path.CurrentLocation.Path)" in command
         assert "[IO.Path]::GetPathRoot(" in command
-        assert "[IO.Directory]::SetCurrentDirectory((Get-Location).Path)" in command
 
 
 def test_all_installers_deploy_every_py_hook() -> None:

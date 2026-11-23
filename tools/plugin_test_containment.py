@@ -21,7 +21,25 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, BinaryIO, Callable, Mapping, Sequence, TypeVar, cast
 from weakref import finalize
 
-if __package__ and not TYPE_CHECKING:
+if TYPE_CHECKING:
+    from plugin_test_environment import (
+        ALLOW_HOST_STATE_ENV as ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES as ALWAYS_SANDBOX_ENV_NAMES,
+        ALWAYS_SCRUB_NAMES as ALWAYS_SCRUB_NAMES, CONTAINED_ENV as CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES as OPTIONAL_FILE_ENV_NAMES, ROOT_ENV_NAMES as ROOT_ENV_NAMES,
+        SANDBOX_ENV as SANDBOX_ENV, isolated_environment as isolated_environment,
+        registry_environment_changes,
+    )
+    from native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
+    from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
+    from plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage as _ps_group_usage,
+    )
+    from plugin_test_registry import (
+        _WindowsEnvironmentSnapshot as _WindowsEnvironmentSnapshot,
+        read_registry_environment as _registry_snapshot,
+    )
+elif __package__:
     from .plugin_test_environment import (
         ALLOW_HOST_STATE_ENV as ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES as ALWAYS_SANDBOX_ENV_NAMES,
@@ -34,6 +52,10 @@ if __package__ and not TYPE_CHECKING:
     from .native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from .plugin_test_containment_posix import (
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage as _ps_group_usage,
+    )
+    from .plugin_test_registry import (
+        _WindowsEnvironmentSnapshot as _WindowsEnvironmentSnapshot,
+        read_registry_environment as _registry_snapshot,
     )
 else:
     from plugin_test_environment import (
@@ -48,6 +70,10 @@ else:
     from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from plugin_test_containment_posix import (
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage as _ps_group_usage,
+    )
+    from plugin_test_registry import (
+        _WindowsEnvironmentSnapshot as _WindowsEnvironmentSnapshot,
+        read_registry_environment as _registry_snapshot,
     )
 
 if TYPE_CHECKING:
@@ -116,7 +142,7 @@ class TestSandbox(NativeTemporaryDirectory):
 
     def retain(self, reason: str = "Unreaped process tree") -> None:
         if not self.retained:
-            self._finalizer.detach()
+            getattr(self, "_finalizer").detach()
             self.retained = True
             print(f"[KEEP] {reason}: sandbox retained at {self.name}", file=sys.stderr)
 
@@ -144,42 +170,8 @@ class TestSandbox(NativeTemporaryDirectory):
             return
 
 
-@dataclass(frozen=True)
-class _WindowsEnvironmentSnapshot:
-    user: dict[str, tuple[Any, int]]
-    machine: dict[str, tuple[Any, int]]
-
-
 def _read_registry_environment() -> _WindowsEnvironmentSnapshot | None:
-    if os.name != "nt":
-        return None
-    winreg: Any = __import__("winreg")
-
-    def read(hive: int, subkey: str) -> dict[str, tuple[Any, int]]:
-        values: dict[str, tuple[Any, int]] = {}
-        try:
-            key = winreg.OpenKey(hive, subkey, 0, winreg.KEY_READ)
-        except FileNotFoundError:
-            return values
-        with key:
-            index = 0
-            while True:
-                try:
-                    name, value, value_type = winreg.EnumValue(key, index)
-                except OSError as exc:
-                    if cast(Any, exc).winerror != 259:
-                        raise
-                    break
-                values[name] = (value, value_type)
-                index += 1
-        return values
-    return _WindowsEnvironmentSnapshot(
-        user=read(winreg.HKEY_CURRENT_USER, "Environment"),
-        machine=read(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-        ),
-    )
+    return _registry_snapshot(os.name)
 
 
 def _registry_environment_drift(
@@ -502,13 +494,13 @@ class _WindowsJob:
         )
         if not process:
             raise ContainmentError(
-                f"OpenProcess({pid}) failed with error {ctypes.get_last_error()}"
+                f"OpenProcess({pid}) failed with error {getattr(ctypes, 'get_last_error')()}"
             )
         try:
             if not self._kernel32.AssignProcessToJobObject(self._handle, process):
                 raise ContainmentError(
                     "AssignProcessToJobObject failed with error "
-                    f"{ctypes.get_last_error()}"
+                    f"{getattr(ctypes, 'get_last_error')()}"
                 )
         finally:
             self._kernel32.CloseHandle(process)
@@ -571,7 +563,7 @@ class _WindowsJob:
         ):
             raise ContainmentError(
                 "QueryInformationJobObject(accounting) failed with error "
-                f"{ctypes.get_last_error()}"
+                f"{getattr(ctypes, 'get_last_error')()}"
             )
         return int(accounting.ActiveProcesses)
 
@@ -589,7 +581,7 @@ class _WindowsJob:
         ):
             raise ContainmentError(
                 "QueryInformationJobObject(limits) failed with error "
-                f"{ctypes.get_last_error()}"
+                f"{getattr(ctypes, 'get_last_error')()}"
             )
         return max(0, active - 1), int(
             extended.PeakJobMemoryUsed
@@ -739,6 +731,7 @@ def _run_contained_process(
     qualification: Qualification | None = None,
     native_application: bool = False,
     native_observer: Callable[[], None] | None = None,
+    job_observation: bool = False,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
@@ -794,6 +787,7 @@ def _run_contained_process(
         if owner_read is not None:
             os.close(owner_read)
     job = None
+    observation = None
     posix_identity = None
     try:
         if qualification is not None:
@@ -807,6 +801,14 @@ def _run_contained_process(
                     if native_application else _WindowsJob(limits)
                 )
                 job.assign(proc.pid)
+                if job_observation:
+                    if TYPE_CHECKING:
+                        from plugin_test_job_observation import JobObservation
+                    elif __package__:
+                        from .plugin_test_job_observation import JobObservation
+                    else:
+                        from plugin_test_job_observation import JobObservation
+                    observation = JobObservation(job._handle, limits.max_processes)
             except BaseException:
                 try:
                     proc.terminate()
@@ -887,6 +889,8 @@ def _run_contained_process(
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124
+            if observation is not None:
+                observation.sample(min(cycle_deadline, time.monotonic() + 0.02))
             if qualification is not None or sys.platform == "darwin":
                 time.sleep(max(0.0, cycle_deadline - time.monotonic()))
             else:
@@ -896,38 +900,50 @@ def _run_contained_process(
         return 130
     finally:
         try:
-            if os.name == "nt":
-                if job is not None:
-                    if qualification is not None:
-                        job.close(qualification=qualification)
-                    else:
-                        job.close()
-            else:
-                if posix_identity is None:
-                    raise UnreapedProcessError("POSIX ownership identity was not captured")
-                _terminate_posix_group(proc.pid, posix_identity)
-        except (OSError, KeyboardInterrupt) as exc:
-            raise UnreapedProcessError("Process-tree teardown could not be verified") from exc
-        finally:
             try:
-                if owner_write is not None:
-                    os.close(owner_write)
-                if result_read is not None:
-                    os.close(result_read)
-            except OSError as exc:
-                raise UnreapedProcessError("Controller pipes could not be released") from exc
-            finally:
-                if qualification is not None:
-                    _reap_controller(proc, qualification=qualification)
+                if os.name == "nt":
+                    if job is not None:
+                        if qualification is not None:
+                            job.close(qualification=qualification)
+                        else:
+                            job.close()
                 else:
-                    _reap_controller(proc)
-        ready.unlink(missing_ok=True)
-        if qualification is not None:
-            assert proc.stdout is not None and proc.stderr is not None
-            qualification.capture.finish(
-                (cast(BinaryIO, proc.stdout), cast(BinaryIO, proc.stderr)), qualification.boundary, time.monotonic,
-            )
-            qualification.observe_receiver(time.monotonic)
+                    if posix_identity is None:
+                        raise UnreapedProcessError("POSIX ownership identity was not captured")
+                    _terminate_posix_group(proc.pid, posix_identity)
+            except (OSError, KeyboardInterrupt) as exc:
+                raise UnreapedProcessError("Process-tree teardown could not be verified") from exc
+            finally:
+                try:
+                    if owner_write is not None:
+                        os.close(owner_write)
+                    if result_read is not None:
+                        os.close(result_read)
+                except OSError as exc:
+                    raise UnreapedProcessError("Controller pipes could not be released") from exc
+                finally:
+                    if qualification is not None:
+                        _reap_controller(proc, qualification=qualification)
+                    else:
+                        _reap_controller(proc)
+            ready.unlink(missing_ok=True)
+            if qualification is not None:
+                assert proc.stdout is not None and proc.stderr is not None
+                qualification.capture.finish(
+                    (cast(BinaryIO, proc.stdout), cast(BinaryIO, proc.stderr)),
+                    qualification.boundary, time.monotonic,
+                )
+                qualification.observe_receiver(time.monotonic)
+        finally:
+            if observation is not None:
+                teardown_error = sys.exc_info()[1]
+                try:
+                    observation.finish(sys.stderr)
+                except OSError as exc:
+                    raise UnreapedProcessError(
+                        "CI Job observation handle closure could not be verified",
+                        job=getattr(teardown_error, "job", None),
+                    ) from (teardown_error if teardown_error is not None else exc)
 
 
 def run_contained(

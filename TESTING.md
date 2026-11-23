@@ -1006,6 +1006,15 @@ descendant's exit after the existing finite owner settles. The same file
 contains controlled owner-selection and unconfirmed-cleanup propagation cases.
 These are contained child-process controls, not native Copilot or fleet adoption.
 
+The Dispatch native packet also selects `tests/test_idle_outbox_contention.py`.
+Its four controls hold a real SQLite writer while polling empty wake and
+verification outboxes; they require read-only idle results without waiting for
+the writer. The test-local busy timeout is shortened only to make a regression
+fail quickly; production timeouts and the original consumer workloads remain
+unchanged. Four companion failure controls require the advisory read's original
+database exception to propagate, rather than reporting an empty outbox.
+This database integration stays outside required unit-only CI.
+
 The same native packet selects
 `agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
 `wall_cpu_tail` / incompatible-reader controls. JUnit properties named
@@ -1234,6 +1243,124 @@ start Python or perform executable discovery. Missing-resident behavior remains
 in the separate cold transport controls.
 The existing native lane explicitly selects the complete command-entry transport
 matrix too, rather than only the process-free original-guard control.
+Native write failures retain their already-parsed launch birth, QPC and CPU
+frame, caller start and elapsed time alongside the original stdout/stderr and
+phases. That context is attached only after child return; it does not add
+work inside the child or RPC budget, and a notification error still fails the
+original success assertion.
+The minimal launch/birth control also prints bounded parsed launch/phase
+context when its unchanged 10-second subprocess limit expires, then re-raises
+the same timeout. It parses at most 16 KiB of captured stderr, retains at most
+1024 phase characters, marks truncation and unavailable stderr explicitly,
+and does not print unrelated diagnostic text. Actor-free controls exercise
+partial clocks, unavailable output and oversized output after the original
+native cases; they do not retry the child or qualify the startup failure.
+Timed RPC fixture phases buffer wall/QPC clock pairs in a fixed 64-row
+capture, including nested JSON markers. They do not query process CPU or write
+stderr during the live RPC interval. The original socket/response cleanup
+precedes reporting; CPU data is not relabeled from a later sample. Legacy CPU
+phase records remain readable. Clock rows include positive `qpc` and
+`frequency` fields, with separate socket-created, connect-start and
+connect-returned boundaries. Optional detail clocks distinguish a successful
+Connect return from catch entry and completion of exception unwrapping. They
+do not identify time inside the native call separately from PowerShell's
+binding/exception machinery. The original common phases retain their order;
+native controls also require a valid success-or-catch detail sequence.
+Encoding-start and socket-start clocks immediately precede the original
+request-encoding and socket-constructor statements. They separate broad local
+pre-connect gaps without changing either statement or the 64-row capture;
+bookkeeping still perturbs the measured path and is not accepted overhead.
+Truncation and reporter errors fail the original
+success check explicitly. Outside opt-in retained diagnostics, a child killed
+before flushing loses its buffered internal phases; earlier entry/dispatch
+markers and independent owner samples remain separate evidence, not a
+reconstruction.
+Clock bookkeeping and deferred output still perturb the fixture; this is not
+an accepted overhead or cold-start bound.
+The pre-tool resident request reuses the complete event already decoded for
+native checks; raw-only transport callers retain their existing decoder.
+`test_native_pretool_reuses_decoded_event` rejects a second decode at that
+seam and requires the original registered-entry denial and wire-event equality
+for both Windows engines and legacy/cell inputs. Raw-only roundtrip, metadata
+compatibility and response-refusal controls remain in `test_post_tool_shell.py`.
+These checks prove removed duplicate work, not a cause or disposition of
+historical timing failures. The 500 ms transport clock still begins before
+endpoint validation and is neither moved nor reset.
+`test_phase_free_registered_write_control` adds eight counterparts for
+personal-state and write-name-real-policy events on both engines and
+legacy/cell fixtures, plus both legacy protected-patch input counterparts.
+It reuses the original registered-write body and every
+membership, wire, denial and fallback assertion without child phase, launch or
+CPU writers. The existing interpreter-lookup sentinel remains; this is not an
+unmodified installed environment. Source-byte checks and fingerprints run only
+after the measured child exits, with the original outer clock and 10/30/300
+limits. A final step on the existing light alias-policy worker selects these
+cases after its original packet, keeping added work out of the near-limit
+cell worker without raising job limits. A passing counterpart is not
+subtractive overhead evidence or a causal disposition of an earlier failure.
+The same step checks its actual workflow routing as a file-backed source
+contract outside the unit-only packet, like the existing native source checks.
+The natural-policy composition fixture shares its passive resident wrapper
+with four native forwarding controls. Both engines preserve bound decoded-event
+identity as well as raw-only calls, including the original kind/raw/membership
+values. The wrapper forwards production's optional decoded argument rather than
+silently restoring raw decoding inside the RPC clock. These controls run after
+the original light-worker packet; existing composition cases and limits stay
+unchanged. Parameter parity is not a diagnosis of a retained native timeout.
+Only opt-in `report-only` and `post-exit` diagnostics extend the existing buffered RPC phase
+helper to natural-policy composition. Buffered stderr flushes after RPC cleanup;
+a structured numeric summary is printed after the child returns, including on
+an original output mismatch. Normal composition keeps its uninstrumented
+transport. This still perturbs the child. The helper adds no process queries or CPU
+samples and keeps the original 64-row buffer, cleanup and 500 ms clock.
+Two native loopback controls check actual response/phase preservation on both
+engines, after the original light-worker packet. They initialize JSON for the
+helper-mechanics check and are not first-touch or latency qualification.
+Pure opt-in controls remain separate from the real-source native inputs.
+All diagnostic results remain nonacceptance, including any passing cases.
+Report-only and post-exit registered-write and natural-policy fixtures retain those same
+numeric records in one parent-owned 4 KiB mapping per existing child instead
+of a second child-local array. A fixed version/count header and per-row commit
+word publish at most 64 existing phase IDs with their original clocks and
+frequency. The parent decodes only committed rows after child exit or the
+unchanged timeout, then closes its mapping. Partial rows are not returned;
+incompatible or invalid records are explicitly unavailable. No process memory,
+arguments, environment, tool data, process-query rights or extra sampler is
+involved. Native controls kill both engines at the original 10-second limit,
+check committed-row retention and partial/invalid refusal, and verify that the
+named mapping no longer exists after owned handles close. Pure decoding and
+disabled-path controls use no native actors. Retained loopback controls also
+preserve the actual response and phase transcript on both engines. Parent
+decoding and reporting follow the original elapsed-time observation.
+Natural-policy invocations supply a post-close reporter for those same numeric
+records outside pytest capture. Existing oracle/warning capture resets therefore
+cannot discard an earlier region's decoding status or closure. Default helper
+consumers keep the original stderr report; callback failure falls back to that
+path rather than replacing the original test exception with the callback error.
+Pure controls cover successive regions, capture resets and original exception
+identity; real-engine controls exercise the reporter path on both hosts.
+Registered-entry controls also load the copied admission helper before the
+real policy RPC, requiring nonempty committed phases on both engines. The
+diagnostic admission projection uses the same shared writer, so loading it
+cannot replace that writer with the normal child-local array implementation.
+Existing secondary prior-reader and real-policy allow/deny launches open their
+own sequential region when retention is enabled; no child reuses a closed
+primary region. Both-engine real-policy controls verify all three region
+lifetimes and the original allow/deny results. Fallback elapsed time is saved
+before parent decoding/reporting, just like the primary observation.
+Normal fixture output and buffers,
+production code, clocks, assertions, order and termination remain unchanged.
+The existing Windows lane runs slow-marker, overflow and LF/CRLF source
+contracts only after the original packets, with optional observers disabled.
+Its late RPC controls run on the light alias-policy worker in normal and full
+diagnostic profiles; full diagnostics place timeout-cleanup controls there too.
+Sender-only diagnostics retain those controls on the cell worker because that
+profile does not start the write matrix. The existing routing guard verifies
+one effective placement per profile, identical control commands/environment
+and unchanged worker and 10/30/300-second runner and 10-minute job limits.
+Those real native controls stay outside required unit-only CI. Pure numeric
+clock decoding has nineteen positively admitted cases; the real PowerShell source
+is a native-contract input, not an exemption from unit-source admission.
 Registered post-tool work-count controls require one original membership
 validation per event on both engines in legacy and selected-cell contexts.
 Direct prepared-read helper calls retain their own admission check.
@@ -1251,6 +1378,218 @@ Large valid warnings and oversized non-BMP or HTML-sensitive reasons require
 explicit truncation without losing a confirmed decision. Both native engines
 consume the bounded large response through their original 500 ms transport,
 including Windows PowerShell 5's HTML-sensitive client reserialization.
+
+The manual `prepared-membership-native.yml` `runner_owner_diagnostics` input
+adds source-only observation at each existing Windows containment Job owner.
+It does not load a pytest observer or wrap a test's process, receiver or policy
+calls. The existing resource-poll loop checks its remaining cycle and a 20 ms
+observation cutoff between member reads while querying only
+that Job's membership and birth-pinned member handles. It records numeric
+creation, CPU and exit counters, with monotonic/UTC origins for correlation.
+Member counters precede the liveness query. A confirmed exit refreshes the
+final time/counters from that same pinned birth before reporting or release;
+unavailable final identity/time stays unavailable rather than becoming a live
+sample or an unchanged-CPU interval through exit.
+Each observation pass samples retained process counters first, then discovers
+members and samples waits. An unfinished pass resumes at its next operation on
+the following resource poll, rather than restarting on a slow first member.
+The same 20 ms cutoff is checked between operations; a slow or unavailable
+counter does not indefinitely starve later members, discovery or wait work.
+The selected observer explicitly requests
+`PROCESS_QUERY_INFORMATION | SYNCHRONIZE`; thread-only snapshot capture
+returned access denied with query-limited handles in the fresh fixture.
+There is no memory-read/all-access request, privilege change or access fallback.
+After counters, only live members retained for at least eight monotonic seconds
+are eligible for snapshot/WCT work. This conservative first-seen age does not
+infer age from a wall clock or a claimed creation time; process counters remain
+eligible immediately. Alternate query starts prefer an eligible member not yet
+selected for a wait query; the remaining starts use the existing member rotation.
+The first-selection state belongs to the birth-pinned member, not a reused PID.
+Pending requests are polled before any further selection, without adding query
+slots or guaranteeing capture before exit. Each member's thread cursor advances
+through at most 16 process-scoped snapshot entries. Only `PSS_CAPTURE_THREADS` is used:
+no memory, thread context, handle names or VA clone.
+
+At most one asynchronous wait-chain request and pinned thread are retained.
+The thread's owner, birth and live state are verified before querying WCT with
+flags zero, without foreign-process traversal. Polls never sleep or wait for
+an event. Returned foreign-thread nodes are omitted; at most 16 nodes contribute
+numeric type/status histograms, never names, addresses or thread IDs.
+Callbacks and their buffers remain alive until native session closure settles.
+Pending requests, cancellation, numeric API errors and thread truncation are
+explicit; access denial is unavailable evidence, not a reason to enable debug
+privileges. Native error stages are: 1 process state, 2 snapshot, 3 walk marker,
+4 thread walk, 5 thread open, 6 thread times, 7 thread owner/birth, 8 thread
+state, 9 asynchronous session and 10 wait-chain query.
+
+No host process scan, command line, payload, environment value, exception text,
+stack or memory capture is performed. Rows are buffered until original
+teardown. The unchanged 4096-total-row budget is split between a most-recent
+1024-row process/wait timeline, at most 2048 process summaries and at most
+1024 retained wait-summary rows, all keyed by verified PID and birth.
+A process summary retains the first observed time/CPU and
+latest time/CPU/exit state plus sample count after the member handle closes;
+PID reuse never combines identities. Earlier summaries are not evicted to
+admit later births. Summary-cap exhaustion reports dropped sample count, not
+an inferred count of missing processes. This trades a shorter detailed timeline
+for retention of early sampled identities; it neither recovers evicted historical
+rows nor proves that a short-lived child was sampled. `[CI-JOB-PROCESS-SUMMARY]`
+records contain only the same bounded numeric identity/counter data. Five fixed
+numeric-or-null fields also retain the current unchanged-counter start and the
+longest observed unchanged CPU-counter interval with its kernel/user counters.
+An interval requires consecutive verified-live samples with equal counters;
+counter changes reset the current interval. First sighting and delayed exit
+reporting never extend it. Counter quantization can hide work, and gaps between
+samples do not identify a blocked thread, its wait cause, continuous zero CPU
+or a scheduling fault. These fields use existing samples only: no extra native
+call, retained handle or row is added.
+`[CI-JOB-WAIT-SUMMARY]` records preserve the first and latest already-collected
+wait row for at most 512 identities after timeline churn. A single sample emits
+one row marked both first and latest; later samples retain their count and two
+rows. Unavailable, budget-exhausted and cancelled observations remain explicit,
+not inferred successful waits. Earlier identities are never evicted to admit
+later ones; capacity loss reports dropped sample count. This further shortens
+the detailed timeline to preserve bounded early wait evidence without adding
+queries, rights, handles or time. First/latest samples cannot reconstruct
+intervening waits or establish a failure's cause.
+The version-5 observation summary includes all lane capacities, retained
+counts, timeline discard and both summary-loss accounts, and the unchanged
+wait-selection minimum age in milliseconds.
+Wait `sample_at_ms` and completion `at_ms` use the process records' origin.
+Only the original concurrent process
+limit plus its controller are retained. Exhausted budgets, incomplete samples,
+truncation and unclosed observation handles remain explicit. Individual Win32
+calls are not preempted; this mode can perturb execution and is not an overhead
+bound. Short-lived or breakaway children
+can be absent; this is not a complete process history or a scheduling-cause
+diagnosis. The original owner still performs all termination and settlement.
+Only the selected disposable hosted Windows owner admits this mode; the switch
+is removed from child environments. Successful instrumented packets return
+diagnostic failure, while existing nonzero exit categories are preserved.
+The original packets, ordering, assertions and child/test/runner/job deadlines
+remain unchanged, and later original packets still execute after a diagnostic
+failure. Default push runs remain uninstrumented; a diagnostic result never
+qualifies them.
+
+The explicit process-only preparation includes the observer's pure module,
+selected-only process/wait adapters and Windows registry reader in its source closure. The pure
+`test_required_tool_closure_contains_actual_owner_startup_imports` control
+checks the transitive declared imports. A focused non-unit check,
+`python -m pytest tools/test_plugin_test_job_import.py`, copies the actual
+declared sources and starts a fresh `-I/-S/-B` interpreter to import containment
+without a checkout or site-package fallback. It does not activate observation,
+load a DLL, run a qualification receiver, or claim native timing acceptance.
+The separate Windows-only `tools/test_plugin_test_job_waits_native.py` control
+uses the original owner to create a fresh disposable Job and native sleeping
+child, then checks late real thread capture and settled handles. Its 8.75-second
+fixture and unchanged ten-second owner bound are feasibility evidence, not a
+reproduction or a qualification of any original native failure.
+
+The manual `prepared-membership-native.yml` `full_native_diagnostics` input
+keeps the original fifteen-job topology, selectors and test identities.
+Normal and full-diagnostic lanes partition the original 161-case cell packet
+by complete file groups: `test_managed_session.py` and
+`test_pre_tool_bounded_reads.py` stay on the cell worker, while the selected
+`test_post_tool_shell.py` group runs on the existing `write-name-policy` worker
+after its original packet and before later controls. Each group retains its
+original case order, setup, assertions, iterations and deadlines. The moved
+group inherits the same full-observation job environment and runs after an
+intentional diagnostic failure unless cancelled. No worker or deadline is
+added; the sender-only diagnostic packet retains its original three-file order.
+The workflow-placement regression guards this split, inherited environment
+and unchanged 30-second test, 300-second runner and ten-minute job bounds.
+An explicit `PYTEST_PLUGINS` entry loads the source-only
+diagnostic bootstrap on Windows; runtime packages and
+`conftest.py` are unchanged. The bootstrap removes its own environment entry
+before test children start, retaining unrelated entries.
+The existing Linux producer runs unchanged.
+The `late` and `post-exit` modes use `_native_portfolio_pytest.py` to
+observe real ten-second PowerShell calls throughout the original
+selected tests, including legacy families without inline process markers.
+It leaves subprocess doubles and other commands untouched and rechecks the
+native seam at each call. It reuses the same
+creation-owned observer and receiver hook, buffers native metadata until the
+original call report and includes the original test outcome. An intentional
+timeout control can therefore pass while reporting a timed-out child.
+The original no-process guard control is left unwrapped. An explicit `Popen`
+patch in another observed test still reaches the real subprocess module, so
+observation cannot isolate a process prohibition from the code it guards.
+Full mode's default `late` setting waits eight seconds before its first native query, leaving the
+normal child's startup and execution unsampled. Completion cancels that wait;
+an empty sample list is therefore expected, not evidence that the observer
+failed to start. Each row declares its mode and live-sampling delay. A child still
+running after arming receives the same bounded metadata queries within its
+original ten-second deadline. Focused observation remains immediate.
+This reduces one source of observation perturbation; it does not prove that
+the observer caused a prior nonreproduction or that late sampling is inert.
+The full profile's `native_observation_mode=post-exit` alternative starts no
+collector thread and makes no live-child metadata queries. Only after stdlib's
+original timeout kill/drain/context cleanup does it start one bounded query
+against the retained created-child handle. It can recover total CPU counters
+and exact PID/birth/exit FILETIME values from an exited process, not its earlier
+live wait state. Identity must match the original handle's already-read birth;
+missing, inconsistent or non-exited metadata remains unavailable, with no PID
+lookup fallback. Each post-exit row also exports `observer_started_monotonic`,
+the existing parent timestamp taken after `Popen` returns and before original
+communication starts. It is not a process-creation timestamp or a new clock
+sample. Correlate it only with the same parent's monotonic clock, not the
+child's QPC or wall clock. Returned children
+remain unsampled. Cleanup uncertainty is explicit, and the original kill is
+never delayed for this query. Each row declares its sampling mode; the default
+remains `late`, and this setting does not activate diagnostics on its own.
+Failed post-exit calls also reuse the bounded numeric failure-context exporter
+described below, through the existing report hook rather than another registered
+pytest plugin. Passing calls add no failure context. The same parent-owned
+4 KiB/64-phase retention remains active in this mode, without moving or adding
+child clock points.
+In these two modes, original policy-composition cases also observe their fixture-owned resident
+dispatcher and guard calls. Fixed rows retain entry/exit deadline remainder,
+elapsed time, decision category and reason length, never payloads, reasons,
+paths or exception text. The original functions receive the original arguments,
+results and exceptions are forwarded unchanged, and the 500 ms transport is
+not extended. At most 64 dispatch rows and 16 guard timings per dispatch are
+retained, with explicit truncation. These probes are diagnostic overhead,
+not latency acceptance; a hard process abort can prevent buffered reports.
+At most 64 child rows are retained per test, with explicit truncation or
+report-error markers; no original outcome is changed by reporting.
+The full profile changes a successful pytest exit into diagnostic failure,
+but preserves an existing nonzero exit category. Remaining original packets
+continue after that deliberate exit, while default failure/skip behavior
+remains unchanged. The forced collector-cleanup control runs after all
+original membership packets with the diagnostic plugin disabled.
+Full observation takes precedence over the focused `sender_diagnostics`
+input. It is not native acceptance or a latency distribution, and it does not
+clear earlier failures or authorize a runtime change.
+
+The full profile's `native_observation_mode=report-only` instead loads the
+independent source-only `_native_failure_report_pytest.py`. It imports no
+original fixtures and installs no subprocess, receiver, dispatcher or call
+wrapper. After a failed call report, it reads fixed numeric timing/launch
+locals and list lengths from that owned synthetic test's traceback only.
+It visits at most 64 frames and retains at most eight matching contexts,
+with explicit unavailable, truncation or report-error markers. For an original
+`TimeoutExpired` with a matching owned frame, it also scans at most 16 KiB of
+retained stderr after bounded UTF-8 conversion. It exports only availability,
+truncation and presence flags for the existing natural-shell build and policy
+start/complete markers; a cap-split final line cannot become a marker.
+For an unchained exact `AssertionError`, the same scanner can read an exact
+`CompletedProcess` retained as `result` in a matching owned `invoke` helper.
+Its five booleans appear as that context's optional `completed_stderr` field;
+the existing `timeout_stderr` field is unchanged. Outer/non-helper results,
+arbitrary holders and exceptions with a cause or context are not admitted,
+so a stale completed result cannot stand in for a timeout's captured output.
+It never exports captured text or reads stdout, list contents, command arguments,
+environment values or exception text, and makes no native process query.
+Marker absence describes retained data only, not proof a phase never executed.
+Unavailable or truncated data remains explicit. Metadata reflects report time, not
+proof that a request completed within budget. Successful calls produce no
+context; an abort can prevent reporting. Its end marker retains the original
+exit category and declares zero intercepted calls; a successful session still
+ends in diagnostic failure. Default and late behavior is unchanged.
+Focused controls live in `tests/test_native_failure_report.py` and the actor-free
+`tools/promotion_unit_tests/test_native_rpc_fixture.py`; the opt-in
+`AGENT_WORKTREES_REPORT_ONLY_CONTROL=1` case deliberately fails through the
+real pytest report path and is not acceptance.
 
 The focused Worktrees credential-isolation regression is
 `tests/test_git_credential_isolation.py`, selected through the canonical
@@ -1281,7 +1620,59 @@ original scripts without these probes. Probe overhead is included in diagnostic
 timings; passing observations are nonreproduction, not an explanation or fix
 for an earlier timeout. Production scripts, retries and deadlines are unchanged.
 
-The same file's `-k registered_policy_timeout_observation` selection invokes
+The manual `prepared-membership-native.yml` `sender_diagnostics` input runs
+the exact original prepared-membership packet on a fresh Windows worker.
+An initial diagnostic-only test registers a call hook, then deliberately fails;
+the remaining modules, selection and test identities retain the default packet's
+order. Its setup-only module does not register the isolated adapter's fixture
+plugin or import the original packet early. Only the original registered read
+cases receive the receiver observer.
+The same opt-in setup observes only the original read, `patch-input` and
+`structured` shell children through their test module's local subprocess
+namespace. It keeps
+stdlib `run`'s timeout, kill, drain and exception handling, sampling only the
+creation-owned Windows handle. At most 24 samples retain process CPU counters,
+up to 16 snapshot-owned threads and fixed wait-chain kind/status numbers.
+Wait queries are asynchronous with one 25 ms observation window per sample;
+they never follow another process. Names, addresses, IDs and raw output are
+not retained. A bounded collector join reports unconfirmed cleanup explicitly
+instead of holding a failing child or masking its outcome. Communication
+completion only signals the collector to stop; joining and reporting happen
+after stdlib has killed/drained a timed-out child and exited its process context.
+The native blocked-collector control requires actual child exit before joining.
+The opt-in workflow runs that focused control after the original membership
+packet, so the control cannot warm or otherwise precede that packet.
+The opt-in workflow also runs the exact original patch-positive and structured
+packets on separate fresh Windows workers, with the same deliberately failing
+setup.
+Default acceptance selections and all original deadlines/assertions remain
+unchanged. Sampling can perturb timing; a passing observed original remains
+nonreproduction, not an explanation or acceptance.
+This selection leaves both the complete sender and PowerShell harness unchanged.
+It delegates to the original handler and reader,
+preserving returned byte objects, raised exceptions and the original reader for
+finish/close. After handling, it emits only connection/dispatch counts and fixed
+framing, JSON, version, authentication and kind categories plus byte lengths.
+Python finalization reports sidecar existence even on an original assertion failure.
+No frame, credential, endpoint, payload or error message is emitted.
+The separate post-entry selection leaves the complete
+sender file byte-identical and reports at most 32 caught base-exception types and
+HResult numbers after the hook returns; no error message, endpoint, token or
+payload is emitted. The separate stage selection observes fixed timing,
+connection and exception-type fields only in fixture-owned sender finalization.
+A focused control proves that its timed operations and all source outside the
+sender remain byte-identical.
+The original receiver assertion, child deadline and sender budget remain.
+Even a completed observation deliberately fails as diagnostic evidence, never
+as native acceptance. Local packet mechanics can select
+`tests/test_hook_packet_receiver_diagnostics.py`
+first, followed by `tests/test_post_tool_shell.py`, with
+`-k "enable_original_packet_receiver_observer or (registered_prepared_cell_post_tool_uses_selected_original_owners and read and not shell-read)"`.
+The isolated adapter remains available in Worktrees
+`tests/test_post_tool_sender_diagnostics.py -k registered_prepared_receiver_observation`
+with `AGENT_WORKTREES_SENDER_DIAGNOSTIC=1` and the existing explicit-tier runner.
+
+The membership-tail file's `-k registered_policy_timeout_observation` selection invokes
 the unchanged `cross-modes` cell composition on both engines. Only that test
 module's subprocess namespace is adapted. If its original ten-second entry
 times out, the adapter reports fixed shell-build/policy-start/policy-complete
@@ -2091,6 +2482,15 @@ without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
 production decoder and verifies structured-value and malformed-input parity.
 Child/item/group limits remain 10/30/300 seconds. These finite synthetic
 measurements are not installed, composed-hook or productive-throughput proof.
+
+`tests/test_pre_tool_bounded_reads.py` adds actual opened-file size, growth,
+short-read, atomic-replacement and decoding controls on both Windows engines.
+Its `registered_pretool_reader_compatibility` adapter reuses every original
+entry case with the contained runner's dependency-ready interpreter; it does
+not select an ambient Python or change the original fixture's assertions.
+The existing prepared-membership job selects only its focused `pretool_bounded`
+reader controls alongside the original registered portfolio. Local validation
+can select the complete adapter explicitly under the same 10/30/300 limits.
 
 For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 `registered_file_local_write_reuses_original_guard_facts` from
@@ -14838,6 +15238,12 @@ the 15-minute per-plugin ceiling remain safety limits for unusually slow or
 explicit runs. A suite that cannot fit the required pull-request CI target must
 provide a contract-focused smoke lane and move its exhaustive cross-products to
 a scheduled or manually dispatched workflow.
+
+The source CI unit job's ten-minute outer envelope includes checkout, tooling,
+the unchanged 300-second admitted unit packet, evidence publication and cleanup.
+It is a safety bound, not an accepted ten-minute execution time or a relaxation
+of the below-five-minute CI target. A canceled or failed evidence upload still
+fails the required aggregate even when the tests have passed.
 
 - Gate specialized suites by changed paths so unrelated pull requests do not
   pay their cost.

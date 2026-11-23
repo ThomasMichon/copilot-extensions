@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from typing import TYPE_CHECKING
 
-from .queue_common import VerificationRequest
+from .queue_common import Task, VerificationRequest
 from .queue_records import Status, TaskError
 
 
 class QueueVerificationRequestsMixin:
     """Submitted-verification outbox helpers for :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
+        def _now(self, now: float | None) -> float: ...
+        def _notify_verification(self) -> None: ...
 
     def request_submitted_verification(
         self,
@@ -146,6 +153,12 @@ class QueueVerificationRequestsMixin:
     ) -> int:
         ts = self._now(now)
         with self._connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM verification_requests WHERE status = 'delivering'"
+                " AND COALESCE(delivery_expires_at, updated_at + ?) <= ? LIMIT 1",
+                (max(0.01, lease_seconds), ts),
+            ).fetchone() is None:
+                return 0
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT * FROM verification_requests WHERE status = 'delivering'"
@@ -171,6 +184,12 @@ class QueueVerificationRequestsMixin:
     ) -> VerificationRequest | None:
         ts = self._now(now)
         with self._connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM verification_requests"
+                " WHERE status = 'pending' AND not_before <= ? LIMIT 1",
+                (ts,),
+            ).fetchone() is None:
+                return None
             conn.execute("BEGIN IMMEDIATE")
             while True:
                 row = conn.execute(
@@ -272,7 +291,9 @@ class QueueVerificationRequestsMixin:
         return VerificationRequest._from_row(result)
 
     @staticmethod
-    def _verification_request_is_current(task, request: VerificationRequest) -> bool:
+    def _verification_request_is_current(
+        task: Task | None, request: VerificationRequest,
+    ) -> bool:
         return bool(
             task is not None
             and task.status == Status.SUBMITTED
@@ -298,7 +319,8 @@ class QueueVerificationRequestsMixin:
             ") VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
             (request_id, task_id, generation, trigger, due_at, ts, ts),
         )
-        return conn.execute(
+        row: sqlite3.Row = conn.execute(
             "SELECT * FROM verification_requests WHERE id = ?",
             (request_id,),
         ).fetchone()
+        return row
