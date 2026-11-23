@@ -3,6 +3,15 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_preflight_preparation_units.py",
+   [
+    "test_unsafe_child_cleanup_refuses_before_preparation_or_collection[False]",
+    "test_unsafe_child_cleanup_refuses_before_preparation_or_collection[True]",
+    "test_source_preflight_counts_against_plugin_budget_before_preparation",
+    "test_run_plugin_prepare_only_never_invokes_pytest"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_preparation_argv_units.py",
    [
     "test_codespaces_functional_profile_preparation_strips_test_only_flags[profile_arguments0]",
@@ -11821,6 +11830,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_preflight_preparation_units.py": "1b64e53d34c3aeaef0a872b298d78590892c6b12385ef96904649fa8cf9ed5e4",
   "tools/promotion_unit_tests/test_original_runner_preparation_argv_units.py": "da4dcb47d13feb45728ce296a57da822a9b43a0b05c0a58e97522ead8beab2b4",
   "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py": "5b9f6625b9651f0b8d31707fa025298ac91ce81db0ff0fc399035759b81bf410",
   "tools/plugin_test_retirement.py": "46e30c26daf9b0932d9d748c6c125ec2d2ab0ea9a5f6b77c21321c87b6ab1248",
