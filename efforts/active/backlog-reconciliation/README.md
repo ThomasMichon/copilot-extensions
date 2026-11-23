@@ -4068,10 +4068,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [current owner-acceptance study](journal/2026/11.22-current-owner-acceptance-boundaries.md)
   preserves all changed #12900/#12905/#13775 discussions, distinct configured
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
-  and ingress interfaces. Its later owner updates distinguish reported
-  provider delivery from conditional explicit-unlock caller and implicit-read
-  adoption, and reported bootstrap delivery from POSIX installer-instance
-  reconciliation, complete producer census and installed adoption. The three
+  and ingress interfaces. Its current follow-through distinguishes reported
+  explicit-unlock/status caller and implicit-read provider delivery from
+  ordinary read-caller migration, preserving receipts, pinned context and
+  no-replay semantics. Reported cleanup, helper, UV, constructor and bootstrap
+  reader increments retain Vault activation/setup, custom constructors and
+  remaining producers, the automatic-cell failure and installed adoption. The three
   owners remain OPEN; #6237's complete
   comment metadata does not clear its independent source/copy restriction.
   The [manual dehydration completion study](journal/2026/11.22-manual-dehydration-source-completion.md)
