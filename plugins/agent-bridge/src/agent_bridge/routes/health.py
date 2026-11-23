@@ -95,6 +95,7 @@ async def health(request: Request) -> dict[str, Any]:
             "retained_keyed_native_admission": 1,
             "target_inventory": 1,
             "bridge_inventory": 2,
+            "result_native_identity": 1,
             "worktree_metadata_hydration": 1,
             LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
             LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,

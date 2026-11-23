@@ -325,6 +325,7 @@ class ResultIdentity(BaseModel):
     requested_ref: str
     snapshot_session_id: str
     current_session_id: str
+    native_session_id: str | None = None
     predecessor_id: str | None = None
     successor_id: str | None = None
 

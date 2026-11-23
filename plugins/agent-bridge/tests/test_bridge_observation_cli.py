@@ -19,6 +19,7 @@ def snapshot(session_id: str, *, idle: bool = True) -> dict[str, Any]:
         "identity": {
             "snapshot_session_id": session_id,
             "current_session_id": session_id,
+            "native_session_id": "native-a",
             "successor_id": None,
         },
         "state": {"session_status": "idle" if idle else "running", "at_rest": idle},
@@ -39,12 +40,14 @@ def client_for(
         calls.append(("resolve", (handle, scope)))
         return {
             "bridge": {
+                "session_id": "native-a",
                 "managed_session_id": None if represented else session_id,
                 "registered_session_id": session_id if represented else None,
             },
         }
 
     def read(handle: str, **bounds: Any) -> dict[str, Any]:
+        assert bounds.pop("require_native_identity") is True
         calls.append(("snapshot", (handle, bounds)))
         return copy.deepcopy(values.pop(0) if len(values) > 1 else values[0])
 
@@ -59,7 +62,7 @@ def client_for(
         return client
 
     monkeypatch.setattr(cli, "_get_client", get_client)
-    monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
+    monkeypatch.setattr(cli, "_sender_repo", lambda: cli._PROJECT_OVERRIDE or "demo")
     return client, calls
 
 
@@ -174,7 +177,7 @@ def test_bridge_read_keeps_retained_managed_history_without_resuming(
 ) -> None:
     client, calls = client_for(monkeypatch)
     client.resolve_bridge = lambda *_args, **_kwargs: {
-        "bridge": {"retained_managed_session_id": "managed-a"},
+        "bridge": {"session_id": "native-a", "retained_managed_session_id": "managed-a"},
     }
     cli.main(["--json", "read", "workspace-a", "--bridge"])
     assert calls == [("snapshot", ("managed-a", {"max_items": None, "max_text_chars": None}))]
@@ -190,6 +193,51 @@ def test_bridge_read_rejects_retargeted_snapshot(
         cli.main(["read", "workspace-a", "--bridge"])
     assert exc.value.code == 1
     assert "bridge_observation_identity_changed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command", ["read", "wait"])
+def test_bridge_observation_rejects_native_recreation_under_same_managed_id(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    replacement = snapshot("managed-a")
+    replacement["identity"]["native_session_id"] = "native-b"
+    replacement["latest_result"] = {"value": "replacement content must not be printed"}
+    payloads = (
+        [snapshot("managed-a", idle=False), replacement] if command == "wait" else [replacement]
+    )
+    _client, calls = client_for(monkeypatch, payloads=payloads)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", command, "workspace-a", "--bridge"])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "bridge_observation_identity_changed" in captured.err
+    assert len(calls) == (3 if command == "wait" else 2)
+
+
+@pytest.mark.parametrize("command", ["read", "wait"])
+@pytest.mark.parametrize("bridge", [False, True])
+def test_explicit_project_is_consumed_only_by_bridge_observations(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    bridge: bool,
+) -> None:
+    _client, calls = client_for(monkeypatch)
+    argv = ["--project", "other-project", "--json", command, "workspace-a"]
+    if bridge:
+        cli.main([*argv, "--bridge"])
+        assert calls[0][1][1]["project"] == "other-project"
+        assert json.loads(capsys.readouterr().out)
+    else:
+        with pytest.raises(SystemExit) as exc:
+            cli.main(argv)
+        assert exc.value.code == 2
+        assert not calls
+        assert "not meaningful" in capsys.readouterr().err
 
 
 def test_bridge_wait_reports_successor_without_following_it(

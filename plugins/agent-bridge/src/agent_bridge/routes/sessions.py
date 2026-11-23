@@ -36,6 +36,7 @@ from ..result_snapshot import (
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
+    ResultIdentityChangedError,
     build_owned_result_snapshot,
     expand_owned_result_ref,
 )
@@ -935,6 +936,8 @@ def get_result_snapshot(
             max_items=max_items,
             max_text_chars=max_text_chars,
         )
+    except ResultIdentityChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ResultTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

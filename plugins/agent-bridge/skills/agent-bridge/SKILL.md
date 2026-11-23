@@ -276,8 +276,10 @@ managed alias is absent. See the
 Use `read ID --bridge` for one bounded, cursor-neutral result snapshot of an
 exact local conversation, or `wait ID --bridge --json` to observe that same
 conversation until idle, terminal state, identity change or command timeout.
-These explicit-adoption forms require `bridge_inventory: 2`, share `show`'s
-project scope and refuse missing/ambiguous evidence without legacy fallback.
+These explicit-adoption forms require `bridge_inventory: 2` and
+`result_native_identity: 1`, share `show`'s project scope and refuse
+missing/ambiguous evidence without legacy fallback. They pin the native
+conversation as well as its managed or registration ID.
 They do not support `--host`, follow a successor, hydrate metadata or resume a
 conversation. A wait result is observation, not message-consumption evidence.
 Keep existing forms for event ranges, historical-session reads, attention waits

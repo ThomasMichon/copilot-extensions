@@ -297,6 +297,30 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Native identity and explicit project observations qualified
+
+- Managed control IDs can survive native conversation recreation. Result
+  identity now adds the native ID and advertises `result_native_identity: 1`.
+  Explicit read/wait pins both identities and refuses replacement content or
+  idle state. A native change during projection also returns an explicit 409.
+- Existing result APIs and legacy client defaults remain available. The new
+  mode checks the executing provider's capability on each result attempt;
+  unsupported providers refuse before the result read.
+- Explicit `--project` reaches read/wait only with `--bridge`. Legacy forms
+  retain their previous rejection rather than silently ignoring the scope.
+- The final focused CLI/client/API packet passes 77 cases. Eight separate
+  legacy result cases pass. Controls cover both hosting modes, provider
+  upgrade/rollback, native recreation before and during projection, wait-poll
+  identity changes, and actual project parsing without native execution.
+- Whole-file strict typing passes for all 12 changed Python files on the
+  Python 3.10 Linux and Windows targets. Focused lint, the 13-plugin install
+  contract and documentation consistency checks pass.
+- An earlier combined packet exceeded its 120-second limit and is not counted
+  as passing. Smaller behavior packets retain the same limits. Full-machine
+  provisioning is unaffected; private fresh-state fixtures cover first reads.
+  A live external lane remains unavailable under the existing execution and
+  rollout limits. Review, exact-source CI, merge and release remain open.
+
 ### 2026-11-23 - Explicit local read/wait observations qualified
 
 - Added opt-in `read --bridge` and `wait --bridge` over the common exact

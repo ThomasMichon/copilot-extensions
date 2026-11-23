@@ -128,8 +128,9 @@ described below. No previous form is deprecated or removed.
 
 `read ID --bridge` and `wait ID --bridge` use the same exact selector as `show`,
 with the same project/CWD scope, `--all-projects`, `--machine` and `--namespace`.
-They require `bridge_inventory: 2` from the executing daemon and read its local
-inventory only. They do not consume cached fleet routes or support `--host`.
+They require `bridge_inventory: 2` and `result_native_identity: 1` from the
+executing daemon and read its local inventory only. They do not consume cached
+fleet routes or support `--host`.
 A Bridge-managed ACP conversation whose worker is remote can still be observed
 through its local owning daemon. Direct observation of another Bridge host
 remains a separate carrier migration.
@@ -166,9 +167,14 @@ mode rather than silently weaken the existing owned attention contract.
 
 Both operations connect without ensuring a daemon, use the existing result
 owners, and change no delivery cursor, workspace, registration, assignment or
-conversation. A result for a different snapshot ID refuses with
+conversation. Result identity adds the optional `native_session_id` field;
+legacy callers can ignore it. The new mode pins both the selected result-owner
+ID and native ID. A result for a different snapshot or native ID refuses with
 `bridge_observation_identity_changed` (409). Errors do not cause profile
 fallback, metadata hydration, replacement or replay.
+The same refusal applies if native recreation changes identity during snapshot
+construction. An older provider without `result_native_identity: 1` refuses the
+new mode before reading results; legacy result reads remain available.
 
 The [contained source runner](../../../TESTING.md) can select
 `tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and

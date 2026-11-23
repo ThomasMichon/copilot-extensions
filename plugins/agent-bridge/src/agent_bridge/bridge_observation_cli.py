@@ -13,6 +13,7 @@ from typing import Any
 class _Target:
     session_id: str
     represented: bool
+    native_session_id: str
 
 
 def selected(args: argparse.Namespace) -> bool:
@@ -30,12 +31,15 @@ def _resolve(client: Any, args: argparse.Namespace) -> _Target:
     from .client import BridgeClientError
 
     row = client.resolve_bridge(args.session_id, local_only=True, **_scope(args))["bridge"]
+    native = row.get("session_id")
+    if not isinstance(native, str) or not native:
+        raise BridgeClientError(409, "bridge_observation_unavailable")
     managed = row.get("managed_session_id")
     represented = row.get("registered_session_id")
     retained = row.get("retained_managed_session_id")
     for session_id, is_represented in ((managed, False), (represented, True), (retained, False)):
         if isinstance(session_id, str) and session_id:
-            return _Target(session_id, is_represented)
+            return _Target(session_id, is_represented, native)
     raise BridgeClientError(409, "bridge_observation_unavailable")
 
 
@@ -43,8 +47,16 @@ def _snapshot(client: Any, target: _Target, **bounds: Any) -> dict[str, Any]:
     from .client import BridgeClientError
 
     method = client.get_live_result_snapshot if target.represented else client.get_result_snapshot
-    payload: dict[str, Any] = method(target.session_id, **bounds)
-    if (payload.get("identity") or {}).get("snapshot_session_id") != target.session_id:
+    payload: dict[str, Any] = method(
+        target.session_id,
+        require_native_identity=True,
+        **bounds,
+    )
+    identity = payload.get("identity") or {}
+    if (
+        identity.get("snapshot_session_id") != target.session_id
+        or identity.get("native_session_id") != target.native_session_id
+    ):
         raise BridgeClientError(409, "bridge_observation_identity_changed")
     return payload
 
@@ -120,7 +132,7 @@ def register(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--bridge",
         action="store_true",
-        help="Use exact local bridge identity and cursor-neutral bounded observations (requires bridge_inventory: 2)",
+        help="Use exact local bridge identity and cursor-neutral bounded observations (requires bridge_inventory: 2 and result_native_identity: 1)",
     )
     parser.add_argument("--all-projects", action="store_true")
     parser.add_argument("--machine", help="Filter the conversation's machine (with --bridge)")
