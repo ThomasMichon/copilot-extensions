@@ -2,20 +2,56 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .models import DelegatedResultSnapshot, ResultField, ResultFidelity, ResultIncrement
 from .result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
     build_owned_result_snapshot as legacy_snapshot,
+    build_represented_result_snapshot as legacy_represented_snapshot,
 )
+from .result_tokens import ResultHistoryChangedError
 from .runtime_custody import RuntimeCustodyError
 from .turn_custody import original_handoff
 
 if TYPE_CHECKING:
     from .db import Database
+    from .events import EventLog
     from .session_manager import Session
+
+
+def build_represented_result_snapshot(
+    *,
+    registration: dict[str, Any],
+    event_log: EventLog,
+    requested_ref: str,
+    position: str | None,
+    max_items: int = DEFAULT_MAX_ITEMS,
+    max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
+    retired_ids: frozenset[str] = frozenset(),
+    inbox: list[dict[str, Any]] | None = None,
+    native_only: bool = False,
+) -> DelegatedResultSnapshot:
+    """Keep combined legacy history; refuse it when native origin is required."""
+    if native_only and (
+        registration["session_id"] != requested_ref
+        or retired_ids
+        or event_log._session_id != requested_ref
+    ):
+        raise ResultHistoryChangedError(
+            "represented history has no native content-origin contract after aliasing",
+        )
+    return legacy_represented_snapshot(
+        registration=registration,
+        event_log=event_log,
+        requested_ref=requested_ref,
+        position=position,
+        max_items=max_items,
+        max_text_chars=max_text_chars,
+        retired_ids=retired_ids,
+        inbox=inbox,
+    )
 
 
 def build_owned_result_snapshot(

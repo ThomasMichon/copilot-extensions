@@ -314,6 +314,10 @@ not another permanent public discovery path.
   Whole-file strict typing passes for all 20 changed Python files on the
   Python 3.10 Linux and Windows targets. Lint, the 13-plugin install contract
   and documentation consistency checks pass.
+- Both hosting modes' native projections share `native_result_snapshot.py`;
+  the live-session route remains within the unchanged module-size limit.
+  After this extraction, all 53 selected API/native-origin cases and the same
+  20-file strict typing packet pass.
 - The earlier required unit run passed its tests but failed coverage because
   the extracted request helper was not observed. Three new eligible actor-free
   controls now exercise the helper and the shared deadline. Local execution

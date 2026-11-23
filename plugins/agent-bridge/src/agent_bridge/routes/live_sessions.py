@@ -63,12 +63,12 @@ from ..live_representation import (
     translate_reconnect_cursor,
 )
 from ..result_tokens import retarget, ResultHistoryChangedError, ResultTokenError
+from ..native_result_snapshot import build_represented_result_snapshot
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
-    build_represented_result_snapshot,
     expand_represented_result_ref,
 )
 from .sessions import _sse_event_stream
@@ -451,15 +451,6 @@ def get_live_result_snapshot(
         raise HTTPException(status_code=404, detail="live session not found")
     log, history = _result_history(request, row["session_id"])
     retired_ids = frozenset(db.live_session_aliases_to(row["session_id"]))
-    if native_only and (
-        row["session_id"] != session_ref
-        or retired_ids
-        or (log is not None and log._session_id != session_ref)
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="represented history has no native content-origin contract after aliasing",
-        )
     position = retarget(position, history)
     if log is None:
         log = EventLog(
@@ -477,7 +468,10 @@ def get_live_result_snapshot(
             max_text_chars=max_text_chars,
             retired_ids=retired_ids,
             inbox=db.inspect_live_inbox(row["session_id"], max_items + 1),
+            native_only=native_only,
         )
+    except ResultHistoryChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ResultTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
