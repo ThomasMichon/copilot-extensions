@@ -67,6 +67,7 @@ on:
       - plugins/agent-dispatch/scripts/install.sh
       - plugins/agent-dispatch/tests/test_retained_bootstrap.py
       - plugins/agent-dispatch/tests/test_managed_bootstrap_reader.py
+      - plugins/agent-dispatch/tests/test_managed_bootstrap_reader_sh.py
       - plugins/agent-dispatch/tests/test_base_python_ps1.py
       - plugins/agent-dispatch/tests/test_source_runtime_install.py
       - plugins/agent-dispatch/tests/source_publication_fixture.py
@@ -180,6 +181,20 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-index
           --test-file tests/test_bootstrap_yaml.py --allow-explicit-tiers
+      - name: Qualify prepared Dispatch POSIX helper readers
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_managed_bootstrap_reader_sh.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/dispatch-posix-reader
+      - name: Require actual raw and packaged Dispatch POSIX reader controls
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/dispatch-posix-reader').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==7;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify explicit native helper Python bindings
         run: >-
           python tools/run-plugin-tests.py agent-procutil
