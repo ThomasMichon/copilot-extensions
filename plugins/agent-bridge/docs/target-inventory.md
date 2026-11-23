@@ -88,7 +88,7 @@ launch, receiver enrollment, service recovery or message submission.
 ### Exact conversation inspection
 
 `show ID` and `BridgeClient.resolve_bridge(ID, ...)` select a single projected
-conversation through the existing `bridge_inventory: 1` read. They accept an
+conversation through the existing `bridge_inventory: 2` read. They accept an
 exact workspace handle, native session ID, registration ID or current/retained
 managed ID exposed on that row. They do not use substring, profile or
 potential-placement matching. Project/CWD scope and explicit `--all-projects`,
