@@ -1,0 +1,9 @@
+{
+  "comment": "Admit thirteen unchanged fixture-owned runner tooling declaration controls to the guarded unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

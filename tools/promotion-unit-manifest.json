@@ -3,6 +3,24 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py",
+   [
+    "test_source_tooling_falls_back_to_flat_dev_group[]",
+    "test_source_tooling_falls_back_to_flat_dev_group[[project.optional-dependencies]\\nother=[\"unselected\"]\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[project=\"not-a-table\"\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[project]\\noptional-dependencies=\"not-a-table\"\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[project]\\noptional-dependencies=[]\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[dependency-groups=\"not-a-table\"\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[dependency-groups=[]\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[project.optional-dependencies]\\ndev=\"not-a-list\"\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[project.optional-dependencies]\\ndev=[1]\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[dependency-groups]\\ndev=\"not-a-list\"\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[dependency-groups]\\ndev=[1]\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[[dependency-groups]\\ndev=[{include-group=\"other\"}]\\nother=[\"pydantic>=2\"]\\n]",
+    "test_source_tooling_refuses_malformed_metadata_before_install[dependency-groups=[]\\n[project.optional-dependencies]\\ndev=[\"pydantic>=2\"]\\n]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_cli_admission_selection_units.py",
    [
     "test_prepare_only_takes_environment_admission",
@@ -11788,6 +11806,8 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py": "5b9f6625b9651f0b8d31707fa025298ac91ce81db0ff0fc399035759b81bf410",
+  "tools/plugin_test_retirement.py": "46e30c26daf9b0932d9d748c6c125ec2d2ab0ea9a5f6b77c21321c87b6ab1248",
   "tools/promotion_unit_tests/test_original_runner_cli_admission_selection_units.py": "d1abf45728e9f375c29b5425b60621c6bf12cc35f903343fd68632b6a1cf5f25",
   "tools/promotion_unit_tests/test_original_runner_profile_argument_units.py": "d76c847bb36c46380a6fb426379488365317df6f7811f0ac91d00c4832652ea2",
   "tools/promotion_unit_tests/test_original_runner_admission_routing_units.py": "b779b8337757c912857338edbbf32d5bc7d66a778681c1dfc27fe7986770b77f",
