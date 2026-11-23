@@ -1,3 +1,3 @@
 """Standalone SSH service; importing it never enrolls or starts a process."""
 
-__version__ = "0.2.42-dev2"
+__version__ = "0.2.43-dev1"

@@ -102,17 +102,19 @@ invoke_uv_pip_install_resilient() {
     fi
     local policy_python="" previous="" arg
     for arg in "$@"; do
-        if [[ "$previous" == "--python" && -x "$arg" ]]; then
+        if [[ "$previous" == "--python" ]]; then
             policy_python="$arg"
+            break
+        fi
+        if [[ "$arg" == --python=* ]]; then
+            policy_python="${arg#--python=}"
             break
         fi
         previous="$arg"
     done
-    if [[ -z "$policy_python" ]]; then
-        policy_python="$(command -v python3 || command -v python || true)"
-    fi
-    if [[ -z "$policy_python" || ! -f "$INSTALLER_ENGINE_DEPENDENCY_POLICY" ]]; then
-        printf '%s\n' 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable' >&2
+    if [[ "$policy_python" != /* || ! -f "$policy_python" || ! -x "$policy_python" ||
+        ! -f "$INSTALLER_ENGINE_DEPENDENCY_POLICY" ]]; then
+        printf '%s\n' 'dependency-seasoning: explicit absolute --python interpreter and canonical policy helper are required' >&2
         return 1
     fi
     local out rc delay

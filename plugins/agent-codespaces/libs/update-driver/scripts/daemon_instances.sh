@@ -19,9 +19,8 @@ _di_python() {
             printf '%s\n' 'daemon lifecycle interpreter must be absolute' >&2; return 1;
         }
     else
-        target="$(command -v python3)" || {
-            printf '%s\n' 'daemon lifecycle requires a supported Python interpreter' >&2; return 1;
-        }
+        printf '%s\n' 'daemon lifecycle requires an explicit selected Python interpreter' >&2
+        return 1
     fi
     target="$(readlink -e -- "$target")" || return 1
     [[ -f "$target" && -x "$target" ]] || return 1

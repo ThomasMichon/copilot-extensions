@@ -229,21 +229,23 @@ function Invoke-UvPipInstallResilient {
     )
 
     $policyPython = $null
-    for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
-        if ($Arguments[$i] -eq '--python' -and (Test-Path -LiteralPath $Arguments[$i + 1] -PathType Leaf)) {
-            $policyPython = $Arguments[$i + 1]
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        if ($Arguments[$i] -ceq '--python') {
+            if ($i + 1 -lt $Arguments.Count) { $policyPython = $Arguments[$i + 1] }
+            break
+        }
+        if ($Arguments[$i] -clike '--python=*') {
+            $policyPython = $Arguments[$i].Substring(9)
             break
         }
     }
-    if (-not $policyPython) {
-        $candidate = Get-Command python3, python -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
-        if ($candidate) { $policyPython = $candidate.Source }
-    }
-    if (-not $policyPython -or -not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
+    if (-not $policyPython -or -not [IO.Path]::IsPathRooted($policyPython) -or
+        -not (Split-Path -Path $policyPython -IsAbsolute) -or
+        -not (Test-Path -LiteralPath $policyPython -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
         return [pscustomobject]@{
             ExitCode = 1
-            Output = 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable'
+            Output = 'dependency-seasoning: explicit absolute --python interpreter and canonical policy helper are required'
         }
     }
     $delays = @(3, 6, 10)

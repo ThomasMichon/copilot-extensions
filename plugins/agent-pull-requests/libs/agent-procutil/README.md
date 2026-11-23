@@ -1717,9 +1717,11 @@ protocol. Linux supervision and cleanup use the shared standard-library Python
 implementation; the package is a pure Python wheel with no custom native
 executable or compiler build hook. Production shell admission still executes
 the application directly. Disposable shell supervision and reconciliation
-require Python 3.10 or newer, selected through the absolute
-`COPILOT_EXTENSIONS_DAEMON_PYTHON` when supplied, otherwise an owned `python3`
-resolved from the caller's PATH. They invoke the deterministic package/payload-local
+require Python 3.10 or newer through the caller's explicit absolute
+`COPILOT_EXTENSIONS_DAEMON_PYTHON` binding. Missing, empty or relative bindings
+refuse without discovering Python on PATH. The installer reconciliation
+producer supplies its prepared managed selection; this lower-level binding
+does not insert another resolver or process owner. They invoke the deterministic package/payload-local
 `daemon_instance_runtime.pyz` source archive with `-I -S -B`, so filesystem
 custody covers the complete import closure rather than just one entry script.
 The archive contains only canonical `.py` files, not bytecode or native code;

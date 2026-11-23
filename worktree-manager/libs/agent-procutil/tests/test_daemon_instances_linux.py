@@ -1,7 +1,10 @@
 """Actual compiler-free Linux lifecycle protocol under the bounded test owner."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import time
@@ -11,7 +14,7 @@ import pytest
 from agent_procutil import _daemon_instance_store as store
 from agent_procutil._linux_pidfd import open_pidfd
 from agent_procutil.daemon_instances import (
-    DaemonInstanceSpec, DaemonLeasePolicy, cleanup_instance, inspect_instances,
+    DaemonInstanceReceipt, DaemonInstanceSpec, DaemonLeasePolicy, cleanup_instance, inspect_instances,
     reserve_instance, renew_instance,
 )
 
@@ -22,7 +25,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def native_helper():
+def native_helper() -> list[str]:
     import agent_procutil
 
     helper = [
@@ -33,7 +36,9 @@ def native_helper():
     return helper
 
 
-def start_supervised(native_helper, tmp_path, *, code, ttl=.8, cap=3):
+def start_supervised(
+    native_helper: list[str], tmp_path: Path, *, code: str, ttl: float = .8, cap: float = 3,
+) -> tuple[subprocess.Popen[bytes], DaemonInstanceReceipt, dict[str, str]]:
     receipt = reserve_instance(DaemonInstanceSpec(
         "native-linux-fixture", tmp_path, Path(__file__).resolve(),
         purpose="unattended-test", registry_root=tmp_path / "registry",
@@ -44,6 +49,7 @@ def start_supervised(native_helper, tmp_path, *, code, ttl=.8, cap=3):
          sys.executable, "-c", code, str(tmp_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
+    assert process.stderr is not None
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         record = inspect_instances(receipt.registry_root)[0]
@@ -57,7 +63,9 @@ def start_supervised(native_helper, tmp_path, *, code, ttl=.8, cap=3):
     pytest.fail("native admission deadline")
 
 
-def test_native_expiry_reaps_actual_worker_and_grandchild(native_helper, tmp_path):
+def test_native_expiry_reaps_actual_worker_and_grandchild(
+    native_helper: list[str], tmp_path: Path,
+) -> None:
     code = """
 import subprocess,sys,time
 from pathlib import Path
@@ -87,7 +95,9 @@ time.sleep(30)
             os.close(descriptor)
 
 
-def test_compiler_free_supervisor_settles_reparented_session(native_helper, tmp_path):
+def test_compiler_free_supervisor_settles_reparented_session(
+    native_helper: list[str], tmp_path: Path,
+) -> None:
     code = """
 import subprocess,sys,time
 from pathlib import Path
@@ -116,7 +126,9 @@ time.sleep(30)
             os.close(descriptor)
 
 
-def test_compiler_free_owner_loss_stops_before_lease(native_helper, tmp_path):
+def test_compiler_free_owner_loss_stops_before_lease(
+    native_helper: list[str], tmp_path: Path,
+) -> None:
     import json
 
     code = """
@@ -160,7 +172,9 @@ raise RuntimeError('admission timed out')
 
 
 @pytest.mark.parametrize("field", ["owner_birth", "launcher_birth", "runtime_inode"])
-def test_compiler_free_admission_refuses_changed_custody(native_helper, tmp_path, field):
+def test_compiler_free_admission_refuses_changed_custody(
+    native_helper: list[str], tmp_path: Path, field: str,
+) -> None:
     receipt = reserve_instance(DaemonInstanceSpec(
         "changed-custody", tmp_path, Path(__file__).resolve(), purpose="unattended-test",
         registry_root=tmp_path / "registry", lease=DaemonLeasePolicy(2, 3),
@@ -181,7 +195,7 @@ def test_compiler_free_admission_refuses_changed_custody(native_helper, tmp_path
     assert receipt.record_path.exists()
 
 
-def test_missing_lifecycle_interpreter_reports_a_held_record(tmp_path):
+def test_missing_lifecycle_interpreter_reports_a_held_record(tmp_path: Path) -> None:
     import agent_procutil
 
     receipt = reserve_instance(DaemonInstanceSpec(
@@ -205,9 +219,14 @@ def test_missing_lifecycle_interpreter_reports_a_held_record(tmp_path):
     assert receipt.record_path.exists()
 
 
-def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_path):
+def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_path: Path) -> None:
     import agent_procutil
 
+    interpreter = tmp_path / "fixture-python"
+    interpreter.write_text(
+        f'#!/bin/bash\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8",
+    )
+    interpreter.chmod(0o700)
     receipt = reserve_instance(DaemonInstanceSpec(
         "large-reconcile-budget", tmp_path, Path(__file__).resolve(),
         purpose="unattended-test", registry_root=tmp_path / "registry",
@@ -229,7 +248,8 @@ def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_pa
             ["bash", "-c", '. "$1"; reconcile_daemon_instances 128 600 "$2"',
              "large-budget", str(Path(agent_procutil.__file__).with_name("daemon_instances.sh")),
              str(receipt.registry_root)],
-            capture_output=True, text=True, timeout=8,
+             env={**os.environ, "COPILOT_EXTENSIONS_DAEMON_PYTHON": str(interpreter)},
+             capture_output=True, text=True, timeout=8,
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout == f"settled\tprocess-exit-observed\t{receipt.instance_id}\n"
@@ -240,7 +260,7 @@ def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_pa
         process.communicate(timeout=5)
 
 
-def test_native_renewal_obeys_hard_cap(native_helper, tmp_path):
+def test_native_renewal_obeys_hard_cap(native_helper: list[str], tmp_path: Path) -> None:
     process, receipt, record = start_supervised(
         native_helper, tmp_path, code="import time;time.sleep(30)", ttl=.8, cap=2,
     )
@@ -262,7 +282,9 @@ def test_native_renewal_obeys_hard_cap(native_helper, tmp_path):
         process.communicate(timeout=6)
 
 
-def test_native_cleanup_removes_only_declared_artifact(native_helper, tmp_path):
+def test_native_cleanup_removes_only_declared_artifact(
+    native_helper: list[str], tmp_path: Path,
+) -> None:
     code = """
 import time
 time.sleep(30)
@@ -298,7 +320,9 @@ time.sleep(30)
         process.communicate(timeout=6)
 
 
-def test_automatic_source_follows_real_child_path_not_parent_path(tmp_path, monkeypatch):
+def test_automatic_source_follows_real_child_path_not_parent_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_procutil import spawn_daemon
 
     parent_bin, child_bin, working = (tmp_path / name for name in ("parent", "child", "work"))
@@ -314,21 +338,25 @@ def test_automatic_source_follows_real_child_path_not_parent_path(tmp_path, monk
         ["service-fixture"], cwd=working, log_path=tmp_path / "path.log",
         env={"PATH": str(child_bin)}, breakaway=False,
     )
+    receipt = getattr(process, "instance_receipt")
+    assert isinstance(receipt, DaemonInstanceReceipt)
     try:
         deadline = time.monotonic() + 5
         while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(.01)
         assert marker.read_text() == "child"
-        row = inspect_instances(process.instance_receipt.registry_root)[0]
+        row = inspect_instances(receipt.registry_root)[0]
         assert row["source"] == str((child_bin / "service-fixture").resolve())
     finally:
         if process.poll() is None:
             process.kill()
         process.wait(timeout=5)
-        cleanup_instance(process.instance_receipt, terminate=False)
+        cleanup_instance(receipt, terminate=False)
 
 
-def test_native_finite_production_cleanup_preserves_artifacts(native_helper, tmp_path):
+def test_native_finite_production_cleanup_preserves_artifacts(
+    native_helper: list[str], tmp_path: Path,
+) -> None:
     from agent_procutil.daemon_instances import spawn_finite_worker
 
     artifact = tmp_path / "production-output"
@@ -364,7 +392,9 @@ def test_native_finite_production_cleanup_preserves_artifacts(native_helper, tmp
 )
 @pytest.mark.parametrize("hidden_ancestor", [False, True])
 @pytest.mark.parametrize("backend", ["bash", "python-inspect", "python-reconcile"])
-def test_native_inventory_permission_failure_is_not_reported_empty(tmp_path, hidden_ancestor, backend):
+def test_native_inventory_permission_failure_is_not_reported_empty(
+    tmp_path: Path, hidden_ancestor: bool, backend: str,
+) -> None:
     import agent_procutil
 
     helper = Path(agent_procutil.__file__).parent / "daemon_instances.sh"
@@ -397,7 +427,7 @@ def test_native_inventory_permission_failure_is_not_reported_empty(tmp_path, hid
 
 
 @pytest.mark.parametrize("kind", ["relative", "non-normalized", "broken-root", "broken-parent"])
-def test_native_inventory_unsafe_absence_is_not_reported_empty(tmp_path, kind):
+def test_native_inventory_unsafe_absence_is_not_reported_empty(tmp_path: Path, kind: str) -> None:
     import agent_procutil
 
     helper = Path(agent_procutil.__file__).parent / "daemon_instances.sh"
@@ -423,7 +453,7 @@ def test_native_inventory_unsafe_absence_is_not_reported_empty(tmp_path, kind):
 
 
 @pytest.mark.parametrize("operation", ["inspect", "reconcile"])
-def test_python_dangling_inventory_root_is_not_missing(tmp_path, operation):
+def test_python_dangling_inventory_root_is_not_missing(tmp_path: Path, operation: str) -> None:
     from agent_procutil.daemon_instances import reconcile_instances
 
     root = tmp_path / "dangling-inventory"
