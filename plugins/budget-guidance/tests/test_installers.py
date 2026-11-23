@@ -735,6 +735,62 @@ def test_posix_cleanroom_snapshot_provisions_without_index_environment(tmp_path:
     assert (root / "current-version").read_text().strip() == VERSION
 
 
+@pytest.mark.parametrize("layout", ["raw", "composed"])
+@pytest.mark.parametrize("configuration", ["project", "config"])
+def test_native_index_reader_matches_uv_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str, configuration: str,
+) -> None:
+    uv = shutil.which("uv")
+    assert uv, "The configuration-context control requires prepared uv"
+    shell = tmp_path / "launcher"
+    effective = shell / "selected directory"
+    project = effective / "project"
+    project.mkdir(parents=True)
+    selected = effective / "configuration/selected.toml"
+    selected.parent.mkdir()
+    index = "https://configured.example/simple"
+    document = f'[[index]]\nurl = "{index}"\ndefault = true\n'
+    (project / "uv.toml").write_text(document, encoding="utf-8")
+    selected.write_text(document, encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
+        and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
+    }
+    environment.update(
+        UV_WORKING_DIR=effective.name if layout == "raw" else str(effective),
+        HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"),
+        APPDATA=str(tmp_path / "appdata"), XDG_CONFIG_HOME=str(tmp_path / "user"),
+        XDG_CONFIG_DIRS=str(tmp_path / "system"), UV_NO_SYSTEM_CONFIG="1",
+        UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "cache"),
+        PIP_INDEX_URL="https://not-selected.example/simple",
+    )
+    if configuration == "project":
+        environment["UV_PROJECT"] = "project"
+    else:
+        environment["UV_CONFIG_FILE"] = "configuration/selected.toml"
+    helper = PLUGIN.parents[1] / "libs/installer-engine/installer_pip_index.py"
+    if layout == "composed":
+        payload = tmp_path / "payload"
+        _copy_payload(payload)
+        helper = payload / "scripts/pip-index-config"
+    result = subprocess.run(
+        [BASE_PYTHON, "-I", "-B", str(helper), "--uv", uv],
+        cwd=shell, env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=NO_WINDOW,
+    )
+    assert result.returncode == 0 and result.stdout == result.stderr == "", result.stdout + result.stderr
+    settings = subprocess.run(
+        [uv, "pip", "install", "--python", BASE_PYTHON, "--show-settings", "example-package>=1"],
+        cwd=shell, env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=NO_WINDOW,
+    )
+    assert settings.returncode == 0, settings.stdout + settings.stderr
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "libs/installer-engine"))
+    native = importlib.import_module("installer_native_feed")
+    assert _resolved_uv_defaults(settings.stdout + settings.stderr, native) == [index]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable search semantics")
 @pytest.mark.parametrize("lookup", [
     "relative-command", "relative-path", "empty-path-entry", "symlink-command", "symlink-path",
@@ -795,6 +851,14 @@ def test_system_flag_pins_provider_in_actual_launch_context(
         configuration.require_system_config_provider(
             "bin/uv", environment, cwd=parent, error_type=ValueError,
         )
+    effective = cwd / "working"
+    effective.mkdir()
+    (effective / "uv.toml").write_text(
+        '[[index]]\nurl = "https://configured.example/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    environment["UV_WORKING_DIR"] = "working"
+    assert reader._uv_default(environment, cwd, uv)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink and parent traversal")
