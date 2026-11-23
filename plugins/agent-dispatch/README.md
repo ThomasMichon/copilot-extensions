@@ -661,14 +661,19 @@ The POSIX installer uses that selected engine's declared prepared managed Python
 for source fingerprints, construction-control helpers and lifecycle recording.
 It does not borrow the active runtime or search PATH Python, and inspection
 cannot download an interpreter. Missing packaged bootstrap assets cannot fall
-back to repository files. Its separate runtime constructor and pip-index
-discovery are independent of helper selection. New POSIX runtime environments
+back to repository files. New POSIX runtime environments
 use the shared resilient uv constructor with an explicit managed Python 3.10
 request, separate from the prepared 3.11+ installer helper. Project/virtualenv
 selectors and uv configuration cannot override that request; configured managed
 storage and offline policy remain effective. Failure does not fall back to PATH
 Python or `python -m venv`. The versioned construction owner still controls
 candidate cleanup, receipts and completed-runtime reuse.
+
+POSIX index discovery uses that same prepared helper and the canonical data-only
+pip configuration reader, never ambient `pip` or `pip3`. Explicit uv index and
+effective project/configuration selection retain precedence; an active venv or
+Conda prefix contributes its site pip configuration without executing it.
+Malformed selected configuration refuses installation before construction.
 
 On Windows, successful implicit selections are reused only within the current installer
 invocation and matching bootstrap directory, runtime root and admission mode.
