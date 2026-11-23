@@ -5,17 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from types import ModuleType
 import urllib.error
-from typing import Any
+from typing import Any, cast
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _turn_settled(client, session_id: str, cursor: int) -> bool:
+def _turn_settled(client: Any, session_id: str, cursor: int) -> bool:
     try:
         session = client.get_session(session_id)
     except Exception:
@@ -31,11 +32,11 @@ def _turn_settled(client, session_id: str, cursor: int) -> bool:
 
 
 def _stream_feed(
-    client,
+    client: Any,
     session_id: str,
     *,
     caller_id: str | None,
-    renderer,
+    renderer: Any,
     command_timeout: float = 0.0,
     attention_reasons: list[str] | None = None,
     attention_position: str | None = None,
@@ -62,7 +63,9 @@ def _stream_feed(
     def _probe_attention() -> dict[str, Any] | None:
         if not attention_reasons:
             return None
-        return client.wait_for_attention(session_id, reasons=attention_reasons, position=attention_position, timeout_seconds=0)
+        return cast(dict[str, Any], client.wait_for_attention(
+            session_id, reasons=attention_reasons, position=attention_position, timeout_seconds=0,
+        ))
 
     def _ack(up_to: int) -> None:
         try:
@@ -234,7 +237,12 @@ def _stream_feed(
 
 
 def _cmd_wait(args: argparse.Namespace) -> None:
+    from . import bridge_observation_cli
+
     core = _core()
+    if bridge_observation_cli.selected(args):
+        bridge_observation_cli.wait(core._get_client(ensure=False), args)
+        return
     client = core._get_client()
     caller_id = core._caller_id_for(args)
     selected = list(getattr(args, "attention", None) or [])
@@ -298,7 +306,7 @@ def _contract_changed_result(prior: dict[str, Any], successor_id: str) -> dict[s
     }
 
 
-def _cmd_attention_wait(client, args: argparse.Namespace, caller_id: str | None, reasons: list[str]) -> None:
+def _cmd_attention_wait(client: Any, args: argparse.Namespace, caller_id: str | None, reasons: list[str]) -> None:
     import time
 
     core = _core()
@@ -353,7 +361,7 @@ def _cmd_attention_wait(client, args: argparse.Namespace, caller_id: str | None,
                 continue
         else:
             print(f"[>] Waiting for attention from session {session_id}...")
-            result = _stream_feed(
+            streamed = _stream_feed(
                 client,
                 session_id,
                 caller_id=caller_id,
@@ -362,11 +370,13 @@ def _cmd_attention_wait(client, args: argparse.Namespace, caller_id: str | None,
                 attention_reasons=reasons,
                 attention_position=position,
             )
-            if isinstance(result, str):
-                if result == "timeout":
+            if isinstance(streamed, str):
+                if streamed == "timeout":
                     result = client.wait_for_attention(session_id, reasons=reasons, position=position, timeout_seconds=0)
                 else:
                     return
+            else:
+                result = streamed
         last_result = result
         successor_id = str((result.get("identity") or {}).get("successor_id") or "")
         if successor_id and not result.get("settled"):
@@ -401,10 +411,15 @@ def _cmd_attention_wait(client, args: argparse.Namespace, caller_id: str | None,
 
 
 def _cmd_read(args: argparse.Namespace) -> None:
+    from . import bridge_observation_cli
     from .client import BridgeClientError, BridgeConnectionError
 
     core = _core()
+    bridge_mode = bridge_observation_cli.selected(args)
     client = core._get_client(ensure=False)
+    if bridge_mode:
+        bridge_observation_cli.read(client, args)
+        return
     caller_id = core._caller_id_for(args)
     target = args.session_id
     from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
@@ -469,7 +484,7 @@ def _cmd_read(args: argparse.Namespace) -> None:
             start_id, end_id = since + 1, None
         else:
             try:
-                lo, _, hi = rng.partition(":")
+                lo, _, hi = cast(str, rng).partition(":")
                 start_id = int(lo) if lo else 0
                 end_id = int(hi) if hi else None
             except ValueError:
@@ -562,7 +577,7 @@ def _cmd_result(args: argparse.Namespace) -> None:
     _render_result_snapshot(payload, args.session_ref)
 
 
-def _render_result_snapshot(payload: dict, session_ref: str) -> None:
+def _render_result_snapshot(payload: dict[str, Any], session_ref: str) -> None:
     identity = payload.get("identity") or {}
     state = payload.get("state") or {}
     fidelity = payload.get("fidelity") or {}
@@ -626,15 +641,18 @@ def _render_result_snapshot(payload: dict, session_ref: str) -> None:
         print(f"    Position:  {incremental['position']}")
 
 
-def register_session_streaming_commands(sub: argparse._SubParsersAction) -> None:
+def register_session_streaming_commands(sub: argparse._SubParsersAction[Any]) -> None:
+    from . import bridge_observation_cli
+
     core = _core()
     wait_p = sub.add_parser("wait", help="Wait for current turn to complete")
     wait_p.add_argument("session_id", help="Session ID")
     wait_p.add_argument("--attention", action="append", choices=["turn_complete", "turn_cancelled", "failed", "input_required", "permission_required", "unreachable", "policy_required", "contract_changed", "stopped", "ended"], help="Settle on this attention reason (repeatable); omitted keeps the legacy turn-only wait")
     wait_p.add_argument("--all-attention", action="store_true", help="Settle on any stable attention reason")
     wait_p.add_argument("--position", help="Resume from an opaque cursor-neutral attention position")
-    wait_p.add_argument("--json", action="store_true", help="Print one structured settlement without opening the delivery stream")
+    wait_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print one structured settlement without opening the delivery stream")
     core._add_stream_args(wait_p)
+    bridge_observation_cli.register(wait_p)
     wait_p.set_defaults(func=_cmd_wait)
 
     read_p = sub.add_parser("read", help="Read/resume a session's conversation from the delivery cursor")
@@ -648,6 +666,7 @@ def register_session_streaming_commands(sub: argparse._SubParsersAction) -> None
     read_p.add_argument("--max-items", type=int, default=None, help="Represented read item bound (default 20, maximum 100)")
     read_p.add_argument("--max-text-chars", type=int, default=None, help="Represented read text bound (default 6000, maximum 20000)")
     core._add_stream_args(read_p)
+    bridge_observation_cli.register(read_p)
     read_p.set_defaults(func=_cmd_read)
 
     result_p = sub.add_parser("result", help="Read a bounded delegated-result snapshot without moving a cursor")

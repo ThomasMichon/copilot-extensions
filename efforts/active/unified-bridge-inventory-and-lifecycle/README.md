@@ -24,9 +24,13 @@ outcome rather than replacing it with one intermediate fix.
 
 - **Kind:** completion
 - **Now:** the scoped and explicit-host inventory slice merged in #14034.
-  The first Phase 3 shared exact selector and read-only `show` consumer passed
-  focused local qualification; publish it through the normal source gates.
-  Continue effectful selector and potential-target migration afterward.
+  The Phase 3 shared exact selector and read-only `show` consumer merged in
+  #14206; release verification remains open. Explicit local read/wait adoption
+  of exact identity and bounded result observations is qualified in source;
+  its review, CI and merge gates remain open. Default migration, remote
+  observation, effectful selectors and potential targets follow.
+  This sequencing is the author's next implementation slice, not
+  additional operator scope.
   Queued-delivery attribution remains separately open at the installed-adoption
   boundary: the real notification reached the owned model, but its original
   receipt lacked consumption. Relevant fixes #13862 and #13883 are released;
@@ -211,9 +215,12 @@ Installed fleet adoption is not claimed.
 ### Phase 3 - Align selectors and separate potential targets
 
 - [x] Qualify the common exact identity selector and read-only `show` consumer
-  over the released provider contract before migrating effectful operations.
-- [ ] Route ordinary show, send, read, wait, resume, stop and end selectors
+  over the negotiated provider contract before migrating effectful operations.
+- [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
+  The current source slice first adds opt-in local read/wait over existing
+  bounded result owners. Legacy history, event-cursor, attention and workspace
+  following remain unchanged until their replacement contracts are ready.
 - [ ] Separate potential placements from bridges, including empty worktrees,
   eligible roots, containers, CodeSpaces, configured ACP hosts and external
   endpoints, with occupancy and allocation behavior visible.
@@ -289,6 +296,55 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-23 - Explicit local read/wait observations qualified
+
+- Added opt-in `read --bridge` and `wait --bridge` over the common exact
+  selector and existing bounded result owners. Both hosting modes retain
+  their actual fidelity. Local-only observation pins the selected conversation;
+  it does not hydrate metadata, resume, follow a successor or change a cursor.
+- Ordinary defaults remain unchanged. Historical/event reads, workspace
+  following, remote carrier observations and represented attention require
+  their own receiving contracts before default migration.
+- The final bounded packet passes 104 cases, including real CLI/client/API
+  serialization for both hosting modes, provider capability versions 0/1/2,
+  fresh private registry state, unchanged legacy reads, attention and streams.
+  The real consumer exposed a global `--json` value overwritten by `wait`'s
+  local parser default; the corrected default preserves either flag position.
+- Whole-file strict typing passes for all five changed Python files on the
+  Python 3.10 Linux and Windows targets. Focused Python lint, the 13-plugin
+  install contract and documentation consistency checks pass.
+- The first combined run exhausted its aggregate budget during preparation;
+  that run is not counted as passing. Separate preparation retains the
+  original test, group and aggregate limits.
+- Full-machine provisioning is not affected. The fresh-state API fixture proves
+  the first observation without starting native conversations. A live external
+  lane is not exercised: installed rollout, protected receiver changes and
+  native conversation execution are not authorized. Source review, exact-head
+  CI, merge, release and the full effort's remaining gates stay open.
+
+### 2026-11-23 - Exact inspection merged; read/wait migration follows
+
+- #14206 merged as `e81c69beadd8491c5a95996b6b503de4b97525b9`.
+  The final owner-authored review reported no open findings on the exact head,
+  all threads were resolved, and required CI passed. The normal Maintainer
+  merge path omitted only the separate CODEOWNER vote, not review or CI.
+- The final behavior packet passed 29 cases, and all ten changed Python files
+  passed strict typing on the Linux and Windows targets. Both native telemetry
+  lanes passed on the same Python source; the last commit corrected only a
+  documentation capability reference.
+- Normal pull-forward safely aborted on the squash history. The complete local
+  and merged patch IDs were equal, the local tree was clean, and all four local
+  commits belonged to the merged PR. An empty-range rebase reconciled only that
+  already-merged history, after which normal sync completed. Recovery refs remain.
+- Retain this worktree for the full effort. Next prove read/wait selection of
+  the same conversation without profile fallback or replacement. Other selectors,
+  potential targets, guarded creation, release and installed delivery remain
+  separate open gates. No local rollout or receiving completion is claimed.
+- The pinned release check at `main`
+  `599820454166a041762a91e099a5d7a2ec382576` still advertises
+  `bridge_inventory: 1`, not the required version 2. This slice is merged but
+  not yet released; no installation or deployment follows from the check.
 
 ### 2026-11-22 - Exact inspection consumer qualified
 

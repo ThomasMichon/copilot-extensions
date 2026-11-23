@@ -120,13 +120,61 @@ returns 503, not a false 404.
 
 No new RPC is introduced. An older executing provider refuses `show` before
 the inventory read; legacy commands remain available on rollback.
-`send`, `read`, `wait`, `resume`,
-`stop` and `end` keep their existing selectors in this slice. No previous form
-is deprecated or removed.
+`send`, `resume`, `stop` and `end` keep their existing selectors.
+`read` and `wait` also keep their existing defaults; explicit adoption is
+described below. No previous form is deprecated or removed.
+
+### Exact local conversation observation
+
+`read ID --bridge` and `wait ID --bridge` use the same exact selector as `show`,
+with the same project/CWD scope, `--all-projects`, `--machine` and `--namespace`.
+They require `bridge_inventory: 2` from the executing daemon and read its local
+inventory only. They do not consume cached fleet routes or support `--host`.
+A Bridge-managed ACP conversation whose worker is remote can still be observed
+through its local owning daemon. Direct observation of another Bridge host
+remains a separate carrier migration.
+
+This is the explicit-adoption step, not a change to ordinary `read`/`wait`.
+Their existing event-cursor, historical-session, workspace-following and attention
+forms remain available without `--bridge`. Default migration is not complete:
+archive lookup, remote carrier observation and represented attention still need
+their own receiving contracts. Unsupported providers refuse the new mode before
+reading inventory; there is no fallback to the legacy selector.
+
+The selected row must expose a current managed ID, registered ID or matching
+retained managed ID. Current managed observation takes precedence when both
+owners represent the same native conversation. A metadata-only conversation
+refuses with `bridge_observation_unavailable` (409), rather than hydrate a
+control record, load native history or resume the conversation. Selection errors
+retain the 404/409/503 distinctions above.
+
+`read --bridge` returns one existing bounded result snapshot for either hosting
+mode. JSON retains the result-snapshot schema and its full/reduced fidelity.
+`--tail` sets the item bound; `--max-items` and `--max-text-chars` keep the existing
+snapshot limits. The read is always cursor-neutral and finite, including with
+`--no-follow`. ACP event ranges and message receipts are not snapshot positions:
+`--range`, `--event`, `--since` and `--message-id` refuse in this mode.
+
+`wait --bridge` polls bounded snapshots of that exact conversation until idle,
+terminal state, identity change or command timeout. It never follows a successor.
+JSON contains `settled`, `reason` and the final `snapshot`; `settled: true`
+means the observation stopped on a reported state, not that a prompt was
+delivered or consumed. A timeout reports `settled: false`. Represented waits
+also inspect the exact registration so an expired registration with retained
+idle history is not reported as idle. Attention/position options refuse in this
+mode rather than silently weaken the existing owned attention contract.
+
+Both operations connect without ensuring a daemon, use the existing result
+owners, and change no delivery cursor, workspace, registration, assignment or
+conversation. A result for a different snapshot ID refuses with
+`bridge_observation_identity_changed` (409). Errors do not cause profile
+fallback, metadata hydration, replacement or replay.
 
 The [contained source runner](../../../TESTING.md) can select
 `tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and
 `tests/test_bridge_fleet_inventory.py` with `--allow-explicit-tiers`.
+`tests/test_bridge_observation_cli.py` qualifies explicit local read/wait
+selection, bounded output, refusal and unchanged legacy-option boundaries.
 The packet uses synthetic five-host observations and private registry fixtures.
 It exercises the actual CLI/client/API serialization and unsupported-capability
 refusal without native execution. It does not certify installed fleet adoption.

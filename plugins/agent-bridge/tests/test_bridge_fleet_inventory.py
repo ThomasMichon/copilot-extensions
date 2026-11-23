@@ -361,36 +361,69 @@ def test_http_inventory_uses_the_same_serialized_local_projection(
 
 
 @pytest.mark.parametrize("capability", [0, 1, 2])
-@pytest.mark.parametrize("operation", ["list", "show"])
+@pytest.mark.parametrize(("operation", "represented"), [
+    ("list", True), ("show", True), ("read", True), ("wait", True),
+    ("read", False), ("wait", False),
+])
 def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution(
     metadata_boundary: Any,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     capability: int,
     operation: str,
+    represented: bool,
 ) -> None:
     import json
 
     from agent_bridge import __main__ as cli
     from agent_bridge.client import BridgeClient
+    from agent_bridge.events import EventLog
+    from agent_bridge.live_representation import LiveEventStore
     from agent_bridge.protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+    from agent_bridge.routes.live_sessions import router as live_router
+    from agent_bridge.routes.sessions import router as owned_router
+    from agent_bridge.session_manager import Session
+    from agent_bridge.session_status import SessionStatus
+    from agent_bridge.transport import SpawnTarget
     from agent_bridge.worktree_native_resume import router
 
     bound = metadata_boundary
-    bound.db.register_live_session(
-        "native-real",
-        machine=bound.entry.machine,
-        cwd=bound.entry.path,
-        worktree_id=bound.entry.id,
-        repo="example-project",
-        branch=None,
-        pid=None,
-        role=None,
-        now=time.time(),
-    )
+    if represented:
+        bound.db.register_live_session(
+            "native-real",
+            machine=bound.entry.machine,
+            cwd=bound.entry.path,
+            worktree_id=bound.entry.id,
+            repo="example-project",
+            branch=None,
+            pid=None,
+            role=None,
+            now=time.time(),
+        )
+        bound.db.update_live_turn_state(
+            "native-real", turn_state="idle", last_activity_at=time.time(),
+        )
+    else:
+        session = Session(
+            "managed-real", "fixture", SpawnTarget(
+                type="local", cwd=bound.entry.path,
+                worktree_id=bound.entry.id, project="example-project",
+            ), "example",
+        )
+        session.acp_session_id = "native-real"
+        session.status = SessionStatus.IDLE
+        bound.db.create_session(
+            session.session_id, session.name, session.agent_name, session.target.cwd,
+            "local", "idle", time.time(), acp_session_id=session.acp_session_id,
+        )
+        session.event_log = EventLog(db=bound.db, session_id=session.session_id)
+        bound.manager._sessions[session.session_id] = session
     app = FastAPI()
     app.state = bound.request.app.state
+    app.state.live_event_store = LiveEventStore()
     app.include_router(router)
+    app.include_router(live_router)
+    app.include_router(owned_router)
     calls = []
 
     @app.get("/health")
@@ -421,15 +454,39 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
                 else pytest.fail("listing ensured the service")
             ),
         )
-        argv = ["--json", operation, *(["native-real"] if operation == "show" else [])]
-        if capability >= (2 if operation == "show" else 1):
+        argv = ["--json", operation, *(["native-real"] if operation != "list" else [])]
+        if operation in {"read", "wait"}:
+            argv.append("--bridge")
+        if capability >= (1 if operation == "list" else 2):
             cli.main(argv)
             result = json.loads(capsys.readouterr().out)
-            row = result["bridge"] if operation == "show" else result["bridges"][0]
-            assert row["session_id"] == "native-real"
-            assert row["worktree_id"] == bound.entry.id
-            assert row["control"] == "registered"
-            assert calls == ["/health", "/api/v1/bridges"]
+            if operation in {"read", "wait"}:
+                payload = result["snapshot"] if operation == "wait" else result
+                expected_id = "native-real" if represented else "managed-real"
+                assert payload["identity"]["snapshot_session_id"] == expected_id
+                assert payload["fidelity"]["level"] == ("reduced" if represented else "full")
+                if operation == "wait":
+                    assert result["reason"] == "idle"
+                    assert result["settled"] is True
+                result_path = (
+                    "/api/v1/live-sessions/native-real/result"
+                    if represented else "/api/v1/sessions/managed-real/result"
+                )
+                assert result_path in calls
+                assert all(
+                    path in {
+                        "/health", "/api/v1/bridges",
+                        "/api/v1/live-sessions/native-real",
+                        result_path,
+                    }
+                    for path in calls
+                )
+            else:
+                row = result["bridge"] if operation == "show" else result["bridges"][0]
+                assert row["session_id"] == "native-real"
+                assert row["worktree_id"] == bound.entry.id
+                assert row["control"] == "registered"
+                assert calls == ["/health", "/api/v1/bridges"]
         else:
             with pytest.raises(SystemExit) as refused:
                 cli.main(argv)
