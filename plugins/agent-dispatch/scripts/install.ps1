@@ -880,16 +880,23 @@ function Get-BootstrapPython {
     $probe = @'
 import json,sys
 assert sys.version_info >= (3,11)
+if sys.argv[2] == '1':
+    from pathlib import Path
+    python = Path(sys._base_executable).resolve(strict=True)
+    root = Path(sys.argv[3]).absolute()
+    assert '..' not in root.parts
+    assert all(not python.is_relative_to(boundary) for boundary in (root, root.resolve()))
 print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
 '@
     $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
     $resolve = {
-        param([string]$Candidate)
+        param([string]$Candidate, [bool]$RequireExternal = $false)
         if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
         try {
             $nativeError = ''
             $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $mode
+                '-I', '-S', '-B', '-c', $probe, $mode,
+                $(if ($RequireExternal) { '1' } else { '0' }), $InstallDir
             ) -ErrorOutput ([ref]$nativeError)
             if ($LASTEXITCODE -eq 0) {
                 $selected = ($output | Out-String) | ConvertFrom-Json
@@ -904,63 +911,29 @@ print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executab
     if ($selected) { return $selected }
     $selected = & $resolve (Resolve-DispatchBasePython)
     if ($selected) { return $selected }
-    $candidates = @()
-    foreach ($name in 'python3', 'python') {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
+    $bootstrapAction = if ($ExternalOnly) { 'uninstall' } else { $Action }
+    $bootstrapDirectory = [IO.Path]::GetFullPath(
+        (Split-Path -Parent $script:InstallerDependencyPolicy)
+    )
+    $bootstrapRoot = [IO.Path]::GetFullPath($InstallDir)
+    $cached = Get-Variable DispatchManagedBootstrapCache -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cached -and $cached.Directory -ceq $bootstrapDirectory -and
+        $cached.Root -ceq $bootstrapRoot -and $cached.Action -ceq $bootstrapAction -and
+        $cached.External -eq [bool]$ExternalOnly) {
+        $requireExternal = $ExternalOnly -or $bootstrapAction -in @('uninstall', 'broker-remove')
+        $selected = & $resolve $cached.Python $requireExternal
+        if ($selected) { return $selected }
+        $script:DispatchManagedBootstrapCache = $null
     }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($root in $roots) {
-            if (-not $root) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
+    $selected = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $bootstrapAction -Root $InstallDir `
+        -BootstrapDirectory $bootstrapDirectory
+    if ($selected) {
+        $script:DispatchManagedBootstrapCache = [pscustomobject]@{
+            Python = $selected; Directory = $bootstrapDirectory; Root = $bootstrapRoot
+            Action = $bootstrapAction; External = [bool]$ExternalOnly
         }
     }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        $selected = & $resolve $candidate
-        if ($selected) {
-            $script:DispatchBootstrapPython = $selected
-            return $selected
-        }
-    }
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($ExternalOnly) { break }
-        if ($d) {
-            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
-                $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) {
-                    $selected = & $resolve $p
-                    if ($selected) { return $selected }
-                }
-            }
-        }
-    }
-    return $null
+    return $selected
 }
 
 function Assert-DispatchActions {

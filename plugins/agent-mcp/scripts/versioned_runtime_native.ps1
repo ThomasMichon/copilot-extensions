@@ -79,11 +79,12 @@ function Resolve-NativeBootstrapPython {
     param(
         [ValidateSet(10, 11)][int]$MinimumMinor = 11,
         [string]$Action = 'inspect',
-        [string]$Root = ''
+        [string]$Root = '',
+        [string]$BootstrapDirectory = $PSScriptRoot
     )
-    . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+    . (Join-Path $BootstrapDirectory 'bootstrap-uv.ps1')
     $selection = Resolve-UvBootstrapPython `
-        -RequestFile (Join-Path $PSScriptRoot 'installer-instance-python-version.txt') `
+        -RequestFile (Join-Path $BootstrapDirectory 'installer-instance-python-version.txt') `
         -Operation Inspect -IsolateSelection -InvokeCaptured {
             param($FilePath, $ArgList, $Environment)
             $nativeError = ''
