@@ -15,7 +15,7 @@ from agent_vault import cache
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
-@pytest.mark.parametrize("population", ["get", "unlock-warm"])
+@pytest.mark.parametrize("population", ["get", "unlock-warm", "request-warm"])
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     tmp_path: Path, population: str,
 ) -> None:
@@ -31,13 +31,17 @@ def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     result = subprocess.run(
         [sys.executable, "-c", """
 import asyncio
+import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from agent_vault import cache, cache_warm, cli, config, credential_reads, extensions, kek, service
+from agent_vault import cache, cache_warm, cli, config, configuration, configuration_scope, credential_reads, extensions, kek, service
 from agent_vault.cache_dpapi import CacheDecryptionUnavailable
+from agent_vault.cache_warm_selection import CONTRACT, FIELD
 from agent_vault.extensions import ExtensionRegistry
+from agent_vault.service_connections import VaultConnections
 
 try:
     kek._dpapi(True, b"synthetic-protection-preflight")
@@ -57,23 +61,58 @@ vault = service.VaultService()
 vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
-if sys.argv[3] == "unlock-warm":
-    registry.register_cache_source(lambda _machine: ["entry"])
-    vault.cli.verify_password = lambda *_args: True
-    assert vault.handle_request({
+if sys.argv[3] in ("unlock-warm", "request-warm"):
+    request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
-    })["ok"]
+    }
+    if sys.argv[3] == "request-warm":
+        root = Path(sys.argv[1])
+        selected, resident = root / "selected", root / "resident"
+        for directory, target in ((selected, "entry"), (resident, "WRONG")):
+            directory.mkdir()
+            (directory / ".agent-vault.json").write_text(json.dumps({"cache_entries": [target]}))
+        configuration_scope.bind_service_configuration(str(resident))
+        configuration.owner_report = lambda _root: None
+        os.environ["AGENT_VAULT_CONFIG"] = str(root / "native.json")
+        request[FIELD] = {
+            "contract": CONTRACT, "version": 1, "root": str(selected), "native_default": False,
+        }
+    else:
+        registry.register_cache_source(lambda _machine: ["entry"])
+    vault.cli.verify_password = lambda *_args: True
     async def warm() -> None:
-        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, None)
+        connections = VaultConnections(vault, service.handle_client)
+        listener = await asyncio.start_server(connections.callback("tcp"), "127.0.0.1", 0)
+        host, port = listener.sockets[0].getsockname()[:2]
+        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, connections)
+        async def send(payload: dict[str, object]) -> dict[str, object]:
+            reader, writer = await asyncio.open_connection(host, port)
+            try:
+                writer.write((json.dumps(payload) + "\\n").encode())
+                await writer.drain()
+                response = json.loads(await asyncio.wait_for(reader.readline(), 5))
+                assert isinstance(response, dict)
+                return response
+            finally:
+                writer.close()
+                await writer.wait_closed()
         try:
+            metadata = await send({"action": "ping", "health_only": True})
+            assert metadata["cache_warm_selection_versions"] == [1]
+            accepted = await send(request)
+            assert accepted["ok"], accepted
+            if FIELD in request:
+                assert accepted["cache_warm"]["state"] == "queued", accepted
             runtime.tick()
             assert runtime.future is not None
             await asyncio.wait_for(asyncio.shield(runtime.future), 5)
+            status = (await send({**request, "action": "ping"}))["cache_warm"]
+            assert status["state"] == "complete" and status["cached"] == 1, status
         finally:
             await runtime.close()
+            await connections.close([listener], [], lambda: None)
+            assert not connections.clients and not connections.workers and not connections.work
     asyncio.run(warm())
-    status = vault._cache_warm.status(kpdb, "")
-    assert status["state"] == "complete" and status["cached"] == 1, status
     def no_backend(*_args: object) -> str:
         raise AssertionError("warmed native hit reached the backend")
     vault.cli.get_entry = no_backend
