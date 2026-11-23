@@ -93,6 +93,14 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
     production_functions(
         "config", {"_nonempty", "_clean_group", "normalize_entry"}, state.config.__dict__,
     )
+    server_config: dict[str, Any] = {
+        "load_config": lambda: SimpleNamespace(group="Other"),
+    }
+    production_functions(
+        "config", {"_nonempty", "_clean_group", "normalize_entry"}, server_config,
+    )
+    state.server_entries = None
+    state.server_targets = []
 
     def load_config() -> Any:
         state.group_loads += 1
@@ -139,6 +147,8 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
         else:
             assert persistent.held
             state.waits.append((action, wait))
+            entry = server_config["normalize_entry"](request["entry"], request.get("group"))
+            state.server_targets.append((action, entry))
             if action == "get":
                 if state.read_mode == "lost":
                     return None
@@ -147,12 +157,19 @@ def password(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Simp
                 if state.read_mode == "invalid-value":
                     return {"ok": True, "value": 7, "generation": 7}
                 response = {
-                    "ok": True, "value": state.server_value, "generation": state.read_generation,
+                    "ok": True,
+                    "value": (
+                        state.server_entries[entry] if state.server_entries is not None
+                        else state.server_value
+                    ),
+                    "generation": state.read_generation,
                 }
             else:
                 assert action == "set-password"
                 if state.reply_mode not in ("refused", "pending"):
                     state.server_value = request["password"]
+                    if state.server_entries is not None:
+                        state.server_entries[entry] = request["password"]
                 if state.reply_mode == "lost":
                     return None
                 if state.reply_mode == "invalid":
@@ -351,12 +368,21 @@ def test_password_captured_no_group_never_reloads_a_new_default(
 ) -> None:
     password.context.group = password.loaded_group = None
     password.gain_group = True
+    password.cache.pending = {"operation": 1}
+    password.reply_mode = "generation-missing"
+    password.server_entries = {"direct": "fixture-old", "Other/direct": "fixture-other"}
     assert password.cli.cmd_set_password(arguments()) == 0
     output = capsys.readouterr()
     assert output.out == "fixture-updated\n" and not output.err
     assert password.loaded_group == "Other" and password.group_loads == 0
     assert all(event[1] == "direct" for event in password.cache.events)
     assert password.cache.pending is None and password.cache.value == "fixture-candidate"
+    assert password.server_targets == [
+        ("get", "direct"), ("set-password", "direct"), ("get", "direct"),
+    ]
+    assert password.server_entries == {
+        "direct": password.cache.value, "Other/direct": "fixture-other",
+    }
 
 
 def test_password_mixed_capabilities_pinned_and_unbound_peers_keep_explicit_baseline(

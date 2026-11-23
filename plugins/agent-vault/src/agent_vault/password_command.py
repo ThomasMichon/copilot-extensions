@@ -82,6 +82,8 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
             return 1
     persistent = get_cache()
     cache_entry = config.normalize_entry(args.entry, context.group or "")
+    operation_entry = "/" + cache_entry
+    group = context.group or ""
     with persistent.replacement_lock():
         legacy = legacy_cache_entry(args.entry, cache_entry)
         if legacy is not None:
@@ -89,7 +91,8 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
         pending = persistent.pending_replace(cache_entry, "password")
         if pending is not None:
             recovery = cli.send_command({
-                "action": "get", "entry": args.entry, "field": "password", "refresh": True,
+                "action": "get", "entry": operation_entry, "group": group,
+                "field": "password", "refresh": True,
             }, timeout=cli.PASSWORD_MUTATION_TIMEOUT)
             generation = _generation(recovery) if recovery else None
             if (
@@ -112,7 +115,8 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
             print("Error: could not journal the caller's password rotation", file=sys.stderr)
             return 2
         response = cli.send_command({
-            "action": "set-password", "entry": args.entry, "password": password,
+            "action": "set-password", "entry": operation_entry, "group": group,
+            "password": password,
         }, timeout=cli.PASSWORD_MUTATION_TIMEOUT)
         if response and (response.get("ok") or response.get("committed")):
             cache_updated = True
@@ -120,7 +124,8 @@ def _transaction(args: Any, context: ResolvedVault) -> int:
                 generation = response.get("generation")
                 if generation is None:
                     authoritative = cli.send_command({
-                        "action": "get", "entry": args.entry, "field": "password", "refresh": True,
+                        "action": "get", "entry": operation_entry, "group": group,
+                        "field": "password", "refresh": True,
                     }, timeout=cli.PASSWORD_MUTATION_TIMEOUT)
                     confirmed_generation = _generation(authoritative) if authoritative else None
                     cache_updated = bool(

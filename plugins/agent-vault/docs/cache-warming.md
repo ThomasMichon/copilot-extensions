@@ -273,7 +273,10 @@ original transaction conditions.
 The combined capability also gates source projection on those reads, so a
 partial peer cannot erase an unsupported transaction warning. A captured absent
 group remains explicit during local cache normalization, without reloading a
-new default.
+new default. Recovery, mutation and confirmation send the captured canonical
+entry as an absolute path, together with the captured group (or an explicit
+empty group). A different service default cannot redirect the operation while
+the caller settles another entry's journal.
 
 Unknown mutation replies leave the journal pending without replay or alternate
 transport. Malformed consumed result flags or recovery values cannot become

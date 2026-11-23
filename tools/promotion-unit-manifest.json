@@ -13351,8 +13351,8 @@
   "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py": "2d4cfa78bcab58e64cff3f2f708423d17f673909134f6a7541fe63f6567a4cc9",
   "tools/promotion_unit_tests/test_vault_legacy_attachments.py": "457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6",
   "tools/promotion_unit_tests/test_installer_pip_index_windows.py": "7a43ef242d83aa220e386debffbd807ba5c683ec135824969f500dbc5c0da8af",
-  "plugins/agent-vault/src/agent_vault/password_command.py": "2b269df2fa8da82c96ffb70430f6d2bdd4ccdf6bdc76b036940b3a03006f70fd",
-  "tools/promotion_unit_tests/test_vault_password_selection.py": "e30913d7793a9de78973da378d6107c4b954c24b70d8058e9f5257fc425f0580"
+  "plugins/agent-vault/src/agent_vault/password_command.py": "0ce84e2c10788f8d901c4f60e3da780416c5787518f84566f6b03061426b5beb",
+  "tools/promotion_unit_tests/test_vault_password_selection.py": "d0e058557bb34aa12d97caad57be8676779c3a70a87bcd99b171eb739551f14a"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",
