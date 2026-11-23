@@ -6699,6 +6699,90 @@ This changes no grouping/runtime behavior. Fixture filenames containing
 qualify preparation, process/thread lifecycle, installation, release, rollout,
 custody, controlled whole-flow saving or broader parent completion.
 
+Exact-head approval `6017609317` names
+`850e077c3f6de2760aae9ac79f236674c6ed8c89`, with no active review issues,
+discussion comments or review threads and complete pagination. Managed
+publication first preserves concurrent #14192 at
+`f6c2e83a86d8098dab55a12bbbe02db8201eed59`; its three changed files are
+outside the admitted inputs, the manifest equals the initial candidate and
+all 48 observed Python sources remain unchanged.
+
+Fresh CI `45127477163`, attempt one, unit job `137535048248`, executes all
+9,559 cases with 55 deselections in 194.52 pytest / 216.533 packet seconds.
+The lookup takes 540 ms; execution reports `mode=executed`, origin run
+`45127477163`, attempt one, identity
+`6f5a16cea53bbddec125f93d1232dbc25fba34aa9010d08712d3073596afe9f1`
+and packet digest
+`169c007980bb7abb04ede13d0666e79d426d95e2cf799d325d56281aba01d0c0`.
+Three-file artifact `14795953465` (3,875,883 bytes), guards `137535048621`,
+required aggregate `137536714837` and trusted metadata `45127477685` pass.
+Seven fresh verifier reads and complete final review/thread/head/hold/parent
+fences precede normal managed merge. No retry, metadata edit, extra execution
+or deadline waiver is used.
+
+Source #14195 merges at `2026-11-23T07:03:22Z` as
+`71421f9b3de099952ab5dcd7235de5f9931d06ff`. Independent readback confirms merged
+state and open parent #6237, and managed source pull-forward succeeds.
+Whole-tree composition preserves the reviewed five-file change and every
+other blob from concurrent #14194 and #14196 through
+`9846c548b00f23e5cc063b5dfef6f5001e0cd7d8`. The peers add three cases and
+six existing source rebindings: 9,562 nodes, 1,350 sources, 486 targets and
+1,020,833 bytes. Exact manifest composition, preceding order, all source
+bindings and 89 helpers verify; all 48 initially observed Python sources
+remain unchanged. Earlier-head CI is not execution evidence for those later
+peer deltas; the next functional slice needs fresh full CI. The actual
+parent Goal, Plan, own leaf and Validation Plan are reread before resolving
+only this five-case leaf. Separate data/native-load/thread and assessment-
+phase refusals, release, owner, custody and completion gates remain open.
+
+### November 23 original isolated-environment controls
+
+The adapter selects five complete original functions as five cases: detach
+mutable roots, validate optional file overrides, preserve explicit synthetic
+host state without session affinity, require explicit tiers and reject an
+escaped temporary root. All original functions, the autouse scratch fixture
+and assertions remain unchanged. Collection compares 267 original cases with
+five adapter cases, verifies exact function/fixture objects and confirms the
+selected functions are unparametrized. The other 102 functions / 262 cases
+remain excluded before execution.
+
+Initial unchanged effect/source guarding passes all five in 2.70 pytest /
+3.766 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads and all fifteen phase reports. Each case executes its real
+environment owner; both containment-validation cases also execute the real
+portfolio guard. Synthetic maps and private fixture directories do not read
+real credentials or qualify host-state/native execution.
+
+Only the adapter source binding is added. The candidate contains 9,567 nodes,
+1,351 sources and unchanged 486 production targets in 1,021,416 one-space
+v2 bytes. Previous order/hashes, 89 helper decisions, 300-second bound and
+1 MiB cap remain. Local observations are not full-packet qualification:
+normal source pull-forward, strict checks, committed release intent,
+exact-head review and fresh complete Linux CI remain required.
+
+The normal `origin/dev` strict check initially compares the older local tree
+against two newly merged peer changes and reports their reverse deltas. The
+adapter itself passes Linux/Windows strict checks. Missing local checker
+environments are prepared through the ordinary checker; peer typing
+diagnostics are not waived or repaired here. Commit and normal managed
+pull-forward must restore the correct complete comparison before publication.
+Normal managed pull-forward preserves #14193, #14198 and #14200. The last
+peer replaces five checkout-disposition cases with four and rebinds two
+existing sources. Exact parent-plus-five-case composition yields 9,566 nodes,
+1,351 sources, 486 targets and 1,021,330 bytes. All 48 initially observed
+sources remain unchanged; full bindings and 89 helpers verify. The normal
+`origin/dev` strict ratchet then passes on Linux and Windows. No base repin,
+checker exception, runtime repair or CI bypass is used. Local observations
+of these five cases are not evidence for the peers' changed cases; fresh
+full-packet CI must qualify the complete publication head.
+
+The scheduled owner check finds #1303 and #3336 still open with unchanged
+39/47 comments, no new comments since 06:43 UTC and both exact requests
+unchanged. Neither weekly Payload CWD removal nor trusted one-scan integration
+has an accepted seam. No new keyed controller receipt is available; the
+retained pre-admission terminal result is not replayed. The bounded follow-up
+schedule continues; existing control, release and custody holds remain.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

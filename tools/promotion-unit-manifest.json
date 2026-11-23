@@ -3,6 +3,16 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_environment_selection_units.py",
+   [
+    "test_default_environment_redirects_all_mutable_roots",
+    "test_optional_file_override_is_validated_only_when_present",
+    "test_host_state_opt_in_preserves_credentials_not_session_affinity",
+    "test_host_state_requires_explicit_tiers_at_environment_boundary",
+    "test_host_state_still_fails_closed_on_escaped_temp"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_independent_selection_units.py",
    [
     "test_bridge_native_and_performance_files_have_independent_groups",
@@ -11705,6 +11715,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_environment_selection_units.py": "b3ebe9e24b5f77bcf57667f597d65e03c6b8ec7d0e98dd44137132d5cfc838ff",
   "tools/promotion_unit_tests/test_original_runner_independent_selection_units.py": "a6f493b99a9b2464895cc2ab3ae2c1b3f474e4137ecedb49bdd9d08fcc44870f",
   "tools/promotion_unit_tests/test_original_runner_explicit_selection_units.py": "11329efc56424d63a05f19c36aeafa49f9bf6d54754cd511000a3d5fee93d529",
   "tools/promotion_unit_tests/test_original_runner_file_selection_units.py": "e7b03cc29960003eb34d2fae984424b37ad38cb5dc07cef499d5d75ab4ed2a08",
