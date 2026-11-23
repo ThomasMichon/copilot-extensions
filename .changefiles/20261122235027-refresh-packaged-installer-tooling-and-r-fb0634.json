@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh packaged installer tooling and resource declarations used by source preparation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

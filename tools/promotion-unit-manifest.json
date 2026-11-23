@@ -11873,7 +11873,7 @@
   "plugins/agent-dispatch/scripts/install.sh": "32a8f13a57b544f5ad107203042b90a0e9438dce73b7ad2ef40325415d2af97e",
   "plugins/agent-dispatch/scripts/install.ps1": "86b8526515b8dff99c0456d7b388af4a98b99a21fdbe1cc23b82df8e74e41b63",
   "plugins/agent-vault/plugin.json": "3f191fb32f9763f4c5717ea9e711c467e9746e182dd806b600fb1d4f00ca99c4",
-  "plugins/agent-vault/scripts/install.sh": "f1651b792a47c2d97c5d645c2c848140cf06824f626b051fa135b7e12fa657a3",
+  "plugins/agent-vault/scripts/install.sh": "008e5dcf449145683ffeabbfd94788f53570690bdd391a9171fd3a2bf092dc6d",
   "plugins/agent-vault/scripts/install.ps1": "726d2051a4201d27f0be69471db78cc7e252b048978e3fd71671d09fc9d74a12",
   "plugins/budget-guidance/plugin.json": "a6d744a5409791ce2c6a765af4fa5cdb8b6e19495825435eca50b2dcb7cdb530",
   "plugins/budget-guidance/scripts/install.sh": "2c09878eb272a30f64a0dc5e7b2b308c52502b82ab26166bec979a5e01e8b0e3",

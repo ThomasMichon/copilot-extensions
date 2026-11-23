@@ -606,7 +606,7 @@ _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
     local uv_cmd="${1:?selected uv command required}" py idx site_prefix=""
     local helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
-    if [[ ! -f "$helper_dir/installer_pip_index.py" || ! -f "$helper_dir/bootstrap-uv.sh" ]]; then
+    if [[ ! -f "$helper_dir/installer_pip_index.py" ]]; then
         _fail 'The index reader is not prepared; use the owning source-preparation flow.'
         return 1
     fi
@@ -616,8 +616,7 @@ _ensure_uv_index() {
         site_prefix="$CONDA_PREFIX"
     fi
     py="$(_bootstrap_python)" || return 1
-    . "$helper_dir/bootstrap-uv.sh" || return 1
-    idx="$(invoke_uv_bootstrap_environment "$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
         --uv "$uv_cmd" --site-prefix "$site_prefix" </dev/null)" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }

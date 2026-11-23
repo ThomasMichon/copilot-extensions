@@ -109,7 +109,9 @@ def test_setup_bootstrap_never_discovers_ambient_python(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX index bridge")
 @pytest.mark.parametrize("composed", [False, True])
-@pytest.mark.parametrize("setting", ["file", "environment", "uv-override", "malformed"])
+@pytest.mark.parametrize("setting", [
+    "file", "environment", "uv-override", "malformed", "uv-project", "uv-isolated",
+])
 def test_index_bridge_reads_canonical_policy_without_ambient_pip(
     tmp_path: Path, composed: bool, setting: str,
 ) -> None:
@@ -129,6 +131,25 @@ def test_index_bridge_reads_canonical_policy_without_ambient_pip(
         expected = env["PIP_INDEX_URL"] = "https://environment.invalid/simple"
     elif setting == "uv-override":
         expected = env["UV_DEFAULT_INDEX"] = "https://uv.invalid/simple"
+    elif setting in {"uv-project", "uv-isolated"}:
+        env.pop("UV_CONFIG_FILE")
+        env["PIP_INDEX_URL"] = "https://environment.invalid/simple"
+        if setting == "uv-project":
+            selected = tmp_path / "selected project"
+            selected.mkdir()
+            (selected / "pyproject.toml").write_text(
+                '[[tool.uv.index]]\nurl="https://project.invalid/simple"\ndefault=true\n',
+                encoding="utf-8",
+            )
+            env["UV_PROJECT"] = str(selected)
+            expected = ""
+        else:
+            (Path(env["HOME"]) / "pyproject.toml").write_text(
+                '[[tool.uv.index]]\nurl="https://cwd.invalid/simple"\ndefault=true\n',
+                encoding="utf-8",
+            )
+            env["UV_ISOLATED"] = "1"
+            expected = env["PIP_INDEX_URL"]
     installer = payload / "scripts" / "install.sh"
     script = (
         "set -uo pipefail\nSCRIPT_DIR=" + shlex.quote(str(installer.parent))
