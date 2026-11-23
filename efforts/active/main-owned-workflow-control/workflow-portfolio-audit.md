@@ -6671,6 +6671,33 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original explicit-file selection controls
+
+The adapter selects four complete original functions as eleven cases:
+sorted/deduplicated explicit-file selections, five invalid relative paths,
+absolute-path rejection and four invalid CLI target combinations. Original
+functions, the autouse scratch fixture, own parameter rows, full IDs and
+assertions remain unchanged. Collection compares 267 original cases with
+eleven adapter cases, exact function/fixture/own-mark-row objects and equal
+cross-module parameter values/types. The other 103 functions / 256 cases
+remain excluded before execution, including symlink/native paths, preparation,
+actual runners, threaded cleanup and subprocess execution.
+
+Initial unchanged effect/source guarding passes all eleven in 1.51 pytest /
+2.219 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all thirty-three phase reports and actual runner-owner call-phase
+coverage for every case. The four CLI rows stop at argument validation before
+limits, discovery, dependency preparation or leases. Add only one adapter
+binding and no production target: 9,554 nodes, 1,349 sources and unchanged
+486 targets in 1,019,988 one-space v2 bytes. Preceding entries/order/hashes,
+89 helpers, 1 MiB cap and 300-second bound remain intact.
+
+Strict Linux/Win32 changed-file admission and targeted Ruff pass. Committed
+release intent, exact-head review and fresh full-packet CI remain required.
+This is a source selection census, not changed CLI/runtime behavior or
+qualification of preparation, actual execution, native installation, release,
+rollout, custody, controlled whole-flow saving or broader parent completion.
+
 ### November 23 original private-fixture file-selection controls
 
 The adapter selects three complete original functions as ten cases:
@@ -6700,6 +6727,38 @@ runner, preparation, process, native, installation, publication or custody
 behavior. Private fixture source files are not subprocess execution or native
 acceptance. No rollout, controlled whole-flow saving or broader parent
 completion is claimed.
+
+Exact-head approval `6017313996` names
+`c6650f4ac1ded0efa4191117950877d4104c280a`, with no active review issues,
+discussion comments or review threads and complete pagination. Fresh CI
+`45122984057`, attempt one, unit job `137520802480`, executes all 9,543
+cases with 55 deselections in 176.64 pytest / 199.736 packet seconds.
+The lookup takes 540 ms; execution reports `mode=executed`, origin run
+`45122984057`, attempt one, identity
+`55410174bc9e57f94964ffe473dc52be3fe2c07acc9f54ed3f0aca5c3afb79c2`
+and packet digest
+`2b98dbc0e52eb52b3f30bddd247afab34ee1c150cac4642733b299d40128e8fb`.
+Three-file artifact `14794018512` (3,864,874 bytes), guards `137520802079`,
+required aggregate `137522736228` and trusted metadata `45122979567` pass.
+Seven fresh verifier reads and complete final review/thread/head/hold/parent
+fences precede normal managed merge. No retry, metadata edit, extra execution
+or deadline waiver is used.
+
+Source #14188 merges at `2026-11-23T06:24:30Z` as
+`256e09550bcfccf29d1981d24e0601144eb86254`. Independent readback confirms merged
+state and open parent #6237, and managed source pull-forward succeeds.
+Whole-tree composition preserves the reviewed five-file change and every
+other blob from concurrent #14127 at
+`19f4e58eb83084e8be20e68172fdd05941e2f47c`, including its one existing
+`status_monitor_cli.py` rebinding. Counts and bytes remain 9,543 nodes,
+1,348 sources, 486 targets and 1,018,924 bytes; exact manifest composition,
+preceding order, all source bindings and 89 helpers verify. All 48 initially
+observed Python sources remain unchanged. Earlier-head CI is not execution
+evidence for the later peer delta; the next functional slice needs fresh
+full CI. The actual parent Goal, Plan, own leaf and Validation Plan are reread
+before resolving only this ten-case leaf. Separate data/native-load/thread
+and assessment-phase refusals, release, owner, custody and completion gates
+remain open.
 
 ### November 23 original pure capture-cohort selection controls
 

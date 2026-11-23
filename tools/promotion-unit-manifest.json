@@ -3,6 +3,22 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_explicit_selection_units.py",
+   [
+    "test_explicit_file_selection_avoids_unrelated_collection",
+    "test_explicit_file_selection_refuses_invalid_paths[../test_outside.py]",
+    "test_explicit_file_selection_refuses_invalid_paths[tests/../test_outside.py]",
+    "test_explicit_file_selection_refuses_invalid_paths[tests/test_missing.py]",
+    "test_explicit_file_selection_refuses_invalid_paths[tests/helper.py]",
+    "test_explicit_file_selection_refuses_invalid_paths[tests/test_directory.py]",
+    "test_explicit_file_selection_refuses_absolute_path",
+    "test_explicit_file_selection_requires_one_execution_target[args0]",
+    "test_explicit_file_selection_requires_one_execution_target[args1]",
+    "test_explicit_file_selection_requires_one_execution_target[args2]",
+    "test_explicit_file_selection_requires_one_execution_target[args3]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_file_selection_units.py",
    [
     "test_default_discovery_honors_pytest_directory_patterns_but_not_file_names[False-[\"native\", \"build_*\", \"test_default.py\"]]",
@@ -11677,6 +11693,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_explicit_selection_units.py": "11329efc56424d63a05f19c36aeafa49f9bf6d54754cd511000a3d5fee93d529",
   "tools/promotion_unit_tests/test_original_runner_file_selection_units.py": "e7b03cc29960003eb34d2fae984424b37ad38cb5dc07cef499d5d75ab4ed2a08",
   "tools/promotion_unit_tests/test_original_capture_cohort_selection_units.py": "e7490844522f4c23bb428b5147a2a7d81da6813670c8e86db13a204bb50a3f3d",
   "tools/test_capture_cohorts.py": "efba4b3f3c52e09c5e37093df16786906999705d0fd4c22b2025d3487c135c85",
