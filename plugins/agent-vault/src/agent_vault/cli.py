@@ -577,21 +577,9 @@ Write-Output $box1.Text
 
 
 def cmd_has(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_has
 
-    resp = send_command({"action": "has", "entry": args.entry}, timeout=None)
-    if resp and resp.get("ok"):
-        if resp["exists"]:
-            print("true")
-            return 0
-        print("false")
-        return 1
-
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_has(args)
 
 
 def cmd_search(args: Any) -> int:
