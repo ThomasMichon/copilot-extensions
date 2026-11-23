@@ -17,6 +17,58 @@ ROOT = Path(__file__).resolve().parents[1]
 PROVIDER = ROOT / "libs/installer-engine/bootstrap-uv.ps1"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX runtime selector")
+@pytest.mark.parametrize("outcome", ["selected", "different", "missing", "failed"])
+def test_posix_runtime_selection_preserves_the_completed_environment(
+    tmp_path: Path, outcome: str,
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    expected = tmp_path / "completed runtime/bin/python"
+    expected.parent.mkdir(parents=True)
+    expected.touch(mode=0o700)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    calls = tmp_path / "calls"
+    if outcome != "missing":
+        uv = tools / "uv"
+        uv.write_text(
+            "#!/bin/sh\n"
+            '[ -z "${UV_PYTHON-}${UV_NO_MANAGED_PYTHON-}${VIRTUAL_ENV-}${UV_WORKING_DIR-}${UV_CONFIG_FILE-}" ] || exit 95\n'
+            '[ "$UV_NO_CONFIG" = 1 ] || exit 94\n'
+            'printf "%s\\n" "$@" > "$CALLS"\n'
+            '[ "$OUTCOME" != failed ] || exit 42\n'
+            '[ "$OUTCOME" != different ] || { printf "/different/python\\n"; exit; }\n'
+            'printf "%s\\n" "$EXPECTED"\n',
+            encoding="utf-8",
+        )
+        uv.chmod(0o700)
+    result = subprocess.run(
+        [bash, "-c", '. "$1"; resolve_uv_runtime_python "$2"; status=$?; '
+         '[ "$UV_CONFIG_FILE" = relative.toml ] && [ "$UV_NO_CONFIG" = false ] || exit 99; '
+         'exit "$status"', "runtime", str(PROVIDER.with_suffix(".sh")), str(expected)],
+        capture_output=True, text=True, timeout=15,
+        env={
+            **os.environ, "PATH": str(tools), "CALLS": str(calls), "OUTCOME": outcome,
+            "EXPECTED": str(expected), "UV_PYTHON": "foreign", "UV_NO_MANAGED_PYTHON": "1",
+            "VIRTUAL_ENV": "foreign", "UV_WORKING_DIR": "foreign",
+            "UV_CONFIG_FILE": "relative.toml", "UV_NO_CONFIG": "false",
+        },
+    )
+    assert result.returncode == {"selected": 0, "different": 1, "missing": 127, "failed": 42}[outcome]
+    assert result.stdout == (str(expected) + "\n" if outcome == "selected" else "")
+    if outcome == "missing":
+        assert not calls.exists()
+        assert "prepare the command prerequisites" in result.stderr
+    else:
+        assert calls.read_text().splitlines() == [
+            "python", "find", "--no-project", "--managed-python", "--no-python-downloads",
+            str(expected),
+        ]
+    if outcome == "different":
+        assert "did not select the addressed application runtime" in result.stderr
+
+
 @pytest.mark.parametrize("operation", ["Inspect", "Prepare"])
 def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
     tmp_path: Path, operation: str,
