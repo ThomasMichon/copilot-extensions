@@ -92,7 +92,7 @@ def _gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, str
     root = home / ".agent-dispatch"
     root.mkdir(parents=True)
     shutil.copytree(PLUGIN / "src", payload / "src")
-    for name in ("runtime-gate.sh", "action_controls.py", "bootstrap-check.sh"):
+    for name in ("runtime-gate.sh", "action_controls.py", "bootstrap-check.sh", "bootstrap-python.sh"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     (payload / "plugin.json").write_text('{"name":"agent-dispatch"}')
     shutil.copyfile(
@@ -119,7 +119,9 @@ def _gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, str
     selector = scripts / "_bootstrap_python" / "bootstrap-uv.sh"
     selector.parent.mkdir()
     selector.write_text(
-        'resolve_uv_runtime_python() { printf "%s\\n" "$1"; }\n', encoding="utf-8",
+        'resolve_uv_runtime_python() { printf "%s\\n" "$1"; }\n'
+        f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {sys.executable!r}; }}\n",
+        encoding="utf-8",
     )
     (scripts / "resolve-runtime.sh").write_text(
         "# Trace contract: normal/read-only/ready-v1\n"
@@ -255,7 +257,7 @@ def _global_gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[s
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     binary = root / "bin"
     binary.mkdir()
-    for name in ("runtime-gate.sh", "resolve-runtime.sh"):
+    for name in ("runtime-gate.sh", "resolve-runtime.sh", "bootstrap-python.sh"):
         shutil.copyfile(gate.with_name(name), binary / name)
     shutil.copytree(gate.parent / "_bootstrap_python", binary / "_bootstrap_python")
     shutil.copytree(gate.parent / "installation-context", binary / "installation-context")
@@ -371,14 +373,17 @@ def test_late_policy_refusal_updates_owned_provision_status(
     if status_unwritable:
         tools = tmp_path / "reader-bin"
         tools.mkdir()
-        python = tools / "python3"
+        python = tools / "bootstrap-test-python"
         python.write_text(
             "#!/bin/bash\n"
             f"if [[ -f {str(status)!r} ]]; then chmod 400 {str(status)!r}; fi\n"
             f'exec {sys.executable!r} "$@"\n',
         )
         python.chmod(0o755)
-        env["PATH"] = str(tools) + os.pathsep + env["PATH"]
+        (gate.parent / "_bootstrap_python" / "bootstrap-uv.sh").write_text(
+            f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {str(python)!r}; }}\n",
+            encoding="utf-8",
+        )
     try:
         result = subprocess.run(
             [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,

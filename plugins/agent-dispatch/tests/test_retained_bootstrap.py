@@ -31,6 +31,7 @@ def test_binstub_publication_retains_managed_bootstrap(tmp_path: Path, shell: st
     managed_root = subprocess.check_output([uv, "python", "dir"], text=True, timeout=15).strip()
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copyfile(fixture.SCRIPTS / "bootstrap-python.sh", scripts / "bootstrap-python.sh")
     shutil.copytree(
         fixture.SCRIPTS / "installation-context", scripts / "installation-context",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
@@ -83,7 +84,7 @@ def test_binstub_publication_retains_managed_bootstrap(tmp_path: Path, shell: st
             + fixture.function("sh", "_runtime_admission_preflight")
             + fixture.function("sh", "deploy_binstub")
             + '\ndeploy_binstub\ndeploy_binstub\n'
-            + 'bash "$INSTALL_DIR/bin/_bootstrap_python/select.sh"\n',
+            + '. "$INSTALL_DIR/bin/bootstrap-python.sh"\ndispatch_bootstrap_python\n',
             encoding="utf-8",
         )
         command = [host, str(entry)]
@@ -113,4 +114,5 @@ def test_binstub_publication_retains_managed_bootstrap(tmp_path: Path, shell: st
     assert not result.stderr
     for path in outputs:
         assert (root / "bin" / path.relative_to(scripts)).read_bytes() == path.read_bytes()
+    assert (root / "bin/bootstrap-python.sh").read_bytes() == (scripts / "bootstrap-python.sh").read_bytes()
     assert not (root / "bin/_bootstrap_python/_bootstrap_python").exists()
