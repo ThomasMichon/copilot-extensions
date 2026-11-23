@@ -3674,6 +3674,26 @@ authorizes critical main-path acceptance or a bounded administrative change.
   1 MiB cap and 300 seconds. Ruff and normal changed-code Linux/Windows strict
   checks pass; a worktree-manager patch changefile records release intent.
   Fresh full CI, exact-head review, normal merge and parent readback remain.
+  Initial #14253 head `787637c562ded9bf9545a6d3bbf80e23562cd667`
+  receives exact approval and fresh attempt-one CI `45190875919` executes
+  all 9,836 cases in 142.976 packet seconds with a complete three-file
+  upload. The final fence then observes a conflicting Dev-base advance,
+  so that head is not merged. A retained backup and safe managed abort
+  precede the understood target-union rebase onto
+  `ce6d8b9c1fed4dfe862986736116df2c00c11a5e`. Preserve the peer's current
+  witness rename/new case, all peer bindings/targets and our exact six
+  cases/two inputs. All four observed inputs remain unchanged. Actual
+  combined totals are 9,837 / 1,383 / 497 / 1,001,889 bytes, with 89 helpers
+  and existing bounds retained. The prior CI is not combined-head
+  qualification; fresh review and complete CI remain required.
+- [ ] Retain the original retirement early-refusal input boundary: two
+  prospective original functions, provisionally six cases, use the unchanged
+  environment fixture that copies actual `tools/test-environment-capabilities.json`.
+  That input exists but is outside the current explicit build-data contract;
+  `relative_file` refuses it. No retirement module is imported/called, test
+  collected/executed, adapter written or packet admitted. Revisit only through
+  a separately authorized input-contract decision, not a synthetic
+  replacement, omitted input, preload, original/fixture edit or guard exception.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
