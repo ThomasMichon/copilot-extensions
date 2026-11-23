@@ -218,6 +218,11 @@ ruleset status contexts across all pages, then requires every declared context
 and configured integration to report a pass. Integration-bound checks need
 exact-head check-run evidence from that app; an unverifiable legacy status
 cannot substitute for a bound check run.
+A complete all-success integration inventory remains valid. Superseding
+retained non-success requires each current required result's link to identify
+one successful check run on that head from an expected app. Missing or
+ambiguous selection identity refuses supersession; an arbitrary same-name
+success cannot replace independent required producers or erase failed history.
 Absent, pending, unsuccessful or unreadable evidence refuses the merge even if
 all *reported* checks look green. Optional checks do not become required.
 The verified PR head is pinned with `--match-head-commit`, and a head/base change
