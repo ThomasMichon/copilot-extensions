@@ -1,4 +1,10 @@
-"""Preserve checkout-local history and unclassified ignored data during disposal."""
+"""Preserve checkout-local history and submodule data during disposal.
+
+Ordinary Git-ignored content (build output, caches, virtual environments) is
+disposable with its checkout and never holds removal on its own; explicitly
+preserved homes such as ``.effort-agenda`` are protected whether or not Git
+ignores them.
+"""
 
 from __future__ import annotations
 
@@ -104,16 +110,6 @@ def preservation_reason(checkout: str | Path) -> str | None:
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         environment["GIT_NO_LAZY_FETCH"] = "1"
         deadline = time.monotonic() + 5
-        ignored = _git_observation(
-            root, git, ["ls-files", "--sparse", "--others", "--ignored", "--exclude-standard",
-                        "--directory", "--no-empty-directory", "-z"],
-            environment, deadline, 65536,
-        )
-        if ignored:
-            return (
-                "checkout contains ignored data without completed producer disposition; "
-                "retain it until its artifact owner preserves or explicitly reclaims that data"
-            )
         index = _git_observation(
             root, git, ["ls-files", "--sparse", "--format=%(objectmode)%x09%(path)", "-z"],
             environment, deadline, 32 * 1024 * 1024,
@@ -138,5 +134,5 @@ def preservation_reason(checkout: str | Path) -> str | None:
                 if reason := _submodule_reason(root, name):
                     return reason
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        return "cannot classify ignored checkout data; retain it for its producer"
+        return "cannot inspect the checkout index; retain the checkout until its owner reconciles preservation"
     return None

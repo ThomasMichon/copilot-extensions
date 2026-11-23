@@ -17,7 +17,19 @@ CONTRACT = "agent-vault.cache-warm-selection"
 VERSION = 1
 RECEIPT_FIELD = "request_selection_version"
 MAX_ROOT_LENGTH = 4096
-READ_ACTIONS = frozenset({"get", "has"})
+READ_ACTIONS = frozenset({"get", "has", "search", "list", "ls", "show"})
+MUTATION_ACTIONS = frozenset({"add", "set-username", "remove", "rm", "move", "mv", "copy", "cp"})
+_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS
+
+
+def capabilities() -> dict[str, object]:
+    """Keep the original read generation while explicitly naming added actions."""
+    return {
+        "cache_warm_selection_versions": [VERSION],
+        "cache_warm_read_selection_versions": [VERSION],
+        "cache_warm_read_selection_actions": sorted(READ_ACTIONS),
+        "cache_warm_selection_actions": sorted(_RECEIPT_ACTIONS),
+    }
 
 
 @dataclass(frozen=True)
@@ -108,11 +120,11 @@ def unlocked(request: dict[str, Any], warmed: WarmState) -> dict[str, Any]:
     }
 
 
-def read_result(
+def request_result(
     service: VaultService, request: dict[str, Any], response: dict[str, Any],
 ) -> dict[str, Any]:
-    """Acknowledge read-source handling without changing the credential outcome."""
-    if request.get("action") not in READ_ACTIONS or FIELD not in request:
+    """Acknowledge source handling without changing the operation outcome."""
+    if request.get("action") not in _RECEIPT_ACTIONS or FIELD not in request:
         return response
     return {
         **response,

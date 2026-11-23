@@ -575,8 +575,7 @@ class VaultService:
             "version": _PROCESS_VERSION,
             "runtime_generation": PROCESS_GENERATION,
             "generation_protocol": PROTOCOL,
-            "cache_warm_selection_versions": [cache_warm_selection.VERSION],
-            "cache_warm_read_selection_versions": [cache_warm_selection.VERSION],
+            **cache_warm_selection.capabilities(),
             "accepting_work": self._runtime_can_work,
             "key_attachment_import_versions": (
                 [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []

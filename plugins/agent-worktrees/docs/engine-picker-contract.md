@@ -435,17 +435,15 @@ resident write transport. It is not a real Copilot acceptance test.
 
 ### SSH-first terminal launch
 
-Manager requests `resolve --json --machine ... --require-terminal-handoff`.
-The selected local engine resolves configuration and returns
-`remote_terminal_handoff_version: 1`, the SSH alias and a shell-safe ordinary
-target command. It does not contact the target, run remote policy checks,
-allocate a remote worktree or stage a prompt. Unsupported local engines reject
-the required flag before effects; Manager never retries the old admission path.
-The packaged target command carries `--require-foreground-completion`.
-An older target rejects that syntax in the SSH terminal before creation,
-without an originating preflight, admission exchange or weaker retry.
-This fence is target-local: combining it with `--machine` refuses before remote
-resolution rather than silently dropping it in a legacy remote plan.
+Manager reads the selected project's machine configuration and packages the
+SSH alias and shell-safe ordinary target command itself. It does not call the
+selected local engine, contact the target, run remote policy checks, allocate a
+remote worktree or stage a prompt. Existing New/anchor/Resume, mux and staged-seed
+syntax remains usable across independently updated Manager and engine versions.
+No new required launch flag or compatibility RPC is sent to either engine.
+The optional engine-side `resolve --json --machine ... --require-terminal-handoff`
+interface remains available to callers that already use it; Manager does not
+depend on that interface or retry the legacy admission path.
 
 The in-place Picker has exited before `ssh -t -o ConnectTimeout=10` takes its
 terminal. The target's project command owns creation, current policy checks,
@@ -454,8 +452,8 @@ The complete selected options travel to that command; POSIX arguments are
 quoted and PowerShell commands encoded. A physical machine plus environment
 and an execution alias normalize through the existing machine-transport owner.
 Registered opaque keys and SSH profile names take precedence over suffix
-inference. Manager drops redundant environment context only when that owner's
-registry resolution proves the same destination; it never rewrites an alias.
+inference. Machine/environment context selects the SSH profile locally and is
+not sent to the already-selected target.
 Supported detached presentation retains its separate terminal lifetime.
 Recovery fast-path arguments are refused for this packaged flow because the
 legacy shell preprocessors bypass ordinary target resolution for them. Run

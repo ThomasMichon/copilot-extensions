@@ -1,5 +1,9 @@
 """Native bootstrap routing, opt-outs and skew without a real installer."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from importlib import import_module
 import json
 import math
 import os
@@ -8,23 +12,27 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
-from .test_bootstrap_check_reconcile_always_on import (
-    _BASH, _clean_env, _make_fake_install, _make_fake_plugin,
-)
+_bootstrap = import_module(".test_bootstrap_check_reconcile_always_on", __package__)
+_BASH = cast(str | None, _bootstrap._BASH)
+_clean_env = cast(Callable[[dict[str, str]], dict[str, str]], _bootstrap._clean_env)
+_make_fake_install = cast(Callable[[Path, str], Path], _bootstrap._make_fake_install)
+_make_fake_plugin = cast(Callable[[Path, str], Path], _bootstrap._make_fake_plugin)
 
 
-def native_bootstrap(plugin, project, native_directory):
+def native_bootstrap(plugin: Path, project: Path, native_directory: Path) -> list[str]:
     script = plugin / "scripts" / ("bootstrap-check.ps1" if os.name == "nt" else "bootstrap-check.sh")
     if os.name != "nt":
         if _BASH is None:
             pytest.skip("native Bash is unavailable")
         return [_BASH, str(script)]
     shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    def quote(value: Path) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
     return [
         str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
         f"Set-Location -LiteralPath {quote(project)}; "
@@ -35,7 +43,9 @@ def native_bootstrap(plugin, project, native_directory):
 
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell interpreter floor")
 @pytest.mark.parametrize("kind,minimum", [("wheel", 11), ("source", 10)])
-def test_native_profile_readiness_selects_the_required_python_floor(tmp_path, kind, minimum):
+def test_native_profile_readiness_selects_the_required_python_floor(
+    tmp_path: Path, kind: str, minimum: int,
+) -> None:
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     project.mkdir()
@@ -75,7 +85,9 @@ def test_native_profile_readiness_selects_the_required_python_floor(tmp_path, ki
     reason="explicit isolated bootstrap performance measurement",
 )
 @pytest.mark.parametrize("phase", ["cold", "current-metadata"])
-def test_native_bootstrap_performance_samples(tmp_path, capsys, phase):
+def test_native_bootstrap_performance_samples(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], phase: str,
+) -> None:
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     project.mkdir()
@@ -96,7 +108,8 @@ def test_native_bootstrap_performance_samples(tmp_path, capsys, phase):
         "HOME": str(home), "USERPROFILE": str(home),
         "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
     })
-    samples, errors = [], []
+    samples: list[float] = []
+    errors: list[str] = []
     parent_cpu = time.process_time()
     try:
         for _ in range(2):
@@ -141,8 +154,8 @@ def test_native_bootstrap_performance_samples(tmp_path, capsys, phase):
     "no-ack", "foreign-ack",
 ])
 def test_bootstrap_routes_or_defers_without_inline_install(
-    tmp_path, phase, condition,
-):
+    tmp_path: Path, phase: str, condition: str,
+) -> None:
     label = "-caf\u00e9-\u6d4b\u8bd5" if condition == "unicode" else ""
     home = tmp_path / ("home" + label)
     home.mkdir()
@@ -227,7 +240,7 @@ def test_bootstrap_routes_or_defers_without_inline_install(
         assert not installation.exists()
 
 
-def test_healthy_bootstrap_never_requires_driver_or_environment_helper(tmp_path):
+def test_healthy_bootstrap_never_requires_driver_or_environment_helper(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -260,31 +273,31 @@ def test_healthy_bootstrap_never_requires_driver_or_environment_helper(tmp_path)
     assert {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
 
 
-def test_shell_profile_inspection_selects_supported_existing_python(tmp_path):
+def test_shell_profile_inspection_reuses_selected_managed_python(tmp_path: Path) -> None:
     bash = _BASH
-    if not bash and os.name == "nt" and shutil.which("git"):
-        candidate = Path(shutil.which("git")).parents[1] / "bin" / "bash.exe"
+    git = shutil.which("git")
+    if not bash and os.name == "nt" and git:
+        candidate = Path(git).parents[1] / "bin" / "bash.exe"
         bash = str(candidate) if candidate.is_file() else None
     if not bash:
         pytest.skip("native Bash is unavailable")
     script = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-check.sh"
     text = script.read_text(encoding="utf-8")
-    start = text.index('    profile_python=""')
+    start = text.index('    if ! "$py" -I -S -B')
     end = text.index("    profile_code=0", start)
     probe = tmp_path / "qualified-python.sh"
     probe.write_text(
-        "set -euo pipefail\nminimum_minor=11\n"
+        'set -euo pipefail\nminimum_minor=11\npy="$PROFILE_TEST_PYTHON"\n'
         "python3() { return 1; }\n"
         "python() { return 1; }\n"
         "python3.13() { return 1; }\n"
         "python3.12() { return 1; }\n"
         'python3.11() { "$PROFILE_TEST_PYTHON" "$@"; }\n'
         + text[start:end]
-        + '[[ "$profile_python" == python3.11 ]]\n'
-        + '"$profile_python" -I -S -B -c "import tomllib"\n',
+        + '"$py" -I -S -B -c "import tomllib"\n',
     )
     env = os.environ.copy()
-    env["PROFILE_TEST_PYTHON"] = Path(sys._base_executable).as_posix()
+    env["PROFILE_TEST_PYTHON"] = Path(sys.executable).as_posix()
     result = subprocess.run(
         [bash, str(probe)], env=env, capture_output=True, text=True,
         timeout=15, **no_window_kwargs(),
@@ -293,7 +306,9 @@ def test_shell_profile_inspection_selects_supported_existing_python(tmp_path):
 
 
 @pytest.mark.parametrize("condition", ["current", "base-runtime", "malformed-desire", "profile-directory"])
-def test_native_bootstrap_preserves_or_reconciles_selected_ssh_profile(tmp_path, condition):
+def test_native_bootstrap_preserves_or_reconciles_selected_ssh_profile(
+    tmp_path: Path, condition: str,
+) -> None:
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     project.mkdir()
@@ -342,8 +357,8 @@ def test_native_bootstrap_preserves_or_reconciles_selected_ssh_profile(tmp_path,
 @pytest.mark.parametrize("profile", [None, "ssh"])
 @pytest.mark.parametrize("condition", ["current", "older-source", "receipt-drift", "marker-drift"])
 def test_native_bootstrap_uses_incoming_source_with_or_without_desire(
-    tmp_path, monkeypatch, profile, condition,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str | None, condition: str,
+) -> None:
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
     project.mkdir()
@@ -405,7 +420,9 @@ def test_native_bootstrap_uses_incoming_source_with_or_without_desire(
 @pytest.mark.parametrize("failure", [
     "empty-owner", "wrong-owner", "malformed-deployment", "nonstring-version", "missing-version",
 ])
-def test_invalid_bootstrap_metadata_refuses_visibly_without_driver_handoff(tmp_path, failure):
+def test_invalid_bootstrap_metadata_refuses_visibly_without_driver_handoff(
+    tmp_path: Path, failure: str,
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -439,7 +456,7 @@ def test_invalid_bootstrap_metadata_refuses_visibly_without_driver_handoff(tmp_p
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX metadata-reader boundary")
 @pytest.mark.parametrize("killswitch", [False, True])
-def test_bootstrap_without_metadata_python_remains_read_only(tmp_path, killswitch):
+def test_bootstrap_without_metadata_python_remains_read_only(tmp_path: Path, killswitch: bool) -> None:
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -447,7 +464,7 @@ def test_bootstrap_without_metadata_python_remains_read_only(tmp_path, killswitc
     plugin = _make_fake_plugin(tmp_path, "agent-vault")
     tools = tmp_path / "tools"
     tools.mkdir()
-    for name in ("bash", "dirname"):
+    for name in ("bash", "dirname", "awk"):
         executable = shutil.which(name)
         if executable is None:
             pytest.skip(f"native tool is unavailable: {name}")
@@ -463,6 +480,9 @@ def test_bootstrap_without_metadata_python_remains_read_only(tmp_path, killswitc
         native_bootstrap(plugin, project, home), env=env, cwd=project,
         capture_output=True, text=True, encoding="utf-8", timeout=15,
     )
-    assert result.returncode == 0 and json.loads(result.stdout) == {}, result.stdout + result.stderr
+    assert result.returncode == (0 if killswitch else 3), result.stdout + result.stderr
+    assert json.loads(result.stdout) == {}
+    if not killswitch:
+        assert "prepared" in result.stderr and "Python" in result.stderr
     assert not (project / "handoff").exists()
     assert {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before

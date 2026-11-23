@@ -10,17 +10,21 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import no_window_kwargs
 
 if TYPE_CHECKING:
     from .runtime_source import ResolvedSource
+    from update_telemetry.human import HumanOperation as _HumanOperation
 
+HumanOperation: type[_HumanOperation] | None
 try:
-    from update_telemetry.human import HumanOperation, current_operation
+    from update_telemetry.human import HumanOperation as _HumanOperation, current_operation
 except ImportError:  # older runtimes retain their original output
     HumanOperation = None
+else:
+    HumanOperation = _HumanOperation
 
 
 @dataclass(frozen=True)
@@ -162,10 +166,10 @@ def _legacy_binding(
         return selected.binding
     query = dict(environment)
     query.pop("COPILOT_PLUGIN_ROOT", None)
-    return api["publish_legacy_binding"](
+    return cast(dict[str, Any], api["publish_legacy_binding"](
         primitive, payload_root=selected.payload, plugin_id="agent-worktrees",
         legacy_root=root, environment=query,
-    )
+    ))
 
 
 def _refresh_source(
@@ -378,6 +382,7 @@ def _wait(command: list[str], environment: dict[str, str], cwd: Path) -> int:
 def _invoke(installation: _Installation, action: str, environment: dict[str, str]) -> int:
     """The supported CLI validates ownership, mints a capability, and holds custody."""
     from update_driver import participant_environment
+    from .update_bootstrap_python import prepare
 
     artifact = installation.artifact or installation.payload
     script = artifact / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
@@ -446,6 +451,10 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
         child["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(Path.cwd())
         child["AGENT_WORKTREES_TARGETED_UPDATE"] = "1"
     child["PATH"] = str(Path(base).parent) + os.pathsep + child.get("PATH", "")
+    for payload in dict.fromkeys((installation.payload, artifact)):
+        prepared = prepare(payload, child, _wait)
+        if prepared:
+            return prepared
     if installation.context_arguments is not None:
         if installation.primitive is None:
             raise RuntimeError("Scoped repair has no canonical publication SDK")
@@ -458,7 +467,7 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
 
 def _repair_installation(
     source: Path, *, runtime_source: ResolvedSource | None = None,
-    prepared_source=None,
+    prepared_source: Any = None,
 ) -> RepairResult:
     """Restore only the attributable installation, using its owning source."""
     environment = dict(os.environ)

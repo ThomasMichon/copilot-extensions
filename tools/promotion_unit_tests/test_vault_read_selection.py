@@ -40,6 +40,7 @@ def peer(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     state = SimpleNamespace(
         requests=[], discoveries=[], endpoint=19071, ready=True, bound=True,
         versions=[1], read_versions=[1], receipt=True, warm_state="idle", outcome="success", writes=[],
+        actions=sorted(selection.READ_ACTIONS),
         root=str(Path(ROOT.anchor) / "selected"), native=True, owner_reads=0,
     )
     context = SimpleNamespace(
@@ -80,16 +81,22 @@ def peer(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
                 "ok": True, "accepting_work": state.ready,
                 "cache_warm_selection_versions": state.versions,
                 "cache_warm_read_selection_versions": state.read_versions,
+                **({"cache_warm_read_selection_actions": state.actions}
+                   if state.actions is not None else {}),
             }
         if state.outcome == "lost":
             return None
         if state.outcome == "invalid":
             return {"ok": "false", "value": "must-not-cache", "exists": "false"}
+        payloads: dict[str, dict[str, Any]] = {
+            "get": {"value": "fixture-value", "generation": 7},
+            "has": {"exists": True}, "search": {"results": ["fixture-result"]},
+            "list": {"entries": ["fixture-entry"]}, "show": {"output": "fixture-output"},
+        }
         response: dict[str, Any] = (
             {"ok": False, "error": "locked", "needs_unlock": True}
             if state.outcome == "refused" else
-            {"ok": True, **({"value": "fixture-value", "generation": 7}
-                           if request["action"] == "get" else {"exists": True})}
+            {"ok": True, **payloads[request["action"]]}
         )
         if selection.FIELD in request and state.receipt:
             response["cache_warm"] = {
@@ -281,10 +288,10 @@ def test_read_scope_does_not_capture_explicit_or_unrelated_operations() -> None:
         unavailable=ExplicitBoundary, invalid=ValueError,
     )
     with transport.use_read_sender(scoped):
-        for action in ("ping", "get", "has"):
+        for action in ("ping", "get", "has", "search", "list", "show"):
             assert transport.send_command(boundary, {"action": action})["ok"]
         for action, options in (
-            ("unlock", {}), ("search", {}),
+            ("unlock", {}), ("add", {}),
             ("get", {"_route": transport.CommandRoute()}),
             ("ping", {"_context": SimpleNamespace(port=19071)}),
         ):
@@ -292,4 +299,64 @@ def test_read_scope_does_not_capture_explicit_or_unrelated_operations() -> None:
                 transport.send_command(boundary, {"action": action}, **options)
     with pytest.raises(ExplicitBoundary):
         transport.send_command(boundary, {"action": "get"})
-    assert calls == ["ping", "get", "has"]
+    assert calls == ["ping", "get", "has", "search", "list", "show"]
+
+
+def test_query_callers_require_action_support_and_preserve_flags_and_stdout(
+    peer: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = SimpleNamespace(
+        query="needle", path="Allowed", recursive=True, flatten=True,
+        entry="direct", show_protected=True,
+    )
+    for action, expected in (("search", "fixture-result\n"), ("list", "fixture-entry\n"),
+                             ("show", "fixture-output")):
+        peer.requests.clear()
+        assert caller.command_query(args, action) == 0
+        output = capsys.readouterr()
+        assert output.out == expected and not output.err
+        assert [request["action"] for _, request, _ in peer.requests] == ["ping", action]
+        request = peer.requests[-1][1]
+        assert request[selection.FIELD]["root"] == peer.root
+        if action == "search":
+            assert request["query"] == "needle"
+        elif action == "list":
+            assert request["path"] == "Allowed" and request["recursive"] and request["flatten"]
+        else:
+            assert request["entry"] == "direct" and request["show_protected"]
+    peer.warm_state = {}
+    assert caller.command_query(args, "show") == 0
+    output = capsys.readouterr()
+    assert output.out == "fixture-output" and caller.UNCONFIRMED in output.err
+
+
+def test_old_read_generation_does_not_imply_query_support_or_break_get(
+    peer: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    advertisements: tuple[object, ...] = (None, [], ["get", "has"], "search")
+    for actions in advertisements:
+        peer.actions = actions
+        assert caller.command_query(SimpleNamespace(query="needle"), "search") == 0
+        output = capsys.readouterr()
+        assert output.out == "fixture-result\n" and caller.UNSUPPORTED in output.err
+        assert selection.FIELD not in peer.requests[-1][1]
+        result = peer.read()
+        assert result.code == 0 and result.warning is None
+        assert selection.FIELD in peer.requests[-1][1]
+
+
+def test_lost_or_malformed_query_outcomes_do_not_print_payload_or_replay(
+    peer: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = SimpleNamespace(
+        query="needle", path="/", recursive=False, flatten=False,
+        entry="direct", show_protected=False,
+    )
+    for outcome in ("lost", "invalid"):
+        peer.outcome = outcome
+        for action in ("search", "list", "show"):
+            peer.requests.clear()
+            assert caller.command_query(args, action) == 1
+            output = capsys.readouterr()
+            assert not output.out and "Error:" in output.err
+            assert [request["action"] for _, request, _ in peer.requests] == ["ping", action]

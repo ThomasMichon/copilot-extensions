@@ -82,8 +82,8 @@ Dehydrate refuses, without writing a catalog entry, unless all hold:
 5. No checkout-local retained data, using the same
    `checkout_data.preservation_hint` hold as finalize (for example a
    checkout-local `.effort-agenda`). The broader `preservation_reason` is not
-   used, because it also flags ordinary ignored build output, which
-   dehydration is meant to remove.
+   used, because it starts a Git index observation that the status and flag
+   checks below already cover.
 6. `git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none`
    succeeds and is empty, and no index entry has the assume-unchanged or
    skip-worktree flag (`git ls-files -v`: a lowercase tag or `S`). Both Git

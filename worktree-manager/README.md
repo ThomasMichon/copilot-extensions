@@ -1336,6 +1336,17 @@ participant witness before entering either publication boundary. Consuming the
 incoming environment witness does not authorize an unadmitted replacement
 driver; a lost owner refuses before publication or child execution.
 
+After admitting refreshed source, explicit engine repair runs that payload's
+declared managed-Python selector in Prepare mode before lifecycle admission.
+A separately prepared installer artifact prepares its own declaration too.
+Both use the existing native wait, caller streams and execution custody;
+preparation failure stops before the lifecycle child. Legacy payloads without
+the opt-in declaration retain their existing path. Ordinary command/status
+launch remains Inspect-only and does not acquire Python. This closes the
+handoff where a new payload required a helper version the admitting Manager
+had not prepared; it is not complete adoption of the application-footprint
+replacement model.
+
 Engine repair tolerates transient Windows payload-directory sharing contention
 without stopping live sessions or disabling their hooks. A completed native
 plugin **update** reporting sharing/lock violation 32 or 33 may retry at most
@@ -2095,17 +2106,18 @@ A later explicitly supplied prompt replaces the pending intent; a stale
 handoff acknowledgement cannot discard that replacement.
 
 Local and remote New/cold Resume use the same host-rendered prompt composer.
-For SSH targets Manager requires the selected local engine's
-`--require-terminal-handoff` contract. Resolution packages the complete project,
+For SSH targets Manager packages the complete project,
 destination and options without contacting the target. The Picker exits before
 the terminal runs `ssh -t`; the ordinary target-side command then owns policy,
 creation, seed staging and native backend handoff. Arbitrary prompt text remains
 literal through POSIX quoting or PowerShell encoding. There is no preliminary
-remote admission, allocation or receipt round-trip. An older local engine fails
-on the required flag without a fallback to remote precreation; normal target
-syntax and its native-seed fence remain strict.
+remote admission, allocation or receipt round-trip. Packaging reads the selected
+project's machine registry locally and does not invoke the local engine, so an
+older selected engine needs no new launch flag or compatibility RPC. The target
+receives existing New/anchor/Resume, mux and staged-seed syntax, not the
+originating machine/environment selector or a new required capability flag.
 Registered machine keys and SSH profile aliases remain opaque. Environment
-context is omitted only when registry-aware resolution proves it redundant.
+context selects the registered SSH profile and is not forwarded to the target.
 Recovery fast-path arguments are refused for this packaged flow because the
 legacy shell preprocessors bypass ordinary resolution; invoke recovery
 explicitly on the target instead.
@@ -2121,11 +2133,12 @@ still preserves unknown outcomes. Legacy launch requests remain inspectable;
 neither this change nor an attempt ID authorizes replaying an uncertain New.
 Journaled local and seedless actions also require durable engine resolution
 receipts through `--require-launch-attempt`. The confirmed ID survives the
-relocated local launcher and the SSH target hop. Each resolution has its own
-operation receipt; a returned plan is not evidence that Copilot started.
-Remote planning records forwarding only, while target resolution
-records its own machine-local preparation. Missing or mismatched receipts stop
-execution without automatically repeating allocation. Full prompts remain in
+relocated local launcher. Each local resolution has its own operation receipt;
+a returned plan is not evidence that Copilot started. Remote packaging retains
+the originating Manager's observations without fabricating a target receipt or
+requiring the target to accept its attempt identity. Target resolution owns its
+machine-local preparation. Missing or mismatched local receipts stop execution
+without automatically repeating allocation. Full prompts remain in
 the protected Manager journal, not in these engine metadata receipts.
 
 #### Read saved launch attempts
