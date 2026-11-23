@@ -182,9 +182,9 @@ unresolved mechanics rather than treat recommendations as settled API.
 
 ### Phase 4 - Prove automatic stop and resume (#13784)
 
-- [ ] Extend existing post-exit/resident work with actual retirement checks and a shared entry/removal fence.
-- [ ] Hydrate before every path-dependent mux and Bridge entry; preserve prompts and session lineage.
-- [ ] Prove repeated automatic cycles, concurrent requests, restart recovery and supported provider skew.
+- [x] Extend existing post-exit/resident work with actual retirement checks and a shared entry/removal fence.
+- [x] Hydrate before every path-dependent mux and Bridge entry; preserve prompts and session lineage.
+- [x] Prove repeated automatic cycles, concurrent requests, restart recovery and supported provider skew.
 
 ### Phase 5 - Prove the complete operator flow (#13785)
 
@@ -326,3 +326,31 @@ kickoff; the full capability remains future work under #13781.
   checkouts and submodules are refused. 32 new real-Git tests pass, including the 11 review regressions; the six
   gc/prune failures seen locally also fail on the base commit. Automatic
   stop/resume (#13784) and Manager controls (#13785) remain.
+- Phase 4 (#13784): `post-exit` now only queues a candidate when the
+  machine-local `checkout_dehydration.mode` is `automatic` (default manual).
+  The hook wakes the resident status monitor and never dehydrates inline.
+  Bounded passes in the monitor's periodic loop (at once on its startup, then at most once a minute,
+  in a windowless child) re-confirm strict session liveness, no pending seed or launch, no entry
+  lease, and every Phase 3 gate, then call the same `dehydrate()`. Each pass
+  first reconciles interrupted catalog stages. Mux, Bridge, Picker, `embody --worktree-id`/`--codename`
+  and remote seed resume admission hydrate the checkout, and a harness record's knowledge sibling, before
+  path-dependent policy, preflight or CWD use; previews never hydrate. An unrestorable checkout
+  refuses with a structured `checkout-dehydrated` reason naming
+  `agent-worktrees rehydrate <id>`. An entry lease, released as soon as entry
+  finishes, and candidate withdrawal close the entry/automatic-removal race; a
+  manual dehydrate between a finished entry and the launch's first process is
+  a documented residual gap. Review hardening fences candidate retries to a
+  per-exit generation under one candidate lock, re-checks retirement and seed
+  state inside `dehydrate()`'s guards, refuses an unresolved declared pair
+  (`sibling-unavailable`) only when hydration is involved, re-runs pair preparation after a restore (a pending-readiness marker makes a
+  retry repeat sibling validation and preparation until both succeed), hydrates a
+  remote seed only after its request validation, and keeps a drained monitor
+  busy until its pass ends and reopens it on activation. Every monitor exit,
+  including a timed shutdown or a loop error, waits for or terminates a running
+  pass child before it releases route ownership. Real-Git fixtures cover a real child process holding
+  the checkout, a deterministic and a threaded entry/dehydrate race, two
+  automatic cycles, the resident pass dehydrating a sole worktree after its
+  process retires, a newer catalog schema hold, rollback to manual, restart
+  reconciliation and the real mux and Bridge entry functions. These are
+  fixture results, not a native Linux/WSL qualification, an installed
+  rollout or a storage/latency measurement; those remain with #13785.

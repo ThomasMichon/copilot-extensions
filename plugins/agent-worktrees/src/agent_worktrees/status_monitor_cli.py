@@ -20,15 +20,11 @@ from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
 from .status_monitor_roster_demand import scheduled_roster_projects
 from .status_monitor_content import refresh_monitor_content
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
+from .checkout_hydration_resident import DehydrationMaintenance
 
 if TYPE_CHECKING:
     from single_instance_lease import SingleInstance
     from . import config_cache as cfg
-
-    _MonitorEntry = Callable[[argparse.Namespace], int]
-    daemon_entrypoint = cast(
-        Callable[..., Callable[[_MonitorEntry], _MonitorEntry]], daemon_entrypoint,
-    )
 else:
     from . import config as cfg
 
@@ -269,6 +265,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     allocation_linker = AllocationLinkRuntime(
         elected=_allocation_owner_elected, context_lock=state_lock, wake=wake_event,
     )
+    dehydration = DehydrationMaintenance(admitting=False)
     hook_client = load_hook_client_module()
     hook_policy = resident_hook_policy_type(hook_client)
     if hook_policy.ready():
@@ -391,6 +388,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return False
         repositories_runtime.activate()
         allocation_linker.activate()
+        dehydration.activate()
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(
@@ -461,11 +459,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         worktrees_runtime.close_admission("draining")
         repositories_runtime.close_admission("draining")
         allocation_linker.close_admission()
+        dehydration.close_admission()
         _close_request_surface_admission()
-        # Stop admitting new managed-mux push observations too (a genuine
-        # "new source" admission vector, distinct from worktree_status_runtime's
-        # stateless per-worktree reads, which stay open -- see close_admission's
-        # own docstring).
+        # Managed-mux pushes are a new-source admission vector; stateless
+        # per-worktree status reads stay open (see close_admission's docstring).
         managed_mux_runtime.close_admission()
 
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
@@ -546,6 +543,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("tracking-write")
         if allocation_linker.active_count():
             reasons.append("allocation-link")
+        reasons.extend(["dehydration"] if dehydration.busy() else [])
         if worktrees_runtime.feed.active_count():
             reasons.append("worktrees-feed")
         reasons.extend(worktrees_runtime.agenda_busy(control_server))
@@ -763,6 +761,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             and exit_trace.check("repositories", not repositories_runtime.has_active_demand())
             and exit_trace.check("in-flight", not _drain_busy_reasons())
             and exit_trace.check("allocation", not allocation_linker.has_demand())
+            and exit_trace.check("dehydration", not dehydration.has_demand())
             and exit_trace.check("retirement", not retirements.pending)
             # A completed handler publishes demand before its busy count drops.
             and exit_trace.check("recent-tool-hook", hook_server is None or not hook_server.has_recent_hook_demand())
@@ -854,6 +853,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     allocation_linker.discover()
                 allocation_linker.tick()
+                dehydration.tick()
                 external_projects = scheduled_roster_projects(
                     monitor_roots.live_picker_projects(), core.list_cache.recent_demand_projects(),
                     worktrees_runtime.demand_projects(), managed_mux_runtime.cache,
@@ -982,6 +982,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 _enter_drain_only_state()
                 worktrees_runtime.close_admission("shutdown")
                 repositories_runtime.close_admission("shutdown")
+            dehydration.shutdown_or_raise()  # an unsettled pass keeps ownership; retirement retries
 
         with exit_trace.retiring(exit_reason, sys.exc_info()[1]):
             retire_monitor(
