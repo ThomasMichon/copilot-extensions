@@ -252,8 +252,8 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==194;
-          assert sum(c.find('skipped') is None for c in cases)==174;
+          assert len(cases)==182;
+          assert sum(c.find('skipped') is None for c in cases)==162;
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

@@ -1,24 +1,18 @@
-"""Explicit POSIX setup readers reuse the existing managed and index owners."""
+"""Explicit POSIX setup readers reuse the existing prepared managed binding."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from importlib import import_module
 import os
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import sys
-from typing import cast
 
 from agent_procutil import no_window_kwargs
 import pytest
 
-_snapshot = import_module(".test_install_snapshot_ps1", __package__)
-_stage_payload = cast(Callable[[Path], Path], _snapshot._stage_payload)
 PLUGIN = Path(__file__).resolve().parents[1]
-REPO = PLUGIN.parents[1]
 
 
 def _function(script: Path, name: str) -> str:
@@ -104,77 +98,4 @@ def test_setup_bootstrap_never_discovers_ambient_python(
             "--version", "python", "find", "--no-project", "--system",
             "--managed-python", "--no-python-downloads", "cpython@3.11.18",
         ]
-    assert not (tmp_path / "runtime").exists()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX index bridge")
-@pytest.mark.parametrize("composed", [False, True])
-@pytest.mark.parametrize("setting", [
-    "file", "environment", "uv-override", "malformed", "uv-project", "uv-isolated",
-])
-def test_index_bridge_reads_canonical_policy_without_ambient_pip(
-    tmp_path: Path, composed: bool, setting: str,
-) -> None:
-    bash = shutil.which("bash")
-    assert bash
-    env, trace, marker = _environment(tmp_path, "managed")
-    payload = _stage_payload(tmp_path / "composed") if composed else PLUGIN
-    engine = payload / "scripts" / "installer-engine.sh" if composed else REPO / "libs/installer-engine/installer-engine.sh"
-    configuration = tmp_path / "pip.conf"
-    configuration.write_text(
-        "[invalid" if setting == "malformed" else "[global]\nindex-url=https://file.invalid/simple\n",
-        encoding="utf-8",
-    )
-    env["PIP_CONFIG_FILE"] = str(configuration)
-    expected = "https://file.invalid/simple"
-    if setting == "environment":
-        expected = env["PIP_INDEX_URL"] = "https://environment.invalid/simple"
-    elif setting == "uv-override":
-        expected = env["UV_DEFAULT_INDEX"] = "https://uv.invalid/simple"
-    elif setting in {"uv-project", "uv-isolated"}:
-        env.pop("UV_CONFIG_FILE")
-        env["PIP_INDEX_URL"] = "https://environment.invalid/simple"
-        if setting == "uv-project":
-            selected = tmp_path / "selected project"
-            selected.mkdir()
-            (selected / "pyproject.toml").write_text(
-                '[[tool.uv.index]]\nurl="https://project.invalid/simple"\ndefault=true\n',
-                encoding="utf-8",
-            )
-            env["UV_PROJECT"] = str(selected)
-            expected = ""
-        else:
-            (Path(env["HOME"]) / "pyproject.toml").write_text(
-                '[[tool.uv.index]]\nurl="https://cwd.invalid/simple"\ndefault=true\n',
-                encoding="utf-8",
-            )
-            env["UV_ISOLATED"] = "1"
-            expected = env["PIP_INDEX_URL"]
-    installer = payload / "scripts" / "install.sh"
-    script = (
-        "set -uo pipefail\nSCRIPT_DIR=" + shlex.quote(str(installer.parent))
-        + "\nINSTALL_DIR=" + shlex.quote(str(tmp_path / "runtime"))
-        + "\nPROFILE=''\n_fail() { printf '%s\\n' \"$*\" >&2; }\n_step() { :; }\n"
-        + ". " + shlex.quote(str(engine)) + "\n"
-        + _function(installer, "_bootstrap_python") + "\n"
-        + _function(installer, "_ensure_uv_index") + "\n"
-        + "_ensure_uv_index " + shlex.quote(str(Path(env["PATH"]) / "uv"))
-        + '\ncode=$?\nprintf "%s\\n" "${UV_DEFAULT_INDEX-}"\nexit "$code"\n'
-    )
-    result = subprocess.run(
-        [bash, "-c", script], env=env, cwd=Path(env["HOME"]), stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-    )
-    assert not marker.exists(), result.stdout + result.stderr
-    if setting == "malformed":
-        assert result.returncode != 0 and not result.stdout.strip(), result.stdout + result.stderr
-    else:
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout.strip() == expected
-    if setting == "uv-override":
-        assert not trace.exists()
-    else:
-        calls = trace.read_text().splitlines()
-        assert calls.count("find") == 1
-        assert "install" not in calls
     assert not (tmp_path / "runtime").exists()

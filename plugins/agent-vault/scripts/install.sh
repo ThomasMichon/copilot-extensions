@@ -601,23 +601,22 @@ _deploy_binstub() {
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
-# uv does not read pip.conf; the canonical data reader retains its precedence.
+# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
+# files and export it. No-op where pip has no index (e.g. pristine -- the index
+# then arrives via env / the clean-room fixture).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local uv_cmd="${1:?selected uv command required}" py idx site_prefix=""
-    local helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
-    if [[ ! -f "$helper_dir/installer_pip_index.py" ]]; then
-        _fail 'The index reader is not prepared; use the owning source-preparation flow.'
-        return 1
+    local idx=""
+    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
+    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
+    if [[ -z "$idx" ]]; then
+        local f
+        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
+            [[ -n "$f" && -f "$f" ]] || continue
+            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
+            [[ -n "$idx" ]] && break
+        done
     fi
-    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
-        site_prefix="$VIRTUAL_ENV"
-    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
-        site_prefix="$CONDA_PREFIX"
-    fi
-    py="$(_bootstrap_python)" || return 1
-    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
-        --uv "$uv_cmd" --site-prefix "$site_prefix" </dev/null)" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 
@@ -689,12 +688,12 @@ _ensure_runtime() {
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
     local uv_cmd=""
+    _ensure_uv_index
     uv_cmd="$(ensure_uv "$INSTALL_DIR" tool 1 || true)"
     if [[ -z "$uv_cmd" ]]; then
         _fail 'uv is required but could not be resolved or acquired'
         exit 1
     fi
-    _ensure_uv_index "$uv_cmd" || return 1
     have_uv=1
     if [[ -n "${RUNTIME_PROFILE:-}" ]]; then export AGENT_VAULT_INSTALL_UV="$uv_cmd"; fi
 
