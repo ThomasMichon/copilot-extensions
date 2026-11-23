@@ -1,5 +1,13 @@
 # Testing copilot-extensions
 
+Dispatch's POSIX prepared-reader packet includes the actual cold command gate
+and session-start hook with poisoned ambient interpreters, offline managed
+selection, retained-cache repeats and missing-provider/request/UV negatives.
+`tests/test_managed_bootstrap_reader_sh.py` retains exact native counts and
+per-entry performance properties in the existing mixed-Python workflow.
+These controls prove policy-before-effects and reader selection, not daemon
+readiness, installation lifetime or ownership of legacy reconciliation locks.
+
 The mixed-Python native workflow exports Dispatch's original Windows-construction,
 snapshot and constructed-publication controls through
 `libs/payload-invocation/tests/test_dispatch_construction_source.py`.

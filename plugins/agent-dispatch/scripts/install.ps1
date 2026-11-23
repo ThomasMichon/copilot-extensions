@@ -1854,7 +1854,7 @@ function Deploy-SelfProvisioningBinstub {
     # (uniform-runtime-resolution, #765).
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh',
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh', 'bootstrap-python.sh',
             'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh',
             'bootstrap-python-version.txt', 'bootstrap-python-launcher.txt')) {
         $rSrc = Join-Path $PSScriptRoot $r

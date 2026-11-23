@@ -3,20 +3,29 @@
 from __future__ import annotations
 
 import importlib.util
+from importlib import import_module
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+from typing import Any, Protocol, cast
 
 import pytest
 
 LIBRARY = Path(__file__).resolve().parents[1]
 REPO = LIBRARY.parents[1]
 sys.path.insert(0, str(LIBRARY))
-import versioned_runtime_source as source
+source = import_module("versioned_runtime_source")
+
+
+class _SourceIdentity(Protocol):
+    runtime_version: str
+
+    def document(self) -> dict[str, str]: ...
 
 PLUGINS = ("agent-bridge", "agent-dispatch", "agent-mcp")
 VERSION = "1.2.3"
@@ -28,7 +37,7 @@ NATIVE = pytest.mark.skipif(
 )
 
 
-def _fixture(tmp_path, plugin):
+def _fixture(tmp_path: Path, plugin: str) -> tuple[Path, Path, Path]:
     home = tmp_path / "home"
     payload = (
         home / ".copilot/installed-plugins/fixture" / plugin
@@ -46,6 +55,13 @@ def _fixture(tmp_path, plugin):
     if plugin == "agent-dispatch":
         canonical = REPO / "plugins" / plugin
         shutil.copyfile(canonical / "scripts/action_controls.py", scripts / "action_controls.py")
+        shutil.copyfile(canonical / "scripts/bootstrap-python.sh", scripts / "bootstrap-python.sh")
+        selector = scripts / "_bootstrap_python/bootstrap-uv.sh"
+        selector.parent.mkdir()
+        selector.write_text(
+            f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {shlex.quote(sys.executable)}; }}\n",
+            encoding="utf-8",
+        )
         shutil.copytree(
             canonical / "src", payload / "src",
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
@@ -81,12 +97,12 @@ def _fixture(tmp_path, plugin):
     return payload, home, root
 
 
-def _manifest(root, **fields):
+def _manifest(root: Path, **fields: Any) -> None:
     data = {"source": {"version": VERSION}, **fields}
     (root / "deploy-manifest.json").write_text(json.dumps(data), encoding="utf-8")
 
 
-def _source_payload(payload):
+def _source_payload(payload: Path) -> _SourceIdentity:
     digest = source.assembly_hash(payload)
     identity = source.SourceIdentity(
         json.loads((payload / "plugin.json").read_text())["name"],
@@ -96,10 +112,10 @@ def _source_payload(payload):
     (payload / "runtime-source.json").write_text(
         json.dumps(identity.document()), encoding="utf-8",
     )
-    return identity
+    return cast(_SourceIdentity, identity)
 
 
-def _slot(root, version, *, complete=True):
+def _slot(root: Path, version: str, *, complete: bool = True) -> Path:
     slot = root / "versions" / version
     (slot / "bin").mkdir(parents=True)
     (slot / "bin" / "python").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -112,7 +128,7 @@ def _slot(root, version, *, complete=True):
     return slot
 
 
-def _environment(home):
+def _environment(home: Path) -> dict[str, str]:
     env = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("AGENT_RT_", "COPILOT_EXTENSIONS_", "COPILOT_PLUGIN_"))
@@ -122,7 +138,7 @@ def _environment(home):
     return env
 
 
-def _hook(payload, home):
+def _hook(payload: Path, home: Path) -> tuple[subprocess.CompletedProcess[str], float]:
     started = time.monotonic()
     result = subprocess.run(
         ["bash", str(payload / "scripts" / "bootstrap-check.sh")],
@@ -132,12 +148,12 @@ def _hook(payload, home):
     return result, time.monotonic() - started
 
 
-def _children(home):
+def _children(home: Path) -> list[str]:
     path = home / "children"
     return path.read_text().splitlines() if path.exists() else []
 
 
-def _wait_for_child(home):
+def _wait_for_child(home: Path) -> None:
     for _ in range(50):
         if _children(home):
             return
@@ -146,7 +162,7 @@ def _wait_for_child(home):
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
-def test_readiness_reference_is_synchronized(plugin):
+def test_readiness_reference_is_synchronized(plugin: str) -> None:
     reference = (REPO / "plugins" / PLUGINS[0] / "scripts" / "bootstrap-check.sh").read_text()
     actual = (REPO / "plugins" / plugin / "scripts" / "bootstrap-check.sh").read_text()
     block = actual.split(START)[1].split(END)[0]
@@ -160,7 +176,7 @@ def test_readiness_reference_is_synchronized(plugin):
     "ordinary", "repair", "source", "source-repair", "changed-source", "changed-bytes", "wrong-generation",
     "missing-source-receipt",
 ])
-def test_actual_identity_probe_on_host(tmp_path, case):
+def test_actual_identity_probe_on_host(tmp_path: Path, case: str) -> None:
     payload, _, root = _fixture(tmp_path, "agent-bridge")
     expected = VERSION
     if case == "repair":
@@ -188,7 +204,7 @@ def test_actual_identity_probe_on_host(tmp_path, case):
         [sys.executable, "-I", "-B", "-", str(payload / "scripts"), str(payload),
          str(root / "deploy-manifest.json"), VERSION, "agent-bridge"],
         input=code, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     if case in ("ordinary", "repair", "source", "source-repair"):
         assert result.returncode == 0, result.stderr
@@ -207,7 +223,7 @@ def test_actual_identity_probe_on_host(tmp_path, case):
     "missing-interpreter", "changed-version", "changed-source", "changed-bytes",
     "wrong-generation", "legacy-broken-selection",
 ])
-def test_actual_hook_selected_readiness(tmp_path, plugin, case):
+def test_actual_hook_selected_readiness(tmp_path: Path, plugin: str, case: str) -> None:
     payload, home, root = _fixture(tmp_path, plugin)
     selected = VERSION
     if case in ("source", "source-repair", "changed-source", "changed-bytes", "wrong-generation"):
@@ -279,7 +295,7 @@ def test_actual_hook_selected_readiness(tmp_path, plugin, case):
 @NATIVE
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("case", ["missing", "refused", "refused-first", "context"])
-def test_existing_bootstrap_admission_and_output(tmp_path, plugin, case):
+def test_existing_bootstrap_admission_and_output(tmp_path: Path, plugin: str, case: str) -> None:
     payload, home, root = _fixture(tmp_path, plugin)
     if case in ("missing", "refused-first"):
         (root / "deploy-manifest.json").unlink()
@@ -318,7 +334,7 @@ def test_dispatch_action_admission_remains_authoritative_in_fixture(tmp_path: Pa
 
 
 @NATIVE
-def test_marker_only_before_after_installer_count(tmp_path, capsys):
+def test_marker_only_before_after_installer_count(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     payload, home, root = _fixture(tmp_path, "agent-bridge")
     _slot(root, VERSION)
     (root / "current-version").write_text(VERSION, encoding="utf-8")
@@ -352,8 +368,11 @@ def test_marker_only_before_after_installer_count(tmp_path, capsys):
         )
 
 
-def test_sync_tool_is_idempotent_and_detects_readiness_drift(tmp_path, monkeypatch):
+def test_sync_tool_is_idempotent_and_detects_readiness_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location("bootstrap_sync", REPO / "tools" / "check-bootstrap-sync.py")
+    assert spec is not None and spec.loader is not None
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
     plugins = tmp_path / "plugins"

@@ -449,6 +449,15 @@ policy above. Native uninstall recognizes both the new root-bound coordinator
 gate command and historical completed-runtime registrations; effective-unit
 ownership, drop-in and foreign-root refusal remain unchanged.
 
+The POSIX cold policy gate and session-start metadata/readiness readers inspect
+their declared prepared uv-managed bootstrap Python through the same packaged
+selector. They never run ambient `python`/`python3`, download Python, or borrow
+the application runtime. Missing prerequisites refuse before cold provisioning
+or background reconciliation; session-start still emits its JSON object.
+Only an unmaterialized source installer may use its canonical repository
+bootstrap support. Installed commands retain the helper and selector locally.
+This changes interpreter selection, not reconciliation-lock ownership.
+
 PowerShell first-use callers retry native Windows sharing violations and POSIX
 `EAGAIN` while another owner holds the provisioning lock, then reuse the
 owner's healthy runtime without running another installer. Other I/O errors
